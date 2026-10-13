@@ -1,21 +1,10 @@
 {
   "$id": "https://grit-scm.com/schemas/reset/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "definitions": {
-    "ResetCliMode": {
-      "description": "Reset mode in JSON (`soft`, `mixed`, or `hard`).",
-      "enum": [
-        "soft",
-        "mixed",
-        "hard"
-      ],
-      "type": "string"
-    }
-  },
   "description": "CLI view of [`ResetOutcome`].",
   "properties": {
     "mode": {
-      "$ref": "#/definitions/ResetCliMode"
+      "type": "string"
     },
     "previous": {
       "type": "string"

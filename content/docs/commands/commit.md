@@ -70,6 +70,8 @@ $ grit commit --amend -m "Add the greeting (fixed typo)"
 
 ## JSON output
 
+Schema: [v1](/schemas/commit/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

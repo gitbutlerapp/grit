@@ -455,7 +455,7 @@ pub fn print_stash_push_outcome(
     outln!(w, "## Stash");
     outln!(w);
     match outcome {
-        StashPushOutcome::Nothing => outln!(w, "No local changes to save."),
+        StashPushOutcome::Nothing { .. } => outln!(w, "No local changes to save."),
         StashPushOutcome::Saved { oid, message } => {
             let short = short_hex(oid);
             if message.is_empty() {

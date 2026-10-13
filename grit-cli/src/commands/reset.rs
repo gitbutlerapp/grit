@@ -10,9 +10,10 @@ use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// CLI view of [`ResetOutcome`].
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct ResetCliOutcome {
     pub mode: String,
     pub target: String,

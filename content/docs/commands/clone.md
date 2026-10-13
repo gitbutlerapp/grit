@@ -63,6 +63,8 @@ $ grit clone /srv/git/project.git
 
 ## JSON output
 
+Schema: [v1](/schemas/clone/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
@@ -90,6 +92,14 @@ Example:
   "files": 3
 }
 ```
+
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for agent-friendly output.
+
+Schema: [v1](/schemas/clone/v1.json)
+
+Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
 ## See also
 

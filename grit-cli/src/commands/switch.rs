@@ -11,14 +11,16 @@ use std::io::Write;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// Result of `grit switch`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct SwitchOutcome {
     pub branch: String,
     pub created: bool,
     pub detached: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
 }
 

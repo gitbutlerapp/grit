@@ -9,9 +9,10 @@ use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// CLI outcome for `grit rm`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct RmOutcome {
     /// Paths removed from the index (and work tree unless `--cached`).
     pub removed: Vec<String>,

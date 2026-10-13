@@ -40,6 +40,7 @@ use std::path::Path;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// Lines of unchanged context to show around each change.
 const CONTEXT_LINES: usize = 3;
@@ -61,41 +62,47 @@ const FG_ADD_NUM: &str = "38;5;71"; // added line number
 const FG_ON_DIFF: &str = "38;5;231";
 
 /// Result of `grit diff`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct DiffOutcome {
     pub files: Vec<FileDiff>,
 }
 
 /// One changed file.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct FileDiff {
     /// Display path (the new path, or the old path for a deletion).
     pub path: String,
     /// Pre-rename path, when different from `path`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub old_path: Option<String>,
     pub status: String,
     /// Old git mode (octal), when present on this side.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub old_mode: Option<String>,
     /// New git mode (octal), when present on this side.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub new_mode: Option<String>,
     /// True when old side bytes were decoded with lossy UTF-8.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(skip)]
     pub old_encoding_lossy: bool,
     /// True when new side bytes were decoded with lossy UTF-8.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(skip)]
     pub new_encoding_lossy: bool,
     pub binary: bool,
     /// True when the blob OID changed (not a mode-only touch on the same content).
     #[serde(skip_serializing)]
+    #[schemars(skip)]
     pub content_changed: bool,
     pub hunks: Vec<Hunk>,
 }
 
 /// A contiguous run of changes plus surrounding context.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct Hunk {
     /// 1-based first old/new line numbers in the hunk.
     pub old_start: usize,
@@ -106,27 +113,31 @@ pub struct Hunk {
     pub new_lines: usize,
     /// The enclosing definition line (function/struct/…), when found.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
     pub lines: Vec<Line>,
 }
 
 /// One rendered line of a hunk.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct Line {
     pub kind: LineKind,
     /// 1-based old/new line numbers (absent on the side where the line is new/gone).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub old: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub new: Option<usize>,
     /// The line split into segments; `emphasis` marks the intra-line word changes.
     pub segments: Vec<Segment>,
     /// Missing newline at end of file on this side (Git `\ No newline at end of file`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(skip)]
     pub no_newline_at_eof: bool,
 }
 
-#[derive(Serialize, Clone, Copy, PartialEq)]
+#[derive(Serialize, Clone, Copy, PartialEq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum LineKind {
     Context,
@@ -135,7 +146,7 @@ pub enum LineKind {
 }
 
 /// A run of text within a line, flagged if it's part of the word-level change.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct Segment {
     pub text: String,
     pub emphasis: bool,

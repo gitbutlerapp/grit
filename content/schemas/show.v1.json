@@ -2,19 +2,6 @@
   "$id": "https://grit-scm.com/schemas/show/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
-    "ChangeStatus": {
-      "description": "Machine-readable diff change status (`--json` / `--markdown` contract).",
-      "enum": [
-        "added",
-        "deleted",
-        "modified",
-        "type_changed",
-        "renamed",
-        "copied",
-        "unmerged"
-      ],
-      "type": "string"
-    },
     "CommitInfo": {
       "properties": {
         "author": {
@@ -107,7 +94,7 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/ChangeStatus"
+          "type": "string"
         }
       },
       "required": [
@@ -138,16 +125,6 @@
         "name"
       ],
       "type": "object"
-    },
-    "ShowKind": {
-      "description": "What `grit show` resolved (`--json` contract).",
-      "enum": [
-        "commit",
-        "branch",
-        "tag",
-        "annotated_tag"
-      ],
-      "type": "string"
     },
     "TagInfo": {
       "properties": {
@@ -196,7 +173,8 @@
       "$ref": "#/definitions/CommitInfo"
     },
     "kind": {
-      "$ref": "#/definitions/ShowKind"
+      "description": "`commit` | `branch` | `tag` | `annotated_tag`.",
+      "type": "string"
     },
     "ref_name": {
       "description": "Branch or tag name, when shown via a ref.",

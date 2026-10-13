@@ -91,6 +91,8 @@ stash untracked restore blocked: 'notes.txt' already exists on disk
 
 ## JSON output
 
+Schema: [v1](/schemas/stash/v1.json) · [stash.push v1](/schemas/stash.push/v1.json) · [stash.list v1](/schemas/stash.list/v1.json) · [stash.show v1](/schemas/stash.show/v1.json) · [stash.apply v1](/schemas/stash.apply/v1.json) · [stash.pop v1](/schemas/stash.pop/v1.json) · [stash.drop v1](/schemas/stash.drop/v1.json)
+
 Pass `--json` for stable, scripting-friendly output.
 
 ### `grit stash` / `grit stash push`
@@ -204,27 +206,7 @@ Pop adds `dropped` (whether the entry was removed):
 
 ## Markdown output
 
-Pass [`--markdown`](../global-options/) for structured headings and bullets.
-
-Push (or bare `grit stash`) when something was saved:
-
-```text
-- Saved **On main: wip** · `a1b2c3d`
-```
-
-When there was nothing to save:
-
-```text
-No local changes to save.
-```
-
-List:
-
-```text
-- **stash@{0}** `a1b2c3d` — On main: wip
-```
-
-Apply and drop use a `## Stash apply` / `## Stash drop` heading with the stash index. Pop reports whether the entry was dropped. When conflicts remain, conflicting paths are listed as bullets. `show` renders the diffstat or patch like [`grit diff`](../diff/).
+With `--markdown`, list/apply/pop/drop use bullet lists; `show` renders the diffstat or patch like other diff commands.
 
 ## See also
 

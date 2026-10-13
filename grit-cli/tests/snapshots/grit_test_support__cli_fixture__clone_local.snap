@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"url\": \"[UPSTREAM]\",\n  \"path\": \"cloned-json\",\n  \"branch\": \"main\",\n  \"objects\": 8,\n  \"bytes\": 596,\n  \"branches\": 2,\n  \"tags\": 1,\n  \"files\": 2\n}\n",
+    "stdout": "{\n  \"url\": \"[REPO]\",\n  \"path\": \"cloned-json\",\n  \"branch\": \"main\",\n  \"objects\": 8,\n  \"bytes\": 596,\n  \"branches\": 2,\n  \"tags\": 1,\n  \"files\": 2\n}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Clone complete\n\n- **path**: `cloned-markdown`\n- **branch**: `main`\n- **url**: `[UPSTREAM]`\n- **objects**: 8\n- **bytes**: 596 ([SIZE])\n- **branches**: 2\n- **tags**: 1\n- **files**: 2\n- **elapsed**: [DURATION]\n",
+    "stdout": "## Clone complete\n\n- **path**: `cloned-markdown`\n- **branch**: `main`\n- **url**: `[REPO]`\n- **objects**: 8\n- **bytes**: 596 ([SIZE])\n- **branches**: 2\n- **tags**: 1\n- **files**: 2\n- **elapsed**: [DURATION]\n",
     "stderr": ""
   }
 }

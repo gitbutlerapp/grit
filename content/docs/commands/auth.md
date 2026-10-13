@@ -58,6 +58,8 @@ $ grit auth logout
 
 ## JSON output
 
+Schema: [v1](/schemas/auth/v1.json) · [auth.logout v1](/schemas/auth.logout/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
@@ -88,19 +90,11 @@ After logout:
 
 ## Markdown output
 
-Pass [`--markdown`](../global-options/) for a short result summary (the device-flow prompts still go to stderr during sign-in):
+Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-```text
-- Signed in to **`github.com`**
-```
+Schema: [v1](/schemas/auth/v1.json) · [auth.logout v1](/schemas/auth.logout/v1.json)
 
-Logout:
-
-```text
-- Signed out of **`github.com`** (stored token removed)
-```
-
-When no credential helper is configured, logout reports that there is nothing stored to remove.
+Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
 ## See also
 

@@ -89,6 +89,8 @@ $ grit diff v0.1 --json --filter '.files[].path'
 
 ## JSON output
 
+Schema: [v1](/schemas/diff/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

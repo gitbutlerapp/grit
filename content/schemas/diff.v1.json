@@ -2,19 +2,6 @@
   "$id": "https://grit-scm.com/schemas/diff/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
-    "ChangeStatus": {
-      "description": "Machine-readable diff change status (`--json` / `--markdown` contract).",
-      "enum": [
-        "added",
-        "deleted",
-        "modified",
-        "type_changed",
-        "renamed",
-        "copied",
-        "unmerged"
-      ],
-      "type": "string"
-    },
     "FileDiff": {
       "description": "One changed file.",
       "properties": {
@@ -27,20 +14,12 @@
           },
           "type": "array"
         },
-        "new_encoding_lossy": {
-          "description": "True when new side bytes were decoded with lossy UTF-8.",
-          "type": "boolean"
-        },
         "new_mode": {
           "description": "New git mode (octal), when present on this side.",
           "type": [
             "string",
             "null"
           ]
-        },
-        "old_encoding_lossy": {
-          "description": "True when old side bytes were decoded with lossy UTF-8.",
-          "type": "boolean"
         },
         "old_mode": {
           "description": "Old git mode (octal), when present on this side.",
@@ -61,7 +40,7 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/ChangeStatus"
+          "type": "string"
         }
       },
       "required": [
@@ -134,10 +113,6 @@
             "integer",
             "null"
           ]
-        },
-        "no_newline_at_eof": {
-          "description": "Missing newline at end of file on this side (Git `\\ No newline at end of file`).",
-          "type": "boolean"
         },
         "old": {
           "description": "1-based old/new line numbers (absent on the side where the line is new/gone).",

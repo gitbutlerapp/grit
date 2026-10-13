@@ -9,9 +9,10 @@ use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// CLI result (mirrors [`RestoreOutcome`]).
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, JsonSchema)]
 pub struct RestoreCliOutcome {
     pub restored: Vec<String>,
     pub removed: Vec<String>,

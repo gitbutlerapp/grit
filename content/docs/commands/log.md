@@ -51,6 +51,8 @@ $ grit log --json --filter '.commits[].subject'
 
 ## JSON output
 
+Schema: [v1](/schemas/log/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

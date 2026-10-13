@@ -6,3 +6,9 @@ export function markdown(body: string): Response {
 export function text(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
+
+export function jsonSchema(body: string): Response {
+  return new Response(body, {
+    headers: { "Content-Type": "application/schema+json; charset=utf-8" },
+  });
+}

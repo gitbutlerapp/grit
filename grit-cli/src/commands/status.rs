@@ -15,6 +15,7 @@ use crate::output::{
     change_json, outln, ChangeJson, CommitJson, HumanRender, MarkdownRender, RenderContext,
 };
 use crate::ui::{self, PathDisplayContext};
+use schemars::JsonSchema;
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
 const SHORTLOG_LIMIT: usize = 10;
@@ -34,7 +35,7 @@ enum HeaderKind {
 }
 
 /// Result of `grit status`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct StatusOutcome {
     /// Current branch (short name), or `null` when detached / invalid.
     pub branch: Option<String>,
@@ -54,22 +55,29 @@ pub struct StatusOutcome {
     /// True when a merge is in progress (`MERGE_HEAD` exists).
     pub merging: bool,
     /// In-progress operations (e.g. `merge`, `rebase`), when any apply.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
     pub in_progress: Vec<String>,
     /// Unmerged paths from the index (stages 1–3).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
     pub conflicts: Vec<String>,
 
     // Human-only state, not part of the JSON schema.
     #[serde(skip)]
+    #[schemars(skip)]
     header: HeaderKind,
     #[serde(skip)]
+    #[schemars(skip)]
     commit_rows: Vec<CommitSummary>,
     #[serde(skip)]
+    #[schemars(skip)]
     staged_entries: Vec<DiffEntry>,
     #[serde(skip)]
+    #[schemars(skip)]
     unstaged_entries: Vec<DiffEntry>,
     #[serde(skip)]
+    #[schemars(skip)]
     path_display: Option<PathDisplayContext>,
 }
 

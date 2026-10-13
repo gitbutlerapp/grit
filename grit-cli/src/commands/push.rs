@@ -20,10 +20,11 @@ use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use grit_lib::fetch::NoProgress;
 use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
 use grit_lib::transfer::{resolve_push_delete_ref, PushOptions};
+use schemars::JsonSchema;
 use std::collections::HashSet;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct PushOutcome {
     pub remote: String,
     /// Local branch (short name) that was pushed, or `"--tags"` when this
@@ -35,7 +36,7 @@ pub struct PushOutcome {
 }
 
 /// One ref's push result.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct PushRefResult {
     #[serde(rename = "ref")]
     pub ref_name: String,

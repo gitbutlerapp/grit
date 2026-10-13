@@ -47,6 +47,8 @@ Renamed report.txt -> docs/.
 
 ## JSON output
 
+Schema: [v1](/schemas/mv/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

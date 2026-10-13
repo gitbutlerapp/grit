@@ -30,9 +30,6 @@
         },
         "path": {
           "type": "string"
-        },
-        "prunable": {
-          "type": "boolean"
         }
       },
       "required": [
@@ -40,8 +37,7 @@
         "detached",
         "head",
         "locked",
-        "path",
-        "prunable"
+        "path"
       ],
       "type": "object"
     }
@@ -112,27 +108,6 @@
       "required": [
         "action",
         "path"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "action": {
-          "enum": [
-            "prune"
-          ],
-          "type": "string"
-        },
-        "pruned": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "action",
-        "pruned"
       ],
       "type": "object"
     }

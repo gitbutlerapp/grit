@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { findPage, loadSite } from "../lib/docs";
 import { bundle, bundleUrl, CLI_BUNDLE, LIB_BUNDLE, llmsFullTxt, llmsTxt, pageTwin } from "../lib/llms";
+import { loadSchemas } from "../lib/schemas";
 
 describe("agent-facing Markdown", () => {
   it("follows the llms.txt structure and lists every page", () => {
@@ -19,11 +20,14 @@ describe("agent-facing Markdown", () => {
     }
   });
 
-  it("puts every twin in llms-full.txt in reading order", () => {
+  it("puts every twin and schema in llms-full.txt in reading order", () => {
     const site = loadSite();
+    const schemas = loadSchemas();
     const full = llmsFullTxt(site);
-    const headings = [...full.matchAll(/^# (https:\/\/grit-scm\.com\/docs\/\S+)$/gm)].map((m) => m[1]);
-    expect(headings).toHaveLength(site.pages.length);
+    const docHeadings = [...full.matchAll(/^# (https:\/\/grit-scm\.com\/docs\/\S+)$/gm)].map((m) => m[1]);
+    const schemaHeadings = [...full.matchAll(/^# (https:\/\/grit-scm\.com\/schemas\/\S+)$/gm)].map((m) => m[1]);
+    expect(docHeadings).toHaveLength(site.pages.length);
+    expect(schemaHeadings).toHaveLength(schemas.length);
   });
 
   it("splits the bundles into the CLI and library halves", () => {

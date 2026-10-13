@@ -3,7 +3,7 @@ title: Index
 summary: Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.
 ---
 
-The Git index (staging area) lives in [`Index`](rustdoc:grit_lib::index::Index). Open a [`Repository`](rustdoc:grit_lib::repo::Repository), then call `load_index` (or `write_index` after changes). Index extensions (sparse checkout, split index, untracked cache) live under the [`index`](rustdoc:grit_lib::index) domain; working-tree helpers are under [`worktree`](rustdoc:grit_lib::worktree). See [API layout](api-layout).
+The Git index (staging area) lives in [`Index`](rustdoc:grit_lib::index::Index). Open a [`Repository`](rustdoc:grit_lib::repo::Repository), then call `load_index` (or `write_index` after changes). Index extensions (sparse checkout, split index, untracked cache) live under the [`index`](rustdoc:grit_lib::index) domain; working-tree helpers are under [`worktree`](rustdoc:grit_lib::worktree). See [API layout](../api-layout).
 
 See also the [Repository](../repository/) and [Objects](../objects/) pages for opening repos and writing objects. Other library topics: [Refs](../refs/), [Diff](../diff/).
 

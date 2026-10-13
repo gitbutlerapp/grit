@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use schemars::JsonSchema;
 
 /// Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum RemoteOutcome {
     List {
@@ -32,14 +33,14 @@ pub enum RemoteOutcome {
 }
 
 /// One remote in a `list` outcome.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct RemoteEntry {
     pub name: String,
     pub url: String,
 }
 
 /// One ref in a `refs` JSON outcome (annotated tags carry `peeled`; no separate `^{}` row).
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, JsonSchema)]
 pub struct RemoteRefEntry {
     pub name: String,
     pub oid: String,

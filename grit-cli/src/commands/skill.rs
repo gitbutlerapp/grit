@@ -6,6 +6,7 @@ use std::io::Write;
 
 use crate::output::{HumanRender, MarkdownRender, RenderContext};
 use crate::stdio;
+use schemars::JsonSchema;
 
 /// The skill text, with `{version}` replaced by the running grit's version.
 const SKILL: &str = include_str!("skill.md");
@@ -14,7 +15,7 @@ const SKILL: &str = include_str!("skill.md");
 const SUGGESTED_PATH: &str = ".agents/skills/grit/SKILL.md";
 
 /// Result of `grit skill`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct SkillOutcome {
     /// The skill's name, from its front matter.
     pub name: String,

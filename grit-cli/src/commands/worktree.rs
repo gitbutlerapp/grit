@@ -14,9 +14,10 @@ use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ref_name_messages::branch_short_name_error_message;
+use schemars::JsonSchema;
 
 /// Result of `grit worktree`, tagged by `action`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum WorktreeOutcome {
     List {
@@ -32,7 +33,7 @@ pub enum WorktreeOutcome {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct WorktreeRow {
     pub path: String,
     pub head: String,
@@ -41,6 +42,7 @@ pub struct WorktreeRow {
     pub bare: bool,
     pub locked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub lock_reason: Option<String>,
 }
 

@@ -10,18 +10,20 @@ use grit_lib::repo::init_repository;
 use serde::Serialize;
 
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 fn is_false(value: &bool) -> bool {
     !*value
 }
 
 /// Result of `grit init`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct InitOutcome {
     /// `true` when a new repository was created.
     pub initialized: bool,
     /// `true` when an existing repository was reinitialized in place.
-    #[serde(skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schemars(default)]
     pub reinitialized: bool,
     /// The created `.git` directory.
     pub path: String,

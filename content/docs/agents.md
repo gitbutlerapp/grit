@@ -3,7 +3,7 @@ title: Agent guide
 summary: Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.
 ---
 
-This page is for programs and agents that drive [`grit`](../install/) in automation. It describes **existing** CLI behavior only. For field-level JSON schemas, use each command's docs page; this guide covers the shared contract.
+This page is for programs and agents that drive [`grit`](../install/) in automation. It describes **existing** CLI behavior only. Machine-readable **v1 JSON Schemas** for each command's `--json` success object are published at `/schemas/<command>/v1.json` (see the [JSON schemas](../schemas/) index). Field-level tables on each command page remain the human-oriented reference; this guide covers the shared contract.
 
 Examples below were captured on 2026-10-08 with `grit` built from this repository (`cargo build --release -p grit-cli`), in a temporary repository on branch `main`, unless noted.
 
@@ -43,9 +43,23 @@ $ grit --json --filter '{branch, clean}'
 
 See [Scripting with grit](../scripting/) for more `--filter` patterns. Per-command keys are documented under [The grit CLI](../global-options/) command pages.
 
+## JSON schema versioning
+
+Each command path has a versioned schema file: `<command>.v1.json` (dotted paths for subcommands, such as `stash.list.v1.json`). **Additive changes stay on v1:** new optional JSON fields, new enum variants, or new properties documented with defaults are allowed without bumping the version. **Breaking changes require a new version:** removing a field, renaming a field, or changing a field's JSON type means publishing `<command>.v2.json` while keeping v1 available at its stable `$id` URL for older clients.
+
+Regenerate committed schemas after intentional contract changes with:
+
+```bash
+GRIT_UPDATE_SCHEMAS=1 cargo test json_schemas_are_current -p grit-cli -- --nocapture
+```
+
+CI runs `json_schemas_are_current` (drift check) and `json_snapshots_match_schemas` (golden `--json` snapshots validate against the matching schema).
+
 ## Error object shape
 
-On failure with `--json`, stdout is a single object with an **`error`** string (the same message a human sees after `error:` on stderr):
+Schema: [v1](/schemas/error/v1.json)
+
+On failure with `--json`, stdout is a single object with an **`error`** string (the same message a human sees after `error:` on stderr). Some failures add a **`kind`** and optional fields (for example merge/pick **conflicts**); see the error schema for the plain vs structured union.
 
 ```console
 $ grit commit --json

@@ -75,6 +75,8 @@ error: untracked file 'notes.txt' would be overwritten — move or remove it fir
 
 ## JSON output
 
+Schema: [v1](/schemas/merge/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

@@ -46,6 +46,8 @@ a1b2c3d4e5f6789012345678901234567890abcd	refs/heads/main
 
 ## JSON output
 
+Schema: [v1](/schemas/remote/v1.json) · [remote.add v1](/schemas/remote.add/v1.json) · [remote.refs v1](/schemas/remote.refs/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

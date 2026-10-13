@@ -30,9 +30,10 @@ use serde::Serialize;
 
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// Result of `grit auth` (sign-in).
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct AuthOutcome {
     pub authenticated: bool,
     pub host: String,
@@ -57,7 +58,7 @@ impl MarkdownRender for AuthOutcome {
 }
 
 /// Result of `grit auth logout`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct LogoutOutcome {
     pub logged_out: bool,
     pub host: String,

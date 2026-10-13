@@ -16,9 +16,10 @@ use serde::Serialize;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// Result of `grit branch`, tagged by `action` (`list` / `create` / `delete`).
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum BranchOutcome {
     List {
@@ -39,7 +40,7 @@ pub enum BranchOutcome {
 }
 
 /// One branch in a `list` outcome.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct BranchEntry {
     pub name: String,
     pub current: bool,

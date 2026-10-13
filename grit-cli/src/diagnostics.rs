@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use grit_lib::diagnostics::{DiagnosticSink, Trace, Warning};
+use schemars::JsonSchema;
 use serde::Serialize;
 
 /// Delivers library warnings to stderr and retains them for JSON output.
@@ -13,7 +14,7 @@ pub struct CliDiagnosticSink {
     dedupe: Mutex<HashSet<Warning>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct WarningRecord {
     pub kind: String,
     pub message: String,

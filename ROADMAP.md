@@ -299,9 +299,9 @@
 - Keep the jq-style `--filter`.
 
 **Acceptance.**
-- All 22 commands support `--json` and `--markdown`.
+- All 32 commands support `--json` and `--markdown` (except plumbing and shell completions, which document their non-JSON stdout).
 - The schemas are published on the docs site.
-- Snapshot tests run in CI.
+- Snapshot tests and docs gates (`every_command_has_output_snapshots`, `json_field_tables_match_schemas`) run in CI.
 
 ## 19. grit-cli coverage of core features
 *Workstream: CLI*

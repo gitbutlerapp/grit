@@ -44,6 +44,8 @@ description: Use the grit CLI for version control in Git repositories — status
 
 ## JSON output
 
+Schema: [v1](/schemas/skill/v1.json)
+
 Pass `--json` to get the skill text along with where to save it:
 
 | Field | Type | Meaning |

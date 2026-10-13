@@ -21,10 +21,11 @@ Closing fences stay untagged: ` ``` ` on its own line.
 3. **Options** — table of flags and arguments (or a note pointing at global options).
 4. **Examples** — human-readable terminal output from a real `grit` run.
 5. **JSON output** — for commands that emit JSON with `--json`:
+   - a **Schema:** line linking the committed v1 JSON Schema on the docs site (for example `Schema: [v1](/schemas/status/v1.json)`; use one link per subcommand schema when a page covers several);
    - at least one fenced ` ```json ` block containing real `grit <cmd> --json` output;
-   - a **markdown field table** (`| Field | … |`) documenting every top-level key in each example (prose lists of keys are not enough).
-   **Exception:** plumbing commands (`manager`, `upload-pack`, `receive-pack`) and [`completions`](completions.md) do not use fenced JSON; their JSON output section explains that stdout carries the wire protocol, credential stream, or completion script instead. Every other command follows the fenced-JSON + field-table rule.
-6. **Markdown output** — only when the command (or global flags) includes `--markdown`. Do not add this section until the flag exists.
+   - a **markdown field table** (`| Field | … |`) whose rows are **exactly** the top-level properties of that command’s schema(s)—no extra rows, no missing keys (CI compares against `content/schemas/*.v1.json`).
+   **Exception:** plumbing commands (`manager`, `upload-pack`, `receive-pack`) and [`completions`](completions.md) do not use fenced JSON; their JSON output section explains that stdout carries the wire protocol, credential stream, or completion script instead. Every other command follows the schema link + fenced JSON + field-table rule.
+6. **Markdown output** — **required** for every command that supports `--markdown` (including via global flags). Document real `--markdown` output, agent-oriented headings and bullets, and link the same v1 JSON Schema as the JSON output section so agents can rely on one contract.
 7. **See also** — links to related command pages.
 
 There is no generated HTML to commit: the site is built from these files on deploy. Preview with `make docs` and validate with `cd site && npm run check`.

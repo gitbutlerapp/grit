@@ -43,6 +43,8 @@ Staged 2 changes.
 
 ## JSON output
 
+Schema: [v1](/schemas/add/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

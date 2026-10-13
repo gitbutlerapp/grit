@@ -9,11 +9,12 @@ use grit_lib::error::Error;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::rev_parse::resolve_revision;
+use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
 /// Result of `grit revert`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct RevertOutcome {
     /// The commit that was reverted (full hex oid).
     pub source: String,

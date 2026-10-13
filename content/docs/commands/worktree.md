@@ -12,17 +12,23 @@ grit worktree list
 grit worktree add <path> [<rev>]
 grit worktree add -b <branch> <path> [<rev>]
 grit worktree add --detach <path> [<rev>]
+grit worktree add -f <path> [<rev>]
 grit worktree remove <path>
 grit worktree remove -f <path>
+grit worktree prune
 ```
 
 ## Description
 
-Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`).
+Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`). Linked rows whose working tree directory is gone are marked `prunable`, matching `git worktree list`.
 
 `grit worktree add` creates the admin directory under `.git/worktrees/`, writes the `gitdir` / `commondir` files, checks out the tree, and registers the new worktree. With only a path, grit creates a new branch named after the directory basename at `HEAD`. With a `<rev>` that names an existing branch, that branch is checked out (it must not already be checked out elsewhere). Use `-b` to create a new branch at `<rev>` (default `HEAD`). Use `--detach` for a detached HEAD at the resolved commit.
 
+If `<path>` is already registered but its directory was deleted manually, grit refuses the add (same as Git). Use `-f` / `--force` to replace the stale registration, or `grit worktree prune` / `grit worktree remove` to clear it first.
+
 `grit worktree remove` deletes the linked worktree's admin directory and, with `-f`, the working tree even when it has local changes.
+
+`grit worktree prune` removes admin directories for linked worktrees whose working tree is missing (skips locked worktrees).
 
 ## Options
 
@@ -38,6 +44,7 @@ No flags.
 | `<rev>` | Commit or branch to check out (default `HEAD`). |
 | `-b`, `--branch` | Create and check out a new branch at `<rev>`. |
 | `--detach` | Detached HEAD at the resolved commit. |
+| `-f`, `--force` | Replace a stale registration when the directory is missing. |
 
 ### `remove`
 
@@ -45,6 +52,10 @@ No flags.
 | --- | --- |
 | `<path>` | Path to the linked worktree. |
 | `-f`, `--force` | Remove even when locked or dirty. |
+
+### `prune`
+
+No flags.
 
 ## Examples
 
@@ -58,11 +69,16 @@ $ grit worktree list
 
 $ grit worktree remove ../hotfix -f
 Removed worktree /tmp/hotfix
+
+$ grit worktree prune
+Pruned worktree /tmp/old-wt
 ```
 
 ## JSON output
 
-Pass `--json` on any subcommand. The top-level `action` is `list`, `add`, or `remove`.
+Schema: [v1](/schemas/worktree.list/v1.json) · [worktree.add v1](/schemas/worktree.add/v1.json) · [worktree.remove v1](/schemas/worktree.remove/v1.json) · [worktree.prune v1](/schemas/worktree.prune/v1.json)
+
+Pass `--json` on any subcommand. The top-level `action` is `list`, `add`, `remove`, or `prune`.
 
 List:
 
@@ -76,7 +92,8 @@ List:
       "branch": "main",
       "detached": false,
       "bare": false,
-      "locked": false
+      "locked": false,
+      "prunable": false
     }
   ]
 }
@@ -84,15 +101,11 @@ List:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `action` | string | `list`, `add`, or `remove`. |
-| `worktrees` | array | For `list`, one row per worktree. |
-| `path` | string | Absolute path to the working tree. |
-| `head` | string | Current commit oid for that worktree. |
-| `branch` | string | Short branch name when not detached. |
-| `detached` | boolean | True when `HEAD` is detached. |
-| `bare` | boolean | True only for the main entry of a bare repository. |
-| `locked` | boolean | True when the worktree admin dir has a `locked` file. |
-| `lock_reason` | string | Optional reason from the `locked` file. |
+| `action` | string | `list`, `add`, `remove`, or `prune`. |
+| `worktrees` | array | For `list`, one row per worktree (each item includes `path`, `head`, `branch`, and related flags). |
+| `path` | string | For `add` / `remove`, absolute path to the working tree. |
+| `head` | string | For `add`, current commit oid checked out in the new worktree. |
+| `branch` | string or null | For `add`, branch checked out when not detached. |
 
 Add:
 
@@ -116,18 +129,11 @@ Remove:
 
 ## Markdown output
 
-Pass [`--markdown`](../global-options/) for structured output.
+Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-List shows a table of path, branch, and HEAD:
+Schema: [v1](/schemas/worktree.list/v1.json) · [worktree.add v1](/schemas/worktree.add/v1.json) · [worktree.remove v1](/schemas/worktree.remove/v1.json) · [worktree.prune v1](/schemas/worktree.prune/v1.json)
 
-```text
-| Path | Branch | HEAD |
-| --- | --- | --- |
-| /tmp/repo | `main` | `abc1234` |
-| /tmp/hotfix | `hotfix` | `abc1234` |
-```
-
-Add and remove use short headings with the path and branch (or detached HEAD) and commit oid.
+Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
 ## See also
 

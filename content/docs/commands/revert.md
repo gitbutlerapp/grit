@@ -59,6 +59,8 @@ Nothing was changed. grit can't resolve conflicts yet — run `git revert featur
 
 ## JSON output
 
+Schema: [v1](/schemas/revert/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

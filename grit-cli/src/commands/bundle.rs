@@ -11,16 +11,17 @@ use serde::Serialize;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// Outcome of `grit bundle create`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct BundleCreateOutcome {
     pub path: String,
     pub refs: usize,
 }
 
 /// Outcome of `grit bundle verify`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct BundleVerifyOutcome {
     pub path: String,
     pub ok: bool,
@@ -31,13 +32,13 @@ pub struct BundleVerifyOutcome {
 }
 
 /// Outcome of `grit bundle list`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct BundleListOutcome {
     pub path: String,
     pub references: Vec<BundleRefJson>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct BundleRefJson {
     pub name: String,
     pub oid: String,

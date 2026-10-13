@@ -12,6 +12,8 @@ mod dates;
 mod diagnostics;
 mod json_error;
 mod json_filter;
+#[cfg(test)]
+mod json_schema;
 mod markdown;
 mod output;
 mod progress;
@@ -939,6 +941,19 @@ mod tests {
     /// not a JSON outcome object.
     const NO_JSON_COMMANDS: &[&str] = &["completions", "manager", "upload-pack", "receive-pack"];
 
+    /// Subcommands excluded from three-way output snapshot coverage (plumbing + shell completions).
+    const OUTPUT_SNAPSHOT_EXEMPT: &[&str] = &[
+        "help",
+        "completions",
+        "manager",
+        "upload-pack",
+        "receive-pack",
+    ];
+
+    /// In-process render snapshots that satisfy coverage for a top-level command.
+    const RENDER_SNAPSHOT_FOR_COMMAND: &[(&str, &str)] =
+        &[("auth", "auth_render"), ("update", "update_render")];
+
     fn commands_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands")
     }
@@ -1293,6 +1308,197 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                 let sub_name = sub.get_name();
                 if sub_name != "help" && !page.contains(&format!("`{sub_name}")) {
                     problems.push(format!("{name}.md does not document `{sub_name}`"));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    fn snapshot_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots")
+    }
+
+    fn read_snapshot_payload(stem: &str) -> Option<serde_json::Value> {
+        use crate::json_schema::{discover_snapshot_stems, SNAPSHOT_FILE_PREFIX};
+        let dir = snapshot_dir();
+        if !discover_snapshot_stems(&dir).contains(stem) {
+            return None;
+        }
+        let path = dir.join(format!("{SNAPSHOT_FILE_PREFIX}{stem}.snap"));
+        let text = std::fs::read_to_string(&path).ok()?;
+        let json_body = text.rsplit_once("\n---\n").map(|(_, body)| body)?;
+        serde_json::from_str(json_body).ok()
+    }
+
+    fn mode_triple_present(value: &serde_json::Value) -> bool {
+        ["human", "json", "markdown"]
+            .iter()
+            .all(|key| value.get(key).is_some())
+    }
+
+    fn snapshot_has_three_modes(stem: &str, payload: &serde_json::Value) -> bool {
+        if stem == "auth_render" {
+            return payload.get("sign_in").is_some_and(mode_triple_present)
+                && payload.get("logout").is_some_and(mode_triple_present);
+        }
+        mode_triple_present(payload)
+    }
+
+    fn command_covered_by_snapshot_stem(stem: &str, command: &str) -> bool {
+        use crate::json_schema::snapshot_command_args;
+        if RENDER_SNAPSHOT_FOR_COMMAND
+            .iter()
+            .any(|(cmd, snap)| *cmd == command && *snap == stem)
+        {
+            return true;
+        }
+        let Some((_, args)) = snapshot_command_args()
+            .iter()
+            .find(|(name, _)| *name == stem)
+        else {
+            return false;
+        };
+        args.first().is_some_and(|first| *first == command)
+    }
+
+    /// Every non-plumbing command has at least one committed three-mode output snapshot.
+    #[test]
+    fn every_command_has_output_snapshots() {
+        use crate::json_schema::{discover_snapshot_stems, SNAPSHOT_JSON_SKIP};
+        let dir = snapshot_dir();
+        let stems = discover_snapshot_stems(&dir);
+        let mut problems = Vec::new();
+        for stem in &stems {
+            if SNAPSHOT_JSON_SKIP.contains(&stem.as_str()) {
+                continue;
+            }
+            let Some(payload) = read_snapshot_payload(stem) else {
+                problems.push(format!("snapshot `{stem}` is unreadable"));
+                continue;
+            };
+            if !snapshot_has_three_modes(stem, &payload) {
+                problems.push(format!(
+                    "snapshot `{stem}` must include human, json, and markdown sections"
+                ));
+            }
+        }
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if OUTPUT_SNAPSHOT_EXEMPT.contains(&name) {
+                continue;
+            }
+            let covered = stems
+                .iter()
+                .any(|stem| command_covered_by_snapshot_stem(stem, name));
+            if !covered {
+                problems.push(format!("command `{name}` has no output snapshot"));
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    fn schema_top_level_field_names(schema: &serde_json::Value) -> HashSet<String> {
+        let mut keys = HashSet::new();
+        if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
+            keys.extend(props.keys().cloned());
+            return keys;
+        }
+        for branch_key in ["anyOf", "oneOf"] {
+            if let Some(items) = schema.get(branch_key).and_then(|v| v.as_array()) {
+                for item in items {
+                    keys.extend(schema_top_level_field_names(item));
+                }
+                return keys;
+            }
+        }
+        if let Some(items) = schema.get("items") {
+            if let Some(ref_name) = items
+                .get("$ref")
+                .and_then(|r| r.as_str())
+                .and_then(|r| r.strip_prefix("#/definitions/"))
+            {
+                if let Some(def) = schema.get("definitions").and_then(|d| d.get(ref_name)) {
+                    return schema_top_level_field_names(def);
+                }
+            }
+            keys.extend(schema_top_level_field_names(items));
+        }
+        keys
+    }
+
+    fn schema_keys_for_command(command: &str) -> HashSet<String> {
+        use crate::json_schema::{expected_json_command_paths, load_committed_schema};
+        let mut keys = HashSet::new();
+        for path in expected_json_command_paths() {
+            if path == command || path.starts_with(&format!("{command}.")) {
+                keys.extend(schema_top_level_field_names(&load_committed_schema(&path)));
+            }
+        }
+        keys
+    }
+
+    fn page_requires_markdown(command: &clap::Command) -> bool {
+        cli_supports_markdown() || command_supports_markdown(command)
+    }
+
+    fn markdown_section_has_schema_link(section: &str, command: &str) -> bool {
+        section.contains("/schemas/")
+            || section.contains("grit-scm.com/schemas")
+            || section.contains(&format!("/schemas/{command}/"))
+    }
+
+    /// JSON field tables document exactly the top-level schema properties; Markdown sections link schemas.
+    #[test]
+    fn json_field_tables_match_schemas() {
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" || NO_JSON_COMMANDS.contains(&name) {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                problems.push(format!("missing page {}", path.display()));
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let Some(json_section) = section_body(body, "JSON output") else {
+                problems.push(format!("{name}.md: no JSON output section"));
+                continue;
+            };
+            if !json_section.contains("Schema:") && !json_section.contains("/schemas/") {
+                problems.push(format!(
+                    "{name}.md: JSON output section must link the v1 schema under /schemas/"
+                ));
+            }
+            let table_keys = field_table_top_level_keys(&json_section);
+            let schema_keys = schema_keys_for_command(name);
+            if table_keys != schema_keys {
+                let missing: Vec<_> = schema_keys.difference(&table_keys).collect();
+                let extra: Vec<_> = table_keys.difference(&schema_keys).collect();
+                if !missing.is_empty() {
+                    problems.push(format!(
+                        "{name}.md: field table missing schema keys: {missing:?}"
+                    ));
+                }
+                if !extra.is_empty() {
+                    problems.push(format!(
+                        "{name}.md: field table documents keys not in schema: {extra:?}"
+                    ));
+                }
+            }
+            if page_requires_markdown(command) {
+                let Some(md_section) = section_body(body, "Markdown output") else {
+                    problems.push(format!("{name}.md: missing ## Markdown output section"));
+                    continue;
+                };
+                if !markdown_section_has_schema_link(&md_section, name)
+                    && !markdown_section_has_schema_link(&json_section, name)
+                {
+                    problems.push(format!(
+                        "{name}.md: Markdown output must link the command JSON schema"
+                    ));
                 }
             }
         }

@@ -54,6 +54,8 @@ Restored README.md
 
 ## JSON output
 
+Schema: [v1](/schemas/restore/v1.json)
+
 Pass `--json` for scripting:
 
 | Field | Type | Meaning |

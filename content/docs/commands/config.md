@@ -90,6 +90,8 @@ $ grit config --unset target.branch
 
 ## JSON output
 
+Schema: [v1](/schemas/config/v1.json)
+
 Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
 
 | Field | Type | Meaning |
@@ -124,6 +126,14 @@ Listing values:
   ]
 }
 ```
+
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for agent-friendly output.
+
+Schema: [v1](/schemas/config/v1.json)
+
+Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
 ## See also
 

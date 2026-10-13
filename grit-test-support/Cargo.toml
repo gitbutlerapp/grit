@@ -17,6 +17,7 @@ hex.workspace = true
 insta = { version = "1.42", features = ["json", "filters"] }
 regex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 similar.workspace = true

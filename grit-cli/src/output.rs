@@ -26,6 +26,7 @@ use crate::json_error::structured_json_payload;
 use crate::json_filter::apply_json_filter;
 use crate::stdio;
 use crate::ui::entry_path;
+use schemars::JsonSchema;
 
 /// Wall-clock instant captured once per process invocation for relative dates.
 #[derive(Clone, Copy, Debug)]
@@ -203,7 +204,7 @@ pub fn progress(mode: OutputMode, msg: &str) {
 // ---------------------------------------------------------------------------
 
 /// A commit in JSON output: full hex `oid`, subject, author, and dates.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct CommitJson {
     pub oid: String,
     pub subject: String,
@@ -213,6 +214,7 @@ pub struct CommitJson {
     pub author_date: String,
     /// Relative author date (e.g. `3 days ago`), when `now` is supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub relative_date: Option<String>,
 }
 
@@ -230,22 +232,55 @@ impl CommitJson {
 }
 
 /// A single worktree/index change in JSON output.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct ChangeJson {
     pub path: String,
-    pub status: String,
+    pub status: ChangeStatus,
 }
 
-/// Stable machine-readable name for a diff status (snake_case).
+/// Machine-readable diff change status (`--json` / `--markdown` contract).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeStatus {
+    Added,
+    Deleted,
+    Modified,
+    TypeChanged,
+    Renamed,
+    Copied,
+    Unmerged,
+}
+
+impl From<DiffStatus> for ChangeStatus {
+    fn from(status: DiffStatus) -> Self {
+        match status {
+            DiffStatus::Added => Self::Added,
+            DiffStatus::Deleted => Self::Deleted,
+            DiffStatus::Modified => Self::Modified,
+            DiffStatus::TypeChanged => Self::TypeChanged,
+            DiffStatus::Renamed => Self::Renamed,
+            DiffStatus::Copied => Self::Copied,
+            DiffStatus::Unmerged => Self::Unmerged,
+        }
+    }
+}
+
+impl From<&DiffStatus> for ChangeStatus {
+    fn from(status: &DiffStatus) -> Self {
+        (*status).into()
+    }
+}
+
+/// Stable snake_case label for a diff status (human / legacy call sites).
 pub fn change_status_str(status: &DiffStatus) -> &'static str {
-    match status {
-        DiffStatus::Added => "added",
-        DiffStatus::Deleted => "deleted",
-        DiffStatus::Modified => "modified",
-        DiffStatus::TypeChanged => "type_changed",
-        DiffStatus::Renamed => "renamed",
-        DiffStatus::Copied => "copied",
-        DiffStatus::Unmerged => "unmerged",
+    match ChangeStatus::from(status) {
+        ChangeStatus::Added => "added",
+        ChangeStatus::Deleted => "deleted",
+        ChangeStatus::Modified => "modified",
+        ChangeStatus::TypeChanged => "type_changed",
+        ChangeStatus::Renamed => "renamed",
+        ChangeStatus::Copied => "copied",
+        ChangeStatus::Unmerged => "unmerged",
     }
 }
 
@@ -253,7 +288,7 @@ pub fn change_status_str(status: &DiffStatus) -> &'static str {
 pub fn change_json(entry: &DiffEntry) -> ChangeJson {
     ChangeJson {
         path: entry_path(entry).to_owned(),
-        status: change_status_str(&entry.status).to_owned(),
+        status: entry.status.into(),
     }
 }
 
@@ -263,7 +298,7 @@ mod tests {
     use serde::Serialize;
     use std::io::Write;
 
-    #[derive(Serialize)]
+    #[derive(Serialize, JsonSchema)]
     struct SampleOutcome {
         branch: &'static str,
         clean: bool,

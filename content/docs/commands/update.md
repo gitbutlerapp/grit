@@ -32,6 +32,8 @@ Install directory: /home/ada/.local/bin
 
 ## JSON output
 
+Schema: [v1](/schemas/update/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
@@ -52,11 +54,11 @@ With `--json`, the installer's progress goes to stderr so stdout carries only th
 
 ## Markdown output
 
-Pass [`--markdown`](../global-options/) for a one-line result on stdout (installer progress still goes to stderr in this mode):
+Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-```text
-- Updated grit (ran installer; previous version **0.5.0**)
-```
+Schema: [v1](/schemas/update/v1.json)
+
+Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
 ## See also
 

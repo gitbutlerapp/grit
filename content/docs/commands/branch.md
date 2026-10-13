@@ -59,6 +59,8 @@ Deleted branch spike (was a7020c2).
 
 ## JSON output
 
+Schema: [v1](/schemas/branch/v1.json)
+
 Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
 
 | Field | Type | Meaning |
@@ -91,6 +93,14 @@ Creating a branch:
   "name": "experiment"
 }
 ```
+
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for agent-friendly output.
+
+Schema: [v1](/schemas/branch/v1.json)
+
+Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
 ## See also
 

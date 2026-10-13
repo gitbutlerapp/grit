@@ -10,14 +10,15 @@ process.env.GRIT_SITE_STRICT ??= "1";
 
 const { loadSite } = await import("../lib/docs");
 const { loadPosts } = await import("../lib/blog");
+const { validateSchemaLinks } = await import("../lib/schemas");
 const { validateLinks } = await import("../lib/validate");
 
 const site = loadSite();
 const posts = loadPosts();
-const problems = validateLinks(site, posts);
+const problems = [...validateLinks(site, posts), ...validateSchemaLinks(site)];
 if (problems.length) {
   for (const problem of problems) console.error(problem);
-  console.error(`\n${problems.length} broken link(s) in content/docs or content/blog`);
+  console.error(`\n${problems.length} problem(s) in content/docs, content/blog, or content/schemas`);
   process.exit(1);
 }
 console.log(`docs ok: ${site.pages.length} pages (${site.commandPages.length} commands), ${posts.length} blog posts`);

@@ -16,9 +16,10 @@ use serde::Serialize;
 use crate::context;
 use crate::output::{outln, progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::progress::{format_bytes, TerminalProgress};
+use schemars::JsonSchema;
 
 /// Result of `grit clone`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct CloneOutcome {
     pub url: String,
     /// Destination directory.
@@ -36,6 +37,7 @@ pub struct CloneOutcome {
     /// Working-tree files checked out.
     pub files: u64,
     #[serde(skip)]
+    #[schemars(skip)]
     pub elapsed: Duration,
 }
 

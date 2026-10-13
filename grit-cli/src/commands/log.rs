@@ -12,12 +12,13 @@ use crate::context::{self, subject_line, CommitSummary};
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui;
+use schemars::JsonSchema;
 
 /// How many commits to show per page.
 const PAGE: usize = 10;
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct LogOutcome {
     pub commits: Vec<CommitJson>,
     /// Full oid to resume from (`grit log --before=<next>`), or `null` when there

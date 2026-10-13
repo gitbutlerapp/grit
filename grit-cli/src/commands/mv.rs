@@ -9,9 +9,10 @@ use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// CLI outcome for `grit mv`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct MvOutcome {
     /// Source path before the move.
     pub from: String,

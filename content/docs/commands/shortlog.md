@@ -41,6 +41,8 @@ $ grit sl --json --filter .ahead
 
 ## JSON output
 
+Schema: [v1](/schemas/shortlog/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

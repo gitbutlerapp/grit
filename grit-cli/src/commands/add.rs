@@ -14,13 +14,15 @@ use std::io::Write;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// Result of `grit add`: how many changes were staged.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct AddOutcome {
     pub staged: usize,
     /// Whether the invocation had no path arguments (stages everything).
     #[serde(skip)]
+    #[schemars(skip)]
     pub(crate) no_paths: bool,
 }
 

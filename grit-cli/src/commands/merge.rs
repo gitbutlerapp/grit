@@ -14,11 +14,12 @@ use grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_merge;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
+use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
 /// Result of `grit merge` (and the merge half of `grit pull`).
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct MergeOutcome {
     /// `up_to_date` | `fast_forward` | `merged` | `conflicts` | `aborted` | `set_upstream`.
     pub result: String,

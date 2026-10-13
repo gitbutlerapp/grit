@@ -13,9 +13,10 @@ const SHORTLOG_LIST_LIMIT: usize = 100;
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui;
+use schemars::JsonSchema;
 
 /// Result of `grit shortlog`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct ShortlogOutcome {
     pub branch: String,
     /// Target branch name, or `null` when none could be resolved.

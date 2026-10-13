@@ -58,6 +58,8 @@ f4e623f540cd491f8856e9487a3da5f8242307f0 refs/heads/main
 
 ## JSON output
 
+Schema: [v1](/schemas/bundle.create/v1.json) · [bundle.list v1](/schemas/bundle.list/v1.json) · [bundle.verify v1](/schemas/bundle.verify/v1.json)
+
 `grit bundle verify --json`:
 
 | Field | Type | Meaning |

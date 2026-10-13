@@ -7,6 +7,7 @@
  */
 import { loadPosts, postTwinUrl } from "./blog";
 import { isLibrarySlug, librarySlugs, loadSite, twinUrl, type Page, type Site } from "./docs";
+import { loadSchemas, schemaPublicUrl } from "./schemas";
 import { DOCS_RS, SITE_URL } from "./repo";
 
 export const CLI_BUNDLE = "grit-cli.md";
@@ -98,7 +99,11 @@ export function llmsTxt(site: Site = loadSite()): string {
 }
 
 export function llmsFullTxt(site: Site = loadSite()): string {
-  return site.pages.map((p) => `# ${twinUrl(p.slug)}\n\n${pageTwin(p, site).trimEnd()}\n`).join("\n");
+  const pages = site.pages.map((p) => `# ${twinUrl(p.slug)}\n\n${pageTwin(p, site).trimEnd()}\n`).join("\n");
+  const schemas = loadSchemas()
+    .map((s) => `# ${schemaPublicUrl(s.command)}\n\n\`\`\`json\n${s.body.trimEnd()}\n\`\`\`\n`)
+    .join("\n");
+  return `${pages}\n${schemas}`;
 }
 
 /** Pages in one half of the docs, in reading order. Benchmarks belong to neither. */

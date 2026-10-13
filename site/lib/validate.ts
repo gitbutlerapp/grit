@@ -6,7 +6,20 @@ import { SITE_URL } from "./repo";
 import { isExternal } from "./text";
 
 /** Static files and routes that live outside the docs pages. */
-const OTHER_PATHS = new Set(["/", "/blog/", "/llms.txt", "/llms-full.txt", "/docs/grit-cli.md", "/docs/grit-lib.md", "/install", "/install.ps1", "/install-nightly", "/install-nightly.ps1"]);
+const OTHER_PATHS = new Set([
+  "/",
+  "/blog/",
+  "/llms.txt",
+  "/llms-full.txt",
+  "/docs/grit-cli.md",
+  "/docs/grit-lib.md",
+  "/install",
+  "/install.ps1",
+  "/install-nightly",
+  "/install-nightly.ps1",
+]);
+
+const SCHEMA_PATH = /^\/schemas\/[a-z0-9_.-]+\/v1\.json$/;
 
 /** Anchors a page renders: its headings plus ids the overview layout adds. */
 function anchorsFor(site: Site): Map<string, Set<string>> {
@@ -55,6 +68,7 @@ export function validateLinks(site: Site, posts: Post[]): string[] {
       const path = target.startsWith(SITE_URL) ? target.slice(SITE_URL.length) : target;
       if (path.startsWith("/")) {
         if (OTHER_PATHS.has(path)) continue;
+        if (SCHEMA_PATH.test(path)) continue;
         if (path.startsWith("/docs/")) checkDocsTarget(source, docsSlug(path), fragment, href);
         else if (path.startsWith("/blog/")) {
           const slug = path.slice(6).replace(/\/$/, "");

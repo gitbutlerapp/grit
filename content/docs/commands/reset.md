@@ -53,6 +53,8 @@ Reset main to a1b2c3d (mixed)
 
 ## JSON output
 
+Schema: [v1](/schemas/reset/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

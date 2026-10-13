@@ -60,6 +60,8 @@ Initialized empty repository in /home/ada/reftable-demo/.git (ref-format: reftab
 
 ## JSON output
 
+Schema: [v1](/schemas/init/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

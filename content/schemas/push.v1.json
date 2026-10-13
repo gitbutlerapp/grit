@@ -2,15 +2,6 @@
   "$id": "https://grit-scm.com/schemas/push/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
-    "PushRefOutcomeStatus": {
-      "description": "Per-ref push status in JSON (`ok`, `up_to_date`, or `rejected`).",
-      "enum": [
-        "ok",
-        "up_to_date",
-        "rejected"
-      ],
-      "type": "string"
-    },
     "PushRefResult": {
       "description": "One ref's push result.",
       "properties": {
@@ -25,7 +16,8 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/PushRefOutcomeStatus"
+          "description": "`ok` | `up_to_date` | `rejected`.",
+          "type": "string"
         }
       },
       "required": [

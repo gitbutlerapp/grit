@@ -51,6 +51,8 @@ Removed nested/
 
 ## JSON output
 
+Schema: [v1](/schemas/clean/v1.json)
+
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |

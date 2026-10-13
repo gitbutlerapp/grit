@@ -15,9 +15,10 @@ use serde::Serialize;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use schemars::JsonSchema;
 
 /// Result of `grit config`, tagged by `action`.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum ConfigOutcome {
     Get { key: String, value: String },
@@ -27,7 +28,7 @@ pub enum ConfigOutcome {
 }
 
 /// One entry in a `list` outcome. `value` is `null` for a bare/valueless key.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct ConfigEntry {
     pub key: String,
     pub value: Option<String>,

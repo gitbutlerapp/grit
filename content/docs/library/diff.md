@@ -3,7 +3,7 @@ title: Diff
 summary: Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.
 ---
 
-Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain module (tree/content diff, merge helpers, patch-ids). Results are [`DiffEntry`](rustdoc:grit_lib::diff::DiffEntry) rows with a [`DiffStatus`](rustdoc:grit_lib::diff::DiffStatus) letter (`M`, `A`, `D`, …), paths, modes, and object ids — the same shape [`grit diff`](../../diff/) and [`porcelain::status`](rustdoc:grit_lib::porcelain::status) use before formatting output. See [API layout](api-layout) for the flat-path map.
+Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain module (tree/content diff, merge helpers, patch-ids). Results are [`DiffEntry`](rustdoc:grit_lib::diff::DiffEntry) rows with a [`DiffStatus`](rustdoc:grit_lib::diff::DiffStatus) letter (`M`, `A`, `D`, …), paths, modes, and object ids — the same shape [`grit diff`](../../diff/) and [`porcelain::status`](rustdoc:grit_lib::porcelain::status) use before formatting output. See [API layout](../api-layout) for the flat-path map.
 
 ## Tree-to-tree
 

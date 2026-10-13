@@ -12,12 +12,13 @@ use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
+use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 use time::OffsetDateTime;
 
 /// Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum TagOutcome {
     /// All tags in the repository, sorted by name.
@@ -36,7 +37,7 @@ pub enum TagOutcome {
 }
 
 /// One tag in a `list` outcome.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct TagEntry {
     pub name: String,
     /// Hex object id the tag ref points at.

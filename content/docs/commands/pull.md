@@ -41,6 +41,8 @@ Already up to date.
 
 ## JSON output
 
+Schema: [v1](/schemas/pull/v1.json)
+
 The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
@@ -49,6 +51,7 @@ The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stabl
 | `branch` | string | Remote branch that was integrated. |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
+| `conflicts` | array | Conflicted paths when `result` is `conflicts`; omitted otherwise. |
 
 Example:
 
@@ -59,6 +62,14 @@ Example:
   "oid": "b52cca65378cf17309f0b1f917c6dc4fdd9256f2"
 }
 ```
+
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for agent-friendly output.
+
+Schema: [v1](/schemas/pull/v1.json)
+
+Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
 ## See also
 
