@@ -4,12 +4,14 @@ use std::borrow::Cow;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::output::outln;
 
 use grit_lib::config::git_path::relative_path_for_display;
 use grit_lib::diff::{DiffEntry, DiffStatus};
+use grit_lib::quote_path::quote_path_for_display;
+use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::pathdiff;
 
 use crate::context::{self, CommitSummary};
@@ -54,6 +56,59 @@ impl PathDisplayContext {
             Some(rel) => Cow::Owned(rel),
             None => Cow::Borrowed(repo_rel),
         }
+    }
+}
+
+/// Cwd-relative path display and `core.quotepath` quoting for human / Markdown output.
+#[derive(Clone, Debug)]
+pub struct PathDisplayOptions {
+    pub path_display: Option<PathDisplayContext>,
+    pub quote_path_fully: bool,
+}
+
+impl PathDisplayOptions {
+    /// Build options from an open repository and the process current directory.
+    pub fn from_repo(repo: &Repository) -> Result<Self> {
+        let cwd = std::env::current_dir().context("could not read the current directory")?;
+        let path_display = repo
+            .work_tree()
+            .and_then(|wt| PathDisplayContext::from_cwd_and_work_tree(cwd, wt.to_path_buf()));
+        Ok(Self {
+            path_display,
+            quote_path_fully: repo.config()?.quote_path_fully(),
+        })
+    }
+
+    /// Map a repository-relative path to a safe human-facing string (Git `quote.c` style).
+    #[must_use]
+    pub fn format_path_for_human(&self, repo_rel: &str) -> String {
+        let rel = self
+            .path_display
+            .as_ref()
+            .map(|ctx| ctx.format_repo_path(repo_rel).into_owned())
+            .unwrap_or_else(|| repo_rel.to_owned());
+        quote_path_for_display(&rel, self.quote_path_fully)
+    }
+}
+
+/// Format a diff file title (`old → new` or the path alone), with Git-style quoting.
+#[must_use]
+pub fn format_diff_file_header(
+    old_path: Option<&str>,
+    path: &str,
+    path_opts: Option<&PathDisplayOptions>,
+) -> String {
+    let new_shown = path_opts
+        .map(|o| o.format_path_for_human(path))
+        .unwrap_or_else(|| path.to_owned());
+    match old_path {
+        Some(old) => {
+            let old_shown = path_opts
+                .map(|o| o.format_path_for_human(old))
+                .unwrap_or_else(|| old.to_owned());
+            format!("{old_shown} → {new_shown}")
+        }
+        None => new_shown,
     }
 }
 
@@ -198,7 +253,7 @@ pub fn print_change_group(
     w: &mut dyn Write,
     title: &str,
     entries: &[DiffEntry],
-    path_display: Option<&PathDisplayContext>,
+    path_opts: Option<&PathDisplayOptions>,
 ) -> Result<()> {
     if entries.is_empty() {
         return Ok(());
@@ -210,8 +265,8 @@ pub fn print_change_group(
         let l = label(entry);
         let marker = format!("{g}  {l:<width$}", width = LABEL_WIDTH);
         let repo_path = entry_path(entry);
-        let shown = path_display
-            .map(|ctx| ctx.format_repo_path(repo_path).into_owned())
+        let shown = path_opts
+            .map(|opts| opts.format_path_for_human(repo_path))
             .unwrap_or_else(|| repo_path.to_owned());
         outln!(
             w,
@@ -228,7 +283,7 @@ pub fn print_change_group(
 pub fn print_untracked(
     w: &mut dyn Write,
     paths: &[String],
-    path_display: Option<&PathDisplayContext>,
+    path_opts: Option<&PathDisplayOptions>,
 ) -> Result<()> {
     if paths.is_empty() {
         return Ok(());
@@ -236,8 +291,8 @@ pub fn print_untracked(
     let color = use_color();
     outln!(w, "{}", paint(color, "1", "Untracked"));
     for path in paths {
-        let shown = path_display
-            .map(|ctx| ctx.format_repo_path(path).into_owned())
+        let shown = path_opts
+            .map(|opts| opts.format_path_for_human(path))
             .unwrap_or_else(|| path.clone());
         let marker = format!("?  {l:<width$}", l = "untracked", width = LABEL_WIDTH);
         outln!(w, "  {}  {shown}", paint(color, "31", &marker));

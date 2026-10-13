@@ -15,7 +15,7 @@ use crate::markdown;
 use crate::output::{
     change_json, outln, ChangeJson, CommitJson, HumanRender, MarkdownRender, RenderContext,
 };
-use crate::ui::{self, PathDisplayContext};
+use crate::ui::{self, PathDisplayOptions};
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
 const SHORTLOG_LIMIT: usize = 10;
@@ -78,7 +78,7 @@ pub struct StatusOutcome {
     unstaged_entries: Vec<DiffEntry>,
     #[serde(skip)]
     #[schemars(skip)]
-    path_display: Option<PathDisplayContext>,
+    path_display: Option<PathDisplayOptions>,
 }
 
 impl HumanRender for StatusOutcome {
@@ -315,10 +315,7 @@ pub fn run() -> Result<StatusOutcome> {
         && conflicts.is_empty()
         && !merging;
 
-    let cwd = std::env::current_dir().context("could not read the current directory")?;
-    let path_display = repo
-        .work_tree()
-        .and_then(|wt| PathDisplayContext::from_cwd_and_work_tree(cwd, wt.to_path_buf()));
+    let path_display = PathDisplayOptions::from_repo(&repo).ok();
 
     Ok(StatusOutcome {
         branch,

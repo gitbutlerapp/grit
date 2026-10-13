@@ -21,6 +21,7 @@ use crate::context::{self, subject_line};
 use crate::dates::rfc3339_from_identity_when;
 use crate::markdown;
 use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::PathDisplayOptions;
 
 /// Width budget for the `+`/`-` change bars in the diffstat.
 const BAR_WIDTH: usize = 40;
@@ -54,6 +55,9 @@ pub struct ShowOutcome {
     pub commit: CommitInfo,
     /// A summary (diffstat) of the change the commit introduced — not the full patch.
     pub stat: DiffStat,
+    #[serde(skip)]
+    #[schemars(skip)]
+    path_display: Option<PathDisplayOptions>,
 }
 
 /// A diffstat: per-file insertion/deletion counts plus totals.
@@ -141,6 +145,7 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
         tag,
         commit,
         stat,
+        path_display: PathDisplayOptions::from_repo(&repo).ok(),
     })
 }
 
@@ -300,7 +305,7 @@ impl MarkdownRender for ShowOutcome {
             print_markdown_message(w, &body)?;
             outln!(w);
         }
-        render_markdown_stat(w, &self.stat)?;
+        render_markdown_stat(w, &self.stat, self.path_display.as_ref())?;
         Ok(())
     }
 }
@@ -354,13 +359,18 @@ impl HumanRender for ShowOutcome {
         outln!(w);
         print_message(w, &self.commit.message)?;
 
-        render_stat(w, &self.stat, color)?;
+        render_stat(w, &self.stat, color, self.path_display.as_ref())?;
         Ok(())
     }
 }
 
 /// Render the diffstat, mirroring `git show --stat`.
-pub(crate) fn render_stat(w: &mut dyn Write, stat: &DiffStat, color: bool) -> Result<()> {
+pub(crate) fn render_stat(
+    w: &mut dyn Write,
+    stat: &DiffStat,
+    color: bool,
+    path_opts: Option<&PathDisplayOptions>,
+) -> Result<()> {
     if stat.files.is_empty() {
         return Ok(());
     }
@@ -369,7 +379,7 @@ pub(crate) fn render_stat(w: &mut dyn Write, stat: &DiffStat, color: bool) -> Re
     let name_width = stat
         .files
         .iter()
-        .map(|f| stat_path(f).chars().count())
+        .map(|f| stat_path(f, path_opts).chars().count())
         .max()
         .unwrap_or(0)
         .min(60);
@@ -381,7 +391,7 @@ pub(crate) fn render_stat(w: &mut dyn Write, stat: &DiffStat, color: bool) -> Re
         .unwrap_or(0);
 
     for file in &stat.files {
-        let path = stat_path(file);
+        let path = stat_path(file, path_opts);
         if file.binary {
             outln!(w, " {path:<name_width$} | Bin");
             continue;
@@ -396,10 +406,20 @@ pub(crate) fn render_stat(w: &mut dyn Write, stat: &DiffStat, color: bool) -> Re
 }
 
 /// `old => new` for a rename, otherwise just the path.
-fn stat_path(file: &FileStat) -> String {
+fn stat_path(file: &FileStat, path_opts: Option<&PathDisplayOptions>) -> String {
     match &file.old_path {
-        Some(old) => format!("{old} => {}", file.path),
-        None => file.path.clone(),
+        Some(old) => {
+            let old_shown = path_opts
+                .map(|o| o.format_path_for_human(old))
+                .unwrap_or_else(|| old.clone());
+            let new_shown = path_opts
+                .map(|o| o.format_path_for_human(&file.path))
+                .unwrap_or_else(|| file.path.clone());
+            format!("{old_shown} => {new_shown}")
+        }
+        None => path_opts
+            .map(|o| o.format_path_for_human(&file.path))
+            .unwrap_or_else(|| file.path.clone()),
     }
 }
 
@@ -500,7 +520,11 @@ fn message_body(full: &str, subject: &str) -> String {
     }
 }
 
-pub(crate) fn render_markdown_stat(w: &mut dyn Write, stat: &DiffStat) -> Result<()> {
+pub(crate) fn render_markdown_stat(
+    w: &mut dyn Write,
+    stat: &DiffStat,
+    path_opts: Option<&PathDisplayOptions>,
+) -> Result<()> {
     if stat.files.is_empty() {
         return Ok(());
     }
@@ -509,7 +533,8 @@ pub(crate) fn render_markdown_stat(w: &mut dyn Write, stat: &DiffStat) -> Result
     outln!(w, "| File | + | − |");
     outln!(w, "| --- | ---: | ---: |");
     for file in &stat.files {
-        let path = markdown::escape_table_cell(&stat_path(file));
+        let path =
+            markdown::escape_table_cell(&markdown::escape_inline_code(&stat_path(file, path_opts)));
         if file.binary {
             outln!(w, "| `{path}` | binary | |");
         } else {

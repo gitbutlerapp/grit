@@ -43,6 +43,7 @@ use std::path::Path;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::{self, PathDisplayOptions};
 
 /// Lines of unchanged context to show around each change.
 const CONTEXT_LINES: usize = 3;
@@ -67,6 +68,9 @@ const FG_ON_DIFF: &str = "38;5;231";
 #[derive(Serialize, JsonSchema)]
 pub struct DiffOutcome {
     pub files: Vec<FileDiff>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    path_display: Option<PathDisplayOptions>,
 }
 
 /// One changed file.
@@ -162,6 +166,11 @@ pub struct DiffRunOptions {
     pub commits: Vec<String>,
 }
 
+fn attach_path_display(repo: &grit_lib::repo::Repository, mut outcome: DiffOutcome) -> DiffOutcome {
+    outcome.path_display = PathDisplayOptions::from_repo(repo).ok();
+    outcome
+}
+
 pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let repo = context::discover()?;
     if opts.staged && opts.unstaged {
@@ -171,13 +180,19 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         if !opts.commits.is_empty() || opts.against.is_some() {
             anyhow::bail!("--staged cannot be combined with revision arguments or --against");
         }
-        return Ok(outcome_from_changes(staged_changes(&repo)?));
+        return Ok(attach_path_display(
+            &repo,
+            outcome_from_changes(staged_changes(&repo)?),
+        ));
     }
     if opts.unstaged {
         if !opts.commits.is_empty() || opts.against.is_some() {
             anyhow::bail!("--unstaged cannot be combined with revision arguments or --against");
         }
-        return Ok(outcome_from_changes(unstaged_changes(&repo)?));
+        return Ok(attach_path_display(
+            &repo,
+            outcome_from_changes(unstaged_changes(&repo)?),
+        ));
     }
     if opts.commits.len() > 2 {
         anyhow::bail!("at most two commits, or one two-dot range such as A..B");
@@ -209,12 +224,15 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         }
         _ => unreachable!("checked above"),
     };
-    Ok(outcome_from_changes(changes))
+    Ok(attach_path_display(&repo, outcome_from_changes(changes)))
 }
 
 /// The diff a single commit introduced, as a [`DiffOutcome`]. Reused by `grit show`.
 pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<DiffOutcome> {
-    Ok(outcome_from_changes(commit_changes(repo, oid)?))
+    Ok(attach_path_display(
+        repo,
+        outcome_from_changes(commit_changes(repo, oid)?),
+    ))
 }
 
 /// Build a full patch-style [`DiffOutcome`] from tree diff entries (e.g. stash W vs base).
@@ -231,12 +249,13 @@ pub fn outcome_from_tree_entries(
             Ok(file_change(e, old_bytes, new_bytes, old_bin || new_bin))
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(outcome_from_changes(changes))
+    Ok(attach_path_display(repo, outcome_from_changes(changes)))
 }
 
 fn outcome_from_changes(changes: Vec<FileChange>) -> DiffOutcome {
     DiffOutcome {
         files: changes.into_iter().map(build_file_diff).collect(),
+        path_display: None,
     }
 }
 
@@ -720,7 +739,7 @@ impl HumanRender for DiffOutcome {
         }
         let color = use_color();
         for file in &self.files {
-            render_file(w, file, color)?;
+            render_file(w, file, color, self.path_display.as_ref())?;
         }
         Ok(())
     }
@@ -728,7 +747,7 @@ impl HumanRender for DiffOutcome {
 
 impl MarkdownRender for DiffOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_diff_files(w, &self.files)?;
+        markdown::print_diff_files(w, &self.files, self.path_display.as_ref())?;
         Ok(())
     }
 }
@@ -749,12 +768,14 @@ fn paint(color: bool, code: &str, text: &str) -> String {
     }
 }
 
-fn render_file(w: &mut dyn Write, file: &FileDiff, color: bool) -> Result<()> {
+fn render_file(
+    w: &mut dyn Write,
+    file: &FileDiff,
+    color: bool,
+    path_opts: Option<&PathDisplayOptions>,
+) -> Result<()> {
     outln!(w);
-    let header = match &file.old_path {
-        Some(old) => format!("{old} → {}", file.path),
-        None => file.path.clone(),
-    };
+    let header = ui::format_diff_file_header(file.old_path.as_deref(), &file.path, path_opts);
     outln!(w, "{}", paint(color, "1;4", &header)); // bold + underline
 
     if file.old_mode != file.new_mode {

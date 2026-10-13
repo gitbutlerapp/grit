@@ -25,7 +25,7 @@ The status screen is your home base. It shows, from top to bottom:
 
 Each change has a label: `new`, `modified`, `deleted`, `renamed`, `copied`, `type changed` or `conflict`.
 
-Paths are shown relative to the directory you run `grit` from.
+Paths are shown relative to the directory you run `grit` from. Names that contain C0 control characters (including ESC and BEL) are C-quoted the same way as `git status --short` (`core.quotepath`), so a malicious repository cannot inject terminal escape sequences into human or `--markdown` output. `--json` path fields stay unquoted UTF-8 strings (JSON escapes controls as `\uXXXX`).
 
 ### The target branch
 
@@ -114,7 +114,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `commits` | array | Newest of those commits, up to ten, each with `oid` and `subject`. |
 | `staged` | array | Staged changes with `path` and `status`. |
 | `unstaged` | array | Unstaged changes with `path` and `status`. |
-| `untracked` | array | Paths of untracked files. |
+| `untracked` | array | Paths of untracked files (raw UTF-8; JSON escapes control characters). |
 | `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
 | `merging` | boolean | `true` when a merge is in progress (`MERGE_HEAD` exists). |
 | `in_progress` | array | Stable operation ids while work is paused (for example `merge`, `rebase`). Omitted when empty. |
