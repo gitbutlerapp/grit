@@ -54,9 +54,9 @@ pub fn print_change_section(
     for entry in entries {
         let repo_path = ui::entry_path(entry);
         let shown = path_opts
-            .map(|opts| escape_inline_code(&opts.format_path_for_human(repo_path)))
-            .unwrap_or_else(|| escape_inline_code(repo_path));
-        outln!(w, "- **{}** `{shown}`", change_label(&entry.status));
+            .map(|opts| format_inline_code(&opts.format_path_for_human(repo_path)))
+            .unwrap_or_else(|| format_inline_code(repo_path));
+        outln!(w, "- **{}** {shown}", change_label(&entry.status));
     }
     outln!(w);
     Ok(())
@@ -86,9 +86,9 @@ pub fn print_untracked(
     outln!(w, "## Untracked");
     for path in paths {
         let shown = path_opts
-            .map(|opts| escape_inline_code(&opts.format_path_for_human(path)))
-            .unwrap_or_else(|| escape_inline_code(path));
-        outln!(w, "- `{shown}`");
+            .map(|opts| format_inline_code(&opts.format_path_for_human(path)))
+            .unwrap_or_else(|| format_inline_code(path));
+        outln!(w, "- {shown}");
     }
     outln!(w);
     Ok(())
@@ -235,10 +235,27 @@ pub fn print_config_entries(
     Ok(())
 }
 
-/// Escape a string for Markdown inline code (backticks).
+/// Wrap `content` in a Markdown inline code span.
+///
+/// Picks a backtick delimiter longer than any run of backticks in `content` (CommonMark
+/// code spans do not treat backslash as escape inside single-backtick spans).
 #[must_use]
-pub fn escape_inline_code(s: &str) -> String {
-    s.replace('`', "\\`")
+pub fn format_inline_code(content: &str) -> String {
+    let mut ticks = 1usize;
+    loop {
+        let marker = "`".repeat(ticks);
+        if !content.contains(&marker) {
+            let pad = content.starts_with(' ')
+                || content.ends_with(' ')
+                || content.starts_with('`')
+                || content.ends_with('`');
+            if pad {
+                return format!("{marker} {content} {marker}");
+            }
+            return format!("{marker}{content}{marker}");
+        }
+        ticks += 1;
+    }
 }
 
 /// Escape cell text so it stays on one Markdown table row.
@@ -502,7 +519,7 @@ pub fn print_push_results(
 
 #[cfg(test)]
 mod tests {
-    use super::{diff_code_fence, escape_table_cell};
+    use super::{diff_code_fence, escape_table_cell, format_inline_code};
 
     #[test]
     fn diff_code_fence_uses_longer_delimiter_when_body_has_triple_backticks() {
@@ -518,6 +535,17 @@ mod tests {
         let (open, close) = diff_code_fence(body);
         assert_eq!(open, "```diff");
         assert_eq!(close, "```");
+    }
+
+    #[test]
+    fn format_inline_code_uses_longer_delimiter_for_embedded_backtick() {
+        assert_eq!(format_inline_code("tick`name.txt"), "``tick`name.txt``");
+        assert_eq!(format_inline_code("plain.txt"), "`plain.txt`");
+    }
+
+    #[test]
+    fn format_inline_code_pads_when_content_touches_delimiter() {
+        assert_eq!(format_inline_code("`edge"), "`` `edge ``");
     }
 
     #[test]

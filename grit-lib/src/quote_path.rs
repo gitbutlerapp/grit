@@ -112,7 +112,7 @@ pub fn quote_c_style(path: &str, quote_fully: bool) -> String {
 
 /// Quote a repository-relative path for human-facing CLI output (status, diff headers).
 ///
-/// `quote_fully` mirrors Git's `core.quotepath` (see [`grit_lib::config::ConfigSet::quote_path_fully`]).
+/// `quote_fully` mirrors Git's `core.quotepath` (see [`crate::config::ConfigSet::quote_path_fully`]).
 #[must_use]
 pub fn quote_path_for_display(path: &str, quote_fully: bool) -> String {
     quote_c_style(path, quote_fully)

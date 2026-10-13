@@ -26,6 +26,8 @@ fn status_and_diff_quote_control_bytes_in_paths() {
     std::fs::File::create(dir.path().join(bell)).unwrap();
     std::fs::File::create(dir.path().join(ctl)).unwrap();
 
+    std::fs::File::create(dir.path().join("tick`name.txt")).unwrap();
+
     for args in [&["status"][..], &["status", "--markdown"][..]] {
         let out = Command::new(GRIT)
             .args(args)
@@ -56,6 +58,22 @@ fn status_and_diff_quote_control_bytes_in_paths() {
             "expected control-byte quoting in {args:?}:\n{text}"
         );
     }
+
+    let md = Command::new(GRIT)
+        .args(["status", "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("grit status markdown");
+    assert!(md.status.success());
+    let md_out = String::from_utf8_lossy(&md.stdout);
+    assert!(
+        md_out.contains("``tick`name.txt``"),
+        "expected doubled-backtick inline code for backtick filename:\n{md_out}"
+    );
+    assert!(
+        !md_out.contains("tick\\`name"),
+        "backslash-backtick is not valid CommonMark inline code:\n{md_out}"
+    );
 
     let git_short = Command::new("git")
         .args(["status", "--short"])

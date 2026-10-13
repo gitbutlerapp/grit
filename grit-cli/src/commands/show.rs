@@ -533,12 +533,17 @@ pub(crate) fn render_markdown_stat(
     outln!(w, "| File | + | − |");
     outln!(w, "| --- | ---: | ---: |");
     for file in &stat.files {
-        let path =
-            markdown::escape_table_cell(&markdown::escape_inline_code(&stat_path(file, path_opts)));
+        let path = markdown::escape_table_cell(&stat_path(file, path_opts));
+        let path_code = markdown::format_inline_code(&path);
         if file.binary {
-            outln!(w, "| `{path}` | binary | |");
+            outln!(w, "| {path_code} | binary | |");
         } else {
-            outln!(w, "| `{path}` | {} | {} |", file.insertions, file.deletions);
+            outln!(
+                w,
+                "| {path_code} | {} | {} |",
+                file.insertions,
+                file.deletions
+            );
         }
     }
     outln!(w);
