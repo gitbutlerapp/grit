@@ -177,6 +177,19 @@ pub fn commits_ahead_of(
     Ok(AheadOfTarget { total, commits })
 }
 
+/// Symmetric ahead/behind counts between `head` and `target` (merge-base relative).
+///
+/// `ahead` is commits reachable from `head` but not `target`; `behind` is the converse.
+pub fn commits_ahead_behind_of(
+    repo: &Repository,
+    head: ObjectId,
+    target: ObjectId,
+) -> Result<(usize, usize)> {
+    Ok(grit_lib::revwalk::merge_base::count_symmetric_ahead_behind(
+        repo, head, target,
+    )?)
+}
+
 /// Parsed fields from a Git commit identity line (`Name <email> <epoch> <tz>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedIdentityLine {

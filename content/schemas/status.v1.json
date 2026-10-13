@@ -73,6 +73,12 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "behind": {
+      "description": "Number of commits on `target` not in the current branch (full count).",
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "branch": {
       "description": "Current branch (short name), or `null` when detached / invalid.",
       "type": [
@@ -146,6 +152,7 @@
   },
   "required": [
     "ahead",
+    "behind",
     "clean",
     "commits",
     "detached",

@@ -293,8 +293,103 @@ fn status_json_merge_conflict_keeps_ahead_of_target() -> TestResult {
     assert_eq!(v["merging"], Value::Bool(true));
     assert_eq!(v["target"], "origin/main");
     assert_eq!(v["ahead"], 1);
+    assert_eq!(v["behind"], 0);
     assert_eq!(v["commits"].as_array().unwrap().len(), 1);
     assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    Ok(())
+}
+
+fn git_symmetric_ahead_behind(repo: &Path) -> (usize, usize) {
+    let out = Command::new("git")
+        .args(["rev-list", "--left-right", "--count", "HEAD...origin/main"])
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git rev-list");
+    assert!(
+        out.status.success(),
+        "git rev-list failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut parts = text.split_whitespace();
+    let ahead = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    let behind = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    (ahead, behind)
+}
+
+#[test]
+fn status_json_behind_and_diverged_match_git() -> TestResult {
+    let scratch = Scratch::new("status-behind")?;
+    let remote = scratch.child("r.git");
+    let upstream = scratch.child("w");
+    let clone = scratch.child("c");
+    fs::create_dir_all(&upstream)?;
+    system_git_ok(
+        scratch.path(),
+        &["init", "-q", "--bare", &path_arg(&remote)],
+    );
+    system_git_ok(&upstream, &["clone", "-q", &path_arg(&remote), "."]);
+    system_git_ok(&upstream, &["config", "user.name", "T"]);
+    system_git_ok(&upstream, &["config", "user.email", "t@e.com"]);
+    write_file(&upstream.join("one.txt"), "1\n");
+    system_git_ok(&upstream, &["add", "one.txt"]);
+    system_git_ok(&upstream, &["commit", "-qm", "one"]);
+    system_git_ok(&upstream, &["push", "-u", "origin", "HEAD:main"]);
+
+    system_git_ok(
+        scratch.path(),
+        &["clone", "-q", "-b", "main", &path_arg(&remote), &path_arg(&clone)],
+    );
+
+    write_file(&upstream.join("two.txt"), "2\n");
+    system_git_ok(&upstream, &["add", "two.txt"]);
+    system_git_ok(&upstream, &["commit", "-qm", "two"]);
+    system_git_ok(&upstream, &["push", "origin", "HEAD:main"]);
+
+    gs_ok(&clone, &["fetch"]);
+
+    let v = gs_json(&clone, &["status"]);
+    assert_eq!(v["target"], "origin/main");
+    let (git_ahead, git_behind) = git_symmetric_ahead_behind(&clone);
+    assert_eq!(git_ahead, 0);
+    assert_eq!(git_behind, 1);
+    assert_eq!(v["ahead"], git_ahead);
+    assert_eq!(v["behind"], git_behind);
+    assert_eq!(v["clean"], Value::Bool(true));
+
+    let human = gs_ok(&clone, &["status"]);
+    assert!(
+        human.stdout.contains("1 behind origin/main"),
+        "human behind:\n{}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains("grit pull to update from origin/main"),
+        "pull hint:\n{}",
+        human.stdout
+    );
+
+    write_file(&clone.join("local.txt"), "local\n");
+    gs_ok(&clone, &["add", "local.txt"]);
+    gs_ok(&clone, &["commit", "-m", "local"]);
+
+    let v = gs_json(&clone, &["status"]);
+    let (git_ahead, git_behind) = git_symmetric_ahead_behind(&clone);
+    assert_eq!(git_ahead, 1);
+    assert_eq!(git_behind, 1);
+    assert_eq!(v["ahead"], git_ahead);
+    assert_eq!(v["behind"], git_behind);
+
+    let human = gs_ok(&clone, &["status"]);
+    assert!(
+        human.stdout.contains("1 ahead, 1 behind origin/main"),
+        "human diverged:\n{}",
+        human.stdout
+    );
     Ok(())
 }
 
@@ -1557,6 +1652,7 @@ fn schema_top_level_keys_are_stable() -> TestResult {
         keys(&status),
         [
             "ahead",
+            "behind",
             "branch",
             "clean",
             "commits",

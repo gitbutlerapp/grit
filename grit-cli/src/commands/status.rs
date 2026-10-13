@@ -25,6 +25,8 @@ const SHORTLOG_LIMIT: usize = 10;
 #[derive(Clone, Copy)]
 enum HeaderKind {
     AheadOfTarget,
+    BehindTarget,
+    Diverged,
     EvenWith,
     NoTarget,
     Unborn,
@@ -46,6 +48,8 @@ pub struct StatusOutcome {
     pub target: Option<String>,
     /// Number of commits ahead of `target` (full count).
     pub ahead: usize,
+    /// Number of commits on `target` not in the current branch (full count).
+    pub behind: usize,
     /// Newest ahead-of-target commits (newest first), up to the status shortlog limit.
     pub commits: Vec<CommitJson>,
     pub staged: Vec<ChangeJson>,
@@ -108,16 +112,21 @@ impl StatusOutcome {
             HeaderKind::AheadOfTarget => {
                 outln!(w, "On {branch}  ·  {} ahead of {target}", self.ahead);
                 outln!(w);
-                for row in ui::commit_rows(&self.commit_rows, now)
-                    .iter()
-                    .take(SHORTLOG_LIMIT)
-                {
-                    outln!(w, "{row}");
-                }
-                if self.ahead > SHORTLOG_LIMIT {
-                    outln!(w, "  … and {} more", self.ahead - SHORTLOG_LIMIT);
-                }
+                self.render_ahead_shortlog(w, now)?;
+            }
+            HeaderKind::BehindTarget => {
+                outln!(w, "On {branch}  ·  {} behind {target}", self.behind);
                 outln!(w);
+            }
+            HeaderKind::Diverged => {
+                outln!(
+                    w,
+                    "On {branch}  ·  {} ahead, {} behind {target}",
+                    self.ahead,
+                    self.behind
+                );
+                outln!(w);
+                self.render_ahead_shortlog(w, now)?;
             }
             HeaderKind::EvenWith => {
                 outln!(w, "On {branch}  ·  even with {target}");
@@ -173,19 +182,37 @@ impl StatusOutcome {
             outln!(w, "→ grit commit \"message\" to finish the merge");
             return Ok(());
         }
-        let mut hints = Vec::new();
+        let mut hints: Vec<String> = Vec::new();
         if !self.unstaged_entries.is_empty() {
-            hints.push("grit restore <file> to discard worktree changes");
+            hints.push("grit restore <file> to discard worktree changes".to_owned());
         }
         if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
-            hints.push("grit add <file> to stage");
+            hints.push("grit add <file> to stage".to_owned());
         }
         if !self.staged_entries.is_empty() {
-            hints.push("grit commit \"message\" to commit");
+            hints.push("grit commit \"message\" to commit".to_owned());
+        }
+        if self.ahead == 0 && self.behind > 0 {
+            let target = self.target.as_deref().unwrap_or("target");
+            hints.push(format!("grit pull to update from {target}"));
         }
         if !hints.is_empty() {
             outln!(w, "→ {}", hints.join("  ·  "));
         }
+        Ok(())
+    }
+
+    fn render_ahead_shortlog(&self, w: &mut dyn Write, now: i64) -> Result<()> {
+        for row in ui::commit_rows(&self.commit_rows, now)
+            .iter()
+            .take(SHORTLOG_LIMIT)
+        {
+            outln!(w, "{row}");
+        }
+        if self.ahead > SHORTLOG_LIMIT {
+            outln!(w, "  … and {} more", self.ahead - SHORTLOG_LIMIT);
+        }
+        outln!(w);
         Ok(())
     }
 
@@ -198,12 +225,16 @@ impl StatusOutcome {
             outln!(w, "→ grit commit `\"message\"` to finish the merge");
             return Ok(());
         }
-        let mut hints = Vec::new();
+        let mut hints: Vec<String> = Vec::new();
         if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
-            hints.push("grit add `PATH` to stage");
+            hints.push("grit add `PATH` to stage".to_owned());
         }
         if !self.staged_entries.is_empty() {
-            hints.push("grit commit `\"message\"` to commit");
+            hints.push("grit commit `\"message\"` to commit".to_owned());
+        }
+        if self.ahead == 0 && self.behind > 0 {
+            let target = self.target.as_deref().unwrap_or("target");
+            hints.push(format!("grit pull to update from `{target}`"));
         }
         if !hints.is_empty() {
             outln!(w, "→ {}", hints.join("  ·  "));
@@ -221,19 +252,24 @@ impl StatusOutcome {
                     "On **`{branch}`** · **{}** ahead of `{target}`",
                     self.ahead
                 );
-                if !self.commit_rows.is_empty() {
-                    outln!(w);
-                    markdown::print_commit_list(
-                        w,
-                        &self.commit_rows[..self.commit_rows.len().min(SHORTLOG_LIMIT)],
-                        ctx,
-                    )?;
-                    if self.ahead > SHORTLOG_LIMIT {
-                        outln!(w);
-                        outln!(w, "… and {} more commit(s).", self.ahead - SHORTLOG_LIMIT);
-                    }
-                }
+                self.render_markdown_ahead_shortlog(w, ctx)?;
+            }
+            HeaderKind::BehindTarget => {
+                outln!(
+                    w,
+                    "On **`{branch}`** · **{}** behind `{target}`",
+                    self.behind
+                );
                 outln!(w);
+            }
+            HeaderKind::Diverged => {
+                outln!(
+                    w,
+                    "On **`{branch}`** · **{}** ahead, **{}** behind `{target}`",
+                    self.ahead,
+                    self.behind
+                );
+                self.render_markdown_ahead_shortlog(w, ctx)?;
             }
             HeaderKind::EvenWith => {
                 outln!(w, "On **`{branch}`** · even with `{target}`");
@@ -268,6 +304,23 @@ impl StatusOutcome {
         Ok(())
     }
 
+    fn render_markdown_ahead_shortlog(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        if !self.commit_rows.is_empty() {
+            outln!(w);
+            markdown::print_commit_list(
+                w,
+                &self.commit_rows[..self.commit_rows.len().min(SHORTLOG_LIMIT)],
+                ctx,
+            )?;
+            if self.ahead > SHORTLOG_LIMIT {
+                outln!(w);
+                outln!(w, "… and {} more commit(s).", self.ahead - SHORTLOG_LIMIT);
+            }
+        }
+        outln!(w);
+        Ok(())
+    }
+
     fn render_markdown_changes(&self, w: &mut dyn Write) -> Result<()> {
         if self.clean {
             outln!(w, "Nothing to commit — working tree clean.");
@@ -298,9 +351,10 @@ pub fn run() -> Result<StatusOutcome> {
     let merging = model.state.merge_in_progress;
     let conflicts = model.conflicts.clone();
 
-    let (branch, detached, head, target, ahead_total, ahead_commits, header) =
+    let (branch, detached, head, target, ahead_total, behind_total, ahead_commits, header) =
         resolve_header(&repo, &model.head, merging, &in_progress)?;
     let ahead = ahead_total;
+    let behind = behind_total;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let commits = ahead_commits
         .iter()
@@ -323,6 +377,7 @@ pub fn run() -> Result<StatusOutcome> {
         head,
         target,
         ahead,
+        behind,
         commits,
         staged,
         unstaged,
@@ -345,6 +400,7 @@ type HeaderResult = (
     bool,
     Option<String>,
     Option<String>,
+    usize,
     usize,
     Vec<CommitSummary>,
     HeaderKind,
@@ -392,23 +448,35 @@ fn resolve_header(
                     Some(head_oid.to_hex()),
                     None,
                     0,
+                    0,
                     Vec::new(),
                     in_progress_header.unwrap_or(HeaderKind::NoTarget),
                 ),
                 Some(target) => {
-                    let ahead =
-                        context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?;
-                    let header = in_progress_header.unwrap_or(if ahead.total == 0 {
-                        HeaderKind::EvenWith
+                    let (ahead_total, behind_total) =
+                        context::commits_ahead_behind_of(repo, *head_oid, target.oid)?;
+                    let ahead = if ahead_total > 0 {
+                        context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?
                     } else {
-                        HeaderKind::AheadOfTarget
+                        context::AheadOfTarget {
+                            total: 0,
+                            commits: Vec::new(),
+                        }
+                    };
+                    debug_assert_eq!(ahead.total, ahead_total);
+                    let header = in_progress_header.unwrap_or(match (ahead_total, behind_total) {
+                        (0, 0) => HeaderKind::EvenWith,
+                        (a, 0) if a > 0 => HeaderKind::AheadOfTarget,
+                        (0, b) if b > 0 => HeaderKind::BehindTarget,
+                        (_, _) => HeaderKind::Diverged,
                     });
                     (
                         Some(short_name.clone()),
                         false,
                         Some(head_oid.to_hex()),
                         Some(target.display_name),
-                        ahead.total,
+                        ahead_total,
+                        behind_total,
                         ahead.commits,
                         header,
                     )
@@ -421,6 +489,7 @@ fn resolve_header(
             None,
             None,
             0,
+            0,
             Vec::new(),
             HeaderKind::Unborn,
         ),
@@ -430,9 +499,19 @@ fn resolve_header(
             Some(oid.to_hex()),
             None,
             0,
+            0,
             Vec::new(),
             HeaderKind::Detached,
         ),
-        HeadState::Invalid => (None, false, None, None, 0, Vec::new(), HeaderKind::Invalid),
+        HeadState::Invalid => (
+            None,
+            false,
+            None,
+            None,
+            0,
+            0,
+            Vec::new(),
+            HeaderKind::Invalid,
+        ),
     })
 }
