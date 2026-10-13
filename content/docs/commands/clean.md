@@ -86,6 +86,7 @@ Example (with `-f`):
 
 ## Markdown output
 
+Schema: [v1](/schemas/clean/v1.json)
 Pass `--markdown` (see [Global options](../global-options/)) for a bullet list of paths under **Would remove** or **Removed**.
 
 ## See also

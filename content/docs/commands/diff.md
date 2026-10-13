@@ -139,6 +139,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/diff/v1.json)
 Pass [`--markdown`](../global-options/) for one `diff`-fenced unified patch per changed file (binary files note `Binary file differs.` when content changed):
 
 ```text

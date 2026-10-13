@@ -87,6 +87,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/init/v1.json)
 Pass [`--markdown`](../global-options/) for a short prose summary:
 
 ```text

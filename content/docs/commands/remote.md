@@ -100,6 +100,7 @@ Listing refs:
 
 ## Markdown output
 
+Schema: [v1](/schemas/remote/v1.json)
 Pass `--markdown` for an agent-friendly Markdown table of refs (a “Remote refs” heading, then columns — not JSON). Example shape:
 
 ```text

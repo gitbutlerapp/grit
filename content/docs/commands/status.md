@@ -146,6 +146,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/status/v1.json)
 Pass [`--markdown`](../global-options/) for headed sections that mirror the status screen:
 
 ```text

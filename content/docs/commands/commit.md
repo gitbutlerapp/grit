@@ -96,6 +96,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/commit/v1.json)
 Pass [`--markdown`](../global-options/) for a `Commit` heading, branch and commit summary, and change count:
 
 ```text

@@ -77,6 +77,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/reset/v1.json)
 Pass `--markdown` for agent-friendly output: a short heading plus bullet list of ref, mode, target, and previous oids.
 
 ## See also

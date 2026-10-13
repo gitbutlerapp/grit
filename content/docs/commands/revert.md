@@ -81,6 +81,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/revert/v1.json)
 Pass [`--markdown`](../global-options/) for a `Revert` heading and source → revert commit line:
 
 ```text

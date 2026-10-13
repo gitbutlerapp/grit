@@ -65,6 +65,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/shortlog/v1.json)
 Pass [`--markdown`](../global-options/) for a branch summary and commit bullets:
 
 ```text

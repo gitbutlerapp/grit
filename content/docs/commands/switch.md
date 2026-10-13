@@ -105,6 +105,7 @@ Example (detached):
 
 ## Markdown output
 
+Schema: [v1](/schemas/switch/v1.json)
 Pass [`--markdown`](../global-options/) for a `Switch` heading and one summary line:
 
 ```text

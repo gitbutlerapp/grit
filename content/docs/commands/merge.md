@@ -108,6 +108,7 @@ When the merge stops on conflicts (exit code 1), stdout is still a single JSON o
 
 ## Markdown output
 
+Schema: [v1](/schemas/merge/v1.json)
 Pass [`--markdown`](../global-options/) for a `Merge` heading and a result summary. Fast-forward:
 
 ```text

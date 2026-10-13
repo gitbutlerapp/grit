@@ -63,6 +63,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/rm/v1.json)
 Pass [`--markdown`](../global-options/) for agent-friendly output:
 
 ```text

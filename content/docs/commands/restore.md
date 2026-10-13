@@ -74,6 +74,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/restore/v1.json)
 Pass `--markdown` for agent-friendly bullet lists of restored and removed paths.
 
 ## See also

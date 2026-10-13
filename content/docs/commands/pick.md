@@ -79,6 +79,7 @@ On failure because of conflicts, stdout is a single JSON object (exit code 1) wi
 
 ## Markdown output
 
+Schema: [v1](/schemas/pick/v1.json)
 Pass [`--markdown`](../global-options/) for a `Pick` heading and a single line with source and new commit oids:
 
 ```text

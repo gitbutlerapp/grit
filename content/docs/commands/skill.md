@@ -68,6 +68,7 @@ Example (with `content` shortened):
 
 ## Markdown output
 
+Schema: [v1](/schemas/skill/v1.json)
 Pass [`--markdown`](../global-options/) to print the full `SKILL.md` text on stdout (same bytes as human mode, suitable for saving or parsing):
 
 ```text

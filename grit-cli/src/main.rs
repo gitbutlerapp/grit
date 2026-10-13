@@ -1364,14 +1364,11 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     /// Every non-plumbing command has at least one committed three-mode output snapshot.
     #[test]
     fn every_command_has_output_snapshots() {
-        use crate::json_schema::{discover_snapshot_stems, SNAPSHOT_JSON_SKIP};
+        use crate::json_schema::discover_snapshot_stems;
         let dir = snapshot_dir();
         let stems = discover_snapshot_stems(&dir);
         let mut problems = Vec::new();
         for stem in &stems {
-            if SNAPSHOT_JSON_SKIP.contains(&stem.as_str()) {
-                continue;
-            }
             let Some(payload) = read_snapshot_payload(stem) else {
                 problems.push(format!("snapshot `{stem}` is unreadable"));
                 continue;
@@ -1493,9 +1490,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                     problems.push(format!("{name}.md: missing ## Markdown output section"));
                     continue;
                 };
-                if !markdown_section_has_schema_link(&md_section, name)
-                    && !markdown_section_has_schema_link(&json_section, name)
-                {
+                if !markdown_section_has_schema_link(&md_section, name) {
                     problems.push(format!(
                         "{name}.md: Markdown output must link the command JSON schema"
                     ));
@@ -1503,5 +1498,32 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
             }
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn render_snapshot_missing_markdown_mode_is_detected() {
+        let payload = serde_json::json!({
+            "sign_in": {
+                "human": { "exit": 0, "stdout": "", "stderr": "" },
+                "json": { "exit": 0, "stdout": "{}", "stderr": "" }
+            },
+            "logout": {
+                "human": { "exit": 0, "stdout": "", "stderr": "" },
+                "json": { "exit": 0, "stdout": "{}", "stderr": "" },
+                "markdown": { "exit": 0, "stdout": "", "stderr": "" }
+            }
+        });
+        assert!(
+            !snapshot_has_three_modes("auth_render", &payload),
+            "auth_render must require human, json, and markdown for every scenario"
+        );
+    }
+
+    #[test]
+    fn markdown_schema_link_must_live_in_markdown_section() {
+        let json_section = "Schema: [v1](/schemas/pull/v1.json)\n";
+        let md_section = "Pass `--markdown` for agent-friendly output.\n";
+        assert!(markdown_section_has_schema_link(json_section, "pull"));
+        assert!(!markdown_section_has_schema_link(md_section, "pull"));
     }
 }

@@ -110,6 +110,23 @@ Human output uses ANSI color only when **stdout is a terminal**, the environment
 
 JSON mode never depends on color; always pass `--json` for machines.
 
+## Markdown output (`--markdown`)
+
+When a human-readable transcript is easier to consume than raw JSON, pass **`--markdown`**. It is mutually exclusive with `--json`; use JSON for strict parsing and Markdown for agent-oriented prose.
+
+Each command page documents real `--markdown` stdout under **Markdown output** and links the same v1 JSON Schema as the JSON section (for example `Schema: [v1](/schemas/status/v1.json)`). Treat that schema as the stable field contract even when stdout is Markdown.
+
+Grit formats `--markdown` consistently:
+
+| Convention | Behavior |
+| --- | --- |
+| **Headings** | `##` titles introduce sections (status groups, file lists, subcommand results). |
+| **Bullets** | `-` lines for commits, paths, and simple lists; short oids often appear in backticks. |
+| **Tables** | Markdown tables for rows of refs, remotes, worktrees, and similar; `\|`, `\n`, and `\r` inside cells are escaped. |
+| **Diff fences** | One fenced `diff` block per changed file when a command emits patches; fence backticks lengthen if the patch text contains ``` so the fence stays unambiguous. |
+
+Do not combine `--markdown` with `--filter`. See [Scripting with grit](../scripting/) for exit codes, filters, and the shared JSON error object.
+
 ## Stay non-interactive
 
 `grit` does **not** open an external editor for commit messages. [`grit commit`](../commit/) requires a message on the command line (positional or `-m`); there is no `$GIT_EDITOR` path.

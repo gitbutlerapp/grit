@@ -115,6 +115,7 @@ Schema: [v1](/schemas/bundle.create/v1.json) · [bundle.list v1](/schemas/bundle
 
 ## Markdown output
 
+Schema: [v1](/schemas/bundle.create/v1.json)
 Pass `--markdown` on any `grit bundle` subcommand for the same JSON document wrapped for agents (see [Global options](../global-options/)).
 
 ## See also

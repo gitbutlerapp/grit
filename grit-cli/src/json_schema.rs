@@ -328,8 +328,10 @@ fn collect_json_commands(cmd: &clap::Command, prefix: Option<&str>, out: &mut Ve
 /// Insta snapshot file prefix under `grit-cli/tests/snapshots/`.
 pub const SNAPSHOT_FILE_PREFIX: &str = "grit_test_support__cli_fixture__";
 
-/// Snapshot names whose JSON stdout is not a command outcome (filters, etc.).
-pub const SNAPSHOT_JSON_SKIP: &[&str] = &[
+/// Snapshot stems whose `json.stdout` is not a single command outcome object (render
+/// fixtures, jq filter slices, and similar). Skipped by [`json_snapshots_match_schemas`] only;
+/// output snapshot coverage still requires human/json/markdown sections for render stems.
+pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "auth_render",
     "log_json_filter_commits_oid",
     "update_render",
@@ -359,7 +361,7 @@ pub fn discover_snapshot_stems(dir: &Path) -> std::collections::BTreeSet<String>
     stems
 }
 
-/// Assert [`snapshot_command_args`] lists exactly every on-disk snapshot stem, except [`SNAPSHOT_JSON_SKIP`].
+/// Assert [`snapshot_command_args`] lists exactly every on-disk snapshot stem, except [`SNAPSHOT_JSON_SCHEMA_SKIP`].
 pub fn assert_snapshot_args_cover_disk(dir: &Path) {
     use std::collections::BTreeSet;
 
@@ -368,7 +370,10 @@ pub fn assert_snapshot_args_cover_disk(dir: &Path) {
         .iter()
         .map(|(name, _)| (*name).to_owned())
         .collect();
-    let skip: BTreeSet<_> = SNAPSHOT_JSON_SKIP.iter().map(|s| (*s).to_owned()).collect();
+    let skip: BTreeSet<_> = SNAPSHOT_JSON_SCHEMA_SKIP
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
 
     for stem in &on_disk {
         if skip.contains(stem) {
@@ -376,7 +381,7 @@ pub fn assert_snapshot_args_cover_disk(dir: &Path) {
         }
         assert!(
             table.contains(stem),
-            "snapshot `{stem}` exists on disk but is missing from snapshot_command_args(); add a row or SNAPSHOT_JSON_SKIP if intentional"
+            "snapshot `{stem}` exists on disk but is missing from snapshot_command_args(); add a row or SNAPSHOT_JSON_SCHEMA_SKIP if intentional"
         );
     }
     for stem in &table {
@@ -576,7 +581,7 @@ mod tests {
         assert_snapshot_args_cover_disk(&snapshot_dir);
 
         for name in discover_snapshot_stems(&snapshot_dir) {
-            if SNAPSHOT_JSON_SKIP.contains(&name.as_str()) {
+            if SNAPSHOT_JSON_SCHEMA_SKIP.contains(&name.as_str()) {
                 continue;
             }
             let args = snapshot_args_lookup(&name)

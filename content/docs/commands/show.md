@@ -111,6 +111,7 @@ Example:
 
 ## Markdown output
 
+Schema: [v1](/schemas/show/v1.json)
 Pass [`--markdown`](../global-options/) for headings, commit metadata, message body, and a diffstat table:
 
 ```text

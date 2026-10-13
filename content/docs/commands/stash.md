@@ -206,6 +206,7 @@ Pop adds `dropped` (whether the entry was removed):
 
 ## Markdown output
 
+Schema: [v1](/schemas/stash/v1.json)
 With `--markdown`, list/apply/pop/drop use bullet lists; `show` renders the diffstat or patch like other diff commands.
 
 ## See also
