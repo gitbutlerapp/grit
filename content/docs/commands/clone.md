@@ -33,7 +33,7 @@ Working-tree materialization after fetch uses the same parallel checkout path as
 
 ### Exit status
 
-On failure, `grit clone` exits **1** for most errors (destination not empty, checkout failure, and so on). When the remote cannot be read — for example SSH cannot connect or the repository path on the server is missing — grit exits **128** with `could not read from remote repository`. That is distinct from a reachable empty remote, which completes the fetch and then reports that there are no branches to check out.
+On failure, `grit clone` exits **1** for most errors (destination not empty, checkout failure, and so on). When the remote cannot be read — for example SSH cannot connect or the repository path on the server is missing — grit exits **128** with `could not read from remote repository`. That is distinct from a reachable empty remote, which exits **0** after configuring `origin` and the default branch without checking out files (see above).
 
 ## Options
 
