@@ -51,14 +51,17 @@ fn parse_fixture(bytes: &[u8]) -> EwahView<'_> {
     }
 }
 
+/// Returns a clone of the cached Git-sized EWAH serialization used by benchmarks.
 pub fn git_sized_sample() -> Vec<u8> {
     fixture().0.clone()
 }
 
+/// Cached EWAH bytes representing a sparse bitmap roughly the size of a large `.git` index.
 pub fn git_sized_bytes() -> &'static [u8] {
     &fixture().0
 }
 
+/// Expands `bytes` into a dense bitmap and returns its set-bit count (benchmark body).
 pub fn expand_fixture(bytes: &[u8]) -> usize {
     let view = parse_fixture(bytes);
     let mut out = Bitmap::new();
@@ -68,6 +71,7 @@ pub fn expand_fixture(bytes: &[u8]) -> usize {
     }
 }
 
+/// ORs the cached EWAH view into the cached base bitmap and returns the popcount.
 pub fn or_into_fixture() -> usize {
     let (bytes, base) = fixture();
     let view = parse_fixture(bytes);
@@ -78,6 +82,7 @@ pub fn or_into_fixture() -> usize {
     }
 }
 
+/// Returns the EWAH popcount for `bytes` without materializing a dense bitmap.
 pub fn popcount_fixture(bytes: &[u8]) -> usize {
     let view = parse_fixture(bytes);
     match view.count_ones() {

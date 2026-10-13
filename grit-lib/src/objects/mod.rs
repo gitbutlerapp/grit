@@ -114,5 +114,6 @@ pub mod pack_receive {
 
 #[cfg(feature = "unstable-bench-helpers")]
 pub mod ewah_bench {
+    //! Criterion fixtures for EWAH bitmap hot paths (`benches/ewah.rs` only).
     include!("../ewah_bench_api.rs");
 }
