@@ -120,6 +120,73 @@ fn patch_id_matches_git_patch_id_stable() {
     }
 }
 
+fn git_patch_id_from_show(dir: &std::path::Path, flag: &str) -> ObjectId {
+    let show_p = git_in(dir, &["show", "-p", "HEAD"]);
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .current_dir(dir)
+        .args(["patch-id", flag])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn git patch-id");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(show_p.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "git patch-id {flag}");
+    ObjectId::from_hex(
+        String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .next()
+            .expect("patch id"),
+    )
+    .expect("hex")
+}
+
+#[test]
+fn patch_id_verbatim_matches_git_whitespace_sensitive() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    std::fs::write(dir.path().join("f.txt"), b"one\n").unwrap();
+    git_in(dir.path(), &["add", "f.txt"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "base"]);
+    std::fs::write(dir.path().join("f.txt"), b"one  \ntwo\n").unwrap();
+    git_in(dir.path(), &["add", "f.txt"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "trailing-space"]);
+
+    let commit: ObjectId = git_in(dir.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+
+    let git_stable = git_patch_id_from_show(dir.path(), "--stable");
+    let git_verbatim = git_patch_id_from_show(dir.path(), "--verbatim");
+    assert_ne!(git_stable, git_verbatim, "fixture must differ by mode");
+
+    let repo = Repository::open(
+        &dir.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(dir.path()),
+    )
+    .expect("open");
+
+    let grit_stable = repo
+        .patch_id(&commit, PatchIdMode::Stable)
+        .expect("stable")
+        .expect("some");
+    let grit_verbatim = repo
+        .patch_id(&commit, PatchIdMode::Verbatim)
+        .expect("verbatim")
+        .expect("some");
+
+    assert_eq!(grit_stable, git_stable, "stable ODB vs git");
+    assert_eq!(grit_verbatim, git_verbatim, "verbatim ODB vs git");
+    assert_ne!(grit_stable, grit_verbatim);
+}
+
 #[test]
 fn patch_id_stable_and_unstable_differ_for_multi_file_commit() {
     let dir = TempDir::new().expect("tempdir");
@@ -137,57 +204,8 @@ fn patch_id_stable_and_unstable_differ_for_multi_file_commit() {
         .parse()
         .unwrap();
 
-    let show_p = git_in(dir.path(), &["show", "-p", &commit.to_hex()]);
-    let git_stable_id = {
-        use std::io::Write;
-        let mut child = Command::new("git")
-            .current_dir(dir.path())
-            .args(["patch-id", "--stable"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("spawn");
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(show_p.as_bytes())
-            .unwrap();
-        let out = child.wait_with_output().unwrap();
-        assert!(out.status.success());
-        ObjectId::from_hex(
-            String::from_utf8_lossy(&out.stdout)
-                .split_whitespace()
-                .next()
-                .expect("patch"),
-        )
-        .expect("hex")
-    };
-    let git_unstable_id = {
-        use std::io::Write;
-        let mut child = Command::new("git")
-            .current_dir(dir.path())
-            .args(["patch-id", "--unstable"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("spawn");
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(show_p.as_bytes())
-            .unwrap();
-        let out = child.wait_with_output().unwrap();
-        assert!(out.status.success());
-        ObjectId::from_hex(
-            String::from_utf8_lossy(&out.stdout)
-                .split_whitespace()
-                .next()
-                .expect("patch"),
-        )
-        .expect("hex")
-    };
+    let git_stable_id = git_patch_id_from_show(dir.path(), "--stable");
+    let git_unstable_id = git_patch_id_from_show(dir.path(), "--unstable");
     assert_ne!(
         git_stable_id, git_unstable_id,
         "git stable and unstable must differ for this fixture"

@@ -17,7 +17,10 @@
 
 use similar::{ChangeTag, TextDiff};
 
-use crate::diff::{diff_trees_with_renames, zero_oid, DiffEntry, DiffStatus};
+use crate::diff::{
+    diff_trees_with_renames, unified_diff_histogram_with_prefix_and_funcname, zero_oid, DiffEntry,
+    DiffStatus,
+};
 use crate::error::Result;
 use crate::hash::ObjectHasher;
 use crate::merge_file;
@@ -488,6 +491,12 @@ fn compute_patch_id_filtered(
     // Sort by primary path (lexicographic), matching diffcore_std ordering.
     diffs.sort_by(|a, b| a.path().cmp(b.path()));
 
+    if mode == PatchIdMode::Verbatim {
+        let patch = patch_id_build_git_show_patch(odb, commit_oid, &diffs)?;
+        let ids = compute_patch_ids_from_text(algo, &patch, mode);
+        return Ok(ids.into_iter().next().map(|(patch_id, _)| patch_id));
+    }
+
     if diffs.len() == 1 {
         let entry = &diffs[0];
         if entry.old_oid != entry.new_oid {
@@ -609,6 +618,114 @@ fn patch_id_add_string(ctx: &mut ObjectHasher, s: &[u8]) {
 fn patch_id_add_mode(ctx: &mut ObjectHasher, mode: u32) {
     let text = format!("{mode:06o}");
     ctx.update(text.as_bytes());
+}
+
+/// Build a `git show -p` fragment for patch-id verbatim parsing.
+fn patch_id_build_git_show_patch(
+    odb: &Odb,
+    commit_oid: &ObjectId,
+    diffs: &[DiffEntry],
+) -> Result<Vec<u8>> {
+    let mut patch = Vec::new();
+    patch_id_write_line(&mut patch, &format!("commit {}", commit_oid.to_hex()));
+    for entry in diffs {
+        patch_id_append_git_show_entry(odb, entry, &mut patch)?;
+    }
+    Ok(patch)
+}
+
+fn patch_id_append_git_show_entry(odb: &Odb, entry: &DiffEntry, out: &mut Vec<u8>) -> Result<()> {
+    let git_old = entry
+        .old_path
+        .as_deref()
+        .or(entry.new_path.as_deref())
+        .unwrap_or("dev/null");
+    let git_new = entry
+        .new_path
+        .as_deref()
+        .or(entry.old_path.as_deref())
+        .unwrap_or("dev/null");
+    patch_id_write_line(out, &format!("diff --git a/{git_old} b/{git_new}"));
+
+    let old_mode = parse_mode_u32(&entry.old_mode);
+    let new_mode = parse_mode_u32(&entry.new_mode);
+    if old_mode == 0 {
+        patch_id_write_line(out, &format!("new file mode {}", entry.new_mode.trim()));
+    } else if new_mode == 0 {
+        patch_id_write_line(out, &format!("deleted file mode {}", entry.old_mode.trim()));
+    }
+
+    if entry.status == DiffStatus::Renamed {
+        let score = entry.score.unwrap_or(100);
+        patch_id_write_line(out, &format!("similarity index {score}%"));
+        if let Some(path) = &entry.old_path {
+            patch_id_write_line(out, &format!("rename from {path}"));
+        }
+        if let Some(path) = &entry.new_path {
+            patch_id_write_line(out, &format!("rename to {path}"));
+        }
+    } else if old_mode != 0 && new_mode != 0 && old_mode != new_mode {
+        patch_id_write_line(out, &format!("old mode {}", entry.old_mode.trim()));
+        patch_id_write_line(out, &format!("new mode {}", entry.new_mode.trim()));
+    }
+
+    let index_mode = if new_mode != 0 {
+        entry.new_mode.trim()
+    } else {
+        entry.old_mode.trim()
+    };
+    patch_id_write_line(
+        out,
+        &format!(
+            "index {}..{} {}",
+            patch_id_index_oid(&entry.old_oid),
+            patch_id_index_oid(&entry.new_oid),
+            index_mode,
+        ),
+    );
+
+    if entry.old_oid == entry.new_oid {
+        return Ok(());
+    }
+
+    let old_bytes = read_blob(odb, &entry.old_oid)?;
+    let new_bytes = read_blob(odb, &entry.new_oid)?;
+
+    if merge_file::is_binary(&old_bytes) || merge_file::is_binary(&new_bytes) {
+        let old_side = if old_mode == 0 {
+            "/dev/null".to_owned()
+        } else {
+            format!("a/{git_old}")
+        };
+        let new_side = if new_mode == 0 {
+            "/dev/null".to_owned()
+        } else {
+            format!("b/{git_new}")
+        };
+        patch_id_write_line(
+            out,
+            &format!("Binary files {old_side} and {new_side} differ"),
+        );
+        return Ok(());
+    }
+
+    let old_str = std::str::from_utf8(&old_bytes).unwrap_or("");
+    let new_str = std::str::from_utf8(&new_bytes).unwrap_or("");
+    let old_path = if old_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        format!("a/{git_old}")
+    };
+    let new_path = if new_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        format!("b/{git_new}")
+    };
+    let unified = unified_diff_histogram_with_prefix_and_funcname(
+        old_str, new_str, &old_path, &new_path, 3, 0, "", "", None, false,
+    );
+    out.extend_from_slice(unified.as_bytes());
+    Ok(())
 }
 
 /// Hash one tree diff entry into `ctx` (rename or regular file).
@@ -835,6 +952,45 @@ mod tests {
             String::from_utf8_lossy(&out.stderr)
         );
         String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[test]
+    fn verbatim_built_patch_text_matches_git_show_patch_id() {
+        let dir = TempDir::new().expect("tempdir");
+        git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+        std::fs::write(dir.path().join("f.txt"), b"one\n").unwrap();
+        git_in(dir.path(), &["add", "f.txt"]);
+        git_in(dir.path(), &["commit", "-q", "-m", "base"]);
+        std::fs::write(dir.path().join("f.txt"), b"one  \ntwo\n").unwrap();
+        git_in(dir.path(), &["add", "f.txt"]);
+        git_in(dir.path(), &["commit", "-q", "-m", "change"]);
+        let commit: ObjectId = git_in(dir.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .unwrap();
+        let git_show = git_in(dir.path(), &["show", "-p", "HEAD"]);
+
+        let repo = crate::repo::Repository::open(
+            &dir.path().join(".git"),
+            &RepositoryOptions::empty().with_work_tree(dir.path()),
+        )
+        .unwrap();
+        let grit_verbatim =
+            compute_patch_id(HashAlgo::Sha1, &repo.odb(), &commit, PatchIdMode::Verbatim)
+                .expect("verbatim")
+                .expect("some");
+
+        let from_git_show =
+            compute_patch_ids_from_text(HashAlgo::Sha1, git_show.as_bytes(), PatchIdMode::Verbatim)
+                .into_iter()
+                .find(|(_, c)| *c == commit)
+                .expect("commit in git show stream")
+                .0;
+
+        assert_eq!(
+            grit_verbatim, from_git_show,
+            "ODB verbatim should match parsing git show -p"
+        );
     }
 
     #[test]
