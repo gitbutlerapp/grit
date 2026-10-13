@@ -27,10 +27,12 @@ Uses [`Repository::patch_id`](../../library/maintenance.md) with stable accumula
 ## Examples
 
 ```console
-$ grit patch-id HEAD~2..HEAD
+$ grit patch-id HEAD~2 HEAD~1 HEAD
 a1b2c3d4e5f6789012345678901234567890abcd 0123456789abcdef0123456789abcdef01234567
 fedcba0987654321fedcba0987654321fedcba09 abcdef0123456789abcdef0123456789abcdef01
 ```
+
+Each argument is one commit (or other single object); revision ranges such as `HEAD~2..HEAD` are not expanded.
 
 ## JSON output
 
