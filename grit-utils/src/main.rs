@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use grit_utils::binary::{require_hyperfine, resolve_binary};
 use grit_utils::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
 use grit_utils::compare::compare_files;
+use grit_utils::fixture::DeepLeafDogfoodSpec;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::fsck_suite::run_fsck_suite;
 use grit_utils::ignore_suite::run_ignore_suite;
@@ -26,10 +27,11 @@ use grit_utils::refs_suite::{run_refs_suite, RefsRunConfig};
 use grit_utils::render::{render_markdown, render_text};
 use grit_utils::revwalk_suite::run_revwalk_suite;
 use grit_utils::scenarios::{
-    run_add_suite, run_blame_suite, run_commit_suite, run_diff_suite, run_hot_path_suite,
-    run_log_suite, run_prepare_add, run_prepare_commit, run_prepare_merge, run_prepare_pick,
-    run_prepare_pick_series, run_prepare_restore, run_prepare_revert, run_prepare_stash,
-    run_prepare_switch, run_restore_suite, run_stash_suite, run_status_suite, RunConfig,
+    run_add_suite, run_blame_suite, run_commit_suite, run_deep_leaf_worktree_suite, run_diff_suite,
+    run_hot_path_suite, run_log_suite, run_prepare_add, run_prepare_commit, run_prepare_merge,
+    run_prepare_pick, run_prepare_pick_series, run_prepare_restore, run_prepare_revert,
+    run_prepare_stash, run_prepare_switch, run_restore_suite, run_stash_suite, run_status_suite,
+    RunConfig,
 };
 use grit_utils::schema::BenchReport;
 use std::net::TcpListener;
@@ -93,6 +95,11 @@ enum Cmd {
     Diff {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000])]
         sizes: Vec<usize>,
+    },
+    /// Deep-leaf CRLF worktree (dogfood #1017 layout): clean/dirty status and diff
+    DeepLeaf {
+        #[arg(long)]
+        smoke: bool,
     },
     /// Last 100 commits, one line each
     Log {
@@ -682,6 +689,16 @@ fn main() -> Result<()> {
             eprintln!("Running diff benchmarks...");
             let cfg = run_config(&cli, false);
             run_diff_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::DeepLeaf { smoke } => {
+            eprintln!("Running deep-leaf worktree benchmarks (dogfood #1017 layout)...");
+            let cfg = run_config(&cli, true);
+            let spec = if *smoke {
+                DeepLeafDogfoodSpec::smoke()
+            } else {
+                DeepLeafDogfoodSpec::production()
+            };
+            run_deep_leaf_worktree_suite(&hyperfine, &git, &grit, &cfg, spec, timestamp)?
         }
         Cmd::Log { sizes } => {
             eprintln!("Running log benchmarks...");

@@ -259,6 +259,15 @@ cargo build --release -p grit-cli -p grit-utils
 
 **Measured outcomes:** the Object reads table below is generated from committed `grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs per scenario, grit vs system git medians and peak RSS). Refresh with two invocations and `grit-bench compare run1.json run2.json --tolerance 0.10` before updating the baseline file and running `make docs`.
 
+## grit-bench: deep-leaf worktree (issue #1017)
+
+**`grit-bench deep-leaf`** builds the dogfood layout used on Windows release checks: many deep leaf directories with a few CRLF **`*.txt`** files each (via **`.gitattributes`**), a large **`large.bin`**, and tracked **`*.rs`** sources. Scenarios time clean **status**, dirty **status** after modifying **100** Rust files, and **diff** against system **`git`**. Use **`--smoke`** for a few hundred leaf dirs in CI; omit it for the full **~50k**-path production fixture.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench deep-leaf --smoke --format json --output /tmp/deep-leaf-smoke.json
+```
+
 ## grit-bench: parallelism (threads=1 vs auto)
 
 The **`grit-bench parallel`** suite measures how wall time scales when worker threads are pinned to **1** versus **auto** (unset `index.threads`, `checkout.workers`, and `pack.threads`, so system **git** and **grit** use all logical CPUs). Each scenario runs twice in the JSON baseline: ids end with **`-t1`** or **`-tauto`**. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config, `gc.auto=0`), with extra keys injected through **`GIT_CONFIG_COUNT`** for the one-thread runs. When the **`grit`** binary exposes a global **`--threads`** flag, the suite passes **`--threads=1`** or **`--threads=0`** (auto) in addition to those config keys.

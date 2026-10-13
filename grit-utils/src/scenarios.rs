@@ -7,9 +7,10 @@ use anyhow::{Context, Result};
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{
-    create_blame_deep_history_repo, create_repo, create_repo_with_history, dirty_repo,
-    modify_files_for_diff, prepare_add_iteration, prepare_commit_iteration,
-    prepare_restore_iteration, scratch_dir,
+    create_blame_deep_history_repo, create_deep_leaf_dogfood_repo, create_repo,
+    create_repo_with_history, dirty_repo, modify_files_for_diff, modify_rs_files_for_diff,
+    prepare_add_iteration, prepare_commit_iteration, prepare_restore_iteration, scratch_dir,
+    DeepLeafDogfoodSpec,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
@@ -277,6 +278,89 @@ pub fn run_restore_suite(
             &repo,
         )?);
     }
+    Ok(build_report(git, grit, timestamp, scenarios))
+}
+
+/// Deep-leaf CRLF worktree mirroring dogfood issue #1017 (clean status + dirty diff).
+pub fn run_deep_leaf_worktree_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    spec: DeepLeafDogfoodSpec,
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    const MODIFIED_RS: usize = 100;
+    let repo = create_deep_leaf_dogfood_repo(git, spec)?;
+    let fixture = format!(
+        "deep-leaf-{}",
+        spec.leaf_dirs * spec.files_per_leaf + spec.rs_file_count + 1
+    );
+    let mut scenarios = vec![run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: "status-clean-deep-leaf".into(),
+            group: "status".into(),
+            fixture: fixture.clone(),
+            description: "status on clean deep-leaf CRLF worktree (git -s, grit default)".into(),
+            grit_argv: vec!["status".into()],
+            git_argv: vec!["status".into(), "-s".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &repo,
+    )?];
+
+    modify_rs_files_for_diff(&repo, MODIFIED_RS.min(spec.rs_file_count))?;
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: "status-dirty-deep-leaf".into(),
+            group: "status".into(),
+            fixture: fixture.clone(),
+            description: format!(
+                "status after modifying {} .rs files on deep-leaf worktree",
+                MODIFIED_RS.min(spec.rs_file_count)
+            ),
+            grit_argv: vec!["status".into()],
+            git_argv: vec!["status".into(), "-s".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &repo,
+    )?);
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: "diff-deep-leaf".into(),
+            group: "diff".into(),
+            fixture,
+            description: format!(
+                "worktree diff after modifying {} .rs files (git diff, grit diff)",
+                MODIFIED_RS.min(spec.rs_file_count)
+            ),
+            grit_argv: vec!["diff".into()],
+            git_argv: vec!["diff".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &repo,
+    )?);
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 

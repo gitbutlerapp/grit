@@ -201,6 +201,103 @@ pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Dogfood-style deep leaf worktree (issue #1017): CRLF `*.txt`, a large `.bin`, and tracked `.rs` files.
+#[derive(Debug, Clone, Copy)]
+pub struct DeepLeafDogfoodSpec {
+    /// Count of deepest directories (each holds [`Self::files_per_leaf`] text files).
+    pub leaf_dirs: usize,
+    pub files_per_leaf: usize,
+    pub rs_file_count: usize,
+    pub bin_megabytes: usize,
+}
+
+impl DeepLeafDogfoodSpec {
+    /// Small fixture for CI smoke and local ratio checks.
+    #[must_use]
+    pub fn smoke() -> Self {
+        Self {
+            leaf_dirs: 400,
+            files_per_leaf: 3,
+            rs_file_count: 20,
+            bin_megabytes: 1,
+        }
+    }
+
+    /// Matches the Windows dogfood layout (~50k tracked paths).
+    #[must_use]
+    pub fn production() -> Self {
+        Self {
+            leaf_dirs: 15_625,
+            files_per_leaf: 3,
+            rs_file_count: 100,
+            bin_megabytes: 20,
+        }
+    }
+}
+
+/// Build and commit the deep-leaf dogfood repository under [`scratch_dir`].
+pub fn create_deep_leaf_dogfood_repo(git: &Path, spec: DeepLeafDogfoodSpec) -> Result<PathBuf> {
+    let dir = scratch_dir();
+    remove_dir_robust(&dir);
+    fs::create_dir_all(&dir).context("create scratch dir")?;
+    run_git(git, &dir, &["init", "-q", "-b", "main"])?;
+    fs::write(dir.join(".gitattributes"), "*.txt text eol=crlf\n")?;
+
+    for leaf in 0..spec.leaf_dirs {
+        let leaf_dir = format!("leaf{leaf:05}/a/b");
+        let abs_leaf = dir.join(&leaf_dir);
+        fs::create_dir_all(&abs_leaf)?;
+        for f in 0..spec.files_per_leaf {
+            let path = abs_leaf.join(format!("part{f}.txt"));
+            fs::write(path, format!("leaf={leaf} part={f}\r\n"))?;
+        }
+    }
+
+    for i in 0..spec.rs_file_count {
+        let sub = format!("src{:02}", i / 10);
+        fs::create_dir_all(dir.join(&sub))?;
+        fs::write(
+            dir.join(&sub).join(format!("module{i}.rs")),
+            format!("fn f{i}() {{}}\n"),
+        )?;
+    }
+
+    let bin_path = dir.join("large.bin");
+    {
+        use std::io::Write as _;
+        let mut bin = fs::File::create(&bin_path)?;
+        let chunk = vec![0_u8; 1024 * 1024];
+        for _ in 0..spec.bin_megabytes {
+            bin.write_all(&chunk)?;
+        }
+    }
+
+    run_git(git, &dir, &["add", "-A"])?;
+    run_git(git, &dir, &["commit", "-q", "-m", "deep-leaf dogfood seed"])?;
+    Ok(dir)
+}
+
+/// Append one line to the first `count` tracked `.rs` files (unstaged) for diff/status benches.
+pub fn modify_rs_files_for_diff(dir: &Path, count: usize) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut paths: Vec<PathBuf> = walkdir(dir)?
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+        .collect();
+    paths.sort();
+    anyhow::ensure!(
+        paths.len() >= count,
+        "expected at least {count} .rs files, found {}",
+        paths.len()
+    );
+    for path in paths.iter().take(count) {
+        let mut file = fs::OpenOptions::new().append(true).open(path)?;
+        writeln!(file, "// bench diff line")?;
+    }
+    Ok(())
+}
+
 /// Repository with many sequential edits to a single tracked file (for blame benches).
 pub fn create_blame_deep_history_repo(git: &Path, commit_count: usize) -> Result<PathBuf> {
     let dir = scratch_dir();

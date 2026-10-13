@@ -213,64 +213,6 @@ fn partial_dirs_from_blobs(blobs: &[BlobInDir]) -> HashMap<String, Vec<BlobInDir
     partial
 }
 
-fn preload_blob_lookups_direct_parallel(
-    ordered: &[BlobInDir],
-    threads: usize,
-    symlink_missing: &HashSet<String>,
-    file_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
-) -> Result<HashMap<usize, BlobDiskLookup>> {
-    if ordered.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let chunk_size = ordered.len().div_ceil(threads);
-    let mut merged = HashMap::new();
-    std::thread::scope(|scope| {
-        let mut handles = Vec::new();
-        for chunk in ordered.chunks(chunk_size) {
-            let chunk: Vec<BlobInDir> = chunk.to_vec();
-            let symlink_missing = symlink_missing.clone();
-            let file_abs = Arc::clone(&file_abs);
-            handles.push(
-                scope.spawn(move || -> Result<HashMap<usize, BlobDiskLookup>> {
-                    let mut local = HashMap::with_capacity(chunk.len());
-                    for blob in chunk {
-                        if symlink_missing.contains(&blob.rel_path) {
-                            local.insert(blob.entry_index, BlobDiskLookup::Missing);
-                            continue;
-                        }
-                        let target = file_abs(&blob.rel_path);
-                        let lookup = match symlink_metadata_path(&target) {
-                            Ok(meta) => BlobDiskLookup::Present(meta),
-                            Err(e)
-                                if e.kind() == io::ErrorKind::NotFound
-                                    || e.raw_os_error() == Some(20) =>
-                            {
-                                BlobDiskLookup::Missing
-                            }
-                            Err(e) => BlobDiskLookup::Io(e),
-                        };
-                        local.insert(blob.entry_index, lookup);
-                    }
-                    Ok(local)
-                }),
-            );
-        }
-        for handle in handles {
-            match handle.join() {
-                Ok(Ok(local)) => merged.extend(local),
-                Ok(Err(e)) => return Err(e),
-                Err(_) => {
-                    return Err(Error::Message(
-                        "parallel direct blob stat worker thread panicked".to_owned(),
-                    ));
-                }
-            }
-        }
-        Ok(())
-    })?;
-    Ok(merged)
-}
-
 fn preload_blob_lookups_parallel(
     ordered: &[BlobInDir],
     entry_slots: usize,
@@ -440,45 +382,30 @@ where
     let dir_abs_arc: Arc<dyn Fn(&str) -> PathBuf + Send + Sync> = Arc::new(dir_abs);
     let file_abs_arc: Arc<dyn Fn(&str) -> PathBuf + Send + Sync> = Arc::new(file_abs);
     if threads > 1 {
-        if blob_count >= PARALLEL_STAT_MIN_ENTRIES {
-            let mut preloaded = preload_blob_lookups_direct_parallel(
-                &ordered,
-                threads,
-                &symlink_missing,
-                Arc::clone(&file_abs_arc),
-            )?;
-            for blob in &ordered {
-                let lookup = preloaded.remove(&blob.entry_index).ok_or_else(|| {
-                    Error::Message(format!(
-                        "parallel blob stat preload missing index entry {}",
-                        blob.entry_index
-                    ))
-                })?;
-                visit(blob.entry_index, &blob.rel_path, lookup)?;
-            }
-        } else {
-            let entry_slots = ordered
-                .iter()
-                .map(|b| b.entry_index)
-                .max()
-                .map_or(0, |i| i + 1);
-            let mut preloaded = preload_blob_lookups_parallel(
-                &ordered,
-                entry_slots,
-                threads,
-                &symlink_missing,
-                Arc::clone(&dir_abs_arc),
-                Arc::clone(&file_abs_arc),
-            )?;
-            for blob in &ordered {
-                let lookup = preloaded[blob.entry_index].take().ok_or_else(|| {
-                    Error::Message(format!(
-                        "parallel blob stat preload missing index entry {}",
-                        blob.entry_index
-                    ))
-                })?;
-                visit(blob.entry_index, &blob.rel_path, lookup)?;
-            }
+        // Always partition parallel preload by directory groups so multi-file parents use
+        // one read_dir per directory (Git preload-index style). A flat per-file stat loop
+        // regresses deep leaf-dir layouts (~50k paths, few files per directory).
+        let entry_slots = ordered
+            .iter()
+            .map(|b| b.entry_index)
+            .max()
+            .map_or(0, |i| i + 1);
+        let mut preloaded = preload_blob_lookups_parallel(
+            &ordered,
+            entry_slots,
+            threads,
+            &symlink_missing,
+            Arc::clone(&dir_abs_arc),
+            Arc::clone(&file_abs_arc),
+        )?;
+        for blob in &ordered {
+            let lookup = preloaded[blob.entry_index].take().ok_or_else(|| {
+                Error::Message(format!(
+                    "parallel blob stat preload missing index entry {}",
+                    blob.entry_index
+                ))
+            })?;
+            visit(blob.entry_index, &blob.rel_path, lookup)?;
         }
         return Ok(());
     }
@@ -705,6 +632,72 @@ mod tests {
         assert!(
             worktree_metadata_probe_count() <= CHAINS + 5,
             "expected ~one stat per file, got {}",
+            worktree_metadata_probe_count()
+        );
+    }
+
+    #[test]
+    fn parallel_scan_uses_read_dir_for_multi_file_directories() {
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().to_path_buf();
+        fs::create_dir_all(wt.join(".git/objects")).unwrap();
+        const DIRS: usize = 450;
+        const FILES_PER_DIR: usize = 3;
+        let mut index = Index::new();
+        for d in 0..DIRS {
+            let dir = format!("leaf{d:05}");
+            for f in 0..FILES_PER_DIR {
+                let rel = format!("{dir}/part{f}.txt");
+                let oid = write_blob_file(&wt, &rel, format!("{d}-{f}\n").as_bytes());
+                index.add_or_replace(
+                    entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                );
+            }
+        }
+        let grouped = group_blob_entries_by_dir(&index);
+        let _probe = reset_worktree_metadata_probe(&wt);
+        let wt_dir = wt.clone();
+        let dir_abs = move |dir: &str| {
+            if dir.is_empty() {
+                wt_dir.clone()
+            } else {
+                wt_dir.join(dir)
+            }
+        };
+        let wt_file = wt.clone();
+        let file_abs = move |rel: &str| wt_file.join(rel);
+        let policy = crate::parallel::ThreadPolicy::default();
+        let config = crate::config::ConfigSet::new();
+        let mut seen = 0;
+        for_each_blob_by_directory_parallel(
+            &grouped,
+            WorktreeBlobScanOptions {
+                preload_index: true,
+                stat_parallel_threads: Some(4),
+            },
+            &policy,
+            &config,
+            false,
+            dir_abs,
+            file_abs,
+            |_| false,
+            |_, _, lookup| {
+                assert!(matches!(lookup, BlobDiskLookup::Present(_)));
+                seen += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen, DIRS * FILES_PER_DIR);
+        assert!(
+            worktree_read_dir_probe_count() >= DIRS,
+            "parallel preload must read_dir each multi-file parent (got {} read_dirs)",
+            worktree_read_dir_probe_count()
+        );
+        let tracked = DIRS * FILES_PER_DIR;
+        assert!(
+            worktree_metadata_probe_count() <= tracked + DIRS + 8,
+            "metadata probes {} exceeded budget for grouped scan",
             worktree_metadata_probe_count()
         );
     }
