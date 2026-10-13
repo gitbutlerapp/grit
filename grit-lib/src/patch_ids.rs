@@ -453,7 +453,7 @@ fn compute_patch_id_filtered(
     paths: &[String],
     mode: PatchIdMode,
 ) -> Result<Option<ObjectId>> {
-    let _ = mode;
+    let per_file_flush = mode != PatchIdMode::Unstable;
     let digest_len = algo.len();
     let obj = odb.read(commit_oid)?;
     if obj.kind != ObjectKind::Commit {
@@ -504,88 +504,25 @@ fn compute_patch_id_filtered(
     }
 
     let mut result = [0u8; PATCH_ID_DIGEST_MAX];
+    let mut rolling_ctx = ObjectHasher::new(algo);
 
     for entry in &diffs {
-        if entry.status == DiffStatus::Renamed {
-            patch_id_hash_rename_entry(odb, algo, entry, &mut result, digest_len)?;
-            continue;
-        }
-        // Git's patch-id header (`diff --git a/<x> b/<y>`) uses the present path on both sides for
-        // pure additions/deletions (e.g. `diff --git a/file b/file` for a new file), so fall back to
-        // the other side when one path is absent.
-        let old_path = entry
-            .old_path
-            .as_deref()
-            .or(entry.new_path.as_deref())
-            .unwrap_or("");
-        let new_path = entry
-            .new_path
-            .as_deref()
-            .or(entry.old_path.as_deref())
-            .unwrap_or("");
-        let mut old_path_buf = old_path.as_bytes().to_vec();
-        let mut new_path_buf = new_path.as_bytes().to_vec();
-        let len1 = remove_space_bytes(&mut old_path_buf);
-        let len2 = remove_space_bytes(&mut new_path_buf);
-
-        let old_mode = parse_mode_u32(&entry.old_mode);
-        let new_mode = parse_mode_u32(&entry.new_mode);
-
-        let mut ctx = ObjectHasher::new(algo);
-        patch_id_add_string(&mut ctx, b"diff--git");
-        patch_id_add_string(&mut ctx, b"a/");
-        ctx.update(&old_path_buf[..len1]);
-        patch_id_add_string(&mut ctx, b"b/");
-        ctx.update(&new_path_buf[..len2]);
-
-        if old_mode == 0 {
-            patch_id_add_string(&mut ctx, b"newfilemode");
-            patch_id_add_mode(&mut ctx, new_mode);
-        } else if new_mode == 0 {
-            patch_id_add_string(&mut ctx, b"deletedfilemode");
-            patch_id_add_mode(&mut ctx, old_mode);
-        } else if old_mode != new_mode {
-            patch_id_add_string(&mut ctx, b"oldmode");
-            patch_id_add_mode(&mut ctx, old_mode);
-            patch_id_add_string(&mut ctx, b"newmode");
-            patch_id_add_mode(&mut ctx, new_mode);
-        }
-
-        if entry.old_oid == entry.new_oid {
-            // Mode-only commits (and other metadata-only tree diffs) omit `---`/`+++` hunks.
+        if per_file_flush {
+            let mut ctx = ObjectHasher::new(algo);
+            patch_id_hash_diff_entry(odb, entry, &mut ctx)?;
+            text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
         } else {
-            let old_bytes = read_blob(odb, &entry.old_oid)?;
-            let new_bytes = read_blob(odb, &entry.new_oid)?;
-
-            if merge_file::is_binary(&old_bytes) || merge_file::is_binary(&new_bytes) {
-                let a = patch_id_index_oid(&entry.old_oid);
-                let b = patch_id_index_oid(&entry.new_oid);
-                ctx.update(a.as_bytes());
-                ctx.update(b.as_bytes());
-            } else {
-                let old_str = std::str::from_utf8(&old_bytes).unwrap_or("");
-                let new_str = std::str::from_utf8(&new_bytes).unwrap_or("");
-
-                if old_mode == 0 {
-                    patch_id_add_string(&mut ctx, b"---/dev/null");
-                    patch_id_add_string(&mut ctx, b"+++b/");
-                    ctx.update(&new_path_buf[..len2]);
-                } else if new_mode == 0 {
-                    patch_id_add_string(&mut ctx, b"---a/");
-                    ctx.update(&old_path_buf[..len1]);
-                    patch_id_add_string(&mut ctx, b"+++/dev/null");
-                } else {
-                    patch_id_add_string(&mut ctx, b"---a/");
-                    ctx.update(&old_path_buf[..len1]);
-                    patch_id_add_string(&mut ctx, b"+++b/");
-                    ctx.update(&new_path_buf[..len2]);
-                }
-
-                patch_id_hash_text_hunks(&mut ctx, old_str, new_str);
-            }
+            patch_id_hash_diff_entry(odb, entry, &mut rolling_ctx)?;
         }
+    }
 
-        text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
+    if !per_file_flush {
+        text_flush_one_hunk(
+            &mut result[..digest_len],
+            digest_len,
+            &mut rolling_ctx,
+            algo,
+        );
     }
 
     if result.iter().take(digest_len).all(|&b| b == 0) {
@@ -674,14 +611,103 @@ fn patch_id_add_mode(ctx: &mut ObjectHasher, mode: u32) {
     ctx.update(text.as_bytes());
 }
 
+/// Hash one tree diff entry into `ctx` (rename or regular file).
+fn patch_id_hash_diff_entry(odb: &Odb, entry: &DiffEntry, ctx: &mut ObjectHasher) -> Result<()> {
+    if entry.status == DiffStatus::Renamed {
+        patch_id_hash_rename_entry_into_ctx(odb, entry, ctx)
+    } else {
+        patch_id_hash_file_entry_into_ctx(odb, entry, ctx)
+    }
+}
+
+/// Hash a regular (non-rename) file diff into `ctx`.
+fn patch_id_hash_file_entry_into_ctx(
+    odb: &Odb,
+    entry: &DiffEntry,
+    ctx: &mut ObjectHasher,
+) -> Result<()> {
+    // Git's patch-id header (`diff --git a/<x> b/<y>`) uses the present path on both sides for
+    // pure additions/deletions (e.g. `diff --git a/file b/file` for a new file), so fall back to
+    // the other side when one path is absent.
+    let old_path = entry
+        .old_path
+        .as_deref()
+        .or(entry.new_path.as_deref())
+        .unwrap_or("");
+    let new_path = entry
+        .new_path
+        .as_deref()
+        .or(entry.old_path.as_deref())
+        .unwrap_or("");
+    let mut old_path_buf = old_path.as_bytes().to_vec();
+    let mut new_path_buf = new_path.as_bytes().to_vec();
+    let len1 = remove_space_bytes(&mut old_path_buf);
+    let len2 = remove_space_bytes(&mut new_path_buf);
+
+    let old_mode = parse_mode_u32(&entry.old_mode);
+    let new_mode = parse_mode_u32(&entry.new_mode);
+
+    patch_id_add_string(ctx, b"diff--git");
+    patch_id_add_string(ctx, b"a/");
+    ctx.update(&old_path_buf[..len1]);
+    patch_id_add_string(ctx, b"b/");
+    ctx.update(&new_path_buf[..len2]);
+
+    if old_mode == 0 {
+        patch_id_add_string(ctx, b"newfilemode");
+        patch_id_add_mode(ctx, new_mode);
+    } else if new_mode == 0 {
+        patch_id_add_string(ctx, b"deletedfilemode");
+        patch_id_add_mode(ctx, old_mode);
+    } else if old_mode != new_mode {
+        patch_id_add_string(ctx, b"oldmode");
+        patch_id_add_mode(ctx, old_mode);
+        patch_id_add_string(ctx, b"newmode");
+        patch_id_add_mode(ctx, new_mode);
+    }
+
+    if entry.old_oid == entry.new_oid {
+        return Ok(());
+    }
+
+    let old_bytes = read_blob(odb, &entry.old_oid)?;
+    let new_bytes = read_blob(odb, &entry.new_oid)?;
+
+    if merge_file::is_binary(&old_bytes) || merge_file::is_binary(&new_bytes) {
+        let a = patch_id_index_oid(&entry.old_oid);
+        let b = patch_id_index_oid(&entry.new_oid);
+        ctx.update(a.as_bytes());
+        ctx.update(b.as_bytes());
+    } else {
+        let old_str = std::str::from_utf8(&old_bytes).unwrap_or("");
+        let new_str = std::str::from_utf8(&new_bytes).unwrap_or("");
+
+        if old_mode == 0 {
+            patch_id_add_string(ctx, b"---/dev/null");
+            patch_id_add_string(ctx, b"+++b/");
+            ctx.update(&new_path_buf[..len2]);
+        } else if new_mode == 0 {
+            patch_id_add_string(ctx, b"---a/");
+            ctx.update(&old_path_buf[..len1]);
+            patch_id_add_string(ctx, b"+++/dev/null");
+        } else {
+            patch_id_add_string(ctx, b"---a/");
+            ctx.update(&old_path_buf[..len1]);
+            patch_id_add_string(ctx, b"+++b/");
+            ctx.update(&new_path_buf[..len2]);
+        }
+
+        patch_id_hash_text_hunks(ctx, old_str, new_str);
+    }
+    Ok(())
+}
+
 /// Hash a rename entry the same way `git patch-id` hashes `similarity index` /
 /// `rename from` / `rename to` lines from `git show --patch`.
-fn patch_id_hash_rename_entry(
+fn patch_id_hash_rename_entry_into_ctx(
     odb: &Odb,
-    algo: HashAlgo,
     entry: &DiffEntry,
-    result: &mut [u8],
-    digest_len: usize,
+    ctx: &mut ObjectHasher,
 ) -> Result<()> {
     let old_path = entry.old_path.as_deref().unwrap_or("");
     let new_path = entry.new_path.as_deref().unwrap_or("");
@@ -690,28 +716,27 @@ fn patch_id_hash_rename_entry(
     let len1 = remove_space_bytes(&mut old_path_buf);
     let len2 = remove_space_bytes(&mut new_path_buf);
 
-    let mut ctx = ObjectHasher::new(algo);
-    patch_id_add_string(&mut ctx, b"diff--git");
-    patch_id_add_string(&mut ctx, b"a/");
+    patch_id_add_string(ctx, b"diff--git");
+    patch_id_add_string(ctx, b"a/");
     ctx.update(&old_path_buf[..len1]);
-    patch_id_add_string(&mut ctx, b"b/");
+    patch_id_add_string(ctx, b"b/");
     ctx.update(&new_path_buf[..len2]);
 
     let score = entry.score.unwrap_or(100);
-    patch_id_add_string(&mut ctx, b"similarityindex");
+    patch_id_add_string(ctx, b"similarityindex");
     ctx.update(format!("{score}%").as_bytes());
-    patch_id_add_string(&mut ctx, b"renamefrom");
+    patch_id_add_string(ctx, b"renamefrom");
     ctx.update(&old_path_buf[..len1]);
-    patch_id_add_string(&mut ctx, b"renameto");
+    patch_id_add_string(ctx, b"renameto");
     ctx.update(&new_path_buf[..len2]);
 
     let old_mode = parse_mode_u32(&entry.old_mode);
     let new_mode = parse_mode_u32(&entry.new_mode);
     if old_mode != new_mode {
-        patch_id_add_string(&mut ctx, b"oldmode");
-        patch_id_add_mode(&mut ctx, old_mode);
-        patch_id_add_string(&mut ctx, b"newmode");
-        patch_id_add_mode(&mut ctx, new_mode);
+        patch_id_add_string(ctx, b"oldmode");
+        patch_id_add_mode(ctx, old_mode);
+        patch_id_add_string(ctx, b"newmode");
+        patch_id_add_mode(ctx, new_mode);
     }
 
     if entry.old_oid != entry.new_oid {
@@ -725,15 +750,14 @@ fn patch_id_hash_rename_entry(
         } else {
             let old_str = std::str::from_utf8(&old_bytes).unwrap_or("");
             let new_str = std::str::from_utf8(&new_bytes).unwrap_or("");
-            patch_id_add_string(&mut ctx, b"---a/");
+            patch_id_add_string(ctx, b"---a/");
             ctx.update(&old_path_buf[..len1]);
-            patch_id_add_string(&mut ctx, b"+++b/");
+            patch_id_add_string(ctx, b"+++b/");
             ctx.update(&new_path_buf[..len2]);
-            patch_id_hash_text_hunks(&mut ctx, old_str, new_str);
+            patch_id_hash_text_hunks(ctx, old_str, new_str);
         }
     }
 
-    text_flush_one_hunk(result, digest_len, &mut ctx, algo);
     Ok(())
 }
 

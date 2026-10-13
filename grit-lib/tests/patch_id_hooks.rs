@@ -121,6 +121,105 @@ fn patch_id_matches_git_patch_id_stable() {
 }
 
 #[test]
+fn patch_id_stable_and_unstable_differ_for_multi_file_commit() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    std::fs::write(dir.path().join("a.txt"), b"a\n").unwrap();
+    git_in(dir.path(), &["add", "a.txt"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "base"]);
+    std::fs::write(dir.path().join("a.txt"), b"a\nchanged\n").unwrap();
+    std::fs::write(dir.path().join("b.txt"), b"b\n").unwrap();
+    git_in(dir.path(), &["add", "a.txt", "b.txt"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "two-file"]);
+
+    let commit: ObjectId = git_in(dir.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+
+    let show_p = git_in(dir.path(), &["show", "-p", &commit.to_hex()]);
+    let git_stable_id = {
+        use std::io::Write;
+        let mut child = Command::new("git")
+            .current_dir(dir.path())
+            .args(["patch-id", "--stable"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(show_p.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        ObjectId::from_hex(
+            String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .next()
+                .expect("patch"),
+        )
+        .expect("hex")
+    };
+    let git_unstable_id = {
+        use std::io::Write;
+        let mut child = Command::new("git")
+            .current_dir(dir.path())
+            .args(["patch-id", "--unstable"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(show_p.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        ObjectId::from_hex(
+            String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .next()
+                .expect("patch"),
+        )
+        .expect("hex")
+    };
+    assert_ne!(
+        git_stable_id, git_unstable_id,
+        "git stable and unstable must differ for this fixture"
+    );
+
+    let repo = Repository::open(
+        &dir.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(dir.path()),
+    )
+    .expect("open");
+
+    let grit_stable = repo
+        .patch_id(&commit, PatchIdMode::Stable)
+        .expect("stable")
+        .expect("some");
+    let grit_unstable = repo
+        .patch_id(&commit, PatchIdMode::Unstable)
+        .expect("unstable")
+        .expect("some");
+
+    assert_eq!(
+        grit_stable, git_stable_id,
+        "stable ODB vs git patch-id --stable"
+    );
+    assert_eq!(
+        grit_unstable, git_unstable_id,
+        "unstable ODB vs git patch-id --unstable"
+    );
+    assert_ne!(grit_stable, grit_unstable);
+}
+
+#[test]
 fn merge_commit_has_no_patch_id() {
     let dir = TempDir::new().expect("tempdir");
     git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
