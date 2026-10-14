@@ -21,6 +21,9 @@ use crate::objects::{parse_commit, parse_tree, ObjectId};
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::pathspec_is_exclude;
+use crate::porcelain::index_mode::{
+    apply_executable_hint_to_index, is_chmod_eligible_mode, StageExecutableHint,
+};
 use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
 use crate::porcelain::stage_tracked::stage_tracked_modifications_in_index;
 use crate::porcelain::status::{
@@ -57,6 +60,8 @@ pub struct StageOptions {
     pub pathspec_sources: Vec<String>,
     /// Whether to include untracked paths ([`StageMode::All`]) or only tracked changes ([`StageMode::Update`]).
     pub mode: StageMode,
+    /// Force executable or non-executable mode for explicitly listed regular files (see [`StageExecutableHint`]).
+    pub executable_hint: StageExecutableHint,
 }
 
 /// Counts returned by [`stage`].
@@ -94,9 +99,8 @@ pub fn stage_for_commit(
     progress: &mut dyn ProgressSink,
 ) -> Result<StageOutcome> {
     let opts = StageOptions {
-        pathspecs: Vec::new(),
-        pathspec_sources: Vec::new(),
         mode: StageMode::All,
+        ..StageOptions::default()
     };
     stage_with_tracked_scan(repo, &opts, progress)
 }
@@ -323,6 +327,11 @@ fn stage_inner(
             stage_unmerged_paths_matching_pathspecs(repo, work_tree, &matches, &mut index, &rules)?;
     }
 
+    if opts.executable_hint != StageExecutableHint::None && !opts.pathspecs.is_empty() {
+        outcome.modified +=
+            apply_executable_hint_to_index(&mut index, opts.executable_hint, &matches)?;
+    }
+
     if outcome.total() > 0 {
         index.sort();
         repo.write_index(&mut index)?;
@@ -457,6 +466,22 @@ fn merge_tracked_stage_plan(
     }
 }
 
+fn staged_mode_for_tracked_plan(
+    index: &Index,
+    rel_path: &str,
+    plan_mode: u32,
+    trust_filemode: bool,
+) -> u32 {
+    if trust_filemode {
+        return plan_mode;
+    }
+    index
+        .get(rel_path.as_bytes(), 0)
+        .map(|e| e.mode)
+        .filter(|mode| is_chmod_eligible_mode(*mode))
+        .unwrap_or(plan_mode)
+}
+
 fn mode_from_diff_octal(mode: &str) -> Result<u32> {
     if mode.is_empty() || mode == "000000" {
         return Ok(0);
@@ -465,7 +490,7 @@ fn mode_from_diff_octal(mode: &str) -> Result<u32> {
 }
 
 fn apply_tracked_stage_plan(
-    _repo: &Repository,
+    repo: &Repository,
     work_tree: &Path,
     rel_path: &str,
     plan: &TrackedStagePlan,
@@ -473,6 +498,11 @@ fn apply_tracked_stage_plan(
     index: &mut Index,
     has_unmerged: bool,
 ) -> Result<()> {
+    let trust_filemode = repo
+        .config()
+        .ok()
+        .and_then(|cfg| cfg.get_bool("core.filemode").and_then(|r| r.ok()))
+        .unwrap_or(true);
     let abs = work_tree.join(rel_path);
 
     if plan.gitlink {
@@ -493,8 +523,9 @@ fn apply_tracked_stage_plan(
     }
 
     let oid = plan.oid;
+    let mode = staged_mode_for_tracked_plan(index, rel_path, plan.mode, trust_filemode);
     let mut entry = if let Some(stat) = cached_stat {
-        stat.index_entry(rel_path.as_bytes(), oid, plan.mode)
+        stat.index_entry(rel_path.as_bytes(), oid, mode)
     } else {
         let meta = fs::symlink_metadata(&abs).map_err(|e| {
             Error::Io(std::io::Error::new(
@@ -502,9 +533,9 @@ fn apply_tracked_stage_plan(
                 format!("could not read {rel_path}: {e}"),
             ))
         })?;
-        entry_from_metadata(&meta, rel_path.as_bytes(), oid, plan.mode)
+        entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode)
     };
-    entry.mode = plan.mode;
+    entry.mode = mode;
     if has_unmerged {
         index.stage_file(entry);
     } else {
@@ -1423,6 +1454,7 @@ mod tests {
                 pathspecs: Vec::new(),
                 pathspec_sources: Vec::new(),
                 mode: StageMode::All,
+                ..StageOptions::default()
             },
             &mut NullProgress,
         )

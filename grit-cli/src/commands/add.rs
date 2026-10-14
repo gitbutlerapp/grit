@@ -5,6 +5,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions};
+use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{pathdiff, resolve_pathspec_in_worktree_with_git_dir};
@@ -45,19 +46,36 @@ impl MarkdownRender for AddOutcome {
     }
 }
 
-pub fn run(paths: &[String]) -> Result<AddOutcome> {
+pub fn run(paths: &[String], executable: bool, non_executable: bool) -> Result<AddOutcome> {
+    if executable && non_executable {
+        bail!("--executable and --non-executable cannot be used together");
+    }
+    if (executable || non_executable) && paths.is_empty() {
+        bail!("--executable and --non-executable require at least one path");
+    }
     let repo = context::discover()?;
-    let staged = stage(&repo, paths)?;
+    let staged = stage_with_hint(
+        &repo,
+        paths,
+        if executable {
+            StageExecutableHint::SetExecutable
+        } else if non_executable {
+            StageExecutableHint::SetNonExecutable
+        } else {
+            StageExecutableHint::None
+        },
+    )?;
     Ok(AddOutcome {
         staged,
         no_paths: paths.is_empty(),
     })
 }
 
-/// Stage all changes matching `selectors` (empty selectors = everything).
-///
-/// Returns the number of paths staged. Shared with `grit commit -a`.
-pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
+fn stage_with_hint(
+    repo: &Repository,
+    selectors: &[String],
+    executable_hint: StageExecutableHint,
+) -> Result<usize> {
     let work_tree = repo.work_tree().context("grit add needs a working tree")?;
     let cwd = std::env::current_dir().context("could not read the current directory")?;
     let prefix = pathdiff(&cwd, work_tree);
@@ -87,6 +105,7 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
         pathspecs,
         pathspec_sources,
         mode: StageMode::All,
+        executable_hint,
     };
     let outcome =
         stage_paths(repo, &opts, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;

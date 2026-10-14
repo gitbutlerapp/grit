@@ -56,6 +56,7 @@ fn add_stages_unregistered_embedded_repo_as_gitlink() {
             pathspecs: Vec::new(),
             pathspec_sources: Vec::new(),
             mode: StageMode::All,
+            ..StageOptions::default()
         },
         &mut NullProgress,
     )
@@ -105,6 +106,7 @@ fn add_skips_gitignored_embedded_repo() {
             pathspecs: Vec::new(),
             pathspec_sources: Vec::new(),
             mode: StageMode::All,
+            ..StageOptions::default()
         },
         &mut NullProgress,
     )
@@ -139,6 +141,7 @@ fn add_does_not_treat_placeholder_dot_git_as_embedded_repo() {
             pathspecs: Vec::new(),
             pathspec_sources: Vec::new(),
             mode: StageMode::All,
+            ..StageOptions::default()
         },
         &mut NullProgress,
     )
@@ -210,6 +213,7 @@ fn add_stages_nested_linked_worktree_as_gitlink() {
             pathspecs: Vec::new(),
             pathspec_sources: Vec::new(),
             mode: StageMode::All,
+            ..StageOptions::default()
         },
         &mut NullProgress,
     )

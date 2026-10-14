@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit add [<path>...]
+grit add [--executable | --non-executable] [<path>...]
 ```
 
 ## Description
@@ -17,6 +17,8 @@ Stages changes so they show up under **Staged** in [`grit status`](../status/). 
 
 Paths are relative to your current directory, so from inside `src/`, `grit add main.rs` stages `src/main.rs`. Paths like `../README.md` and absolute paths inside the repository work too. A path that matches nothing is an error, and nothing is staged.
 
+On filesystems where Grit sets `core.filemode=false` (typical on Windows), every new file is staged as non-executable (`100644`) even when it is a script. Use `--executable` on the paths you ship as runnable scripts so the index and commits record mode `100755`. Use `--non-executable` to clear an explicit executable bit in the index. These flags require at least one path argument.
+
 [`grit commit`](../commit/) stages every change before it records a commit, so you don't need `grit add` to commit. It's useful for starting to track a new file and checking what will be committed.
 
 ## Options
@@ -24,6 +26,8 @@ Paths are relative to your current directory, so from inside `src/`, `grit add m
 | Option | Description |
 | --- | --- |
 | `<path>...` | Files or directories to stage. Omit to stage every change. |
+| `--executable` | Stage listed regular files with mode `100755` in the index (requires at least one path). |
+| `--non-executable` | Stage listed regular files with mode `100644` in the index (requires at least one path). |
 
 ## Examples
 
@@ -39,6 +43,13 @@ Stage one file and a directory:
 ```console
 $ grit add README.md src/
 Staged 2 changes.
+```
+
+Mark a script executable when the filesystem does not track the execute bit:
+
+```console
+$ grit add --executable scripts/deploy.sh
+Staged 1 change.
 ```
 
 ## JSON output

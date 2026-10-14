@@ -430,6 +430,12 @@ enum Command {
     Add {
         /// Files or directories to stage. Omit to stage all changes.
         paths: Vec<String>,
+        /// Mark staged regular files as executable (`100755`) in the index.
+        #[arg(long = "executable", conflicts_with = "non_executable")]
+        executable: bool,
+        /// Mark staged regular files as non-executable (`100644`) in the index.
+        #[arg(long = "non-executable", conflicts_with = "executable")]
+        non_executable: bool,
     },
     /// Remove tracked paths from the working tree and index.
     Rm {
@@ -997,7 +1003,15 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Show { object } => emit(&commands::show::run(object)?, opts, ctx),
         Command::Status => emit(&commands::status::run()?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
-        Command::Add { paths } => emit(&commands::add::run(&paths)?, opts, ctx),
+        Command::Add {
+            paths,
+            executable,
+            non_executable,
+        } => emit(
+            &commands::add::run(&paths, executable, non_executable)?,
+            opts,
+            ctx,
+        ),
         Command::Rm {
             paths,
             cached,
