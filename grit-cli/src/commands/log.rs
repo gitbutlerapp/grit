@@ -101,8 +101,10 @@ pub fn run(
     let use_rev_walk = !paths.is_empty() || (limit.is_some() && before.is_none());
     if use_rev_walk {
         let walk = repo.rev_walk();
+        // Omitted `--limit` means no cap (required for path history); default page
+        // size applies only to the LogWalkCursor branch below.
         let opts = RevWalkListOptions {
-            limit: Some(page_size),
+            limit,
             first_parent: false,
             paths: paths.to_vec(),
         };

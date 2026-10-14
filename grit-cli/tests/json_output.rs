@@ -1602,6 +1602,41 @@ fn log_json_filters_by_path() -> TestResult {
 }
 
 #[test]
+fn log_json_path_history_returns_all_matches_beyond_default_page() -> TestResult {
+    let scratch = Scratch::new("log-path-page")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("tracked.txt"), "seed\n");
+    write_file(&repo.join("noise.txt"), "n\n");
+    gs_ok(&repo, &["add", "."]);
+    gs_ok(&repo, &["commit", "seed"]);
+    for i in 0..12 {
+        write_file(&repo.join("tracked.txt"), &format!("v{i}\n"));
+        gs_ok(&repo, &["add", "tracked.txt"]);
+        gs_ok(&repo, &["commit", &format!("touch tracked {i}")]);
+        write_file(&repo.join("noise.txt"), &format!("n{i}\n"));
+        gs_ok(&repo, &["add", "noise.txt"]);
+        gs_ok(&repo, &["commit", &format!("noise only {i}")]);
+    }
+    let v = gs_json(&repo, &["log", "--", "tracked.txt"]);
+    let commits = v["commits"].as_array().unwrap();
+    assert_eq!(
+        commits.len(),
+        13,
+        "expected seed plus 12 touches on tracked.txt, got {}",
+        commits.len()
+    );
+    assert_eq!(commits[0]["subject"], "touch tracked 11");
+    assert_eq!(commits[12]["subject"], "seed");
+    assert_eq!(v["next"], Value::Null);
+
+    let capped = gs_json(&repo, &["log", "--limit", "5", "--", "tracked.txt"]);
+    assert_eq!(capped["commits"].as_array().unwrap().len(), 5);
+    Ok(())
+}
+
+#[test]
 fn log_rejects_before_with_paths() -> TestResult {
     let scratch = Scratch::new("log-before-path")?;
     let repo = scratch.child("repo");
