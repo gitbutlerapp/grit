@@ -3,8 +3,10 @@
 //! Deliberately minimal: it shows one page of commits (newest first) and, when
 //! there's more, prints the command to fetch the next page.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::log_walk::LogWalkCursor;
+use grit_lib::revwalk::RevWalkListOptions;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -16,7 +18,7 @@ use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui;
 
-/// How many commits to show per page.
+/// How many commits to show per page when the caller does not set `--limit`.
 const PAGE: usize = 10;
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
@@ -81,8 +83,35 @@ impl MarkdownRender for LogOutcome {
     }
 }
 
-pub fn run(before: Option<String>, stat: bool) -> Result<LogOutcome> {
+pub fn run(
+    before: Option<String>,
+    stat: bool,
+    limit: Option<usize>,
+    paths: &[String],
+) -> Result<LogOutcome> {
+    if before.is_some() && !paths.is_empty() {
+        bail!(
+            "`grit log` cannot combine `--before` with path filters; drop `--before` or the paths"
+        );
+    }
+
     let repo = context::discover()?;
+    let page_size = limit.unwrap_or(PAGE);
+
+    let use_rev_walk = !paths.is_empty() || (limit.is_some() && before.is_none());
+    if use_rev_walk {
+        let walk = repo.rev_walk();
+        let opts = RevWalkListOptions {
+            limit: Some(page_size),
+            first_parent: false,
+            paths: paths.to_vec(),
+        };
+        let oids = walk
+            .commits(&["HEAD"], &opts)
+            .context("could not list commits")?;
+        return build_outcome(&repo, &oids, stat, None);
+    }
+
     let cursor = before
         .as_deref()
         .map(LogWalkCursor::decode)
@@ -90,16 +119,24 @@ pub fn run(before: Option<String>, stat: bool) -> Result<LogOutcome> {
         .context("invalid log continuation cursor")?;
 
     let page =
-        LogWalkCursor::step(&repo, cursor.as_ref(), PAGE).context("could not list commits")?;
+        LogWalkCursor::step(&repo, cursor.as_ref(), page_size).context("could not list commits")?;
+    let next = page.next.map(|c| c.encode()).transpose()?;
+    build_outcome(&repo, &page.commits, stat, next)
+}
 
+fn build_outcome(
+    repo: &grit_lib::repo::Repository,
+    oids: &[ObjectId],
+    stat: bool,
+    next: Option<String>,
+) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
 
-    let commit_rows = page
-        .commits
+    let commit_rows = oids
         .iter()
         .map(|oid| {
-            let commit = context::read_commit(&repo, oid)?;
+            let commit = context::read_commit(repo, oid)?;
             let (author, timestamp) = context::author_and_time(&commit.author);
             Ok(CommitSummary {
                 oid: *oid,
@@ -118,15 +155,13 @@ pub fn run(before: Option<String>, stat: bool) -> Result<LogOutcome> {
             Ok(LogCommit {
                 commit: CommitJson::from_summary(row, now),
                 stat: if stat {
-                    Some(diffstat(&diff_of_commit(&repo, &row.oid)?))
+                    Some(diffstat(&diff_of_commit(repo, &row.oid)?))
                 } else {
                     None
                 },
             })
         })
         .collect::<Result<Vec<_>>>()?;
-
-    let next = page.next.map(|c| c.encode()).transpose()?;
 
     Ok(LogOutcome {
         commits,

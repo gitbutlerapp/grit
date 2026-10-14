@@ -8,14 +8,16 @@ order: 1
 ## Synopsis
 
 ```text
-grit log [--before <commit>] [--stat]
+grit log [--before <cursor>] [--limit <N>] [--stat] [-- <path>…]
 ```
 
 ## Description
 
-Lists the commits reachable from the current commit, newest first, ten at a time. Each line shows the short commit id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`.
+Lists the commits reachable from the current commit, newest first, ten at a time (unless you pass `--limit`). Each line shows the short commit id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`.
 
-When there's more history, the last line shows the command for the next page.
+Pass one or more paths after `--` to show only commits that touched those paths (same rules as [`grit revs`](../revs/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`.
+
+When there's more history on the default walk, the last line shows the command for the next page. Path filters and a one-shot `--limit` without `--before` do not emit a continuation cursor.
 
 With `--stat`, each commit is followed by the files it changed and how many lines were added and removed in each, like [`grit show`](../show/). Merge commits show the change against their first parent.
 
@@ -23,8 +25,10 @@ With `--stat`, each commit is followed by the files it changed and how many line
 
 | Option | Description |
 | --- | --- |
-| `--before <cursor>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). This is not a commit oid: it encodes the walk queue so merges and side branches are not skipped. |
+| `--before <cursor>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). This is not a commit oid: it encodes the walk queue so merges and side branches are not skipped. Cannot be combined with path operands. |
+| `--limit <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--before`). With path filters, or when you set `--limit` without `--before`, history is listed in one shot with no `next` cursor. |
 | `--stat` | Show which files each commit changed, with insertion and deletion counts. |
+| `<path>…` | After `--`, limit to commits that touch these paths. |
 
 ## Examples
 
@@ -67,6 +71,18 @@ Get the subjects of the last ten commits:
 $ grit log --json --filter '.commits[].subject'
 ```
 
+Show the five newest commits:
+
+```console
+$ grit log --limit 5
+```
+
+History of one file:
+
+```console
+$ grit log -- src/lib.rs
+```
+
 ## JSON output
 
 Schema: [v1](/schemas/log/v1.json)
@@ -75,7 +91,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `commits` | array | Up to ten commits, newest first. Each entry has `oid`, `subject`, `author` (same display as human log), `author_date` (RFC 3339), and `relative_date` (e.g. `3 days ago`). |
+| `commits` | array | Up to ten commits by default, or up to `--limit` when set, newest first. Each entry has `oid`, `subject`, `author` (same display as human log), `author_date` (RFC 3339), and `relative_date` (e.g. `3 days ago`). |
 | `commits[].stat` | object | Only with `--stat`: `files` (each with `path`, `old_path` for renames, `status`, `insertions`, `deletions`, `binary`), `files_changed`, `insertions` and `deletions`. The same shape as `stat` in [`grit show`](../show/). |
 | `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--before` for the next page, or `null` when there is no more history. |
 

@@ -1554,6 +1554,74 @@ fn log_json_includes_author_and_rfc3339_date() -> TestResult {
 }
 
 #[test]
+fn log_json_honors_limit_without_cursor() -> TestResult {
+    let scratch = Scratch::new("log-limit")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    for i in 0..8 {
+        write_file(&repo.join("a.txt"), &format!("v{i}\n"));
+        gs_ok(&repo, &["add", "a.txt"]);
+        gs_ok(&repo, &["commit", &format!("commit {i}")]);
+    }
+    let v = gs_json(&repo, &["log", "--limit", "5"]);
+    assert_eq!(v["commits"].as_array().unwrap().len(), 5);
+    assert_eq!(v["next"], Value::Null);
+    assert_eq!(v["commits"][0]["subject"], "commit 7");
+    Ok(())
+}
+
+#[test]
+fn log_json_filters_by_path() -> TestResult {
+    let scratch = Scratch::new("log-path")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("keep.txt"), "a\n");
+    write_file(&repo.join("skip.txt"), "b\n");
+    gs_ok(&repo, &["add", "."]);
+    gs_ok(&repo, &["commit", "both"]);
+    write_file(&repo.join("keep.txt"), "a2\n");
+    gs_ok(&repo, &["add", "keep.txt"]);
+    gs_ok(&repo, &["commit", "keep only"]);
+    write_file(&repo.join("skip.txt"), "b2\n");
+    gs_ok(&repo, &["add", "skip.txt"]);
+    gs_ok(&repo, &["commit", "skip only"]);
+
+    let v = gs_json(&repo, &["log", "--", "keep.txt"]);
+    let subjects: Vec<_> = v["commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["subject"].as_str().unwrap())
+        .collect();
+    assert_eq!(subjects, vec!["keep only", "both"]);
+    assert_eq!(v["next"], Value::Null);
+    assert!(v["commits"][0]["author"].as_str().is_some());
+    Ok(())
+}
+
+#[test]
+fn log_rejects_before_with_paths() -> TestResult {
+    let scratch = Scratch::new("log-before-path")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "x\n");
+    gs_ok(&repo, &["commit", "one"]);
+    let v = gs_json(&repo, &["log"]);
+    let next = v["next"].as_str().unwrap_or("lw1.fake");
+    let out = gs(&repo, &["log", &format!("--before={next}"), "--", "a.txt"]);
+    assert_ne!(out.status, Some(0));
+    assert!(
+        out.stderr.contains("path filters"),
+        "stderr: {}",
+        out.stderr
+    );
+    Ok(())
+}
+
+#[test]
 fn merge_conflict_json_is_structured() -> TestResult {
     let scratch = Scratch::new("merge-conflict")?;
     let repo = scratch.child("repo");
