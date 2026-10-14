@@ -658,7 +658,7 @@ fn decide_push_wire(
         });
     };
 
-    if !local_odb.exists(&old) {
+    if !spec.force && !local_odb.exists(&old) {
         return Ok(no_op(
             PushRefStatus::RejectFetchFirst,
             Some(old),

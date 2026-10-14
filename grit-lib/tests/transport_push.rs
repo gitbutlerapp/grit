@@ -458,6 +458,8 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     git(&seed, &["commit", "-q", "--allow-empty", "-m", "one"]);
     git(&seed, &["remote", "add", "origin", bare.to_str().unwrap()]);
     git(&seed, &["push", "-q", "origin", "HEAD:main"]);
+    let seed_main = rev_parse(&bare, "refs/heads/main");
+    git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
 
     let Some(port) = free_port() else {
         eprintln!("SKIP: could not allocate a free port");
@@ -499,14 +501,25 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     let clone_b = tmp.path().join("cB");
     git(&clone_a.parent().unwrap(), &["clone", "-q", &url, "cA"]);
     git(&clone_b.parent().unwrap(), &["clone", "-q", &url, "cB"]);
+    assert_eq!(
+        rev_parse(&clone_a, "HEAD"),
+        seed_main,
+        "clone A should start at seeded main"
+    );
+    assert_eq!(
+        rev_parse(&clone_b, "HEAD"),
+        seed_main,
+        "clone B should start at seeded main"
+    );
 
     let repo_a = Repository::discover(Some(&clone_a), &RepositoryOptions::empty()).expect("open a");
     let advanced = grit_commit(&repo_a, "a.txt", "A");
+    assert_ne!(advanced, seed_main);
     let transport = GitDaemonTransport::new();
     let mut conn_a = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("connect a");
-    push_remote(
+    let outcome_a = push_remote(
         &clone_a.join(".git"),
         &mut *conn_a,
         &[PushRefSpec {
@@ -522,9 +535,26 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     )
     .expect("clone A advances main");
     drop(conn_a);
+    assert_eq!(outcome_a.results.len(), 1);
+    assert_eq!(
+        outcome_a.results[0].status,
+        PushRefStatus::Ok,
+        "clone A ff push to main should succeed, got {:?}",
+        outcome_a.results[0].message
+    );
+    let remote_main_after_a = resolve_ref(&bare, "refs/heads/main").expect("remote main");
+    assert_eq!(
+        remote_main_after_a, advanced,
+        "remote main must advance after clone A push"
+    );
 
     git(&clone_b, &["checkout", "-q", "-b", "newbr"]);
     let repo_b = Repository::discover(Some(&clone_b), &RepositoryOptions::empty()).expect("open b");
+    let clone_b_odb = open_odb(&clone_b.join(".git"));
+    assert!(
+        !clone_b_odb.exists(&advanced),
+        "clone B must not have clone A's advanced main commit locally"
+    );
     let new_tip = grit_commit(&repo_b, "b.txt", "B");
 
     let mut conn_b = transport
@@ -561,6 +591,44 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         open_odb(&bare).exists(&new_tip),
         "pushed commit missing on remote"
     );
+
+    // Force-updating main without the advertised remote tip in the local ODB must work.
+    let mut conn_force = transport
+        .connect(&url, Service::ReceivePack, &ConnectOptions::default())
+        .expect("connect for force main");
+    assert!(
+        !clone_b_odb.exists(&remote_main_after_a),
+        "clone B still lacks the advertised main tip"
+    );
+    let outcome_force = push_remote(
+        &clone_b.join(".git"),
+        &mut *conn_force,
+        &[PushRefSpec {
+            src: Some(new_tip),
+            dst: "refs/heads/main".to_owned(),
+            force: true,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+        &mut NoProgress,
+    )
+    .expect("forced main push without local copy of old tip");
+    drop(conn_force);
+    assert_eq!(outcome_force.results.len(), 1);
+    assert_eq!(
+        outcome_force.results[0].status,
+        PushRefStatus::Ok,
+        "forced main update should succeed, got {:?}",
+        outcome_force.results[0].message
+    );
+    assert!(outcome_force.results[0].forced);
+    assert_eq!(
+        resolve_ref(&bare, "refs/heads/main").expect("main after force"),
+        new_tip
+    );
+
     let fsck = Command::new("git")
         .current_dir(&bare)
         .args(["fsck", "--no-dangling"])
