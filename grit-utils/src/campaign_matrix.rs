@@ -8,9 +8,7 @@ use anyhow::Result;
 use crate::campaign_prep::{
     ensure_campaign_hot_path, load_campaign_hot_path_meta, restore_campaign_worktree_to_main,
 };
-use crate::campaign_worktree::{
-    blame_target_path, dirty_tracked_worktree, list_tracked_files,
-};
+use crate::campaign_worktree::{blame_target_path, dirty_tracked_worktree, list_tracked_files};
 use crate::fixture::prepare_commit_iteration;
 use crate::hot_path_fixture::HotPathMeta;
 use crate::maintenance_suite::seed_loose_objects;
@@ -246,7 +244,8 @@ pub fn run_fixture_cli_matrix(
     } else {
         (sh_script(grit_log_pages_shell(grit, log_pages)), true)
     };
-    out.push(run_scenario(
+    let log_allows_grit_failure = !smoke && fixture.id == "git-dot-git";
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -264,6 +263,7 @@ pub fn run_fixture_cli_matrix(
             git_via_shell: false,
         },
         &fixture.worktree,
+        log_allows_grit_failure,
     )?);
 
     if !smoke {
@@ -277,7 +277,7 @@ pub fn run_fixture_cli_matrix(
                 patch_limit.to_string(),
             ],
         );
-        out.push(run_scenario(
+        out.push(run_matrix_scenario(
             hyperfine,
             git,
             grit,
@@ -295,6 +295,7 @@ pub fn run_fixture_cli_matrix(
                 git_via_shell: false,
             },
             &fixture.worktree,
+            log_allows_grit_failure,
         )?);
     }
 
