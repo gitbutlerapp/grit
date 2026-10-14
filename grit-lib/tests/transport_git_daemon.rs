@@ -17,12 +17,16 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
-use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
+use grit_lib::remote::push::push_remote;
+use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
+use grit_lib::repo::Repository;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -451,5 +455,116 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
     assert!(
         open_odb(&local_git).exists(&tag_oid),
         "annotated tag object must be present locally"
+    );
+}
+
+/// After `main` is already on the remote, pushing a new annotated tag on that tip
+/// must send the tag object over git:// receive-pack (issue #1020).
+#[test]
+fn push_annotated_tag_on_existing_commit_over_git_daemon() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let base = tmp.path().join("srv");
+    std::fs::create_dir_all(&base).unwrap();
+    let bare = base.join("repo.git");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "-b", "main"]);
+    git(&bare, &["config", "daemon.receivepack", "true"]);
+    std::fs::write(bare.join("git-daemon-export-ok"), b"").unwrap();
+
+    let seed = tmp.path().join("seed");
+    std::fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["init", "-q", "-b", "main"]);
+    std::fs::write(seed.join("f"), "x\n").unwrap();
+    git(&seed, &["add", "f"]);
+    git(&seed, &["commit", "-q", "-m", "one"]);
+    git(
+        &seed,
+        &["push", "-q", bare.to_str().expect("utf8 path"), "HEAD:main"],
+    );
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_daemon(&base, port) else {
+        eprintln!("SKIP: `git daemon` is unavailable");
+        return;
+    };
+    let _guard = DaemonGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: git daemon did not become ready on port {port}");
+        return;
+    }
+
+    let url = format!("git://127.0.0.1:{port}/repo.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main"]);
+    let local_git = local.join(".git");
+
+    let transport = GitDaemonTransport::new();
+    let mut conn = match transport.connect(&url, Service::UploadPack, &ConnectOptions::default()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("SKIP: could not connect to git daemon: {e}");
+            return;
+        }
+    };
+    let fetch_opts = FetchOptions {
+        refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
+        tags: TagMode::None,
+        ..Default::default()
+    };
+    fetch_remote(&local_git, &mut *conn, &fetch_opts, &mut NoProgress).expect("fetch main");
+
+    let repo = Repository::open(&local_git, &RepositoryOptions::empty()).expect("open local repo");
+    let head = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
+    let tag_outcome = create_tag(
+        &repo,
+        &CreateTagRequest {
+            name: "v1-ann".to_owned(),
+            target: head,
+            message: Some("release".to_owned()),
+            tagger: Some("T <t@example.com> 946684800 +0000".to_owned()),
+        },
+    )
+    .expect("annotated tag");
+
+    match transport.connect(&url, Service::ReceivePack, &ConnectOptions::default()) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("SKIP: git daemon refuses receive-pack: {e}");
+            return;
+        }
+    }
+
+    let mut conn = transport
+        .connect(&url, Service::ReceivePack, &ConnectOptions::default())
+        .expect("receive-pack connect");
+    push_remote(
+        &local_git,
+        &mut *conn,
+        &[PushRefSpec {
+            src: Some(tag_outcome.oid),
+            dst: "refs/tags/v1-ann".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+        &mut NoProgress,
+    )
+    .expect("push annotated tag");
+
+    assert_eq!(
+        resolve_ref(&bare, "refs/tags/v1-ann").expect("tag ref on remote"),
+        tag_outcome.oid
+    );
+    let cat_type = git(&bare, &["cat-file", "-t", "v1-ann"]);
+    assert_eq!(
+        cat_type.trim(),
+        "tag",
+        "remote must store annotated tag object"
     );
 }

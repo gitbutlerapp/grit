@@ -499,6 +499,26 @@ pub(crate) fn collect_objects_for_commits_only(
     Ok(ordered)
 }
 
+/// Annotated tag tips in `wants` must be packed even when their peeled commits
+/// are already on the peer; the commit-only fast path does not walk tag objects.
+fn merge_annotated_tag_wants(
+    odb: &Odb,
+    wants: &[ObjectId],
+    send: &mut Vec<ObjectId>,
+) -> Result<()> {
+    let mut present: HashSet<ObjectId> = send.iter().copied().collect();
+    for &want in wants {
+        if present.contains(&want) {
+            continue;
+        }
+        if odb.read(&want)?.kind == ObjectKind::Tag {
+            send.push(want);
+            present.insert(want);
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn build_pack_push_fast(
     local_git_dir: &Path,
     odb: &Odb,
@@ -534,7 +554,8 @@ pub(crate) fn build_pack_push_fast(
     // Only pack objects attached to the new commits themselves (no parent walks).
     let empty_haves = HashSet::new();
     let empty_name_hashes = HashMap::new();
-    collect_objects_for_commits_only(odb, &commits, Some(&exclude)).and_then(|send| {
+    collect_objects_for_commits_only(odb, &commits, Some(&exclude)).and_then(|mut send| {
+        merge_annotated_tag_wants(odb, wants, &mut send)?;
         build_pack_from_send_list(odb, &send, &empty_haves, opts, &empty_name_hashes)
     })
 }

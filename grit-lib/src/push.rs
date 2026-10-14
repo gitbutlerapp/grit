@@ -503,7 +503,13 @@ fn build_push_pack(
     };
     // Small pushes (typical empty-commit series) spend more time planning deltas
     // than a whole-object pack costs to build and send.
-    if wants.len() <= 128 {
+    let wants_all_commits = wants.iter().all(|oid| {
+        local_odb
+            .read(oid)
+            .map(|obj| obj.kind == ObjectKind::Commit)
+            .unwrap_or(false)
+    });
+    if wants.len() <= 128 && wants_all_commits {
         pack_opts.delta = false;
         pack_opts.reuse_deltas = false;
         pack_opts.thin = false;
