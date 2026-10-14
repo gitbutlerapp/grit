@@ -74,7 +74,14 @@ pub fn restore_campaign_worktree_to_main(
     run_git_auth(
         git,
         repo,
-        &["clean", "-fd", "-e", ".grit-bench-hot-path.json"],
+        &[
+            "clean",
+            "-fd",
+            "-e",
+            ".grit-bench-hot-path.json",
+            "-e",
+            ".grit-bench-worktree-ready",
+        ],
     )?;
     Ok(())
 }
