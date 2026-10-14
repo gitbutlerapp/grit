@@ -357,7 +357,11 @@ fn prepare_tree_switch_allow_local(
         snapshot.index.source_mtime = crate::index::index_file_mtime(&index_path);
     }
 
-    let tree_changes = crate::diff::diff_trees(repo.odb(), from_tree, Some(to_tree), "")?;
+    let tree_changes = if from_tree == Some(to_tree) {
+        Vec::new()
+    } else {
+        crate::diff::diff_trees(repo.odb(), from_tree, Some(to_tree), "")?
+    };
     let preserve_worktree_paths = ensure_local_changes_compatible_with_switch(
         &snapshot.index,
         &staged,

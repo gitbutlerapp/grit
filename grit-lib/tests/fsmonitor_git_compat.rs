@@ -219,3 +219,47 @@ fn git_fsmn_index_rewritten_by_grit_preserves_token() {
     );
     assert!(!flags_before.is_empty());
 }
+
+#[test]
+fn grit_status_skips_worktree_stat_when_fsmonitor_valid() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = init_repo_with_fsmn(tmp.path());
+
+    let hook = write_fsmonitor_hook(tmp.path());
+    let no_change_script = r#"#!/bin/sh
+if [ "$1" = "2" ]; then
+  printf '%s\0' 'bench-token'
+  exit 0
+fi
+exit 0
+"#;
+    std::fs::write(&hook, no_change_script).expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&hook).expect("meta").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&hook, perms).expect("chmod");
+    }
+
+    let grit_repo = Repository::open(
+        &repo_root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(&repo_root),
+    )
+    .expect("open grit repo");
+
+    isolated_git(&repo_root, &["status", "-s"]);
+
+    let model = grit_lib::porcelain::status::status(
+        &grit_repo,
+        &grit_lib::porcelain::status::StatusOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+    )
+    .expect("status");
+    assert!(
+        model.staged.is_empty() && model.unstaged.is_empty(),
+        "expected clean status, got staged={:?} unstaged={:?}",
+        model.staged,
+        model.unstaged
+    );
+}

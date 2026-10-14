@@ -91,6 +91,7 @@ pub(crate) fn local_change_diffs(
             refresh_index_stat_in_pass: false,
             config,
             worktree_rules,
+            command_runner: Some(repo.command_runner()),
             ..Default::default()
         },
     )?;
@@ -221,7 +222,11 @@ pub fn prepare_tree_switch(
         ));
     }
 
-    let tree_changes = diff_trees(repo.odb(), from_tree, Some(to_tree), "")?;
+    let tree_changes = if from_tree == Some(to_tree) {
+        Vec::new()
+    } else {
+        diff_trees(repo.odb(), from_tree, Some(to_tree), "")?
+    };
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;

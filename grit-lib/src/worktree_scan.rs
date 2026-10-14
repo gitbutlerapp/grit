@@ -25,7 +25,7 @@ use std::sync::Arc;
 /// Deep trees often have one tracked file per leaf directory; `read_dir` still beats a
 /// separate stat per file when grouping parallel preload by directory.
 #[cfg(windows)]
-const READ_DIR_AMORTIZE_MIN: usize = 4;
+const READ_DIR_AMORTIZE_MIN: usize = 2;
 #[cfg(not(windows))]
 const READ_DIR_AMORTIZE_MIN: usize = 2;
 
@@ -154,7 +154,10 @@ pub(crate) struct BlobInDir {
 
 /// Group stage-0 blob index entries by parent directory for bulk `read_dir`.
 #[must_use]
-pub(crate) fn group_blob_entries_by_dir(index: &Index) -> HashMap<String, Vec<BlobInDir>> {
+pub(crate) fn group_blob_entries_by_dir(
+    index: &Index,
+    honor_fsmonitor_valid: bool,
+) -> HashMap<String, Vec<BlobInDir>> {
     let mut by_dir: HashMap<String, Vec<BlobInDir>> = HashMap::new();
     for (entry_index, ie) in index.entries.iter().enumerate() {
         if ie.stage() != 0 {
@@ -164,6 +167,9 @@ pub(crate) fn group_blob_entries_by_dir(index: &Index) -> HashMap<String, Vec<Bl
             continue;
         }
         if ie.mode == MODE_GITLINK {
+            continue;
+        }
+        if honor_fsmonitor_valid && index.fsmonitor_last_update.is_some() && ie.fsmonitor_valid() {
             continue;
         }
         let Ok(rel_path) = std::str::from_utf8(&ie.path) else {
@@ -518,7 +524,7 @@ mod tests {
         index.add_or_replace(
             entry_from_stat(&wt.join("d0/f0.txt"), b"d0/f0.txt", oid, 0o100644).unwrap(),
         );
-        let grouped = group_blob_entries_by_dir(&index);
+        let grouped = group_blob_entries_by_dir(&index, false);
         assert_eq!(grouped.len(), 1);
         assert!(grouped.contains_key("d0"));
 
@@ -560,7 +566,7 @@ mod tests {
         index.add_or_replace(entry);
         fs::remove_file(wt.join("gone.txt")).unwrap();
 
-        let grouped = group_blob_entries_by_dir(&index);
+        let grouped = group_blob_entries_by_dir(&index, false);
         let mut missing = false;
         let dir_abs = |dir: &str| {
             if dir.is_empty() {
@@ -603,7 +609,7 @@ mod tests {
                 entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
             );
         }
-        let grouped = group_blob_entries_by_dir(&index);
+        let grouped = group_blob_entries_by_dir(&index, false);
         let _probe = reset_worktree_metadata_probe(wt);
         let dir_abs = |dir: &str| {
             if dir.is_empty() {
@@ -657,7 +663,7 @@ mod tests {
                 );
             }
         }
-        let grouped = group_blob_entries_by_dir(&index);
+        let grouped = group_blob_entries_by_dir(&index, false);
         let _probe = reset_worktree_metadata_probe(&wt);
         let wt_dir = wt.clone();
         let dir_abs = move |dir: &str| {

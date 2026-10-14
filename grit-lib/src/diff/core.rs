@@ -2726,7 +2726,7 @@ pub fn diff_index_to_worktree(
 }
 
 /// Additional inputs for [`diff_index_to_worktree_with_options`].
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct DiffIndexToWorktreeOptions {
     /// Optional index mtime pair `(sec, nsec)` sampled when the index was read.
     ///
@@ -2760,6 +2760,30 @@ pub struct DiffIndexToWorktreeOptions {
         Option<std::sync::Arc<std::sync::Mutex<crate::worktree_rules::WorktreeRules>>>,
     /// When true, omit worktree-vs-index diffs for unmerged paths (used by `status` only).
     pub for_status: bool,
+    /// When true (default), query `core.fsmonitor` before scanning the worktree.
+    pub refresh_fsmonitor: bool,
+    /// Injectable subprocess runner for fsmonitor hooks; defaults to the system runner.
+    pub command_runner: Option<std::sync::Arc<dyn crate::command_runner::CommandRunner>>,
+}
+
+impl Default for DiffIndexToWorktreeOptions {
+    fn default() -> Self {
+        Self {
+            index_mtime: None,
+            ignore_submodule_untracked: false,
+            simplify_gitlinks: false,
+            error_on_broken_gitlinks: false,
+            repository_git_dir: None,
+            refresh_index_stat_in_pass: false,
+            config: None,
+            stat_parallel_threads: None,
+            thread_policy: None,
+            worktree_rules: None,
+            for_status: false,
+            refresh_fsmonitor: true,
+            command_runner: None,
+        }
+    }
 }
 
 struct StagingHashJob {
@@ -3116,6 +3140,24 @@ fn diff_index_to_worktree_inner(
     let mut result = Vec::new();
     let refresh_index_stat_in_pass = options.refresh_index_stat_in_pass;
     let mut index_stat_refresh_changed = false;
+    if options.refresh_fsmonitor {
+        let default_runner = crate::command_runner::system_command_runner();
+        let runner = options
+            .command_runner
+            .as_deref()
+            .unwrap_or(default_runner.as_ref());
+        if crate::fsmonitor::refresh_index(
+            index,
+            repository_git_dir,
+            work_tree,
+            &config,
+            Some(runner),
+        )? {
+            index_stat_refresh_changed = true;
+        }
+    }
+    let honor_fsmonitor_valid = options.refresh_fsmonitor && index.fsmonitor_last_update.is_some();
+    let use_fsmonitor_stat_skip = honor_fsmonitor_valid;
     let mut unmerged_base: std::collections::BTreeMap<String, (u8, IndexEntry)> =
         std::collections::BTreeMap::new();
 
@@ -3346,7 +3388,7 @@ fn diff_index_to_worktree_inner(
         preload_index,
         stat_parallel_threads: options.stat_parallel_threads,
     };
-    let blob_dirs = group_blob_entries_by_dir(index);
+    let blob_dirs = group_blob_entries_by_dir(index, honor_fsmonitor_valid);
     let work_tree_owned = work_tree.to_path_buf();
     let dir_abs = move |dir: &str| {
         if dir.is_empty() {
@@ -3379,6 +3421,12 @@ fn diff_index_to_worktree_inner(
             dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
         },
         |entry_index, path_str_ref, lookup| {
+            if use_fsmonitor_stat_skip {
+                let ie_skip = &index.entries[entry_index];
+                if crate::fsmonitor::entry_skips_worktree_stat(ie_skip, index) {
+                    return Ok(());
+                }
+            }
             let file_path =
                 index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
             match lookup {
@@ -3431,6 +3479,16 @@ fn diff_index_to_worktree_inner(
                             }
                             if refresh.content_verified {
                                 stat_refresh_verified[entry_index] = true;
+                            }
+                            if index.fsmonitor_last_update.is_some()
+                                && stat_matches_with_policy(
+                                    &index.entries[entry_index],
+                                    &meta,
+                                    stat_policy,
+                                )
+                                && !refresh.index_changed
+                            {
+                                index.entries[entry_index].set_fsmonitor_valid(true);
                             }
                         }
                     }
@@ -4202,7 +4260,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
         .unwrap_or(false);
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
 
-    let blob_dirs = group_blob_entries_by_dir(index);
+    let blob_dirs = group_blob_entries_by_dir(index, false);
     let work_tree_owned = work_tree.to_path_buf();
     let dir_abs = move |dir: &str| {
         if dir.is_empty() {

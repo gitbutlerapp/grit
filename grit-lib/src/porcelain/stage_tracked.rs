@@ -166,7 +166,7 @@ pub fn stage_tracked_modifications_in_index(
         }
     }
 
-    let blob_dirs = group_blob_entries_by_dir(index);
+    let blob_dirs = group_blob_entries_by_dir(index, false);
     let work_tree_owned = work_tree.to_path_buf();
     let dir_abs = move |dir: &str| {
         if dir.is_empty() {

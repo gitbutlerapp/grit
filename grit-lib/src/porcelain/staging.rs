@@ -51,6 +51,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         repository_git_dir: Some(repo.git_dir().to_path_buf()),
         config: Some(config_arc.clone()),
         worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
+        refresh_fsmonitor: false,
         ..Default::default()
     };
     let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(

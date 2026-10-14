@@ -1527,6 +1527,7 @@ pub fn status(
                 thread_policy: Some(repo.thread_policy()),
                 worktree_rules: Some(Arc::clone(&worktree_rules)),
                 for_status: true,
+                command_runner: Some(repo.command_runner()),
                 ..Default::default()
             },
         )?;
