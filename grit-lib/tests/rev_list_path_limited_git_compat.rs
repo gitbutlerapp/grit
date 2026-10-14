@@ -247,6 +247,34 @@ fn path_limited_limit_merge_prefers_newer_second_parent_side() {
 }
 
 #[test]
+fn path_limited_exclude_only_pathspec_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    std::fs::create_dir_all(wt.join("kept")).expect("mkdir");
+    std::fs::write(wt.join("kept/file"), "x\n").expect("write");
+    git(wt, &["add", "kept/file"]);
+    git(wt, &["commit", "-m", "nested"]);
+    let spec = ":(exclude)other/**";
+    let git_count = git(wt, &["rev-list", "--count", "HEAD", "--", spec])
+        .trim()
+        .parse::<usize>()
+        .expect("git count");
+    let repo = open_grit_repo(wt);
+    let grit_count = repo
+        .rev_walk()
+        .count(
+            &["HEAD"],
+            &RevWalkListOptions {
+                paths: vec![spec.into()],
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit count");
+    assert_eq!(grit_count, git_count);
+    assert_eq!(git_count, 1);
+}
+
+#[test]
 fn path_limited_root_gitlink_matches_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

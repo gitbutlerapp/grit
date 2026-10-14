@@ -613,6 +613,39 @@ pub fn pathspec_is_exclude(spec: &str) -> bool {
     combine_magic(elem_magic).exclude
 }
 
+/// Whether a path-limited revision tree walk should recurse into directory `path`.
+///
+/// Uses [`pathspec_wants_descent_into_tree`] for non-exclude specs. Exclude-only lists never
+/// trigger that helper alone, but Git's implicit match-all still requires walking non-excluded
+/// directories so nested paths can match [`matches_pathspec_list`].
+#[must_use]
+pub fn pathspec_wants_descent_for_rev_tree(path: &str, specs: &[String]) -> bool {
+    if specs.is_empty() {
+        return true;
+    }
+    for spec in specs {
+        if !pathspec_is_exclude(spec) && pathspec_wants_descent_into_tree(spec, path) {
+            return true;
+        }
+    }
+    if !specs.iter().any(|s| pathspec_is_exclude(s)) {
+        return false;
+    }
+    let ctx = PathspecMatchContext {
+        is_directory: true,
+        is_git_submodule: false,
+        precompose_paths: false,
+    };
+    for spec in specs {
+        if pathspec_is_exclude(spec)
+            && pathspec_exclude_element_matches_with_context(spec, path, ctx)
+        {
+            return false;
+        }
+    }
+    !specs.iter().any(|s| !pathspec_is_exclude(s))
+}
+
 /// Whether tree-walking should recurse into directory `full_name` for pathspec `spec` without
 /// `-r` (Git `read_tree` / `show_recursive` “interesting” descent).
 ///

@@ -5026,9 +5026,7 @@ fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -
         return true;
     }
     if is_tree {
-        return pathspecs
-            .iter()
-            .any(|spec| crate::pathspec::pathspec_wants_descent_into_tree(spec, path));
+        return crate::pathspec::pathspec_wants_descent_for_rev_tree(path, pathspecs);
     }
     false
 }
@@ -5066,9 +5064,7 @@ fn tree_has_pathspec_match(
             return Ok(true);
         }
         if is_tree
-            && pathspecs
-                .iter()
-                .any(|spec| crate::pathspec::pathspec_wants_descent_into_tree(spec, &path))
+            && crate::pathspec::pathspec_wants_descent_for_rev_tree(&path, pathspecs)
             && tree_has_pathspec_match(repo, entry.oid, &path, pathspecs)?
         {
             return Ok(true);
@@ -5182,9 +5178,9 @@ fn trees_differ_tree_entries(
                                 }
                             } else if o_is_tree
                                 && n_is_tree
-                                && pathspecs.iter().any(|spec| {
-                                    crate::pathspec::pathspec_wants_descent_into_tree(spec, &path)
-                                })
+                                && crate::pathspec::pathspec_wants_descent_for_rev_tree(
+                                    &path, pathspecs,
+                                )
                                 && trees_differ_for_pathspecs(repo, o.oid, n.oid, &path, pathspecs)?
                             {
                                 return Ok(true);

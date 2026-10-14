@@ -14847,6 +14847,7 @@ pub fn grit_lib::worktree::pathspec::pathspec_has_top(&str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_is_exclude(&str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_match_context_with_precompose(bool) -> grit_lib::worktree::pathspec::PathspecMatchContext
 pub fn grit_lib::worktree::pathspec::pathspec_matches(&str, &str) -> bool
+pub fn grit_lib::worktree::pathspec::pathspec_wants_descent_for_rev_tree(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_wants_descent_into_tree(&str, &str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspecs_allow_bloom(&[alloc::string::String]) -> bool
 pub fn grit_lib::worktree::pathspec::precompose_argv_pathspec(&str) -> alloc::borrow::Cow<'_, str>
