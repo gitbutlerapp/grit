@@ -1103,13 +1103,6 @@ pub fn rev_list(
             stats: options.bloom_stats.as_ref(),
             cwd: bloom_cwd.as_deref(),
         };
-        let visible_budget = options.max_count.and_then(|max| {
-            if options.count {
-                None
-            } else {
-                Some(options.skip.saturating_add(max))
-            }
-        });
         let (selected, walked, walk_order) = walk_dense_path_limited_closure(
             repo,
             &mut graph,
@@ -1119,7 +1112,6 @@ pub fn rev_list(
             options.sparse,
             options.show_pulls,
             Some(&bloom_ctx),
-            visible_budget,
         )?;
         included = selected;
         if discovery_order.is_empty() {
@@ -4839,7 +4831,6 @@ fn walk_dense_path_limited_closure(
     sparse: bool,
     show_pulls: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
-    visible_budget: Option<usize>,
 ) -> Result<(HashSet<ObjectId>, HashSet<ObjectId>, Vec<ObjectId>)> {
     let mut walked = HashSet::new();
     let mut selected = HashSet::new();
@@ -4855,9 +4846,6 @@ fn walk_dense_path_limited_closure(
         let action = dense_path_limited_action(repo, graph, oid, paths, sparse, show_pulls, bloom)?;
         if action.visible {
             selected.insert(oid);
-            if visible_budget.is_some_and(|need| selected.len() >= need) {
-                break;
-            }
         }
 
         for parent in action.parents_to_walk {
@@ -4966,13 +4954,7 @@ pub fn commit_visible_for_dense_pathspecs(
 
     if parents.len() == 1 {
         let parent = load_commit(repo, parents[0])?;
-        return trees_differ_for_pathspecs(
-            repo,
-            commit.tree,
-            parent.tree,
-            "",
-            paths,
-        );
+        return trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", paths);
     }
 
     let mut treesame_parents = 0usize;
@@ -5073,9 +5055,6 @@ fn tree_has_pathspec_match(
 ) -> Result<bool> {
     let entries = read_parsed_tree(repo, tree_oid)?;
     for entry in entries {
-        if entry.mode == 0o160000 {
-            continue;
-        }
         let name = String::from_utf8_lossy(&entry.name);
         let path = if prefix.is_empty() {
             name.into_owned()
@@ -5206,9 +5185,7 @@ fn trees_differ_tree_entries(
                                 && pathspecs.iter().any(|spec| {
                                     crate::pathspec::pathspec_wants_descent_into_tree(spec, &path)
                                 })
-                                && trees_differ_for_pathspecs(
-                                    repo, o.oid, n.oid, &path, pathspecs,
-                                )?
+                                && trees_differ_for_pathspecs(repo, o.oid, n.oid, &path, pathspecs)?
                             {
                                 return Ok(true);
                             }
