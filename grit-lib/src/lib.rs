@@ -194,7 +194,7 @@ pub(crate) mod filter_process;
 pub(crate) mod fmt_merge_msg;
 pub(crate) mod fsck;
 pub(crate) mod fsck_standalone;
-pub(crate) mod fsmonitor;
+pub mod fsmonitor;
 pub(crate) mod gc;
 pub(crate) mod git_binary_base85;
 pub(crate) mod git_date;

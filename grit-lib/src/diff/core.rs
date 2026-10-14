@@ -2764,6 +2764,8 @@ pub struct DiffIndexToWorktreeOptions {
     pub refresh_fsmonitor: bool,
     /// Injectable subprocess runner for fsmonitor hooks; defaults to the system runner.
     pub command_runner: Option<std::sync::Arc<dyn crate::command_runner::CommandRunner>>,
+    /// When set, used as the hook protocol v1 query boundary; otherwise [`crate::environment::wall_clock_unix_timestamp_nanos`] is sampled once per diff.
+    pub fsmonitor_query_boundary: Option<crate::fsmonitor::FsmonitorQueryBoundary>,
 }
 
 impl Default for DiffIndexToWorktreeOptions {
@@ -2782,6 +2784,7 @@ impl Default for DiffIndexToWorktreeOptions {
             for_status: false,
             refresh_fsmonitor: true,
             command_runner: None,
+            fsmonitor_query_boundary: None,
         }
     }
 }
@@ -3146,12 +3149,19 @@ fn diff_index_to_worktree_inner(
             .command_runner
             .as_deref()
             .unwrap_or(default_runner.as_ref());
+        let boundary = options.fsmonitor_query_boundary.unwrap_or_else(|| {
+            crate::fsmonitor::FsmonitorQueryBoundary(
+                crate::environment::wall_clock_unix_timestamp_nanos(),
+            )
+        });
+        let refresh_opts = crate::fsmonitor::FsmonitorRefreshOptions::with_query_boundary(boundary);
         if crate::fsmonitor::refresh_index(
             index,
             repository_git_dir,
             work_tree,
             &config,
             Some(runner),
+            &refresh_opts,
         )? {
             index_stat_refresh_changed = true;
         }

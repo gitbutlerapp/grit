@@ -657,6 +657,15 @@ impl IdentityEnv for Environment {
     }
 }
 
+/// Nanoseconds since the Unix epoch from the process wall clock.
+///
+/// Callers pass this into [`crate::fsmonitor::FsmonitorRefreshOptions`] so fsmonitor hook
+/// protocol v1 tokens are sampled before the hook subprocess runs.
+#[must_use]
+pub fn wall_clock_unix_timestamp_nanos() -> u64 {
+    u64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos()).unwrap_or(u64::MAX)
+}
+
 /// Map a Unix timestamp through an optional `TZ`-style string (or the process default offset).
 #[must_use]
 pub fn offset_from_epoch_and_tz(epoch: i64, tz: Option<&str>) -> OffsetDateTime {

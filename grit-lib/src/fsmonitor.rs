@@ -16,6 +16,33 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::index::Index;
 
+/// Nanoseconds since the Unix epoch, sampled immediately before a fsmonitor hook query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FsmonitorQueryBoundary(pub u64);
+
+/// Inputs for [`refresh_index`]; embedders supply the query boundary explicitly.
+#[derive(Debug, Clone, Copy)]
+pub struct FsmonitorRefreshOptions {
+    /// Token Git stores after a hook protocol v1 query (sampled before spawning the hook).
+    pub query_boundary: FsmonitorQueryBoundary,
+}
+
+impl FsmonitorRefreshOptions {
+    /// Build refresh options from an explicit boundary (for tests and embedders).
+    #[must_use]
+    pub fn with_query_boundary(boundary: FsmonitorQueryBoundary) -> Self {
+        Self {
+            query_boundary: boundary,
+        }
+    }
+}
+
+/// Format the hook protocol v1 token string from a pre-sampled boundary.
+#[must_use]
+pub fn v1_hook_token(boundary: FsmonitorQueryBoundary) -> String {
+    format!("{}", boundary.0)
+}
+
 /// Whether `core.fsmonitor` is configured for hook or built-in IPC mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FsmonitorMode {
@@ -63,7 +90,13 @@ pub fn refresh_index(
     work_tree: &Path,
     config: &ConfigSet,
     runner: Option<&dyn CommandRunner>,
+    options: &FsmonitorRefreshOptions,
 ) -> Result<bool> {
+    if index.fsmonitor_refresh_ran {
+        return Ok(false);
+    }
+    index.fsmonitor_refresh_ran = true;
+
     let mode = fsmonitor_mode(config);
     if matches!(mode, FsmonitorMode::Disabled) {
         return Ok(false);
@@ -78,9 +111,41 @@ pub fn refresh_index(
         .filter(|e| e.fsmonitor_valid())
         .count() as u32;
 
+    let hook_version = hook_version(config);
+    let v1_query_token = if hook_version == 1 {
+        Some(v1_hook_token(options.query_boundary))
+    } else {
+        None
+    };
+
+    // Git skips the hook until the index already has an FSMN token; seed the token and invalidate.
+    if matches!(mode, FsmonitorMode::Hook(_)) && index.fsmonitor_last_update.is_none() {
+        let token = v1_query_token
+            .clone()
+            .unwrap_or_else(|| bootstrap_token(options.query_boundary));
+        index.set_fsmonitor_last_update(Some(token));
+        invalidate_all_valid(index);
+        index.fsmonitor_validity_changed();
+        let token_after = index.fsmonitor_last_update.clone();
+        let valid_after: u32 = index
+            .entries()
+            .iter()
+            .filter(|e| e.fsmonitor_valid())
+            .count() as u32;
+        return Ok(token_before != token_after || valid_before != valid_after);
+    }
+
     let query = match mode {
         FsmonitorMode::Disabled => return Ok(false),
-        FsmonitorMode::Hook(path) => query_hook(runner, &path, work_tree, index, config),
+        FsmonitorMode::Hook(path) => query_hook(
+            runner,
+            &path,
+            work_tree,
+            index,
+            config,
+            options.query_boundary,
+            v1_query_token.clone(),
+        ),
         FsmonitorMode::Ipc => query_ipc(git_dir, index),
     };
 
@@ -91,7 +156,11 @@ pub fn refresh_index(
         Err(_) => {
             invalidate_all_valid(index);
             if index.fsmonitor_last_update.is_none() {
-                index.set_fsmonitor_last_update(Some(default_bootstrap_token()));
+                index.set_fsmonitor_last_update(Some(
+                    v1_query_token
+                        .clone()
+                        .unwrap_or_else(|| bootstrap_token(options.query_boundary)),
+                ));
             }
         }
     }
@@ -111,8 +180,8 @@ struct QueryOutcome {
     changed_paths: Vec<String>,
 }
 
-fn default_bootstrap_token() -> String {
-    format!("builtin:{}", filetime::FileTime::now().unix_seconds())
+fn bootstrap_token(boundary: FsmonitorQueryBoundary) -> String {
+    format!("builtin:{}", boundary.0)
 }
 
 fn query_hook(
@@ -121,6 +190,8 @@ fn query_hook(
     work_tree: &Path,
     index: &Index,
     config: &ConfigSet,
+    _query_boundary: FsmonitorQueryBoundary,
+    v1_query_token: Option<String>,
 ) -> Result<QueryOutcome> {
     let version = hook_version(config);
     let last = index.fsmonitor_last_update.as_deref().unwrap_or("");
@@ -143,20 +214,12 @@ fn query_hook(
         )));
     }
     if version == 1 {
-        let token = hook_v1_query_token();
+        let token = v1_query_token.ok_or_else(|| {
+            Error::Message("internal error: missing v1 fsmonitor query token".into())
+        })?;
         return Ok(parse_v1_hook_response(&output.stdout, token));
     }
     parse_v2_hook_response(&output.stdout)
-}
-
-/// Nanosecond timestamp token Git uses for hook protocol v1 (`getnanotime`).
-fn hook_v1_query_token() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{nanos}")
 }
 
 /// Parse hook v1 stdout: NUL-delimited changed paths only (no response token).
@@ -405,16 +468,21 @@ mod tests {
     #[test]
     fn parse_v1_changed_paths() {
         let raw = b"tracked.txt\0";
-        let out = parse_v1_hook_response(raw, "123".to_owned());
+        let out = parse_v1_hook_response(raw, v1_hook_token(FsmonitorQueryBoundary(123)));
         assert_eq!(out.token, "123");
         assert!(!out.trivial);
         assert_eq!(out.changed_paths, vec!["tracked.txt"]);
     }
 
     #[test]
+    fn v1_hook_token_uses_injected_boundary() {
+        assert_eq!(v1_hook_token(FsmonitorQueryBoundary(99_001)), "99001");
+    }
+
+    #[test]
     fn parse_v1_trivial_response() {
         let raw = b"/\0";
-        let out = parse_v1_hook_response(raw, "456".to_owned());
+        let out = parse_v1_hook_response(raw, v1_hook_token(FsmonitorQueryBoundary(456)));
         assert!(out.trivial);
         assert!(out.changed_paths.is_empty());
     }

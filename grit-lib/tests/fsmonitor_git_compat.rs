@@ -331,3 +331,106 @@ fn grit_status_honors_fsmonitor_hook_v1_changed_paths() {
         "git baseline should show modification: {git_porcelain}"
     );
 }
+
+fn write_fsmonitor_v1_race_hook(dir: &Path) -> PathBuf {
+    let hook = dir.join("fsmonitor-v1-race-hook.sh");
+    let script = r#"#!/bin/sh
+if [ "$1" != "1" ]; then
+  exit 0
+fi
+TOKEN="$2"
+if [ -z "$TOKEN" ]; then
+  exit 0
+fi
+# First hook query (previous token = first boundary): modify during the query, then
+# report when mtime is at/after that token (real mtimes exceed injected test tokens).
+if [ "$TOKEN" = "1000000" ]; then
+  echo >> tracked.txt
+  MTIME=$(python3 -c 'import os; print(os.stat("tracked.txt").st_mtime_ns)' 2>/dev/null || echo 0)
+  if [ "$MTIME" -ge "$TOKEN" ] 2>/dev/null; then
+    printf '%s\0' 'tracked.txt'
+  fi
+  exit 0
+fi
+MTIME=$(python3 -c 'import os; print(os.stat("tracked.txt").st_mtime_ns)' 2>/dev/null || echo 0)
+if [ "$MTIME" -ge "$TOKEN" ] 2>/dev/null; then
+  printf '%s\0' 'tracked.txt'
+fi
+exit 0
+"#;
+    fs::write(&hook, script).expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&hook).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hook, perms).expect("chmod hook");
+    }
+    hook
+}
+
+#[test]
+fn grit_status_v1_two_query_race_after_hook_modifies_during_first_query() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path();
+    git(repo_root, &["init", "-q", "-b", "main", "."]);
+    git(repo_root, &["config", "user.email", "t@example.com"]);
+    git(repo_root, &["config", "user.name", "Test"]);
+    let hook = write_fsmonitor_v1_race_hook(repo_root);
+    git(
+        repo_root,
+        &[
+            "config",
+            "core.fsmonitor",
+            hook.to_str().expect("hook utf8"),
+        ],
+    );
+    git(repo_root, &["config", "core.fsmonitorhookversion", "1"]);
+    fs::write(repo_root.join("tracked.txt"), "base\n").expect("write");
+    git(repo_root, &["add", "tracked.txt"]);
+    git(repo_root, &["commit", "-qm", "initial"]);
+    // Git commit leaves an FSMN token; drop it so the first grit status seeds the boundary.
+    let index_path = repo_root.join(".git/index");
+    let mut disk_index = grit_lib::index::Index::load(&index_path).expect("load index");
+    disk_index.clear_fsmonitor_extension();
+    disk_index.write(&index_path).expect("write index");
+
+    let grit_repo = Repository::open(
+        &repo_root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(repo_root),
+    )
+    .expect("open grit repo");
+    let mut progress = grit_lib::progress::NullProgress;
+    let boundary_first = grit_lib::fsmonitor::FsmonitorQueryBoundary(1_000_000);
+    let boundary_second = grit_lib::fsmonitor::FsmonitorQueryBoundary(2_000_000);
+    let mut opts = grit_lib::porcelain::status::StatusOptions::default();
+    opts.fsmonitor_query_boundary = Some(boundary_first);
+
+    let first = grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress)
+        .expect("first status");
+    assert!(
+        first.unstaged.is_empty(),
+        "first query seeds FSMN token without hook: {:?}",
+        first.unstaged
+    );
+    assert_eq!(
+        first.index.fsmonitor_last_update.as_deref(),
+        Some("1000000"),
+        "first query must persist pre-hook v1 token"
+    );
+
+    opts.fsmonitor_query_boundary = Some(boundary_second);
+    let second = grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress)
+        .expect("second status");
+    assert!(
+        second.unstaged.iter().any(|e| e.path() == "tracked.txt"),
+        "second query must invalidate via v1 token window: {:?}",
+        second.unstaged
+    );
+
+    let git_porcelain = isolated_git(repo_root, &["status", "--porcelain"]);
+    assert!(
+        git_porcelain.contains("tracked.txt"),
+        "git baseline should show modification: {git_porcelain}"
+    );
+}

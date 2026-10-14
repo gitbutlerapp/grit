@@ -399,6 +399,8 @@ pub struct Index {
     pub hash_algo: HashAlgo,
     /// On-disk index mtime when this index was last read (Git `istate->timestamp`).
     pub source_mtime: Option<(u32, u32)>,
+    /// In-memory only: Git `istate->fsmonitor_has_run_once`.
+    pub(crate) fsmonitor_refresh_ran: bool,
 }
 
 impl Default for Index {
@@ -766,6 +768,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
             source_mtime: None,
+            fsmonitor_refresh_ran: false,
         }
     }
 
@@ -813,6 +816,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
             source_mtime: None,
+            fsmonitor_refresh_ran: false,
         }
     }
 
@@ -840,6 +844,7 @@ impl Index {
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
                 source_mtime: None,
+                fsmonitor_refresh_ran: false,
             };
         }
 
@@ -875,6 +880,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::default(),
             source_mtime: None,
+            fsmonitor_refresh_ran: false,
         }
     }
 
@@ -900,6 +906,7 @@ impl Index {
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
                 source_mtime: None,
+                fsmonitor_refresh_ran: false,
             };
         }
 
@@ -938,6 +945,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::default(),
             source_mtime: None,
+            fsmonitor_refresh_ran: false,
         }
     }
 
@@ -1300,6 +1308,7 @@ impl Index {
             cache_tree: ext_fields.cache_tree,
             hash_algo,
             source_mtime: None,
+            fsmonitor_refresh_ran: false,
         })
     }
 

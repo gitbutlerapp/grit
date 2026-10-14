@@ -93,6 +93,9 @@ pub struct StatusOptions {
     /// Override parallel index stat workers (`Some(1)` forces serial). Used by tests and embedders.
     #[doc(hidden)]
     pub stat_parallel_threads: Option<usize>,
+    /// Hook protocol v1 query boundary for fsmonitor refresh (deterministic tests).
+    #[doc(hidden)]
+    pub fsmonitor_query_boundary: Option<crate::fsmonitor::FsmonitorQueryBoundary>,
 }
 
 impl Default for StatusOptions {
@@ -104,6 +107,7 @@ impl Default for StatusOptions {
             pathspecs: Vec::new(),
             ahead_behind: true,
             stat_parallel_threads: None,
+            fsmonitor_query_boundary: None,
         }
     }
 }
@@ -1528,6 +1532,7 @@ pub fn status(
                 worktree_rules: Some(Arc::clone(&worktree_rules)),
                 for_status: true,
                 command_runner: Some(repo.command_runner()),
+                fsmonitor_query_boundary: opts.fsmonitor_query_boundary,
                 ..Default::default()
             },
         )?;
