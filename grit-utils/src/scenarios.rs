@@ -20,6 +20,7 @@ use crate::hot_path_fixture::{
 };
 use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::machine::{collect_machine_info, format_timestamp};
+use crate::real_repo_fixture::run_git;
 use crate::schema::{
     BenchFailure, BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION,
 };
@@ -920,6 +921,8 @@ pub fn run_prepare_stash(git: &Path) -> Result<()> {
     if let Ok(meta) = crate::campaign_prep::load_campaign_hot_path_meta(&dir) {
         crate::campaign_prep::restore_campaign_worktree_to_main(git, &dir, &meta)?;
     }
+    run_git(git, &dir, &["reset", "--hard", "HEAD"])?;
+    run_git(git, &dir, &["clean", "-fd", "-q"])?;
     let mut cmd = Command::new(git);
     cmd.args(["stash", "clear"]).current_dir(&dir);
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
