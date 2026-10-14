@@ -181,6 +181,71 @@ fn clean_repo_has_no_issues_and_git_agrees() {
 }
 
 #[test]
+fn nested_annotated_tags_pass_fsck_with_cached_links() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    git(dir.path(), &["tag", "-a", "inner", "-m", "inner"]);
+    git(dir.path(), &["tag", "-a", "outer", "inner", "-m", "outer"]);
+    let git_out = git_fsck(dir.path(), false);
+    assert!(git_out.msg_ids.is_empty(), "{:?}", git_out.msg_ids);
+    let opts = FsckOptions::full_repository(false).with_check_dangling(false);
+    let config = repo.config().expect("config");
+    let report = grit_fsck(&repo, &opts);
+    assert!(
+        report.ok(&config, &opts),
+        "nested tag chain must not produce brokenLink: {:?}",
+        report.issues
+    );
+    assert!(!has_msg_id(&report, "brokenLink"));
+}
+
+#[test]
+fn tree_blob_mode_pointing_at_tag_is_broken_link() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    git(dir.path(), &["tag", "-a", "t", "-m", "t"]);
+    let tag_oid_hex = git(dir.path(), &["rev-parse", "refs/tags/t"]);
+    let tag_oid = ObjectId::from_hex(tag_oid_hex.trim()).expect("tag oid");
+    let objects = dir.path().join(".git/objects");
+    let mut tree_body = b"100644 wrong-name\0".to_vec();
+    tree_body.extend_from_slice(tag_oid.as_bytes());
+    let tree_hex =
+        write_loose_object(&objects, FixtureAlgo::Sha1, "tree", &tree_body).expect("tree");
+    let tree_oid: ObjectId = tree_hex.parse().expect("tree oid");
+    let parent_hex = git(dir.path(), &["rev-parse", "HEAD"]);
+    let parent = ObjectId::from_hex(parent_hex.trim()).expect("parent");
+    let commit_body = format!(
+        "tree {}\nparent {}\nauthor T <t@example.com> 2 +0000\ncommitter T <t@example.com> 2 +0000\n\nlink tag as blob\n",
+        tree_oid.to_hex(),
+        parent.to_hex()
+    );
+    let commit_hex = write_loose_object(
+        &objects,
+        FixtureAlgo::Sha1,
+        "commit",
+        commit_body.as_bytes(),
+    )
+    .expect("commit");
+    let bad_commit: ObjectId = commit_hex.parse().expect("bad commit");
+    write_ref_loose(dir.path(), "refs/heads/main", bad_commit);
+    pack_loose_object_and_remove_loose(dir.path(), tag_oid);
+    pack_loose_object_and_remove_loose(dir.path(), tree_oid);
+    pack_loose_object_and_remove_loose(dir.path(), bad_commit);
+    repo.odb().invalidate_packs();
+    let git_text = git(dir.path(), &["fsck"]);
+    assert!(
+        git_text.contains("brokenLink") || git_text.to_lowercase().contains("tag"),
+        "{git_text}"
+    );
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        has_msg_id(&report, "brokenLink"),
+        "blob mode for tag object via cached links: {:?}",
+        report.issues
+    );
+}
+
+#[test]
 fn missing_blob_reported_as_missing_object() {
     let (dir, repo) = init_repo();
     one_commit(&repo);

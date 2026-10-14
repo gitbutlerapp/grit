@@ -1059,7 +1059,7 @@ fn link_kind_matches(links: &ValidatedObjectLinks, expected: ObjectKind) -> bool
     match (links, expected) {
         (ValidatedObjectLinks::Commit { .. }, ObjectKind::Commit) => true,
         (ValidatedObjectLinks::Tree(_), ObjectKind::Tree) => true,
-        (ValidatedObjectLinks::Tag { object_type, .. }, kind) => *object_type == kind,
+        (ValidatedObjectLinks::Tag { .. }, ObjectKind::Tag) => true,
         (ValidatedObjectLinks::Blob, ObjectKind::Blob) => true,
         _ => false,
     }
