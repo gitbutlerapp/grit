@@ -1870,12 +1870,62 @@ pub fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth:
     }
 }
 
+/// Pack/index pair validated for fsck without inflating every object.
+///
+/// Structure, checksums, and per-entry headers are checked; object hashes are
+/// verified separately when objects are read for semantic fsck.
+#[derive(Debug)]
+pub(crate) struct VerifiedPackForFsck {
+    pub idx: PackIndex,
+    pub pack_bytes: Vec<u8>,
+    pub records: Vec<VerifyObjectRecord>,
+}
+
+/// Verify pack trailer, index checksum, counts, and object header layout.
+///
+/// Does not inflate objects or verify per-object hashes (see [`verify_pack_and_collect`]).
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] when the index or pack are malformed.
+pub(crate) fn verify_pack_for_fsck(idx_path: &Path) -> Result<VerifiedPackForFsck> {
+    let (idx, pack_bytes, records) = verify_pack_structure_and_records(idx_path)?;
+    Ok(VerifiedPackForFsck {
+        idx,
+        pack_bytes,
+        records,
+    })
+}
+
 /// Verify one pack/index pair and optionally return object records.
 ///
 /// # Errors
 ///
 /// Returns [`Error::CorruptObject`] when the index or pack are malformed.
 pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord>> {
+    let VerifiedPackForFsck {
+        idx,
+        pack_bytes,
+        records,
+    } = verify_pack_for_fsck(idx_path)?;
+    let hb = idx.hash_bytes();
+    for entry in idx.iter() {
+        let obj = read_object_from_pack_bytes(&pack_bytes, &idx, entry.oid())?;
+        let computed = hash_object_bytes(obj.kind, &obj.data, hb)?;
+        if computed.as_slice() != entry.oid() {
+            return Err(Error::CorruptObject(format!(
+                "pack object hash mismatch at offset {} (index says {})",
+                entry.offset(),
+                oid_bytes_to_hex(entry.oid())
+            )));
+        }
+    }
+    Ok(records)
+}
+
+fn verify_pack_structure_and_records(
+    idx_path: &Path,
+) -> Result<(PackIndex, Vec<u8>, Vec<VerifyObjectRecord>)> {
     let idx = read_pack_index(idx_path)?;
     let idx_file_bytes = fs::read(idx_path).map_err(Error::Io)?;
     let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
@@ -1939,7 +1989,7 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
     }
     let offsets: Vec<u64> = by_offset.keys().copied().collect();
     if offsets.is_empty() {
-        return Ok(Vec::new());
+        return Ok((idx, pack_bytes, Vec::new()));
     }
 
     let mut by_oid: HashMap<Vec<u8>, usize> = HashMap::new();
@@ -2012,19 +2062,7 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
         }
     }
 
-    for entry in idx.iter() {
-        let obj = read_object_from_pack_bytes(&pack_bytes, &idx, entry.oid())?;
-        let computed = hash_object_bytes(obj.kind, &obj.data, hb)?;
-        if computed.as_slice() != entry.oid() {
-            return Err(Error::CorruptObject(format!(
-                "pack object hash mismatch at offset {} (index says {})",
-                entry.offset(),
-                oid_bytes_to_hex(entry.oid())
-            )));
-        }
-    }
-
-    Ok(records)
+    Ok((idx, pack_bytes, records))
 }
 
 /// Read alternates recursively, deduplicated in discovery order.
