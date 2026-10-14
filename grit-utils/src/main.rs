@@ -317,6 +317,11 @@ enum Cmd {
         git: PathBuf,
     },
     #[command(hide = true)]
+    PrepareDiffDirty {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
     PrepareParallelCheckout {
         #[arg(long)]
         git: PathBuf,
@@ -644,6 +649,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_stash(&git);
         }
+        Cmd::PrepareDiffDirty { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return grit_utils::scenarios::run_prepare_diff_dirty(&git);
+        }
         Cmd::PrepareParallelCheckout { git, url, dest } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_parallel_checkout(&git, url, dest.as_path());
@@ -941,6 +950,7 @@ fn main() -> Result<()> {
         | Cmd::ServeGitHttp { .. }
         | Cmd::PrepareRestore
         | Cmd::PrepareStash { .. }
+        | Cmd::PrepareDiffDirty { .. }
         | Cmd::PrepareParallelCheckout { .. }
         | Cmd::PrepareParallelClone { .. }
         | Cmd::PrepareParallelIndexPack { .. }

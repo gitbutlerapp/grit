@@ -1,6 +1,7 @@
 //! Scenario definitions and hyperfine execution.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 
@@ -19,9 +20,11 @@ use crate::hot_path_fixture::{
 };
 use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::machine::{collect_machine_info, format_timestamp};
-use crate::schema::{BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION};
+use crate::schema::{
+    BenchFailure, BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION,
+};
 use crate::shell::{shell_command, shell_quote};
-use crate::stats::{median_ratio, timing_from_hyperfine};
+use crate::stats::{failed_timing_stats, median_ratio, timing_from_hyperfine};
 
 /// Driver selection for a scenario (CLI today; library hooks reserved).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +71,7 @@ pub enum PrepareKind {
     RestoreReset,
     StashReset,
     MaintenanceReset,
+    DiffDirtyReset,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -117,6 +121,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::RestoreReset => "prepare-restore",
         PrepareKind::StashReset => "prepare-stash",
         PrepareKind::MaintenanceReset => "prepare-maintenance",
+        PrepareKind::DiffDirtyReset => "prepare-diff-dirty",
     };
     shell_command(
         &cfg.prepare_bin,
@@ -183,6 +188,122 @@ pub fn run_scenario(
         grit: grit_stats,
         ratio,
         grit_failure: None,
+    })
+}
+
+/// Run git hyperfine only; grit stats come from `grit_failure` (avoids repeated OOM during hyperfine warmups).
+pub fn run_scenario_git_only_with_grit_failure(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    scenario: &Scenario,
+    repo: &Path,
+    grit_failure: BenchFailure,
+) -> Result<ScenarioResult> {
+    let prepare = scenario
+        .prepare_kind
+        .map(|kind| prepare_command(cfg, git, kind));
+
+    let git_prog = if scenario.git_via_shell {
+        PathBuf::from("/bin/sh")
+    } else {
+        git.to_path_buf()
+    };
+
+    let git_stats = bench_tool(
+        hyperfine,
+        &git_prog,
+        &scenario.git_argv,
+        repo,
+        cfg,
+        prepare.as_deref(),
+        "git",
+    )?;
+    let _ = grit;
+
+    Ok(ScenarioResult {
+        id: scenario.id.clone(),
+        group: scenario.group.clone(),
+        fixture: scenario.fixture.clone(),
+        description: scenario.description.clone(),
+        driver: scenario.driver.into(),
+        git: git_stats,
+        grit: failed_timing_stats(),
+        ratio: 0.0,
+        grit_failure: Some(grit_failure),
+    })
+}
+
+/// Like [`run_scenario`], but records a grit-side hyperfine failure instead of aborting the campaign.
+pub fn run_scenario_allow_grit_failure(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    scenario: &Scenario,
+    repo: &Path,
+) -> Result<ScenarioResult> {
+    let prepare = scenario
+        .prepare_kind
+        .map(|kind| prepare_command(cfg, git, kind));
+
+    let git_prog = if scenario.git_via_shell {
+        PathBuf::from("/bin/sh")
+    } else {
+        git.to_path_buf()
+    };
+    let grit_prog = if scenario.grit_via_shell {
+        PathBuf::from("/bin/sh")
+    } else {
+        grit.to_path_buf()
+    };
+
+    let git_stats = bench_tool(
+        hyperfine,
+        &git_prog,
+        &scenario.git_argv,
+        repo,
+        cfg,
+        prepare.as_deref(),
+        "git",
+    )?;
+
+    let grit_outcome = bench_tool(
+        hyperfine,
+        &grit_prog,
+        &scenario.grit_argv,
+        repo,
+        cfg,
+        prepare.as_deref(),
+        "grit",
+    );
+
+    let (grit_stats, ratio, grit_failure) = match grit_outcome {
+        Ok(stats) => {
+            let ratio = median_ratio(git_stats.median_ms, stats.median_ms);
+            (stats, ratio, None)
+        }
+        Err(err) => (
+            failed_timing_stats(),
+            0.0,
+            Some(BenchFailure {
+                kind: "command_failed".into(),
+                message: err.to_string(),
+            }),
+        ),
+    };
+
+    Ok(ScenarioResult {
+        id: scenario.id.clone(),
+        group: scenario.group.clone(),
+        fixture: scenario.fixture.clone(),
+        description: scenario.description.clone(),
+        driver: scenario.driver.into(),
+        git: git_stats,
+        grit: grit_stats,
+        ratio,
+        grit_failure,
     })
 }
 
@@ -799,7 +920,20 @@ pub fn run_prepare_stash(git: &Path) -> Result<()> {
     if let Ok(meta) = crate::campaign_prep::load_campaign_hot_path_meta(&dir) {
         crate::campaign_prep::restore_campaign_worktree_to_main(git, &dir, &meta)?;
     }
+    let mut cmd = Command::new(git);
+    cmd.args(["stash", "clear"]).current_dir(&dir);
+    cmd.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            crate::bench_env::empty_global_config_path(),
+        )
+        .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    let _ = cmd.output();
     prepare_commit_iteration(&dir, git)
+}
+
+pub fn run_prepare_diff_dirty(git: &Path) -> Result<()> {
+    crate::fixture::prepare_diff_dirty_iteration(&bench_work_dir(), git)
 }
 
 pub fn run_prepare_switch(git: &Path) -> Result<()> {

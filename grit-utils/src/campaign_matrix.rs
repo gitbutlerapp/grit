@@ -1,25 +1,30 @@
 //! Core CLI scenario matrix for one campaign fixture.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::Result;
 
-use crate::campaign_prep::{ensure_campaign_hot_path, load_campaign_hot_path_meta, restore_campaign_worktree_to_main};
+use crate::campaign_prep::{
+    ensure_campaign_hot_path, load_campaign_hot_path_meta, restore_campaign_worktree_to_main,
+};
 use crate::campaign_worktree::{
-    blame_target_path, dirty_tracked_worktree, list_tracked_files, modify_tracked_files,
+    blame_target_path, dirty_tracked_worktree, list_tracked_files,
 };
 use crate::fixture::prepare_commit_iteration;
 use crate::hot_path_fixture::HotPathMeta;
 use crate::maintenance_suite::seed_loose_objects;
 use crate::network_fixture::{ensure_campaign_bare_network_meta, file_url};
 use crate::network_suite::{ensure_network_client_repo, prepare_network_command};
+use crate::real_repo_fixture::git_env;
 use crate::real_repo_fixture::run_git;
 use crate::real_repo_fixture::scratch_root;
 use crate::scenarios::{
-    chain_shell_public, grit_log_pages_shell, run_scenario, run_scenario_prepared, Driver,
-    PrepareKind, RunConfig, Scenario, LOG_BENCH_GRIT_PAGE_COUNT,
+    chain_shell_public, grit_log_pages_shell, run_scenario, run_scenario_allow_grit_failure,
+    run_scenario_git_only_with_grit_failure, run_scenario_prepared, Driver, PrepareKind, RunConfig,
+    Scenario, LOG_BENCH_GRIT_PAGE_COUNT,
 };
-use crate::schema::ScenarioResult;
+use crate::schema::{BenchFailure, ScenarioResult};
 use crate::shell::{shell_command, shell_quote};
 
 /// One campaign fixture (bare remote + local worktree).
@@ -37,6 +42,42 @@ fn sid(fixture_id: &str, name: &str) -> String {
 
 fn sh_script(script: String) -> Vec<String> {
     vec!["-c".into(), script]
+}
+
+fn probe_grit_cli(grit: &Path, repo: &Path, args: &[&str]) -> Option<BenchFailure> {
+    let mut cmd = Command::new(grit);
+    cmd.args(args).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().ok()?;
+    if out.status.success() {
+        return None;
+    }
+    let message = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let message = if message.is_empty() {
+        format!("grit exited with {}", out.status)
+    } else {
+        message
+    };
+    Some(BenchFailure {
+        kind: "command_failed".into(),
+        message,
+    })
+}
+
+fn run_matrix_scenario(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    scenario: &Scenario,
+    repo: &Path,
+    allow_grit_failure: bool,
+) -> Result<ScenarioResult> {
+    if allow_grit_failure {
+        run_scenario_allow_grit_failure(hyperfine, git, grit, cfg, scenario, repo)
+    } else {
+        run_scenario(hyperfine, git, grit, cfg, scenario, repo)
+    }
 }
 
 /// Run the core CLI matrix for `fixture`.
@@ -57,12 +98,14 @@ pub fn run_fixture_cli_matrix(
     let _guard = CampaignCwdGuard;
 
     let mut out = Vec::new();
-    let tracked = list_tracked_files(git, &fixture.worktree)?;
+    let mut tracked = list_tracked_files(git, &fixture.worktree)?;
+    tracked.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
     let modify_count = if smoke {
         5
     } else {
         48.min(tracked.len().max(1))
     };
+    std::env::set_var("GRIT_BENCH_DIFF_DIRTY_COUNT", modify_count.to_string());
 
     dirty_tracked_worktree(git, &fixture.worktree)?;
     out.push(run_scenario(
@@ -154,8 +197,7 @@ pub fn run_fixture_cli_matrix(
         &fixture.worktree,
     )?);
 
-    modify_tracked_files(&fixture.worktree, &tracked, modify_count)?;
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -168,11 +210,12 @@ pub fn run_fixture_cli_matrix(
             grit_argv: vec!["diff".into()],
             git_argv: vec!["diff".into()],
             driver: Driver::Cli,
-            prepare_kind: None,
+            prepare_kind: Some(PrepareKind::DiffDirtyReset),
             grit_via_shell: false,
             git_via_shell: false,
         },
         &fixture.worktree,
+        false,
     )?);
     run_git(git, &fixture.worktree, &["reset", "--hard", "HEAD"])?;
     out.push(run_scenario(
@@ -279,33 +322,62 @@ pub fn run_fixture_cli_matrix(
     }
 
     let meta = ensure_campaign_hot_path(git, &fixture.worktree)?;
-    if fixture.id != "git-dot-git" {
-        out.push(run_scenario(
+    let merge_base = Scenario {
+        id: sid(fixture.id, "merge-base"),
+        group: "merge-base".into(),
+        fixture: fixture.label.clone(),
+        description: "merge-base between main tip and topic commit".into(),
+        grit_argv: vec![
+            "merge-base".into(),
+            meta.main_tip.clone(),
+            meta.pick_commit.clone(),
+        ],
+        git_argv: vec![
+            "merge-base".into(),
+            meta.main_tip.clone(),
+            meta.pick_commit.clone(),
+        ],
+        driver: Driver::Cli,
+        prepare_kind: None,
+        grit_via_shell: false,
+        git_via_shell: false,
+    };
+    if fixture.id == "git-dot-git" {
+        let grit_args = [
+            "merge-base",
+            meta.main_tip.as_str(),
+            meta.pick_commit.as_str(),
+        ];
+        if let Some(failure) = probe_grit_cli(grit, &fixture.worktree, &grit_args) {
+            out.push(run_scenario_git_only_with_grit_failure(
+                hyperfine,
+                git,
+                grit,
+                cfg,
+                &merge_base,
+                &fixture.worktree,
+                failure,
+            )?);
+        } else {
+            out.push(run_matrix_scenario(
+                hyperfine,
+                git,
+                grit,
+                cfg,
+                &merge_base,
+                &fixture.worktree,
+                false,
+            )?);
+        }
+    } else {
+        out.push(run_matrix_scenario(
             hyperfine,
             git,
             grit,
             cfg,
-            &Scenario {
-                id: sid(fixture.id, "merge-base"),
-                group: "merge-base".into(),
-                fixture: fixture.label.clone(),
-                description: "merge-base between main tip and topic commit".into(),
-                grit_argv: vec![
-                    "merge-base".into(),
-                    meta.main_tip.clone(),
-                    meta.pick_commit.clone(),
-                ],
-                git_argv: vec![
-                    "merge-base".into(),
-                    meta.main_tip.clone(),
-                    meta.pick_commit.clone(),
-                ],
-                driver: Driver::Cli,
-                prepare_kind: None,
-                grit_via_shell: false,
-                git_via_shell: false,
-            },
+            &merge_base,
             &fixture.worktree,
+            false,
         )?);
     }
 
@@ -485,10 +557,6 @@ fn append_stash_scenario(
     fixture: &CampaignFixture,
     out: &mut Vec<ScenarioResult>,
 ) -> Result<()> {
-    // git.git often hits `stash pop` conflicts after merge scenarios; skip until prepare is stronger.
-    if fixture.id == "git-dot-git" {
-        return Ok(());
-    }
     if let Ok(meta) = load_campaign_hot_path_meta(&fixture.worktree) {
         restore_campaign_worktree_to_main(git, &fixture.worktree, &meta)?;
     } else {
@@ -507,7 +575,7 @@ fn append_stash_scenario(
             vec!["stash".into(), "pop".into(), "-q".into()],
         ],
     );
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -525,6 +593,7 @@ fn append_stash_scenario(
             git_via_shell: true,
         },
         &fixture.worktree,
+        fixture.id == "git-dot-git",
     )?);
     Ok(())
 }
@@ -538,27 +607,27 @@ fn append_fsck_gc_repack(
     smoke: bool,
     out: &mut Vec<ScenarioResult>,
 ) -> Result<()> {
-    if fixture.id != "git-dot-git" {
-        out.push(run_scenario(
-            hyperfine,
-            git,
-            grit,
-            cfg,
-            &Scenario {
-                id: sid(fixture.id, "fsck"),
-                group: "maintenance".into(),
-                fixture: fixture.label.clone(),
-                description: "fsck --no-dangling on worktree".into(),
-                grit_argv: vec!["fsck".into(), "--no-dangling".into()],
-                git_argv: vec!["fsck".into(), "--no-dangling".into()],
-                driver: Driver::Cli,
-                prepare_kind: None,
-                grit_via_shell: false,
-                git_via_shell: false,
-            },
-            &fixture.worktree,
-        )?);
-    }
+    let fsck_allows_grit_failure = fixture.id == "git-dot-git";
+    out.push(run_matrix_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "fsck"),
+            group: "maintenance".into(),
+            fixture: fixture.label.clone(),
+            description: "fsck --no-dangling on worktree".into(),
+            grit_argv: vec!["fsck".into(), "--no-dangling".into()],
+            git_argv: vec!["fsck".into(), "--no-dangling".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+        fsck_allows_grit_failure,
+    )?);
 
     if smoke {
         return Ok(());

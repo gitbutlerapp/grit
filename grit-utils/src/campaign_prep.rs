@@ -64,7 +64,11 @@ fn current_branch(git: &Path, repo: &Path) -> Result<String> {
 }
 
 /// Reset the campaign worktree to a clean checkout of `main_branch` at `base_commit`.
-pub fn restore_campaign_worktree_to_main(git: &Path, repo: &Path, meta: &HotPathMeta) -> Result<()> {
+pub fn restore_campaign_worktree_to_main(
+    git: &Path,
+    repo: &Path,
+    meta: &HotPathMeta,
+) -> Result<()> {
     run_git_auth(git, repo, &["checkout", "-f", &meta.main_branch])?;
     run_git_auth(git, repo, &["reset", "--hard", &meta.base_commit])?;
     run_git_auth(

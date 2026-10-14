@@ -192,6 +192,27 @@ pub fn prepare_restore_iteration(dir: &Path) -> Result<()> {
 }
 
 /// Modify ~20% of tracked files and reset the index to HEAD with **git** (for `add` benchmarks).
+/// Reset the worktree and apply a deterministic dirty diff (campaign `diff-dirty` hyperfine prepare).
+pub fn prepare_diff_dirty_iteration(dir: &Path, git: &Path) -> Result<()> {
+    let count = std::env::var("GRIT_BENCH_DIFF_DIRTY_COUNT")
+        .context("GRIT_BENCH_DIFF_DIRTY_COUNT")?
+        .parse::<usize>()
+        .context("parse GRIT_BENCH_DIFF_DIRTY_COUNT")?;
+    run_git(git, dir, &["reset", "--hard", "HEAD"])?;
+    run_git(
+        git,
+        dir,
+        &["clean", "-fd", "-e", ".grit-bench-hot-path.json"],
+    )?;
+    let mut rel = crate::campaign_worktree::list_tracked_files(git, dir)?
+        .into_iter()
+        .filter(|p| p.to_string_lossy() != ".gitmodules")
+        .collect::<Vec<_>>();
+    rel.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+    crate::campaign_worktree::modify_tracked_files(dir, &rel, count)?;
+    Ok(())
+}
+
 pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     let files = tracked_worktree_files(git, dir)?;
     let modify_count = (files.len() / 5).max(1);

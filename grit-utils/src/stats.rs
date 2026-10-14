@@ -22,6 +22,19 @@ pub fn timing_from_hyperfine(entry: &HyperfineResultEntry) -> TimingStats {
     }
 }
 
+/// Placeholder stats when the grit side did not complete (documented campaign gaps).
+pub fn failed_timing_stats() -> TimingStats {
+    TimingStats {
+        mean_ms: 0.0,
+        median_ms: 0.0,
+        stddev_ms: 0.0,
+        min_ms: 0.0,
+        max_ms: 0.0,
+        runs_ms: Vec::new(),
+        peak_rss_bytes: None,
+    }
+}
+
 /// Ratio of grit median to git median.
 pub fn median_ratio(git_median_ms: f64, grit_median_ms: f64) -> f64 {
     if git_median_ms <= 0.0 {
