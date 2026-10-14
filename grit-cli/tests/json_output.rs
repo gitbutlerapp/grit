@@ -340,7 +340,14 @@ fn status_json_behind_and_diverged_match_git() -> TestResult {
 
     system_git_ok(
         scratch.path(),
-        &["clone", "-q", "-b", "main", &path_arg(&remote), &path_arg(&clone)],
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "main",
+            &path_arg(&remote),
+            &path_arg(&clone),
+        ],
     );
 
     write_file(&upstream.join("two.txt"), "2\n");

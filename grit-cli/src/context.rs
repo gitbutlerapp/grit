@@ -177,17 +177,47 @@ pub fn commits_ahead_of(
     Ok(AheadOfTarget { total, commits })
 }
 
-/// Symmetric ahead/behind counts between `head` and `target` (merge-base relative).
+/// Ahead/behind vs `target` plus bounded newest-ahead commit summaries for status.
+#[derive(Debug, Clone)]
+pub struct AheadBehindOfTarget {
+    pub ahead: usize,
+    pub behind: usize,
+    pub commits: Vec<CommitSummary>,
+}
+
+/// Symmetric ahead/behind between `head` and `target`, with a bounded ahead shortlog.
 ///
-/// `ahead` is commits reachable from `head` but not `target`; `behind` is the converse.
+/// Uses a streaming rev walk (no full ancestor closures). When one tip is an ancestor of
+/// the other, the unnecessary direction is skipped.
 pub fn commits_ahead_behind_of(
     repo: &Repository,
     head: ObjectId,
     target: ObjectId,
-) -> Result<(usize, usize)> {
-    Ok(grit_lib::revwalk::merge_base::count_symmetric_ahead_behind(
-        repo, head, target,
-    )?)
+    summary_limit: usize,
+) -> Result<AheadBehindOfTarget> {
+    let (ahead, behind, oids) = grit_lib::revwalk::merge_base::ahead_behind_of_target_commits(
+        repo,
+        head,
+        target,
+        summary_limit,
+    )?;
+    let mut commits = Vec::with_capacity(oids.len());
+    for oid in oids {
+        let commit = read_commit(repo, &oid)?;
+        let (author, timestamp) = author_and_time(&commit.author);
+        commits.push(CommitSummary {
+            oid,
+            subject: subject_line(&commit.message),
+            author,
+            timestamp,
+            author_date: rfc3339_from_identity_when(identity_when_suffix(&commit.author)),
+        });
+    }
+    Ok(AheadBehindOfTarget {
+        ahead,
+        behind,
+        commits,
+    })
 }
 
 /// Parsed fields from a Git commit identity line (`Name <email> <epoch> <tz>`).

@@ -364,11 +364,54 @@ pub fn count_symmetric_ahead_behind(
     local: ObjectId,
     other: ObjectId,
 ) -> Result<(usize, usize)> {
-    let left = ancestor_closure(repo, local)?;
-    let right = ancestor_closure(repo, other)?;
-    let ahead = left.difference(&right).count();
-    let behind = right.difference(&left).count();
+    let (ahead, behind, _) = ahead_behind_of_target_commits(repo, local, other, 0)?;
     Ok((ahead, behind))
+}
+
+/// Symmetric ahead/behind between `head` and `target`, plus bounded newest-ahead OIDs.
+///
+/// Matches `git rev-list --left-right --count HEAD...TARGET` for the counts. The returned
+/// OID list contains up to `retain_newest_ahead` commits reachable from `head` but not
+/// from `target` (newest first), without materializing full ancestor closures.
+///
+/// # Errors
+///
+/// Propagates object read and parse errors from commit traversal.
+pub fn ahead_behind_of_target_commits(
+    repo: &Repository,
+    head: ObjectId,
+    target: ObjectId,
+    retain_newest_ahead: usize,
+) -> Result<(usize, usize, Vec<ObjectId>)> {
+    if head == target {
+        return Ok((0, 0, Vec::new()));
+    }
+    let target_is_ancestor = is_ancestor(repo, target, head)?;
+    let head_is_ancestor = is_ancestor(repo, head, target)?;
+
+    let (ahead, ahead_oids) = if head_is_ancestor && !target_is_ancestor {
+        (0, Vec::new())
+    } else {
+        walk_commits_reachable_excluding_ancestors_of(
+            repo,
+            std::slice::from_ref(&head),
+            &[target],
+            ReachableWalkLimit::CountAllRetainNewest(retain_newest_ahead),
+        )?
+    };
+
+    let behind = if target_is_ancestor && !head_is_ancestor {
+        0
+    } else {
+        walk_commits_reachable_excluding_ancestors_of(
+            repo,
+            std::slice::from_ref(&target),
+            &[head],
+            ReachableWalkLimit::CountAllRetainNewest(0),
+        )?
+        .0
+    };
+    Ok((ahead, behind, ahead_oids))
 }
 
 /// Commits reachable from `tips` that are not ancestors of any `hide` tip, in committer-date order
@@ -1300,6 +1343,10 @@ mod tests {
         let (ahead, behind) = count_symmetric_ahead_behind(&repo, c3, c1)?;
         assert_eq!(ahead, 2);
         assert_eq!(behind, 0);
+        let (ahead2, behind2, retained) = ahead_behind_of_target_commits(&repo, c3, c1, 1)?;
+        assert_eq!((ahead2, behind2), (2, 0));
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0], c3);
         let idx = branch_base_for_tip(&repo, c3, &[c1, c2])?;
         assert!(idx.is_some());
         Ok(())

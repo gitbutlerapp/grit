@@ -13364,6 +13364,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::merge_base::ReachableWalkS
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::merge_base::ReachableWalkState
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::merge_base::ReachableWalkState
 pub fn grit_lib::revwalk::merge_base::ahead_of_target_commits(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, usize) -> grit_lib::error::Result<(usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
+pub fn grit_lib::revwalk::merge_base::ahead_behind_of_target_commits(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, usize) -> grit_lib::error::Result<(usize, usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub fn grit_lib::revwalk::merge_base::ancestor_closure(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::merge_base::branch_base_for_tip(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<core::option::Option<usize>>
 pub fn grit_lib::revwalk::merge_base::commits_reachable_excluding_ancestors_of(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], core::option::Option<usize>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>

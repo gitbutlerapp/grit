@@ -453,31 +453,27 @@ fn resolve_header(
                     in_progress_header.unwrap_or(HeaderKind::NoTarget),
                 ),
                 Some(target) => {
-                    let (ahead_total, behind_total) =
-                        context::commits_ahead_behind_of(repo, *head_oid, target.oid)?;
-                    let ahead = if ahead_total > 0 {
-                        context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?
-                    } else {
-                        context::AheadOfTarget {
-                            total: 0,
-                            commits: Vec::new(),
-                        }
-                    };
-                    debug_assert_eq!(ahead.total, ahead_total);
-                    let header = in_progress_header.unwrap_or(match (ahead_total, behind_total) {
-                        (0, 0) => HeaderKind::EvenWith,
-                        (a, 0) if a > 0 => HeaderKind::AheadOfTarget,
-                        (0, b) if b > 0 => HeaderKind::BehindTarget,
-                        (_, _) => HeaderKind::Diverged,
-                    });
+                    let tracking = context::commits_ahead_behind_of(
+                        repo,
+                        *head_oid,
+                        target.oid,
+                        SHORTLOG_LIMIT,
+                    )?;
+                    let header =
+                        in_progress_header.unwrap_or(match (tracking.ahead, tracking.behind) {
+                            (0, 0) => HeaderKind::EvenWith,
+                            (a, 0) if a > 0 => HeaderKind::AheadOfTarget,
+                            (0, b) if b > 0 => HeaderKind::BehindTarget,
+                            (_, _) => HeaderKind::Diverged,
+                        });
                     (
                         Some(short_name.clone()),
                         false,
                         Some(head_oid.to_hex()),
                         Some(target.display_name),
-                        ahead_total,
-                        behind_total,
-                        ahead.commits,
+                        tracking.ahead,
+                        tracking.behind,
+                        tracking.commits,
                         header,
                     )
                 }
