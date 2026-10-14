@@ -2020,16 +2020,6 @@ impl ConfigSet {
         }
     }
 
-    /// Loose-object count before `git gc` runs auto packing (`gc.auto`, Git default 6700).
-    #[must_use]
-    pub(crate) fn gc_auto_loose_limit(&self) -> usize {
-        match self.get_i64("gc.auto") {
-            None => 6700,
-            Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(6700),
-            Some(Ok(_)) | Some(Err(_)) => 6700,
-        }
-    }
-
     /// Pack count above which `git gc` repacks all packs (`gc.autoPackLimit`, Git default 50).
     #[must_use]
     pub fn gc_auto_pack_limit(&self) -> usize {
@@ -4335,9 +4325,8 @@ mod pack_object_config_tests {
     }
 
     #[test]
-    fn gc_auto_limits_from_config() {
-        let set = set_from_snippet("[gc]\n\tauto = 100\n\tautoPackLimit = 3\n");
-        assert_eq!(set.gc_auto_loose_limit(), 100);
+    fn gc_auto_pack_limit_from_config() {
+        let set = set_from_snippet("[gc]\n\tautoPackLimit = 3\n");
         assert_eq!(set.gc_auto_pack_limit(), 3);
     }
 }
