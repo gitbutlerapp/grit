@@ -25,7 +25,7 @@ The status screen is your home base. It shows, from top to bottom:
 
 Each change has a label: `new`, `modified`, `deleted`, `renamed`, `copied`, `type changed` or `conflict`.
 
-Paths are shown relative to the directory you run `grit` from. Names that contain C0 control characters (including ESC and BEL) are C-quoted the same way as `git status --short` (`core.quotepath`), so a malicious repository cannot inject terminal escape sequences into human or `--markdown` output. `--json` path fields stay unquoted UTF-8 strings (JSON escapes controls as `\uXXXX`).
+Paths are shown relative to the directory you run `grit` from. Valid UTF-8 file names print as-is in human and `--markdown` output (unlike Git’s default `core.quotepath=true`, which octal-escapes non-ASCII bytes). Names that contain C0 control characters (including ESC and BEL) are still C-quoted so a malicious repository cannot inject terminal escape sequences. Set `core.quotepath=true` in config if you want Git-style octal escaping for all non-ASCII bytes. `--json` path fields are always unquoted UTF-8 strings (JSON escapes controls as `\uXXXX`).
 
 ### The target branch
 
