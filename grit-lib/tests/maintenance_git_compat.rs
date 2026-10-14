@@ -855,6 +855,45 @@ fn repack_consolidates_multiple_packs_like_git_repack_ad() {
 }
 
 #[test]
+fn gc_skips_repack_when_single_pack_and_no_loose_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let git_dir = dir.path().join(".git");
+    assert_eq!(git_pack_count(&git_dir), 1);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let grit_git = grit_copy.path().join(".git");
+    let pack_dir = grit_git.join("objects/pack");
+    let pack_before = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .expect("pack file")
+        .path();
+    let pack_bytes_before = std::fs::read(&pack_before).expect("read pack");
+
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+
+    let pack_after = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .expect("pack file")
+        .path();
+    assert_eq!(
+        pack_bytes_before,
+        std::fs::read(&pack_after).expect("read pack after gc"),
+        "grit gc must skip repack on a single-pack repo with no loose objects"
+    );
+    git_fsck(grit_copy.path(), true);
+}
+
+#[test]
 fn gc_autopacklimit_consolidates_packs_like_git() {
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);

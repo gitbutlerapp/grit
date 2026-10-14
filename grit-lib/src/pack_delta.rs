@@ -699,10 +699,15 @@ fn prepare_whole(
             });
         }
     }
-    let zlib = zlib_compress(&entry.data)?;
+    let payload = if entry.data.is_empty() {
+        odb.read(&entry.oid)?.data
+    } else {
+        entry.data.clone()
+    };
+    let zlib = zlib_compress(&payload)?;
     Ok(PreparedEntry {
         body: PreparedBody::Zlib(zlib),
-        payload_len: entry.data.len(),
+        payload_len: payload.len(),
         whole_kind: Some(entry.kind),
     })
 }
@@ -729,18 +734,23 @@ fn prepare_delta(
     let delta = if let Some(reused) = &entry.reused_delta {
         reused.clone()
     } else {
+        let target_data = if entry.data.is_empty() {
+            odb.read(&entry.oid)?.data
+        } else {
+            entry.data.clone()
+        };
         let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
             d.to_vec()
         } else {
             odb.read(&base_oid)?.data
         };
-        if entry.data.starts_with(&base_data) && entry.data.len() > base_data.len() {
-            encode_prefix_extension_delta(&base_data, &entry.data)?
+        if target_data.starts_with(&base_data) && target_data.len() > base_data.len() {
+            encode_prefix_extension_delta(&base_data, &target_data)?
         } else {
             let index = delta_indices
                 .get(&base_oid)
                 .ok_or_else(|| Error::CorruptObject("missing delta index for pack base".into()))?;
-            index.encode(&entry.data, 0).ok_or_else(|| {
+            index.encode(&target_data, 0).ok_or_else(|| {
                 Error::CorruptObject("failed to encode pack delta for object".into())
             })?
         }

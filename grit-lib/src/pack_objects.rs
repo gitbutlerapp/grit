@@ -83,6 +83,23 @@ impl PackBuildOptions {
         }
     }
 
+    /// Full repack of an on-disk repository: reuse existing pack bytes, no new delta search.
+    #[must_use]
+    pub fn for_repack_rewrite(cfg: Option<&crate::config::ConfigSet>) -> Self {
+        let max_depth = Self::window_and_depth_from_config(cfg).1;
+        Self {
+            thin: false,
+            delta: true,
+            window: 0,
+            max_depth,
+            use_ofs_delta: true,
+            reuse_deltas: max_depth > 0,
+            reuse_objects: true,
+            use_bitmaps: true,
+            ..Default::default()
+        }
+    }
+
     /// Production pack settings for an in-process local push (thin delta pack).
     #[must_use]
     pub fn for_local_push(cfg: Option<&crate::config::ConfigSet>) -> Self {
@@ -416,11 +433,15 @@ pub fn build_pack_from_send_list(
     opts: &PackBuildOptions,
     blob_name_hashes: &HashMap<ObjectId, u32>,
 ) -> Result<Vec<u8>> {
-    if !opts.delta {
-        return serialize_pack(odb, send, opts);
-    }
-    let plan = plan_deltas(odb, send, have_closure, opts, blob_name_hashes, Some(1))?;
-    crate::pack_delta::serialize_pack_with_deltas(odb, &plan.entries, opts, Some(1))
+    build_pack_from_send_list_with_parallel_threads(
+        odb,
+        send,
+        have_closure,
+        opts,
+        blob_name_hashes,
+        None,
+        None,
+    )
 }
 
 /// Like [`build_pack`] with an explicit pack-write worker override for tests and embedders.
@@ -770,12 +791,14 @@ fn plan_deltas(
     blob_name_hashes: &HashMap<ObjectId, u32>,
     search_threads: Option<usize>,
 ) -> Result<DeltaPlan> {
-    // Load every object once. The plan keeps payloads so the serializer needn't
-    // re-read; for the typical pack sizes this is the same data the whole-object
-    // path would touch anyway.
+    // Reuse-only repacks (`window == 0`) stream from disk at serialize time; avoid
+    // materializing every payload during planning.
+    let lazy_payloads = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
     let mut objects: HashMap<ObjectId, Object> = HashMap::new();
-    for &oid in send {
-        objects.insert(oid, odb.read(&oid)?);
+    if !lazy_payloads {
+        for &oid in send {
+            objects.insert(oid, odb.read(&oid)?);
+        }
     }
 
     let in_pack: HashSet<ObjectId> = send.iter().copied().collect();
@@ -804,7 +827,13 @@ fn plan_deltas(
             &objects,
         )?;
         for (t, (base, size, pack_bytes, zlib_start, zlib_end)) in candidates {
-            if objects[&t].data.is_empty() {
+            if lazy_payloads {
+                if let Ok(info) = odb.read_info(&t) {
+                    if info.kind == ObjectKind::Blob && info.size == 0 {
+                        continue;
+                    }
+                }
+            } else if objects[&t].data.is_empty() {
                 continue;
             }
             if base != t && in_pack.contains(&base) && islands.in_same_island(&t, &base) {
@@ -940,11 +969,17 @@ fn plan_deltas(
     // the base has not yet been written.
     let mut entries: Vec<PlannedEntry> = Vec::with_capacity(send.len());
     for &oid in send {
-        let obj = &objects[&oid];
+        let (kind, data) = if lazy_payloads {
+            let info = odb.read_info(&oid)?;
+            (info.kind, Vec::new())
+        } else {
+            let obj = &objects[&oid];
+            (obj.kind, obj.data.clone())
+        };
         entries.push(PlannedEntry {
             oid,
-            kind: obj.kind,
-            data: obj.data.clone(),
+            kind,
+            data,
             base: delta_to_base.get(&oid).copied(),
             reused_delta: None,
             reused_delta_zlib: reused_zlib.get(&oid).cloned(),
