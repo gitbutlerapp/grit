@@ -644,18 +644,6 @@ fn copy_objects_for_local_fetch(
 
     let remote_objects = remote_git_dir.join("objects");
     let local_objects = local_git_dir.join("objects");
-    // Initial fetch into an empty repo: link packfiles before walking the object graph.
-    if !pack_build.thin && try_pack_link && haves.is_empty() && !wants.is_empty() {
-        progress.start(ProgressPhase::CopyingObjects, Some(wants.len() as u64));
-        if try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, wants, false)? {
-            progress.set(wants.len() as u64);
-            progress.finish();
-            let oids = linked_object_set(local_odb, wants);
-            let transfer = transfer_stats_from_pack_dir(&local_objects_pack_dir(local_git_dir))?;
-            return Ok((oids, transfer));
-        }
-        progress.finish();
-    }
 
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
     let send = collect_reachable_excluding_peer(
