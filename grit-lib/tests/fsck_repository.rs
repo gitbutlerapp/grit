@@ -2,9 +2,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::fs;
 use std::process::Command;
 
 use grit_lib::index::Index;
+use grit_lib::objects::pack::{read_pack_index, write_v2_pack_index_with_trailer};
 use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOptions};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
@@ -437,6 +439,74 @@ fn hash_mismatch() {
         .issues
         .iter()
         .any(|i| matches!(i, FsckIssue::HashMismatch { .. })));
+}
+
+#[test]
+fn idx_oid_content_mismatch_returns_fsck_report_not_error() {
+    let (dir, repo) = init_repo();
+    let head = one_commit(&repo);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let pack_dir = dir.path().join(".git/objects/pack");
+    let idx_path = fs::read_dir(&pack_dir)
+        .expect("rd")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("idx");
+    let pack_path = idx_path.with_extension("pack");
+    let idx = read_pack_index(&idx_path).expect("read idx");
+    let pack_bytes = fs::read(&pack_path).expect("read pack");
+    let trailer = &pack_bytes[pack_bytes.len().saturating_sub(20)..];
+    let mut rows: Vec<(ObjectId, u64, u32)> = idx
+        .iter()
+        .map(|e| {
+            (
+                ObjectId::from_bytes(e.oid()).expect("oid"),
+                e.offset(),
+                e.crc32().unwrap_or(0),
+            )
+        })
+        .collect();
+    let pos = rows
+        .iter()
+        .position(|(oid, _, _)| *oid == head)
+        .expect("head commit in pack index");
+    let mut bogus_bytes: [u8; 20] = head.as_bytes().try_into().expect("sha1 oid");
+    bogus_bytes[19] ^= 0x01;
+    let bogus_oid = ObjectId::from_bytes(&bogus_bytes).expect("bogus oid");
+    assert_eq!(bogus_bytes[0], head.as_bytes()[0]);
+    rows[pos].0 = bogus_oid;
+    rows.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    for path in [&idx_path, &pack_path] {
+        let mut perms = fs::metadata(path).expect("meta").permissions();
+        perms.set_readonly(false);
+        fs::set_permissions(path, perms).expect("chmod");
+    }
+    write_v2_pack_index_with_trailer(&idx_path, &rows, trailer, 20, None).expect("rewrite idx");
+    repo.odb().invalidate_packs();
+
+    let git_text = git(dir.path(), &["fsck", "--no-dangling"]);
+    assert!(
+        git_text.to_lowercase().contains("corrupt")
+            || git_text.contains("badPack")
+            || git_text.contains("missing"),
+        "{git_text}"
+    );
+    let opts = FsckOptions::full_repository(false).with_check_dangling(false);
+    let report = grit_fsck(&repo, &opts);
+    assert!(
+        has_msg_id(&report, "badPackChecksum") || has_msg_id(&report, "missingObject"),
+        "expected pack or missing integrity issues: {:?}",
+        report.issues
+    );
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::PackChecksum { .. } | FsckIssue::MissingObject { .. })),
+        "{:?}",
+        report.issues
+    );
 }
 
 #[test]
@@ -901,5 +971,3 @@ fn linked_worktree_head_reflog_roots_match_git_fsck() {
         "dangling mismatch git={git_set:?} grit={grit_set:?}"
     );
 }
-
-use std::fs;

@@ -28,7 +28,7 @@ mod roots;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::commit_graph_file::CommitGraphChain;
 use crate::config::ConfigSet;
@@ -685,6 +685,29 @@ enum PackObjectCheckOutcome {
     Issue(FsckIssue),
 }
 
+fn pack_object_read_issue(oid: ObjectId, pack: &Path, err: Error) -> FsckIssue {
+    match err {
+        Error::CorruptObject(msg)
+            if msg.contains("checksum") && msg.contains("index") =>
+        {
+            FsckIssue::IdxMismatch {
+                pack: pack.to_path_buf(),
+            }
+        }
+        Error::CorruptObject(_) => FsckIssue::PackChecksum {
+            pack: pack.to_path_buf(),
+        },
+        Error::ObjectNotFound(_) => FsckIssue::MissingObject {
+            oid,
+            referenced_by: ObjectId::zero(),
+        },
+        other => FsckIssue::BadObject {
+            oid,
+            error: FsckError::new("corruptObject", other.to_string()),
+        },
+    }
+}
+
 fn apply_dot_checks(
     dot: &mut DotFsckTracker,
     issues: &mut Vec<FsckIssue>,
@@ -806,8 +829,14 @@ fn verify_pack_objects(
         let pack_bytes = prep.pack_bytes;
         let idx = prep.idx;
         let results = match try_par_map::<_, _, String, _>(&oids, par_opts, object_count, |oid| {
-            let obj = read_object_from_pack_bytes(&pack_bytes, &idx, oid.as_bytes())
-                .map_err(|e| e.to_string())?;
+            let obj = match read_object_from_pack_bytes(&pack_bytes, &idx, oid.as_bytes()) {
+                Ok(obj) => obj,
+                Err(err) => {
+                    return Ok(PackObjectCheckOutcome::Issue(pack_object_read_issue(
+                        *oid, &pack_path, err,
+                    )));
+                }
+            };
             if let Err(err) = fsck_object(obj.kind, &obj.data, fsck_opts) {
                 return Ok(PackObjectCheckOutcome::Issue(FsckIssue::BadObject {
                     oid: *oid,
@@ -1056,13 +1085,13 @@ fn enqueue(
 }
 
 fn link_kind_matches(links: &ValidatedObjectLinks, expected: ObjectKind) -> bool {
-    match (links, expected) {
-        (ValidatedObjectLinks::Commit { .. }, ObjectKind::Commit) => true,
-        (ValidatedObjectLinks::Tree(_), ObjectKind::Tree) => true,
-        (ValidatedObjectLinks::Tag { .. }, ObjectKind::Tag) => true,
-        (ValidatedObjectLinks::Blob, ObjectKind::Blob) => true,
-        _ => false,
-    }
+    matches!(
+        (links, expected),
+        (ValidatedObjectLinks::Commit { .. }, ObjectKind::Commit)
+            | (ValidatedObjectLinks::Tree(_), ObjectKind::Tree)
+            | (ValidatedObjectLinks::Tag { .. }, ObjectKind::Tag)
+            | (ValidatedObjectLinks::Blob, ObjectKind::Blob)
+    )
 }
 
 enum ChildKindProbe {
