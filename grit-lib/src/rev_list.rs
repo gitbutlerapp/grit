@@ -989,9 +989,18 @@ pub fn rev_list(
         return Ok(rev_list_result_from_commits(ordered));
     }
 
+    let use_dense_path_limit = !options.paths.is_empty()
+        && !options.full_history
+        && !options.ancestry_path
+        && !options.simplify_merges;
+
     let mut traversal_missing = Vec::new();
     let mut traversal_missing_seen = HashSet::new();
-    let (mut included, discovery_order) = if include.is_empty() {
+    let (mut included, mut discovery_order) = if include.is_empty() {
+        (HashSet::new(), Vec::new())
+    } else if use_dense_path_limit {
+        // Dense path limiting walks from tips and prunes TREESAME merges; a full
+        // `walk_closure_ordered` over every reachable commit first only duplicates work.
         (HashSet::new(), Vec::new())
     } else if options.exclude_promisor_objects {
         walk_closure_ordered_excluding(&mut graph, &include, &excluded_promisor)?
@@ -1086,36 +1095,22 @@ pub fn rev_list(
     };
 
     let mut dense_path_limited = false;
-    let dense_traversable: HashSet<ObjectId> = if !options.paths.is_empty()
-        && !options.full_history
-        && !options.ancestry_path
-        && !options.simplify_merges
-    {
-        let traversable = included.clone();
-        // Consult the Bloom filter over the full reachable set *before* dense limiting prunes the
-        // traversal. Git loads a first-parent Bloom filter for every commit its `limit_list` walk
-        // reaches — including those simplified away by TREESAME merges — which both feeds the
-        // `GIT_TRACE2_PERF` statistics and surfaces the reader's corrupt-graph integrity warnings.
-        // Consulting only the pruned/selected set would undercount the statistics (e.g. side-branch
-        // commits hidden by a TREESAME merge) and miss warnings for commits that don't touch the
-        // path. This runs whenever a Bloom chain is present, independent of statistics collection.
-        if bloom_chain.is_some() {
-            let bloom_ctx = DenseBloomCtx {
-                chain: bloom_chain.as_ref(),
-                read_changed_paths: bloom_read_changed,
-                changed_paths_version: bloom_version,
-                stats: options.bloom_stats.as_ref(),
-                cwd: bloom_cwd.as_deref(),
-            };
-            consult_dense_bloom_filters(
-                repo,
-                &mut graph,
-                &traversable,
-                &options.paths,
-                &bloom_ctx,
-            )?;
-        }
-        included = walk_dense_path_limited_closure(
+    let dense_traversable: HashSet<ObjectId> = if use_dense_path_limit {
+        let bloom_ctx = DenseBloomCtx {
+            chain: bloom_chain.as_ref(),
+            read_changed_paths: bloom_read_changed,
+            changed_paths_version: bloom_version,
+            stats: options.bloom_stats.as_ref(),
+            cwd: bloom_cwd.as_deref(),
+        };
+        let visible_budget = options.max_count.and_then(|max| {
+            if options.count {
+                None
+            } else {
+                Some(options.skip.saturating_add(max))
+            }
+        });
+        let (selected, walked, walk_order) = walk_dense_path_limited_closure(
             repo,
             &mut graph,
             &include,
@@ -1123,9 +1118,15 @@ pub fn rev_list(
             &options.paths,
             options.sparse,
             options.show_pulls,
+            Some(&bloom_ctx),
+            visible_budget,
         )?;
+        included = selected;
+        if discovery_order.is_empty() {
+            discovery_order = walk_order;
+        }
         dense_path_limited = true;
-        traversable
+        walked
     } else {
         HashSet::new()
     };
@@ -1229,7 +1230,8 @@ pub fn rev_list(
     };
 
     // Path filtering: keep only commits that modify given paths.
-    if !options.paths.is_empty() {
+    let dense_path_retain_done = dense_path_limited && !path_effective_full && !options.sparse;
+    if !options.paths.is_empty() && !dense_path_retain_done {
         let paths = &options.paths;
         // The dense path-limited walk above already performed the first-parent Bloom precheck and
         // recorded its `GIT_TRACE2_PERF` statistics for every visited commit (matching Git's single
@@ -4627,60 +4629,35 @@ fn commit_touches_paths(
 ) -> Result<bool> {
     let commit = load_commit(repo, oid)?;
     let parents = graph.parents_of(oid)?;
-    let commit_entries = flatten_tree_with_mode(repo, commit.tree, "")?;
-    let commit_map: HashMap<String, (ObjectId, u32)> = commit_entries.into_iter().collect();
+    let bloom_ctx = bloom_chain.map(|chain| DenseBloomCtx {
+        chain: Some(chain),
+        read_changed_paths,
+        changed_paths_version,
+        stats: bloom_stats,
+        cwd: bloom_cwd,
+    });
 
     // Root commit: include only when any requested pathspec exists.
     if parents.is_empty() {
         if sparse {
             return Ok(true);
         }
-        let precompose = repo.pathspec_precompose_enabled();
-        let ctx = crate::pathspec::PathspecMatchContext {
-            is_directory: false,
-            is_git_submodule: false,
-            precompose_paths: precompose,
-        };
-        return Ok(commit_map
-            .keys()
-            .any(|path| crate::pathspec::matches_pathspec_list_with_context(path, paths, ctx)));
+        return tree_has_pathspec_match(repo, commit.tree, "", paths);
     }
 
     // Single-parent commit: include only when requested paths changed.
     if parents.len() == 1 {
-        let mut bloom_ret = BloomPrecheck::Inapplicable;
-        if let Some(chain) = bloom_chain {
-            bloom_ret = chain.bloom_precheck_for_paths(
-                repo.odb(),
-                oid,
-                paths,
-                bloom_cwd,
-                changed_paths_version,
-                read_changed_paths,
-            )?;
-            if let Some(stats) = bloom_stats {
-                if let Ok(mut g) = stats.lock() {
-                    g.record_precheck(bloom_ret);
-                }
-            }
-            if bloom_ret == BloomPrecheck::DefinitelyNot {
-                return Ok(false);
-            }
-        }
-
         let parent = load_commit(repo, parents[0])?;
-        let parent_map: HashMap<String, (ObjectId, u32)> =
-            flatten_tree_with_mode(repo, parent.tree, "")?
-                .into_iter()
-                .collect();
-        let differs = path_differs_for_specs(&commit_map, &parent_map, paths);
-        if bloom_ret == BloomPrecheck::Maybe && !differs {
-            if let Some(stats) = bloom_stats {
-                if let Ok(mut g) = stats.lock() {
-                    g.record_false_positive();
-                }
-            }
-        }
+        let differs = trees_differ_for_pathspecs_with_bloom(
+            repo,
+            commit.tree,
+            parent.tree,
+            "",
+            paths,
+            true,
+            bloom_ctx.as_ref(),
+            oid,
+        )?;
         if differs {
             return Ok(true);
         }
@@ -4697,49 +4674,19 @@ fn commit_touches_paths(
     let mut differs_any = false;
     let mut first_parent_differs = false;
     for (nth, parent_oid) in parents.iter().enumerate() {
-        // Git consults the changed-path Bloom filter only when comparing against the
-        // first parent (`nth_parent == 0` in `rev_compare_tree`). This applies to merge
-        // commits too: a `DefinitelyNot` result short-circuits the first-parent tree diff
-        // and is recorded in the Bloom statistics counters just like for single-parent
-        // commits.
-        let mut bloom_ret = BloomPrecheck::Inapplicable;
-        if nth == 0 {
-            if let Some(chain) = bloom_chain {
-                bloom_ret = chain.bloom_precheck_for_paths(
-                    repo.odb(),
-                    oid,
-                    paths,
-                    bloom_cwd,
-                    changed_paths_version,
-                    read_changed_paths,
-                )?;
-                if let Some(stats) = bloom_stats {
-                    if let Ok(mut g) = stats.lock() {
-                        g.record_precheck(bloom_ret);
-                    }
-                }
-            }
-        }
-
-        let differs = if bloom_ret == BloomPrecheck::DefinitelyNot {
-            false
-        } else {
-            let parent = load_commit(repo, *parent_oid)?;
-            let parent_map: HashMap<String, (ObjectId, u32)> =
-                flatten_tree_with_mode(repo, parent.tree, "")?
-                    .into_iter()
-                    .collect();
-            path_differs_for_specs(&commit_map, &parent_map, paths)
-        };
+        let parent = load_commit(repo, *parent_oid)?;
+        let differs = trees_differ_for_pathspecs_with_bloom(
+            repo,
+            commit.tree,
+            parent.tree,
+            "",
+            paths,
+            nth == 0,
+            bloom_ctx.as_ref(),
+            oid,
+        )?;
         if nth == 0 {
             first_parent_differs = differs;
-            if bloom_ret == BloomPrecheck::Maybe && !differs {
-                if let Some(stats) = bloom_stats {
-                    if let Ok(mut g) = stats.lock() {
-                        g.record_false_positive();
-                    }
-                }
-            }
         }
         if differs {
             differs_any = true;
@@ -4891,19 +4838,26 @@ fn walk_dense_path_limited_closure(
     paths: &[String],
     sparse: bool,
     show_pulls: bool,
-) -> Result<HashSet<ObjectId>> {
+    bloom: Option<&DenseBloomCtx<'_>>,
+    visible_budget: Option<usize>,
+) -> Result<(HashSet<ObjectId>, HashSet<ObjectId>, Vec<ObjectId>)> {
     let mut walked = HashSet::new();
     let mut selected = HashSet::new();
+    let mut walk_order = Vec::new();
     let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
 
     while let Some(oid) = queue.pop_front() {
         if excluded.contains(&oid) || !walked.insert(oid) {
             continue;
         }
+        walk_order.push(oid);
 
-        let action = dense_path_limited_action(repo, graph, oid, paths, sparse, show_pulls)?;
+        let action = dense_path_limited_action(repo, graph, oid, paths, sparse, show_pulls, bloom)?;
         if action.visible {
             selected.insert(oid);
+            if visible_budget.is_some_and(|need| selected.len() >= need) {
+                break;
+            }
         }
 
         for parent in action.parents_to_walk {
@@ -4913,80 +4867,7 @@ fn walk_dense_path_limited_closure(
         }
     }
 
-    Ok(selected)
-}
-
-/// Consult the changed-path Bloom filter over the full reachable set, matching Git's walk.
-///
-/// Git consults the Bloom filter for the first-parent comparison of *every* commit it walks in
-/// `limit_list` via `rev_compare_tree`/`check_maybe_different_in_bloom_filter` (even commits later
-/// pruned by TREESAME merge simplification). This happens unconditionally — not just when
-/// `GIT_TRACE2_PERF` statistics are being collected — so loading the filter for each commit is also
-/// what surfaces the reader's integrity warnings (out-of-range / decreasing index offsets) for a
-/// corrupt commit-graph. grit's dense path-limited selection walk prunes the traversal (it follows
-/// only the TREESAME parent of a merge) and then filters an already-reduced set, so on its own it
-/// would consult far fewer filters than Git and miss both the statistics and these warnings.
-///
-/// This pass therefore runs over `reachable` — the full reachable set before dense limiting — and
-/// looks up each commit's first-parent Bloom filter exactly once, mirroring Git's single
-/// `limit_list` pass. When a `BloomWalkStats` handle is present it records the
-/// `filter_not_present` / `maybe` / `definitely_not` / `false_positive` counters; the pass runs even
-/// without one so corrupt-graph warnings still fire. It never changes which commits are selected for
-/// output (a `DefinitelyNot` only confirms what the tree diff would also conclude).
-fn consult_dense_bloom_filters(
-    repo: &Repository,
-    graph: &mut CommitGraph<'_>,
-    reachable: &HashSet<ObjectId>,
-    paths: &[String],
-    bloom: &DenseBloomCtx<'_>,
-) -> Result<()> {
-    let Some(chain) = bloom.chain else {
-        return Ok(());
-    };
-    for oid in reachable {
-        let parents = graph.parents_of(*oid)?;
-        // Bloom is consulted only against the first parent (Git `rev_compare_tree`,
-        // `nth_parent == 0`); root commits have no first-parent comparison.
-        let Some(first_parent) = parents.first().copied() else {
-            continue;
-        };
-        let pre = chain.bloom_precheck_for_paths(
-            repo.odb(),
-            *oid,
-            paths,
-            bloom.cwd,
-            bloom.changed_paths_version,
-            bloom.read_changed_paths,
-        )?;
-        if let Some(stats) = bloom.stats {
-            if let Ok(mut g) = stats.lock() {
-                g.record_precheck(pre);
-            }
-        }
-        // A `Maybe` result that turns out not to touch the path (tree-same against the first
-        // parent) is a Bloom false positive in Git's accounting. Only computed when stats are
-        // being collected, since it requires an extra tree diff that is otherwise unnecessary.
-        if pre == BloomPrecheck::Maybe {
-            if let Some(stats) = bloom.stats {
-                let commit = load_commit(repo, *oid)?;
-                let commit_map: HashMap<String, (ObjectId, u32)> =
-                    flatten_tree_with_mode(repo, commit.tree, "")?
-                        .into_iter()
-                        .collect();
-                let parent = load_commit(repo, first_parent)?;
-                let parent_map: HashMap<String, (ObjectId, u32)> =
-                    flatten_tree_with_mode(repo, parent.tree, "")?
-                        .into_iter()
-                        .collect();
-                if !path_differs_for_specs(&commit_map, &parent_map, paths) {
-                    if let Ok(mut g) = stats.lock() {
-                        g.record_false_positive();
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
+    Ok((selected, walked, walk_order))
 }
 
 struct DensePathAction {
@@ -5001,25 +4882,13 @@ fn dense_path_limited_action(
     paths: &[String],
     sparse: bool,
     show_pulls: bool,
+    bloom: Option<&DenseBloomCtx<'_>>,
 ) -> Result<DensePathAction> {
     let commit = load_commit(repo, oid)?;
     let parents = graph.parents_of(oid)?;
-    let commit_map: HashMap<String, (ObjectId, u32)> =
-        flatten_tree_with_mode(repo, commit.tree, "")?
-            .into_iter()
-            .collect();
 
     if parents.is_empty() {
-        let precompose = repo.pathspec_precompose_enabled();
-        let ctx = crate::pathspec::PathspecMatchContext {
-            is_directory: false,
-            is_git_submodule: false,
-            precompose_paths: precompose,
-        };
-        let visible = sparse
-            || commit_map
-                .keys()
-                .any(|path| crate::pathspec::matches_pathspec_list_with_context(path, paths, ctx));
+        let visible = sparse || tree_has_pathspec_match(repo, commit.tree, "", paths)?;
         return Ok(DensePathAction {
             visible,
             parents_to_walk: Vec::new(),
@@ -5031,11 +4900,17 @@ fn dense_path_limited_action(
     let mut first_parent_differs = false;
     for (nth, parent_oid) in parents.iter().enumerate() {
         let parent = load_commit(repo, *parent_oid)?;
-        let parent_map: HashMap<String, (ObjectId, u32)> =
-            flatten_tree_with_mode(repo, parent.tree, "")?
-                .into_iter()
-                .collect();
-        if path_differs_for_specs(&commit_map, &parent_map, paths) {
+        let differs = trees_differ_for_pathspecs_with_bloom(
+            repo,
+            commit.tree,
+            parent.tree,
+            "",
+            paths,
+            nth == 0,
+            bloom,
+            oid,
+        )?;
+        if differs {
             if nth == 0 {
                 first_parent_differs = true;
             }
@@ -5084,44 +4959,27 @@ pub fn commit_visible_for_dense_pathspecs(
     }
     let commit = load_commit(repo, oid)?;
     let parents = commit.parents.clone();
-    let commit_entries = flatten_tree_with_mode(repo, commit.tree, "")?;
-    let commit_map: HashMap<String, (ObjectId, u32)> = commit_entries.into_iter().collect();
 
     if parents.is_empty() {
-        let precompose = repo.pathspec_precompose_enabled();
-        return Ok(commit_map.keys().any(|path| {
-            paths.iter().any(|spec| {
-                crate::pathspec::matches_pathspec_with_context(
-                    spec,
-                    path,
-                    crate::pathspec::PathspecMatchContext {
-                        is_directory: false,
-                        is_git_submodule: false,
-                        precompose_paths: precompose,
-                    },
-                )
-            })
-        }));
+        return tree_has_pathspec_match(repo, commit.tree, "", paths);
     }
 
     if parents.len() == 1 {
         let parent = load_commit(repo, parents[0])?;
-        let parent_map: HashMap<String, (ObjectId, u32)> =
-            flatten_tree_with_mode(repo, parent.tree, "")?
-                .into_iter()
-                .collect();
-        return Ok(path_differs_for_specs(&commit_map, &parent_map, paths));
+        return trees_differ_for_pathspecs(
+            repo,
+            commit.tree,
+            parent.tree,
+            "",
+            paths,
+        );
     }
 
     let mut treesame_parents = 0usize;
     let mut differs_any = false;
     for parent_oid in &parents {
         let parent = load_commit(repo, *parent_oid)?;
-        let parent_map: HashMap<String, (ObjectId, u32)> =
-            flatten_tree_with_mode(repo, parent.tree, "")?
-                .into_iter()
-                .collect();
-        let differs = path_differs_for_specs(&commit_map, &parent_map, paths);
+        let differs = trees_differ_for_pathspecs(repo, commit.tree, parent.tree, "", paths)?;
         if differs {
             differs_any = true;
         } else {
@@ -5175,6 +5033,278 @@ fn path_differs_for_specs(
         }
     }
     false
+}
+
+fn is_tree_mode(mode: u32) -> bool {
+    mode == 0o040000
+}
+
+fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -> bool {
+    if crate::pathspec::matches_pathspec_list(path, pathspecs) {
+        return true;
+    }
+    if is_tree {
+        return pathspecs
+            .iter()
+            .any(|spec| crate::pathspec::pathspec_wants_descent_into_tree(spec, path));
+    }
+    false
+}
+
+fn read_parsed_tree(
+    repo: &Repository,
+    tree_oid: ObjectId,
+) -> Result<Vec<crate::objects::TreeEntry>> {
+    let object = repo.odb().read(&tree_oid)?;
+    if object.kind != ObjectKind::Tree {
+        return Err(Error::CorruptObject(format!(
+            "object {tree_oid} is not a tree"
+        )));
+    }
+    parse_tree(&object.data)
+}
+
+/// Whether any blob path under `tree_oid` matches `pathspecs` (root-commit visibility).
+fn tree_has_pathspec_match(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    prefix: &str,
+    pathspecs: &[String],
+) -> Result<bool> {
+    let entries = read_parsed_tree(repo, tree_oid)?;
+    for entry in entries {
+        if entry.mode == 0o160000 {
+            continue;
+        }
+        let name = String::from_utf8_lossy(&entry.name);
+        let path = if prefix.is_empty() {
+            name.into_owned()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let is_tree = is_tree_mode(entry.mode);
+        if !is_tree && crate::pathspec::matches_pathspec_list(&path, pathspecs) {
+            return Ok(true);
+        }
+        if is_tree
+            && pathspecs
+                .iter()
+                .any(|spec| crate::pathspec::pathspec_wants_descent_into_tree(spec, &path))
+            && tree_has_pathspec_match(repo, entry.oid, &path, pathspecs)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Pathspec-scoped tree comparison (Git `rev_compare_tree` / tree-diff pruning).
+///
+/// Walks only directories that pathspecs may match instead of flattening whole trees.
+fn trees_differ_for_pathspecs(
+    repo: &Repository,
+    old_tree: ObjectId,
+    new_tree: ObjectId,
+    prefix: &str,
+    pathspecs: &[String],
+) -> Result<bool> {
+    trees_differ_for_pathspecs_optional(repo, Some(old_tree), Some(new_tree), prefix, pathspecs)
+}
+
+fn trees_differ_for_pathspecs_optional(
+    repo: &Repository,
+    old_tree: Option<ObjectId>,
+    new_tree: Option<ObjectId>,
+    prefix: &str,
+    pathspecs: &[String],
+) -> Result<bool> {
+    match (old_tree, new_tree) {
+        (None, None) => Ok(false),
+        (Some(a), Some(b)) if a == b => Ok(false),
+        (old_o, new_o) => {
+            let old_entries = match old_o {
+                Some(oid) => read_parsed_tree(repo, oid)?,
+                None => Vec::new(),
+            };
+            let new_entries = match new_o {
+                Some(oid) => read_parsed_tree(repo, oid)?,
+                None => Vec::new(),
+            };
+            trees_differ_tree_entries(repo, &old_entries, &new_entries, prefix, pathspecs)
+        }
+    }
+}
+
+fn trees_differ_tree_entries(
+    repo: &Repository,
+    old: &[crate::objects::TreeEntry],
+    new: &[crate::objects::TreeEntry],
+    prefix: &str,
+    pathspecs: &[String],
+) -> Result<bool> {
+    let mut oi = 0usize;
+    let mut ni = 0usize;
+    while oi < old.len() || ni < new.len() {
+        match (old.get(oi), new.get(ni)) {
+            (Some(o), Some(n)) => {
+                let cmp = crate::objects::tree_entry_cmp(
+                    &o.name,
+                    is_tree_mode(o.mode),
+                    &n.name,
+                    is_tree_mode(n.mode),
+                );
+                match cmp {
+                    Ordering::Less => {
+                        let name = String::from_utf8_lossy(&o.name);
+                        let path = format_path_for_tree_diff(prefix, &name);
+                        if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
+                            if is_tree_mode(o.mode) {
+                                if tree_has_pathspec_match(repo, o.oid, &path, pathspecs)? {
+                                    return Ok(true);
+                                }
+                            } else {
+                                return Ok(true);
+                            }
+                        }
+                        oi += 1;
+                    }
+                    Ordering::Greater => {
+                        let name = String::from_utf8_lossy(&n.name);
+                        let path = format_path_for_tree_diff(prefix, &name);
+                        if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
+                            if is_tree_mode(n.mode) {
+                                if tree_has_pathspec_match(repo, n.oid, &path, pathspecs)? {
+                                    return Ok(true);
+                                }
+                            } else {
+                                return Ok(true);
+                            }
+                        }
+                        ni += 1;
+                    }
+                    Ordering::Equal => {
+                        let name = String::from_utf8_lossy(&o.name);
+                        let path = format_path_for_tree_diff(prefix, &name);
+                        let o_is_tree = is_tree_mode(o.mode);
+                        let n_is_tree = is_tree_mode(n.mode);
+                        let relevant =
+                            pathspec_entry_is_relevant(&path, o_is_tree || n_is_tree, pathspecs);
+                        if relevant {
+                            if o.oid != n.oid || canon_tree_mode(o.mode) != canon_tree_mode(n.mode)
+                            {
+                                if o_is_tree && n_is_tree {
+                                    if trees_differ_for_pathspecs(
+                                        repo, o.oid, n.oid, &path, pathspecs,
+                                    )? {
+                                        return Ok(true);
+                                    }
+                                } else {
+                                    return Ok(true);
+                                }
+                            } else if o_is_tree
+                                && n_is_tree
+                                && pathspecs.iter().any(|spec| {
+                                    crate::pathspec::pathspec_wants_descent_into_tree(spec, &path)
+                                })
+                                && trees_differ_for_pathspecs(
+                                    repo, o.oid, n.oid, &path, pathspecs,
+                                )?
+                            {
+                                return Ok(true);
+                            }
+                        }
+                        oi += 1;
+                        ni += 1;
+                    }
+                }
+            }
+            (Some(o), None) => {
+                let name = String::from_utf8_lossy(&o.name);
+                let path = format_path_for_tree_diff(prefix, &name);
+                if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
+                    if is_tree_mode(o.mode) {
+                        if tree_has_pathspec_match(repo, o.oid, &path, pathspecs)? {
+                            return Ok(true);
+                        }
+                    } else {
+                        return Ok(true);
+                    }
+                }
+                oi += 1;
+            }
+            (None, Some(n)) => {
+                let name = String::from_utf8_lossy(&n.name);
+                let path = format_path_for_tree_diff(prefix, &name);
+                if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
+                    if is_tree_mode(n.mode) {
+                        if tree_has_pathspec_match(repo, n.oid, &path, pathspecs)? {
+                            return Ok(true);
+                        }
+                    } else {
+                        return Ok(true);
+                    }
+                }
+                ni += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    Ok(false)
+}
+
+fn format_path_for_tree_diff(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{prefix}/{name}")
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn trees_differ_for_pathspecs_with_bloom(
+    repo: &Repository,
+    commit_tree: ObjectId,
+    parent_tree: ObjectId,
+    prefix: &str,
+    pathspecs: &[String],
+    first_parent: bool,
+    bloom: Option<&DenseBloomCtx<'_>>,
+    commit_oid: ObjectId,
+) -> Result<bool> {
+    let mut bloom_ret = BloomPrecheck::Inapplicable;
+    if first_parent {
+        if let Some(ctx) = bloom {
+            if let Some(chain) = ctx.chain {
+                bloom_ret = chain.bloom_precheck_for_paths(
+                    repo.odb(),
+                    commit_oid,
+                    pathspecs,
+                    ctx.cwd,
+                    ctx.changed_paths_version,
+                    ctx.read_changed_paths,
+                )?;
+                if let Some(stats) = ctx.stats {
+                    if let Ok(mut g) = stats.lock() {
+                        g.record_precheck(bloom_ret);
+                    }
+                }
+                if bloom_ret == BloomPrecheck::DefinitelyNot {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    let differs = trees_differ_for_pathspecs(repo, commit_tree, parent_tree, prefix, pathspecs)?;
+    if first_parent && bloom_ret == BloomPrecheck::Maybe && !differs {
+        if let Some(ctx) = bloom {
+            if let Some(stats) = ctx.stats {
+                if let Ok(mut g) = stats.lock() {
+                    g.record_false_positive();
+                }
+            }
+        }
+    }
+    Ok(differs)
 }
 
 fn rev_list_unexpected_kind(oid: ObjectId, expected: &'static str) -> Error {
@@ -9168,7 +9298,12 @@ mod line_coverage_tests {
             maximal_only: true,
             ..RevListOptions::default()
         };
-        let _ = rev_list(&repo, &[String::from("main"), String::from("side")], &[], &opts2)?;
+        let _ = rev_list(
+            &repo,
+            &[String::from("main"), String::from("side")],
+            &[],
+            &opts2,
+        )?;
         Ok(())
     }
 

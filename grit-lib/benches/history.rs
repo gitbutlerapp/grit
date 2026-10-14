@@ -15,6 +15,23 @@ use similar::Algorithm;
 
 use s7::HistoryBenchFixtures;
 
+fn bench_revwalk_path_limited(c: &mut Criterion) {
+    let fx = HistoryBenchFixtures::global();
+    let mut group = c.benchmark_group("revwalk_path_limited");
+    group.throughput(Throughput::Elements(fx.commit_count as u64));
+    group.bench_function("walk_f00000", |b| {
+        b.iter(|| {
+            let opts = RevListOptions {
+                paths: vec![String::from("f00000.txt")],
+                ..Default::default()
+            };
+            let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+            black_box(result.commits.len())
+        });
+    });
+    group.finish();
+}
+
 fn revwalk_group(c: &mut Criterion, ordering: OrderingMode, label: &str) {
     let fx = HistoryBenchFixtures::global();
     let mut group = c.benchmark_group(format!("revwalk_{label}"));
@@ -176,6 +193,7 @@ criterion_group!(
     bench_s1_rev_list_objects_v1,
     bench_revwalk_topo,
     bench_revwalk_date,
+    bench_revwalk_path_limited,
     bench_rev_parse,
     bench_tree_diff,
     bench_blob_diff
