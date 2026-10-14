@@ -433,3 +433,142 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         "scratch ref must be gone after a deletion push"
     );
 }
+
+/// Two clones of the same daemon repo: when clone A advances `main`, clone B
+/// must still push a brand-new branch without fetching (issue #1019).
+#[test]
+fn push_new_branch_without_local_copy_of_advanced_remote_main() {
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::porcelain::add::stage_for_commit;
+    use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+    use grit_lib::progress::NullProgress;
+    use grit_lib::repo::Repository;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let base = tmp.path().join("srv");
+    std::fs::create_dir_all(&base).unwrap();
+    let bare = base.join("repo.git");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "."]);
+    git(&bare, &["config", "daemon.receivepack", "true"]);
+
+    let seed = tmp.path().join("seed");
+    std::fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["init", "-q", "-b", "main", "."]);
+    git(&seed, &["commit", "-q", "--allow-empty", "-m", "one"]);
+    git(&seed, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&seed, &["push", "-q", "origin", "HEAD:main"]);
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_daemon(&base, port) else {
+        eprintln!("SKIP: `git daemon` is unavailable");
+        return;
+    };
+    let _guard = DaemonGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: git daemon did not become ready on port {port}");
+        return;
+    }
+    let url = format!("git://127.0.0.1:{port}/repo.git");
+
+    fn grit_commit(repo: &Repository, filename: &str, message: &str) -> ObjectId {
+        let wt = repo.work_tree().expect("worktree");
+        std::fs::write(wt.join(filename), format!("{message}\n")).unwrap();
+        stage_for_commit(repo, &mut NullProgress).expect("stage");
+        let ident = "Test <t@example.com> 1 +0000".to_string();
+        let out = create_commit(
+            repo,
+            &CommitRequest {
+                message: message.to_owned(),
+                author: ident.clone(),
+                committer: ident,
+                allow_empty: false,
+                sign_override: None,
+                amend: false,
+            },
+            &mut NullProgress,
+        )
+        .expect("commit");
+        out.oid
+    }
+
+    let clone_a = tmp.path().join("cA");
+    let clone_b = tmp.path().join("cB");
+    git(&clone_a.parent().unwrap(), &["clone", "-q", &url, "cA"]);
+    git(&clone_b.parent().unwrap(), &["clone", "-q", &url, "cB"]);
+
+    let repo_a = Repository::discover(Some(&clone_a), &RepositoryOptions::empty()).expect("open a");
+    let advanced = grit_commit(&repo_a, "a.txt", "A");
+    let transport = GitDaemonTransport::new();
+    let mut conn_a = transport
+        .connect(&url, Service::ReceivePack, &ConnectOptions::default())
+        .expect("connect a");
+    push_remote(
+        &clone_a.join(".git"),
+        &mut *conn_a,
+        &[PushRefSpec {
+            src: Some(advanced),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+        &mut NoProgress,
+    )
+    .expect("clone A advances main");
+    drop(conn_a);
+
+    git(&clone_b, &["checkout", "-q", "-b", "newbr"]);
+    let repo_b = Repository::discover(Some(&clone_b), &RepositoryOptions::empty()).expect("open b");
+    let new_tip = grit_commit(&repo_b, "b.txt", "B");
+
+    let mut conn_b = transport
+        .connect(&url, Service::ReceivePack, &ConnectOptions::default())
+        .expect("connect b");
+    let outcome = push_remote(
+        &clone_b.join(".git"),
+        &mut *conn_b,
+        &[PushRefSpec {
+            src: Some(new_tip),
+            dst: "refs/heads/newbr".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+        &mut NoProgress,
+    )
+    .expect("clone B pushes new branch without fetch");
+    drop(conn_b);
+
+    assert_eq!(outcome.results.len(), 1);
+    assert_eq!(
+        outcome.results[0].status,
+        PushRefStatus::Ok,
+        "new branch push should succeed, got {:?} ({:?})",
+        outcome.results[0].status,
+        outcome.results[0].message
+    );
+    let remote_newbr = resolve_ref(&bare, "refs/heads/newbr").expect("remote newbr");
+    assert_eq!(remote_newbr, new_tip);
+    assert!(
+        open_odb(&bare).exists(&new_tip),
+        "pushed commit missing on remote"
+    );
+    let fsck = Command::new("git")
+        .current_dir(&bare)
+        .args(["fsck", "--no-dangling"])
+        .output()
+        .expect("fsck");
+    assert!(
+        fsck.status.success(),
+        "git fsck after new-branch push: {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+}

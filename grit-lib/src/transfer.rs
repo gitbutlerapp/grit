@@ -508,8 +508,16 @@ pub(crate) fn build_pack_push_fast(
 ) -> Result<Vec<u8>> {
     use crate::merge_base::{walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit};
 
+    // Remote ref tips advertised on the wire may point at commits this clone
+    // never fetched. Treat missing hide roots like `pack_object_select`'s
+    // `skip_missing` walk: they must not abort packing unrelated new refs.
+    let hide: Vec<ObjectId> = haves
+        .iter()
+        .copied()
+        .filter(|tip| odb.exists(tip))
+        .collect();
+
     let repo = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
-    let hide: Vec<ObjectId> = haves.to_vec();
     let mut commit_set: HashSet<ObjectId> = HashSet::new();
     for &want in wants {
         let (_, commits) = walk_commits_reachable_excluding_ancestors_of(
@@ -523,7 +531,7 @@ pub(crate) fn build_pack_push_fast(
     let commits: Vec<ObjectId> = commit_set.into_iter().collect();
 
     let mut exclude: HashSet<ObjectId> = HashSet::new();
-    for &tip in haves {
+    for &tip in &hide {
         exclude.insert(tip);
         let obj = odb.read(&tip)?;
         if obj.kind == ObjectKind::Commit {

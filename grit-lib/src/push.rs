@@ -495,6 +495,7 @@ fn build_push_pack(
 
     let mut haves: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
     haves.extend_from_slice(&adv.advertised_haves);
+    haves.retain(|oid| local_odb.exists(oid));
     let mut pack_opts = PackBuildOptions {
         thin: true,
         delta: true,
@@ -510,7 +511,12 @@ fn build_push_pack(
         // Negotiation `.have` lines name individual objects, not ref tips; using
         // them as hide roots makes the commit walk treat most of history as
         // visible and defeats the fast push path.
-        let hide_tips: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
+        let hide_tips: Vec<ObjectId> = adv
+            .remote_refs
+            .values()
+            .copied()
+            .filter(|oid| local_odb.exists(oid))
+            .collect();
         return build_pack_push_fast(local_git_dir, local_odb, &wants, &hide_tips, &pack_opts)
             .map(Some);
     }
@@ -651,6 +657,16 @@ fn decide_push_wire(
             send: true,
         });
     };
+
+    if !local_odb.exists(&old) {
+        return Ok(no_op(
+            PushRefStatus::RejectFetchFirst,
+            Some(old),
+            Some(src),
+            false,
+            Some("fetch first".to_owned()),
+        ));
+    }
 
     // Existing ref: fast-forward when the remote's current commit is an ancestor
     // of the source; otherwise non-fast-forward (allowed only with force).
