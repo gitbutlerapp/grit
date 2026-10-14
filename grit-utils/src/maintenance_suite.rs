@@ -12,7 +12,7 @@ use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{remove_dir_robust, scratch_dir};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::network_fixture::{ensure_fixture, NetworkFixtureKind, NetworkProfile};
-use crate::scenarios::{run_scenario, Driver, PrepareKind, RunConfig, Scenario};
+use crate::scenarios::{run_scenario, Driver, RunConfig, Scenario};
 use crate::schema::{BenchReport, ToolVersions, SCHEMA_VERSION};
 
 pub(crate) fn git_env(cmd: &mut Command) {

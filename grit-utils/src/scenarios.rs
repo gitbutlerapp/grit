@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{
-    create_blame_deep_history_repo, create_deep_leaf_dogfood_repo, create_repo,
+    bench_work_dir, create_blame_deep_history_repo, create_deep_leaf_dogfood_repo, create_repo,
     create_repo_with_history, dirty_repo, modify_files_for_diff, modify_rs_files_for_diff,
     prepare_add_iteration, prepare_commit_iteration, prepare_restore_iteration, scratch_dir,
     DeepLeafDogfoodSpec,
@@ -478,7 +478,7 @@ pub fn run_log_suite(
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 
-fn grit_log_pages_shell(grit: &Path, pages: usize) -> String {
+pub(crate) fn grit_log_pages_shell(grit: &Path, pages: usize) -> String {
     let grit_q = shell_quote(&grit.to_string_lossy());
     format!(
         r#"set -eu
@@ -716,39 +716,44 @@ pub(crate) fn build_report(
 
 /// Shared prepare hook for `add` scenarios (invoked by hyperfine `--prepare`).
 pub fn run_prepare_add(git: &Path) -> Result<()> {
-    prepare_add_iteration(&scratch_dir(), git)
+    prepare_add_iteration(&bench_work_dir(), git)
 }
 
 pub fn run_prepare_commit(git: &Path) -> Result<()> {
-    prepare_commit_iteration(&scratch_dir(), git)
+    prepare_commit_iteration(&bench_work_dir(), git)
 }
 
 pub fn run_prepare_restore(_git: &Path) -> Result<()> {
-    prepare_restore_iteration(&scratch_dir())
+    prepare_restore_iteration(&bench_work_dir())
 }
 
 pub fn run_prepare_stash(git: &Path) -> Result<()> {
-    prepare_commit_iteration(&scratch_dir(), git)
+    prepare_commit_iteration(&bench_work_dir(), git)
 }
 
 pub fn run_prepare_switch(git: &Path) -> Result<()> {
-    prepare_switch(git, &scratch_dir())
+    prepare_switch(git, &bench_work_dir())
 }
 
 pub fn run_prepare_pick(git: &Path) -> Result<()> {
-    prepare_pick(git, &scratch_dir())
+    prepare_pick(git, &bench_work_dir())
 }
 
 pub fn run_prepare_merge(git: &Path) -> Result<()> {
-    prepare_merge(git, &scratch_dir())
+    prepare_merge(git, &bench_work_dir())
 }
 
 pub fn run_prepare_pick_series(git: &Path) -> Result<()> {
-    prepare_pick_series(git, &scratch_dir())
+    prepare_pick_series(git, &bench_work_dir())
 }
 
 pub fn run_prepare_revert(git: &Path) -> Result<()> {
-    prepare_revert(git, &scratch_dir())
+    prepare_revert(git, &bench_work_dir())
+}
+
+/// Join multiple CLI invocations for hyperfine shell benchmarks.
+pub fn chain_shell_public(program: &Path, invocations: &[Vec<String>]) -> String {
+    chain_shell(program, invocations)
 }
 
 fn chain_shell(program: &Path, invocations: &[Vec<String>]) -> String {

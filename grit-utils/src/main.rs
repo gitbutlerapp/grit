@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use grit_utils::binary::{require_hyperfine, resolve_binary};
 use grit_utils::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
+use grit_utils::campaign_suite::{run_campaign_suite, CampaignOptions};
 use grit_utils::compare::compare_files;
 use grit_utils::fixture::DeepLeafDogfoodSpec;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
@@ -23,6 +24,7 @@ use grit_utils::parallel_suite::{
     prepare_parallel_checkout, prepare_parallel_clone, prepare_parallel_index_pack,
     run_parallel_suite,
 };
+use grit_utils::perf_targets::{load_perf_targets, render_ledger_markdown};
 use grit_utils::refs_driver;
 use grit_utils::refs_fixture::{run_prepare_refs, RefsWorkMode};
 use grit_utils::refs_suite::{run_refs_suite, RefsRunConfig};
@@ -197,6 +199,21 @@ enum Cmd {
     RunLimited {
         #[arg(long)]
         cwd: PathBuf,
+    },
+    /// Real-repo campaign scorecard (git.git, chromium-class synthetic, optional linux)
+    Campaign {
+        /// Tiny fixtures and fewer scenarios (for CI and integration tests).
+        #[arg(long)]
+        smoke: bool,
+        /// Also run the matrix on a pinned linux kernel clone (or set `GRIT_BENCH_LINUX=1`).
+        #[arg(long)]
+        with_linux: bool,
+        /// Render the 1.1× ledger markdown table (also needs `--format markdown` or `--output`).
+        #[arg(long)]
+        ledger: bool,
+        /// Skip the deep-history network scenario block at the end of the run.
+        #[arg(long)]
+        no_network: bool,
     },
     /// Compare two JSON reports; exit non-zero when ratios differ beyond tolerance
     Compare {
@@ -840,6 +857,45 @@ fn main() -> Result<()> {
             eprintln!("Running ignore check benchmarks...");
             let cfg = run_config(&cli, false);
             run_ignore_suite(&hyperfine, &git, &grit, &cfg, timestamp)?
+        }
+        Cmd::Campaign {
+            smoke,
+            with_linux,
+            ledger,
+            no_network,
+        } => {
+            eprintln!("Running campaign benchmarks...");
+            let cfg = run_config(&cli, true);
+            let bench_exe = std::env::current_exe().context("current exe")?;
+            let report = run_campaign_suite(
+                &hyperfine,
+                &git,
+                &grit,
+                &bench_exe,
+                &cfg,
+                &CampaignOptions {
+                    smoke: *smoke,
+                    with_linux: *with_linux,
+                    include_network: !no_network,
+                },
+                timestamp,
+            )?;
+            if *ledger {
+                let targets_path =
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("perf-targets.toml");
+                let targets = load_perf_targets(&targets_path)?;
+                let ledger_md = render_ledger_markdown(&report, &targets);
+                if matches!(cli.format, OutputFormat::Markdown) {
+                    write_output(&cli, &ledger_md)?;
+                } else if let Some(path) = &cli.output {
+                    let ledger_path = path.with_extension("ledger.md");
+                    std::fs::write(&ledger_path, &ledger_md)?;
+                    eprintln!("Ledger written to {}", ledger_path.display());
+                } else {
+                    eprintln!("{ledger_md}");
+                }
+            }
+            report
         }
         Cmd::HotPaths {
             sizes,

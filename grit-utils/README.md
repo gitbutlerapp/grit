@@ -36,7 +36,26 @@ cargo build --release -p grit-cli -p grit-utils
 
 # Compare two JSON reports (exit 1 if any scenario ratio drifts > tolerance)
 ./target/release/grit-bench compare baseline.json candidate.json --tolerance 0.10
+
+# Campaign scorecard on real fixtures (git.git + chromium-class synthetic; optional linux)
+./target/release/grit-bench campaign --format json --output baselines/campaign-before.json
+
+# 1.1× ledger table (markdown) alongside JSON output
+./target/release/grit-bench campaign --ledger --format markdown --output baselines/campaign-before.json
+
+# Smaller fixtures for CI (`GRIT_BENCH_LINUX=1` or `--with-linux` adds linux)
+./target/release/grit-bench campaign --smoke --no-network --format json --output /tmp/campaign-smoke.json
 ```
+
+### Campaign fixtures
+
+| Fixture | Source | Enable |
+| --- | --- | --- |
+| **git-dot-git** | Upstream [git.git](https://github.com/git/git) at pinned tag (`GRIT_BENCH_GIT_GIT_TAG`, default `v2.47.0`), bare + worktree, repacked with pack bitmaps | always |
+| **chromium-synth** | Deterministic `git fast-import` repo (400k files, 40k dirs, 100k commits, 50k refs, single pack + commit-graph) cached under the bench scratch root | always |
+| **linux** | [torvalds/linux](https://github.com/torvalds/linux) at pinned tag (`GRIT_BENCH_LINUX_TAG`, default `v6.12`) | `--with-linux` or `GRIT_BENCH_LINUX=1` |
+
+Performance targets and documented gaps live in [`perf-targets.toml`](perf-targets.toml). `campaign --ledger` classifies each scenario as `pass`, `fail`, `documented`, or `owned-by-item-14` (rev-list count/objects and serve-clone rows are not scored in this step).
 
 Global options:
 

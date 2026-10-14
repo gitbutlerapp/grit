@@ -10,7 +10,16 @@ use anyhow::{bail, Context, Result};
 
 /// Default scratch directory for benchmark repos.
 pub fn scratch_dir() -> PathBuf {
-    PathBuf::from("/tmp/grit-bench-scratch")
+    std::env::var("GRIT_BENCH_SCRATCH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-scratch"))
+}
+
+/// Active worktree for hyperfine prepare hooks (campaign sets `GRIT_BENCH_CAMPAIGN_CWD`).
+pub fn bench_work_dir() -> PathBuf {
+    std::env::var("GRIT_BENCH_CAMPAIGN_CWD")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| scratch_dir())
 }
 
 /// Remove a directory tree, retrying transient failures.
@@ -143,10 +152,8 @@ pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
     let files = walkdir(dir)?;
     let modify_count = (files.len() / 5).max(1);
     for f in files.iter().take(modify_count) {
-        if f.extension().is_some_and(|e| e == "txt") {
-            let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
-            writeln!(file, "commit bench change")?;
-        }
+        let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
+        writeln!(file, "commit bench change")?;
     }
     let out = Command::new(git)
         .args(["reset", "-q", "HEAD"])
@@ -181,9 +188,7 @@ pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     let files = walkdir(dir)?;
     let modify_count = (files.len() / 5).max(1);
     for f in files.iter().take(modify_count) {
-        if f.extension().is_some_and(|e| e == "txt") {
-            fs::write(f, "modified for add bench\n")?;
-        }
+        fs::write(f, "modified for add bench\n")?;
     }
     let out = Command::new(git)
         .args(["reset", "-q", "HEAD"])
@@ -340,7 +345,7 @@ fn walkdir_inner(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         }
         if path.is_dir() {
             walkdir_inner(&path, files)?;
-        } else {
+        } else if !path.file_name().is_some_and(|n| n == ".gitmodules") {
             files.push(path);
         }
     }

@@ -1,0 +1,759 @@
+//! Core CLI scenario matrix for one campaign fixture.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
+
+use crate::campaign_prep::ensure_campaign_hot_path;
+use crate::campaign_worktree::{
+    blame_target_path, dirty_tracked_worktree, list_tracked_files, modify_tracked_files,
+};
+use crate::fixture::prepare_commit_iteration;
+use crate::hot_path_fixture::HotPathMeta;
+use crate::maintenance_suite::seed_loose_objects;
+use crate::network_fixture::file_url;
+use crate::real_repo_fixture::run_git;
+use crate::real_repo_fixture::scratch_root;
+use crate::scenarios::{
+    chain_shell_public, grit_log_pages_shell, run_scenario, Driver, PrepareKind, RunConfig,
+    Scenario, LOG_BENCH_GRIT_PAGE_COUNT,
+};
+use crate::schema::ScenarioResult;
+use crate::shell::{shell_command, shell_quote};
+
+/// One campaign fixture (bare remote + local worktree).
+#[derive(Debug, Clone)]
+pub struct CampaignFixture {
+    pub id: &'static str,
+    pub label: String,
+    pub bare: PathBuf,
+    pub worktree: PathBuf,
+}
+
+fn sid(fixture_id: &str, name: &str) -> String {
+    format!("{fixture_id}/{name}")
+}
+
+fn sh_script(script: String) -> Vec<String> {
+    vec!["-c".into(), script]
+}
+
+/// Run the core CLI matrix for `fixture`.
+pub fn run_fixture_cli_matrix(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    bench_exe: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    smoke: bool,
+) -> Result<Vec<ScenarioResult>> {
+    std::env::set_var(
+        "GRIT_BENCH_CAMPAIGN_CWD",
+        fixture.worktree.display().to_string(),
+    );
+    let _guard = CampaignCwdGuard;
+
+    let mut out = Vec::new();
+    let tracked = list_tracked_files(git, &fixture.worktree)?;
+    let modify_count = if smoke {
+        5
+    } else {
+        48.min(tracked.len().max(1))
+    };
+
+    dirty_tracked_worktree(git, &fixture.worktree)?;
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "status-dirty"),
+            group: "status".into(),
+            fixture: fixture.label.clone(),
+            description: "status on dirty worktree (git -s vs grit status)".into(),
+            grit_argv: vec!["status".into()],
+            git_argv: vec!["status".into(), "-s".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    run_git(git, &fixture.worktree, &["reset", "--hard", "HEAD"])?;
+    run_git(git, &fixture.worktree, &["clean", "-fd", "-q"])?;
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "status-clean"),
+            group: "status".into(),
+            fixture: fixture.label.clone(),
+            description: "status on clean worktree".into(),
+            grit_argv: vec!["status".into()],
+            git_argv: vec!["status".into(), "-s".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "add"),
+            group: "add".into(),
+            fixture: fixture.label.clone(),
+            description: "stage all changes (git add -A vs grit add)".into(),
+            grit_argv: vec!["add".into()],
+            git_argv: vec!["add".into(), "-A".into()],
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::AddIteration),
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    let git_commit = chain_shell_public(
+        git,
+        &[
+            vec!["add".into(), "-A".into()],
+            vec!["commit".into(), "-q".into(), "-m".into(), "bench".into()],
+        ],
+    );
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "commit"),
+            group: "commit".into(),
+            fixture: fixture.label.clone(),
+            description: "stage all + commit after modifying ~20% of files".into(),
+            grit_argv: vec!["commit".into(), "bench".into()],
+            git_argv: sh_script(git_commit),
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::CommitIteration),
+            grit_via_shell: false,
+            git_via_shell: true,
+        },
+        &fixture.worktree,
+    )?);
+
+    modify_tracked_files(&fixture.worktree, &tracked, modify_count)?;
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "diff-dirty"),
+            group: "diff".into(),
+            fixture: fixture.label.clone(),
+            description: format!("worktree diff with {modify_count} modified files"),
+            grit_argv: vec!["diff".into()],
+            git_argv: vec!["diff".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+    run_git(git, &fixture.worktree, &["reset", "--hard", "HEAD"])?;
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "diff-clean"),
+            group: "diff".into(),
+            fixture: fixture.label.clone(),
+            description: "worktree diff on clean tree".into(),
+            grit_argv: vec!["diff".into()],
+            git_argv: vec!["diff".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    let log_limit = if smoke { 20 } else { 1000 };
+    let page_size = LOG_BENCH_GRIT_PAGE_COUNT.max(1);
+    let log_pages = (log_limit + page_size - 1) / page_size;
+    let use_single_log_page = smoke || fixture.id == "git-dot-git";
+    let (grit_log, grit_via_shell) = if use_single_log_page {
+        (vec!["log".into()], false)
+    } else {
+        (sh_script(grit_log_pages_shell(grit, log_pages)), true)
+    };
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "log"),
+            group: "log".into(),
+            fixture: fixture.label.clone(),
+            description: format!("last {log_limit} commits one line each"),
+            grit_argv: grit_log,
+            git_argv: vec!["log".into(), format!("-{log_limit}"), "--oneline".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    if !smoke {
+        let patch_limit = 200;
+        let grit_patch = shell_command(
+            bench_exe,
+            &[
+                "drive".into(),
+                "log-patch".into(),
+                fixture.worktree.display().to_string(),
+                patch_limit.to_string(),
+            ],
+        );
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "log-patch"),
+                group: "log".into(),
+                fixture: fixture.label.clone(),
+                description: format!("log -p over {patch_limit} commits"),
+                grit_argv: sh_script(grit_patch),
+                git_argv: vec!["log".into(), "-p".into(), format!("-{patch_limit}")],
+                driver: Driver::Lib,
+                prepare_kind: None,
+                grit_via_shell: true,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+        )?);
+    }
+
+    if !smoke {
+        let blame_path = blame_target_path(git, &fixture.worktree)?;
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "blame"),
+                group: "blame".into(),
+                fixture: fixture.label.clone(),
+                description: format!("blame {blame_path}"),
+                grit_argv: vec!["blame".into(), blame_path.clone()],
+                git_argv: vec!["blame".into(), "--porcelain".into(), blame_path],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+        )?);
+    }
+
+    let meta = ensure_campaign_hot_path(git, &fixture.worktree)?;
+    if fixture.id != "git-dot-git" {
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "merge-base"),
+                group: "merge-base".into(),
+                fixture: fixture.label.clone(),
+                description: "merge-base between main tip and topic commit".into(),
+                grit_argv: vec![
+                    "merge-base".into(),
+                    meta.main_tip.clone(),
+                    meta.pick_commit.clone(),
+                ],
+                git_argv: vec![
+                    "merge-base".into(),
+                    meta.main_tip.clone(),
+                    meta.pick_commit.clone(),
+                ],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+        )?);
+    }
+
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "resolve"),
+            group: "resolve".into(),
+            fixture: fixture.label.clone(),
+            description: "resolve HEAD".into(),
+            grit_argv: vec!["resolve".into(), "HEAD".into()],
+            git_argv: vec!["rev-parse".into(), "HEAD".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "cat"),
+            group: "cat".into(),
+            fixture: fixture.label.clone(),
+            description: "cat HEAD tree object".into(),
+            grit_argv: vec!["cat".into(), "HEAD^{tree}".into()],
+            git_argv: vec!["cat-file".into(), "-p".into(), "HEAD^{tree}".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    append_hot_path_scenarios(hyperfine, git, grit, cfg, fixture, &meta, smoke, &mut out)?;
+    append_stash_scenario(hyperfine, git, grit, cfg, fixture, &mut out)?;
+    append_fsck_gc_repack(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
+    append_file_transport(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
+
+    Ok(out)
+}
+
+fn append_hot_path_scenarios(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    meta: &HotPathMeta,
+    smoke: bool,
+    out: &mut Vec<ScenarioResult>,
+) -> Result<()> {
+    let (grit_switch, git_switch) = switch_argv(grit, git, meta);
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "switch"),
+            group: "switch".into(),
+            fixture: fixture.label.clone(),
+            description: "switch between campaign-a and campaign-b".into(),
+            grit_argv: grit_switch,
+            git_argv: git_switch,
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::SwitchReset),
+            grit_via_shell: true,
+            git_via_shell: true,
+        },
+        &fixture.worktree,
+    )?);
+
+    let (grit_pick, git_pick) = pick_argv(meta);
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "pick"),
+            group: "pick".into(),
+            fixture: fixture.label.clone(),
+            description: "pick topic commit".into(),
+            grit_argv: grit_pick,
+            git_argv: git_pick,
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::PickReset),
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    let (grit_merge, git_merge) = merge_argv(meta);
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "merge"),
+            group: "merge".into(),
+            fixture: fixture.label.clone(),
+            description: "merge campaign-topic".into(),
+            grit_argv: grit_merge,
+            git_argv: git_merge,
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::MergeReset),
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    let (grit_revert, git_revert) = revert_argv(meta);
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "revert"),
+            group: "revert".into(),
+            fixture: fixture.label.clone(),
+            description: "revert topic commit".into(),
+            grit_argv: grit_revert,
+            git_argv: git_revert,
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::RevertReset),
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    if !smoke {
+        let (grit_wide, git_wide) = switch_argv(grit, git, meta);
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "switch-wide"),
+                group: "switch".into(),
+                fixture: fixture.label.clone(),
+                description: "switch-wide (campaign-b with extra dirty files)".into(),
+                grit_argv: grit_wide,
+                git_argv: git_wide,
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::SwitchReset),
+                grit_via_shell: true,
+                git_via_shell: true,
+            },
+            &fixture.worktree,
+        )?);
+    }
+    Ok(())
+}
+
+fn append_stash_scenario(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    out: &mut Vec<ScenarioResult>,
+) -> Result<()> {
+    prepare_commit_iteration(&fixture.worktree, git)?;
+    let grit_cmd = chain_shell_public(
+        grit,
+        &[vec!["stash".into()], vec!["stash".into(), "pop".into()]],
+    );
+    let git_cmd = chain_shell_public(
+        git,
+        &[
+            vec!["stash".into(), "push".into(), "-q".into()],
+            vec!["stash".into(), "pop".into(), "-q".into()],
+        ],
+    );
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "stash-push-pop"),
+            group: "stash".into(),
+            fixture: fixture.label.clone(),
+            description: "stash push then pop".into(),
+            grit_argv: sh_script(grit_cmd),
+            git_argv: sh_script(git_cmd),
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::StashReset),
+            grit_via_shell: true,
+            git_via_shell: true,
+        },
+        &fixture.worktree,
+    )?);
+    Ok(())
+}
+
+fn append_fsck_gc_repack(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    smoke: bool,
+    out: &mut Vec<ScenarioResult>,
+) -> Result<()> {
+    if fixture.id != "git-dot-git" {
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "fsck"),
+                group: "maintenance".into(),
+                fixture: fixture.label.clone(),
+                description: "fsck --no-dangling on worktree".into(),
+                grit_argv: vec!["fsck".into(), "--no-dangling".into()],
+                git_argv: vec!["fsck".into(), "--no-dangling".into()],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+        )?);
+    }
+
+    if smoke {
+        return Ok(());
+    }
+    std::env::set_var(
+        "GRIT_BENCH_MAINTENANCE_BARE",
+        fixture.bare.display().to_string(),
+    );
+    if !smoke {
+        seed_loose_objects(git, &fixture.worktree)?;
+    }
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "gc"),
+            group: "maintenance".into(),
+            fixture: fixture.label.clone(),
+            description: "grit gc vs git gc".into(),
+            grit_argv: vec!["gc".into()],
+            git_argv: vec!["gc".into()],
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::MaintenanceReset),
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "repack"),
+            group: "maintenance".into(),
+            fixture: fixture.label.clone(),
+            description: "repack -adf on bare remote".into(),
+            grit_argv: vec!["repack".into(), "-adf".into()],
+            git_argv: vec!["repack".into(), "-adf".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.bare,
+    )?);
+    Ok(())
+}
+
+fn append_file_transport(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    smoke: bool,
+    out: &mut Vec<ScenarioResult>,
+) -> Result<()> {
+    let url = file_url(&fixture.bare)?;
+    let clone_dest = scratch_root().join(format!("{}-campaign-clone", fixture.id));
+    let grit_clone = shell_command(
+        grit,
+        &[
+            "clone".into(),
+            url.clone(),
+            clone_dest.display().to_string(),
+        ],
+    );
+    let git_clone = shell_command(
+        git,
+        &[
+            "clone".into(),
+            "-q".into(),
+            url.clone(),
+            clone_dest.display().to_string(),
+        ],
+    );
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "clone-file"),
+            group: "network".into(),
+            fixture: fixture.label.clone(),
+            description: "clone over file://".into(),
+            grit_argv: sh_script(format!(
+                "rm -rf {} && {grit_clone}",
+                shell_quote(&clone_dest.to_string_lossy())
+            )),
+            git_argv: sh_script(format!(
+                "rm -rf {} && {git_clone}",
+                shell_quote(&clone_dest.to_string_lossy())
+            )),
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: true,
+            git_via_shell: true,
+        },
+        &fixture.bare,
+    )?);
+
+    if smoke {
+        return Ok(());
+    }
+
+    let fetch_dest = fixture.worktree.clone();
+    let grit_fetch = shell_command(
+        grit,
+        &[
+            "fetch".to_string(),
+            "origin".to_string(),
+            "HEAD".to_string(),
+        ],
+    );
+    let git_fetch = shell_command(
+        git,
+        &[
+            "fetch".to_string(),
+            "-q".to_string(),
+            "origin".to_string(),
+            "HEAD".to_string(),
+        ],
+    );
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "fetch-incr-file"),
+            group: "network".into(),
+            fixture: fixture.label.clone(),
+            description: "incremental fetch over file://".into(),
+            grit_argv: sh_script(grit_fetch),
+            git_argv: sh_script(git_fetch),
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: true,
+            git_via_shell: true,
+        },
+        &fetch_dest,
+    )?);
+    Ok(())
+}
+
+fn switch_argv(grit: &Path, git: &Path, meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+    let grit_cmd = chain_shell_public(
+        grit,
+        &[
+            vec!["switch".into(), meta.branch_b.clone()],
+            vec!["switch".into(), meta.branch_a.clone()],
+        ],
+    );
+    let git_cmd = chain_shell_public(
+        git,
+        &[
+            vec!["switch".into(), "-q".into(), meta.branch_b.clone()],
+            vec!["switch".into(), "-q".into(), meta.branch_a.clone()],
+        ],
+    );
+    (sh_script(grit_cmd), sh_script(git_cmd))
+}
+
+fn pick_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+    (
+        vec!["pick".into(), meta.pick_commit.clone()],
+        vec![
+            "cherry-pick".into(),
+            "--no-edit".into(),
+            meta.pick_commit.clone(),
+        ],
+    )
+}
+
+fn revert_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+    (
+        vec!["revert".into(), meta.pick_commit.clone()],
+        vec![
+            "revert".into(),
+            "--no-edit".into(),
+            meta.pick_commit.clone(),
+        ],
+    )
+}
+
+fn merge_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+    (
+        vec!["merge".into(), meta.topic_branch.clone()],
+        vec![
+            "merge".into(),
+            "-q".into(),
+            "--no-edit".into(),
+            meta.topic_branch.clone(),
+        ],
+    )
+}
+
+struct CampaignCwdGuard;
+
+impl Drop for CampaignCwdGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("GRIT_BENCH_CAMPAIGN_CWD");
+    }
+}

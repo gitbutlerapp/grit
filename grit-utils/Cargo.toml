@@ -26,6 +26,7 @@ serde_json.workspace = true
 time = { workspace = true, features = ["formatting", "parsing"] }
 shell-words.workspace = true
 tempfile.workspace = true
+toml.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["resource", "signal"] }
