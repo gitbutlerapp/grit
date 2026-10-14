@@ -92,10 +92,14 @@ fn t5303_apply_delta_source_size_mismatch_is_rejected() {
 #[test]
 fn rolling_hash_delta_mid_edit_index_pack_strict_and_git_fsck() {
     run_algo(HashAlgo::Sha1, |algo| {
-        let base = b"pack delta base line\n".repeat(4000);
-        let mut target = base.clone();
-        let mid = target.len() / 2;
-        target.splice(mid..mid, b"// grit rolling-hash insert\n".repeat(40));
+        let mut lines: Vec<String> = (1..=4000)
+            .map(|i| format!("pack delta base line {i}\n"))
+            .collect();
+        let base = lines.join("");
+        lines[2000] = "pack delta base line EDITED for rolling hash\n".to_owned();
+        let target = lines.join("");
+        let base = base.into_bytes();
+        let target = target.into_bytes();
         let delta = encode_delta(&base, &target, 0).expect("encode");
         assert_eq!(apply_delta(&base, &delta).expect("apply"), target);
         assert!(

@@ -26,10 +26,13 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::maintenance::RepackOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::unpack_objects::{pack_bytes_to_object_map, pack_is_thin};
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
+use grit_lib::repo::Repository;
 
 // ---------------------------------------------------------------------------
 // System-git fixture helpers (copied/adapted from the sibling transfer_pack.rs
@@ -832,6 +835,78 @@ fn delta_pack_is_far_smaller_and_near_pack_objects() {
         git_size,
         delta.len() as f64 / git_size as f64,
         whole.len()
+    );
+}
+
+/// Regression for issue #1011: sed-style line edits on one large file must deltify like Git.
+#[test]
+fn issue_1011_sed_line_edits_pack_near_git_size() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    if !git_try(dir, &["init", "-q", "-b", "main", "."]) {
+        eprintln!("SKIP: git init failed");
+        return;
+    }
+    let mut body = String::new();
+    for i in 1..=3000 {
+        body.push_str(&format!(
+            "{i} some moderately long line of text to make blob bigger abcdefghijklmnop\n"
+        ));
+    }
+    std::fs::write(dir.join("f.txt"), body.as_bytes()).expect("write");
+    git(dir, &["add", "f.txt"]);
+    git(dir, &["commit", "-q", "-m", "c0"]);
+    for i in 1..=10 {
+        let path = dir.join("f.txt");
+        let mut text = std::fs::read_to_string(&path).expect("read");
+        let mut owned: Vec<String> = text.lines().map(str::to_owned).collect();
+        let line_idx = (i * 100).min(owned.len().saturating_sub(1));
+        owned[line_idx] = format!("edit {i}");
+        std::fs::write(&path, owned.join("\n")).expect("write edit");
+        git(dir, &["add", "f.txt"]);
+        git(dir, &["commit", "-q", "-m", &format!("c{i}")]);
+    }
+    let tip = rev_parse(dir, "HEAD");
+    let git_size = git_pack_objects_size(dir, &[tip]);
+    let repo = Repository::open(
+        &dir.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(dir),
+    )
+    .expect("open repo");
+    repo.repack(&RepackOptions::default()).expect("repack");
+    let pack_dir = dir.join(".git/objects/pack");
+    let grit_pack_bytes: usize = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .map(|e| {
+            std::fs::metadata(e.path())
+                .map(|m| m.len() as usize)
+                .unwrap_or(0)
+        })
+        .sum();
+    assert!(
+        grit_pack_bytes <= git_size * 12 / 10,
+        "issue #1011: grit repack pack bytes {} vs git pack-objects {} (ratio {:.2})",
+        grit_pack_bytes,
+        git_size,
+        grit_pack_bytes as f64 / git_size as f64
+    );
+    let pack_path = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .expect("pack file")
+        .path();
+    let pack = std::fs::read(&pack_path).expect("read pack");
+    assert!(
+        git_index_and_fsck_ok(&pack, HashAlgo::Sha1),
+        "pack must index-pack and fsck"
+    );
+    let (rd, od, _) = pack_delta_stats(&pack, 20);
+    assert!(
+        rd + od >= 8,
+        "expected most blob revisions as deltas (ref={rd} ofs={od})"
     );
 }
 

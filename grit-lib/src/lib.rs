@@ -175,6 +175,7 @@ pub(crate) mod credentials;
 pub(crate) mod crlf;
 pub(crate) mod delta_encode;
 pub(crate) mod delta_islands;
+pub(crate) mod delta_rabin;
 pub mod diagnostics;
 pub mod diff;
 pub(crate) mod diff_indent_heuristic;
