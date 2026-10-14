@@ -142,18 +142,43 @@ fn query_hook(
             output.status.code.unwrap_or(-1)
         )));
     }
-    parse_nul_response(&output.stdout, version == 1)
+    if version == 1 {
+        let token = hook_v1_query_token();
+        return Ok(parse_v1_hook_response(&output.stdout, token));
+    }
+    parse_v2_hook_response(&output.stdout)
 }
 
-fn parse_nul_response(buf: &[u8], v1: bool) -> Result<QueryOutcome> {
-    if v1 {
-        let trivial = buf.first() == Some(&b'/');
-        return Ok(QueryOutcome {
-            token: default_bootstrap_token(),
-            trivial,
-            changed_paths: Vec::new(),
-        });
+/// Nanosecond timestamp token Git uses for hook protocol v1 (`getnanotime`).
+fn hook_v1_query_token() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos}")
+}
+
+/// Parse hook v1 stdout: NUL-delimited changed paths only (no response token).
+fn parse_v1_hook_response(buf: &[u8], token: String) -> QueryOutcome {
+    let mut changed_paths = Vec::new();
+    let mut trivial = false;
+    for part in buf.split(|&b| b == 0).filter(|p| !p.is_empty()) {
+        let path = String::from_utf8_lossy(part);
+        if path == "/" {
+            trivial = true;
+            break;
+        }
+        changed_paths.push(path.into_owned());
     }
+    QueryOutcome {
+        token,
+        trivial,
+        changed_paths,
+    }
+}
+
+fn parse_v2_hook_response(buf: &[u8]) -> Result<QueryOutcome> {
     let mut parts = buf.split(|&b| b == 0).filter(|p| !p.is_empty());
     let token = parts
         .next()
@@ -184,7 +209,7 @@ fn query_ipc(git_dir: &Path, index: &Index) -> Result<QueryOutcome> {
         .as_deref()
         .unwrap_or("builtin:fake");
     let response = ipc_send_query(&ipc_path, token.as_bytes())?;
-    parse_nul_response(&response, false)
+    parse_v2_hook_response(&response)
 }
 
 fn ipc_send_query(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
@@ -364,7 +389,7 @@ mod tests {
     #[test]
     fn parse_v2_nul_response_token_and_paths() {
         let raw = b"tok\0foo.txt\0bar/\0";
-        let out = parse_nul_response(raw, false).expect("parse");
+        let out = parse_v2_hook_response(raw).expect("parse");
         assert_eq!(out.token, "tok");
         assert!(!out.trivial);
         assert_eq!(out.changed_paths, vec!["foo.txt", "bar/"]);
@@ -373,7 +398,24 @@ mod tests {
     #[test]
     fn parse_v2_trivial_response() {
         let raw = b"tok\0/\0";
-        let out = parse_nul_response(raw, false).expect("parse");
+        let out = parse_v2_hook_response(raw).expect("parse");
         assert!(out.trivial);
+    }
+
+    #[test]
+    fn parse_v1_changed_paths() {
+        let raw = b"tracked.txt\0";
+        let out = parse_v1_hook_response(raw, "123".to_owned());
+        assert_eq!(out.token, "123");
+        assert!(!out.trivial);
+        assert_eq!(out.changed_paths, vec!["tracked.txt"]);
+    }
+
+    #[test]
+    fn parse_v1_trivial_response() {
+        let raw = b"/\0";
+        let out = parse_v1_hook_response(raw, "456".to_owned());
+        assert!(out.trivial);
+        assert!(out.changed_paths.is_empty());
     }
 }

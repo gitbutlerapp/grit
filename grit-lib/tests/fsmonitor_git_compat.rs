@@ -263,3 +263,71 @@ exit 0
         model.unstaged
     );
 }
+
+fn write_fsmonitor_v1_hook(dir: &Path) -> PathBuf {
+    let hook = dir.join("fsmonitor-v1-hook.sh");
+    let script = r#"#!/bin/sh
+if [ "$1" = "1" ]; then
+  printf '%s\0' 'tracked.txt'
+  exit 0
+fi
+exit 0
+"#;
+    fs::write(&hook, script).expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&hook).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hook, perms).expect("chmod hook");
+    }
+    hook
+}
+
+#[test]
+fn grit_status_honors_fsmonitor_hook_v1_changed_paths() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path();
+    git(repo_root, &["init", "-q", "-b", "main", "."]);
+    git(repo_root, &["config", "user.email", "t@example.com"]);
+    git(repo_root, &["config", "user.name", "Test"]);
+    let hook = write_fsmonitor_v1_hook(repo_root);
+    git(
+        repo_root,
+        &[
+            "config",
+            "core.fsmonitor",
+            hook.to_str().expect("hook utf8"),
+        ],
+    );
+    git(repo_root, &["config", "core.fsmonitorhookversion", "1"]);
+    fs::write(repo_root.join("tracked.txt"), "v1\n").expect("write");
+    git(repo_root, &["add", "tracked.txt"]);
+    git(repo_root, &["commit", "-qm", "initial"]);
+    isolated_git(repo_root, &["status", "-s"]);
+
+    fs::write(repo_root.join("tracked.txt"), "v1 modified\n").expect("modify");
+
+    let grit_repo = Repository::open(
+        &repo_root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(repo_root),
+    )
+    .expect("open grit repo");
+    let model = grit_lib::porcelain::status::status(
+        &grit_repo,
+        &grit_lib::porcelain::status::StatusOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+    )
+    .expect("status");
+
+    assert!(
+        model.unstaged.iter().any(|e| e.path() == "tracked.txt"),
+        "grit must report unstaged change after v1 hook invalidates path: {:?}",
+        model.unstaged
+    );
+    let git_porcelain = isolated_git(repo_root, &["status", "--porcelain"]);
+    assert!(
+        git_porcelain.contains("tracked.txt"),
+        "git baseline should show modification: {git_porcelain}"
+    );
+}
