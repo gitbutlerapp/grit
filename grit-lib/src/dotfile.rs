@@ -123,6 +123,17 @@ fn is_ntfs_dot_generic(name: &str, dotgit_name: &str, short_prefix: &str) -> boo
         return only_spaces_and_periods(name, after_prefix + 2);
     }
 
+    // DOS 8.3 short alias without a leading dot (e.g. `gitmod~1` for `.gitmodules`).
+    let prefix6 = dotgit_name.as_bytes();
+    if prefix6.len() >= 6
+        && b.len() >= 8
+        && bytes_eq_ignore_ascii_case(&b[..6], &prefix6[..6])
+        && b[6] == b'~'
+        && (b'1'..=b'4').contains(&b[7])
+    {
+        return only_spaces_and_periods(name, 8);
+    }
+
     let mut i = 0usize;
     let mut saw_tilde = false;
     while i < 8 {
@@ -187,5 +198,33 @@ pub fn dotfile_matches(subcmd: &str, path: &str) -> bool {
         "is_dotgitattributes" => is_hfs_dot_gitattributes(path) || is_ntfs_dot_gitattributes(path),
         "is_dotmailmap" => is_hfs_dot_mailmap(path) || is_ntfs_dot_mailmap(path),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression for issue #1037: `name[..6]` in the old NTFS helper panicked here.
+    #[test]
+    fn ntfs_dot_checks_multibyte_char_at_byte_six_do_not_panic() {
+        for name in ["abcde日.txt", "ab日本.txt", "file0日本.txt"] {
+            assert!(!is_ntfs_dot_gitmodules(name));
+            assert!(!is_ntfs_dot_gitattributes(name));
+            assert!(!is_ntfs_dot_gitignore(name));
+            assert!(!is_ntfs_dot_mailmap(name));
+            assert!(!is_ntfs_dotgit(name));
+        }
+    }
+
+    #[test]
+    fn ntfs_dos83_short_aliases_without_leading_dot() {
+        assert!(is_ntfs_dot_gitmodules("gitmod~1"));
+        assert!(is_ntfs_dot_gitmodules("GITMOD~2"));
+        assert!(is_ntfs_dot_gitattributes("gitatt~1"));
+        assert!(is_ntfs_dot_gitignore("gitign~1"));
+        assert!(is_ntfs_dot_mailmap("mailma~1"));
+        assert!(!is_ntfs_dot_gitmodules("gitmod~5"));
+        assert!(!is_ntfs_dot_gitmodules("gitmo~1"));
     }
 }

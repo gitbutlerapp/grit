@@ -12,6 +12,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::config::{ConfigFile, ConfigScope};
+use crate::dotfile::{
+    is_hfs_dot_gitattributes, is_hfs_dot_gitignore, is_hfs_dot_gitmodules, is_hfs_dot_mailmap,
+    is_ntfs_dot_gitattributes, is_ntfs_dot_gitignore, is_ntfs_dot_gitmodules, is_ntfs_dot_mailmap,
+};
 use crate::error::Result;
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::store::PackedObjects;
@@ -34,143 +38,6 @@ pub fn tree_entry_is_gitmodules_blob(mode: u32, name: &[u8]) -> bool {
         return false;
     };
     is_hfs_dot_gitmodules(name_str) || is_ntfs_dot_gitmodules(name_str)
-}
-
-fn next_hfs_char(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<char> {
-    loop {
-        let ch = chars.next()?;
-        match ch {
-            '\u{200c}' | '\u{200d}' | '\u{200e}' | '\u{200f}' => continue,
-            '\u{202a}'..='\u{202e}' => continue,
-            '\u{206a}'..='\u{206f}' => continue,
-            '\u{feff}' => continue,
-            _ => return Some(ch),
-        }
-    }
-}
-
-fn is_hfs_dot_generic(path: &str, needle: &str) -> bool {
-    let mut chars = path.chars().peekable();
-    let mut c = match next_hfs_char(&mut chars) {
-        Some(x) => x,
-        None => return false,
-    };
-    if c != '.' {
-        return false;
-    }
-    for nc in needle.chars() {
-        c = match next_hfs_char(&mut chars) {
-            Some(x) => x,
-            None => return false,
-        };
-        if c as u32 > 127 {
-            return false;
-        }
-        if !c.eq_ignore_ascii_case(&nc) {
-            return false;
-        }
-    }
-    match next_hfs_char(&mut chars) {
-        None | Some('/') => true,
-        Some(_) => false,
-    }
-}
-
-fn is_hfs_dot_gitmodules(path: &str) -> bool {
-    is_hfs_dot_generic(path, "gitmodules")
-}
-
-fn only_spaces_and_periods(name: &str, mut i: usize) -> bool {
-    let b = name.as_bytes();
-    loop {
-        let c = *b.get(i).unwrap_or(&0);
-        if c == 0 || c == b':' {
-            return true;
-        }
-        if c != b' ' && c != b'.' {
-            return false;
-        }
-        i += 1;
-    }
-}
-
-fn is_ntfs_dot_generic(name: &str, dotgit_name: &str, short_prefix: &str) -> bool {
-    let b = name.as_bytes();
-    let len = dotgit_name.len();
-    if !b.is_empty()
-        && b[0] == b'.'
-        && name.len() > len
-        && name[1..1 + len].eq_ignore_ascii_case(dotgit_name)
-    {
-        let i = len + 1;
-        return only_spaces_and_periods(name, i);
-    }
-
-    if b.len() >= 8
-        && name[..6].eq_ignore_ascii_case(&dotgit_name[..6])
-        && b[6] == b'~'
-        && (b[7] >= b'1' && b[7] <= b'4')
-    {
-        return only_spaces_and_periods(name, 8);
-    }
-
-    let mut i = 0usize;
-    let mut saw_tilde = false;
-    while i < 8 {
-        let c = *b.get(i).unwrap_or(&0);
-        if c == 0 {
-            return false;
-        }
-        if saw_tilde {
-            if !c.is_ascii_digit() {
-                return false;
-            }
-        } else if c == b'~' {
-            i += 1;
-            let d = *b.get(i).unwrap_or(&0);
-            if !(b'1'..=b'9').contains(&d) {
-                return false;
-            }
-            saw_tilde = true;
-        } else if i >= 6 || c & 0x80 != 0 {
-            return false;
-        } else {
-            let sc = short_prefix.as_bytes().get(i).copied().unwrap_or(0);
-            if (c as char).to_ascii_lowercase() != sc as char {
-                return false;
-            }
-        }
-        i += 1;
-    }
-    only_spaces_and_periods(name, i)
-}
-
-fn is_ntfs_dot_gitmodules(name: &str) -> bool {
-    is_ntfs_dot_generic(name, "gitmodules", "gi7eba")
-}
-
-fn is_hfs_dot_gitattributes(path: &str) -> bool {
-    is_hfs_dot_generic(path, "gitattributes")
-}
-
-fn is_ntfs_dot_gitattributes(name: &str) -> bool {
-    is_ntfs_dot_generic(name, "gitattributes", "gi7d29")
-}
-
-fn is_hfs_dot_gitignore(path: &str) -> bool {
-    is_hfs_dot_generic(path, "gitignore")
-}
-
-fn is_ntfs_dot_gitignore(name: &str) -> bool {
-    is_ntfs_dot_generic(name, "gitignore", "gi250a")
-}
-
-fn is_hfs_dot_mailmap(path: &str) -> bool {
-    is_hfs_dot_generic(path, "mailmap")
-}
-
-fn is_ntfs_dot_mailmap(name: &str) -> bool {
-    is_ntfs_dot_generic(name, "mailmap", "maba30")
 }
 
 /// True for a tree entry name that should be treated as `.gitattributes` for fsck (blob only).

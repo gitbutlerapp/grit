@@ -934,6 +934,18 @@ mod tests {
         assert!(fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).is_ok());
     }
 
+    /// Regression for issue #1037: dot-special NTFS checks must not slice `&str` at byte 6.
+    #[test]
+    fn tree_multibyte_utf8_name_at_byte_six_does_not_panic() {
+        let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let oid = hex::decode(tree).expect("hex");
+        let mut body = b"100644 ".to_vec();
+        body.extend_from_slice("abcde日.txt".as_bytes());
+        body.push(0);
+        body.extend_from_slice(&oid);
+        assert!(fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).is_ok());
+    }
+
     #[test]
     fn tree_file_then_tree_same_name_is_duplicate() {
         let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";

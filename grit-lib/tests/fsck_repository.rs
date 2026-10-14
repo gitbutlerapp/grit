@@ -1010,3 +1010,83 @@ fn linked_worktree_head_reflog_roots_match_git_fsck() {
         "dangling mismatch git={git_set:?} grit={grit_set:?}"
     );
 }
+
+/// Regression for issue #1037: tree dot-special checks must not panic on UTF-8 names
+/// whose multibyte character starts at byte index 6.
+#[test]
+fn fsck_commit_with_multibyte_name_at_byte_six() {
+    let (dir, repo) = init_repo();
+    let wt = repo.work_tree().expect("wt");
+    std::fs::write(wt.join("abcde日.txt"), b"x\n").expect("write");
+    stage_for_commit(&repo, &mut NullProgress).expect("stage");
+    let ident = "T <t@example.com> 1 +0000".to_string();
+    create_commit(
+        &repo,
+        &CommitRequest {
+            message: "one".into(),
+            author: ident.clone(),
+            committer: ident,
+            allow_empty: false,
+            sign_override: None,
+            amend: false,
+            assume_worktree_synced: false,
+        },
+        &mut NullProgress,
+    )
+    .expect("commit");
+
+    let git_out = git_fsck(dir.path(), true);
+    assert!(
+        git_out.msg_ids.is_empty(),
+        "git fsck --strict: {:?}",
+        git_out.msg_ids
+    );
+
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(true));
+    assert!(
+        report.issues.is_empty(),
+        "grit fsck issues: {:?}",
+        report.issues
+    );
+}
+
+/// NTFS DOS 8.3 alias `gitmod~1` must be treated like `.gitmodules` (Git `fsck`).
+#[test]
+fn gitmod_dos83_symlink_matches_git() {
+    let (dir, repo) = init_repo();
+    let objects = dir.path().join(".git/objects");
+    let blob_hex =
+        write_loose_object(&objects, FixtureAlgo::Sha1, "blob", b"target\n").expect("blob");
+    let blob_oid: ObjectId = blob_hex.parse().expect("parse");
+    let mut tree_body = b"120000 gitmod~1\0".to_vec();
+    tree_body.extend_from_slice(blob_oid.as_bytes());
+    let tree_hex =
+        write_loose_object(&objects, FixtureAlgo::Sha1, "tree", &tree_body).expect("tree");
+    let tree_oid: ObjectId = tree_hex.parse().expect("parse");
+    let commit_body = format!(
+        "tree {}\nauthor T <t@example.com> 1 +0000\ncommitter T <t@example.com> 1 +0000\n\nm\n",
+        tree_oid.to_hex()
+    );
+    let commit_hex = write_loose_object(
+        &objects,
+        FixtureAlgo::Sha1,
+        "commit",
+        commit_body.as_bytes(),
+    )
+    .expect("commit");
+    let commit_oid: ObjectId = commit_hex.parse().expect("parse");
+    write_ref_loose(dir.path(), "refs/heads/main", commit_oid);
+
+    let git_out = git_fsck(dir.path(), true);
+    assert!(
+        git_out.msg_ids.iter().any(|id| id == "gitmodulesSymlink"),
+        "git fsck: {:?}",
+        git_out.msg_ids
+    );
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        has_msg_id(&report, "gitmodulesSymlink"),
+        "grit fsck: {:?}",
+        report.issues
+    );
+}
