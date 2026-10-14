@@ -4,19 +4,20 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::campaign_prep::ensure_campaign_hot_path;
+use crate::campaign_prep::{ensure_campaign_hot_path, load_campaign_hot_path_meta, restore_campaign_worktree_to_main};
 use crate::campaign_worktree::{
     blame_target_path, dirty_tracked_worktree, list_tracked_files, modify_tracked_files,
 };
 use crate::fixture::prepare_commit_iteration;
 use crate::hot_path_fixture::HotPathMeta;
 use crate::maintenance_suite::seed_loose_objects;
-use crate::network_fixture::file_url;
+use crate::network_fixture::{ensure_campaign_bare_network_meta, file_url};
+use crate::network_suite::{ensure_network_client_repo, prepare_network_command};
 use crate::real_repo_fixture::run_git;
 use crate::real_repo_fixture::scratch_root;
 use crate::scenarios::{
-    chain_shell_public, grit_log_pages_shell, run_scenario, Driver, PrepareKind, RunConfig,
-    Scenario, LOG_BENCH_GRIT_PAGE_COUNT,
+    chain_shell_public, grit_log_pages_shell, run_scenario, run_scenario_prepared, Driver,
+    PrepareKind, RunConfig, Scenario, LOG_BENCH_GRIT_PAGE_COUNT,
 };
 use crate::schema::ScenarioResult;
 use crate::shell::{shell_command, shell_quote};
@@ -197,8 +198,7 @@ pub fn run_fixture_cli_matrix(
     let log_limit: usize = if smoke { 20 } else { 1000 };
     let page_size = LOG_BENCH_GRIT_PAGE_COUNT.max(1);
     let log_pages = log_limit.div_ceil(page_size);
-    let use_single_log_page = smoke || fixture.id == "git-dot-git";
-    let (grit_log, grit_via_shell) = if use_single_log_page {
+    let (grit_log, grit_via_shell) = if smoke {
         (vec!["log".into()], false)
     } else {
         (sh_script(grit_log_pages_shell(grit, log_pages)), true)
@@ -485,6 +485,12 @@ fn append_stash_scenario(
     fixture: &CampaignFixture,
     out: &mut Vec<ScenarioResult>,
 ) -> Result<()> {
+    if let Ok(meta) = load_campaign_hot_path_meta(&fixture.worktree) {
+        restore_campaign_worktree_to_main(git, &fixture.worktree, &meta)?;
+    } else {
+        run_git(git, &fixture.worktree, &["reset", "--hard", "HEAD"])?;
+        run_git(git, &fixture.worktree, &["clean", "-fd", "-q"])?;
+    }
     prepare_commit_iteration(&fixture.worktree, git)?;
     let grit_cmd = chain_shell_public(
         grit,
@@ -697,6 +703,63 @@ fn append_file_transport(
         },
         &fetch_dest,
     )?);
+
+    let push_meta = ensure_campaign_bare_network_meta(git, &fixture.bare, smoke)?;
+    let push_client = ensure_network_client_repo(git, &fixture.bare)?;
+    let push_url = file_url(&fixture.bare)?;
+    configure_push_remote(git, &push_client, &push_url, &push_meta.default_branch)?;
+    let prepare = prepare_network_command(cfg, git, &fixture.bare, "prepare-network-push");
+    out.push(run_scenario_prepared(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "push-file"),
+            group: "network".into(),
+            fixture: fixture.label.clone(),
+            description: format!("push {} commits over file://", push_meta.push_commits),
+            grit_argv: vec!["push".into()],
+            git_argv: vec![
+                "push".into(),
+                "-q".into(),
+                "origin".into(),
+                push_meta.default_branch.clone(),
+            ],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &push_client,
+        &prepare,
+    )?);
+    Ok(())
+}
+
+fn configure_push_remote(git: &Path, client: &Path, url: &str, default_branch: &str) -> Result<()> {
+    if client.join(".git").is_dir() {
+        run_git(git, client, &["remote", "remove", "origin"]).ok();
+    }
+    run_git(git, client, &["remote", "add", "origin", url])?;
+    run_git(
+        git,
+        client,
+        &[
+            "config",
+            &format!("branch.{default_branch}.remote"),
+            "origin",
+        ],
+    )?;
+    run_git(
+        git,
+        client,
+        &[
+            "config",
+            &format!("branch.{default_branch}.merge"),
+            &format!("refs/heads/{default_branch}"),
+        ],
+    )?;
     Ok(())
 }
 
@@ -757,5 +820,17 @@ struct CampaignCwdGuard;
 impl Drop for CampaignCwdGuard {
     fn drop(&mut self) {
         std::env::remove_var("GRIT_BENCH_CAMPAIGN_CWD");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LOG_BENCH_GRIT_PAGE_COUNT;
+
+    #[test]
+    fn production_log_limit_pages_match_git_thousand() {
+        let log_limit = 1000usize;
+        let pages = log_limit.div_ceil(LOG_BENCH_GRIT_PAGE_COUNT);
+        assert_eq!(pages, 100);
     }
 }

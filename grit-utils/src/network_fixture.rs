@@ -90,6 +90,13 @@ pub struct NetworkBenchMeta {
     pub clone_dest: PathBuf,
     /// Tip OID on the server before incremental fetch prep.
     pub fetch_base_oid: String,
+    /// Default branch on the bare remote (`main`, `master`, …).
+    #[serde(default = "default_network_branch")]
+    pub default_branch: String,
+}
+
+fn default_network_branch() -> String {
+    "main".into()
 }
 
 pub fn meta_path(bare: &Path) -> PathBuf {
@@ -402,6 +409,62 @@ fn bare_repo_stem(bare: &Path) -> String {
         .unwrap_or_else(|| "repo.git".to_string())
 }
 
+fn default_branch_on_bare(git: &Path, bare: &Path) -> Result<String> {
+    let mut cmd = Command::new(git);
+    cmd.args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(bare);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git symbolic-ref HEAD")?;
+    if out.status.success() {
+        let short = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !short.is_empty() {
+            return Ok(short);
+        }
+    }
+    Ok("main".into())
+}
+
+/// Network bench metadata for a real-repo campaign bare remote (file:// push/fetch matrix).
+pub fn ensure_campaign_bare_network_meta(
+    git: &Path,
+    bare: &Path,
+    smoke: bool,
+) -> Result<NetworkBenchMeta> {
+    if meta_path(bare).is_file() {
+        return load_meta(bare);
+    }
+    let profile = if smoke {
+        NetworkProfile::Smoke
+    } else {
+        NetworkProfile::Production
+    };
+    let default_branch = default_branch_on_bare(git, bare)?;
+    let fetch_base = rev_parse(
+        git,
+        bare,
+        &format!(
+            "refs/heads/{default_branch}~{}",
+            profile.incremental_fetch_commits()
+        ),
+    )
+    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
+    let meta = NetworkBenchMeta {
+        profile: profile.suffix().to_string(),
+        kind: "CampaignRealRepo".into(),
+        bare_repo: bare.to_path_buf(),
+        http_repo_name: REPO_NAME.to_string(),
+        many_refs: 0,
+        incremental_fetch_commits: profile.incremental_fetch_commits(),
+        push_commits: profile.push_commits(),
+        client_repo: bare.with_file_name(format!("{}-campaign-push-client", bare_repo_stem(bare))),
+        clone_dest: bare.with_file_name(format!("{}-campaign-clone", bare_repo_stem(bare))),
+        fetch_base_oid: fetch_base,
+        default_branch,
+    };
+    fs::write(meta_path(bare), serde_json::to_string_pretty(&meta)?)?;
+    Ok(meta)
+}
+
 fn write_meta(
     git: &Path,
     profile: NetworkProfile,
@@ -409,13 +472,18 @@ fn write_meta(
     bare: &Path,
     many_refs: usize,
 ) -> Result<()> {
+    let default_branch = default_branch_on_bare(git, bare)?;
     let fetch_base = rev_parse(
         git,
         bare,
-        &format!("refs/heads/main~{}", profile.incremental_fetch_commits()),
+        &format!(
+            "refs/heads/{default_branch}~{}",
+            profile.incremental_fetch_commits()
+        ),
     )
-    .or_else(|_| rev_parse(git, bare, "refs/heads/main"))?;
+    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
 
+    let default_branch = default_branch_on_bare(git, bare)?;
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: format!("{kind:?}"),
@@ -427,6 +495,7 @@ fn write_meta(
         client_repo: bare.with_file_name(format!("{}-client", bare_repo_stem(bare))),
         clone_dest: bare.with_file_name(format!("{}-clone", bare_repo_stem(bare))),
         fetch_base_oid: fetch_base,
+        default_branch,
     };
     fs::write(meta_path(bare), serde_json::to_string_pretty(&meta)?)?;
     for sidecar in [&meta.client_repo, &meta.clone_dest] {

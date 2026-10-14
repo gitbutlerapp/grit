@@ -947,8 +947,13 @@ fn main() -> Result<()> {
         | Cmd::RefsDriver { .. } => unreachable!(),
     };
 
-    let rendered = render_report(&cli.format, &report)?;
-    write_output(&cli, &rendered)?;
+    let ledger_wrote_markdown = matches!(cli.command, Cmd::Campaign { ledger: true, .. })
+        && matches!(cli.format, OutputFormat::Markdown)
+        && cli.output.is_some();
+    if !ledger_wrote_markdown {
+        let rendered = render_report(&cli.format, &report)?;
+        write_output(&cli, &rendered)?;
+    }
     if !matches!(
         cli.command,
         Cmd::Odb

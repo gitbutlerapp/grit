@@ -186,6 +186,61 @@ pub fn run_scenario(
     })
 }
 
+/// Like [`run_scenario`] but uses an explicit hyperfine prepare command (network hooks).
+pub fn run_scenario_prepared(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    scenario: &Scenario,
+    repo: &Path,
+    prepare: &str,
+) -> Result<ScenarioResult> {
+    let git_prog = if scenario.git_via_shell {
+        PathBuf::from("/bin/sh")
+    } else {
+        git.to_path_buf()
+    };
+    let grit_prog = if scenario.grit_via_shell {
+        PathBuf::from("/bin/sh")
+    } else {
+        grit.to_path_buf()
+    };
+
+    let git_stats = bench_tool(
+        hyperfine,
+        &git_prog,
+        &scenario.git_argv,
+        repo,
+        cfg,
+        Some(prepare),
+        "git",
+    )?;
+    let grit_stats = bench_tool(
+        hyperfine,
+        &grit_prog,
+        &scenario.grit_argv,
+        repo,
+        cfg,
+        Some(prepare),
+        "grit",
+    )?;
+
+    let ratio = median_ratio(git_stats.median_ms, grit_stats.median_ms);
+
+    Ok(ScenarioResult {
+        id: scenario.id.clone(),
+        group: scenario.group.clone(),
+        fixture: scenario.fixture.clone(),
+        description: scenario.description.clone(),
+        driver: scenario.driver.into(),
+        git: git_stats,
+        grit: grit_stats,
+        ratio,
+        grit_failure: None,
+    })
+}
+
 /// Status benchmarks (dirty + clean) for each file count.
 pub fn run_status_suite(
     hyperfine: &Path,
@@ -511,6 +566,18 @@ mod log_bench_tests {
             LOG_BENCH_GRIT_PAGE_COUNT
         );
     }
+
+    #[test]
+    fn campaign_production_log_uses_hundred_grit_pages() {
+        let grit = Path::new("/opt/grit/grit");
+        let log_limit = 1000usize;
+        let pages = log_limit.div_ceil(LOG_BENCH_GRIT_PAGE_COUNT);
+        assert_eq!(pages, 100);
+        let script = grit_log_pages_shell(grit, pages);
+        assert!(script.contains("seq 1 100"));
+        let grit_q = shell_quote(&grit.to_string_lossy());
+        assert!(script.contains(&format!("page=$({grit_q} log)")));
+    }
 }
 
 /// Stage-all benchmark for each file count (`git add -A` vs `grit add`).
@@ -728,7 +795,11 @@ pub fn run_prepare_restore(_git: &Path) -> Result<()> {
 }
 
 pub fn run_prepare_stash(git: &Path) -> Result<()> {
-    prepare_commit_iteration(&bench_work_dir(), git)
+    let dir = bench_work_dir();
+    if let Ok(meta) = crate::campaign_prep::load_campaign_hot_path_meta(&dir) {
+        crate::campaign_prep::restore_campaign_worktree_to_main(git, &dir, &meta)?;
+    }
+    prepare_commit_iteration(&dir, git)
 }
 
 pub fn run_prepare_switch(git: &Path) -> Result<()> {

@@ -218,7 +218,7 @@ fn run_fetch_scenarios(
     ensure_client_repo(git, bare, &meta)?;
     let (url, _git_http, _grit_http) =
         resolve_transport_url(git, grit, http_server, bare, transport)?;
-    configure_remote(git, &meta.client_repo, &url)?;
+    configure_remote(git, &meta.client_repo, &url, &meta.default_branch)?;
 
     let mut out = Vec::new();
 
@@ -283,7 +283,7 @@ fn run_push_scenarios(
     ensure_client_repo(git, bare, &meta)?;
     let (url, _git_http, _grit_http) =
         resolve_transport_url(git, grit, http_server, bare, transport)?;
-    configure_remote(git, &meta.client_repo, &url)?;
+    configure_remote(git, &meta.client_repo, &url, &meta.default_branch)?;
 
     let prepare = prepare_network_command(cfg, git, bare, "prepare-network-push");
     let scenario = run_paired_cli_scenario(
@@ -301,7 +301,12 @@ fn run_push_scenarios(
                 meta.push_commits,
                 transport.label()
             ),
-            git_argv: vec!["push".into(), "-q".into(), "origin".into(), "main".into()],
+            git_argv: vec![
+                "push".into(),
+                "-q".into(),
+                "origin".into(),
+                meta.default_branch.clone(),
+            ],
             grit_argv: vec!["push".into()],
             prepare: Some(prepare),
         },
@@ -513,7 +518,7 @@ fn clear_network_sidecars(bare: &Path) -> Result<()> {
     Ok(())
 }
 
-fn prepare_network_command(cfg: &RunConfig, git: &Path, bare: &Path, sub: &str) -> String {
+pub fn prepare_network_command(cfg: &RunConfig, git: &Path, bare: &Path, sub: &str) -> String {
     shell_command(
         &cfg.prepare_bin,
         &[
@@ -574,6 +579,12 @@ fn resolve_transport_url(
     }
 }
 
+pub fn ensure_network_client_repo(git: &Path, bare: &Path) -> Result<PathBuf> {
+    let meta = load_meta(bare)?;
+    ensure_client_repo(git, bare, &meta)?;
+    Ok(meta.client_repo)
+}
+
 fn ensure_client_repo(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Result<()> {
     if meta.client_repo.join(".git").is_dir() || meta.client_repo.join("HEAD").is_file() {
         return Ok(());
@@ -592,7 +603,11 @@ fn ensure_client_repo(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Resul
             meta.client_repo.to_str().context("client")?,
         ],
     )?;
-    run_git_cmd(git, Some(&meta.client_repo), &["checkout", "-q", "main"])?;
+    run_git_cmd(
+        git,
+        Some(&meta.client_repo),
+        &["checkout", "-q", &meta.default_branch],
+    )?;
     run_git_cmd(
         git,
         Some(&meta.client_repo),
@@ -601,7 +616,7 @@ fn ensure_client_repo(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Resul
     Ok(())
 }
 
-fn configure_remote(git: &Path, client: &Path, url: &str) -> Result<()> {
+fn configure_remote(git: &Path, client: &Path, url: &str, default_branch: &str) -> Result<()> {
     let remote_file = client.join(".git/config");
     if remote_file.is_file() {
         run_git_cmd(git, Some(client), &["remote", "remove", "origin"]).ok();
@@ -610,12 +625,20 @@ fn configure_remote(git: &Path, client: &Path, url: &str) -> Result<()> {
     run_git_cmd(
         git,
         Some(client),
-        &["config", "branch.main.remote", "origin"],
+        &[
+            "config",
+            &format!("branch.{default_branch}.remote"),
+            "origin",
+        ],
     )?;
     run_git_cmd(
         git,
         Some(client),
-        &["config", "branch.main.merge", "refs/heads/main"],
+        &[
+            "config",
+            &format!("branch.{default_branch}.merge"),
+            &format!("refs/heads/{default_branch}"),
+        ],
     )?;
     Ok(())
 }
@@ -659,10 +682,11 @@ pub fn prepare_network_clone(bare: &Path) -> Result<()> {
 pub fn prepare_network_fetch_incr(git: &Path, bare: &Path) -> Result<()> {
     let meta = load_meta(bare)?;
     ensure_client_repo(git, bare, &meta)?;
+    let branch_ref = format!("refs/heads/{}", meta.default_branch);
     run_git_cmd(
         git,
         Some(bare),
-        &["update-ref", "refs/heads/main", &meta.fetch_base_oid],
+        &["update-ref", &branch_ref, &meta.fetch_base_oid],
     )?;
     run_git_cmd(
         git,
@@ -670,7 +694,12 @@ pub fn prepare_network_fetch_incr(git: &Path, bare: &Path) -> Result<()> {
         &["reset", "--hard", &meta.fetch_base_oid],
     )?;
     for i in 0..meta.incremental_fetch_commits {
-        append_empty_commit_on_bare(git, bare, &format!("bench-fetch-incr-{i}"))?;
+        append_empty_commit_on_bare(
+            git,
+            bare,
+            &meta.default_branch,
+            &format!("bench-fetch-incr-{i}"),
+        )?;
     }
     refresh_http_mirror(git, bare)
 }
@@ -684,7 +713,11 @@ pub fn prepare_network_fetch_noop(git: &Path, bare: &Path) -> Result<()> {
     run_git_cmd(
         git,
         Some(&meta.client_repo),
-        &["reset", "--hard", "origin/main"],
+        &[
+            "reset",
+            "--hard",
+            &format!("origin/{}", meta.default_branch),
+        ],
     )?;
     Ok(())
 }
@@ -693,10 +726,11 @@ pub fn prepare_network_fetch_noop(git: &Path, bare: &Path) -> Result<()> {
 pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
     let meta = load_meta(bare)?;
     prepare_network_fetch_noop(git, bare)?;
+    let branch_ref = format!("refs/heads/{}", meta.default_branch);
     run_git_cmd(
         git,
         Some(bare),
-        &["update-ref", "refs/heads/main", &meta.fetch_base_oid],
+        &["update-ref", &branch_ref, &meta.fetch_base_oid],
     )?;
     run_git_cmd(
         git,
@@ -719,8 +753,13 @@ pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
     refresh_http_mirror(git, bare)
 }
 
-/// Advance `refs/heads/main` on a bare repo with an empty commit (same tree).
-fn append_empty_commit_on_bare(git: &Path, bare: &Path, message: &str) -> Result<()> {
+/// Advance the default branch on a bare repo with an empty commit (same tree).
+fn append_empty_commit_on_bare(
+    git: &Path,
+    bare: &Path,
+    default_branch: &str,
+    message: &str,
+) -> Result<()> {
     let tree = run_git_output(git, Some(bare), &["rev-parse", "HEAD^{tree}"])?;
     let parent = run_git_output(git, Some(bare), &["rev-parse", "HEAD"])?;
     let mut cmd = Command::new(git);
@@ -740,11 +779,8 @@ fn append_empty_commit_on_bare(git: &Path, bare: &Path, message: &str) -> Result
         );
     }
     let new_oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    run_git_cmd(
-        git,
-        Some(bare),
-        &["update-ref", "refs/heads/main", &new_oid],
-    )?;
+    let branch_ref = format!("refs/heads/{default_branch}");
+    run_git_cmd(git, Some(bare), &["update-ref", &branch_ref, &new_oid])?;
     Ok(())
 }
 

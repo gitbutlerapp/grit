@@ -145,11 +145,19 @@ pub fn dirty_repo(dir: &Path, count: usize) -> Result<()> {
     Ok(())
 }
 
+fn tracked_worktree_files(git: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
+    Ok(crate::campaign_worktree::list_tracked_files(git, dir)?
+        .into_iter()
+        .filter(|rel| rel.to_string_lossy() != ".gitmodules")
+        .map(|rel| dir.join(rel))
+        .collect())
+}
+
 /// Modify ~20% of tracked files for a `commit` iteration (append line), then reset index with **git**.
 pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
     use std::io::Write as _;
 
-    let files = walkdir(dir)?;
+    let files = tracked_worktree_files(git, dir)?;
     let modify_count = (files.len() / 5).max(1);
     for f in files.iter().take(modify_count) {
         let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
@@ -185,7 +193,7 @@ pub fn prepare_restore_iteration(dir: &Path) -> Result<()> {
 
 /// Modify ~20% of tracked files and reset the index to HEAD with **git** (for `add` benchmarks).
 pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
-    let files = walkdir(dir)?;
+    let files = tracked_worktree_files(git, dir)?;
     let modify_count = (files.len() / 5).max(1);
     for f in files.iter().take(modify_count) {
         fs::write(f, "modified for add bench\n")?;
@@ -371,7 +379,7 @@ mod tests {
         }
         let err = prepare_add_iteration(dir.path(), &grit).unwrap_err();
         assert!(
-            err.to_string().contains("git reset"),
+            err.to_string().contains("git reset") || err.to_string().contains("ls-files"),
             "unexpected error: {err}"
         );
     }
