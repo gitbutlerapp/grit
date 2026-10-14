@@ -8,7 +8,7 @@ use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::NullProgress;
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::Repository;
 use grit_test_support::git;
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
@@ -54,7 +54,7 @@ fn add_executable_stages_100755_when_filemode_false() {
     fs::write(root.join("tool.sh"), "#!/bin/sh\necho hi\n").expect("write");
 
     let repo = Repository::discover(Some(root), &Default::default()).expect("open");
-    stage(
+    let outcome = stage(
         &repo,
         &StageOptions {
             pathspecs: vec!["tool.sh".to_owned()],
@@ -66,6 +66,11 @@ fn add_executable_stages_100755_when_filemode_false() {
         &mut NullProgress,
     )
     .expect("stage");
+    assert_eq!(
+        outcome.total(),
+        1,
+        "one new path must count as one staged change, got {outcome:?}"
+    );
 
     let staged = git_out(root, &["ls-files", "-s", "tool.sh"]);
     assert!(

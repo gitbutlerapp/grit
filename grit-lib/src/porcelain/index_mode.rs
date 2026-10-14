@@ -122,12 +122,7 @@ pub(crate) fn apply_executable_hint_to_index(
     let paths: Vec<Vec<u8>> = index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0)
-        .filter(|e| {
-            std::str::from_utf8(&e.path)
-                .ok()
-                .is_some_and(matches)
-        })
+        .filter(|e| e.stage() == 0 && std::str::from_utf8(&e.path).ok().is_some_and(matches))
         .map(|e| e.path.clone())
         .collect();
 
