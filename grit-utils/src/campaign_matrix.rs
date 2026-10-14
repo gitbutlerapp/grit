@@ -39,6 +39,7 @@ fn sh_script(script: String) -> Vec<String> {
 }
 
 /// Run the core CLI matrix for `fixture`.
+#[allow(clippy::too_many_arguments)]
 pub fn run_fixture_cli_matrix(
     hyperfine: &Path,
     git: &Path,
@@ -195,7 +196,7 @@ pub fn run_fixture_cli_matrix(
 
     let log_limit = if smoke { 20 } else { 1000 };
     let page_size = LOG_BENCH_GRIT_PAGE_COUNT.max(1);
-    let log_pages = (log_limit + page_size - 1) / page_size;
+    let log_pages = log_limit.div_ceil(page_size);
     let use_single_log_page = smoke || fixture.id == "git-dot-git";
     let (grit_log, grit_via_shell) = if use_single_log_page {
         (vec!["log".into()], false)
@@ -356,6 +357,7 @@ pub fn run_fixture_cli_matrix(
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_hot_path_scenarios(
     hyperfine: &Path,
     git: &Path,
