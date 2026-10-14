@@ -95,6 +95,21 @@ pub struct StatusOptions {
     pub stat_parallel_threads: Option<usize>,
 }
 
+/// Map `status.showUntrackedFiles` (Git-compatible) to [`UntrackedMode`].
+///
+/// Unknown or missing values default to [`UntrackedMode::Normal`], matching Git.
+pub fn untracked_mode_from_config(config: &ConfigSet) -> UntrackedMode {
+    let raw = config
+        .get("status.showUntrackedFiles")
+        .or_else(|| config.get("status.showuntrackedfiles"));
+    match raw {
+        Some(v) if v.eq_ignore_ascii_case("no") => UntrackedMode::No,
+        Some(v) if v.eq_ignore_ascii_case("all") => UntrackedMode::All,
+        Some(v) if v.eq_ignore_ascii_case("normal") => UntrackedMode::Normal,
+        _ => UntrackedMode::Normal,
+    }
+}
+
 impl Default for StatusOptions {
     fn default() -> Self {
         Self {
@@ -1875,6 +1890,42 @@ mod status_op_tests {
             "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn untracked_mode_from_config_reads_show_untracked_files() {
+        assert_eq!(
+            untracked_mode_from_config(&ConfigSet::new()),
+            UntrackedMode::Normal,
+            "missing key defaults to normal"
+        );
+        let cfg_dir = tempfile::TempDir::new().unwrap();
+        fs::write(
+            cfg_dir.path().join("config"),
+            "[status]\n\tshowUntrackedFiles = all\n",
+        )
+        .unwrap();
+        let cfg_all = ConfigSet::load(
+            &crate::environment::Environment::empty(),
+            Some(cfg_dir.path()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(untracked_mode_from_config(&cfg_all), UntrackedMode::All);
+
+        let cfg_dir = tempfile::TempDir::new().unwrap();
+        fs::write(
+            cfg_dir.path().join("config"),
+            "[status]\n\tshowUntrackedFiles = no\n",
+        )
+        .unwrap();
+        let cfg_no = ConfigSet::load(
+            &crate::environment::Environment::empty(),
+            Some(cfg_dir.path()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(untracked_mode_from_config(&cfg_no), UntrackedMode::No);
     }
 
     #[test]

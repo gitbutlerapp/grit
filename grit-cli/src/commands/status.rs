@@ -3,7 +3,9 @@
 
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::status::{
+    status, untracked_mode_from_config, StatusOptions, UntrackedMode,
+};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::refs::branch_tracking::{shorten_tracking_ref, upstream_tracking_full_ref};
@@ -341,10 +343,59 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
-pub fn run() -> Result<StatusOutcome> {
+/// CLI spelling for [`UntrackedMode`] (`grit status --untracked`).
+#[derive(Clone, Copy, Debug)]
+pub enum UntrackedListing {
+    No,
+    Normal,
+    All,
+}
+
+impl std::str::FromStr for UntrackedListing {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::parse(raw)
+    }
+}
+
+impl UntrackedListing {
+    /// Parse `no`, `normal`, or `all` (case-insensitive).
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.to_ascii_lowercase().as_str() {
+            "no" => Ok(Self::No),
+            "normal" => Ok(Self::Normal),
+            "all" => Ok(Self::All),
+            _ => Err(format!(
+                "invalid untracked mode {raw:?} (expected no, normal, or all)"
+            )),
+        }
+    }
+
+    fn into_lib(self) -> UntrackedMode {
+        match self {
+            Self::No => UntrackedMode::No,
+            Self::Normal => UntrackedMode::Normal,
+            Self::All => UntrackedMode::All,
+        }
+    }
+}
+
+pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
     let repo = context::discover()?;
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress)
-        .context("could not compute status")?;
+    let untracked_mode = match untracked {
+        Some(mode) => mode.into_lib(),
+        None => {
+            let config = repo.config().context("could not load config")?;
+            untracked_mode_from_config(&config)
+        }
+    };
+    let status_opts = StatusOptions {
+        untracked: untracked_mode,
+        ..StatusOptions::default()
+    };
+    let model =
+        status(&repo, &status_opts, &mut NullProgress).context("could not compute status")?;
 
     let in_progress: Vec<String> = detect_in_progress(repo.git_dir())
         .into_iter()

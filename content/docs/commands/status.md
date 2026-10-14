@@ -47,7 +47,11 @@ $ grit config target.branch origin/develop
 
 ## Options
 
-`grit status` takes no options beyond the [global ones](../global-options/).
+| Flag | Description |
+| ---- | ----------- |
+| `--untracked <MODE>` | How untracked paths are listed: `normal` (default) shows untracked files and collapses wholly untracked directories to a single directory entry; `all` lists every untracked file; `no` omits untracked paths. When the flag is omitted, `status.showUntrackedFiles` from config is used (Git-compatible; defaults to `normal`). |
+
+See also the [global options](../global-options/).
 
 ## Examples
 
@@ -122,6 +126,29 @@ $ grit status --json --filter .clean
 true
 ```
 
+List every untracked file (for staging scripts and agents):
+
+```console
+$ grit status --untracked all --json --filter .untracked
+[
+  "docs/a.txt",
+  "docs/b.txt",
+  "plain.txt",
+  "src/main.rs"
+]
+```
+
+With the default `normal` mode, the same tree collapses directories:
+
+```console
+$ grit status --json --filter .untracked
+[
+  "docs/",
+  "plain.txt",
+  "src/"
+]
+```
+
 ## JSON output
 
 Schema: [v1](/schemas/status/v1.json)
@@ -139,7 +166,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `commits` | array | Newest of those commits, up to ten, each with `oid` and `subject`. |
 | `staged` | array | Staged changes with `path` and `status`. |
 | `unstaged` | array | Unstaged changes with `path` and `status`. |
-| `untracked` | array | Paths of untracked files (raw UTF-8; JSON escapes control characters). |
+| `untracked` | array | Untracked paths (raw UTF-8; JSON escapes control characters). With default `--untracked normal`, wholly untracked directories appear once (often with a trailing `/`); with `--untracked all`, every file path is listed. |
 | `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
 | `merging` | boolean | `true` when a merge is in progress (`MERGE_HEAD` exists). |
 | `in_progress` | array | Stable operation ids while work is paused (for example `merge`, `rebase`). Omitted when empty. |

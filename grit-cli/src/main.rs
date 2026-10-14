@@ -422,7 +422,13 @@ enum Command {
     },
     /// Show what's changed and where you are (this is the default).
     #[command(alias = "st")]
-    Status,
+    Status {
+        /// How untracked paths are listed: `normal` (default) collapses wholly
+        /// untracked directories; `all` lists every file; `no` omits untracked paths.
+        /// When omitted, uses `status.showUntrackedFiles` from config.
+        #[arg(long = "untracked", value_name = "MODE")]
+        untracked: Option<commands::status::UntrackedListing>,
+    },
     /// List the commits on this branch that aren't on the target branch yet.
     #[command(alias = "sl")]
     Shortlog,
@@ -898,7 +904,9 @@ fn reject_non_human_plumbing(cli: &Cli, opts: &OutputOptions) -> Result<()> {
 }
 
 fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
-    match cli.command.unwrap_or(Command::Status) {
+    match cli.command.unwrap_or(Command::Status {
+        untracked: None,
+    }) {
         Command::Init {
             path,
             bare,
@@ -995,7 +1003,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Show { object } => emit(&commands::show::run(object)?, opts, ctx),
-        Command::Status => emit(&commands::status::run()?, opts, ctx),
+        Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add { paths } => emit(&commands::add::run(&paths)?, opts, ctx),
         Command::Rm {

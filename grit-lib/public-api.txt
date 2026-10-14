@@ -8683,6 +8683,7 @@ pub fn grit_lib::porcelain::status::status(&grit_lib::repo::Repository, &grit_li
 pub fn grit_lib::porcelain::status::status_path_matches(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::status_path_matches_worktree(&grit_lib::repo::Repository, &grit_lib::index::Index, &std::path::Path, &str, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::status_path_matches_worktree_with_rules(&grit_lib::repo::Repository, &grit_lib::index::Index, &std::path::Path, &str, &[alloc::string::String], core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>) -> bool
+pub fn grit_lib::porcelain::status::untracked_mode_from_config(&grit_lib::config::ConfigSet) -> grit_lib::porcelain::status::UntrackedMode
 pub mod grit_lib::porcelain::switch
 pub enum grit_lib::porcelain::switch::SwitchMode
 pub grit_lib::porcelain::switch::SwitchMode::Create
