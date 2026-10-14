@@ -2022,7 +2022,7 @@ impl ConfigSet {
 
     /// Loose-object count before `git gc` runs auto packing (`gc.auto`, Git default 6700).
     #[must_use]
-    pub fn gc_auto_loose_limit(&self) -> usize {
+    pub(crate) fn gc_auto_loose_limit(&self) -> usize {
         match self.get_i64("gc.auto") {
             None => 6700,
             Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(6700),
