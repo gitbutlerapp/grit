@@ -20,7 +20,9 @@ use crate::index::{
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::BULK_NEW_LOOSE_WRITE;
-use crate::porcelain::bulk_index::large_index_restage_threshold;
+use crate::porcelain::bulk_index::{
+    large_index_restage_threshold, parallel_tracked_restage_threshold,
+};
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -86,8 +88,10 @@ pub fn stage_tracked_modifications(
 
     let summary = stage_tracked_modifications_in_index(repo, work_tree, &index_path, &mut index)?;
 
-    if summary.change_count() > 0 {
+    if summary.untracked_invalidation_deferred {
         replay_deferred_untracked_invalidations(&mut index, &summary);
+    }
+    if summary.change_count() > 0 {
         index.ensure_canonical_order();
         repo.write_index_at(&index_path, &mut index)?;
     }
@@ -162,10 +166,20 @@ pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &Stag
     if !summary.untracked_invalidation_deferred {
         return;
     }
+    if summary.modified.is_empty() && summary.removed.is_empty() {
+        return;
+    }
     for raw in summary.modified.iter().chain(summary.removed.iter()) {
         let path = std::str::from_utf8(raw)
             .map_or_else(|_| String::from_utf8_lossy(raw).into_owned(), str::to_owned);
         index.invalidate_untracked_cache_for_path(&path);
+    }
+    // Per-path invalidation is a no-op when UNTR has no directory node for a path; tracked-set
+    // changes during bulk defer still require marking the root invalid (Git invalidates UNTR).
+    if let Some(uc) = index.untracked_cache.as_mut() {
+        if let Some(root) = uc.root.as_mut() {
+            root.valid = false;
+        }
     }
 }
 
@@ -264,7 +278,7 @@ fn stage_tracked_modifications_in_index_body(
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
     let thread_policy = repo.thread_policy();
-    let parallel_restage = index.entries.len() >= large_index_restage_threshold();
+    let parallel_restage = index.entries.len() >= parallel_tracked_restage_threshold();
     let parallelism = thread_policy
         .resolve(
             crate::parallel::ParallelOp::IndexRefresh,

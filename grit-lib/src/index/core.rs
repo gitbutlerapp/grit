@@ -1512,9 +1512,7 @@ impl Index {
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
     ) -> Result<Vec<u8>> {
-        if !self.entries_sorted {
-            self.sort();
-        }
+        self.ensure_canonical_order();
         let mut body = Vec::new();
         self.serialize_into_with_options(&mut body, config, policy)?;
         Ok(body)
@@ -4256,6 +4254,21 @@ mod tests {
         assert!(idx.get(b"z", 0).is_some());
         assert!(idx.remove(b"z"));
         assert!(idx.get(b"z", 0).is_none());
+    }
+
+    #[test]
+    fn write_restores_canonical_order_when_sorted_flag_is_stale() {
+        let mut idx = Index::new();
+        idx.entries.push(make_entry("zzz.txt"));
+        idx.entries.push(make_entry("aaa.txt"));
+        idx.entries_sorted = true;
+        assert!(!idx.entries_are_sorted());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("index");
+        idx.write(&path).expect("write index");
+        let parsed = Index::load(&path).expect("load index");
+        assert!(parsed.entries_are_sorted());
+        assert_eq!(parsed.entries[0].path, b"aaa.txt".as_slice());
     }
 
     #[test]
