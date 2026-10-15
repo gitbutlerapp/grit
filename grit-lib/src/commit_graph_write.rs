@@ -641,7 +641,7 @@ pub fn atomic_replace_commit_graph(
         file.write_all(bytes).map_err(crate::error::Error::Io)?;
         drop(file);
         #[cfg(test)]
-        if test_inject::FAIL_RENAME.load(std::sync::atomic::Ordering::Relaxed) {
+        if test_inject::should_fail_rename() {
             return Err(crate::error::Error::Message(
                 "injected commit-graph rename failure".into(),
             ));
@@ -771,12 +771,36 @@ pub(crate) fn peel_to_commit(odb: &Odb, oid: ObjectId) -> Option<ObjectId> {
 
 #[cfg(test)]
 mod test_inject {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::cell::Cell;
 
-    pub static FAIL_RENAME: AtomicBool = AtomicBool::new(false);
+    thread_local! {
+        static FAIL_RENAME: Cell<bool> = const { Cell::new(false) };
+    }
 
     pub fn set_fail_rename(fail: bool) {
-        FAIL_RENAME.store(fail, Ordering::Relaxed);
+        FAIL_RENAME.with(|flag| flag.set(fail));
+    }
+
+    pub(crate) fn should_fail_rename() -> bool {
+        FAIL_RENAME.with(|flag| flag.get())
+    }
+
+    /// Clears injection on drop so a panicking test cannot leak into parallel tests.
+    pub struct FailRenameGuard(bool);
+
+    impl FailRenameGuard {
+        pub fn enabled() -> Self {
+            set_fail_rename(true);
+            Self(true)
+        }
+    }
+
+    impl Drop for FailRenameGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                set_fail_rename(false);
+            }
+        }
     }
 }
 
@@ -956,10 +980,9 @@ mod tests {
         std::fs::create_dir_all(graph_path.parent().unwrap()).expect("info");
         std::fs::write(&graph_path, prior).expect("seed graph");
 
-        super::test_inject::set_fail_rename(true);
+        let _fail_rename = super::test_inject::FailRenameGuard::enabled();
         let err = super::atomic_replace_commit_graph(objects_dir, b"replacement")
             .expect_err("injected rename failure");
-        super::test_inject::set_fail_rename(false);
         assert!(err.to_string().contains("injected commit-graph rename"));
 
         let on_disk = std::fs::read(&graph_path).expect("graph still present");

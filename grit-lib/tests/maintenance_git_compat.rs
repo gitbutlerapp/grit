@@ -960,6 +960,45 @@ fn gc_autopacklimit_zero_keeps_two_packs_like_git_gc_auto() {
 }
 
 #[test]
+fn gc_autopacklimit_ignores_kept_packs_like_git_gc_auto() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "gc.autoPackLimit", "1"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c2"]);
+    git(dir.path(), &["repack", "-d"]);
+    let git_dir = dir.path().join(".git");
+    let pack_dir = git_dir.join("objects/pack");
+    assert_eq!(git_pack_count(&git_dir), 2);
+
+    let kept = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .expect("pack");
+    std::fs::write(kept.with_extension("keep"), b"keep").expect("keep");
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let git_copy = TempDir::new().expect("git");
+    duplicate_repo_tree(dir.path(), git_copy.path());
+
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    git(git_copy.path(), &["gc", "--auto", "--quiet"]);
+
+    assert_eq!(
+        git_pack_count(&grit_copy.path().join(".git")),
+        git_pack_count(&git_copy.path().join(".git")),
+        "grit gc must ignore .keep packs for gc.autoPackLimit like git gc --auto"
+    );
+    assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 2);
+}
+
+#[test]
 fn gc_autopacklimit_consolidates_packs_like_git() {
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);

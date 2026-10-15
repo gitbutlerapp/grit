@@ -987,9 +987,7 @@ fn should_auto_skip_repack(
         return false;
     }
     if !config.is_some_and(ConfigSet::gc_auto_loose_disabled) {
-        let loose_auto = config
-            .map(ConfigSet::gc_auto_loose_limit)
-            .unwrap_or(6700);
+        let loose_auto = config.map(ConfigSet::gc_auto_loose_limit).unwrap_or(6700);
         if loose_objects >= loose_auto {
             return false;
         }
