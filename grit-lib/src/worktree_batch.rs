@@ -9,10 +9,12 @@ use crate::crlf::{self, ConversionConfig, FileAttrs, GitAttributes};
 use crate::diff::{hash_worktree_file, mode_from_metadata, worktree_blob_bytes};
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
-use crate::hash::{hash_object, try_par_hash_with, ParallelHashError, Parallelism};
+use crate::hash::{
+    hash_object, try_par_hash_with, try_par_hash_with_force, ParallelHashError, Parallelism,
+};
 use crate::index::IndexEntry;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
-use crate::odb::{self, Odb};
+use crate::odb::{self, Odb, WriteOptions};
 
 /// One worktree path to read and normalize in parallel.
 pub(crate) struct WorktreeBlobReadInput {
@@ -96,6 +98,76 @@ pub(crate) fn prepare_worktree_blobs_parallel(
             mode,
         })
     })
+    .map_err(|e: ParallelHashError<Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })?;
+    Ok(prepared)
+}
+
+/// Like [`prepare_worktree_blobs_parallel`], but writes each blob to the loose store in the same worker pass.
+///
+/// Avoids a second parallel wave over the same inputs during bulk `git add` restage.
+///
+/// # Errors
+///
+/// Propagates I/O, conversion, hashing, compression, or loose-write failures from any worker.
+pub(crate) fn prepare_and_store_worktree_blobs_parallel(
+    odb: &Odb,
+    items: &[WorktreeBlobReadInput],
+    conv: &ConversionConfig,
+    parallelism: Parallelism,
+    filter_process: Option<&FilterProcessState>,
+    write_opts: WriteOptions,
+) -> Result<Vec<PreparedWorktreeBlob>> {
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ctx = PrepareBlobContext {
+        algo: odb.hash_algo(),
+        compression: odb.loose_compression()?,
+    };
+    let threads = parallelism.threads();
+    let map_item = |item: &WorktreeBlobReadInput| -> Result<PreparedWorktreeBlob> {
+        let meta = match &item.cached_meta {
+            Some(m) => m.clone(),
+            None => fs::symlink_metadata(&item.abs).map_err(Error::Io)?,
+        };
+        let data = worktree_blob_bytes(
+            odb,
+            &item.abs,
+            &meta,
+            conv,
+            &item.file_attrs,
+            &item.index_relpath,
+            item.index_entry.as_ref(),
+            filter_process,
+        )?;
+        let store_bytes = odb::blob_store_bytes(&data);
+        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data);
+        let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
+        odb.write_loose_zlib_prehashed(&oid, &zlib_store, write_opts)
+            .map_err(|e| match e {
+                Error::Io(source) => Error::LooseObjectWrite {
+                    path: item.index_relpath.clone(),
+                    source,
+                },
+                other => other,
+            })?;
+        let mode = mode_from_metadata(&meta);
+        Ok(PreparedWorktreeBlob {
+            index_relpath: item.index_relpath.clone(),
+            oid,
+            zlib_store,
+            meta,
+            mode,
+        })
+    };
+    let prepared = if items.len() >= crate::hash::PAR_HASH_MIN_ITEMS {
+        try_par_hash_with_force(items, threads, map_item)
+    } else {
+        let total_bytes = items.len().saturating_mul(4096);
+        try_par_hash_with(items, threads, total_bytes, map_item)
+    }
     .map_err(|e: ParallelHashError<Error>| match e {
         ParallelHashError::Task(err) => err,
     })?;

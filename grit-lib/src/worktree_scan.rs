@@ -240,11 +240,14 @@ pub(crate) enum BlobDiskLookup {
     Io(io::Error),
 }
 
-/// Collect every scannable blob in ascending index order.
+/// Collect scannable blob `(entry_index, rel_path)` pairs in ascending index order.
 #[must_use]
-fn index_ordered_blobs(by_dir: &HashMap<String, Vec<BlobInDir>>) -> Vec<BlobInDir> {
-    let mut blobs: Vec<BlobInDir> = by_dir.values().flatten().cloned().collect();
-    blobs.sort_by_key(|b| b.entry_index);
+fn index_ordered_blob_paths(by_dir: &HashMap<String, Vec<BlobInDir>>) -> Vec<(usize, String)> {
+    let mut blobs: Vec<(usize, String)> = by_dir
+        .values()
+        .flat_map(|v| v.iter().map(|b| (b.entry_index, b.rel_path.clone())))
+        .collect();
+    blobs.sort_by_key(|(entry_index, _)| *entry_index);
     blobs
 }
 
@@ -403,7 +406,7 @@ pub(crate) fn for_each_blob_by_directory_parallel<F>(
 where
     F: FnMut(usize, &str, BlobDiskLookup) -> Result<()>,
 {
-    let ordered = index_ordered_blobs(by_dir);
+    let ordered = index_ordered_blob_paths(by_dir);
     let mut symlink_missing = HashSet::new();
     if scan_symlink_ancestors {
         // One ancestor probe per distinct parent directory (not per indexed file).
@@ -429,7 +432,7 @@ where
         // regresses deep leaf-dir layouts (~50k paths, few files per directory).
         let entry_slots = ordered
             .iter()
-            .map(|b| b.entry_index)
+            .map(|(entry_index, _)| *entry_index)
             .max()
             .map_or(0, |i| i + 1);
         let mut preloaded = preload_blob_lookups_parallel(
@@ -440,14 +443,13 @@ where
             Arc::clone(&dir_abs_arc),
             Arc::clone(&file_abs_arc),
         )?;
-        for blob in &ordered {
-            let lookup = preloaded[blob.entry_index].take().ok_or_else(|| {
+        for (entry_index, rel_path) in &ordered {
+            let lookup = preloaded[*entry_index].take().ok_or_else(|| {
                 Error::Message(format!(
-                    "parallel blob stat preload missing index entry {}",
-                    blob.entry_index
+                    "parallel blob stat preload missing index entry {entry_index}"
                 ))
             })?;
-            visit(blob.entry_index, &blob.rel_path, lookup)?;
+            visit(*entry_index, rel_path, lookup)?;
         }
         return Ok(());
     }
