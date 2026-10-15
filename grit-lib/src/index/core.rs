@@ -1326,7 +1326,7 @@ impl Index {
     /// # Errors
     ///
     /// Returns [`Error::Io`] on filesystem errors.
-    pub fn write(&self, path: &Path) -> Result<()> {
+    pub fn write(&mut self, path: &Path) -> Result<()> {
         let git_dir = path.parent();
         let config = git_dir.and_then(|d| {
             ConfigSet::load(&crate::environment::Environment::empty(), Some(d), true).ok()
@@ -1340,13 +1340,13 @@ impl Index {
     /// # Errors
     ///
     /// Same as [`Self::write`].
-    pub fn write_with_config(&self, path: &Path, config: &ConfigSet) -> Result<()> {
+    pub fn write_with_config(&mut self, path: &Path, config: &ConfigSet) -> Result<()> {
         self.write_with_config_and_policy(path, config, crate::parallel::ThreadPolicy::default())
     }
 
     /// Write the index using config and an explicit thread policy (EOIE/IEOT emission).
     pub fn write_with_config_and_policy(
-        &self,
+        &mut self,
         path: &Path,
         config: &ConfigSet,
         policy: crate::parallel::ThreadPolicy,
@@ -1358,13 +1358,13 @@ impl Index {
     /// Write this index to `path` with an explicit trailing-checksum policy.
     ///
     /// When `skip_hash` is true, the trailing SHA-1 is written as all zeros (Git `index.skipHash`).
-    pub fn write_to_path(&self, path: &Path, skip_hash: bool) -> Result<()> {
+    pub fn write_to_path(&mut self, path: &Path, skip_hash: bool) -> Result<()> {
         self.write_to_path_with_config(path, skip_hash, None)
     }
 
     /// Like [`Self::write_to_path`], but uses `config` for `core.lockfilepid` instead of reloading.
     pub(crate) fn write_to_path_with_config(
-        &self,
+        &mut self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1378,7 +1378,7 @@ impl Index {
     }
 
     pub(crate) fn write_to_path_with_config_and_policy(
-        &self,
+        &mut self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1388,7 +1388,7 @@ impl Index {
     }
 
     pub(crate) fn write_to_path_with_config_and_lock_policy(
-        &self,
+        &mut self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1408,7 +1408,7 @@ impl Index {
     /// Like [`Self::write_to_path_with_config_and_lock`], but can leave the index uncommitted
     /// when `commit` is false (bytes are written to an existing [`IndexLock`] only).
     pub(crate) fn write_to_path_with_config_and_lock_mode(
-        &self,
+        &mut self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1426,7 +1426,7 @@ impl Index {
     }
 
     pub(crate) fn write_to_path_with_config_and_lock_mode_policy(
-        &self,
+        &mut self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1508,18 +1508,15 @@ impl Index {
     }
 
     fn serialize_index_body(
-        &self,
+        &mut self,
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
     ) -> Result<Vec<u8>> {
-        let mut body = Vec::new();
-        if self.entries_sorted {
-            self.serialize_into_with_options(&mut body, config, policy)?;
-        } else {
-            let mut sorted = self.clone();
-            sorted.sort();
-            sorted.serialize_into_with_options(&mut body, config, policy)?;
+        if !self.entries_sorted {
+            self.sort();
         }
+        let mut body = Vec::new();
+        self.serialize_into_with_options(&mut body, config, policy)?;
         Ok(body)
     }
 
@@ -2546,6 +2543,9 @@ impl Index {
 
     /// Sort entries in Git's canonical order: by path, then by stage.
     pub fn sort(&mut self) {
+        if self.entries_sorted {
+            return;
+        }
         self.entries
             .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
         self.entries_sorted = true;
@@ -3931,7 +3931,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("index");
 
-        let idx = Index::new();
+        let mut idx = Index::new();
         idx.write(&path).unwrap();
 
         let loaded = Index::load(&path).unwrap();
@@ -3946,7 +3946,7 @@ mod tests {
         let mut idx = Index::new();
         idx.add_or_replace(make_entry("foo.txt"));
         idx.add_or_replace(make_entry("bar/baz.txt"));
-        idx.write(&path).unwrap();
+        idx.write(&path).unwrap(); // idx is mut in each test scope
 
         let loaded = Index::load(&path).unwrap();
         assert_eq!(loaded.entries.len(), 2);
@@ -3986,7 +3986,7 @@ mod tests {
         idx.fsmonitor_last_update = Some(token);
         idx.fsmonitor_dirty = Some(dirty);
         idx.fsmonitor_raw_extension = Some(fsmn_payload.to_vec());
-        idx.write(&path).unwrap();
+        idx.write(&path).unwrap(); // idx is mut in each test scope
 
         let loaded = Index::load(&path).unwrap();
         assert_eq!(
@@ -4018,7 +4018,7 @@ mod tests {
         let mut idx = Index::new();
         idx.add_or_replace(make_entry("a"));
         idx.set_fsmonitor_last_update(Some("builtin:fake".to_owned()));
-        idx.write(&path).unwrap();
+        idx.write(&path).unwrap(); // idx is mut in each test scope
 
         let data = fs::read(&path).unwrap();
         assert!(
@@ -4391,7 +4391,7 @@ mod tests {
             0,
             "entry mutations must not scan entries for the EWAH"
         );
-        idx.write(&path).unwrap();
+        idx.write(&path).unwrap(); // idx is mut in each test scope
         assert_eq!(
             fsmonitor_rebuild_counter::count(),
             1,
@@ -4410,7 +4410,7 @@ mod tests {
         };
         idx.add_or_replace(make_entry("one"));
         idx.add_or_replace(make_entry("two/one"));
-        idx.write(&path).unwrap();
+        idx.write(&path).unwrap(); // idx is mut in each test scope
 
         let data = fs::read(&path).unwrap();
         assert_eq!(&data[4..8], &4u32.to_be_bytes());
@@ -4611,7 +4611,7 @@ mod tests {
         let lock = IndexLock::acquire(&path, None).unwrap();
         assert!(IndexLock::acquire(&path, None).is_err());
         drop(lock);
-        idx.write(&path).unwrap();
+        idx.write(&path).unwrap(); // idx is mut in each test scope
         assert_eq!(Index::load(&path).unwrap().entries.len(), 1);
     }
 

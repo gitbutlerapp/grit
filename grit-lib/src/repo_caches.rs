@@ -145,6 +145,7 @@ impl RepoCaches {
     }
 
     /// Drop a cached commit-graph after the on-disk file was rewritten.
+    #[allow(dead_code)]
     pub(crate) fn invalidate_commit_graph_cache(&self) {
         if let Ok(mut guard) = self.commit_graph.lock() {
             *guard = None;

@@ -665,7 +665,7 @@ pub(crate) fn write_index_file_split(
     }
 
     let base_oid = if rebuild {
-        let shared_index = Index {
+        let mut shared_index = Index {
             version: index.version,
             entries: base_snapshot.clone(),
             entries_sorted: true,
@@ -818,7 +818,7 @@ pub(crate) fn write_index_file_split(
         replace_bitmap: Some(replace_bm),
     };
 
-    let out_index = Index {
+    let mut out_index = Index {
         version: index.version,
         entries: main_entries,
         entries_sorted: true,

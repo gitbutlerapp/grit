@@ -25,7 +25,9 @@ use crate::porcelain::index_mode::{
     apply_executable_hint_to_index, staged_mode_with_hint, StageExecutableHint,
 };
 use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
-use crate::porcelain::stage_tracked::stage_tracked_modifications_in_index;
+use crate::porcelain::stage_tracked::{
+    stage_tracked_modifications_in_index_with_rules, StageTrackedSummary,
+};
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
     UntrackedScan,
@@ -180,8 +182,14 @@ fn stage_inner(
     let (unstaged, staging_stats) = if index.entries.is_empty() {
         (Vec::new(), std::collections::BTreeMap::new())
     } else if use_tracked_scan {
-        let summary =
-            stage_tracked_modifications_in_index(repo, work_tree, &index_path, &mut index)?;
+        let mut rules_guard = lock_rules(&rules_arc)?;
+        let summary = stage_tracked_modifications_in_index_with_rules(
+            repo,
+            work_tree,
+            &index_path,
+            &mut index,
+            &mut rules_guard,
+        )?;
         tracked_scan_summary = Some(summary);
         (Vec::new(), std::collections::BTreeMap::new())
     } else {
@@ -258,9 +266,6 @@ fn stage_inner(
     let matches =
         |path: &str| opts.pathspecs.is_empty() || repo.paths_match_pathspecs(path, &opts.pathspecs);
 
-    let indexed_any_stage: HashSet<Vec<u8>> =
-        index.entries.iter().map(|e| e.path.clone()).collect();
-
     let mut outcome = StageOutcome::default();
     let has_unmerged = index.has_unmerged_entries();
     let unmerged_only_paths: HashSet<Vec<u8>> = if has_unmerged {
@@ -311,28 +316,26 @@ fn stage_inner(
             stage_ignorecase_spelling_updates(work_tree, &icase_map, &matches, &mut index)?;
     }
 
-    stage_untracked_paths_parallel(
-        repo,
-        work_tree,
-        &untracked,
-        &matches,
-        &indexed_any_stage,
-        &rules,
-        &mut icase_map,
-        &mut index,
-        parallelism,
-        opts.executable_hint,
-        &mut outcome,
-    )?;
+    if !untracked.is_empty() {
+        let indexed_any_stage: HashSet<Vec<u8>> =
+            index.entries.iter().map(|e| e.path.clone()).collect();
+        stage_untracked_paths_parallel(
+            repo,
+            work_tree,
+            &untracked,
+            &matches,
+            &indexed_any_stage,
+            &rules,
+            &mut icase_map,
+            &mut index,
+            parallelism,
+            opts.executable_hint,
+            &mut outcome,
+        )?;
+    }
 
     if let Some(summary) = &tracked_scan_summary {
-        if index.entries.len() >= 80_000 {
-            for raw in summary.modified.iter().chain(summary.removed.iter()) {
-                if let Ok(path) = std::str::from_utf8(raw) {
-                    index.invalidate_untracked_cache_for_path(path);
-                }
-            }
-        }
+        replay_deferred_untracked_invalidations(&mut index, summary);
     }
 
     if has_unmerged && !opts.pathspecs.is_empty() {
@@ -346,11 +349,25 @@ fn stage_inner(
     }
 
     if outcome.total() > 0 {
-        index.sort();
+        if !index.entries_sorted {
+            index.sort();
+        }
         repo.write_index(&mut index)?;
     }
 
     Ok(outcome)
+}
+
+/// Replay UNTR invalidations suppressed during a bulk tracked restage.
+fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &StageTrackedSummary) {
+    if !summary.untracked_invalidation_deferred {
+        return;
+    }
+    for raw in summary.modified.iter().chain(summary.removed.iter()) {
+        if let Ok(path) = std::str::from_utf8(raw) {
+            index.invalidate_untracked_cache_for_path(path);
+        }
+    }
 }
 
 /// Stage worktree content for explicit pathspecs that match unmerged index entries.
@@ -723,7 +740,13 @@ fn stage_untracked_paths_parallel(
     let _written: Vec<ObjectId> = try_par_hash_with(&prepared, threads, write_bytes, |prep| {
         repo.odb()
             .write_loose_zlib_prehashed(&prep.oid, &prep.zlib_store, write_opts)
-            .map_err(|e| Error::Message(format!("could not store {}: {e}", prep.index_relpath)))
+            .map_err(|e| match e {
+                Error::Io(source) => Error::LooseObjectWrite {
+                    path: prep.index_relpath.clone(),
+                    source,
+                },
+                other => other,
+            })
     })
     .map_err(|e: ParallelHashError<Error>| match e {
         ParallelHashError::Task(err) => err,

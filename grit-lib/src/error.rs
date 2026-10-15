@@ -455,6 +455,15 @@ pub enum Error {
         real_oid: String,
     },
 
+    /// A prepared loose object could not be written during parallel index staging.
+    #[error("could not store {path}: {source}")]
+    LooseObjectWrite {
+        /// Index-relative path of the blob being stored.
+        path: String,
+        /// Underlying filesystem error from the object store.
+        source: std::io::Error,
+    },
+
     /// The index file is missing, truncated, or has a bad header.
     #[error("index error: {0}")]
     IndexError(String),
