@@ -3,7 +3,7 @@
 //! Builds repositories with `grit-lib` and uses the system `git` binary only for
 //! `index-pack`, which is allowed in benchmark harness code (same as `fixture.rs`).
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used, dead_code)]
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -466,7 +466,7 @@ impl HistoryBenchFixtures {
             return;
         }
         if git_commit_graph_write(self._root.path()).is_err() {
-            write_grit_commit_graph(self.repo.odb().objects_dir(), &self.repo.odb())
+            write_grit_commit_graph(self.repo.odb().objects_dir(), self.repo.odb())
                 .expect("restore commit-graph");
         }
     }

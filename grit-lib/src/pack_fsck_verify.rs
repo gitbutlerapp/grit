@@ -1,8 +1,8 @@
 //! Offset-order pack object verification for repository fsck.
-#![allow(clippy::too_many_arguments)]
 //!
 //! Inflates and hashes each packed object once while walking the pack in offset order,
 //! reusing resolved bases for delta chains and parallelizing independent delta families.
+#![allow(clippy::too_many_arguments)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,6 +24,20 @@ pub(crate) struct FsckVerifiedPackObject {
     pub oid: ObjectId,
     pub kind: ObjectKind,
     pub data: Vec<u8>,
+}
+
+/// Per-object result from offset-order pack verification.
+#[derive(Debug)]
+pub(crate) enum PackFsckObjectOutcome {
+    /// Object inflated, hash-checked, and ready for semantic fsck.
+    Clean(FsckVerifiedPackObject),
+    /// One object could not be read or verified; other objects in the pack may still be checked.
+    Failed {
+        /// Index object id for this pack slot.
+        oid: ObjectId,
+        /// Underlying read/hash/decompress error.
+        err: Error,
+    },
 }
 
 struct FsckResolvedBase {
@@ -124,11 +138,11 @@ fn delta_base_ready(
     false
 }
 
-fn base_bytes<'a>(
-    pack_bytes: &'a [u8],
+fn base_bytes(
+    pack_bytes: &[u8],
     delta: &PendingFsckDelta,
-    ofs_bases: &'a HashMap<usize, FsckResolvedBase>,
-    oid_bases: &'a HashMap<ObjectId, FsckResolvedBase>,
+    ofs_bases: &HashMap<usize, FsckResolvedBase>,
+    oid_bases: &HashMap<ObjectId, FsckResolvedBase>,
     odb: &Odb,
 ) -> Result<(ObjectKind, Arc<[u8]>)> {
     if let Some(base_off) = delta.base_offset {
@@ -156,25 +170,22 @@ fn store_resolved_base(
     ofs_bases: &mut HashMap<usize, FsckResolvedBase>,
     oid_bases: &mut HashMap<ObjectId, FsckResolvedBase>,
     oid: ObjectId,
-    retain_for_delta_children: bool,
 ) {
-    if retain_for_delta_children {
-        ofs_bases.insert(
-            offset,
-            FsckResolvedBase {
-                kind,
-                data: Arc::clone(&data),
-            },
-        );
-        oid_bases.insert(
-            oid,
-            FsckResolvedBase {
-                kind,
-                data: data.clone(),
-            },
-        );
-        pack_cache::put_delta_bases(kind, &[(pack_id, offset as u64, data)]);
-    }
+    ofs_bases.insert(
+        offset,
+        FsckResolvedBase {
+            kind,
+            data: Arc::clone(&data),
+        },
+    );
+    oid_bases.insert(
+        oid,
+        FsckResolvedBase {
+            kind,
+            data: data.clone(),
+        },
+    );
+    pack_cache::put_delta_bases(kind, &[(pack_id, offset as u64, data)]);
 }
 
 fn resolve_one_pending_delta(
@@ -184,22 +195,24 @@ fn resolve_one_pending_delta(
     oid_bases: &HashMap<ObjectId, FsckResolvedBase>,
     odb: &Odb,
     algo: HashAlgo,
-    ofs_out_refs: &HashMap<usize, u32>,
-    oid_out_refs: &HashMap<ObjectId, u32>,
-) -> Result<FsckVerifiedPackObject> {
-    let (delta_data, _) =
-        decompress_zlib_at(pack_bytes, delta.zlib_offset, delta.uncompressed_size)?;
-    let (base_kind, base_data) = base_bytes(pack_bytes, &delta, ofs_bases, oid_bases, odb)?;
-    let result = apply_delta(base_data.as_ref(), &delta_data)?;
-    verify_oid_hash(algo, base_kind, &result, &delta.oid)?;
-    let retain_ofs = ofs_out_refs.get(&delta.offset).copied().unwrap_or(0) > 0;
-    let retain_oid = oid_out_refs.get(&delta.oid).copied().unwrap_or(0) > 0;
-    let _ = retain_ofs || retain_oid;
-    Ok(FsckVerifiedPackObject {
-        oid: delta.oid,
-        kind: base_kind,
-        data: result,
-    })
+) -> PackFsckObjectOutcome {
+    let oid = delta.oid;
+    let outcome = (|| -> Result<FsckVerifiedPackObject> {
+        let (delta_data, _) =
+            decompress_zlib_at(pack_bytes, delta.zlib_offset, delta.uncompressed_size)?;
+        let (base_kind, base_data) = base_bytes(pack_bytes, &delta, ofs_bases, oid_bases, odb)?;
+        let result = apply_delta(base_data.as_ref(), &delta_data)?;
+        verify_oid_hash(algo, base_kind, &result, &oid)?;
+        Ok(FsckVerifiedPackObject {
+            oid,
+            kind: base_kind,
+            data: result,
+        })
+    })();
+    match outcome {
+        Ok(obj) => PackFsckObjectOutcome::Clean(obj),
+        Err(err) => PackFsckObjectOutcome::Failed { oid, err },
+    }
 }
 
 fn count_delta_children(
@@ -220,16 +233,75 @@ fn count_delta_children(
     (ofs_out_refs, oid_out_refs)
 }
 
+fn verify_whole_object(
+    pack_bytes: &[u8],
+    record: &VerifyObjectRecord,
+    hash_bytes: usize,
+    algo: HashAlgo,
+    pack_id: u32,
+    ofs_out_refs: &HashMap<usize, u32>,
+    oid_out_refs: &HashMap<ObjectId, u32>,
+    ofs_bases: &mut HashMap<usize, FsckResolvedBase>,
+    oid_bases: &mut HashMap<ObjectId, FsckResolvedBase>,
+) -> PackFsckObjectOutcome {
+    let oid = match ObjectId::from_bytes(&record.oid) {
+        Ok(id) => id,
+        Err(err) => {
+            return PackFsckObjectOutcome::Failed {
+                oid: ObjectId::zero(),
+                err,
+            };
+        }
+    };
+    let (zlib_offset, uncompressed_size) = match record_zlib_bounds(pack_bytes, record, hash_bytes)
+    {
+        Ok(v) => v,
+        Err(err) => return PackFsckObjectOutcome::Failed { oid, err },
+    };
+    let kind = match packed_type_to_kind(record.packed_type) {
+        Ok(k) => k,
+        Err(err) => return PackFsckObjectOutcome::Failed { oid, err },
+    };
+    let (data, _) = match decompress_zlib_at(pack_bytes, zlib_offset, uncompressed_size) {
+        Ok(v) => v,
+        Err(err) => return PackFsckObjectOutcome::Failed { oid, err },
+    };
+    if let Err(err) = verify_oid_hash(algo, kind, &data, &oid) {
+        return PackFsckObjectOutcome::Failed { oid, err };
+    }
+    let retain = ofs_out_refs
+        .get(&(record.offset as usize))
+        .copied()
+        .unwrap_or(0)
+        > 0
+        || oid_out_refs.get(&oid).copied().unwrap_or(0) > 0;
+    if retain {
+        store_resolved_base(
+            pack_id,
+            record.offset as usize,
+            kind,
+            Arc::from(data.as_slice()),
+            ofs_bases,
+            oid_bases,
+            oid,
+        );
+    }
+    PackFsckObjectOutcome::Clean(FsckVerifiedPackObject { oid, kind, data })
+}
+
 /// Verify every object in `prep`, walking the pack in offset order and reusing inflated bases.
+///
+/// Returns one outcome per index entry; failures on individual objects do not stop the scan.
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the pack cannot be resolved, or a parallel pool error.
+/// Returns an error only for parallel pool failures or unrecoverable pack structure problems
+/// before per-object work begins.
 pub(crate) fn verify_pack_objects_offset_order(
     prep: VerifiedPackForFsck,
     odb: &Odb,
     par_opts: ParallelOptions,
-) -> Result<Vec<FsckVerifiedPackObject>> {
+) -> Result<Vec<PackFsckObjectOutcome>> {
     let VerifiedPackForFsck {
         idx,
         pack_bytes,
@@ -241,40 +313,28 @@ pub(crate) fn verify_pack_objects_offset_order(
     let (ofs_out_refs, oid_out_refs) = count_delta_children(&records);
     let mut ofs_bases: HashMap<usize, FsckResolvedBase> = HashMap::new();
     let mut oid_bases: HashMap<ObjectId, FsckResolvedBase> = HashMap::new();
-    let mut verified: Vec<FsckVerifiedPackObject> = Vec::with_capacity(records.len());
+    let mut outcomes: Vec<PackFsckObjectOutcome> = Vec::with_capacity(records.len());
     let mut pending: Vec<PendingFsckDelta> = Vec::new();
 
     for record in &records {
-        let oid = ObjectId::from_bytes(&record.oid)?;
-        let (zlib_offset, uncompressed_size) =
-            record_zlib_bounds(&pack_bytes, record, hash_bytes)?;
         match record.packed_type {
             PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
-                let kind = packed_type_to_kind(record.packed_type)?;
-                let (data, _) = decompress_zlib_at(&pack_bytes, zlib_offset, uncompressed_size)?;
-                verify_oid_hash(algo, kind, &data, &oid)?;
-                let retain = ofs_out_refs
-                    .get(&(record.offset as usize))
-                    .copied()
-                    .unwrap_or(0)
-                    > 0
-                    || oid_out_refs.get(&oid).copied().unwrap_or(0) > 0;
-                if retain {
-                    let arc = Arc::from(data.as_slice());
-                    store_resolved_base(
-                        pack_id,
-                        record.offset as usize,
-                        kind,
-                        arc,
-                        &mut ofs_bases,
-                        &mut oid_bases,
-                        oid,
-                        true,
-                    );
-                }
-                verified.push(FsckVerifiedPackObject { oid, kind, data });
+                outcomes.push(verify_whole_object(
+                    &pack_bytes,
+                    record,
+                    hash_bytes,
+                    algo,
+                    pack_id,
+                    &ofs_out_refs,
+                    &oid_out_refs,
+                    &mut ofs_bases,
+                    &mut oid_bases,
+                ));
             }
             PackedType::OfsDelta | PackedType::RefDelta => {
+                let oid = ObjectId::from_bytes(&record.oid)?;
+                let (zlib_offset, uncompressed_size) =
+                    record_zlib_bounds(&pack_bytes, record, hash_bytes)?;
                 pending.push(PendingFsckDelta {
                     offset: record.offset as usize,
                     oid,
@@ -295,7 +355,6 @@ pub(crate) fn verify_pack_objects_offset_order(
         if pending.is_empty() {
             break;
         }
-        let before = pending.len();
         let mut ready: Vec<PendingFsckDelta> = Vec::new();
         let mut still: Vec<PendingFsckDelta> = Vec::new();
         for delta in pending {
@@ -307,60 +366,72 @@ pub(crate) fn verify_pack_objects_offset_order(
         }
         pending = still;
         if ready.is_empty() {
-            return Err(Error::CorruptObject(format!(
-                "{before} delta(s) could not be resolved during pack fsck"
-            )));
+            for delta in pending {
+                outcomes.push(PackFsckObjectOutcome::Failed {
+                    oid: delta.oid,
+                    err: Error::CorruptObject(format!(
+                        "delta base for {} could not be resolved during pack fsck",
+                        delta.oid.to_hex()
+                    )),
+                });
+            }
+            break;
         }
 
-        let resolve = |delta: &PendingFsckDelta| {
-            let offset = delta.offset;
-            let object = resolve_one_pending_delta(
-                &pack_bytes,
-                PendingFsckDelta {
-                    offset: delta.offset,
-                    oid: delta.oid,
-                    base_offset: delta.base_offset,
-                    base_oid: delta.base_oid,
-                    zlib_offset: delta.zlib_offset,
-                    uncompressed_size: delta.uncompressed_size,
-                },
-                &ofs_bases,
-                &oid_bases,
-                odb,
-                algo,
-                &ofs_out_refs,
-                &oid_out_refs,
-            )?;
-            Ok((offset, object))
+        let resolve_delta = |delta: &PendingFsckDelta| {
+            (
+                delta.offset,
+                resolve_one_pending_delta(
+                    &pack_bytes,
+                    PendingFsckDelta {
+                        offset: delta.offset,
+                        oid: delta.oid,
+                        base_offset: delta.base_offset,
+                        base_oid: delta.base_oid,
+                        zlib_offset: delta.zlib_offset,
+                        uncompressed_size: delta.uncompressed_size,
+                    },
+                    &ofs_bases,
+                    &oid_bases,
+                    odb,
+                    algo,
+                ),
+            )
         };
 
-        let batch: Vec<(usize, FsckVerifiedPackObject)> = if threads <= 1 || ready.len() == 1 {
-            ready.iter().map(resolve).collect::<Result<_>>()?
+        let batch: Vec<(usize, PackFsckObjectOutcome)> = if threads <= 1 || ready.len() == 1 {
+            ready.iter().map(resolve_delta).collect()
         } else {
-            try_par_map(&ready, par_opts, ready.len(), resolve)
-                .map_err(|e| Error::Message(format!("parallel pack fsck: {e}")))?
+            try_par_map(&ready, par_opts, ready.len(), |delta| {
+                Ok::<_, std::convert::Infallible>(resolve_delta(delta))
+            })
+            .map_err(
+                |e: crate::parallel::ParallelHashError<std::convert::Infallible>| {
+                    Error::Message(format!("parallel pack fsck: {e}"))
+                },
+            )?
         };
 
-        for (off, item) in batch {
-            let retain_ofs = ofs_out_refs.get(&off).copied().unwrap_or(0) > 0;
-            let retain_oid = oid_out_refs.get(&item.oid).copied().unwrap_or(0) > 0;
-            if retain_ofs || retain_oid {
-                let arc = Arc::from(item.data.as_slice());
-                store_resolved_base(
-                    pack_id,
-                    off,
-                    item.kind,
-                    arc,
-                    &mut ofs_bases,
-                    &mut oid_bases,
-                    item.oid,
-                    true,
-                );
+        for (off, outcome) in batch {
+            if let PackFsckObjectOutcome::Clean(ref item) = outcome {
+                let retain_ofs = ofs_out_refs.get(&off).copied().unwrap_or(0) > 0;
+                let retain_oid = oid_out_refs.get(&item.oid).copied().unwrap_or(0) > 0;
+                if retain_ofs || retain_oid {
+                    store_resolved_base(
+                        pack_id,
+                        off,
+                        item.kind,
+                        Arc::from(item.data.as_slice()),
+                        &mut ofs_bases,
+                        &mut oid_bases,
+                        item.oid,
+                    );
+                }
             }
-            verified.push(item);
+            outcomes.push(outcome);
         }
     }
 
     let _ = idx;
-    Ok(verified)
+    Ok(outcomes)
 }

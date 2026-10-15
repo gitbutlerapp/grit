@@ -3,7 +3,7 @@
 //! Builds repositories with `grit-lib` and uses the system `git` binary only for
 //! `index-pack` / `repack`, which is allowed in benchmark harness code.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used, dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

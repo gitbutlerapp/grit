@@ -18,7 +18,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
-use std::io::Read;
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -298,6 +297,7 @@ pub(crate) mod pack_cache {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
             return;
         }
+        promote_pack_index(objects_dir, &idx.idx_path);
         PACK_HIT_INDEX.with(|cell| {
             *cell.borrow_mut() = Some((objects_dir.to_path_buf(), Arc::clone(idx)));
         });
@@ -321,7 +321,9 @@ pub(crate) mod pack_cache {
             if slot.as_ref().is_none_or(|(path, _)| path != &idx.idx_path) {
                 *slot = Some((idx.idx_path.clone(), 0));
             }
-            let (_, cursor) = slot.as_mut().expect("initialized above");
+            let Some((_, cursor)) = slot.as_mut() else {
+                return idx.find_offset(oid);
+            };
             idx.find_offset_monotonic(oid, cursor)
         })
     }
@@ -1942,12 +1944,61 @@ pub(crate) struct VerifiedPackForFsck {
 ///
 /// Returns [`Error::CorruptObject`] when the index or pack are malformed.
 pub(crate) fn verify_pack_for_fsck(idx_path: &Path) -> Result<VerifiedPackForFsck> {
-    let (idx, pack_bytes, records) = verify_pack_structure_and_records(idx_path)?;
+    let (idx, pack_bytes, records) = verify_pack_structure_and_records(idx_path, true)?;
     Ok(VerifiedPackForFsck {
         idx,
         pack_bytes,
         records,
     })
+}
+
+/// Pack-level trailer/index checksum problem detected while preparing object fsck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackFsckTrailerIssue {
+    /// Pack file trailing hash does not match payload.
+    PackChecksum,
+    /// Embedded pack hash in the `.idx` does not match the pack file.
+    IdxMismatch,
+}
+
+/// Load pack bytes and header records for per-object fsck even when the pack trailer is wrong.
+///
+/// Returns a trailer/index checksum issue separately so callers can still inflate objects.
+pub(crate) fn prepare_pack_for_object_fsck(
+    idx_path: &Path,
+) -> Result<(VerifiedPackForFsck, Option<PackFsckTrailerIssue>)> {
+    let (idx, pack_bytes, records) = verify_pack_structure_and_records(idx_path, false)?;
+    let trailer = pack_trailer_fsck_issue(idx_path, &idx, &pack_bytes);
+    Ok((
+        VerifiedPackForFsck {
+            idx,
+            pack_bytes,
+            records,
+        },
+        trailer,
+    ))
+}
+
+fn pack_trailer_fsck_issue(
+    idx_path: &Path,
+    idx: &PackIndex,
+    pack_bytes: &[u8],
+) -> Option<PackFsckTrailerIssue> {
+    let hb = idx.hash_bytes();
+    let algo = HashAlgo::from_len(hb)?;
+    if verify_trailer(algo, pack_bytes).is_err() {
+        return Some(PackFsckTrailerIssue::PackChecksum);
+    }
+    let idx_file_bytes = fs::read(idx_path).ok()?;
+    if idx_file_bytes.len() >= 2 * hb {
+        let pack_end = pack_bytes.len().checked_sub(hb)?;
+        let n = idx_file_bytes.len();
+        let embedded = &idx_file_bytes[n - 2 * hb..n - hb];
+        if embedded != &pack_bytes[pack_end..] {
+            return Some(PackFsckTrailerIssue::IdxMismatch);
+        }
+    }
+    None
 }
 
 /// Verify one pack/index pair and optionally return object records.
@@ -1978,6 +2029,7 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
 
 fn verify_pack_structure_and_records(
     idx_path: &Path,
+    verify_pack_trailer: bool,
 ) -> Result<(PackIndex, Vec<u8>, Vec<VerifyObjectRecord>)> {
     let idx = read_pack_index(idx_path)?;
     let idx_file_bytes = fs::read(idx_path).map_err(Error::Io)?;
@@ -1996,22 +2048,24 @@ fn verify_pack_structure_and_records(
             idx.pack_path.display()
         )));
     };
-    verify_trailer(algo, &pack_bytes).map_err(|e| {
-        Error::CorruptObject(format!(
-            "pack trailing checksum mismatch for {}: {e}",
-            idx.pack_path.display()
-        ))
-    })?;
-    // The `.idx` ends with the pack checksum followed by its own checksum, both
-    // at the repository hash width `hb` (20 for SHA-1, 32 for SHA-256).
-    if idx_file_bytes.len() >= 2 * hb {
-        let n = idx_file_bytes.len();
-        let embedded = &idx_file_bytes[n - 2 * hb..n - hb];
-        if embedded != &pack_bytes[pack_end..] {
-            return Err(Error::CorruptObject(format!(
-                "pack checksum in index does not match {}",
+    if verify_pack_trailer {
+        verify_trailer(algo, &pack_bytes).map_err(|e| {
+            Error::CorruptObject(format!(
+                "pack trailing checksum mismatch for {}: {e}",
                 idx.pack_path.display()
-            )));
+            ))
+        })?;
+        // The `.idx` ends with the pack checksum followed by its own checksum, both
+        // at the repository hash width `hb` (20 for SHA-1, 32 for SHA-256).
+        if idx_file_bytes.len() >= 2 * hb {
+            let n = idx_file_bytes.len();
+            let embedded = &idx_file_bytes[n - 2 * hb..n - hb];
+            if embedded != &pack_bytes[pack_end..] {
+                return Err(Error::CorruptObject(format!(
+                    "pack checksum in index does not match {}",
+                    idx.pack_path.display()
+                )));
+            }
         }
     }
     if &pack_bytes[0..4] != b"PACK" {
@@ -5210,7 +5264,7 @@ mod tests {
 
     /// Hash pack bytes already written to `file` (from offset 0 through current EOF) for a SHA-1 trailer.
     fn sha1_trailer_for_open_file(file: &mut std::fs::File) -> Result<ObjectId> {
-        use std::io::{Seek, SeekFrom};
+        use std::io::{Read, Seek, SeekFrom};
         let len = file.metadata().map_err(Error::Io)?.len();
         file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
         let mut hasher = HashAlgo::Sha1.hasher();

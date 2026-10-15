@@ -9,8 +9,6 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use grit_lib::objects::hash::Parallelism;
 use grit_lib::objects::index_pack::build_pack_index_records;
-use grit_lib::objects::odb::Odb;
-
 fn index_pack_resolve_100k(c: &mut Criterion) {
     let fx = fixture::OdbBackendFixtures::global();
     let odb = &fx.pack_100k.odb;

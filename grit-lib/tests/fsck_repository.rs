@@ -7,7 +7,9 @@ use std::process::Command;
 
 use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOptions};
-use grit_lib::objects::pack::{read_pack_index, write_v2_pack_index_with_trailer};
+use grit_lib::objects::pack::{
+    read_pack_index, verify_pack_and_collect, write_v2_pack_index_with_trailer, PackedType,
+};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -220,6 +222,95 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
         report.ok(&config, &opts),
         "grit fsck must verify deltified pack objects: {:?}",
         report.issues
+    );
+}
+
+fn first_pack_idx(dir: &std::path::Path) -> std::path::PathBuf {
+    let pack_dir = dir.join(".git/objects/pack");
+    fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("pack index")
+}
+
+#[test]
+fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
+    let (dir, repo) = init_repo();
+    for i in 0..50 {
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join(format!("file-{i}.txt")), format!("payload {i}\n")).expect("write");
+        stage_for_commit(&repo, &mut NullProgress).expect("stage");
+        let ident = "T <t@example.com> 1 +0000".to_string();
+        create_commit(
+            &repo,
+            &CommitRequest {
+                message: format!("commit {i}"),
+                author: ident.clone(),
+                committer: ident,
+                allow_empty: false,
+                sign_override: None,
+                amend: false,
+                assume_worktree_synced: false,
+            },
+            &mut NullProgress,
+        )
+        .expect("commit");
+    }
+    git(dir.path(), &["repack", "-adf"]);
+
+    let idx_path = first_pack_idx(dir.path());
+    let records = verify_pack_and_collect(&idx_path).expect("verify-pack records");
+    let delta_bases: std::collections::HashSet<u64> =
+        records.iter().filter_map(|r| r.base_pack_offset).collect();
+    let delta = records
+        .iter()
+        .find(|r| r.packed_type == PackedType::OfsDelta && !delta_bases.contains(&r.offset))
+        .expect("repacked repo must contain leaf ofs-delta objects");
+    let bad_oid = ObjectId::from_bytes(&delta.oid).expect("delta oid");
+    let pack_path = idx_path.with_extension("pack");
+    let mut pack_bytes = fs::read(&pack_path).expect("read pack");
+    let corrupt_at = delta.offset as usize + delta.size_in_pack as usize - 4;
+    pack_bytes[corrupt_at] ^= 0x55;
+    let mut perms = fs::metadata(&pack_path)
+        .expect("pack metadata")
+        .permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(&pack_path, perms).expect("pack writable");
+    fs::write(&pack_path, pack_bytes).expect("corrupt delta payload");
+
+    let git_text = git(dir.path(), &["fsck", "--no-dangling"]);
+    assert!(
+        git_text.contains(&bad_oid.to_hex()),
+        "git fsck must name corrupt object: {git_text}"
+    );
+    assert!(
+        git_text.to_lowercase().contains("corrupt")
+            || git_text.contains("cannot unpack")
+            || git_text.contains("CRC mismatch")
+            || git_text.contains("badObject")
+            || git_text.contains("bad object"),
+        "git fsck must report corruption: {git_text}"
+    );
+
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    let corrupt_for_oid = report.issues.iter().any(|issue| {
+        matches!(
+            issue,
+            FsckIssue::BadObject { oid, .. }
+                if *oid == bad_oid && fsck::issue_msg_id(issue) == "corruptObject"
+        )
+    });
+    assert!(
+        corrupt_for_oid,
+        "grit fsck must report corruptObject for corrupt delta {}; issues: {:?}",
+        bad_oid.to_hex(),
+        report.issues
+    );
+    assert!(
+        report.objects_checked > 1,
+        "fsck must continue checking other pack objects"
     );
 }
 

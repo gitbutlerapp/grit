@@ -40,8 +40,8 @@ use crate::midx::verify_midx;
 use crate::objects::HashAlgo;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
-use crate::pack::verify_pack_for_fsck;
-use crate::pack_fsck_verify::verify_pack_objects_offset_order;
+use crate::pack::{prepare_pack_for_object_fsck, PackFsckTrailerIssue};
+use crate::pack_fsck_verify::{verify_pack_objects_offset_order, PackFsckObjectOutcome};
 use crate::parallel::{try_par_map, ParallelOp, ParallelOptions};
 use crate::progress::{Cancel, ProgressPhase, ProgressSink};
 use crate::refs_fsck::{refs_fsck, RefsFsckIssue};
@@ -690,6 +690,37 @@ fn verify_loose_objects(
     Ok((checked, validated, links))
 }
 
+fn pack_object_read_issue(oid: ObjectId, pack: &Path, err: Error) -> FsckIssue {
+    match err {
+        Error::CorruptObject(msg) if msg.contains("checksum") && msg.contains("index") => {
+            FsckIssue::IdxMismatch {
+                pack: pack.to_path_buf(),
+            }
+        }
+        Error::CorruptObject(msg)
+            if msg.contains("trailing checksum")
+                || msg.contains("pack trailing checksum")
+                || msg.contains("pack checksum") =>
+        {
+            FsckIssue::PackChecksum {
+                pack: pack.to_path_buf(),
+            }
+        }
+        Error::ObjectNotFound(_) => FsckIssue::MissingObject {
+            oid,
+            referenced_by: ObjectId::zero(),
+        },
+        Error::CorruptObject(_) | Error::Zlib(_) => FsckIssue::BadObject {
+            oid,
+            error: FsckError::new("corruptObject", err.to_string()),
+        },
+        other => FsckIssue::BadObject {
+            oid,
+            error: FsckError::new("corruptObject", other.to_string()),
+        },
+    }
+}
+
 fn apply_dot_checks(
     dot: &mut DotFsckTracker,
     issues: &mut Vec<FsckIssue>,
@@ -784,8 +815,8 @@ fn verify_pack_objects(
             return Err(Error::Message("cancelled".into()));
         }
         let pack_path = idx_path.with_extension("pack");
-        let prep = match verify_pack_for_fsck(idx_path) {
-            Ok(p) => p,
+        let (prep, trailer_issue) = match prepare_pack_for_object_fsck(idx_path) {
+            Ok(v) => v,
             Err(Error::CorruptObject(msg)) => {
                 let issue = if msg.contains("checksum") && msg.contains("index") {
                     FsckIssue::IdxMismatch { pack: pack_path }
@@ -798,34 +829,48 @@ fn verify_pack_objects(
             }
             Err(e) => return Err(e),
         };
+        if let Some(trailer) = trailer_issue {
+            let issue = match trailer {
+                PackFsckTrailerIssue::PackChecksum => FsckIssue::PackChecksum {
+                    pack: pack_path.clone(),
+                },
+                PackFsckTrailerIssue::IdxMismatch => FsckIssue::IdxMismatch {
+                    pack: pack_path.clone(),
+                },
+            };
+            if should_emit(config, strict, issue_msg_id(&issue)) {
+                issues.push(issue);
+            }
+        }
         let object_count = prep.records.len();
         checked += object_count;
         if cancel.is_cancelled() {
             return Err(Error::Message("cancelled".into()));
         }
-        let verified = match verify_pack_objects_offset_order(prep, odb, par_opts) {
-            Ok(v) => v,
-            Err(Error::CorruptObject(msg)) => {
-                issues.push(FsckIssue::PackChecksum { pack: pack_path });
-                let _ = msg;
-                progress.set((i + 1) as u64);
-                continue;
-            }
-            Err(e) => return Err(e),
-        };
-        for (n, item) in verified.into_iter().enumerate() {
+        let outcomes = verify_pack_objects_offset_order(prep, odb, par_opts)?;
+        for (n, outcome) in outcomes.into_iter().enumerate() {
             if n.is_multiple_of(128) && cancel.is_cancelled() {
                 return Err(Error::Message("cancelled".into()));
             }
-            let oid = item.oid;
-            let kind = item.kind;
-            let data = item.data;
-            if let Err(err) = fsck_object(kind, &data, fsck_opts) {
-                push_bad_object(issues, config, strict, oid, err);
-                continue;
+            match outcome {
+                PackFsckObjectOutcome::Failed { oid, err } => {
+                    let issue = pack_object_read_issue(oid, &pack_path, err);
+                    if should_emit(config, strict, issue_msg_id(&issue)) {
+                        issues.push(issue);
+                    }
+                }
+                PackFsckObjectOutcome::Clean(item) => {
+                    let oid = item.oid;
+                    let kind = item.kind;
+                    let data = item.data;
+                    if let Err(err) = fsck_object(kind, &data, fsck_opts) {
+                        push_bad_object(issues, config, strict, oid, err);
+                        continue;
+                    }
+                    record_validated_object(&mut validated, &mut links, oid, kind, &data, algo);
+                    apply_dot_checks(&mut dot, issues, config, strict, &oid, kind, &data);
+                }
             }
-            record_validated_object(&mut validated, &mut links, oid, kind, &data, algo);
-            apply_dot_checks(&mut dot, issues, config, strict, &oid, kind, &data);
         }
         progress.set((i + 1) as u64);
     }
