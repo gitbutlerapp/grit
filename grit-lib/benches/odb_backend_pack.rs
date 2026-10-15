@@ -2,15 +2,15 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-mod fixture;
+#[path = "fixture_pack_delta.rs"]
+mod pack_delta_fixture;
 
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use fixture::ObjectBenchFixtures;
 
 fn bench_odb_backend_pack_delta(c: &mut Criterion) {
-    let pack_fx = ObjectBenchFixtures::global();
+    let pack_fx = pack_delta_fixture::global();
     let mut group = c.benchmark_group("odb_backend");
     group.bench_function("read_deep_delta_chain", |b| {
         let odb = &pack_fx.odb;

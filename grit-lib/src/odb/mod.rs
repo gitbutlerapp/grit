@@ -1041,6 +1041,47 @@ impl Odb {
         });
     }
 
+    /// Direct pack read when [`PackStore::with_context`] matches the primary `objects/` tree.
+    ///
+    /// Skips [`ObjectStore`] dynamic dispatch on batch cat-file workloads; MIDX repos use the
+    /// full primary path instead.
+    fn try_read_packed_in_batch_context(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        if self.custom_primary.is_some()
+            || !PackStore::read_context_matches_objects_dir(&self.objects_dir)
+            || self.multi_pack_index_reads_enabled()
+        {
+            return Ok(None);
+        }
+        self.sync_delta_base_cache_limit();
+        match pack::try_read_object_from_packs_with_options(
+            &self.objects_dir,
+            oid,
+            pack::PackLookupOptions::ALL_LOCAL_PACKS,
+        ) {
+            Ok(obj) => Ok(Some(obj)),
+            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn try_read_info_packed_in_batch_context(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        if self.custom_primary.is_some()
+            || !PackStore::read_context_matches_objects_dir(&self.objects_dir)
+            || self.multi_pack_index_reads_enabled()
+        {
+            return Ok(None);
+        }
+        match pack::try_read_object_info_from_packs_with_options(
+            &self.objects_dir,
+            oid,
+            pack::PackLookupOptions::ALL_LOCAL_PACKS,
+        ) {
+            Ok(info) => Ok(Some(info)),
+            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
     /// Return the path to the `objects/` directory.
     ///
     /// This is always the repository layout path (including for custom primaries that do not
@@ -1376,11 +1417,8 @@ impl Odb {
         if let Some(obj) = self.overlay_read(oid) {
             return Ok(obj);
         }
-        if oid.is_well_known_empty_tree() {
-            return Ok(Object {
-                kind: ObjectKind::Tree,
-                data: Vec::new(),
-            });
+        if let Some(obj) = self.try_read_packed_in_batch_context(oid)? {
+            return Ok(obj);
         }
 
         let use_midx = self.multi_pack_index_reads_enabled();
@@ -1455,6 +1493,10 @@ impl Odb {
                 size: u64::try_from(obj.data.len())
                     .map_err(|_| Error::CorruptObject("object size overflow".to_owned()))?,
             });
+        }
+
+        if let Some(info) = self.try_read_info_packed_in_batch_context(oid)? {
+            return Ok(info);
         }
 
         let use_midx = self.multi_pack_index_reads_enabled();
