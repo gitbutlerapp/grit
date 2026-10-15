@@ -14,9 +14,14 @@
 //! ```
 mod core;
 pub mod handle;
+mod patch_log;
 
 pub use core::*;
 pub use handle::Diff;
+pub use patch_log::{
+    write_commit_header_and_message, write_commit_log_patch, write_diff_entry_log_patch,
+    LogPatchCommitHeader, LogPatchDiffOptions, LogPatchOptions,
+};
 
 pub mod bloom {
     //! bloom API (re-exported at this path).
