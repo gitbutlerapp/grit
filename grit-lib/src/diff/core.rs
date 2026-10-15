@@ -3046,6 +3046,195 @@ pub fn diff_index_to_worktree_for_staging(
     diff_index_to_worktree_inner(odb, index, work_tree, repository_git_dir, options, true)
 }
 
+/// First pass of [`diff_index_to_worktree_inner`]: gitlinks and intent-to-add paths only.
+#[allow(clippy::too_many_arguments)]
+fn worktree_diff_pass1_index_entry(
+    odb: &Odb,
+    work_tree: &Path,
+    ie: &IndexEntry,
+    path_str_ref: &str,
+    simplify_gitlinks: bool,
+    ignore_submodule_untracked: bool,
+    error_on_broken_gitlinks: bool,
+    materialize_dirty_blobs: bool,
+    filter_fp: Option<&crate::filter_process::FilterProcessState>,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
+    precompose_unicode: bool,
+    ignorecase: bool,
+    result: &mut Vec<DiffEntry>,
+) -> Result<()> {
+    if ie.skip_worktree() || ie.assume_unchanged() {
+        return Ok(());
+    }
+    let is_intent_to_add = ie.intent_to_add();
+
+    if ie.mode == 0o160000 {
+        let sub_dir = work_tree.join(path_str_ref);
+        match fs::symlink_metadata(&sub_dir) {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::NotFound
+                    || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
+            {
+                if !simplify_gitlinks {
+                    let path_owned = path_str_ref.to_owned();
+                    result.push(DiffEntry {
+                        status: DiffStatus::Deleted,
+                        old_path: Some(path_owned.clone()),
+                        new_path: Some(path_owned),
+                        old_mode: format_mode(ie.mode),
+                        new_mode: "000000".to_owned(),
+                        old_oid: ie.oid,
+                        new_oid: zero_oid(),
+                        score: None,
+                    });
+                }
+                return Ok(());
+            }
+            Err(e) => return Err(Error::Io(e)),
+            Ok(meta) if !meta.is_dir() => {
+                let worktree_mode = mode_from_metadata(&meta);
+                let file_attrs = file_attrs_for(path_str_ref);
+                let worktree_oid = worktree_file_oid(
+                    odb,
+                    &sub_dir,
+                    &meta,
+                    conv,
+                    &file_attrs,
+                    path_str_ref,
+                    None,
+                    materialize_dirty_blobs,
+                    filter_fp,
+                )?;
+                let path_owned = path_str_ref.to_owned();
+                result.push(DiffEntry {
+                    status: DiffStatus::TypeChanged,
+                    old_path: Some(path_owned.clone()),
+                    new_path: Some(path_owned),
+                    old_mode: format_mode(ie.mode),
+                    new_mode: format_mode(worktree_mode),
+                    old_oid: ie.oid,
+                    new_oid: worktree_oid,
+                    score: None,
+                });
+                return Ok(());
+            }
+            Ok(_) => {}
+        }
+        let sub_head_oid = read_submodule_head_oid(&sub_dir);
+        let ref_matches = if let Some(oid) = sub_head_oid {
+            oid == ie.oid
+        } else {
+            let is_placeholder = submodule_worktree_is_unpopulated_placeholder(&sub_dir);
+            if error_on_broken_gitlinks
+                && !is_placeholder
+                && submodule_embedded_git_dir(&sub_dir).is_some()
+            {
+                return Err(Error::Config(
+                    format!("could not read submodule HEAD for '{path_str_ref}'").into(),
+                ));
+            }
+            is_placeholder
+        };
+        if simplify_gitlinks {
+            if !ref_matches {
+                let path_owned = path_str_ref.to_owned();
+                let new_oid = sub_head_oid.unwrap_or_else(zero_oid);
+                result.push(DiffEntry {
+                    status: DiffStatus::Modified,
+                    old_path: Some(path_owned.clone()),
+                    new_path: Some(path_owned),
+                    old_mode: format_mode(ie.mode),
+                    new_mode: format_mode(ie.mode),
+                    old_oid: ie.oid,
+                    new_oid,
+                    score: None,
+                });
+            }
+            return Ok(());
+        }
+        if sub_head_oid.is_some() && submodule_head_object_broken(&sub_dir) {
+            return Err(Error::Config(
+                format!("'git status --porcelain=2' failed in submodule {path_str_ref}").into(),
+            ));
+        }
+        let mut flags = submodule_porcelain_flags(work_tree, path_str_ref, ie.oid);
+        if ignore_submodule_untracked {
+            flags.untracked = false;
+        }
+        let inner_dirty = flags.modified || flags.untracked;
+        if !ref_matches || inner_dirty {
+            let path_owned = path_str_ref.to_owned();
+            let new_oid = if !ref_matches {
+                sub_head_oid.unwrap_or_else(zero_oid)
+            } else {
+                zero_oid()
+            };
+            result.push(DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some(path_owned.clone()),
+                new_path: Some(path_owned),
+                old_mode: format_mode(ie.mode),
+                new_mode: format_mode(ie.mode),
+                old_oid: ie.oid,
+                new_oid,
+                score: None,
+            });
+        }
+        return Ok(());
+    }
+
+    let file_path =
+        index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
+
+    if is_intent_to_add {
+        match fs::symlink_metadata(&file_path) {
+            Ok(meta) => {
+                let file_attrs = file_attrs_for(path_str_ref);
+                let worktree_oid = worktree_file_oid(
+                    odb,
+                    &file_path,
+                    &meta,
+                    conv,
+                    &file_attrs,
+                    path_str_ref,
+                    None,
+                    materialize_dirty_blobs,
+                    filter_fp,
+                )?;
+                let worktree_mode = mode_from_metadata(&meta);
+                result.push(DiffEntry {
+                    status: DiffStatus::Added,
+                    old_path: None,
+                    new_path: Some(path_str_ref.to_owned()),
+                    old_mode: "000000".to_owned(),
+                    new_mode: format_mode(worktree_mode),
+                    old_oid: zero_oid(),
+                    new_oid: worktree_oid,
+                    score: None,
+                });
+            }
+            Err(e)
+                if e.kind() == std::io::ErrorKind::NotFound
+                    || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
+            {
+                result.push(DiffEntry {
+                    status: DiffStatus::Deleted,
+                    old_path: Some(path_str_ref.to_owned()),
+                    new_path: None,
+                    old_mode: format_mode(ie.mode),
+                    new_mode: "000000".to_owned(),
+                    old_oid: ie.oid,
+                    new_oid: zero_oid(),
+                    score: None,
+                });
+            }
+            Err(e) => return Err(Error::Io(e)),
+        }
+    }
+    Ok(())
+}
+
 fn diff_index_to_worktree_inner(
     odb: &Odb,
     index: &mut Index,
@@ -3131,219 +3320,72 @@ fn diff_index_to_worktree_inner(
     // (O(unique dirs) instead of O(files × depth)).
     let mut dir_symlinks = SymlinkDirCache::default();
 
-    for ie in &index.entries {
-        if ie.stage() != 0 {
-            let path = String::from_utf8_lossy(&ie.path).to_string();
-            let rank = match ie.stage() {
-                2 => 0u8,
-                3 => 1u8,
-                1 => 2u8,
-                _ => 3u8,
-            };
-            match unmerged_base.get(&path) {
-                Some((existing_rank, _)) if *existing_rank <= rank => {}
-                _ => {
-                    unmerged_base.insert(path, (rank, ie.clone()));
-                }
-            }
-            continue;
-        }
-        // Sparse checkout: paths outside the cone are not expected on disk; `assume_unchanged`
-        // is treated as clean without reading the filesystem (wt-status.c).
-        if ie.skip_worktree() || ie.assume_unchanged() {
-            continue;
-        }
-        // Use str slice directly to avoid allocation for path joining;
-        // only allocate String if we need it for DiffEntry output.
-        let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
-        if let Some(limit) = &options.restrict_to_paths {
-            if !limit.contains(path_str_ref) {
-                continue;
-            }
-        }
-        let is_intent_to_add = ie.intent_to_add();
-
-        // Gitlink entries (submodules): Git's `diff-index` reports `M` when the recorded
-        // commit differs from the submodule checkout **or** when the submodule work tree is
-        // dirty (staged/unstaged/untracked) even if HEAD still matches the gitlink. For the
-        // latter case the "new" OID column is the null OID (see `git diff-index` / t7506).
-        if ie.mode == 0o160000 {
-            let sub_dir = work_tree.join(path_str_ref);
-            match fs::symlink_metadata(&sub_dir) {
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::NotFound
-                        || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
-                {
-                    // A gitlink whose worktree path is absent is a deleted submodule. Git's
-                    // `check_removed` (diff-lib.c) `lstat`s the path first. Skipped when
-                    // `simplify_gitlinks` so callers that only compare recorded HEADs keep their
-                    // behaviour. (t4060 #50/#51.)
-                    if !simplify_gitlinks {
-                        let path_owned = path_str_ref.to_owned();
-                        result.push(DiffEntry {
-                            status: DiffStatus::Deleted,
-                            old_path: Some(path_owned.clone()),
-                            new_path: Some(path_owned),
-                            old_mode: format_mode(ie.mode),
-                            new_mode: "000000".to_owned(),
-                            old_oid: ie.oid,
-                            new_oid: zero_oid(),
-                            score: None,
-                        });
-                    }
-                    continue;
-                }
-                Err(e) => return Err(Error::Io(e)),
-                Ok(meta) if !meta.is_dir() => {
-                    // Gitlink replaced by a regular file or symlink (t4041-style typechange).
-                    let worktree_mode = mode_from_metadata(&meta);
-                    let file_attrs = file_attrs_for(path_str_ref);
-                    let worktree_oid = worktree_file_oid(
-                        odb,
-                        &sub_dir,
-                        &meta,
-                        &conv,
-                        &file_attrs,
-                        path_str_ref,
-                        None,
-                        materialize_dirty_blobs,
-                        filter_fp,
-                    )?;
-                    let path_owned = path_str_ref.to_owned();
-                    result.push(DiffEntry {
-                        status: DiffStatus::TypeChanged,
-                        old_path: Some(path_owned.clone()),
-                        new_path: Some(path_owned),
-                        old_mode: format_mode(ie.mode),
-                        new_mode: format_mode(worktree_mode),
-                        old_oid: ie.oid,
-                        new_oid: worktree_oid,
-                        score: None,
-                    });
-                    continue;
-                }
-                Ok(_) => {}
-            }
-            let sub_head_oid = read_submodule_head_oid(&sub_dir);
-            let ref_matches = if let Some(oid) = sub_head_oid {
-                oid == ie.oid
-            } else {
-                let is_placeholder = submodule_worktree_is_unpopulated_placeholder(&sub_dir);
-                if options.error_on_broken_gitlinks
-                    && !is_placeholder
-                    && submodule_embedded_git_dir(&sub_dir).is_some()
-                {
-                    return Err(Error::Config(
-                        format!("could not read submodule HEAD for '{path_str_ref}'").into(),
-                    ));
-                }
-                is_placeholder
-            };
-            if simplify_gitlinks {
-                if !ref_matches {
-                    let path_owned = path_str_ref.to_owned();
-                    let new_oid = sub_head_oid.unwrap_or_else(zero_oid);
-                    result.push(DiffEntry {
-                        status: DiffStatus::Modified,
-                        old_path: Some(path_owned.clone()),
-                        new_path: Some(path_owned),
-                        old_mode: format_mode(ie.mode),
-                        new_mode: format_mode(ie.mode),
-                        old_oid: ie.oid,
-                        new_oid,
-                        score: None,
-                    });
-                }
-                continue;
-            }
-            // A populated submodule whose HEAD points at a commit object that is missing from its
-            // own object store is corrupt. Git's `is_submodule_modified` shells `git status` into
-            // the submodule, which fails, and Git aborts the surrounding status/diff. Mirror that:
-            // a broken submodule is a hard error rather than a silently-clean gitlink (t5526 #38).
-            if sub_head_oid.is_some() && submodule_head_object_broken(&sub_dir) {
-                return Err(Error::Config(
-                    format!("'git status --porcelain=2' failed in submodule {path_str_ref}").into(),
-                ));
-            }
-            let mut flags = submodule_porcelain_flags(work_tree, path_str_ref, ie.oid);
-            if ignore_submodule_untracked {
-                flags.untracked = false;
-            }
-            let inner_dirty = flags.modified || flags.untracked;
-            if !ref_matches || inner_dirty {
-                let path_owned = path_str_ref.to_owned();
-                let new_oid = if !ref_matches {
-                    sub_head_oid.unwrap_or_else(zero_oid)
-                } else {
-                    zero_oid()
+    let error_on_broken_gitlinks = options.error_on_broken_gitlinks;
+    if options.restrict_to_paths.is_none() {
+        for ie in &index.entries {
+            if ie.stage() != 0 {
+                let path = String::from_utf8_lossy(&ie.path).to_string();
+                let rank = match ie.stage() {
+                    2 => 0u8,
+                    3 => 1u8,
+                    1 => 2u8,
+                    _ => 3u8,
                 };
-                result.push(DiffEntry {
-                    status: DiffStatus::Modified,
-                    old_path: Some(path_owned.clone()),
-                    new_path: Some(path_owned),
-                    old_mode: format_mode(ie.mode),
-                    new_mode: format_mode(ie.mode),
-                    old_oid: ie.oid,
-                    new_oid,
-                    score: None,
-                });
-            }
-            continue;
-        }
-
-        let file_path =
-            index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
-
-        if is_intent_to_add {
-            match fs::symlink_metadata(&file_path) {
-                Ok(meta) => {
-                    let file_attrs = file_attrs_for(path_str_ref);
-                    let worktree_oid = worktree_file_oid(
-                        odb,
-                        &file_path,
-                        &meta,
-                        &conv,
-                        &file_attrs,
-                        path_str_ref,
-                        None,
-                        materialize_dirty_blobs,
-                        filter_fp,
-                    )?;
-                    let worktree_mode = mode_from_metadata(&meta);
-                    result.push(DiffEntry {
-                        status: DiffStatus::Added,
-                        old_path: None,
-                        new_path: Some(path_str_ref.to_owned()),
-                        old_mode: "000000".to_owned(),
-                        new_mode: format_mode(worktree_mode),
-                        // `ita_invisible_in_index`: null OID on the index side for patch output
-                        // (`index 0000000..`, t2203); index entry still stores the empty blob.
-                        old_oid: zero_oid(),
-                        new_oid: worktree_oid,
-                        score: None,
-                    });
+                match unmerged_base.get(&path) {
+                    Some((existing_rank, _)) if *existing_rank <= rank => {}
+                    _ => {
+                        unmerged_base.insert(path, (rank, ie.clone()));
+                    }
                 }
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::NotFound
-                        || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
-                {
-                    result.push(DiffEntry {
-                        status: DiffStatus::Deleted,
-                        old_path: Some(path_str_ref.to_owned()),
-                        new_path: None,
-                        old_mode: format_mode(ie.mode),
-                        new_mode: "000000".to_owned(),
-                        old_oid: ie.oid,
-                        new_oid: zero_oid(),
-                        score: None,
-                    });
-                }
-                Err(e) => return Err(Error::Io(e)),
             }
-            continue;
         }
+    }
 
-        // Regular blobs: compared in one `read_dir` pass per directory below.
+    if let Some(limit) = options.restrict_to_paths.as_ref() {
+        for path in limit.iter() {
+            let Some(ie) = index.get(path.as_bytes(), 0) else {
+                continue;
+            };
+            worktree_diff_pass1_index_entry(
+                odb,
+                work_tree,
+                ie,
+                path.as_str(),
+                simplify_gitlinks,
+                ignore_submodule_untracked,
+                error_on_broken_gitlinks,
+                materialize_dirty_blobs,
+                filter_fp,
+                &conv,
+                &file_attrs_for,
+                precompose_unicode,
+                ignorecase,
+                &mut result,
+            )?;
+        }
+    } else {
+        for ie in &index.entries {
+            if ie.stage() != 0 {
+                continue;
+            }
+            let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
+            worktree_diff_pass1_index_entry(
+                odb,
+                work_tree,
+                ie,
+                path_str_ref,
+                simplify_gitlinks,
+                ignore_submodule_untracked,
+                error_on_broken_gitlinks,
+                materialize_dirty_blobs,
+                filter_fp,
+                &conv,
+                &file_attrs_for,
+                precompose_unicode,
+                ignorecase,
+                &mut result,
+            )?;
+        }
     }
 
     use crate::worktree_scan::{
