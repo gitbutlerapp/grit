@@ -683,7 +683,8 @@ fn append_fsck_gc_repack(
     if !smoke {
         seed_loose_objects(git, &fixture.worktree)?;
     }
-    out.push(run_scenario(
+    let gc_allows_grit_failure = fixture.id == "git-dot-git";
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -701,6 +702,7 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.worktree,
+        gc_allows_grit_failure,
     )?);
 
     out.push(run_scenario(
