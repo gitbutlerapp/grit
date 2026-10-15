@@ -58,7 +58,10 @@ fn remove_first_n_files(repo_dir: &Path, n: usize) {
 
 #[test]
 fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
-    assert!(ENTRIES >= LARGE_THRESHOLD, "fixture must start at or above 80k entries");
+    assert!(
+        ENTRIES >= LARGE_THRESHOLD,
+        "fixture must start at or above 80k entries"
+    );
 
     let grit_dir = tempfile::tempdir().expect("tempdir");
     let git_dir = tempfile::tempdir().expect("tempdir");
@@ -77,16 +80,16 @@ fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
 
     let grit = open_grit(grit_dir.path());
     let wt = grit.work_tree().expect("work tree");
-    let summary = stage_tracked_modifications_with_thresholds(
-        &grit,
-        wt,
-        IndexStagingThresholds::default(),
-    )
-    .expect("stage tracked");
+    let campaign_thresholds = IndexStagingThresholds {
+        large_index_restage: LARGE_THRESHOLD,
+        parallel_tracked_restage: LARGE_THRESHOLD,
+    };
+    let summary = stage_tracked_modifications_with_thresholds(&grit, wt, campaign_thresholds)
+        .expect("stage tracked");
     assert_eq!(summary.removed.len(), REMOVE);
     assert!(
         summary.untracked_invalidation_deferred,
-        "defer must reflect entry count at start (>=80k), not after removals"
+        "defer must reflect entry count at start (>= {LARGE_THRESHOLD}), not after removals"
     );
 
     let grit_index = fs::read(grit_dir.path().join(".git/index")).expect("grit index");

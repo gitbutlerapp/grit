@@ -196,6 +196,7 @@ impl WorktreeRules {
     }
 
     /// Like [`Self::from_checkout_prospective_index`], but takes ownership of the index view.
+    #[allow(dead_code)]
     pub(crate) fn from_checkout_prospective_index_owned(
         repo: &Repository,
         prospective_index: Index,

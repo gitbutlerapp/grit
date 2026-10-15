@@ -2092,6 +2092,11 @@ impl Index {
         self.touch_fsmonitor_after_entry_change();
     }
 
+    /// Replace many stage-0 entries in one sorted merge (bulk `git add` restage).
+    pub(crate) fn replace_stage0_entries_batch(&mut self, replacements: Vec<IndexEntry>) {
+        self.merge_replacements_into_sorted_index(replacements);
+    }
+
     /// Merge sorted `replacements` into a sorted index in one linear pass.
     fn merge_replacements_into_sorted_index(&mut self, replacements: Vec<IndexEntry>) {
         if replacements.is_empty() {

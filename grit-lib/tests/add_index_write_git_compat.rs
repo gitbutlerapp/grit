@@ -126,7 +126,10 @@ fn add_untracked_path_keeps_index_entries_canonical() {
 
     assert_git_fsck_strict(&repo_dir);
     let index = grit.index_handle().load().expect("load index");
-    assert!(index.entries_are_sorted(), "index paths must stay sorted for git fsck");
+    assert!(
+        index.entries_are_sorted(),
+        "index paths must stay sorted for git fsck"
+    );
     assert_eq!(
         index.entries().first().map(|e| e.path.as_slice()),
         Some(b"aaa.txt" as &[u8])

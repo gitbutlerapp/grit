@@ -27,8 +27,8 @@ use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_batch::{prepare_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
-    for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
-    WorktreeBlobScanOptions,
+    for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
+    BlobDiskLookup, WorktreeBlobScanOptions,
 };
 
 /// Summary of paths updated while staging tracked modifications/deletions.
@@ -75,11 +75,7 @@ pub fn stage_tracked_modifications(
     repo: &Repository,
     work_tree: &Path,
 ) -> Result<StageTrackedSummary> {
-    stage_tracked_modifications_with_thresholds(
-        repo,
-        work_tree,
-        IndexStagingThresholds::default(),
-    )
+    stage_tracked_modifications_with_thresholds(repo, work_tree, IndexStagingThresholds::default())
 }
 
 /// Like [`stage_tracked_modifications`], with explicit bulk/parallel entry-count thresholds.
@@ -165,12 +161,7 @@ pub fn stage_tracked_modifications_in_index_with_thresholds(
 ) -> Result<StageTrackedSummary> {
     let mut rules = WorktreeRules::from_repository(repo, index)?;
     stage_tracked_modifications_in_index_with_rules(
-        repo,
-        work_tree,
-        index_path,
-        index,
-        &mut rules,
-        thresholds,
+        repo, work_tree, index_path, index, &mut rules, thresholds,
     )
 }
 
@@ -258,12 +249,15 @@ fn stage_tracked_modifications_in_index_body(
         .unwrap_or(true);
 
     let mut unmerged_paths: HashSet<Vec<u8>> = HashSet::new();
-    let mut stage0: HashMap<Vec<u8>, IndexEntry> = HashMap::new();
+    let mut special_stage0: Vec<(Vec<u8>, IndexEntry)> = Vec::new();
     for e in &index.entries {
         if e.stage() != 0 {
             unmerged_paths.insert(e.path.clone());
-        } else {
-            stage0.insert(e.path.clone(), e.clone());
+        } else if e.mode == MODE_GITLINK
+            || e.intent_to_add()
+            || std::str::from_utf8(&e.path).is_err()
+        {
+            special_stage0.push((e.path.clone(), e.clone()));
         }
     }
 
@@ -284,28 +278,43 @@ fn stage_tracked_modifications_in_index_body(
         refresh_unmerged_tracked_path(repo, index, raw_path, &abs_path, rules, &mut summary)?;
     }
 
-    for (raw_path, idx_e) in &stage0 {
-        if idx_e.mode == MODE_GITLINK
-            || idx_e.intent_to_add()
-            || std::str::from_utf8(raw_path).is_err()
-        {
-            stage_tracked_path_individual(
-                repo,
-                work_tree,
-                index,
-                raw_path,
-                idx_e,
-                index_mtime,
-                trust_filemode,
-                precompose_unicode,
-                &mut symlink_parent_cache,
-                rules,
-                &mut summary,
-            )?;
-        }
+    for (raw_path, idx_e) in &special_stage0 {
+        stage_tracked_path_individual(
+            repo,
+            work_tree,
+            index,
+            raw_path,
+            idx_e,
+            index_mtime,
+            trust_filemode,
+            precompose_unicode,
+            &mut symlink_parent_cache,
+            rules,
+            &mut summary,
+        )?;
     }
 
-    let blob_dirs = group_blob_entries_by_dir(index, false);
+    let rules_config = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
+    let mut honor_fsmonitor = false;
+    if let Ok(cfg) = repo.config() {
+        let default_runner = crate::command_runner::system_command_runner();
+        let boundary = crate::fsmonitor::FsmonitorQueryBoundary(
+            crate::environment::wall_clock_unix_timestamp_nanos(),
+        );
+        let refresh_opts = crate::fsmonitor::FsmonitorRefreshOptions::with_query_boundary(boundary);
+        let refresh = crate::fsmonitor::refresh_index(
+            index,
+            repo.git_dir(),
+            work_tree,
+            cfg.as_ref(),
+            Some(default_runner.as_ref()),
+            &refresh_opts,
+        )?;
+        honor_fsmonitor = refresh.honor_valid_bits;
+    }
+    let blob_dirs = group_blob_entries_by_dir(index, honor_fsmonitor);
     let work_tree_owned = work_tree.to_path_buf();
     let dir_abs = move |dir: &str| {
         if dir.is_empty() {
@@ -319,20 +328,25 @@ fn stage_tracked_modifications_in_index_body(
     let file_abs = move |rel: &str| {
         index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
     };
-    let preload_index = repo
-        .config()
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.preloadIndex").and_then(|r| r.ok()))
+    let preload_index = rules_config
+        .get_bool("core.preloadIndex")
+        .and_then(|r| r.ok())
         .unwrap_or(true);
+    let blob_count: usize = blob_dirs.values().map(|v| v.len()).sum();
+    let thread_policy = repo.thread_policy();
     let blob_scan_opts = WorktreeBlobScanOptions {
         preload_index,
-        stat_parallel_threads: None,
+        stat_parallel_threads: Some(stat_scan_thread_count(
+            &thread_policy,
+            rules_config.as_ref(),
+            WorktreeBlobScanOptions {
+                preload_index,
+                stat_parallel_threads: None,
+            },
+            blob_count,
+        )),
     };
     let mut blob_scan: Vec<(String, BlobDiskLookup)> = Vec::new();
-    let rules_config = repo
-        .config()
-        .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
-    let thread_policy = repo.thread_policy();
     let parallelism = thread_policy
         .resolve(
             crate::parallel::ParallelOp::IndexRefresh,
@@ -555,6 +569,8 @@ struct DeferredRestageJob {
     rel_path: String,
     abs_path: PathBuf,
     index_entry: IndexEntry,
+    /// Worktree metadata from the directory stat scan (avoids a second `stat` during restage).
+    meta: fs::Metadata,
 }
 
 fn refresh_present_tracked_path(
@@ -619,6 +635,7 @@ fn refresh_present_tracked_path(
                 rel_path: rel_path.to_owned(),
                 abs_path: abs_path.to_path_buf(),
                 index_entry: idx_e.clone(),
+                meta: meta.clone(),
             });
             return Ok(false);
         }
@@ -667,6 +684,7 @@ fn restage_deferred_jobs(
             index_relpath: job.rel_path.clone(),
             index_entry: Some(job.index_entry.clone()),
             file_attrs: rules.file_attrs(&job.rel_path, false),
+            cached_meta: Some(job.meta.clone()),
         })
         .collect();
     let prepared = prepare_worktree_blobs_parallel(
@@ -696,6 +714,7 @@ fn restage_deferred_jobs(
             ParallelHashError::Task(err) => err,
         })?;
 
+    let mut replacements = Vec::new();
     let mut modified = Vec::new();
     for (job, prep) in jobs.iter().zip(prepared.iter()) {
         debug_assert_eq!(job.rel_path, prep.index_relpath);
@@ -706,8 +725,11 @@ fn restage_deferred_jobs(
             continue;
         }
         let entry = entry_from_stat(&job.abs_path, &job.raw_path, prep.oid, mode_for_index)?;
-        index.stage_file(entry);
         modified.push(job.raw_path.clone());
+        replacements.push(entry);
+    }
+    if !replacements.is_empty() {
+        index.replace_stage0_entries_batch(replacements);
     }
     Ok(modified)
 }
@@ -1421,7 +1443,11 @@ mod tests {
         let mut index = repo.load_index().unwrap();
         index.defer_untracked_cache_invalidation = false;
         let err = stage_tracked_modifications_in_index_with_thresholds(
-            &repo, wt, &index_path, &mut index, thresholds,
+            &repo,
+            wt,
+            &index_path,
+            &mut index,
+            thresholds,
         )
         .expect_err("unreadable blob should fail restage");
         assert!(

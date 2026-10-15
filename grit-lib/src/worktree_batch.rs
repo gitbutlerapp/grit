@@ -25,6 +25,8 @@ pub(crate) struct WorktreeBlobReadInput {
     /// Attributes for `index_relpath`, resolved by the caller (attribute lookup is not
     /// thread-safe, so it happens before the parallel phase).
     pub file_attrs: FileAttrs,
+    /// When set, reuse metadata from an earlier stat scan instead of calling `stat` again.
+    pub cached_meta: Option<fs::Metadata>,
 }
 
 /// Worktree blob after parallel read, hash, and zlib compression.
@@ -68,7 +70,10 @@ pub(crate) fn prepare_worktree_blobs_parallel(
     let total_bytes = items.len().saturating_mul(4096);
     let threads = parallelism.threads();
     let prepared = try_par_hash_with(items, threads, total_bytes, |item| {
-        let meta = fs::symlink_metadata(&item.abs).map_err(Error::Io)?;
+        let meta = match &item.cached_meta {
+            Some(m) => m.clone(),
+            None => fs::symlink_metadata(&item.abs).map_err(Error::Io)?,
+        };
         let data = worktree_blob_bytes(
             odb,
             &item.abs,

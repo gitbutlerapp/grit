@@ -14,8 +14,8 @@ pub struct IndexStagingThresholds {
 impl Default for IndexStagingThresholds {
     fn default() -> Self {
         Self {
-            large_index_restage: 80_000,
-            parallel_tracked_restage: 80_000,
+            large_index_restage: 4_096,
+            parallel_tracked_restage: 4_096,
         }
     }
 }

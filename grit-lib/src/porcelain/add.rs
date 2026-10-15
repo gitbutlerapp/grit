@@ -21,11 +21,11 @@ use crate::objects::{parse_commit, parse_tree, ObjectId};
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::pathspec_is_exclude;
+use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
     apply_executable_hint_to_index, staged_mode_with_hint, StageExecutableHint,
 };
 use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
-use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
 };
@@ -148,6 +148,14 @@ fn stage_with_tracked_scan(
     stage_inner(repo, opts, progress, true)
 }
 
+/// Match the UNTR `dir_flags` already stored on the index so add does not rebuild the cache.
+fn untracked_show_all_matching_index(index: &Index) -> bool {
+    index
+        .untracked_cache
+        .as_ref()
+        .is_some_and(|uc| uc.dir_flags == 0)
+}
+
 fn stage_inner(
     repo: &Repository,
     opts: &StageOptions,
@@ -181,9 +189,7 @@ fn stage_inner(
         .unwrap_or(false);
     let mut icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
 
-    let staging_thresholds = opts
-        .staging_thresholds
-        .unwrap_or_default();
+    let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
     let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !ignorecase;
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
@@ -198,9 +204,6 @@ fn stage_inner(
             &mut rules_guard,
             staging_thresholds,
         )?;
-        if summary.untracked_invalidation_deferred {
-            replay_deferred_untracked_invalidations(&mut index, &summary);
-        }
         tracked_scan_summary = Some(summary);
         (Vec::new(), std::collections::BTreeMap::new())
     } else {
@@ -245,7 +248,7 @@ fn stage_inner(
         } else {
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,
-                show_all: false,
+                show_all: untracked_show_all_matching_index(&index),
                 sort_paths: true,
                 use_untracked_cache: true,
             };
@@ -257,14 +260,18 @@ fn stage_inner(
                 scan,
                 &rules,
             )?;
-            expand_untracked_for_staging_with_rules(
-                repo,
-                &mut index,
-                work_tree,
-                untracked,
-                &opts.pathspecs,
-                &rules,
-            )?
+            if untracked.is_empty() {
+                untracked
+            } else {
+                expand_untracked_for_staging_with_rules(
+                    repo,
+                    &mut index,
+                    work_tree,
+                    untracked,
+                    &opts.pathspecs,
+                    &rules,
+                )?
+            }
         }
     } else {
         Vec::new()
@@ -356,6 +363,9 @@ fn stage_inner(
     }
 
     if outcome.total() > 0 {
+        if let Some(summary) = &tracked_scan_summary {
+            replay_deferred_untracked_invalidations(&mut index, summary);
+        }
         index.ensure_canonical_order();
         repo.write_index(&mut index)?;
     }
@@ -713,6 +723,7 @@ fn stage_untracked_paths_parallel(
             index_relpath: resolved.index_relpath,
             index_entry: None,
             file_attrs,
+            cached_meta: None,
         });
     }
 
