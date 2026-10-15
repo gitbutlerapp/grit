@@ -81,12 +81,7 @@ fn cache_tree_after_add_matches_git_write_tree() {
     fs::write(repo_dir.join("d1/f5.txt"), "changed\n").unwrap();
 
     let grit = open_grit(&repo_dir);
-    let opts = StageOptions {
-        pathspecs: Vec::new(),
-        pathspec_sources: Vec::new(),
-        mode: StageMode::All,
-        ..StageOptions::default()
-    };
+    let opts = StageOptions::default();
     stage(&grit, &opts, &mut NullProgress).expect("grit add");
 
     let git_tree_hex = String::from_utf8(
@@ -126,11 +121,7 @@ fn add_untracked_path_keeps_index_entries_canonical() {
     fs::write(repo_dir.join("aaa.txt"), "a\n").unwrap();
 
     let grit = open_grit(&repo_dir);
-    let opts = StageOptions {
-        pathspecs: Vec::new(),
-        pathspec_sources: Vec::new(),
-        mode: StageMode::All,
-    };
+    let opts = StageOptions::default();
     stage(&grit, &opts, &mut NullProgress).expect("grit add");
 
     assert_git_fsck_strict(&repo_dir);

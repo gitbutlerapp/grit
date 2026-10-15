@@ -2541,10 +2541,7 @@ impl Index {
 
     /// Sort entries in Git's canonical order: by path, then by stage.
     pub fn sort(&mut self) {
-        if self.entries_sorted {
-            return;
-        }
-        self.sort_entries_canonical();
+        self.ensure_canonical_order();
     }
 
     /// Restore Git canonical `(path, stage)` order before writing the index.

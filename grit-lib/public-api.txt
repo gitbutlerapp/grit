@@ -7915,7 +7915,6 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::CreateBranchOutc
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::CreateBranchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::CreateBranchOutcome
 pub fn grit_lib::porcelain::branch::create_branch(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::branch::CreateBranchOutcome>
-pub mod grit_lib::porcelain::bulk_index
 pub mod grit_lib::porcelain::checkout
 pub fn grit_lib::porcelain::checkout::apply_index_file_mode(&std::path::Path, u32) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_between_trees(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
@@ -8516,6 +8515,27 @@ pub fn grit_lib::porcelain::revert::committer_timestamp(&str) -> i64
 pub fn grit_lib::porcelain::revert::merge_commit_message_for_revert(&grit_lib::objects::CommitData, grit_lib::objects::ObjectId, bool, char) -> (alloc::string::String, alloc::string::String)
 pub fn grit_lib::porcelain::revert::revision_set_newest_first(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub mod grit_lib::porcelain::stage_tracked
+pub struct grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+pub grit_lib::porcelain::stage_tracked::IndexStagingThresholds::large_index_restage: usize
+pub grit_lib::porcelain::stage_tracked::IndexStagingThresholds::parallel_tracked_restage: usize
+impl core::clone::Clone for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::cmp::PartialEq for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::marker::Freeze for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::marker::Send for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::marker::Sync for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::marker::Unpin for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
 pub struct grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::modified: alloc::vec::Vec<alloc::vec::Vec<u8>>
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::removed: alloc::vec::Vec<alloc::vec::Vec<u8>>
@@ -8542,6 +8562,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::stage_tracked
 pub fn grit_lib::porcelain::stage_tracked::replay_deferred_untracked_invalidations(&mut grit_lib::index::Index, &grit_lib::porcelain::stage_tracked::StageTrackedSummary)
 pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications(&grit_lib::repo::Repository, &std::path::Path) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
 pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index(&grit_lib::repo::Repository, &std::path::Path, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
+pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index_with_thresholds(&grit_lib::repo::Repository, &std::path::Path, &std::path::Path, &mut grit_lib::index::Index, grit_lib::porcelain::stage_tracked::IndexStagingThresholds) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
+pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_with_thresholds(&grit_lib::repo::Repository, &std::path::Path, grit_lib::porcelain::stage_tracked::IndexStagingThresholds) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
 pub mod grit_lib::porcelain::staging
 pub fn grit_lib::porcelain::staging::stage_worktree_changes(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<usize>
 pub mod grit_lib::porcelain::stash

@@ -106,6 +106,7 @@ fn stage_with_hint(
         pathspec_sources,
         mode: StageMode::All,
         executable_hint,
+        staging_thresholds: None,
     };
     let outcome =
         stage_paths(repo, &opts, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;

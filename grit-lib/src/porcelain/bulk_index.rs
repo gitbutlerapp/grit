@@ -1,53 +1,21 @@
 //! Thresholds for campaign-scale index staging (tracked restage and UNTR deferral).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-/// Deferred UNTR invalidation and cache-tree drop apply at this entry count and above.
-const DEFAULT_LARGE_INDEX_RESTAGE_THRESHOLD: usize = 80_000;
-
-/// Parallel tracked blob reread batches activate at this entry count (below bulk UNTR defer).
-const DEFAULT_PARALLEL_TRACKED_RESTAGE_THRESHOLD: usize = 4_096;
-
-static TEST_THRESHOLD_OVERRIDE: AtomicUsize = AtomicUsize::new(0);
-
-/// Override the bulk threshold for the current process (tests only).
-#[cfg(test)]
-pub(crate) fn set_large_index_restage_threshold_for_test(threshold: usize) {
-    TEST_THRESHOLD_OVERRIDE.store(threshold, Ordering::SeqCst);
+/// Entry-count thresholds for bulk tracked restage behavior.
+///
+/// Passed explicitly into staging APIs so tests can use smaller limits without process-wide state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndexStagingThresholds {
+    /// Deferred UNTR invalidation and cache-tree drop at or above this stage-0 entry count.
+    pub large_index_restage: usize,
+    /// Parallel tracked blob reread batches at or above this entry count.
+    pub parallel_tracked_restage: usize,
 }
 
-/// Clear a test override set by [`set_large_index_restage_threshold_for_test`].
-#[cfg(test)]
-pub(crate) fn clear_large_index_restage_threshold_for_test() {
-    TEST_THRESHOLD_OVERRIDE.store(0, Ordering::SeqCst);
-}
-
-/// Process-wide threshold override for integration tests (reset with [`clear_test_threshold_override`]).
-#[doc(hidden)]
-pub fn set_test_threshold_override(threshold: usize) {
-    TEST_THRESHOLD_OVERRIDE.store(threshold, Ordering::SeqCst);
-}
-
-/// Clear [`set_test_threshold_override`].
-#[doc(hidden)]
-pub fn clear_test_threshold_override() {
-    TEST_THRESHOLD_OVERRIDE.store(0, Ordering::SeqCst);
-}
-
-/// Entry count at which bulk UNTR deferral and cache-tree drop activate.
-pub(crate) fn large_index_restage_threshold() -> usize {
-    threshold_or_default(DEFAULT_LARGE_INDEX_RESTAGE_THRESHOLD)
-}
-
-/// Entry count at which parallel tracked restage batches activate.
-pub(crate) fn parallel_tracked_restage_threshold() -> usize {
-    threshold_or_default(DEFAULT_PARALLEL_TRACKED_RESTAGE_THRESHOLD)
-}
-
-fn threshold_or_default(default: usize) -> usize {
-    let override_n = TEST_THRESHOLD_OVERRIDE.load(Ordering::SeqCst);
-    if override_n > 0 {
-        return override_n;
+impl Default for IndexStagingThresholds {
+    fn default() -> Self {
+        Self {
+            large_index_restage: 80_000,
+            parallel_tracked_restage: 4_096,
+        }
     }
-    default
 }

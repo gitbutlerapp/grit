@@ -53,7 +53,7 @@
 
 pub mod add;
 pub mod branch;
-pub mod bulk_index;
+pub(crate) mod bulk_index;
 pub mod checkout;
 pub mod checkout_reflog;
 pub mod cherry_pick;
