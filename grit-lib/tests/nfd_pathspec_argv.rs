@@ -64,6 +64,7 @@ fn library_nfd_resolved_pathspec_stages_nfc_index_entry() {
             pathspecs: vec![nfd_resolved],
             pathspec_sources: vec![nfd_name.clone()],
             mode: StageMode::All,
+            ..StageOptions::default()
         },
         &mut grit_lib::progress::NullProgress,
     )

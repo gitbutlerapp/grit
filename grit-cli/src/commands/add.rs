@@ -87,6 +87,7 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
         pathspecs,
         pathspec_sources,
         mode: StageMode::All,
+        staging_thresholds: None,
     };
     let outcome =
         stage_paths(repo, &opts, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;

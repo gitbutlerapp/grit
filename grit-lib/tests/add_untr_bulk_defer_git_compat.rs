@@ -5,7 +5,9 @@ mod support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
+use grit_lib::porcelain::stage_tracked::{
+    stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
+};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use std::fs;
@@ -24,10 +26,24 @@ fn untr_root_valid(index_bytes: &[u8]) -> bool {
         .is_some_and(|r| r.valid)
 }
 
+fn small_bulk_thresholds() -> IndexStagingThresholds {
+    IndexStagingThresholds {
+        large_index_restage: 64,
+        parallel_tracked_restage: 64,
+    }
+}
+
+fn stage_opts_with_small_bulk() -> StageOptions {
+    StageOptions {
+        pathspecs: Vec::new(),
+        pathspec_sources: Vec::new(),
+        mode: StageMode::All,
+        staging_thresholds: Some(small_bulk_thresholds()),
+    }
+}
+
 #[test]
 fn bulk_deferred_untr_replay_after_mass_removal() {
-    grit_lib::porcelain::bulk_index::set_test_threshold_override(64);
-
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_dir = tmp.path().join("repo");
     fs::create_dir_all(&repo_dir).unwrap();
@@ -41,7 +57,6 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
     }
     git(&repo_dir, &["add", "-A"]);
     git(&repo_dir, &["commit", "-q", "-m", "initial"]);
-    // Warm UNTR on the index.
     git(&repo_dir, &["status", "-s"]);
 
     for i in 0..20 {
@@ -50,12 +65,7 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
     }
 
     let grit = open_grit(&repo_dir);
-    let opts = StageOptions {
-        pathspecs: Vec::new(),
-        pathspec_sources: Vec::new(),
-        mode: StageMode::All,
-    };
-    stage(&grit, &opts, &mut NullProgress).expect("grit add");
+    stage(&grit, &stage_opts_with_small_bulk(), &mut NullProgress).expect("grit add");
 
     let grit_index = fs::read(repo_dir.join(".git/index")).expect("grit index");
     assert!(
@@ -69,13 +79,10 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
         !untr_root_valid(&git_index),
         "git reference: UNTR root should be invalid after mass removal add"
     );
-    grit_lib::porcelain::bulk_index::clear_test_threshold_override();
 }
 
 #[test]
 fn stage_tracked_modifications_public_api_replays_untr_after_bulk_removal() {
-    grit_lib::porcelain::bulk_index::set_test_threshold_override(64);
-
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_dir = tmp.path().join("repo");
     fs::create_dir_all(&repo_dir).unwrap();
@@ -98,7 +105,8 @@ fn stage_tracked_modifications_public_api_replays_untr_after_bulk_removal() {
 
     let grit = open_grit(&repo_dir);
     let wt = grit.work_tree().expect("work tree");
-    let summary = stage_tracked_modifications(&grit, wt).expect("stage tracked");
+    let summary = stage_tracked_modifications_with_thresholds(&grit, wt, small_bulk_thresholds())
+        .expect("stage tracked");
     assert_eq!(summary.removed.len(), 20);
     assert!(summary.untracked_invalidation_deferred);
 
@@ -107,6 +115,56 @@ fn stage_tracked_modifications_public_api_replays_untr_after_bulk_removal() {
         !untr_root_valid(&grit_index),
         "public stage_tracked_modifications must persist invalid UNTR after bulk defer replay"
     );
+}
 
-    grit_lib::porcelain::bulk_index::clear_test_threshold_override();
+/// Index starts at or above the default 80k bulk threshold, ends below after removals, but UNTR
+/// defer replay must still run (gated on [`StageTrackedSummary::untracked_invalidation_deferred`]).
+#[test]
+#[ignore = "slow: builds an 81k-entry worktree"]
+fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
+    const ENTRIES: usize = 81_000;
+    const REMOVE: usize = 15_000;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path().join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    git(&repo_dir, &["init", "-q", "-b", "main", "."]);
+
+    for i in 0..ENTRIES {
+        fs::write(repo_dir.join(format!("f{i:06}.txt")), b"x\n").unwrap();
+    }
+    git(&repo_dir, &["add", "-A"]);
+    git(&repo_dir, &["commit", "-q", "-m", "initial"]);
+    git(&repo_dir, &["status", "-s"]);
+
+    for i in 0..REMOVE {
+        let _ = fs::remove_file(repo_dir.join(format!("f{i:06}.txt")));
+    }
+
+    let grit = open_grit(&repo_dir);
+    let wt = grit.work_tree().expect("work tree");
+    let summary = stage_tracked_modifications_with_thresholds(
+        &grit,
+        wt,
+        IndexStagingThresholds::default(),
+    )
+    .expect("stage tracked");
+    assert_eq!(summary.removed.len(), REMOVE);
+    assert!(
+        summary.untracked_invalidation_deferred,
+        "defer must reflect entry count at start (>=80k), not after removals"
+    );
+    assert!(
+        summary.removed.len() + (ENTRIES - REMOVE) < IndexStagingThresholds::default().large_index_restage
+    );
+
+    let grit_index = fs::read(repo_dir.join(".git/index")).expect("grit index");
+    assert!(!untr_root_valid(&grit_index));
+
+    git(&repo_dir, &["add", "-A"]);
+    let git_index = fs::read(repo_dir.join(".git/index")).expect("git index");
+    assert!(
+        !untr_root_valid(&git_index),
+        "git add -A should also invalidate UNTR after mass removal"
+    );
 }

@@ -20,9 +20,7 @@ use crate::index::{
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::BULK_NEW_LOOSE_WRITE;
-use crate::porcelain::bulk_index::{
-    large_index_restage_threshold, parallel_tracked_restage_threshold,
-};
+pub use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -77,6 +75,23 @@ pub fn stage_tracked_modifications(
     repo: &Repository,
     work_tree: &Path,
 ) -> Result<StageTrackedSummary> {
+    stage_tracked_modifications_with_thresholds(
+        repo,
+        work_tree,
+        IndexStagingThresholds::default(),
+    )
+}
+
+/// Like [`stage_tracked_modifications`], with explicit bulk/parallel entry-count thresholds.
+///
+/// # Errors
+///
+/// Same as [`stage_tracked_modifications`].
+pub fn stage_tracked_modifications_with_thresholds(
+    repo: &Repository,
+    work_tree: &Path,
+    thresholds: IndexStagingThresholds,
+) -> Result<StageTrackedSummary> {
     let index_path = repo.index_path_for_env()?;
     let mut index = match repo.load_index_at(&index_path) {
         Ok(idx) => idx,
@@ -86,7 +101,13 @@ pub fn stage_tracked_modifications(
         Err(e) => return Err(e),
     };
 
-    let summary = stage_tracked_modifications_in_index(repo, work_tree, &index_path, &mut index)?;
+    let summary = stage_tracked_modifications_in_index_with_thresholds(
+        repo,
+        work_tree,
+        &index_path,
+        &mut index,
+        thresholds,
+    )?;
 
     if summary.untracked_invalidation_deferred {
         replay_deferred_untracked_invalidations(&mut index, &summary);
@@ -125,8 +146,32 @@ pub fn stage_tracked_modifications_in_index(
     index_path: &Path,
     index: &mut Index,
 ) -> Result<StageTrackedSummary> {
+    stage_tracked_modifications_in_index_with_thresholds(
+        repo,
+        work_tree,
+        index_path,
+        index,
+        IndexStagingThresholds::default(),
+    )
+}
+
+/// Like [`stage_tracked_modifications_in_index`], with explicit staging thresholds.
+pub fn stage_tracked_modifications_in_index_with_thresholds(
+    repo: &Repository,
+    work_tree: &Path,
+    index_path: &Path,
+    index: &mut Index,
+    thresholds: IndexStagingThresholds,
+) -> Result<StageTrackedSummary> {
     let mut rules = WorktreeRules::from_repository(repo, index)?;
-    stage_tracked_modifications_in_index_with_rules(repo, work_tree, index_path, index, &mut rules)
+    stage_tracked_modifications_in_index_with_rules(
+        repo,
+        work_tree,
+        index_path,
+        index,
+        &mut rules,
+        thresholds,
+    )
 }
 
 /// Like [`stage_tracked_modifications_in_index`], reusing an already-built [`WorktreeRules`].
@@ -136,23 +181,32 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     index_path: &Path,
     index: &mut Index,
     rules: &mut WorktreeRules,
+    thresholds: IndexStagingThresholds,
 ) -> Result<StageTrackedSummary> {
-    let bulk_index = index.entries.len() >= large_index_restage_threshold();
-    if bulk_index {
+    let entry_count_at_start = index.entries.len();
+    let bulk_untr_defer = entry_count_at_start >= thresholds.large_index_restage;
+    let parallel_restage = entry_count_at_start >= thresholds.parallel_tracked_restage;
+    if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = true;
     }
 
     // Git's index often carries a valid TREE extension; per-path invalidation during a bulk
     // restage devolves into thousands of tree walks. Drop it once up front at campaign scale.
-    if bulk_index && index.cache_tree.is_some() {
+    if bulk_untr_defer && index.cache_tree.is_some() {
         index.cache_tree = None;
         index.cache_tree_root = None;
     }
 
     let result = stage_tracked_modifications_in_index_body(
-        repo, work_tree, index_path, index, bulk_index, rules,
+        repo,
+        work_tree,
+        index_path,
+        index,
+        bulk_untr_defer,
+        parallel_restage,
+        rules,
     );
-    if bulk_index {
+    if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = false;
     }
     result
@@ -188,7 +242,8 @@ fn stage_tracked_modifications_in_index_body(
     work_tree: &Path,
     index_path: &Path,
     index: &mut Index,
-    bulk_index: bool,
+    bulk_untr_defer: bool,
+    parallel_restage: bool,
     rules: &mut WorktreeRules,
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
@@ -214,7 +269,7 @@ fn stage_tracked_modifications_in_index_body(
 
     let mut symlink_parent_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut summary = StageTrackedSummary {
-        untracked_invalidation_deferred: bulk_index,
+        untracked_invalidation_deferred: bulk_untr_defer,
         ..StageTrackedSummary::default()
     };
     let ignorecase = repo
@@ -278,7 +333,6 @@ fn stage_tracked_modifications_in_index_body(
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
     let thread_policy = repo.thread_policy();
-    let parallel_restage = index.entries.len() >= parallel_tracked_restage_threshold();
     let parallelism = thread_policy
         .resolve(
             crate::parallel::ParallelOp::IndexRefresh,
@@ -1330,7 +1384,10 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn defer_untracked_flag_cleared_after_io_error() {
-        crate::porcelain::bulk_index::set_large_index_restage_threshold_for_test(4);
+        let thresholds = IndexStagingThresholds {
+            large_index_restage: 4,
+            parallel_tracked_restage: 4,
+        };
 
         let dir = TempDir::new().unwrap();
         let repo = init_repository(
@@ -1363,14 +1420,15 @@ mod tests {
         let index_path = repo.index_path_for_env().unwrap();
         let mut index = repo.load_index().unwrap();
         index.defer_untracked_cache_invalidation = false;
-        let err = stage_tracked_modifications_in_index(&repo, wt, &index_path, &mut index)
-            .expect_err("unreadable blob should fail restage");
+        let err = stage_tracked_modifications_in_index_with_thresholds(
+            &repo, wt, &index_path, &mut index, thresholds,
+        )
+        .expect_err("unreadable blob should fail restage");
         assert!(
             !index.defer_untracked_cache_invalidation,
             "defer flag must be cleared after error: {err}"
         );
 
         fs::set_permissions(&blocked, fs::Permissions::from_mode(0o644)).unwrap();
-        crate::porcelain::bulk_index::clear_large_index_restage_threshold_for_test();
     }
 }

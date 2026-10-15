@@ -22,6 +22,7 @@ use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
+use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
 };
@@ -59,6 +60,9 @@ pub struct StageOptions {
     pub pathspec_sources: Vec<String>,
     /// Whether to include untracked paths ([`StageMode::All`]) or only tracked changes ([`StageMode::Update`]).
     pub mode: StageMode,
+    /// Override bulk/parallel staging thresholds (integration tests only).
+    #[doc(hidden)]
+    pub staging_thresholds: Option<IndexStagingThresholds>,
 }
 
 /// Counts returned by [`stage`].
@@ -99,6 +103,7 @@ pub fn stage_for_commit(
         pathspecs: Vec::new(),
         pathspec_sources: Vec::new(),
         mode: StageMode::All,
+        staging_thresholds: None,
     };
     stage_with_tracked_scan(repo, &opts, progress)
 }
@@ -173,6 +178,9 @@ fn stage_inner(
         .unwrap_or(false);
     let mut icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
 
+    let staging_thresholds = opts
+        .staging_thresholds
+        .unwrap_or_default();
     let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !ignorecase;
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
@@ -185,8 +193,11 @@ fn stage_inner(
             &index_path,
             &mut index,
             &mut rules_guard,
+            staging_thresholds,
         )?;
-        replay_deferred_untracked_invalidations(&mut index, &summary);
+        if summary.untracked_invalidation_deferred {
+            replay_deferred_untracked_invalidations(&mut index, &summary);
+        }
         tracked_scan_summary = Some(summary);
         (Vec::new(), std::collections::BTreeMap::new())
     } else {
@@ -1438,6 +1449,7 @@ mod tests {
                 pathspecs: Vec::new(),
                 pathspec_sources: Vec::new(),
                 mode: StageMode::All,
+                ..StageOptions::default()
             },
             &mut NullProgress,
         )

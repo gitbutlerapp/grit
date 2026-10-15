@@ -48,6 +48,7 @@ fn status_and_add_see_interior_untracked_on_indexed_chain() {
             pathspecs: Vec::new(),
             pathspec_sources: Vec::new(),
             mode: StageMode::All,
+            ..StageOptions::default()
         },
         &mut NullProgress,
     )
@@ -91,6 +92,7 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
             pathspecs: Vec::new(),
             pathspec_sources: Vec::new(),
             mode: StageMode::All,
+            ..StageOptions::default()
         },
         &mut NullProgress,
     )
