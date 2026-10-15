@@ -2760,6 +2760,11 @@ pub struct DiffIndexToWorktreeOptions {
         Option<std::sync::Arc<std::sync::Mutex<crate::worktree_rules::WorktreeRules>>>,
     /// When true, omit worktree-vs-index diffs for unmerged paths (used by `status` only).
     pub for_status: bool,
+    /// When set, only index paths in this set are compared against the work tree.
+    ///
+    /// Used by branch switch to verify dirty paths only where the tree-to-tree diff would
+    /// update the worktree, avoiding a full tracked scan on large indexes.
+    pub restrict_to_paths: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
 }
 
 struct StagingHashJob {
@@ -3156,6 +3161,11 @@ fn diff_index_to_worktree_inner(
         // Use str slice directly to avoid allocation for path joining;
         // only allocate String if we need it for DiffEntry output.
         let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
+        if let Some(limit) = &options.restrict_to_paths {
+            if !limit.contains(path_str_ref) {
+                continue;
+            }
+        }
         let is_intent_to_add = ie.intent_to_add();
 
         // Gitlink entries (submodules): Git's `diff-index` reports `M` when the recorded

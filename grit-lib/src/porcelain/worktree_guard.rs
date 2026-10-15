@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::config::ConfigSet;
+use crate::diff::format_mode;
 use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, DiffEntry, DiffStatus,
 };
@@ -95,6 +96,178 @@ pub(crate) fn local_change_diffs(
         },
     )?;
     Ok((staged, unstaged, index_changed))
+}
+
+/// Like [`local_change_diffs`], but only considers paths touched by `tree_changes`.
+///
+/// Falls back to a full index/worktree scan when the index has unmerged entries.
+pub(crate) fn local_change_diffs_for_tree_changes(
+    repo: &Repository,
+    index: &mut Index,
+    head_tree: Option<ObjectId>,
+    tree_changes: &[DiffEntry],
+) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>, bool)> {
+    let _ = head_tree;
+    if index.entries.iter().any(|e| e.stage() != 0) {
+        return local_change_diffs(repo, index, head_tree);
+    }
+    let paths = paths_touched_by_tree_changes(tree_changes);
+    if paths.is_empty() {
+        return Ok((Vec::new(), Vec::new(), false));
+    }
+    let path_filter = Arc::new(paths);
+    let staged = staged_diff_for_tree_switch_paths(index, tree_changes, path_filter.as_ref())?;
+
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let index_path = repo.index_path_for_env()?;
+    let index_mtime = index_file_mtime(&index_path);
+    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
+        .ok()
+        .map(Arc::new);
+    let worktree_rules = match config.as_ref() {
+        Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts(
+            repo,
+            index,
+            cfg.clone(),
+        )?))),
+        None => None,
+    };
+    let (unstaged, index_changed) = diff_index_to_worktree_with_options(
+        repo.odb(),
+        index,
+        work_tree,
+        crate::diff::DiffIndexToWorktreeOptions {
+            index_mtime: crate::diff::index_mtime_for_diff(index, index_mtime),
+            ignore_submodule_untracked: true,
+            repository_git_dir: Some(repo.git_dir().to_path_buf()),
+            refresh_index_stat_in_pass: false,
+            config,
+            worktree_rules,
+            restrict_to_paths: Some(path_filter),
+            ..Default::default()
+        },
+    )?;
+    Ok((staged, unstaged, index_changed))
+}
+
+#[derive(Clone, Copy)]
+enum HeadTreeSide {
+    Present { oid: ObjectId, mode: u32 },
+    Absent,
+}
+
+fn parse_diff_mode(mode: &str) -> u32 {
+    u32::from_str_radix(mode, 8).unwrap_or(0)
+}
+
+fn head_tree_side_at_path(path: &str, tree_changes: &[DiffEntry]) -> HeadTreeSide {
+    for change in tree_changes {
+        if change.old_path.as_deref() == Some(path) {
+            return HeadTreeSide::Present {
+                oid: change.old_oid,
+                mode: parse_diff_mode(&change.old_mode),
+            };
+        }
+    }
+    HeadTreeSide::Absent
+}
+
+fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for change in tree_changes {
+        if let Some(path) = &change.old_path {
+            paths.insert(path.clone());
+        }
+        if let Some(path) = &change.new_path {
+            paths.insert(path.clone());
+        }
+    }
+    paths
+}
+
+fn staged_diff_for_tree_switch_paths(
+    index: &Index,
+    tree_changes: &[DiffEntry],
+    paths: &BTreeSet<String>,
+) -> Result<Vec<DiffEntry>> {
+    let mut staged = Vec::new();
+    for path in paths {
+        let path_bytes = path.as_bytes();
+        if index
+            .entries
+            .iter()
+            .any(|e| e.path.as_slice() == path_bytes && e.stage() != 0)
+        {
+            if let Some(ie) = index
+                .entries
+                .iter()
+                .find(|e| e.path.as_slice() == path_bytes && e.stage() != 0)
+            {
+                staged.push(DiffEntry {
+                    status: DiffStatus::Unmerged,
+                    old_path: Some(path.clone()),
+                    new_path: Some(path.clone()),
+                    old_mode: format_mode(ie.mode),
+                    new_mode: format_mode(ie.mode),
+                    old_oid: ie.oid,
+                    new_oid: ie.oid,
+                    score: None,
+                });
+            }
+            continue;
+        }
+        let index_entry = index.get(path_bytes, 0);
+        if index_entry.is_some_and(|e| e.intent_to_add()) {
+            continue;
+        }
+        match (head_tree_side_at_path(path, tree_changes), index_entry) {
+            (HeadTreeSide::Absent, None) => {}
+            (HeadTreeSide::Absent, Some(ie)) => {
+                staged.push(DiffEntry {
+                    status: DiffStatus::Added,
+                    old_path: None,
+                    new_path: Some(path.clone()),
+                    old_mode: String::new(),
+                    new_mode: format_mode(ie.mode),
+                    old_oid: ObjectId::zero(),
+                    new_oid: ie.oid,
+                    score: None,
+                });
+            }
+            (HeadTreeSide::Present { oid, mode }, None) => {
+                staged.push(DiffEntry {
+                    status: DiffStatus::Deleted,
+                    old_path: Some(path.clone()),
+                    new_path: None,
+                    old_mode: format_mode(mode),
+                    new_mode: String::new(),
+                    old_oid: oid,
+                    new_oid: ObjectId::zero(),
+                    score: None,
+                });
+            }
+            (HeadTreeSide::Present { oid, mode }, Some(ie)) if ie.oid != oid || ie.mode != mode => {
+                staged.push(DiffEntry {
+                    status: if ie.mode != mode {
+                        DiffStatus::TypeChanged
+                    } else {
+                        DiffStatus::Modified
+                    },
+                    old_path: Some(path.clone()),
+                    new_path: Some(path.clone()),
+                    old_mode: format_mode(mode),
+                    new_mode: format_mode(ie.mode),
+                    old_oid: oid,
+                    new_oid: ie.oid,
+                    score: None,
+                });
+            }
+            (HeadTreeSide::Present { .. }, Some(_)) => {}
+        }
+    }
+    Ok(staged)
 }
 
 /// Pathspec roots covering every [`DiffStatus::Added`] path and its parent directories.
@@ -330,6 +503,7 @@ pub fn prepare_tree_checkout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diff::diff_trees;
     use crate::repo::{init_repository, Repository};
     use tempfile::TempDir;
 
@@ -449,6 +623,74 @@ mod tests {
     }
 
     #[test]
+    fn local_change_diffs_for_tree_changes_matches_full_on_modified_path() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().expect("wt");
+        let mut index = repo.load_index().expect("index");
+        let data = std::fs::read(wt.join("tracked.txt")).expect("read");
+        let oid = repo
+            .odb()
+            .write(crate::objects::ObjectKind::Blob, &data)
+            .expect("blob");
+        let entry = crate::index::entry_from_stat(
+            &wt.join("tracked.txt"),
+            b"tracked.txt",
+            oid,
+            crate::index::MODE_REGULAR,
+        )
+        .expect("entry");
+        index.add_or_replace(entry);
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+        let head_tree = crate::write_tree::write_tree_update_index(
+            &repo.odb(),
+            &mut index,
+            "",
+            crate::write_tree::WriteTreeFlags::silent(),
+        )
+        .expect("tree");
+
+        std::fs::write(wt.join("other.txt"), b"new\n").expect("write other");
+        let other_data = b"new\n";
+        let other_oid = repo
+            .odb()
+            .write(crate::objects::ObjectKind::Blob, other_data)
+            .expect("blob");
+        let mut index2 = repo.load_index().expect("index");
+        let other_entry = crate::index::entry_from_stat(
+            &wt.join("other.txt"),
+            b"other.txt",
+            other_oid,
+            crate::index::MODE_REGULAR,
+        )
+        .expect("entry");
+        index2.add_or_replace(other_entry);
+        index2.sort();
+        let target_tree = crate::write_tree::write_tree_update_index(
+            &repo.odb(),
+            &mut index2,
+            "",
+            crate::write_tree::WriteTreeFlags::silent(),
+        )
+        .expect("target tree");
+
+        let tree_changes =
+            diff_trees(repo.odb(), Some(&head_tree), Some(&target_tree), "").expect("diff");
+        let mut index3 = repo.load_index().expect("index");
+        let (full_staged, full_unstaged, _) =
+            local_change_diffs(&repo, &mut index3, Some(head_tree)).expect("full");
+        let mut index4 = repo.load_index().expect("index");
+        let (scoped_staged, scoped_unstaged, _) = local_change_diffs_for_tree_changes(
+            &repo,
+            &mut index4,
+            Some(head_tree),
+            &tree_changes,
+        )
+        .expect("scoped");
+        assert_eq!(full_staged, scoped_staged);
+        assert_eq!(full_unstaged, scoped_unstaged);
+    }
+
     fn ensure_worktree_clean_for_pick_passes_on_fresh_commit() {
         let (_dir, repo) = init_repo();
         let wt = repo.work_tree().expect("wt");
