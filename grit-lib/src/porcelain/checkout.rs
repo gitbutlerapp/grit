@@ -86,8 +86,7 @@ fn checkout_populated_tree(
     let mut prospective_index = index.clone();
     prospective_index.entries = crate::porcelain::merge::tree_to_index_entries(repo, tree_oid, "")?;
     prospective_index.sort();
-    let rules =
-        WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)?;
+    let rules = WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)?;
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
     let mut new_entries: Vec<IndexEntry> = Vec::new();

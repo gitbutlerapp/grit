@@ -59,6 +59,82 @@ fn build_target_branch(repo_root: &std::path::Path) {
 }
 
 #[test]
+fn switch_nested_gitattributes_crlf_clean_worktree_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    git(tmp.path(), &["config", "gc.auto", "0"]);
+    git(tmp.path(), &["config", "core.autocrlf", "false"]);
+
+    std::fs::create_dir_all(tmp.path().join("sub")).expect("mkdir sub");
+    std::fs::write(
+        tmp.path().join("sub/.gitattributes"),
+        "*.txt text eol=crlf\n",
+    )
+    .expect("nested gitattributes");
+    std::fs::write(tmp.path().join("sub/file.txt"), "main line\r\n").expect("write");
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "main"]);
+
+    assert!(
+        git_porcelain(tmp.path()).trim().is_empty(),
+        "expected clean git status on main, got:\n{}",
+        git_porcelain(tmp.path())
+    );
+
+    git(tmp.path(), &["checkout", "-q", "-b", "target"]);
+    std::fs::write(tmp.path().join("sub/file.txt"), "target line\r\n").expect("write target");
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "target"]);
+    git(tmp.path(), &["checkout", "-q", "main"]);
+
+    assert!(
+        git_porcelain(tmp.path()).trim().is_empty(),
+        "expected clean git status before switch, got:\n{}",
+        git_porcelain(tmp.path())
+    );
+
+    git(tmp.path(), &["switch", "-q", "target"]);
+    assert!(
+        git_porcelain(tmp.path()).trim().is_empty(),
+        "system git switch to target must leave clean tree"
+    );
+    git(tmp.path(), &["switch", "-q", "main"]);
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let target_oid =
+        ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect("grit switch must succeed on clean nested-eol=crlf worktree like git");
+
+    assert!(
+        git_porcelain(tmp.path()).trim().is_empty(),
+        "git status --porcelain must be empty after grit switch, got:\n{}",
+        git_porcelain(tmp.path())
+    );
+    assert!(
+        git_diff_index_head(tmp.path()).trim().is_empty(),
+        "git diff-index HEAD must be empty, got:\n{}",
+        git_diff_index_head(tmp.path())
+    );
+    git_fsck(tmp.path());
+}
+
+#[test]
 fn switch_tree_diff_git_clean_after() {
     let tmp = tempfile::tempdir().expect("tempdir");
     git(tmp.path(), &["init", "-q", "-b", "main", "."]);
