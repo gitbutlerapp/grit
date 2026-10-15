@@ -662,7 +662,8 @@ fn append_fsck_gc_repack(
         gc_allows_grit_failure,
     )?);
 
-    out.push(run_scenario(
+    // Grit repack currently requires a worktree; still measure git on the bare remote.
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -671,8 +672,8 @@ fn append_fsck_gc_repack(
             id: sid(fixture.id, "repack"),
             group: "maintenance".into(),
             fixture: fixture.label.clone(),
-            description: "repack -adf on bare remote".into(),
-            grit_argv: vec!["repack".into(), "-adf".into()],
+            description: "repack on bare remote (git: -adf; grit: modern repack)".into(),
+            grit_argv: vec!["repack".into()],
             git_argv: vec!["repack".into(), "-adf".into()],
             driver: Driver::Cli,
             prepare_kind: None,
@@ -680,6 +681,7 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.bare,
+        true,
     )?);
     Ok(())
 }
