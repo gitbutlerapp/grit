@@ -537,6 +537,7 @@ pub fn write_commit_graph(
 
     let path = atomic_replace_commit_graph(objects_dir, &bytes)?;
     let removed_chain = remove_commit_graph_chain_dir(objects_dir);
+    repo.caches().invalidate_commit_graph_cache();
 
     Ok(CommitGraphWriteReport {
         path,

@@ -116,6 +116,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         return Ok((Vec::new(), Vec::new(), false));
     }
     let path_filter = Arc::new(paths);
+    let touched_count = path_filter.len();
     let head_by_path = head_tree_sides_from_changes(tree_changes);
     let staged = staged_diff_for_tree_switch_paths(index, &head_by_path, path_filter.as_ref())?;
 
@@ -124,14 +125,12 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_file_mtime(&index_path);
-    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
-        .ok()
-        .map(Arc::new);
+    let config = repo.config().ok();
     let worktree_rules = match config.as_ref() {
         Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts(
             repo,
             index,
-            cfg.clone(),
+            Arc::clone(cfg),
         )?))),
         None => None,
     };
@@ -144,8 +143,8 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             ignore_submodule_untracked: true,
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
             refresh_index_stat_in_pass: false,
-            for_status: true,
-            stat_parallel_threads: Some(1),
+            for_status: touched_count <= 128,
+            stat_parallel_threads: if touched_count >= 256 { None } else { Some(1) },
             config,
             worktree_rules,
             restrict_to_paths: Some(path_filter),
@@ -674,6 +673,112 @@ mod tests {
                 .expect("scoped");
         assert_eq!(full_staged, scoped_staged);
         assert_eq!(full_unstaged, scoped_unstaged);
+    }
+
+    #[test]
+    fn local_change_diffs_for_tree_changes_limits_worktree_probes() {
+        use crate::objects::{serialize_commit, CommitData, ObjectKind};
+        use crate::refs;
+        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+        use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
+
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repository(root, false, "main", None, crate::RefStorageFormat::Files)
+            .expect("init");
+        const FILE_COUNT: usize = 800;
+        const TOUCH: usize = 40;
+        for i in 0..FILE_COUNT {
+            let dir = format!("d{:03}", i % 20);
+            std::fs::create_dir_all(root.join(&dir)).expect("mkdir");
+            std::fs::write(
+                root.join(&dir).join(format!("f{i:04}.txt")),
+                format!("body {i}\n"),
+            )
+            .expect("write");
+        }
+        let mut index = repo.load_index().expect("index");
+        for i in 0..FILE_COUNT {
+            let rel = format!("d{:03}/f{i:04}.txt", i % 20);
+            let abs = root.join(&rel);
+            let data = std::fs::read(&abs).expect("read");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            let entry = crate::index::entry_from_stat(
+                &abs,
+                rel.as_bytes(),
+                oid,
+                crate::index::MODE_REGULAR,
+            )
+            .expect("entry");
+            index.add_or_replace(entry);
+        }
+        index.sort();
+        let head_tree =
+            write_tree_update_index(&repo.odb(), &mut index, "", WriteTreeFlags::silent())
+                .expect("head tree");
+        repo.write_index(&mut index).expect("write index");
+        let commit = CommitData {
+            tree: head_tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "seed\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let co = repo
+            .odb()
+            .write(ObjectKind::Commit, &serialize_commit(&commit))
+            .expect("commit");
+        refs::write_ref(&repo.git_dir(), "HEAD", &co).expect("head");
+
+        let mut target_index = index.clone();
+        for i in 0..TOUCH {
+            let rel = format!("d{:03}/f{i:04}.txt", i % 20);
+            let abs = root.join(&rel);
+            std::fs::write(&abs, format!("changed {i}\n")).expect("write touched");
+            let data = std::fs::read(&abs).expect("read touched");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            let entry = crate::index::entry_from_stat(
+                &abs,
+                rel.as_bytes(),
+                oid,
+                crate::index::MODE_REGULAR,
+            )
+            .expect("entry");
+            target_index.add_or_replace(entry);
+        }
+        target_index.sort();
+        let target_tree =
+            write_tree_update_index(&repo.odb(), &mut target_index, "", WriteTreeFlags::silent())
+                .expect("target tree");
+        let tree_changes =
+            diff_trees(repo.odb(), Some(&head_tree), Some(&target_tree), "").expect("diff");
+        assert!(
+            tree_changes.len() >= TOUCH,
+            "expected at least {TOUCH} tree changes, got {}",
+            tree_changes.len()
+        );
+
+        std::fs::write(root.join("d000/f9999.txt"), b"off-tree dirty\n").expect("dirty off-tree");
+
+        let _probe = reset_worktree_metadata_probe(root);
+        let mut index_probe = repo.load_index().expect("index");
+        let _ = local_change_diffs_for_tree_changes(
+            &repo,
+            &mut index_probe,
+            Some(head_tree),
+            &tree_changes,
+        )
+        .expect("scoped diffs");
+        let calls = worktree_metadata_probe_count();
+        assert!(
+            calls <= TOUCH * 3 + 24,
+            "scoped switch diff must not scan all {FILE_COUNT} tracked paths (metadata probes {calls})"
+        );
     }
 
     fn ensure_worktree_clean_for_pick_passes_on_fresh_commit() {

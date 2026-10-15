@@ -16,7 +16,6 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use crate::crlf;
 use crate::diff::{diff_trees, format_mode, DiffEntry, DiffStatus};
@@ -189,7 +188,7 @@ fn checkout_between_trees_slow(
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
     let changes = diff_trees(repo.odb(), from, to, "")?;
-    checkout_tree_changes_with_progress(repo, &changes, progress)
+    checkout_tree_changes_with_progress(repo, &changes, progress, None)
 }
 
 /// Apply the change from tree `from` to tree `to` onto the working tree and
@@ -423,19 +422,89 @@ pub fn checkout_hard_to_tree_from_head_tree(
 /// Callers such as `grit switch` can reuse one [`diff_trees`] result for both
 /// untracked guards and the mechanical apply.
 pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
-    checkout_tree_changes_with_progress(repo, changes, &mut NullProgress)
+    checkout_tree_changes_with_progress(repo, changes, &mut NullProgress, None)
+}
+
+/// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk.
+///
+/// Callers such as `grit switch` use this after a tree-diff guard pass that already loaded the index.
+pub fn checkout_tree_changes_with_index(
+    repo: &Repository,
+    changes: &[DiffEntry],
+    index: &mut Index,
+) -> Result<()> {
+    checkout_tree_changes_with_progress(repo, changes, &mut NullProgress, Some(index))
+}
+
+/// Top-level directories whose tracked files are entirely removed by `delete_paths`.
+fn wholesale_deleted_directories(index: &Index, delete_paths: &[String]) -> BTreeSet<String> {
+    use std::collections::BTreeMap;
+    if delete_paths.len() < 8 {
+        return BTreeSet::new();
+    }
+    let mut deleted_under: BTreeMap<String, usize> = BTreeMap::new();
+    for path in delete_paths {
+        let Some((dir, _rest)) = path.split_once('/') else {
+            continue;
+        };
+        *deleted_under.entry(dir.to_owned()).or_default() += 1;
+    }
+    if deleted_under.is_empty() {
+        return BTreeSet::new();
+    }
+    let candidate_dirs: BTreeSet<String> = deleted_under.keys().cloned().collect();
+    let mut indexed_under: BTreeMap<String, usize> = BTreeMap::new();
+    for entry in &index.entries {
+        if entry.stage() != 0 || entry.mode == MODE_GITLINK {
+            continue;
+        }
+        let Ok(path) = std::str::from_utf8(&entry.path) else {
+            continue;
+        };
+        let Some((dir, _rest)) = path.split_once('/') else {
+            continue;
+        };
+        if !candidate_dirs.contains(dir) {
+            continue;
+        }
+        *indexed_under.entry(dir.to_owned()).or_default() += 1;
+    }
+    deleted_under
+        .into_iter()
+        .filter_map(|(dir, del_count)| {
+            indexed_under
+                .get(&dir)
+                .copied()
+                .filter(|indexed| *indexed == del_count && del_count > 0)
+                .map(|_| dir)
+        })
+        .collect()
+}
+
+fn path_under_wholesale_directory(path: &str, wholesale_dirs: &BTreeSet<String>) -> bool {
+    wholesale_dirs
+        .iter()
+        .any(|dir| path == dir.as_str() || path.starts_with(&format!("{dir}/")))
 }
 
 fn checkout_tree_changes_with_progress(
     repo: &Repository,
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
+    reuse_index: Option<&mut Index>,
 ) -> Result<()> {
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
 
-    let index = Arc::new(repo.load_index()?);
+    let mut loaded_index;
+    let index_mut: &mut Index = if let Some(index) = reuse_index {
+        index
+    } else {
+        loaded_index = repo.load_index()?;
+        &mut loaded_index
+    };
+    let index: &Index = index_mut;
     let config = repo.config()?;
     let ignorecase = config
         .get_bool("core.ignorecase")
@@ -443,10 +512,10 @@ fn checkout_tree_changes_with_progress(
         .unwrap_or(false);
     let precompose = repo.pathspec_precompose_enabled();
     let rules = if tree_changes_touch_gitattributes(changes) {
-        let prospective_index = prospective_index_for_checkout(index.as_ref(), changes);
+        let prospective_index = prospective_index_for_checkout(index, changes);
         WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config.clone())?
     } else {
-        WorktreeRules::from_parts_index_attributes_only(repo, index.as_ref(), config.clone())?
+        WorktreeRules::from_parts_index_attributes_only(repo, index, config.clone())?
     };
     let conv = rules.conversion().clone();
     let mut delayed = DelayedProcessCheckout::default();
@@ -462,17 +531,33 @@ fn checkout_tree_changes_with_progress(
         Some(u64::try_from(changes.len()).unwrap_or(u64::MAX)),
     );
 
+    let delete_paths: Vec<String> = changes
+        .iter()
+        .filter(|c| c.status == DiffStatus::Deleted)
+        .filter_map(|c| c.old_path.clone())
+        .collect();
+    let wholesale_dirs = wholesale_deleted_directories(index, &delete_paths);
+    for dir in &wholesale_dirs {
+        let abs = work_tree.join(dir);
+        let _ = fs::remove_dir_all(&abs);
+        deleted_abs_paths.push(abs);
+    }
+
     for change in changes {
         if change.status == DiffStatus::Deleted {
             if let Some(path) = &change.old_path {
-                let abs = work_tree.join(path);
                 let old_mode = parse_git_mode(&change.old_mode);
-                if old_mode == MODE_GITLINK {
-                    remove_uninitialized_gitlink_worktree(&abs);
-                } else {
-                    let _ = fs::remove_file(&abs);
+                if old_mode == MODE_GITLINK
+                    || !path_under_wholesale_directory(path, &wholesale_dirs)
+                {
+                    let abs = work_tree.join(path);
+                    if old_mode == MODE_GITLINK {
+                        remove_uninitialized_gitlink_worktree(&abs);
+                    } else {
+                        let _ = fs::remove_file(&abs);
+                    }
+                    deleted_abs_paths.push(abs);
                 }
-                deleted_abs_paths.push(abs);
                 paths_to_remove.push(path.as_bytes().to_vec());
             }
             progress.inc(1);
@@ -485,7 +570,7 @@ fn checkout_tree_changes_with_progress(
         };
         let mode = parse_git_mode(&change.new_mode);
         if mode == MODE_GITLINK {
-            if let Some(existing) = index.as_ref().get(path.as_bytes(), 0) {
+            if let Some(existing) = index.get(path.as_bytes(), 0) {
                 if existing.oid == change.new_oid
                     && existing.mode == MODE_GITLINK
                     && gitlink_worktree_matches_index(&work_tree.join(path))
@@ -508,12 +593,12 @@ fn checkout_tree_changes_with_progress(
             progress.inc(1);
             continue;
         }
-        if let Some(existing) = index.as_ref().get(path.as_bytes(), 0) {
+        if let Some(existing) = index.get(path.as_bytes(), 0) {
             if crate::diff::path_checkout_skip_blob_write_when_up_to_date(
                 repo.odb(),
                 repo.git_dir(),
                 work_tree,
-                index.as_ref(),
+                index,
                 existing,
                 &change.new_oid,
                 mode,
@@ -610,10 +695,8 @@ fn checkout_tree_changes_with_progress(
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
 
     drop(rules);
-    let mut index = Arc::into_inner(index)
-        .ok_or_else(|| Error::PathError("internal error: checkout index still shared".into()))?;
-    index.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), new_entries);
-    repo.write_index(&mut index)?;
+    index_mut.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), new_entries);
+    repo.write_index(index_mut)?;
     progress.finish();
     Ok(())
 }
@@ -1450,6 +1533,39 @@ mod tests {
             .expect("commit");
         refs::write_ref(repo.git_dir(), "HEAD", &commit_oid).expect("head");
         tree
+    }
+
+    #[test]
+    fn wholesale_deleted_directories_detects_full_top_level_dir() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        std::fs::create_dir_all(wt.join("d005")).expect("mkdir");
+        let mut index = repo.load_index().expect("index");
+        let mut delete_paths = Vec::new();
+        for i in 0..50 {
+            let rel = format!("d005/f{i:02}.txt");
+            let abs = wt.join(&rel);
+            std::fs::write(&abs, format!("v{i}\n")).expect("write");
+            let data = fs::read(&abs).expect("read");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            index.add_or_replace(
+                entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+            );
+            delete_paths.push(rel);
+        }
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+        assert_eq!(delete_paths.len(), 50);
+        let wholesale = wholesale_deleted_directories(&index, &delete_paths);
+        assert_eq!(wholesale, BTreeSet::from(["d005".to_owned()]));
     }
 
     #[test]

@@ -7897,6 +7897,7 @@ pub fn grit_lib::porcelain::checkout::checkout_between_trees(&grit_lib::repo::Re
 pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::checkout::checkout_tree_changes_with_index(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry], &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::glob_matches(&str, &str) -> bool
 pub fn grit_lib::porcelain::checkout::is_glob_pattern(&str) -> bool
 pub fn grit_lib::porcelain::checkout::prepare_parent_dirs_for_checkout(&std::path::Path, &str) -> grit_lib::error::Result<()>

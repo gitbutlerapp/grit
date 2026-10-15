@@ -195,15 +195,6 @@ impl WorktreeRules {
         Self::from_parts_index_attributes_only(repo, prospective_index, config)
     }
 
-    /// Like [`Self::from_checkout_prospective_index`], but takes ownership of the index view.
-    pub(crate) fn from_checkout_prospective_index_owned(
-        repo: &Repository,
-        prospective_index: Index,
-        config: Arc<ConfigSet>,
-    ) -> Result<Self> {
-        Self::from_checkout_prospective_index(repo, &prospective_index, config)
-    }
-
     /// Long-running filter-process registry for this repository handle.
     #[must_use]
     pub fn filter_process(&self) -> &FilterProcessState {

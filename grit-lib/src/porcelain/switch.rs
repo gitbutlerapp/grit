@@ -6,7 +6,7 @@ use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, ObjectId};
-use crate::porcelain::checkout::checkout_tree_changes;
+use crate::porcelain::checkout::checkout_tree_changes_with_index;
 use crate::porcelain::checkout_reflog::{
     append_head_checkout_reflog, checkout_reflog_from_label, finish_switch_ref_updates,
     is_already_detached_at, is_already_on_branch, switch_create_reflog_source_label,
@@ -74,6 +74,8 @@ struct PreparedSwitch {
     plan: TreeSwitchPlan,
     /// Tree-diff paths whose unstaged worktree edits must not be overwritten.
     preserve_worktree_paths: HashSet<String>,
+    /// Index loaded for switch guards; reused for checkout to avoid a second disk read.
+    index: crate::index::Index,
 }
 
 /// Resolve `-c <branch> [<start-point>]`.
@@ -343,7 +345,7 @@ fn switch_to_target(
     let head_tree = head_oid.map(|oid| commit_tree(repo, &oid)).transpose()?;
     let target_tree = commit_tree(repo, &target_oid)?;
 
-    let prepared = prepare_tree_switch_allow_local(repo, head_tree.as_ref(), &target_tree)?;
+    let mut prepared = prepare_tree_switch_allow_local(repo, head_tree.as_ref(), &target_tree)?;
     ensure_no_untracked_overwrite(&prepared.plan.untracked, &prepared.plan.tree_changes)?;
 
     let tree_changes: Vec<DiffEntry> = prepared
@@ -355,7 +357,7 @@ fn switch_to_target(
                 .is_none_or(|path| !prepared.preserve_worktree_paths.contains(path))
         })
         .collect();
-    checkout_tree_changes(repo, &tree_changes)?;
+    checkout_tree_changes_with_index(repo, &tree_changes, &mut prepared.index)?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
         finish_switch_ref_updates(
@@ -433,6 +435,7 @@ fn prepare_tree_switch_allow_local(
             tree_changes,
         },
         preserve_worktree_paths,
+        index: snapshot.index,
     })
 }
 
