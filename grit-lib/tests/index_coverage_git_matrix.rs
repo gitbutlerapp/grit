@@ -144,7 +144,7 @@ fn git_index_v4_long_paths_parse_and_rewrite() {
         .status()
         .expect("git add");
     let bytes = fs::read(wt.join(".git/index")).expect("read index");
-    let parsed = Index::parse(&bytes).expect("parse v4");
+    let mut parsed = Index::parse(&bytes).expect("parse v4");
     assert_eq!(parsed.version, 4);
     parsed.write(&wt.join("out-index")).expect("rewrite");
     let reload = Index::load(&wt.join("out-index")).expect("reload");

@@ -37,7 +37,7 @@ fn baseline_index_bytes(repo: &Repository) -> Vec<u8> {
     match fs::read(repo.index_handle().path()) {
         Ok(bytes) => bytes,
         Err(_) => {
-            let empty = grit_lib::index::Index::new();
+            let mut empty = grit_lib::index::Index::new();
             let index_path = repo.index_handle().path();
             empty.write(&index_path).expect("write empty index");
             fs::read(index_path).expect("read empty index")

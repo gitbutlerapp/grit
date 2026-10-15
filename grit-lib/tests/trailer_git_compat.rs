@@ -149,7 +149,7 @@ fn grit_write_trailer_artifacts(repo: &Repository) {
     std::fs::create_dir_all(&info_dir).expect("info dir");
     std::fs::write(info_dir.join("commit-graph"), graph_bytes).expect("write commit-graph");
 
-    let index = repo.index_handle().load().expect("load index");
+    let mut index = repo.index_handle().load().expect("load index");
     index
         .write_to_path(&repo.git_dir().join("index"), false)
         .expect("write index");

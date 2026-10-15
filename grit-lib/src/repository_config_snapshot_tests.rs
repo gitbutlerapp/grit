@@ -326,7 +326,7 @@ mod tests {
 
             fs::write(root.join("f.txt"), format!("v-{label}\n").as_bytes()).unwrap();
             stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
-            let index = repo.load_index().unwrap();
+            let mut index = repo.load_index().unwrap();
             let path = repo.index_path();
             index
                 .write_with_config(&path, cfg.as_ref())
