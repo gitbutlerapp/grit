@@ -192,6 +192,12 @@ impl PackStore {
         CURRENT.with(|c| c.borrow().is_some())
     }
 
+    /// `objects/` directory for the active pack read context, if any.
+    #[must_use]
+    pub(crate) fn active_objects_dir() -> Option<PathBuf> {
+        ACTIVE_OBJECTS_DIR.with(|d| d.borrow().clone())
+    }
+
     /// Whether the active read context is scoped to `objects_dir`.
     #[must_use]
     pub(crate) fn read_context_matches_objects_dir(objects_dir: &Path) -> bool {
@@ -303,6 +309,7 @@ impl PackReadContextGuard {
 
 impl Drop for PackReadContextGuard {
     fn drop(&mut self) {
+        crate::pack::clear_pack_read_info_cache();
         ACTIVE_OBJECTS_DIR.with(|d| *d.borrow_mut() = self.prev_dir.take());
         CURRENT.with(|c| *c.borrow_mut() = self.prev_store.take());
     }

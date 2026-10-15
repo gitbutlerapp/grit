@@ -313,6 +313,44 @@ fn odb_driver_cat_file_matches_git() {
 }
 
 #[test]
+fn odb_driver_cat_file_batch_loose_object_and_oid_line_variants() {
+    let git = system_git();
+    let dir = TempDir::new().unwrap();
+    init_small_repo(&git, dir.path());
+    // Create a loose-only blob (not in the repacked pack).
+    let loose_body = b"loose-only payload\n";
+    let loose_input = dir.path().join("loose-body.txt");
+    std::fs::write(&loose_input, loose_body).unwrap();
+    let hash_out = git_cmd(&git, dir.path())
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::fs::File::open(&loose_input).unwrap())
+        .output()
+        .unwrap();
+    assert!(hash_out.status.success());
+    let loose_hex = String::from_utf8_lossy(&hash_out.stdout).trim().to_owned();
+
+    let mut lines = format!("{loose_hex}\n");
+    lines.push_str(&format!("{loose_hex} ignored-rest\n"));
+    lines.push_str(&format!("  {loose_hex}  \n"));
+
+    let oid_file = dir.path().join("batch-lines.txt");
+    std::fs::write(&oid_file, &lines).unwrap();
+    let git_batch = git_cmd(&git, dir.path())
+        .args(["cat-file", "--batch"])
+        .stdin(std::fs::File::open(&oid_file).unwrap())
+        .output()
+        .unwrap()
+        .stdout;
+    let grit_batch = Command::new(bench_exe())
+        .args(["drive", "cat-file-batch", dir.path().to_str().unwrap()])
+        .stdin(std::fs::File::open(&oid_file).unwrap())
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(grit_batch, git_batch);
+}
+
+#[test]
 fn odb_driver_rev_list_objects_matches_git() {
     let git = system_git();
     let dir = TempDir::new().unwrap();

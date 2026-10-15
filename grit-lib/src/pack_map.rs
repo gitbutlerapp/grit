@@ -19,7 +19,7 @@ const OWNED_READ_THRESHOLD: u64 = 8192;
 
 /// Header plus trailing pack checksum — enough to detect on-disk replacement when
 /// mtime/size are unchanged (same-second repack) without re-reading the whole file.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PackFingerprint {
     /// `PACK`, version, and object count (`12` bytes).
     pub header: [u8; HEADER_LEN],
@@ -171,7 +171,7 @@ fn read_fingerprint_from_open_file(
     Ok(PackFingerprint { header, trailer })
 }
 
-fn fingerprint_from_slice(bytes: &[u8], hash_bytes: usize) -> Result<PackFingerprint> {
+pub(crate) fn fingerprint_from_slice(bytes: &[u8], hash_bytes: usize) -> Result<PackFingerprint> {
     if hash_bytes != 20 && hash_bytes != 32 {
         return Err(Error::CorruptObject(format!(
             "unsupported pack trailer width {hash_bytes}"
