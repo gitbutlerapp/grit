@@ -19,6 +19,8 @@ use crate::progress::ProgressSink;
 use crate::transfer::fix_thin_pack_path;
 use crate::unpack_objects::PackIndexRecord;
 
+pub use crate::pack_index_build::{build_pack_index_records, build_pack_index_records_with_progress};
+
 static INGEST_THREAD_RECORDING: AtomicBool = AtomicBool::new(false);
 static LAST_RESOLVED_INGEST_THREADS: AtomicUsize = AtomicUsize::new(0);
 

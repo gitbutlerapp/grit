@@ -3,6 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
+use crate::commit_graph_file::CommitGraphChain;
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind};
 use crate::repo::Repository;
@@ -48,13 +49,27 @@ fn committer_unix_seconds(committer: &str) -> Result<i64> {
         .map_err(|_| Error::CorruptObject("invalid committer timestamp".to_owned()))
 }
 
-fn commit_date(repo: &Repository, oid: ObjectId) -> Result<i64> {
+fn commit_date(repo: &Repository, graph: Option<&CommitGraphChain>, oid: ObjectId) -> Result<i64> {
+    if let Some(chain) = graph {
+        if let Some((_, commit_time)) = chain.graph_commit(&oid) {
+            return Ok(commit_time);
+        }
+    }
     let obj = repo.odb().read(&oid)?;
     let c = parse_commit(&obj.data)?;
     committer_unix_seconds(&c.committer)
 }
 
-fn read_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>> {
+fn read_parents(
+    repo: &Repository,
+    graph: Option<&CommitGraphChain>,
+    oid: ObjectId,
+) -> Result<Vec<ObjectId>> {
+    if let Some(chain) = graph {
+        if let Some((parents, _)) = chain.graph_commit(&oid) {
+            return Ok(parents);
+        }
+    }
     let obj = repo.odb().read(&oid)?;
     Ok(parse_commit(&obj.data)?.parents)
 }
@@ -113,6 +128,7 @@ struct Entry {
 /// Skipping algorithm negotiator for fetch `have` lines.
 pub struct SkippingNegotiator {
     repo: Repository,
+    commit_graph: Option<CommitGraphChain>,
     heap: BinaryHeap<HeapItem>,
     entries: HashMap<ObjectId, Entry>,
     flags: HashMap<ObjectId, u8>,
@@ -124,8 +140,12 @@ impl SkippingNegotiator {
     /// New negotiator bound to `repo`.
     pub fn new(repo: Repository) -> Self {
         let shallow = read_shallow_boundary(&repo);
+        let commit_graph = CommitGraphChain::try_load(repo.odb().objects_dir())
+            .ok()
+            .flatten();
         Self {
             repo,
+            commit_graph,
             heap: BinaryHeap::new(),
             entries: HashMap::new(),
             flags: HashMap::new(),
@@ -148,7 +168,7 @@ impl SkippingNegotiator {
         if self.shallow.contains(&oid) {
             return Ok(Vec::new());
         }
-        read_parents(&self.repo, oid)
+        read_parents(&self.repo, self.commit_graph.as_ref(), oid)
     }
 
     fn f(&self, oid: ObjectId) -> u8 {
@@ -171,7 +191,7 @@ impl SkippingNegotiator {
         if mark & COMMON == 0 {
             self.non_common_revs += 1;
         }
-        let d = commit_date(&self.repo, oid)?;
+        let d = commit_date(&self.repo, self.commit_graph.as_ref(), oid)?;
         self.heap.push(HeapItem { date: d, oid });
         Ok(())
     }

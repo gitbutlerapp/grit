@@ -184,6 +184,46 @@ fn clean_repo_has_no_issues_and_git_agrees() {
 }
 
 #[test]
+fn fsck_passes_on_deltified_pack_after_many_commits() {
+    let (dir, repo) = init_repo();
+    for i in 0..50 {
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join(format!("file-{i}.txt")), format!("payload {i}\n")).expect("write");
+        stage_for_commit(&repo, &mut NullProgress).expect("stage");
+        let ident = "T <t@example.com> 1 +0000".to_string();
+        create_commit(
+            &repo,
+            &CommitRequest {
+                message: format!("commit {i}"),
+                author: ident.clone(),
+                committer: ident,
+                allow_empty: false,
+                sign_override: None,
+                amend: false,
+                assume_worktree_synced: false,
+            },
+            &mut NullProgress,
+        )
+        .expect("commit");
+    }
+    git(dir.path(), &["repack", "-adf"]);
+    let git_out = git_fsck(dir.path(), false);
+    assert!(
+        git_out.msg_ids.is_empty(),
+        "git fsck must pass on deltified pack: {:?}",
+        git_out.msg_ids
+    );
+    let config = repo.config().expect("config");
+    let opts = FsckOptions::full_repository(false);
+    let report = grit_fsck(&repo, &opts);
+    assert!(
+        report.ok(&config, &opts),
+        "grit fsck must verify deltified pack objects: {:?}",
+        report.issues
+    );
+}
+
+#[test]
 fn nested_annotated_tags_pass_fsck_with_cached_links() {
     let (dir, repo) = init_repo();
     one_commit(&repo);

@@ -297,8 +297,26 @@ fn negotiate_pack(
         for t in tips {
             negotiator.add_tip(t)?;
         }
-        for (_, oid) in &advertised {
+        // Seed `known_common` only for advertised refs we already track at the same
+        // peeled commit. Unchanged refs avoid walking parent chains for every server
+        // tip during incremental fetch; moved refs are discovered via `have`s.
+        let mut local_by_name: std::collections::HashMap<String, ObjectId> =
+            std::collections::HashMap::new();
+        for prefix in ["refs/heads/", "refs/tags/"] {
+            if let Ok(entries) = crate::refs::list_refs(local_git_dir, prefix) {
+                for (name, oid) in entries {
+                    local_by_name.insert(name, oid);
+                }
+            }
+        }
+        for (name, oid) in &advertised {
             if want_set.contains(oid) {
+                continue;
+            }
+            let Some(local_oid) = local_by_name.get(name) else {
+                continue;
+            };
+            if local_oid != oid {
                 continue;
             }
             if let Some(c) = peel_to_commit(negotiator.repo(), *oid) {

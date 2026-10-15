@@ -40,7 +40,8 @@ use crate::midx::verify_midx;
 use crate::objects::HashAlgo;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
-use crate::pack::{read_object_from_pack_bytes, verify_pack_for_fsck};
+use crate::pack::verify_pack_for_fsck;
+use crate::pack_fsck_verify::verify_pack_objects_offset_order;
 use crate::parallel::{try_par_map, ParallelOp, ParallelOptions};
 use crate::progress::{Cancel, ProgressPhase, ProgressSink};
 use crate::refs_fsck::{refs_fsck, RefsFsckIssue};
@@ -689,32 +690,6 @@ fn verify_loose_objects(
     Ok((checked, validated, links))
 }
 
-enum PackObjectCheckOutcome {
-    Clean(ObjectId, ObjectKind, Vec<u8>),
-    Issue(FsckIssue),
-}
-
-fn pack_object_read_issue(oid: ObjectId, pack: &Path, err: Error) -> FsckIssue {
-    match err {
-        Error::CorruptObject(msg) if msg.contains("checksum") && msg.contains("index") => {
-            FsckIssue::IdxMismatch {
-                pack: pack.to_path_buf(),
-            }
-        }
-        Error::CorruptObject(_) => FsckIssue::PackChecksum {
-            pack: pack.to_path_buf(),
-        },
-        Error::ObjectNotFound(_) => FsckIssue::MissingObject {
-            oid,
-            referenced_by: ObjectId::zero(),
-        },
-        other => FsckIssue::BadObject {
-            oid,
-            error: FsckError::new("corruptObject", other.to_string()),
-        },
-    }
-}
-
 fn apply_dot_checks(
     dot: &mut DotFsckTracker,
     issues: &mut Vec<FsckIssue>,
@@ -825,54 +800,32 @@ fn verify_pack_objects(
         };
         let object_count = prep.records.len();
         checked += object_count;
-        let oids: Vec<ObjectId> = prep
-            .records
-            .iter()
-            .map(|r| ObjectId::from_bytes(&r.oid))
-            .collect::<Result<Vec<_>>>()?;
         if cancel.is_cancelled() {
             return Err(Error::Message("cancelled".into()));
         }
-        let pack_bytes = prep.pack_bytes;
-        let idx = prep.idx;
-        let results = match try_par_map::<_, _, String, _>(&oids, par_opts, object_count, |oid| {
-            let obj = match read_object_from_pack_bytes(&pack_bytes, &idx, oid.as_bytes()) {
-                Ok(obj) => obj,
-                Err(err) => {
-                    return Ok(PackObjectCheckOutcome::Issue(pack_object_read_issue(
-                        *oid, &pack_path, err,
-                    )));
-                }
-            };
-            if let Err(err) = fsck_object(obj.kind, &obj.data, fsck_opts) {
-                return Ok(PackObjectCheckOutcome::Issue(FsckIssue::BadObject {
-                    oid: *oid,
-                    error: err,
-                }));
-            }
-            Ok(PackObjectCheckOutcome::Clean(*oid, obj.kind, obj.data))
-        }) {
+        let verified = match verify_pack_objects_offset_order(prep, odb, par_opts) {
             Ok(v) => v,
-            Err(e) => return Err(Error::Message(format!("parallel pack fsck: {e}"))),
+            Err(Error::CorruptObject(msg)) => {
+                issues.push(FsckIssue::PackChecksum { pack: pack_path });
+                let _ = msg;
+                progress.set((i + 1) as u64);
+                continue;
+            }
+            Err(e) => return Err(e),
         };
-        for (n, outcome) in results.into_iter().enumerate() {
+        for (n, item) in verified.into_iter().enumerate() {
             if n.is_multiple_of(128) && cancel.is_cancelled() {
                 return Err(Error::Message("cancelled".into()));
             }
-            match outcome {
-                PackObjectCheckOutcome::Clean(oid, kind, data) => {
-                    record_validated_object(&mut validated, &mut links, oid, kind, &data, algo);
-                    apply_dot_checks(&mut dot, issues, config, strict, &oid, kind, &data);
-                }
-                PackObjectCheckOutcome::Issue(FsckIssue::BadObject { oid, error }) => {
-                    push_bad_object(issues, config, strict, oid, error);
-                }
-                PackObjectCheckOutcome::Issue(other) => {
-                    if should_emit(config, strict, issue_msg_id(&other)) {
-                        issues.push(other);
-                    }
-                }
+            let oid = item.oid;
+            let kind = item.kind;
+            let data = item.data;
+            if let Err(err) = fsck_object(kind, &data, fsck_opts) {
+                push_bad_object(issues, config, strict, oid, err);
+                continue;
             }
+            record_validated_object(&mut validated, &mut links, oid, kind, &data, algo);
+            apply_dot_checks(&mut dot, issues, config, strict, &oid, kind, &data);
         }
         progress.set((i + 1) as u64);
     }

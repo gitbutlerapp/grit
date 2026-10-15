@@ -94,6 +94,14 @@ name = "fsck"
 harness = false
 
 [[bench]]
+name = "fsck_pack"
+harness = false
+
+[[bench]]
+name = "index_pack_resolve"
+harness = false
+
+[[bench]]
 name = "repack"
 harness = false
 

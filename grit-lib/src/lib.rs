@@ -230,6 +230,7 @@ pub(crate) mod odb;
 pub(crate) mod pack;
 pub(crate) mod pack_bitmap;
 mod pack_delta;
+mod pack_fsck_verify;
 mod pack_index;
 pub(crate) mod pack_index_build;
 mod pack_map;

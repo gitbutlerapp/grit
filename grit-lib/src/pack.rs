@@ -14,9 +14,9 @@ use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 pub use crate::pack_map::PackData;
 use crate::unpack_objects::{apply_delta_into, delta_uncompressed_result_size_if_complete};
 use crate::zlib_inflate::{inflate_prefix, ZlibInflateScratch};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::cell::RefCell;
 use std::io;
 use std::io::Read;
 use std::mem;
@@ -303,6 +303,7 @@ pub(crate) mod pack_cache {
         });
     }
 
+    // hygiene: per-thread monotonic pack-index probe for batch cat-file (cleared on pack change)
     thread_local! {
         static PACK_MONOTONIC_CURSOR: std::cell::RefCell<Option<(PathBuf, usize)>> =
             const { std::cell::RefCell::new(None) };
@@ -317,10 +318,7 @@ pub(crate) mod pack_cache {
         }
         PACK_MONOTONIC_CURSOR.with(|cell| {
             let mut slot = cell.borrow_mut();
-            if slot
-                .as_ref()
-                .is_none_or(|(path, _)| path != &idx.idx_path)
-            {
+            if slot.as_ref().is_none_or(|(path, _)| path != &idx.idx_path) {
                 *slot = Some((idx.idx_path.clone(), 0));
             }
             let (_, cursor) = slot.as_mut().expect("initialized above");
@@ -336,9 +334,9 @@ pub(crate) mod pack_cache {
             return Ok(None);
         }
         let idx = PACK_HIT_INDEX.with(|cell| {
-            cell.borrow().as_ref().and_then(|(dir, idx)| {
-                (dir == objects_dir).then(|| Arc::clone(idx))
-            })
+            cell.borrow()
+                .as_ref()
+                .and_then(|(dir, idx)| (dir == objects_dir).then(|| Arc::clone(idx)))
         });
         let Some(idx) = idx else {
             return Ok(None);
@@ -361,9 +359,9 @@ pub(crate) mod pack_cache {
             return Ok(None);
         }
         let idx = PACK_HIT_INDEX.with(|cell| {
-            cell.borrow().as_ref().and_then(|(dir, idx)| {
-                (dir == objects_dir).then(|| Arc::clone(idx))
-            })
+            cell.borrow()
+                .as_ref()
+                .and_then(|(dir, idx)| (dir == objects_dir).then(|| Arc::clone(idx)))
         });
         let Some(idx) = idx else {
             return Ok(None);
@@ -1815,6 +1813,8 @@ pub struct VerifyObjectRecord {
     pub depth: Option<u64>,
     /// Base object for ref-delta objects.
     pub base_oid: Option<Vec<u8>>,
+    /// In-pack base offset for ofs-delta objects.
+    pub base_pack_offset: Option<u64>,
 }
 
 /// How a delta object in a pack references its base, used to compute chain depth order-independently.
@@ -2092,6 +2092,10 @@ fn verify_pack_structure_and_records(
         }
 
         let size_in_pack = next_off - offset;
+        let base_pack_offset = match &base_link {
+            Some(DeltaBaseLink::Offset(off)) => Some(*off),
+            _ => None,
+        };
         records.push(VerifyObjectRecord {
             oid: oid.clone(),
             packed_type,
@@ -2100,6 +2104,7 @@ fn verify_pack_structure_and_records(
             offset,
             depth: None,
             base_oid,
+            base_pack_offset,
         });
         base_links.push(base_link);
         by_oid.insert(oid, i);
@@ -2253,6 +2258,7 @@ fn packed_type_to_kind(pt: PackedType) -> Result<ObjectKind> {
     }
 }
 
+// hygiene: per-thread pack read scratch and info cache for batch cat-file hot paths
 thread_local! {
     static DELTA_SIZE_ZLIB: std::cell::RefCell<crate::zlib_inflate::ZlibInflateScratch> =
         std::cell::RefCell::new(crate::zlib_inflate::ZlibInflateScratch::default());
@@ -2842,8 +2848,7 @@ fn resolve_pack_object_info_at_body(
                 state.next_hop()?;
                 let base_offset = parse_ofs_delta_base(cur_bytes, &mut pos, object_start)?;
                 if result_size.is_none() {
-                    result_size =
-                        Some(read_delta_result_size_from_pack_zlib(cur_bytes, &mut pos)?);
+                    result_size = Some(read_delta_result_size_from_pack_zlib(cur_bytes, &mut pos)?);
                 }
                 cur_offset = base_offset;
             }
@@ -2858,8 +2863,7 @@ fn resolve_pack_object_info_at_body(
                 let base_raw = &cur_bytes[pos..pos + hb];
                 pos += hb;
                 if result_size.is_none() {
-                    result_size =
-                        Some(read_delta_result_size_from_pack_zlib(cur_bytes, &mut pos)?);
+                    result_size = Some(read_delta_result_size_from_pack_zlib(cur_bytes, &mut pos)?);
                 }
 
                 let base_oid = ObjectId::from_bytes(base_raw)?;
@@ -3072,6 +3076,7 @@ fn read_whole_pack_entry_info_fast(
     }
 }
 
+// hygiene: per-thread zlib scratch for whole-object pack entry fast path
 thread_local! {
     static WHOLE_OBJECT_ZLIB: RefCell<ZlibInflateScratch> =
         RefCell::new(ZlibInflateScratch::default());
@@ -3288,9 +3293,7 @@ impl SingleLocalPackReader {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
             return Ok(None);
         }
-        pack_cache::sync_thread_local_with_store(
-            &crate::pack_store::PackStore::active_for_reads(),
-        );
+        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
         let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
         if indexes.len() != 1 {
             return Ok(None);
@@ -3321,11 +3324,7 @@ impl SingleLocalPackReader {
         {
             return Ok(info);
         }
-        read_object_info_from_pack_at_offset_with_bytes(
-            &self.idx,
-            offset,
-            self.pack_bytes.as_ref(),
-        )
+        read_object_info_from_pack_at_offset_with_bytes(&self.idx, offset, self.pack_bytes.as_ref())
     }
 
     /// Decompress the object for `oid`.
@@ -3963,7 +3962,7 @@ fn peek_pack_zlib_prefix(bytes: &[u8], zlib_start: usize) -> Result<(Vec<u8>, us
     inflate_prefix(&bytes[zlib_start..], 64)
 }
 
-fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
+pub(crate) fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
     let first = *bytes.get(*pos).ok_or_else(|| {
         Error::CorruptObject("unexpected end of pack header while decoding object".to_owned())
     })?;
@@ -4037,7 +4036,7 @@ pub fn read_packed_delta_dependency(
     }
 }
 
-fn parse_ofs_delta_base(bytes: &[u8], pos: &mut usize, this_offset: u64) -> Result<u64> {
+pub(crate) fn parse_ofs_delta_base(bytes: &[u8], pos: &mut usize, this_offset: u64) -> Result<u64> {
     let mut c = *bytes
         .get(*pos)
         .ok_or_else(|| Error::CorruptObject("truncated ofs-delta header".to_owned()))?;
