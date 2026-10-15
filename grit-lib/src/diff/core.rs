@@ -3143,6 +3143,7 @@ fn diff_index_to_worktree_inner(
     let mut result = Vec::new();
     let refresh_index_stat_in_pass = options.refresh_index_stat_in_pass;
     let mut index_stat_refresh_changed = false;
+    let mut honor_fsmonitor_valid = false;
     if options.refresh_fsmonitor {
         let default_runner = crate::command_runner::system_command_runner();
         let runner = options
@@ -3155,18 +3156,19 @@ fn diff_index_to_worktree_inner(
             )
         });
         let refresh_opts = crate::fsmonitor::FsmonitorRefreshOptions::with_query_boundary(boundary);
-        if crate::fsmonitor::refresh_index(
+        let refresh = crate::fsmonitor::refresh_index(
             index,
             repository_git_dir,
             work_tree,
             &config,
             Some(runner),
             &refresh_opts,
-        )? {
+        )?;
+        if refresh.index_changed {
             index_stat_refresh_changed = true;
         }
+        honor_fsmonitor_valid = refresh.honor_valid_bits;
     }
-    let honor_fsmonitor_valid = options.refresh_fsmonitor && index.fsmonitor_last_update.is_some();
     let use_fsmonitor_stat_skip = honor_fsmonitor_valid;
     let mut unmerged_base: std::collections::BTreeMap<String, (u8, IndexEntry)> =
         std::collections::BTreeMap::new();

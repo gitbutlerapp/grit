@@ -3,6 +3,11 @@
 //! Queries Git's fsmonitor hook protocol v2 or the built-in daemon IPC socket
 //! before worktree stat scans, updating `FSMN` token and `CE_FSMONITOR_VALID` bits
 //! so unchanged paths can skip disk I/O (matching Git's `refresh_fsmonitor`).
+//!
+//! ```rust
+//! use grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary;
+//! let _ = FsmonitorQueryBoundary(0);
+//! ```
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -76,9 +81,23 @@ fn hook_version(config: &ConfigSet) -> u32 {
         .unwrap_or(2)
 }
 
+/// Outcome of [`refresh_index`] for this index load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FsmonitorRefreshResult {
+    /// Token or valid bits changed (index should be persisted).
+    pub index_changed: bool,
+    /// When true, [`entry_skips_worktree_stat`] may skip I/O for valid entries.
+    pub honor_valid_bits: bool,
+}
+
+impl FsmonitorRefreshResult {
+    const UNCHANGED: Self = Self {
+        index_changed: false,
+        honor_valid_bits: false,
+    };
+}
+
 /// Refresh fsmonitor validity on `index` when `core.fsmonitor` is enabled.
-///
-/// Returns `true` when token or valid bits changed (index should be persisted).
 ///
 /// # Errors
 ///
@@ -91,15 +110,15 @@ pub fn refresh_index(
     config: &ConfigSet,
     runner: Option<&dyn CommandRunner>,
     options: &FsmonitorRefreshOptions,
-) -> Result<bool> {
+) -> Result<FsmonitorRefreshResult> {
     if index.fsmonitor_refresh_ran {
-        return Ok(false);
+        return Ok(FsmonitorRefreshResult::UNCHANGED);
     }
     index.fsmonitor_refresh_ran = true;
 
     let mode = fsmonitor_mode(config);
     if matches!(mode, FsmonitorMode::Disabled) {
-        return Ok(false);
+        return Ok(FsmonitorRefreshResult::UNCHANGED);
     }
 
     let default_runner = system_command_runner();
@@ -132,11 +151,15 @@ pub fn refresh_index(
             .iter()
             .filter(|e| e.fsmonitor_valid())
             .count() as u32;
-        return Ok(token_before != token_after || valid_before != valid_after);
+        let changed = token_before != token_after || valid_before != valid_after;
+        return Ok(FsmonitorRefreshResult {
+            index_changed: changed,
+            honor_valid_bits: false,
+        });
     }
 
     let query = match mode {
-        FsmonitorMode::Disabled => return Ok(false),
+        FsmonitorMode::Disabled => unreachable!("fsmonitor disabled above"),
         FsmonitorMode::Hook(path) => query_hook(
             runner,
             &path,
@@ -149,9 +172,10 @@ pub fn refresh_index(
         FsmonitorMode::Ipc => query_ipc(git_dir, index),
     };
 
-    match query {
+    let honor_valid_bits = match query {
         Ok(outcome) => {
             apply_query_result(index, config, outcome);
+            true
         }
         Err(_) => {
             invalidate_all_valid(index);
@@ -162,8 +186,9 @@ pub fn refresh_index(
                         .unwrap_or_else(|| bootstrap_token(options.query_boundary)),
                 ));
             }
+            false
         }
-    }
+    };
 
     let token_after = index.fsmonitor_last_update.clone();
     let valid_after: u32 = index
@@ -171,7 +196,10 @@ pub fn refresh_index(
         .iter()
         .filter(|e| e.fsmonitor_valid())
         .count() as u32;
-    Ok(token_before != token_after || valid_before != valid_after)
+    Ok(FsmonitorRefreshResult {
+        index_changed: token_before != token_after || valid_before != valid_after,
+        honor_valid_bits,
+    })
 }
 
 struct QueryOutcome {
@@ -318,13 +346,32 @@ fn ipc_send_query(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
+/// Git `initialize_pipe_name` for fsmonitor IPC (testable on all platforms).
+#[must_use]
+pub fn git_style_windows_pipe_name_from_absolute_ipc(absolute_ipc_path: &str) -> String {
+    let mut body = absolute_ipc_path.replace('\\', "/");
+    if body.starts_with("//") {
+        body = body[2..].to_string();
+    }
+    const PREFIX: &str = r"\\.\pipe\";
+    let mut pipe = String::from(PREFIX);
+    pipe.push_str(&body);
+    let path_start = PREFIX.len();
+    if body.len() >= 2 && body.as_bytes()[1] == b':' {
+        pipe.replace_range(path_start + 1..path_start + 2, "_");
+        let head = &pipe[..path_start + 2];
+        let tail = pipe[path_start + 2..].replace('/', "\\");
+        return format!("{head}{tail}");
+    }
+    pipe.replace('/', "\\")
+}
+
 #[cfg(windows)]
 fn ipc_send_query_windows(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
     use std::ffi::OsStr;
     use std::io::{BufReader, Write};
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::FromRawHandle;
-    use std::time::Duration;
 
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::{
@@ -333,24 +380,11 @@ fn ipc_send_query_windows(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
     };
     use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
 
-    fn path_to_pipe_name(path: &Path) -> Vec<u16> {
-        let mut wide: Vec<u16> = OsStr::new("\\\\.\\pipe\\").encode_wide().collect();
-        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let mut rest = canonical.as_os_str().encode_wide().collect::<Vec<_>>();
-        if rest.len() >= 2 && rest[1] == b':' as u16 {
-            rest[1] = b'_' as u16;
-        }
-        for ch in &mut rest {
-            if *ch == b'/' as u16 {
-                *ch = b'\\' as u16;
-            }
-        }
-        wide.extend(rest);
-        wide.push(0);
-        wide
-    }
-
-    let pipe = path_to_pipe_name(ipc_path);
+    let abs = std::path::absolute(ipc_path).map_err(Error::Io)?;
+    let abs_git = crate::git_path::user_display_path(&abs);
+    let pipe_name = git_style_windows_pipe_name_from_absolute_ipc(&abs_git);
+    let mut pipe: Vec<u16> = OsStr::new(&pipe_name).encode_wide().collect();
+    pipe.push(0);
     unsafe {
         if WaitNamedPipeW(pipe.as_ptr(), 3000) == 0 {
             return Err(Error::Message("fsmonitor daemon pipe not available".into()));
@@ -400,43 +434,12 @@ fn apply_query_result(index: &mut Index, config: &ConfigSet, outcome: QueryOutco
         .and_then(|r| r.ok())
         .unwrap_or(false);
     for path in outcome.changed_paths {
-        invalidate_path(index, &path, ignorecase);
+        index.invalidate_fsmonitor_for_path(&path, ignorecase);
     }
-    index.fsmonitor_validity_changed();
 }
 
 fn invalidate_all_valid(index: &mut Index) {
-    for entry in index.entries_mut() {
-        entry.set_fsmonitor_valid(false);
-    }
-    index.fsmonitor_validity_changed();
-}
-
-fn invalidate_path(index: &mut Index, path: &str, ignorecase: bool) {
-    let is_dir = path.ends_with('/');
-    let prefix = path.trim_end_matches('/');
-    if prefix.is_empty() {
-        invalidate_all_valid(index);
-        return;
-    }
-    for entry in index.entries_mut() {
-        if entry.stage() != 0 {
-            continue;
-        }
-        let Some(rel) = std::str::from_utf8(&entry.path).ok() else {
-            continue;
-        };
-        let matches = if is_dir {
-            rel == prefix || rel.starts_with(&format!("{prefix}/"))
-        } else if ignorecase {
-            rel.eq_ignore_ascii_case(prefix)
-        } else {
-            rel == prefix
-        };
-        if matches {
-            entry.set_fsmonitor_valid(false);
-        }
-    }
+    index.invalidate_all_fsmonitor_valid();
 }
 
 /// When true, this index entry can skip worktree stat I/O during diff/status.
@@ -477,6 +480,26 @@ mod tests {
     #[test]
     fn v1_hook_token_uses_injected_boundary() {
         assert_eq!(v1_hook_token(FsmonitorQueryBoundary(99_001)), "99001");
+    }
+
+    #[test]
+    fn windows_pipe_name_local_drive_matches_git() {
+        assert_eq!(
+            git_style_windows_pipe_name_from_absolute_ipc(
+                "C:/Users/foo/repo/.git/fsmonitor--daemon.ipc"
+            ),
+            r"\\.\pipe\C_\Users\foo\repo\.git\fsmonitor--daemon.ipc"
+        );
+    }
+
+    #[test]
+    fn windows_pipe_name_unc_skips_leading_slash() {
+        assert_eq!(
+            git_style_windows_pipe_name_from_absolute_ipc(
+                "//server/share/repo/.git/fsmonitor--daemon.ipc"
+            ),
+            r"\\.\pipe\server\share\repo\.git\fsmonitor--daemon.ipc"
+        );
     }
 
     #[test]

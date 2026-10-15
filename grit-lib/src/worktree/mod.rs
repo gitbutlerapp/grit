@@ -28,6 +28,10 @@ pub mod ignore {
     //! ignore API (re-exported at this path).
     pub use crate::ignore::*;
 }
+pub mod fsmonitor {
+    //! fsmonitor API (re-exported at this path).
+    pub use crate::fsmonitor::*;
+}
 pub mod worktree_cwd {
     //! worktree_cwd API (re-exported at this path).
     pub use crate::worktree_cwd::*;

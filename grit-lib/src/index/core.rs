@@ -1789,6 +1789,108 @@ impl Index {
         self.invalidate_fsmonitor_bitmap();
     }
 
+    /// Clear fsmonitor-valid on stage-0 entries without disturbing sort order.
+    pub(crate) fn invalidate_all_fsmonitor_valid(&mut self) {
+        for entry in &mut self.entries {
+            if entry.stage() == 0 {
+                entry.set_fsmonitor_valid(false);
+            }
+        }
+        self.fsmonitor_validity_changed();
+    }
+
+    /// Invalidate fsmonitor-valid bits for one hook-reported path (Git `fsmonitor_refresh_callback`).
+    pub(crate) fn invalidate_fsmonitor_for_path(&mut self, path: &str, ignorecase: bool) {
+        if let Some(uc) = self.untracked_cache.as_mut() {
+            crate::untracked_cache::invalidate_path(uc, path);
+        }
+        let mut invalidated = if path.ends_with('/') {
+            self.invalidate_fsmonitor_directory_cone(path.trim_end_matches('/'), ignorecase)
+        } else {
+            self.invalidate_fsmonitor_unqualified_path(path, ignorecase)
+        };
+        if !invalidated && ignorecase {
+            invalidated = self.invalidate_fsmonitor_icase_fallback(path);
+        }
+        if invalidated {
+            self.fsmonitor_validity_changed();
+        }
+    }
+
+    fn invalidate_fsmonitor_unqualified_path(&mut self, path: &str, ignorecase: bool) -> bool {
+        if let Some(entry) = self.get_mut(path.as_bytes(), 0) {
+            entry.set_fsmonitor_valid(false);
+            return true;
+        }
+        if self.has_stage0_descendant_under(path) {
+            return self.invalidate_fsmonitor_directory_cone(path, ignorecase);
+        }
+        false
+    }
+
+    fn invalidate_fsmonitor_directory_cone(&mut self, prefix: &str, ignorecase: bool) -> bool {
+        if prefix.is_empty() {
+            self.invalidate_all_fsmonitor_valid();
+            return true;
+        }
+        let prefix_slash = format!("{prefix}/");
+        let mut any = false;
+        for entry in &mut self.entries {
+            if entry.stage() != 0 {
+                continue;
+            }
+            let Some(rel) = std::str::from_utf8(&entry.path).ok() else {
+                continue;
+            };
+            if Self::fsmonitor_path_under_prefix(rel, prefix, &prefix_slash, ignorecase) {
+                entry.set_fsmonitor_valid(false);
+                any = true;
+            }
+        }
+        any
+    }
+
+    fn invalidate_fsmonitor_icase_fallback(&mut self, path: &str) -> bool {
+        let is_dir = path.ends_with('/');
+        let prefix = path.trim_end_matches('/');
+        let prefix_slash = format!("{prefix}/");
+        let mut any = false;
+        for entry in &mut self.entries {
+            if entry.stage() != 0 {
+                continue;
+            }
+            let Some(rel) = std::str::from_utf8(&entry.path).ok() else {
+                continue;
+            };
+            let matches = if is_dir {
+                Self::fsmonitor_path_under_prefix(rel, prefix, &prefix_slash, true)
+            } else {
+                rel.eq_ignore_ascii_case(prefix)
+            };
+            if matches {
+                entry.set_fsmonitor_valid(false);
+                any = true;
+            }
+        }
+        any
+    }
+
+    fn fsmonitor_path_under_prefix(
+        rel: &str,
+        prefix: &str,
+        prefix_slash: &str,
+        ignorecase: bool,
+    ) -> bool {
+        if ignorecase {
+            rel.eq_ignore_ascii_case(prefix)
+                || (rel.len() > prefix.len()
+                    && rel.as_bytes().get(prefix.len()) == Some(&b'/')
+                    && rel[..prefix.len()].eq_ignore_ascii_case(prefix))
+        } else {
+            rel == prefix || rel.starts_with(prefix_slash)
+        }
+    }
+
     /// Drop byte-for-byte `FSMN` preservation after index entries change.
     fn touch_fsmonitor_after_entry_change(&mut self) {
         self.invalidate_fsmonitor_bitmap();
@@ -4343,6 +4445,20 @@ mod tests {
         .unwrap();
         let idx = Index::new_from_config(&cfg);
         assert_eq!(idx.version, INDEX_CONFIG_INVALID_FALLBACK);
+    }
+
+    #[test]
+    fn fsmonitor_invalidate_directory_prefix_without_trailing_slash() {
+        let mut idx = Index::new();
+        idx.add_or_replace(make_entry("dir/a.txt"));
+        idx.add_or_replace(make_entry("dir/b.txt"));
+        idx.set_fsmonitor_last_update(Some("tok".into()));
+        for entry in idx.entries_mut() {
+            entry.set_fsmonitor_valid(true);
+        }
+        idx.invalidate_fsmonitor_for_path("dir", false);
+        assert!(!idx.get(b"dir/a.txt", 0).unwrap().fsmonitor_valid());
+        assert!(!idx.get(b"dir/b.txt", 0).unwrap().fsmonitor_valid());
     }
 
     #[test]
