@@ -217,6 +217,41 @@ pub fn ensure_bare_remote(git: &Path, profile: ParallelProfile) -> Result<PathBu
     Ok(bare)
 }
 
+/// Bare remote whose objects are entirely in packfiles (repacked synthetic repo).
+pub fn ensure_fully_packed_local_clone_bare(git: &Path, file_count: usize) -> Result<PathBuf> {
+    let bare = parallel_cache_root().join(format!("local-clone-bare-repacked-{file_count}"));
+    if bare.join("HEAD").is_file() {
+        return Ok(bare);
+    }
+    let worktree = parallel_cache_root().join(format!("local-clone-wt-repacked-{file_count}"));
+    if worktree.exists() {
+        remove_dir_robust(&worktree);
+    }
+    create_repo_in(git, &worktree, file_count)?;
+    run_git(git, &worktree, &["repack", "-a", "-d", "-f"])?;
+    if bare.exists() {
+        remove_dir_robust(&bare);
+    }
+    let parent = bare.parent().unwrap_or(Path::new("/tmp"));
+    fs::create_dir_all(parent)?;
+    let name = bare
+        .file_name()
+        .and_then(|s| s.to_str())
+        .context("bare path name")?;
+    run_git(
+        git,
+        parent,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            worktree.to_str().context("worktree utf8")?,
+            name,
+        ],
+    )?;
+    Ok(bare)
+}
+
 /// Rename-heavy history: base commit and tip with ~`rename_count` renames.
 pub fn ensure_rename_repo(
     git: &Path,

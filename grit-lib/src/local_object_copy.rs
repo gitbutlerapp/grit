@@ -120,6 +120,34 @@ pub(crate) fn refresh_local_odb_after_link(local_odb: &Odb) {
     pack::clear_pack_cache();
 }
 
+/// Whether `objects_dir` stores every object in packfiles (no loose objects, no alternates).
+///
+/// Used before the initial local-clone pack-link fast path: when true, linking packs for tip
+/// oids alone is sufficient because the pack closure is the whole object store.
+pub(crate) fn source_objects_fully_packed(objects_dir: &Path) -> Result<bool> {
+    if !pack::read_alternates_recursive(objects_dir)?.is_empty() {
+        return Ok(false);
+    }
+    for entry in fs::read_dir(objects_dir).map_err(Error::Io)? {
+        let entry = entry.map_err(Error::Io)?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str == "info" || name_str == "pack" {
+            continue;
+        }
+        if name_str.len() != 2 || !name_str.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Ok(mut shard) = fs::read_dir(entry.path()) else {
+            continue;
+        };
+        if shard.next().is_some() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Try to satisfy `needed` by linking the remote's on-disk objects into `local`.
 ///
 /// Returns `true` when every oid in `needed` is present in `local_odb` afterward.
@@ -213,6 +241,64 @@ mod tests {
             out.status.success(),
             "git: {}",
             String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn source_objects_fully_packed_repacked_repo() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        git(&src, &["init", "-q", "-b", "main"]);
+        fs::write(src.join("f"), b"payload\n").unwrap();
+        git(&src, &["add", "f"]);
+        git(&src, &["commit", "-qm", "c"]);
+        git(&src, &["repack", "-a", "-d", "-f"]);
+        let objects = src.join(".git/objects");
+        assert!(source_objects_fully_packed(&objects).expect("scan"));
+    }
+
+    #[test]
+    fn source_objects_fully_packed_false_when_loose_blob_remains() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        git(&src, &["init", "-q", "-b", "main"]);
+        fs::write(src.join("a"), b"one\n").unwrap();
+        git(&src, &["add", "a"]);
+        git(&src, &["commit", "-qm", "one"]);
+        let head = Command::new("git")
+            .current_dir(&src)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let tree = Command::new("git")
+            .current_dir(&src)
+            .args(["rev-parse", "HEAD^{tree}"])
+            .output()
+            .unwrap();
+        let head_hex = String::from_utf8_lossy(&head.stdout);
+        let tree_hex = String::from_utf8_lossy(&tree.stdout);
+        let input = format!("{}\n{}\n", head_hex.trim(), tree_hex.trim());
+        let mut pack = Command::new("git")
+            .current_dir(&src)
+            .args(["pack-objects", "-q", ".git/objects/pack/pack"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .spawn()
+            .expect("pack-objects");
+        if let Some(mut stdin) = pack.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(input.as_bytes()).unwrap();
+        }
+        assert!(pack.wait_with_output().unwrap().status.success());
+        git(&src, &["prune-packed"]);
+        let objects = src.join(".git/objects");
+        assert!(
+            !source_objects_fully_packed(&objects).expect("scan"),
+            "mixed pack+loose must not qualify for tip-only fast path"
         );
     }
 

@@ -9,6 +9,7 @@ use grit_utils::fixture::DeepLeafDogfoodSpec;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::fsck_suite::run_fsck_suite;
 use grit_utils::ignore_suite::run_ignore_suite;
+use grit_utils::local_clone_suite::run_local_clone_suite;
 use grit_utils::maintenance_prepare::run_prepare_maintenance;
 use grit_utils::maintenance_suite::run_maintenance_suite;
 use grit_utils::network_fixture::NetworkProfile;
@@ -169,6 +170,11 @@ enum Cmd {
         /// Use tiny cached fixtures (for integration tests).
         #[arg(long)]
         smoke: bool,
+    },
+    /// Fully repacked local `file://` clone (default 5000-file synthetic bare remote)
+    LocalClone {
+        #[arg(long, default_value_t = 5_000)]
+        files: usize,
     },
     /// Ref workloads (for-each-ref, update-ref --stdin) on 100k-ref fixtures
     Refs,
@@ -824,6 +830,12 @@ fn main() -> Result<()> {
             run_parallel_suite(
                 &hyperfine, &git, &grit, &bench_exe, &cfg, profile, timestamp,
             )?
+        }
+        Cmd::LocalClone { files } => {
+            eprintln!("Running fully packed local clone benchmarks ({files} files)...");
+            let cfg = run_config(&cli, true);
+            let bench_exe = std::env::current_exe().context("current exe")?;
+            run_local_clone_suite(&hyperfine, &git, &grit, &bench_exe, &cfg, *files, timestamp)?
         }
         Cmd::Refs => {
             eprintln!("Running ref benchmarks (100k-ref fixtures)...");

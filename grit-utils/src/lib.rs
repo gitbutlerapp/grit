@@ -11,6 +11,7 @@ pub mod fsck_suite;
 pub mod hot_path_fixture;
 pub mod hyperfine;
 pub mod ignore_suite;
+pub mod local_clone_suite;
 pub mod machine;
 pub mod maintenance_prepare;
 pub mod maintenance_suite;

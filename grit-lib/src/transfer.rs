@@ -639,11 +639,28 @@ fn copy_objects_for_local_fetch(
 ) -> Result<(HashSet<ObjectId>, TransferStats)> {
     use crate::local_object_copy::{
         link_loose_objects_for_oids, linked_object_set, refresh_local_odb_after_link,
-        try_satisfy_via_object_link,
+        source_objects_fully_packed, try_satisfy_via_object_link,
     };
 
     let remote_objects = remote_git_dir.join("objects");
     let local_objects = local_git_dir.join("objects");
+
+    if !pack_build.thin
+        && try_pack_link
+        && haves.is_empty()
+        && !wants.is_empty()
+        && source_objects_fully_packed(&remote_objects)?
+    {
+        progress.start(ProgressPhase::CopyingObjects, Some(wants.len() as u64));
+        if try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, wants, false)? {
+            progress.set(wants.len() as u64);
+            progress.finish();
+            let oids = linked_object_set(local_odb, wants);
+            let transfer = transfer_stats_from_pack_dir(&local_objects_pack_dir(local_git_dir))?;
+            return Ok((oids, transfer));
+        }
+        progress.finish();
+    }
 
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
     let send = collect_reachable_excluding_peer(
