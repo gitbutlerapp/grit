@@ -300,11 +300,6 @@ enum Cmd {
         git: PathBuf,
     },
     #[command(hide = true)]
-    PrepareMaintenance {
-        #[arg(long)]
-        git: PathBuf,
-    },
-    #[command(hide = true)]
     PrepareParallelCheckout {
         #[arg(long)]
         git: PathBuf,
@@ -632,10 +627,6 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_stash(&git);
         }
-        Cmd::PrepareMaintenance { git } => {
-            let git = resolve_binary("git", Some(git))?;
-            return run_prepare_maintenance(&git);
-        }
         Cmd::PrepareParallelCheckout { git, url, dest } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_parallel_checkout(&git, url, dest.as_path());
@@ -894,7 +885,6 @@ fn main() -> Result<()> {
         | Cmd::ServeGitHttp { .. }
         | Cmd::PrepareRestore
         | Cmd::PrepareStash { .. }
-        | Cmd::PrepareMaintenance { .. }
         | Cmd::PrepareParallelCheckout { .. }
         | Cmd::PrepareParallelClone { .. }
         | Cmd::PrepareParallelIndexPack { .. }
