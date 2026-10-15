@@ -1093,6 +1093,8 @@ struct BlameSession<'a> {
     copy_score_parallel: ParallelOptions,
     commit_graph: Option<Arc<CommitGraphChain>>,
     bloom_pathspec: Vec<String>,
+    /// Blob and mode at the blamed path for commits already visited in this walk.
+    blob_at_commit: HashMap<ObjectId, (ObjectId, u32)>,
     blob_lines: HashMap<BlobCacheKey, Arc<Vec<String>>>,
     path_entries: HashMap<PathCacheKey, Option<(ObjectId, u32)>>,
     pair_maps: HashMap<PairMapCacheKey, PairMapCacheValue>,
@@ -1115,6 +1117,7 @@ impl<'a> BlameSession<'a> {
             copy_score_parallel: diff_rename_parallel_options(&config, thread_policy),
             commit_graph: None,
             bloom_pathspec: Vec::new(),
+            blob_at_commit: HashMap::new(),
             blob_lines: HashMap::new(),
             path_entries: HashMap::new(),
             pair_maps: HashMap::new(),
@@ -1127,6 +1130,33 @@ impl<'a> BlameSession<'a> {
         }
         self.bloom_pathspec.clear();
         self.bloom_pathspec.push(path.to_owned());
+        self.blob_at_commit.clear();
+    }
+
+    fn record_commit_blob(&mut self, commit: ObjectId, blob: ObjectId, mode: u32) {
+        self.blob_at_commit.insert(commit, (blob, mode));
+    }
+
+    fn blob_at_commit_path(&self, commit: ObjectId) -> Option<(ObjectId, u32)> {
+        self.blob_at_commit.get(&commit).copied()
+    }
+
+    fn resolve_blob_at_commit(
+        &mut self,
+        odb: &Odb,
+        commit: ObjectId,
+        path: &str,
+        commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    ) -> Result<Option<(ObjectId, u32)>> {
+        if let Some(entry) = self.blob_at_commit_path(commit) {
+            return Ok(Some(entry));
+        }
+        let meta = get_blame_commit(odb, commit, commit_cache)?;
+        let resolved = self.resolve_path_in_tree(meta.tree, path)?;
+        if let Some((blob, mode)) = resolved {
+            self.record_commit_blob(commit, blob, mode);
+        }
+        Ok(resolved)
     }
 
     fn line_refs(lines: &Arc<Vec<String>>) -> Vec<&str> {
@@ -1339,8 +1369,9 @@ fn fast_forward_same_blob(
             oid = parent_oid;
             continue;
         }
-        let parent_commit = get_blame_commit(odb, parent_oid, commit_cache)?;
-        let Some((p_blob, _mode)) = session.resolve_path_in_tree(parent_commit.tree, path)? else {
+        let Some((p_blob, _mode)) =
+            session.resolve_blob_at_commit(odb, parent_oid, path, commit_cache)?
+        else {
             break;
         };
         if p_blob != blob_oid {
@@ -1437,6 +1468,7 @@ fn compute_blame_with_session(
             break;
         }
 
+        session.record_commit_blob(current_oid, current_blob_oid, current_blob_mode);
         let commit = get_blame_commit(odb, current_oid, &mut commit_cache)?;
         let mut parents = commit_parents_for_blame(odb, current_oid, grafts, &mut commit_cache)?;
 
@@ -1594,10 +1626,12 @@ fn compute_blame_with_session(
         // result, pass all remaining lines to that parent without merge diffs.
         if !first_parent_only && !is_ignored && parents.len() >= 2 {
             for parent_oid in &parents {
-                let parent_commit = get_blame_commit(odb, *parent_oid, &mut commit_cache)?;
-                if let Some((blob, mode)) =
-                    session.resolve_path_in_tree(parent_commit.tree, &current_path)?
-                {
+                if let Some((blob, mode)) = session.resolve_blob_at_commit(
+                    odb,
+                    *parent_oid,
+                    &current_path,
+                    &mut commit_cache,
+                )? {
                     if blob == current_blob_oid {
                         current_oid = fast_forward_same_blob(
                             odb,
@@ -1628,7 +1662,7 @@ fn compute_blame_with_session(
             let mut buckets: Vec<Vec<TrackedLine>> = vec![Vec::new(); parents.len()];
             let mut attributed: Vec<BlameLine> = Vec::new();
 
-            let mut used_in_parent: Vec<Vec<bool>> = vec![vec![false; line_count]; parents.len()];
+            let mut used_in_parent: Vec<Vec<bool>> = vec![Vec::new(); parents.len()];
 
             let mut remaining = std::mem::take(&mut pending);
             let mut any_parent_has_path = false;
@@ -1637,8 +1671,8 @@ fn compute_blame_with_session(
                     break;
                 }
                 let p = parents[i];
-                let pc = get_blame_commit(odb, p, &mut commit_cache)?;
-                let Some((blob, mode)) = session.resolve_path_in_tree(pc.tree, &current_path)?
+                let Some((blob, mode)) =
+                    session.resolve_blob_at_commit(odb, p, &current_path, &mut commit_cache)?
                 else {
                     continue;
                 };
@@ -1647,9 +1681,10 @@ fn compute_blame_with_session(
                 if blob == current_blob_oid {
                     par_lines_vec[i] = Some(Arc::clone(&cur_lines_arc));
                     maps[i] = Some(Arc::new((0..line_count).map(Some).collect::<Vec<_>>()));
+                    used_in_parent[i].resize(line_count, false);
                     let mut next_remaining: Vec<TrackedLine> = Vec::new();
                     for t in remaining {
-                        if !used_in_parent[i][t.current_idx] {
+                        if t.current_idx < line_count && !used_in_parent[i][t.current_idx] {
                             used_in_parent[i][t.current_idx] = true;
                             buckets[i].push(TrackedLine {
                                 final_lineno: t.final_lineno,
@@ -1665,11 +1700,7 @@ fn compute_blame_with_session(
                     continue;
                 }
                 let pl_arc = session.load_blob_lines(blob, &current_path, mode)?;
-                let map_algo = if parents.len() > 2 {
-                    BlameDiffAlgorithm::Patience
-                } else {
-                    diff_algorithm
-                };
+                let map_algo = diff_algorithm;
                 let pair = session.parent_child_line_maps(
                     blob,
                     &current_path,
@@ -1698,13 +1729,17 @@ fn compute_blame_with_session(
                         "internal: missing merge parent lines".to_string(),
                     ));
                 };
+                let parent_line_count = par_lines.len();
+                if used_in_parent[i].len() != parent_line_count {
+                    used_in_parent[i].resize(parent_line_count, false);
+                }
                 for t in remaining {
                     let idx = t.current_idx;
                     let cur_line = cur_lines_arc.get(idx).map(String::as_str);
                     let m = map.get(idx).copied().flatten();
                     if let Some(p_idx) = m {
                         let text_ok = par_lines.get(p_idx).map(String::as_str) == cur_line;
-                        if text_ok && p_idx < line_count && !used_in_parent[i][p_idx] {
+                        if text_ok && p_idx < parent_line_count && !used_in_parent[i][p_idx] {
                             used_in_parent[i][p_idx] = true;
                             buckets[i].push(TrackedLine {
                                 final_lineno: t.final_lineno,
@@ -1796,7 +1831,7 @@ fn compute_blame_with_session(
         let parent_oid = parents[0];
         let parent_commit = get_blame_commit(odb, parent_oid, &mut commit_cache)?;
         let mut parent_blob_entry =
-            session.resolve_path_in_tree(parent_commit.tree, &current_path)?;
+            session.resolve_blob_at_commit(odb, parent_oid, &current_path, &mut commit_cache)?;
         let mut parent_blob_path = current_path.clone();
 
         if parent_blob_entry.is_none() && !is_ignored {

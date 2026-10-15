@@ -3,10 +3,12 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::{blame_file, compute_blame, BlameDiffAlgorithm, BlameOptions};
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::state::{resolve_head, HeadState};
 
 fn git_env(cmd: &mut Command) {
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -334,6 +336,75 @@ fn blame_merge_line_from_second_parent_matches_git_default() {
     assert_eq!(grit_lines[0].commit, git_lines[0].commit);
 }
 
+/// Merge result shorter than a parent: mapped parent line index can exceed the result length.
+#[test]
+fn blame_merge_maps_result_line_to_parent_line_beyond_result_length() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "sizes.txt";
+    let mut main_body = String::new();
+    for i in 1..=40 {
+        main_body.push_str(&format!("line {i}\n"));
+    }
+    std::fs::write(root.join(file), &main_body).unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "main forty lines"]);
+
+    git_run(root, &["branch", "wide"]);
+    git_run(root, &["checkout", "wide"]);
+    let mut wide_body = String::new();
+    for i in 1..=100 {
+        if i == 80 {
+            wide_body.push_str("B80\n");
+        } else {
+            wide_body.push_str(&format!("wide {i}\n"));
+        }
+    }
+    std::fs::write(root.join(file), &wide_body).unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "wide parent with B80 at line 80"]);
+    let wide_commit = git_output(root, &["rev-parse", "HEAD"])
+        .trim()
+        .parse::<ObjectId>()
+        .expect("wide oid");
+
+    git_run(root, &["checkout", "main"]);
+    let mut merge_result = main_body.clone();
+    merge_result = merge_result.replace("line 20\n", "B80\n");
+    git_run(root, &["merge", "--no-ff", "--no-commit", "wide"]);
+    std::fs::write(root.join(file), &merge_result).unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "merge: B80 on result line 20"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let dir = repo.work_tree().expect("worktree");
+    let git_lines = git_blame(dir, file, None, Some((20, 20)));
+    assert_eq!(git_lines.len(), 1);
+    assert_eq!(
+        git_lines[0].original_line, 80,
+        "git should map result line 20 to parent line 80"
+    );
+    assert_eq!(
+        git_lines[0].commit, wide_commit,
+        "git should attribute to the wide (second) parent"
+    );
+
+    let grit_lines = grit_blame(&repo, file, None, Some(20..=20));
+    assert_eq!(grit_lines.len(), 1);
+    assert_eq!(
+        grit_lines[0].original_line, git_lines[0].original_line,
+        "grit original line should match git"
+    );
+    assert_eq!(
+        grit_lines[0].commit, git_lines[0].commit,
+        "grit should attribute merge line 20 to the wide parent, not the merge commit"
+    );
+}
+
 #[test]
 fn blame_matches_git_porcelain_after_adcb_permutation() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -583,4 +654,55 @@ fn blame_respects_graft_over_commit_graph_bloom() {
     write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("graph");
 
     assert_blame_matches(&repo, root, "f.txt", Some(&child), None);
+}
+
+#[test]
+#[ignore = "manual dogfood timing; set RUN_GIT_GIT_BENCH=1"]
+fn time_git_git_makefile_blame_breakdown() {
+    if std::env::var("RUN_GIT_GIT_BENCH").ok().as_deref() != Some("1") {
+        return;
+    }
+    let wt = std::path::Path::new("/tmp/git-git-wt");
+    if !wt.join("Makefile").exists() {
+        return;
+    }
+    let repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
+    let head = match resolve_head(repo.git_dir()).expect("head") {
+        HeadState::Detached { oid } => oid,
+        HeadState::Branch { oid: Some(oid), .. } => oid,
+        _ => panic!("no head"),
+    };
+    let odb: &Odb = repo.odb();
+    let ignore = std::collections::HashSet::new();
+    let grafts = std::collections::HashMap::new();
+    let tp = repo.thread_policy();
+    let t0 = std::time::Instant::now();
+    let raw = compute_blame(
+        odb,
+        head,
+        "Makefile",
+        &ignore,
+        BlameDiffAlgorithm::Myers,
+        None,
+        false,
+        0,
+        false,
+        &grafts,
+        false,
+        None,
+        &tp,
+    )
+    .expect("compute");
+    eprintln!("compute_blame: {:?} ({} lines)", t0.elapsed(), raw.len());
+    let t1 = std::time::Instant::now();
+    let _full = blame_file(
+        &repo,
+        "Makefile",
+        &BlameOptions {
+            start: Some(head),
+            ..Default::default()
+        },
+    )
+    .expect("blame_file");
+    eprintln!("blame_file total: {:?}", t1.elapsed());
 }
