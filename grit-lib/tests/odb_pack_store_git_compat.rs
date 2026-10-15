@@ -139,10 +139,10 @@ fn git_repack_packs_stay_identical_with_tiny_delta_base_cache() {
     let (_dir, objects) = deep_delta_repo();
     let repo = _dir.path();
     let git_map = git_batch_all_objects(repo);
-    std::fs::write(repo.join("config"), "[core]\n\tdeltaBaseCacheLimit = 512\n")
-        .expect("write config");
+    let git_dir = repo.join(".git");
+    git_in(repo, &["config", "core.deltaBaseCacheLimit", "512"]);
     clear_pack_cache();
-    let odb = Odb::new(&objects).with_config_git_dir(repo.to_path_buf());
+    let odb = Odb::new(&objects).with_config_git_dir(git_dir);
     for round in 0..3 {
         odb.with_pack_read_context(|| {
             for (oid, (git_kind, git_size)) in &git_map {
