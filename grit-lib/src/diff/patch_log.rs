@@ -11,6 +11,7 @@ use crate::merge_file;
 use crate::objects::CommitData;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::oid_abbrev_cache::OidAbbrevCache;
 use crate::quote_path::format_diff_path_with_prefix;
 use crate::repo::Repository;
 
@@ -127,7 +128,17 @@ pub fn write_commit_log_patch<W: Write>(
     let raw = odb.read(oid)?;
     let commit = parse_commit(&raw.data)?;
     let parent_tree = parent_tree_for_commit(odb, &commit, None)?;
-    write_parsed_commit_log_patch(out, repo, odb, oid, &commit, parent_tree, opts)
+    let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
+    write_parsed_commit_log_patch(
+        out,
+        repo,
+        odb,
+        oid,
+        &commit,
+        parent_tree,
+        opts,
+        &mut abbrev_cache,
+    )
 }
 
 /// Like [`write_commit_log_patch`] for many commits (avoids re-reading parent commits).
@@ -153,9 +164,19 @@ pub fn write_commits_log_patch<W: Write>(
         trees_by_commit.insert(*oid, commit.tree);
         parsed.push((*oid, commit));
     }
+    let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     for (i, (oid, commit)) in parsed.iter().enumerate() {
         let parent_tree = parent_tree_for_commit(odb, commit, Some(&trees_by_commit))?;
-        write_parsed_commit_log_patch(out, repo, odb, oid, commit, parent_tree, opts)?;
+        write_parsed_commit_log_patch(
+            out,
+            repo,
+            odb,
+            oid,
+            commit,
+            parent_tree,
+            opts,
+            &mut abbrev_cache,
+        )?;
         if i + 1 < parsed.len() {
             writeln!(out)?;
         }
@@ -181,6 +202,18 @@ fn parent_tree_for_commit(
     Ok(Some(parse_commit(&parent_raw.data)?.tree))
 }
 
+fn abbrev_for_index_line(
+    cache: &mut OidAbbrevCache,
+    odb: &Odb,
+    oid: &ObjectId,
+    min_len: usize,
+) -> Result<String> {
+    if *oid == zero_oid() {
+        return Ok(abbrev_hex(oid, min_len));
+    }
+    cache.abbrev(odb, oid)
+}
+
 fn write_parsed_commit_log_patch<W: Write>(
     out: &mut W,
     repo: &Repository,
@@ -189,6 +222,7 @@ fn write_parsed_commit_log_patch<W: Write>(
     commit: &CommitData,
     parent_tree: Option<ObjectId>,
     opts: &LogPatchOptions,
+    abbrev_cache: &mut OidAbbrevCache,
 ) -> Result<()> {
     match opts.commit_header {
         LogPatchCommitHeader::Full => {
@@ -196,7 +230,12 @@ fn write_parsed_commit_log_patch<W: Write>(
             if commit.parents.len() > 1 {
                 let mut parts = Vec::with_capacity(commit.parents.len());
                 for parent in &commit.parents {
-                    parts.push(abbrev_hex(parent, opts.abbrev_len));
+                    parts.push(abbrev_for_index_line(
+                        abbrev_cache,
+                        odb,
+                        parent,
+                        opts.abbrev_len,
+                    )?);
                 }
                 writeln!(out, "Merge: {}", parts.join(" "))?;
             }
@@ -216,7 +255,7 @@ fn write_parsed_commit_log_patch<W: Write>(
     }
     let entries = diff_trees(odb, parent_tree.as_ref(), Some(&commit.tree), "")?;
     for entry in entries {
-        write_diff_entry_log_patch(out, repo, odb, &entry, opts)?;
+        write_diff_entry_log_patch(out, repo, odb, &entry, opts, abbrev_cache)?;
     }
     Ok(())
 }
@@ -315,6 +354,7 @@ pub fn write_diff_entry_log_patch<W: Write>(
     odb: &Odb,
     entry: &DiffEntry,
     opts: &LogPatchOptions,
+    abbrev_cache: &mut OidAbbrevCache,
 ) -> Result<()> {
     let git_old = entry
         .old_path
@@ -344,13 +384,22 @@ pub fn write_diff_entry_log_patch<W: Write>(
     }
 
     match entry.status {
-        DiffStatus::Renamed | DiffStatus::Copied => {
+        DiffStatus::Renamed => {
             writeln!(out, "similarity index {}%", entry.score.unwrap_or(100))?;
             if let Some(path) = &entry.old_path {
                 writeln!(out, "rename from {path}")?;
             }
             if let Some(path) = &entry.new_path {
                 writeln!(out, "rename to {path}")?;
+            }
+        }
+        DiffStatus::Copied => {
+            writeln!(out, "similarity index {}%", entry.score.unwrap_or(100))?;
+            if let Some(path) = &entry.old_path {
+                writeln!(out, "copy from {path}")?;
+            }
+            if let Some(path) = &entry.new_path {
+                writeln!(out, "copy to {path}")?;
             }
         }
         _ if old_mode != 0 && new_mode != 0 && old_mode != new_mode => {
@@ -371,32 +420,32 @@ pub fn write_diff_entry_log_patch<W: Write>(
                 writeln!(
                     out,
                     "index {}..{}",
-                    abbrev_hex(&zero_oid(), opts.abbrev_len),
-                    abbrev_hex(&entry.new_oid, opts.abbrev_len)
+                    abbrev_for_index_line(abbrev_cache, odb, &zero_oid(), opts.abbrev_len)?,
+                    abbrev_for_index_line(abbrev_cache, odb, &entry.new_oid, opts.abbrev_len)?
                 )?;
             }
             DiffStatus::Deleted => {
                 writeln!(
                     out,
                     "index {}..{}",
-                    abbrev_hex(&entry.old_oid, opts.abbrev_len),
-                    abbrev_hex(&zero_oid(), opts.abbrev_len)
+                    abbrev_for_index_line(abbrev_cache, odb, &entry.old_oid, opts.abbrev_len)?,
+                    abbrev_for_index_line(abbrev_cache, odb, &zero_oid(), opts.abbrev_len)?
                 )?;
             }
             DiffStatus::Renamed | DiffStatus::Copied => {
                 writeln!(
                     out,
                     "index {}..{}",
-                    abbrev_hex(&entry.old_oid, opts.abbrev_len),
-                    abbrev_hex(&entry.new_oid, opts.abbrev_len)
+                    abbrev_for_index_line(abbrev_cache, odb, &entry.old_oid, opts.abbrev_len)?,
+                    abbrev_for_index_line(abbrev_cache, odb, &entry.new_oid, opts.abbrev_len)?
                 )?;
             }
             _ => {
                 writeln!(
                     out,
                     "index {}..{} {}",
-                    abbrev_hex(&entry.old_oid, opts.abbrev_len),
-                    abbrev_hex(&entry.new_oid, opts.abbrev_len),
+                    abbrev_for_index_line(abbrev_cache, odb, &entry.old_oid, opts.abbrev_len)?,
+                    abbrev_for_index_line(abbrev_cache, odb, &entry.new_oid, opts.abbrev_len)?,
                     index_mode
                 )?;
             }
@@ -502,4 +551,40 @@ fn read_blob_side(odb: &Odb, oid: ObjectId, is_missing: bool) -> Result<Vec<u8>>
         return Ok(Vec::new());
     }
     Ok(obj.data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    use crate::hash::hash_object;
+    use crate::objects::HashAlgo;
+
+    #[test]
+    fn copied_diff_emits_copy_headers() -> Result<()> {
+        let blob_oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"x");
+        let entry = DiffEntry {
+            status: DiffStatus::Copied,
+            old_path: Some("src/a.txt".into()),
+            new_path: Some("dst/b.txt".into()),
+            old_oid: blob_oid,
+            new_oid: blob_oid,
+            old_mode: "100644".into(),
+            new_mode: "100644".into(),
+            score: Some(100),
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        repo.odb().write(ObjectKind::Blob, b"x")?;
+        let mut out = Cursor::new(Vec::new());
+        let opts = LogPatchOptions::git_default(&ConfigSet::default());
+        let mut cache = OidAbbrevCache::new(opts.abbrev_len);
+        write_diff_entry_log_patch(&mut out, &repo, repo.odb(), &entry, &opts, &mut cache)?;
+        let text = String::from_utf8(out.into_inner()).expect("utf-8");
+        assert!(text.contains("copy from src/a.txt"));
+        assert!(text.contains("copy to dst/b.txt"));
+        assert!(!text.contains("rename from"));
+        Ok(())
+    }
 }

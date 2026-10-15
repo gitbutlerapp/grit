@@ -164,6 +164,7 @@ pub(crate) mod pack_cache {
         THREAD_WARM_EPOCH.set(0);
         THREAD_WARM_STORE.set(0);
         PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = None);
+        super::clear_pack_read_info_cache();
     }
 
     /// Drop thread-local pack caches after invalidation on this or another thread.
@@ -230,6 +231,7 @@ pub(crate) mod pack_cache {
         if let Some(pack_dir) = pack_path.parent() {
             drop_thread_local_dir_listing(pack_dir);
         }
+        super::clear_pack_read_info_cache();
     }
 
     /// Seed thread-local pack caches from `store` (one catalog read lock; hot reads avoid the catalog).
@@ -250,6 +252,7 @@ pub(crate) mod pack_cache {
         PACK_IDS.with(|cell| cell.borrow_mut().clear());
         PACK_COUNT_VALIDATED.with(|cell| cell.borrow_mut().clear());
         PACK_HIT_INDEX.with(|cell| *cell.borrow_mut() = None);
+        super::clear_pack_read_info_cache();
         let objects_dir = store.objects_dir();
         let pack_dir = objects_dir.join("pack");
         store.with_catalog_read(|g| {
@@ -2260,6 +2263,10 @@ thread_local! {
 
 const PACK_READ_INFO_CACHE_CAP: usize = 600_000;
 
+pub(crate) fn clear_pack_read_info_cache() {
+    PACK_READ_INFO_CACHE.with(|c| c.borrow_mut().clear());
+}
+
 fn cached_pack_read_info(pack_id: u32, offset: u64) -> Option<ObjectInfo> {
     if !crate::pack_store::PackStore::has_context() {
         return None;
@@ -3275,6 +3282,26 @@ pub struct SingleLocalPackReader {
     cursor: usize,
 }
 
+fn objects_dir_has_loose_objects(objects_dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(objects_dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.len() != 2 || !name.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Ok(hex_entries) = std::fs::read_dir(entry.path()) else {
+            continue;
+        };
+        if hex_entries.flatten().any(|e| e.path().is_file()) {
+            return true;
+        }
+    }
+    false
+}
+
 impl SingleLocalPackReader {
     /// Open when [`crate::pack_store::PackStore`] read context matches and one local pack index exists.
     ///
@@ -3287,7 +3314,7 @@ impl SingleLocalPackReader {
         }
         pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
         let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
-        if indexes.len() != 1 {
+        if indexes.len() != 1 || objects_dir_has_loose_objects(objects_dir) {
             return Ok(None);
         }
         let idx = Arc::clone(&indexes[0]);
@@ -4187,6 +4214,7 @@ mod tests {
     use crate::transfer::{build_pack, PackBuildOptions};
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
+    use std::io::Read;
     use std::io::Write;
     use std::process::Command;
 
