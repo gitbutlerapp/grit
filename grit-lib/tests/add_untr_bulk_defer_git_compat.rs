@@ -25,8 +25,7 @@ fn untr_root_valid(index_bytes: &[u8]) -> bool {
 
 #[test]
 fn bulk_deferred_untr_replay_after_mass_removal() {
-    // Lower bulk threshold so the regression runs quickly in CI.
-    unsafe { std::env::set_var("GRIT_TEST_BULK_THRESHOLD", "64") };
+    grit_lib::porcelain::bulk_index::set_test_threshold_override(64);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_dir = tmp.path().join("repo");
@@ -69,4 +68,5 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
         !untr_root_valid(&git_index),
         "git reference: UNTR root should be invalid after mass removal add"
     );
+    grit_lib::porcelain::bulk_index::clear_test_threshold_override();
 }

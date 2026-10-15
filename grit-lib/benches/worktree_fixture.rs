@@ -57,6 +57,7 @@ fn build_index(entry_count: usize, version: u32) -> Index {
 }
 
 fn write_index_file(index: &Index, path: &Path) {
+    let mut index = index.clone();
     index.write(path).expect("write index fixture");
 }
 
@@ -73,6 +74,7 @@ fn ieot_write_config(base: &Path) -> ConfigSet {
 
 fn write_index_file_ieot(index: &Index, path: &Path, cfg: &ConfigSet) {
     let policy = ThreadPolicy::with_threads_override(Some(4));
+    let mut index = index.clone();
     index
         .write_with_config_and_policy(path, cfg, policy)
         .expect("write ieot index fixture");

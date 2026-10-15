@@ -101,6 +101,7 @@ fn bench_index_write(c: &mut Criterion) {
         group.throughput(Throughput::Elements(index.entries().len() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(label), index, |b, idx| {
             b.iter(|| {
+                let mut idx = idx.clone();
                 idx.write(&fx.index_write_scratch)
                     .expect("write index bench");
             });
@@ -116,6 +117,7 @@ fn bench_index_write_100k(c: &mut Criterion) {
         group.throughput(Throughput::Elements(100_000));
         group.bench_with_input(BenchmarkId::from_parameter(label), index, |b, idx| {
             b.iter(|| {
+                let mut idx = idx.clone();
                 idx.write(&fx.index_write_scratch)
                     .expect("write index bench");
             });
