@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -30,40 +29,37 @@ const READ_DIR_AMORTIZE_MIN: usize = 4;
 const READ_DIR_AMORTIZE_MIN: usize = 2;
 
 /// Test hook: incremented once per worktree metadata syscall used by directory scans.
-#[cfg(test)]
-pub(crate) static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0);
+static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0);
 
 /// Test hook: `read_dir` calls during directory-grouped blob scans.
-#[cfg(test)]
-pub(crate) static WORKTREE_READ_DIR_PROBE: AtomicUsize = AtomicUsize::new(0);
+static WORKTREE_READ_DIR_PROBE: AtomicUsize = AtomicUsize::new(0);
 
 /// Only syscalls under this root are counted, so tests scanning other worktrees in
 /// parallel do not inflate a probing test's counts.
-#[cfg(test)]
+static WORKTREE_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static WORKTREE_PROBE_ROOT: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 /// Serializes probing tests; each owns the counters while its scope is alive.
-#[cfg(test)]
 static WORKTREE_PROBE_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Keeps worktree syscall probing armed for one test; disarms on drop.
-#[cfg(test)]
-pub(crate) struct WorktreeProbeScope {
+#[doc(hidden)]
+pub struct WorktreeProbeScope {
     _serial: std::sync::MutexGuard<'static, ()>,
 }
 
-#[cfg(test)]
 impl Drop for WorktreeProbeScope {
     fn drop(&mut self) {
         *WORKTREE_PROBE_ROOT
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = None;
+        WORKTREE_PROBE_ACTIVE.store(0, Ordering::Release);
     }
 }
 
 /// Zero the probe counters and count only syscalls on paths under `root`.
-#[cfg(test)]
-pub(crate) fn reset_worktree_metadata_probe(root: &Path) -> WorktreeProbeScope {
+#[doc(hidden)]
+pub fn reset_worktree_metadata_probe(root: &Path) -> WorktreeProbeScope {
     let serial = WORKTREE_PROBE_SERIAL
         .lock()
         .unwrap_or_else(|e| e.into_inner());
@@ -72,11 +68,14 @@ pub(crate) fn reset_worktree_metadata_probe(root: &Path) -> WorktreeProbeScope {
         .unwrap_or_else(|e| e.into_inner()) = Some(root.to_path_buf());
     WORKTREE_METADATA_PROBE.store(0, Ordering::Relaxed);
     WORKTREE_READ_DIR_PROBE.store(0, Ordering::Relaxed);
+    WORKTREE_PROBE_ACTIVE.store(1, Ordering::Release);
     WorktreeProbeScope { _serial: serial }
 }
 
-#[cfg(test)]
 fn probe_counts(path: &Path) -> bool {
+    if WORKTREE_PROBE_ACTIVE.load(Ordering::Acquire) == 0 {
+        return false;
+    }
     WORKTREE_PROBE_ROOT
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -84,13 +83,15 @@ fn probe_counts(path: &Path) -> bool {
         .is_some_and(|root| path.starts_with(root))
 }
 
-#[cfg(test)]
-pub(crate) fn worktree_metadata_probe_count() -> usize {
+/// Returns metadata syscall probes recorded since [`reset_worktree_metadata_probe`].
+#[doc(hidden)]
+pub fn worktree_metadata_probe_count() -> usize {
     WORKTREE_METADATA_PROBE.load(Ordering::Relaxed)
 }
 
-#[cfg(test)]
-pub(crate) fn worktree_read_dir_probe_count() -> usize {
+/// Returns `read_dir` probes recorded since [`reset_worktree_metadata_probe`].
+#[doc(hidden)]
+pub fn worktree_read_dir_probe_count() -> usize {
     WORKTREE_READ_DIR_PROBE.load(Ordering::Relaxed)
 }
 
@@ -122,7 +123,6 @@ pub(crate) fn stat_scan_thread_count(
 }
 
 fn probe_worktree_metadata_call(_path: &Path) {
-    #[cfg(test)]
     if probe_counts(_path) {
         WORKTREE_METADATA_PROBE.fetch_add(1, Ordering::Relaxed);
     }
@@ -500,7 +500,6 @@ fn lookup_blob_in_directory(
 }
 
 fn read_directory_map(abs_dir: &Path) -> Result<(bool, HashMap<String, fs::DirEntry>)> {
-    #[cfg(test)]
     if probe_counts(abs_dir) {
         WORKTREE_READ_DIR_PROBE.fetch_add(1, Ordering::Relaxed);
     }

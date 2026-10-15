@@ -483,6 +483,12 @@ fn index_matches_target_tree_entry(
         .is_some_and(|entry| entry.oid == target.oid && entry.mode == target.mode)
 }
 
+/// True when a gitlink worktree's checked-out HEAD already matches the branch being switched to.
+fn gitlink_worktree_head_matches_target(entry: &DiffEntry, target: TargetTreeEntry) -> bool {
+    use crate::index::MODE_GITLINK;
+    target.mode == MODE_GITLINK && entry.new_oid == target.oid
+}
+
 fn ensure_local_changes_compatible_with_switch(
     index: &crate::index::Index,
     staged: &[DiffEntry],
@@ -525,12 +531,13 @@ fn ensure_local_changes_compatible_with_switch(
         if !tree_changed_paths.contains(path) {
             continue;
         }
-        if target_by_path
-            .get(path)
-            .is_some_and(|target| index_matches_target_tree_entry(index, path, *target))
-        {
-            preserve_worktree_paths.insert(path.to_owned());
-            continue;
+        if let Some(target) = target_by_path.get(path) {
+            if index_matches_target_tree_entry(index, path, *target)
+                || gitlink_worktree_head_matches_target(entry, *target)
+            {
+                preserve_worktree_paths.insert(path.to_owned());
+                continue;
+            }
         }
         return Err(Error::Message(
             "you have uncommitted changes — commit them before switching".into(),

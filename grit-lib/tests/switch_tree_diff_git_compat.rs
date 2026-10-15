@@ -490,3 +490,231 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
         "git status must be clean after switch back"
     );
 }
+
+fn init_nested_inner_repo(inner: &std::path::Path) {
+    git(inner, &["init", "-q", "-b", "main"]);
+    git(inner, &["config", "user.email", "t@example.com"]);
+    git(inner, &["config", "user.name", "Test"]);
+}
+
+#[test]
+fn switch_dirty_gitlink_on_changing_gitlink_matches_git() {
+    use std::process::Command;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+
+    let inner = root.join("inner");
+    std::fs::create_dir_all(&inner).expect("mkdir inner");
+    init_nested_inner_repo(&inner);
+    std::fs::write(inner.join("f"), b"v1\n").expect("write");
+    git(&inner, &["add", "f"]);
+    git(&inner, &["commit", "-qm", "v1"]);
+    let sub1 = git(&inner, &["rev-parse", "HEAD"]).trim().to_owned();
+    std::fs::write(inner.join("f"), b"v1\nv2\n").expect("v2");
+    git(&inner, &["add", "f"]);
+    git(&inner, &["commit", "-qm", "v2"]);
+    let sub2 = git(&inner, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&inner, &["checkout", "-q", &sub1]);
+
+    git(root, &["add", "inner"]);
+    git(root, &["commit", "-qm", "main"]);
+
+    git(root, &["checkout", "-q", "-b", "target"]);
+    git(&inner, &["checkout", "-q", &sub2]);
+    git(root, &["add", "inner"]);
+    git(root, &["commit", "-qm", "target"]);
+    git(root, &["checkout", "-q", "main"]);
+
+    git(&inner, &["checkout", "-q", &sub2]);
+    std::fs::write(inner.join("f"), b"v1\nv2\ndirty\n").expect("dirty inner");
+
+    let git_status_before = git_porcelain(root);
+    assert!(
+        git_status_before.contains("inner"),
+        "git must see dirty gitlink before switch, got:\n{git_status_before}"
+    );
+
+    let git_switch = Command::new("git")
+        .current_dir(root)
+        .args(["switch", "target"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git switch");
+    assert!(
+        git_switch.success(),
+        "system git switch must succeed like dirty submodule case"
+    );
+    let git_inner_after = std::fs::read_to_string(inner.join("f")).expect("git inner");
+    assert!(
+        git_inner_after.contains("dirty"),
+        "git must preserve dirty submodule content"
+    );
+    git(root, &["checkout", "-q", "main"]);
+
+    git(&inner, &["checkout", "-q", &sub2]);
+    std::fs::write(inner.join("f"), b"v1\nv2\ndirty\n").expect("dirty again");
+
+    let grit_repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open grit repo");
+    let target_oid =
+        ObjectId::from_hex(git(root, &["rev-parse", "target"]).trim()).expect("target oid");
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect("grit switch must match git and preserve dirty gitlink worktree");
+
+    let grit_inner_after = std::fs::read_to_string(inner.join("f")).expect("grit inner");
+    assert_eq!(
+        grit_inner_after, git_inner_after,
+        "grit must preserve inner worktree like git"
+    );
+    assert!(
+        git_porcelain(root).contains("inner"),
+        "porcelain must still report modified inner after grit switch"
+    );
+}
+
+#[test]
+fn switch_scoped_worktree_diff_limits_metadata_probes() {
+    use grit_lib::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    git(tmp.path(), &["config", "gc.auto", "0"]);
+
+    populate_initial(tmp.path());
+    build_target_branch(tmp.path());
+    std::fs::write(tmp.path().join("d000/f9999.txt"), b"off-tree dirty\n").expect("off-tree dirty");
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let target_oid =
+        ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
+
+    let _probe = reset_worktree_metadata_probe(tmp.path());
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect("switch");
+    const FILE_COUNT: usize = 500;
+    const TOUCH: usize = 40;
+    let calls = worktree_metadata_probe_count();
+    assert!(
+        calls <= TOUCH * 3 + 24,
+        "switch scoped worktree diff must not stat all {FILE_COUNT} paths (probes {calls})"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn switch_tracked_deletes_match_git_when_wholesale_dir_removal_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+
+    std::fs::create_dir_all(root.join("d005")).expect("mkdir");
+    for i in 0..10 {
+        std::fs::write(root.join(format!("d005/f{i}.txt")), format!("v{i}\n")).expect("write");
+    }
+    git(root, &["add", "d005"]);
+    git(root, &["commit", "-qm", "main"]);
+
+    git(root, &["checkout", "-q", "-b", "target"]);
+    git(root, &["rm", "-r", "d005"]);
+    git(root, &["commit", "-qm", "drop d005"]);
+    git(root, &["checkout", "-q", "main"]);
+
+    let mut perms = std::fs::metadata(root.join("d005"))
+        .expect("meta")
+        .permissions();
+    perms.set_mode(0o555);
+    std::fs::set_permissions(root.join("d005"), perms).expect("chmod d005");
+
+    let git_switch = Command::new("git")
+        .current_dir(root)
+        .args(["switch", "target"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git switch");
+    assert!(git_switch.success());
+    let git_left: Vec<_> = std::fs::read_dir(root.join("d005"))
+        .map(|rd| rd.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut restore = std::fs::metadata(root.join("d005"))
+            .expect("meta")
+            .permissions();
+        restore.set_mode(0o755);
+        std::fs::set_permissions(root.join("d005"), restore).expect("restore d005");
+    }
+    let _ = std::fs::remove_dir_all(root.join("d005"));
+    git(root, &["checkout", "-q", "main"]);
+    std::fs::create_dir_all(root.join("d005")).expect("mkdir d005");
+    for i in 0..10 {
+        std::fs::write(root.join(format!("d005/f{i}.txt")), format!("v{i}\n")).expect("rewrite");
+    }
+    let mut perms2 = std::fs::metadata(root.join("d005"))
+        .expect("meta")
+        .permissions();
+    perms2.set_mode(0o555);
+    std::fs::set_permissions(root.join("d005"), perms2).expect("chmod again");
+
+    let grit_repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open");
+    let target_oid =
+        ObjectId::from_hex(git(root, &["rev-parse", "target"]).trim()).expect("target oid");
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect("grit switch");
+    let grit_left: Vec<_> = std::fs::read_dir(root.join("d005"))
+        .map(|rd| rd.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        git_left, grit_left,
+        "grit must leave the same tracked remnants as git when wholesale removal fails"
+    );
+}

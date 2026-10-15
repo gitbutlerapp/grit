@@ -634,12 +634,15 @@ fn checkout_tree_changes_with_progress(
         .filter(|c| c.status == DiffStatus::Deleted)
         .filter_map(|c| c.old_path.clone())
         .collect();
-    let wholesale_dirs =
+    let wholesale_candidates =
         wholesale_deleted_directories_on_disk(work_tree, index, &delete_paths, ignorecase);
-    for dir in &wholesale_dirs {
+    let mut wholesale_dirs_removed = BTreeSet::new();
+    for dir in &wholesale_candidates {
         let abs = work_tree.join(dir);
-        let _ = fs::remove_dir_all(&abs);
-        deleted_abs_paths.push(abs);
+        if fs::remove_dir_all(&abs).is_ok() {
+            wholesale_dirs_removed.insert(dir.clone());
+            deleted_abs_paths.push(abs);
+        }
     }
 
     for change in changes {
@@ -647,7 +650,7 @@ fn checkout_tree_changes_with_progress(
             if let Some(path) = &change.old_path {
                 let old_mode = parse_git_mode(&change.old_mode);
                 if old_mode == MODE_GITLINK
-                    || !path_under_wholesale_directory(path, &wholesale_dirs)
+                    || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
                 {
                     let abs = work_tree.join(path);
                     if old_mode == MODE_GITLINK {

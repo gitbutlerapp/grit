@@ -129,6 +129,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     let index_mtime = index_mtime_for_diff(index, index_file_mtime(&index_path));
     let stat_policy = StatMatchPolicy::from_config(repo.config().ok().as_deref());
     if staged.is_empty()
+        && !touched_paths_include_gitlinks(index, path_filter.as_ref())
         && !touched_paths_include_racy_index_entries(
             index,
             path_filter.as_ref(),
@@ -176,6 +177,16 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         },
     )?;
     Ok((staged, unstaged, index_changed))
+}
+
+/// True when a touched path is a gitlink in the index (requires full submodule checks, not stat-only).
+fn touched_paths_include_gitlinks(index: &Index, paths: &BTreeSet<String>) -> bool {
+    use crate::index::MODE_GITLINK;
+    paths.iter().any(|path| {
+        index
+            .get(path.as_bytes(), 0)
+            .is_some_and(|ie| ie.stage() == 0 && ie.mode == MODE_GITLINK)
+    })
 }
 
 /// True when a touched path has a racy index timestamp relative to the on-disk index file.
@@ -810,6 +821,121 @@ mod tests {
                 .expect("scoped");
         assert_eq!(full_staged, scoped_staged);
         assert_eq!(full_unstaged, scoped_unstaged);
+    }
+
+    fn gitlink_index_entry(path: &str, oid: ObjectId) -> crate::index::IndexEntry {
+        use crate::index::{IndexEntry, MODE_GITLINK};
+        IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_GITLINK,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid,
+            flags: path.len().min(0xFFF) as u16,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    #[test]
+    fn touched_gitlink_skips_stat_only_fast_path() {
+        use crate::objects::{serialize_commit, CommitData, ObjectKind};
+        use crate::refs;
+        use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
+        use std::process::Command;
+
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+
+        fn git_at(dir: &std::path::Path, args: &[&str]) -> String {
+            let out = Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(
+                out.status.success(),
+                "git {args:?} in {} failed: {}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        }
+
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repository(root, false, "main", None, crate::RefStorageFormat::Files)
+            .expect("init");
+        let sub = root.join("inner");
+        std::fs::create_dir_all(&sub).expect("mkdir inner");
+        git_at(&sub, &["init", "-q", "-b", "main"]);
+        git_at(&sub, &["config", "user.email", "t@t"]);
+        git_at(&sub, &["config", "user.name", "T"]);
+        std::fs::write(sub.join("f"), b"v1\n").expect("write");
+        git_at(&sub, &["add", "f"]);
+        git_at(&sub, &["commit", "-qm", "v1"]);
+        let sub1 = ObjectId::from_hex(git_at(&sub, &["rev-parse", "HEAD"]).trim()).expect("sub1");
+        std::fs::write(sub.join("f"), b"v1\nv2\n").expect("v2");
+        git_at(&sub, &["add", "f"]);
+        git_at(&sub, &["commit", "-qm", "v2"]);
+        let sub2 = ObjectId::from_hex(git_at(&sub, &["rev-parse", "HEAD"]).trim()).expect("sub2");
+        git_at(&sub, &["checkout", "-q", &sub1.to_hex()]);
+        let mut index = repo.load_index().expect("index");
+        index.add_or_replace(gitlink_index_entry("inner", sub1));
+        index.sort();
+        let head_tree =
+            write_tree_update_index(&repo.odb(), &mut index, "", WriteTreeFlags::silent())
+                .expect("head tree");
+        repo.write_index(&mut index).expect("write index");
+        let commit = CommitData {
+            tree: head_tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "main\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let co = repo
+            .odb()
+            .write(ObjectKind::Commit, &serialize_commit(&commit))
+            .expect("commit");
+        refs::write_ref(&repo.git_dir(), "HEAD", &co).expect("head");
+
+        git_at(&sub, &["checkout", "-q", &sub2.to_hex()]);
+        let mut target_index = index.clone();
+        target_index.add_or_replace(gitlink_index_entry("inner", sub2));
+        target_index.sort();
+        let target_tree =
+            write_tree_update_index(&repo.odb(), &mut target_index, "", WriteTreeFlags::silent())
+                .expect("target tree");
+        let tree_changes =
+            diff_trees(repo.odb(), Some(&head_tree), Some(&target_tree), "").expect("diff");
+        let mut index_probe = repo.load_index().expect("index");
+        let (_, unstaged, _) = local_change_diffs_for_tree_changes(
+            &repo,
+            &mut index_probe,
+            Some(head_tree),
+            &tree_changes,
+        )
+        .expect("scoped diffs");
+        assert!(
+            unstaged
+                .iter()
+                .any(|e| e.old_path.as_deref() == Some("inner")),
+            "gitlink HEAD mismatch must not pass stat-only fast path, got {unstaged:?}"
+        );
     }
 
     #[test]

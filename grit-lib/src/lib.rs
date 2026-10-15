@@ -307,6 +307,8 @@ pub(crate) mod worktree_rules;
 mod worktree_rules_tests;
 mod worktree_scan;
 pub use worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
+#[doc(hidden)]
+pub use worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
 pub(crate) mod write_tree;
 pub(crate) mod ws;
 pub(crate) mod zlib_inflate;
