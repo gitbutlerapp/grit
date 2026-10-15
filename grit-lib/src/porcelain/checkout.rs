@@ -26,6 +26,7 @@ use crate::index::{
     MODE_REGULAR, MODE_SYMLINK,
 };
 use crate::objects::{parse_tree, ObjectId, ObjectKind};
+use crate::path_icase::paths_equal;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
@@ -481,6 +482,65 @@ fn wholesale_deleted_directories(index: &Index, delete_paths: &[String]) -> BTre
         .collect()
 }
 
+/// True when every file under `work_tree`/`dir` is listed in `delete_paths` (Git keeps untracked/ignored extras).
+fn wholesale_directory_safe_to_remove(
+    work_tree: &Path,
+    dir: &str,
+    delete_paths: &BTreeSet<String>,
+    ignorecase: bool,
+) -> bool {
+    let abs_dir = work_tree.join(dir);
+    let mut stack = vec![abs_dir];
+    while let Some(current) = stack.pop() {
+        let read_dir = match fs::read_dir(&current) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                let _ = e;
+                return false;
+            }
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => return false,
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() && !file_type.is_symlink() {
+                return false;
+            }
+            let Ok(rel) = path.strip_prefix(work_tree) else {
+                return false;
+            };
+            let rel = rel.to_string_lossy();
+            if !delete_paths
+                .iter()
+                .any(|del| paths_equal(rel.as_bytes(), del.as_bytes(), ignorecase))
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn wholesale_deleted_directories_on_disk(
+    work_tree: &Path,
+    index: &Index,
+    delete_paths: &[String],
+    ignorecase: bool,
+) -> BTreeSet<String> {
+    let delete_set: BTreeSet<String> = delete_paths.iter().cloned().collect();
+    wholesale_deleted_directories(index, delete_paths)
+        .into_iter()
+        .filter(|dir| wholesale_directory_safe_to_remove(work_tree, dir, &delete_set, ignorecase))
+        .collect()
+}
+
 fn path_under_wholesale_directory(path: &str, wholesale_dirs: &BTreeSet<String>) -> bool {
     wholesale_dirs
         .iter()
@@ -536,7 +596,8 @@ fn checkout_tree_changes_with_progress(
         .filter(|c| c.status == DiffStatus::Deleted)
         .filter_map(|c| c.old_path.clone())
         .collect();
-    let wholesale_dirs = wholesale_deleted_directories(index, &delete_paths);
+    let wholesale_dirs =
+        wholesale_deleted_directories_on_disk(work_tree, index, &delete_paths, ignorecase);
     for dir in &wholesale_dirs {
         let abs = work_tree.join(dir);
         let _ = fs::remove_dir_all(&abs);
@@ -709,7 +770,7 @@ struct DelayedCheckoutTarget {
     change: DiffEntry,
 }
 
-fn tree_changes_touch_gitattributes(changes: &[DiffEntry]) -> bool {
+pub(crate) fn tree_changes_touch_gitattributes(changes: &[DiffEntry]) -> bool {
     use std::ffi::OsStr;
     use std::path::Path;
     changes.iter().any(|change| {
@@ -1566,6 +1627,46 @@ mod tests {
         assert_eq!(delete_paths.len(), 50);
         let wholesale = wholesale_deleted_directories(&index, &delete_paths);
         assert_eq!(wholesale, BTreeSet::from(["d005".to_owned()]));
+    }
+
+    #[test]
+    fn wholesale_directory_removal_skips_when_untracked_present() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        std::fs::create_dir_all(wt.join("d")).expect("mkdir");
+        let mut index = repo.load_index().expect("index");
+        let mut delete_paths = Vec::new();
+        for i in 0..8 {
+            let rel = format!("d/f{i}.txt");
+            let abs = wt.join(&rel);
+            std::fs::write(&abs, format!("v{i}\n")).expect("write");
+            let data = fs::read(&abs).expect("read");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            index.add_or_replace(
+                entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+            );
+            delete_paths.push(rel);
+        }
+        std::fs::write(wt.join("d/untracked.txt"), b"keep me\n").expect("untracked");
+        index.sort();
+        let delete_set: BTreeSet<String> = delete_paths.iter().cloned().collect();
+        assert!(!super::wholesale_directory_safe_to_remove(
+            wt,
+            "d",
+            &delete_set,
+            false
+        ));
+        let wholesale =
+            super::wholesale_deleted_directories_on_disk(wt, &index, &delete_paths, false);
+        assert!(wholesale.is_empty());
     }
 
     #[test]

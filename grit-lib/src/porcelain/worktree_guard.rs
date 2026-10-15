@@ -15,8 +15,10 @@ use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, DiffEntry, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::index::{index_file_mtime, Index};
+use crate::index::StatMatchPolicy;
+use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::{parse_commit, ObjectId};
+use crate::porcelain::checkout::tree_changes_touch_gitattributes;
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
 use crate::repo::Repository;
 use crate::state::resolve_head;
@@ -123,15 +125,23 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    if staged.is_empty() && worktree_stats_match_index_on_paths(repo, index, path_filter.as_ref())?
+    {
+        return Ok((staged, Vec::new(), false));
+    }
+
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_file_mtime(&index_path);
     let config = repo.config().ok();
     let worktree_rules = match config.as_ref() {
-        Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts(
-            repo,
-            index,
-            Arc::clone(cfg),
-        )?))),
+        Some(cfg) => {
+            let rules = if tree_changes_touch_gitattributes(tree_changes) {
+                WorktreeRules::from_parts(repo, index, Arc::clone(cfg))?
+            } else {
+                WorktreeRules::from_parts_index_attributes_only(repo, index, Arc::clone(cfg))?
+            };
+            Some(Arc::new(Mutex::new(rules)))
+        }
         None => None,
     };
     let (unstaged, index_changed) = diff_index_to_worktree_with_options(
@@ -152,6 +162,103 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         },
     )?;
     Ok((staged, unstaged, index_changed))
+}
+
+/// Whether every indexed blob under `paths` matches worktree stat data (no content read).
+fn worktree_stats_match_index_on_paths(
+    repo: &Repository,
+    index: &Index,
+    paths: &BTreeSet<String>,
+) -> Result<bool> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use crate::diff::stat_matches_with_policy;
+    use crate::index::MODE_GITLINK;
+    use crate::diff::index_entry_worktree_abs;
+    use crate::worktree_scan::{
+        for_each_blob_by_directory_parallel, group_blob_entries_by_dir_for_paths,
+        BlobDiskLookup, WorktreeBlobScanOptions,
+    };
+
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let config = repo.config().ok();
+    let stat_policy = StatMatchPolicy::from_config(config.as_deref());
+    let precompose_unicode = config
+        .as_ref()
+        .and_then(|c| c.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
+        .unwrap_or(false);
+    let ignorecase = config
+        .as_ref()
+        .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
+        .unwrap_or(false);
+    let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
+    if blob_dirs.is_empty() {
+        return Ok(true);
+    }
+    let preload_index = config
+        .as_ref()
+        .and_then(|c| c.get_bool("core.preloadIndex").and_then(|r| r.ok()))
+        .unwrap_or(true);
+    let blob_scan = WorktreeBlobScanOptions {
+        preload_index,
+        stat_parallel_threads: None,
+    };
+    let work_tree_owned = work_tree.to_path_buf();
+    let dir_abs = move |dir: &str| {
+        if dir.is_empty() {
+            work_tree_owned.clone()
+        } else {
+            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+        }
+    };
+    let work_tree_for_files = work_tree.to_path_buf();
+    let file_abs = move |rel: &str| {
+        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+    };
+    let matches = AtomicBool::new(true);
+    for_each_blob_by_directory_parallel(
+        &blob_dirs,
+        blob_scan,
+        &Default::default(),
+        config.as_deref().unwrap_or(&ConfigSet::new()),
+        false,
+        dir_abs,
+        file_abs,
+        |_| false,
+        |entry_index, _path, lookup| {
+            if !matches.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let ie = &index.entries[entry_index];
+            if !indexed_path_needs_worktree_stat_check(ie) {
+                return Ok(());
+            }
+            match lookup {
+                BlobDiskLookup::Missing => {
+                    matches.store(false, Ordering::Relaxed);
+                }
+                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+                BlobDiskLookup::Present(meta) => {
+                    if ie.mode == MODE_GITLINK {
+                        if !meta.is_dir() {
+                            matches.store(false, Ordering::Relaxed);
+                        }
+                    } else if !meta.is_file() && !meta.is_symlink() {
+                        matches.store(false, Ordering::Relaxed);
+                    } else if !stat_matches_with_policy(ie, &meta, stat_policy) {
+                        matches.store(false, Ordering::Relaxed);
+                    }
+                }
+            }
+            Ok(())
+        },
+    )?;
+    Ok(matches.load(Ordering::Relaxed))
+}
+
+fn indexed_path_needs_worktree_stat_check(ie: &IndexEntry) -> bool {
+    ie.stage() == 0 && !ie.skip_worktree() && !ie.assume_unchanged() && !ie.intent_to_add()
 }
 
 #[derive(Clone, Copy)]
@@ -276,14 +383,10 @@ pub(crate) fn untracked_scan_pathspecs_for_tree_changes(tree_changes: &[DiffEntr
         if trimmed.is_empty() {
             continue;
         }
-        specs.insert(trimmed.to_owned());
-        let mut prefix = String::new();
-        for part in trimmed.split('/') {
-            if !prefix.is_empty() {
-                prefix.push('/');
-            }
-            prefix.push_str(part);
-            specs.insert(prefix.clone());
+        if let Some((top, _rest)) = trimmed.split_once('/') {
+            specs.insert(top.to_owned());
+        } else {
+            specs.insert(trimmed.to_owned());
         }
     }
     specs.into_iter().collect()
@@ -591,9 +694,8 @@ mod tests {
             added_entry("top"),
         ];
         let specs = super::untracked_scan_pathspecs_for_tree_changes(&changes);
-        assert!(specs.contains(&"dir/sub/new.txt".to_owned()));
-        assert!(specs.contains(&"dir/sub".to_owned()));
         assert!(specs.contains(&"dir".to_owned()));
+        assert!(!specs.contains(&"dir/sub/new.txt".to_owned()));
         assert!(specs.contains(&"top".to_owned()));
         assert!(!specs.contains(&"tracked.txt".to_owned()));
     }

@@ -401,18 +401,14 @@ fn prepare_tree_switch_allow_local(
     to_tree: &ObjectId,
 ) -> Result<PreparedSwitch> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    let index_path = repo.index_path_for_env()?;
     let tree_changes = crate::diff::diff_trees(repo.odb(), from_tree, Some(to_tree), "")?;
-    let (staged, unstaged, index_changed) =
+    let (staged, unstaged, _index_changed) =
         crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
             repo,
             &mut snapshot.index,
             snapshot.head_tree,
             &tree_changes,
         )?;
-    if index_changed && repo.try_write_index_at(&index_path, &mut snapshot.index)? {
-        snapshot.index.source_mtime = crate::index::index_file_mtime(&index_path);
-    }
     let preserve_worktree_paths = ensure_local_changes_compatible_with_switch(
         &snapshot.index,
         &staged,
