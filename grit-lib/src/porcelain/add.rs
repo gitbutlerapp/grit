@@ -271,7 +271,7 @@ fn stage_inner(
         HashSet::new()
     };
 
-    if let Some(summary) = tracked_scan_summary {
+    if let Some(summary) = &tracked_scan_summary {
         outcome.modified = summary.modified.len();
         outcome.removed = summary.removed.len();
     } else {
@@ -317,6 +317,16 @@ fn stage_inner(
         parallelism,
         &mut outcome,
     )?;
+
+    if let Some(summary) = &tracked_scan_summary {
+        if index.entries.len() >= 80_000 {
+            for raw in summary.modified.iter().chain(summary.removed.iter()) {
+                if let Ok(path) = std::str::from_utf8(raw) {
+                    index.invalidate_untracked_cache_for_path(path);
+                }
+            }
+        }
+    }
 
     if has_unmerged && !opts.pathspecs.is_empty() {
         outcome.modified +=

@@ -13,19 +13,25 @@ use crate::diff::{
     read_submodule_head_oid, stat_matches, symlink_target_bytes, SymlinkDirCache,
 };
 use crate::error::{Error, Result};
+use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
 use crate::index::index_file_mtime;
 use crate::index::{
     entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_GITLINK,
 };
 use crate::objects::{ObjectId, ObjectKind};
+use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
+use crate::worktree_batch::{prepare_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
     for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
     WorktreeBlobScanOptions,
 };
+
+/// Parallel blob reread/hash is only worth the setup cost at campaign index sizes.
+const LARGE_INDEX_RESTAGE_THRESHOLD: usize = 80_000;
 
 /// Summary of paths updated while staging tracked modifications/deletions.
 ///
@@ -121,6 +127,18 @@ pub fn stage_tracked_modifications_in_index(
         .unwrap_or(true);
     let mut rules = WorktreeRules::from_repository(repo, index)?;
 
+    let bulk_index = index.entries.len() >= LARGE_INDEX_RESTAGE_THRESHOLD;
+    if bulk_index {
+        index.defer_untracked_cache_invalidation = true;
+    }
+
+    // Git's index often carries a valid TREE extension; per-path invalidation during a bulk
+    // restage devolves into thousands of tree walks. Drop it once up front at campaign scale.
+    if bulk_index && index.cache_tree.is_some() {
+        index.cache_tree = None;
+        index.cache_tree_root = None;
+    }
+
     let mut unmerged_paths: HashSet<Vec<u8>> = HashSet::new();
     let mut stage0: HashMap<Vec<u8>, IndexEntry> = HashMap::new();
     for e in &index.entries {
@@ -194,6 +212,14 @@ pub fn stage_tracked_modifications_in_index(
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
     let thread_policy = repo.thread_policy();
+    let parallel_restage = index.entries.len() >= LARGE_INDEX_RESTAGE_THRESHOLD;
+    let parallelism = thread_policy
+        .resolve(
+            crate::parallel::ParallelOp::IndexRefresh,
+            rules_config.as_ref(),
+        )
+        .parallelism();
+    let mut deferred_restage: Vec<DeferredRestageJob> = Vec::new();
     for_each_blob_by_directory_parallel(
         &blob_dirs,
         blob_scan_opts,
@@ -253,15 +279,30 @@ pub fn stage_tracked_modifications_in_index(
                     trust_filemode,
                     rules: &mut rules,
                 };
-                if refresh_present_tracked_path(ctx, &meta)? {
+                let defer = parallel_restage.then_some(&mut deferred_restage);
+                if refresh_present_tracked_path(ctx, &meta, defer)? {
                     summary.modified.push(raw_path);
                 }
             }
         }
     }
 
+    if !deferred_restage.is_empty() {
+        summary.modified.extend(restage_deferred_jobs(
+            repo,
+            index,
+            &mut rules,
+            trust_filemode,
+            parallelism,
+            &deferred_restage,
+        )?);
+    }
+
     summary.modified.sort();
     summary.removed.sort();
+    if bulk_index {
+        index.defer_untracked_cache_invalidation = false;
+    }
     Ok(summary)
 }
 
@@ -378,7 +419,7 @@ fn stage_tracked_path_individual(
                 trust_filemode,
                 rules,
             };
-            if refresh_present_tracked_path(ctx, &meta)? {
+            if refresh_present_tracked_path(ctx, &meta, None)? {
                 summary.modified.push(raw_path.to_vec());
             }
         }
@@ -392,7 +433,18 @@ fn stage_tracked_path_individual(
     Ok(())
 }
 
-fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>, meta: &fs::Metadata) -> Result<bool> {
+struct DeferredRestageJob {
+    raw_path: Vec<u8>,
+    rel_path: String,
+    abs_path: PathBuf,
+    index_entry: IndexEntry,
+}
+
+fn refresh_present_tracked_path(
+    ctx: PresentRefreshCtx<'_>,
+    meta: &fs::Metadata,
+    defer_restage: Option<&mut Vec<DeferredRestageJob>>,
+) -> Result<bool> {
     let PresentRefreshCtx {
         repo,
         index,
@@ -444,6 +496,15 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>, meta: &fs::Metadata)
     }
 
     let oid = if let Ok(rel_path) = std::str::from_utf8(raw_path) {
+        if let Some(deferred) = defer_restage {
+            deferred.push(DeferredRestageJob {
+                raw_path: raw_path.to_vec(),
+                rel_path: rel_path.to_owned(),
+                abs_path: abs_path.to_path_buf(),
+                index_entry: idx_e.clone(),
+            });
+            return Ok(false);
+        }
         let file_attrs = rules.file_attrs(rel_path, false);
         let conv = rules.conversion();
         let filter_fp = Some(rules.filter_process());
@@ -472,6 +533,60 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>, meta: &fs::Metadata)
     let entry = entry_from_stat(abs_path, raw_path, oid, mode_for_index)?;
     index.stage_file(entry);
     Ok(true)
+}
+
+fn restage_deferred_jobs(
+    repo: &Repository,
+    index: &mut Index,
+    rules: &mut WorktreeRules,
+    trust_filemode: bool,
+    parallelism: Parallelism,
+    jobs: &[DeferredRestageJob],
+) -> Result<Vec<Vec<u8>>> {
+    let batch_inputs: Vec<WorktreeBlobReadInput> = jobs
+        .iter()
+        .map(|job| WorktreeBlobReadInput {
+            abs: job.abs_path.clone(),
+            index_relpath: job.rel_path.clone(),
+            index_entry: Some(job.index_entry.clone()),
+            file_attrs: rules.file_attrs(&job.rel_path, false),
+        })
+        .collect();
+    let prepared = prepare_worktree_blobs_parallel(
+        repo.odb(),
+        &batch_inputs,
+        rules.conversion(),
+        parallelism,
+        Some(rules.filter_process()),
+    )?;
+    if !prepared.is_empty() {
+        repo.odb().ensure_all_loose_prefix_dirs()?;
+    }
+    let write_bytes: usize = prepared.iter().map(|p| p.zlib_store.len()).sum();
+    let _written: Vec<ObjectId> =
+        try_par_hash_with(&prepared, parallelism.threads(), write_bytes, |prep| {
+            repo.odb()
+                .write_loose_zlib_prehashed(&prep.oid, &prep.zlib_store, BULK_NEW_LOOSE_WRITE)
+                .map_err(|e| Error::Message(format!("could not store {}: {e}", prep.index_relpath)))
+        })
+        .map_err(|e: ParallelHashError<Error>| match e {
+            ParallelHashError::Task(err) => err,
+        })?;
+
+    let mut modified = Vec::new();
+    for (job, prep) in jobs.iter().zip(prepared.iter()) {
+        debug_assert_eq!(job.rel_path, prep.index_relpath);
+        let idx_mode = job.index_entry.mode;
+        let idx_oid = job.index_entry.oid;
+        let mode_for_index = if trust_filemode { prep.mode } else { idx_mode };
+        if prep.oid == idx_oid && (mode_for_index == idx_mode || !trust_filemode) {
+            continue;
+        }
+        let entry = entry_from_stat(&job.abs_path, &job.raw_path, prep.oid, mode_for_index)?;
+        index.stage_file(entry);
+        modified.push(job.raw_path.clone());
+    }
+    Ok(modified)
 }
 
 fn refresh_gitlink(

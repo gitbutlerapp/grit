@@ -12,6 +12,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::index::{Index, IndexParseContext};
 use grit_lib::objects::HashAlgo;
 use grit_lib::parallel::ThreadPolicy;
+use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
@@ -95,9 +96,7 @@ fn bench_index_write(c: &mut Criterion) {
     let mut group = c.benchmark_group("index_write");
     for (label, index) in [
         ("v2/10000", &fx.index_v2_10k),
-        ("v2/100000", &fx.index_v2_100k),
         ("v4/10000", &fx.index_v4_10k),
-        ("v4/100000", &fx.index_v4_100k),
     ] {
         group.throughput(Throughput::Elements(index.entries().len() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(label), index, |b, idx| {
@@ -107,6 +106,40 @@ fn bench_index_write(c: &mut Criterion) {
             });
         });
     }
+    group.finish();
+}
+
+fn bench_index_write_100k(c: &mut Criterion) {
+    let fx = WorktreeBenchFixtures::global();
+    let mut group = c.benchmark_group("index/write_100k");
+    for (label, index) in [("v2", &fx.index_v2_100k), ("v4", &fx.index_v4_100k)] {
+        group.throughput(Throughput::Elements(100_000));
+        group.bench_with_input(BenchmarkId::from_parameter(label), index, |b, idx| {
+            b.iter(|| {
+                idx.write(&fx.index_write_scratch)
+                    .expect("write index bench");
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_add_stage_all_100k(c: &mut Criterion) {
+    let fx = WorktreeBenchFixtures::global();
+    let repo = &fx.scan_repo_100k;
+    let wt = repo.work_tree().expect("work tree");
+    let opts = StageOptions {
+        pathspecs: Vec::new(),
+        pathspec_sources: Vec::new(),
+        mode: StageMode::All,
+    };
+    let mut progress = NullProgress;
+    let mut group = c.benchmark_group("add/stage_all_100k");
+    group.throughput(Throughput::Elements(100_000));
+    group.bench_function("stat_clean", |b| {
+        let _ = wt;
+        b.iter(|| black_box(stage(repo, &opts, &mut progress).expect("stage all")));
+    });
     group.finish();
 }
 
@@ -204,6 +237,8 @@ criterion_group!(
     worktree,
     bench_index_read,
     bench_index_write,
+    bench_index_write_100k,
+    bench_add_stage_all_100k,
     bench_config_load,
     bench_ignore_match,
     bench_untracked_walk,

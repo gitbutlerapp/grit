@@ -211,6 +211,8 @@ pub struct WorktreeBenchFixtures {
     pub index_write_scratch: PathBuf,
     /// Repository with 10k tracked files on disk for status/staging scan benchmarks.
     pub scan_repo_10k: Repository,
+    /// Repository with 100k tracked files for add/index staging benchmarks.
+    pub scan_repo_100k: Repository,
     /// Repository with one `.gitattributes` per directory (L-sized status fixture).
     pub status_nested_attr_repo: Repository,
     /// Same tree layout without per-directory `.gitattributes` (baseline).
@@ -371,6 +373,38 @@ impl WorktreeBenchFixtures {
             .write(&scan_repo.index_handle().path())
             .expect("write scan index");
 
+        let scan_100k_root = base.join("scan-100k");
+        let scan_repo_100k = Repository::init(
+            &scan_100k_root,
+            &InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+        )
+        .expect("scan 100k repo init");
+        let scan_100k_wt = scan_repo_100k.work_tree().expect("work tree");
+        let mut scan_100k_index = Index::empty(2);
+        for i in 0..100_000 {
+            let dir = format!("d{:04}", i / 100);
+            let rel = format!("{dir}/f{:05}.txt", i % 100);
+            let path = scan_100k_wt.join(&rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("scan 100k subdir");
+            }
+            let bytes = format!("payload {i}\n");
+            std::fs::write(&path, &bytes).expect("scan 100k blob");
+            let oid = scan_repo_100k
+                .odb()
+                .write(grit_lib::objects::ObjectKind::Blob, bytes.as_bytes())
+                .expect("hash scan 100k blob");
+            let meta = std::fs::symlink_metadata(&path).expect("stat scan 100k file");
+            let entry =
+                grit_lib::index::entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR);
+            scan_100k_index.add_or_replace(entry);
+        }
+        scan_100k_index
+            .write(&scan_repo_100k.index_handle().path())
+            .expect("write scan 100k index");
+
         let (status_nested_attr_repo, status_plain_l_repo) = build_status_nested_l_fixtures(base);
 
         let untracked_root = base.join("untracked-walk-100k");
@@ -420,6 +454,7 @@ impl WorktreeBenchFixtures {
             attr_paths,
             index_write_scratch,
             scan_repo_10k: scan_repo,
+            scan_repo_100k,
             status_nested_attr_repo,
             status_plain_l_repo,
             untracked_walk_repo,

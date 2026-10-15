@@ -399,6 +399,8 @@ pub struct Index {
     pub hash_algo: HashAlgo,
     /// On-disk index mtime when this index was last read (Git `istate->timestamp`).
     pub source_mtime: Option<(u32, u32)>,
+    /// When set, [`Self::invalidate_untracked_cache_for_path`] is a no-op (bulk staging defers invalidation).
+    pub(crate) defer_untracked_cache_invalidation: bool,
 }
 
 impl Default for Index {
@@ -766,6 +768,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
             source_mtime: None,
+            defer_untracked_cache_invalidation: false,
         }
     }
 
@@ -813,6 +816,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
             source_mtime: None,
+            defer_untracked_cache_invalidation: false,
         }
     }
 
@@ -840,6 +844,7 @@ impl Index {
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
                 source_mtime: None,
+                defer_untracked_cache_invalidation: false,
             };
         }
 
@@ -875,6 +880,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::default(),
             source_mtime: None,
+            defer_untracked_cache_invalidation: false,
         }
     }
 
@@ -900,6 +906,7 @@ impl Index {
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
                 source_mtime: None,
+                defer_untracked_cache_invalidation: false,
             };
         }
 
@@ -938,6 +945,7 @@ impl Index {
             cache_tree: None,
             hash_algo: HashAlgo::default(),
             source_mtime: None,
+            defer_untracked_cache_invalidation: false,
         }
     }
 
@@ -1300,6 +1308,7 @@ impl Index {
             cache_tree: ext_fields.cache_tree,
             hash_algo,
             source_mtime: None,
+            defer_untracked_cache_invalidation: false,
         })
     }
 
@@ -1417,11 +1426,6 @@ impl Index {
         policy: crate::parallel::ThreadPolicy,
     ) -> Result<()> {
         let body = self.serialize_index_body(config, policy)?;
-        let checksum: Vec<u8> = if skip_hash {
-            vec![0u8; self.hash_algo.len()]
-        } else {
-            hash_index_body(self.hash_algo, &body)
-        };
 
         if let Some(lock) = existing_lock {
             if lock.index_path != path {
@@ -1429,6 +1433,11 @@ impl Index {
                     "index lock path does not match write target".into(),
                 ));
             }
+            let checksum: Vec<u8> = if skip_hash {
+                vec![0u8; self.hash_algo.len()]
+            } else {
+                hash_index_body(self.hash_algo, &body)
+            };
             lock.write_index_contents(&body, &checksum)?;
             if commit {
                 lock.commit_replace_index()?;
@@ -1465,11 +1474,9 @@ impl Index {
             wrote_pid_file = true;
         }
 
-        if let Err(e) = (|| -> io::Result<()> {
-            lock_file.write_all(&body)?;
-            lock_file.write_all(&checksum)?;
-            Ok(())
-        })() {
+        if let Err(e) =
+            write_index_body_and_trailer(&mut lock_file, self.hash_algo, skip_hash, &body)
+        {
             let _ = fs::remove_file(&tmp_path);
             if wrote_pid_file {
                 let _ = fs::remove_file(&pid_path);
@@ -1535,6 +1542,7 @@ impl Index {
         } else {
             self.version
         };
+        out.reserve(self.estimate_body_capacity(write_version, config));
         // Header
         out.extend_from_slice(b"DIRC");
         out.extend_from_slice(&write_version.to_be_bytes());
@@ -2267,6 +2275,9 @@ impl Index {
 
     /// Invalidate UNTR nodes affected by an index change (Git `untracked_cache_*_index`).
     pub fn invalidate_untracked_cache_for_path(&mut self, path: &str) {
+        if self.defer_untracked_cache_invalidation {
+            return;
+        }
         if let Some(uc) = self.untracked_cache.as_mut() {
             untracked_cache::invalidate_path(uc, path);
         }
@@ -3146,6 +3157,72 @@ fn is_process_running(pid: u64) -> bool {
 /// Hash an index body with the given algorithm, returning the raw checksum.
 fn hash_index_body(algo: HashAlgo, body: &[u8]) -> Vec<u8> {
     algo.digest(body).as_bytes().to_vec()
+}
+
+/// Write index bytes and trailing checksum in one buffered pass, updating the digest while writing.
+fn write_index_body_and_trailer(
+    file: &mut fs::File,
+    algo: HashAlgo,
+    skip_hash: bool,
+    body: &[u8],
+) -> io::Result<()> {
+    use std::io::BufWriter;
+    let mut out = BufWriter::with_capacity(256 * 1024, file);
+    if skip_hash {
+        out.write_all(body)?;
+        out.write_all(&vec![0u8; algo.len()])?;
+        return out.flush();
+    }
+    let mut hasher = algo.hasher();
+    for chunk in body.chunks(256 * 1024) {
+        hasher.update(chunk);
+        out.write_all(chunk)?;
+    }
+    out.write_all(hasher.finalize().as_bytes())?;
+    out.flush()
+}
+
+impl Index {
+    /// Conservative pre-size for serializing the index body (header, entries, extensions).
+    fn estimate_body_capacity(&self, write_version: u32, config: Option<&ConfigSet>) -> usize {
+        use crate::index_eoie_ieot::record_end_of_index_entries;
+        let hash_len = self.hash_algo.len();
+        let mut entries_bytes = 0usize;
+        for entry in &self.entries {
+            let mut n = 62usize
+                .saturating_add(hash_len)
+                .saturating_add(entry.path.len());
+            if write_version >= 3
+                && entry
+                    .flags_extended
+                    .map(IndexEntry::disk_flags_extended)
+                    .filter(|fe| *fe != 0)
+                    .is_some()
+            {
+                n += 2;
+            }
+            if write_version == 4 {
+                n += 12;
+            } else {
+                n = (n + 7) & !7;
+            }
+            entries_bytes = entries_bytes.saturating_add(n);
+        }
+        let mut extra = 256usize;
+        if self.cache_tree.is_some() {
+            extra += 4096;
+        }
+        if self.untracked_cache.is_some() {
+            extra += 4096;
+        }
+        if self.fsmonitor_last_update.is_some() {
+            extra += 512;
+        }
+        if record_end_of_index_entries(config) {
+            extra += 64;
+        }
+        12 + entries_bytes + extra
+    }
 }
 
 fn append_index_extension(
