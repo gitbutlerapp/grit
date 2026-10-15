@@ -6,7 +6,7 @@ use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, ObjectId};
-use crate::porcelain::checkout::checkout_tree_changes_with_index;
+use crate::porcelain::checkout::{checkout_tree_changes_with_index_opts, CheckoutApplyOptions};
 use crate::porcelain::checkout_reflog::{
     append_head_checkout_reflog, checkout_reflog_from_label, finish_switch_ref_updates,
     is_already_detached_at, is_already_on_branch, switch_create_reflog_source_label,
@@ -357,7 +357,15 @@ fn switch_to_target(
                 .is_none_or(|path| !prepared.preserve_worktree_paths.contains(path))
         })
         .collect();
-    checkout_tree_changes_with_index(repo, &tree_changes, &mut prepared.index)?;
+    checkout_tree_changes_with_index_opts(
+        repo,
+        &tree_changes,
+        &mut prepared.index,
+        CheckoutApplyOptions {
+            parallel_prepare_blobs: true,
+            checkout_parallel_threshold: None,
+        },
+    )?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
         finish_switch_ref_updates(

@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use crate::config::ConfigSet;
 use crate::diff::format_mode;
 use crate::diff::{
-    diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, DiffEntry, DiffStatus,
+    diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, entry_is_racy_with_policy,
+    index_mtime_for_diff, DiffEntry, DiffStatus,
 };
 use crate::error::{Error, Result};
 use crate::index::StatMatchPolicy;
@@ -118,20 +119,33 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         return Ok((Vec::new(), Vec::new(), false));
     }
     let path_filter = Arc::new(paths);
-    let touched_count = path_filter.len();
     let head_by_path = head_tree_sides_from_changes(tree_changes);
     let staged = staged_diff_for_tree_switch_paths(index, &head_by_path, path_filter.as_ref())?;
 
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
-    if staged.is_empty() && worktree_stats_match_index_on_paths(repo, index, path_filter.as_ref())?
+    let index_path = repo.index_path_for_env()?;
+    let index_mtime = index_mtime_for_diff(index, index_file_mtime(&index_path));
+    let stat_policy = StatMatchPolicy::from_config(repo.config().ok().as_deref());
+    if staged.is_empty()
+        && !touched_paths_include_racy_index_entries(
+            index,
+            path_filter.as_ref(),
+            index_mtime,
+            stat_policy,
+        )
+        && worktree_stats_match_index_on_paths(
+            repo,
+            index,
+            path_filter.as_ref(),
+            index_mtime,
+            stat_policy,
+        )?
     {
         return Ok((staged, Vec::new(), false));
     }
 
-    let index_path = repo.index_path_for_env()?;
-    let index_mtime = index_file_mtime(&index_path);
     let config = repo.config().ok();
     let worktree_rules = match config.as_ref() {
         Some(cfg) => {
@@ -149,12 +163,12 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         index,
         work_tree,
         crate::diff::DiffIndexToWorktreeOptions {
-            index_mtime: crate::diff::index_mtime_for_diff(index, index_mtime),
+            index_mtime,
             ignore_submodule_untracked: true,
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
             refresh_index_stat_in_pass: false,
-            for_status: touched_count <= 128,
-            stat_parallel_threads: if touched_count >= 256 { None } else { Some(1) },
+            for_status: false,
+            stat_parallel_threads: None,
             config,
             worktree_rules,
             restrict_to_paths: Some(path_filter),
@@ -164,26 +178,45 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     Ok((staged, unstaged, index_changed))
 }
 
+/// True when a touched path has a racy index timestamp relative to the on-disk index file.
+fn touched_paths_include_racy_index_entries(
+    index: &Index,
+    paths: &BTreeSet<String>,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: StatMatchPolicy,
+) -> bool {
+    paths.iter().any(|path| {
+        index.get(path.as_bytes(), 0).is_some_and(|ie| {
+            indexed_path_needs_worktree_stat_check(ie)
+                && entry_is_racy_with_policy(ie, index_mtime, stat_policy)
+        })
+    })
+}
+
 /// Whether every indexed blob under `paths` matches worktree stat data (no content read).
+///
+/// Callers must treat racy entries as non-matching (see [`touched_paths_include_racy_index_entries`])
+/// and fall back to a content-aware diff.
 fn worktree_stats_match_index_on_paths(
     repo: &Repository,
     index: &Index,
     paths: &BTreeSet<String>,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: StatMatchPolicy,
 ) -> Result<bool> {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use crate::diff::index_entry_worktree_abs;
     use crate::diff::stat_matches_with_policy;
     use crate::index::MODE_GITLINK;
-    use crate::diff::index_entry_worktree_abs;
     use crate::worktree_scan::{
-        for_each_blob_by_directory_parallel, group_blob_entries_by_dir_for_paths,
-        BlobDiskLookup, WorktreeBlobScanOptions,
+        for_each_blob_by_directory_parallel, group_blob_entries_by_dir_for_paths, BlobDiskLookup,
+        WorktreeBlobScanOptions,
     };
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let config = repo.config().ok();
-    let stat_policy = StatMatchPolicy::from_config(config.as_deref());
     let precompose_unicode = config
         .as_ref()
         .and_then(|c| c.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
@@ -240,13 +273,15 @@ fn worktree_stats_match_index_on_paths(
                 }
                 BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
                 BlobDiskLookup::Present(meta) => {
-                    if ie.mode == MODE_GITLINK {
-                        if !meta.is_dir() {
-                            matches.store(false, Ordering::Relaxed);
-                        }
+                    let mismatch = if ie.mode == MODE_GITLINK {
+                        !meta.is_dir()
                     } else if !meta.is_file() && !meta.is_symlink() {
-                        matches.store(false, Ordering::Relaxed);
-                    } else if !stat_matches_with_policy(ie, &meta, stat_policy) {
+                        true
+                    } else {
+                        !stat_matches_with_policy(ie, &meta, stat_policy)
+                            || entry_is_racy_with_policy(ie, index_mtime, stat_policy)
+                    };
+                    if mismatch {
                         matches.store(false, Ordering::Relaxed);
                     }
                 }

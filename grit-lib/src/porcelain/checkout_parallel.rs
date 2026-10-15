@@ -334,24 +334,48 @@ fn flush_parallel_batch(
     batch: &[usize],
     dir_cache: &mut LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
+    parallel_prepare_blobs: bool,
+    checkout_parallel_threshold: Option<i64>,
 ) -> Result<()> {
     if batch.is_empty() {
         return Ok(());
     }
     let policy = repo.thread_policy();
-    let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
+    let mut options = policy.resolve(ParallelOp::Checkout, config.as_ref());
+    if let Some(threshold) = checkout_parallel_threshold {
+        options.signed_entry_threshold = Some(threshold);
+    }
     let use_parallel = options.threads.get() > 1 && checkout_pool_worthwhile(batch.len(), options);
 
-    let mut prepared: Vec<PreparedWrite> = Vec::with_capacity(batch.len());
-    for &idx in batch {
-        match prepare_write_job(repo, conv, &jobs[idx]) {
-            Ok(bytes) => prepared.push(PreparedWrite { idx, bytes }),
-            Err(err) => {
-                flush_prepared_writes_serial(work_tree, jobs, &prepared, dir_cache, outcomes)?;
-                return Err(err);
+    let prepared: Vec<PreparedWrite> = if parallel_prepare_blobs
+        && options.threads.get() > 1
+        && batch.len() > 1
+    {
+        try_par_map_with_local(
+            batch,
+            options,
+            0,
+            || (),
+            |_, &idx| {
+                prepare_write_job(repo, conv, &jobs[idx]).map(|bytes| PreparedWrite { idx, bytes })
+            },
+        )
+        .map_err(|e: ParallelHashError<Error>| match e {
+            ParallelHashError::Task(err) => err,
+        })?
+    } else {
+        let mut prepared = Vec::with_capacity(batch.len());
+        for &idx in batch {
+            match prepare_write_job(repo, conv, &jobs[idx]) {
+                Ok(bytes) => prepared.push(PreparedWrite { idx, bytes }),
+                Err(err) => {
+                    flush_prepared_writes_serial(work_tree, jobs, &prepared, dir_cache, outcomes)?;
+                    return Err(err);
+                }
             }
         }
-    }
+        prepared
+    };
 
     if use_parallel {
         let parent_snapshot = LeadingDirCache::with_ready_from(&*dir_cache);
@@ -384,6 +408,8 @@ pub(crate) fn execute_write_jobs(
     delayed: &mut DelayedProcessCheckout,
     jobs: &[CheckoutWriteJob],
     parallel_indices: &HashSet<usize>,
+    parallel_prepare_blobs: bool,
+    checkout_parallel_threshold: Option<i64>,
 ) -> Result<Vec<WriteJobOutcome>> {
     let mut outcomes: Vec<Option<WriteJobOutcome>> = vec![None; jobs.len()];
     let mut parallel_batch: Vec<usize> = Vec::new();
@@ -402,6 +428,8 @@ pub(crate) fn execute_write_jobs(
             &parallel_batch,
             dir_cache,
             &mut outcomes,
+            parallel_prepare_blobs,
+            checkout_parallel_threshold,
         )?;
         parallel_batch.clear();
         let outcome =
@@ -417,6 +445,8 @@ pub(crate) fn execute_write_jobs(
         &parallel_batch,
         dir_cache,
         &mut outcomes,
+        parallel_prepare_blobs,
+        checkout_parallel_threshold,
     )?;
 
     outcomes

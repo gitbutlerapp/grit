@@ -189,7 +189,13 @@ fn checkout_between_trees_slow(
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
     let changes = diff_trees(repo.odb(), from, to, "")?;
-    checkout_tree_changes_with_progress(repo, &changes, progress, None)
+    checkout_tree_changes_with_progress(
+        repo,
+        &changes,
+        progress,
+        None,
+        CheckoutApplyOptions::default(),
+    )
 }
 
 /// Apply the change from tree `from` to tree `to` onto the working tree and
@@ -423,7 +429,25 @@ pub fn checkout_hard_to_tree_from_head_tree(
 /// Callers such as `grit switch` can reuse one [`diff_trees`] result for both
 /// untracked guards and the mechanical apply.
 pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
-    checkout_tree_changes_with_progress(repo, changes, &mut NullProgress, None)
+    checkout_tree_changes_with_progress(
+        repo,
+        changes,
+        &mut NullProgress,
+        None,
+        CheckoutApplyOptions::default(),
+    )
+}
+
+/// Options for [`checkout_tree_changes_with_index_opts`].
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CheckoutApplyOptions {
+    /// Read blob ODB objects in parallel when preparing write jobs.
+    ///
+    /// Only set when every OID is known to exist (e.g. tree-to-tree switch); general checkout
+    /// must keep serial prepare so missing blobs flush earlier writes before failing.
+    pub parallel_prepare_blobs: bool,
+    /// Override `checkout.thresholdForParallelism` for this apply (switch uses a low threshold).
+    pub checkout_parallel_threshold: Option<i64>,
 }
 
 /// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk.
@@ -434,7 +458,17 @@ pub fn checkout_tree_changes_with_index(
     changes: &[DiffEntry],
     index: &mut Index,
 ) -> Result<()> {
-    checkout_tree_changes_with_progress(repo, changes, &mut NullProgress, Some(index))
+    checkout_tree_changes_with_index_opts(repo, changes, index, CheckoutApplyOptions::default())
+}
+
+/// Like [`checkout_tree_changes_with_index`], with apply-time tuning for trusted callers.
+pub(crate) fn checkout_tree_changes_with_index_opts(
+    repo: &Repository,
+    changes: &[DiffEntry],
+    index: &mut Index,
+    apply: CheckoutApplyOptions,
+) -> Result<()> {
+    checkout_tree_changes_with_progress(repo, changes, &mut NullProgress, Some(index), apply)
 }
 
 /// Top-level directories whose tracked files are entirely removed by `delete_paths`.
@@ -542,9 +576,12 @@ fn wholesale_deleted_directories_on_disk(
 }
 
 fn path_under_wholesale_directory(path: &str, wholesale_dirs: &BTreeSet<String>) -> bool {
-    wholesale_dirs
-        .iter()
-        .any(|dir| path == dir.as_str() || path.starts_with(&format!("{dir}/")))
+    wholesale_dirs.iter().any(|dir| {
+        path == dir.as_str()
+            || path
+                .strip_prefix(dir.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 fn checkout_tree_changes_with_progress(
@@ -552,6 +589,7 @@ fn checkout_tree_changes_with_progress(
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
     reuse_index: Option<&mut Index>,
+    apply: CheckoutApplyOptions,
 ) -> Result<()> {
     let work_tree = repo
         .work_tree()
@@ -718,6 +756,8 @@ fn checkout_tree_changes_with_progress(
         &mut delayed,
         &write_jobs,
         &parallel_indices,
+        apply.parallel_prepare_blobs,
+        apply.checkout_parallel_threshold,
     )?;
 
     let mut new_entries: Vec<IndexEntry> = Vec::with_capacity(plan.len());

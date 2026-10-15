@@ -202,6 +202,124 @@ fn switch_preserves_untracked_in_wholesale_deleted_directory() {
 }
 
 #[test]
+fn switch_refuses_racy_same_size_dirty_file_like_git() {
+    use std::path::Path;
+    use std::process::Command;
+
+    use filetime::FileTime;
+    use grit_lib::error::Error;
+    use grit_lib::index::{entry_from_metadata, Index, MODE_REGULAR};
+    use grit_lib::objects::ObjectKind;
+
+    fn pin_mtime(path: &Path, sec: u32, nsec: u32) {
+        filetime::set_file_mtime(path, FileTime::from_unix_time(i64::from(sec), nsec))
+            .expect("set mtime");
+    }
+
+    const CONTENT_A: &str = "0123456789";
+    const CONTENT_B: &str = "9876543210";
+    const CONTENT_C: &str = "5555555555";
+    assert_eq!(CONTENT_A.len(), CONTENT_B.len());
+    assert_eq!(CONTENT_A.len(), CONTENT_C.len());
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    git(tmp.path(), &["config", "core.trustctime", "false"]);
+    git(tmp.path(), &["config", "core.checkstat", "minimal"]);
+    git(tmp.path(), &["config", "core.usenanosec", "false"]);
+
+    std::fs::write(tmp.path().join("hot.txt"), CONTENT_A).expect("write");
+    git(tmp.path(), &["add", "hot.txt"]);
+    git(tmp.path(), &["commit", "-qm", "main"]);
+
+    git(tmp.path(), &["checkout", "-q", "-b", "target"]);
+    std::fs::write(tmp.path().join("hot.txt"), CONTENT_B).expect("write target");
+    git(tmp.path(), &["add", "hot.txt"]);
+    git(tmp.path(), &["commit", "-qm", "target"]);
+    git(tmp.path(), &["checkout", "-q", "main"]);
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let loaded = grit_repo.index_handle().load().expect("index");
+    let entry = loaded.get(b"hot.txt", 0).expect("hot.txt indexed");
+    let index_mtime = loaded.source_mtime.expect("index source mtime");
+    let entry_mtime = (entry.mtime_sec, entry.mtime_nsec);
+
+    let hot_path = tmp.path().join("hot.txt");
+    std::fs::write(&hot_path, CONTENT_C).expect("dirty same-size");
+    pin_mtime(&hot_path, entry_mtime.0, entry_mtime.1);
+
+    let meta = std::fs::symlink_metadata(&hot_path).expect("meta");
+    let stale_oid = grit_repo.odb().hash(ObjectKind::Blob, CONTENT_A.as_bytes());
+    let mut racy_index = Index::new();
+    racy_index.add_or_replace(entry_from_metadata(
+        &meta,
+        b"hot.txt",
+        stale_oid,
+        MODE_REGULAR,
+    ));
+    racy_index.sort();
+    let index_path = tmp.path().join(".git").join("index");
+    racy_index.write(&index_path).expect("write racy index");
+    pin_mtime(&index_path, index_mtime.0, index_mtime.1);
+
+    let git_diff_files = git(tmp.path(), &["diff-files"]);
+    assert!(
+        !git_diff_files.trim().is_empty(),
+        "git diff-files must report dirty racy file, got:\n{git_diff_files}"
+    );
+
+    let git_switch = Command::new("git")
+        .current_dir(tmp.path())
+        .args(["switch", "target"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git switch");
+    assert!(
+        !git_switch.success(),
+        "system git must refuse switch on racy dirty worktree"
+    );
+
+    let main_before = git(tmp.path(), &["rev-parse", "HEAD"]);
+    let dirty_before = std::fs::read_to_string(&hot_path).expect("read dirty");
+    assert_eq!(dirty_before, CONTENT_C);
+
+    let target_oid =
+        ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
+    let err = switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect_err("grit switch must refuse racy dirty worktree like git");
+    match err {
+        Error::Message(msg) => {
+            assert!(
+                msg.contains("uncommitted changes"),
+                "expected uncommitted changes error, got: {msg}"
+            );
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), main_before);
+    assert_eq!(
+        std::fs::read_to_string(&hot_path).expect("dirty preserved"),
+        CONTENT_C
+    );
+}
+
+#[test]
 fn switch_tree_diff_git_clean_after() {
     let tmp = tempfile::tempdir().expect("tempdir");
     git(tmp.path(), &["init", "-q", "-b", "main", "."]);
