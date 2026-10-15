@@ -6,6 +6,7 @@ use crate::blame::{parse_diff_algorithm_name, BlameDiffAlgorithm};
 use crate::commit_pretty::abbrev_hex;
 use crate::config::ConfigSet;
 use crate::error::Result;
+use crate::merge_file;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -239,6 +240,10 @@ fn format_log_date(ident: &str) -> String {
     )
 }
 
+fn log_patch_parse_mode_u32(mode: &str) -> u32 {
+    u32::from_str_radix(mode.trim(), 8).unwrap_or(0)
+}
+
 /// Write the `diff --git` header and unified body for one [`DiffEntry`].
 ///
 /// # Errors
@@ -251,83 +256,147 @@ pub fn write_diff_entry_log_patch<W: Write>(
     entry: &DiffEntry,
     opts: &LogPatchOptions,
 ) -> Result<()> {
-    let old_path = entry.old_path.as_deref().unwrap_or("/dev/null");
-    let new_path = entry.new_path.as_deref().unwrap_or("/dev/null");
-    let header_path = entry
+    let git_old = entry
+        .old_path
+        .as_deref()
+        .or(entry.new_path.as_deref())
+        .unwrap_or("dev/null");
+    let git_new = entry
         .new_path
         .as_deref()
         .or(entry.old_path.as_deref())
-        .unwrap_or("");
-    writeln!(out, "diff --git a/{header_path} b/{header_path}")?;
+        .unwrap_or("dev/null");
+    writeln!(out, "diff --git a/{git_old} b/{git_new}")?;
+
+    let old_mode = log_patch_parse_mode_u32(&entry.old_mode);
+    let new_mode = log_patch_parse_mode_u32(&entry.new_mode);
+
+    if old_mode == 0 {
+        writeln!(out, "new file mode {}", entry.new_mode.trim())?;
+    } else if new_mode == 0 {
+        writeln!(out, "deleted file mode {}", entry.old_mode.trim())?;
+    }
+
     match entry.status {
-        DiffStatus::Added => {
-            writeln!(out, "new file mode {}", entry.new_mode)?;
-            writeln!(
-                out,
-                "index {}..{}",
-                abbrev_hex(&zero_oid(), opts.abbrev_len),
-                abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?
-            )?;
-        }
-        DiffStatus::Deleted => {
-            writeln!(out, "deleted file mode {}", entry.old_mode)?;
-            writeln!(
-                out,
-                "index {}..{}",
-                abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
-                abbrev_hex(&zero_oid(), opts.abbrev_len)
-            )?;
-        }
-        DiffStatus::Modified => {
-            writeln!(
-                out,
-                "index {}..{} {}",
-                abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
-                abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?,
-                entry.new_mode
-            )?;
-        }
         DiffStatus::Renamed | DiffStatus::Copied => {
             writeln!(out, "similarity index {}%", entry.score.unwrap_or(100))?;
-            writeln!(out, "rename from {old_path}")?;
-            writeln!(out, "rename to {new_path}")?;
-            writeln!(
-                out,
-                "index {}..{}",
-                abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
-                abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?
-            )?;
+            if let Some(path) = &entry.old_path {
+                writeln!(out, "rename from {path}")?;
+            }
+            if let Some(path) = &entry.new_path {
+                writeln!(out, "rename to {path}")?;
+            }
         }
-        _ => {
-            writeln!(
-                out,
-                "index {}..{}",
-                abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
-                abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?
-            )?;
+        _ if old_mode != 0 && new_mode != 0 && old_mode != new_mode => {
+            writeln!(out, "old mode {}", entry.old_mode.trim())?;
+            writeln!(out, "new mode {}", entry.new_mode.trim())?;
+        }
+        _ => {}
+    }
+
+    if entry.old_oid != entry.new_oid {
+        let index_mode = if new_mode != 0 {
+            entry.new_mode.trim()
+        } else {
+            entry.old_mode.trim()
+        };
+        match entry.status {
+            DiffStatus::Added => {
+                writeln!(
+                    out,
+                    "index {}..{}",
+                    abbrev_hex(&zero_oid(), opts.abbrev_len),
+                    abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?
+                )?;
+            }
+            DiffStatus::Deleted => {
+                writeln!(
+                    out,
+                    "index {}..{}",
+                    abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
+                    abbrev_hex(&zero_oid(), opts.abbrev_len)
+                )?;
+            }
+            DiffStatus::Renamed | DiffStatus::Copied => {
+                writeln!(
+                    out,
+                    "index {}..{}",
+                    abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
+                    abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?
+                )?;
+            }
+            _ => {
+                writeln!(
+                    out,
+                    "index {}..{} {}",
+                    abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
+                    abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?,
+                    index_mode
+                )?;
+            }
         }
     }
-    let old_bytes = read_blob_side(odb, entry.old_oid, entry.status == DiffStatus::Added)?;
-    let new_bytes = read_blob_side(odb, entry.new_oid, entry.status == DiffStatus::Deleted)?;
-    if old_bytes.contains(&0) || new_bytes.contains(&0) {
-        let old_disp = log_binary_path(old_path, "a/");
-        let new_disp = log_binary_path(new_path, "b/");
-        writeln!(out, "Binary files {old_disp} and {new_disp} differ")?;
+
+    let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0)?;
+    let new_bytes = read_blob_side(odb, entry.new_oid, new_mode == 0)?;
+    if old_bytes == new_bytes {
         return Ok(());
     }
-    let old_text = std::str::from_utf8(&old_bytes).unwrap_or("");
-    let new_text = std::str::from_utf8(&new_bytes).unwrap_or("");
+
+    if merge_file::is_binary(&old_bytes) || merge_file::is_binary(&new_bytes) {
+        let old_side = if old_mode == 0 {
+            "/dev/null".to_owned()
+        } else {
+            format!("a/{git_old}")
+        };
+        let new_side = if new_mode == 0 {
+            "/dev/null".to_owned()
+        } else {
+            format!("b/{git_new}")
+        };
+        writeln!(out, "Binary files {old_side} and {new_side} differ")?;
+        return Ok(());
+    }
+
+    let byte_oriented = !crate::commit_encoding::is_strict_utf8(&old_bytes)
+        || !crate::commit_encoding::is_strict_utf8(&new_bytes);
+    let (old_text, new_text) = if byte_oriented {
+        (
+            crate::commit_encoding::decode_latin1(&old_bytes),
+            crate::commit_encoding::decode_latin1(&new_bytes),
+        )
+    } else {
+        (
+            std::str::from_utf8(&old_bytes)
+                .expect("valid utf-8 checked above")
+                .to_owned(),
+            std::str::from_utf8(&new_bytes)
+                .expect("valid utf-8 checked above")
+                .to_owned(),
+        )
+    };
+    let old_path = if old_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        format!("a/{git_old}")
+    };
+    let new_path = if new_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        format!("b/{git_new}")
+    };
     let d = &opts.diff;
+    let mut patch_buf = Vec::new();
     write_unified_diff_with_prefix_and_funcname_and_algorithm(
-        out,
-        old_text,
-        new_text,
-        old_path,
-        new_path,
+        &mut patch_buf,
+        &old_text,
+        &new_text,
+        &old_path,
+        &new_path,
         d.context_lines,
         d.inter_hunk_context,
-        "a/",
-        "b/",
+        "",
+        "",
         None,
         d.algorithm,
         false,
@@ -335,15 +404,14 @@ pub fn write_diff_entry_log_patch<W: Write>(
         d.indent_heuristic,
         true,
     )?;
-    Ok(())
-}
-
-fn log_binary_path(path: &str, prefix: &str) -> String {
-    if path == "/dev/null" {
-        path.to_owned()
+    if byte_oriented {
+        out.write_all(&crate::commit_encoding::encode_latin1_lossy(
+            std::str::from_utf8(&patch_buf).expect("patch is latin1"),
+        ))?;
     } else {
-        format!("{prefix}{path}")
+        out.write_all(&patch_buf)?;
     }
+    Ok(())
 }
 
 fn read_blob_side(odb: &Odb, oid: ObjectId, is_missing: bool) -> Result<Vec<u8>> {

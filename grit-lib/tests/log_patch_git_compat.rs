@@ -85,6 +85,62 @@ fn log_patch_corpus_matches_git_default_algorithm() {
     assert_eq!(grit_out, git_out);
 }
 
+fn assert_last_log_patch_matches_git(dir: &std::path::Path) {
+    let git_out = git_in(dir, &["log", "-p", "--no-color", "--format=%H", "-1"]);
+    let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open");
+    let grit_out = grit_log_patch(&repo, 1, LogPatchDiffOptions::default());
+    assert_eq!(
+        grit_out,
+        git_out,
+        "patch mismatch:\ngrit:\n{}\ngit:\n{}",
+        String::from_utf8_lossy(&grit_out),
+        String::from_utf8_lossy(&git_out)
+    );
+}
+
+#[test]
+fn log_patch_mode_only_matches_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    std::fs::write(dir.path().join("f"), b"x\n").unwrap();
+    git_in(dir.path(), &["add", "f"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "init"]);
+    std::fs::write(dir.path().join("f"), b"x\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path().join("f"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    git_in(dir.path(), &["add", "f"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "chmod"]);
+    assert_last_log_patch_matches_git(dir.path());
+}
+
+#[test]
+fn log_patch_empty_file_add_matches_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    git_in(dir.path(), &["commit", "--allow-empty", "-q", "-m", "init"]);
+    std::fs::write(dir.path().join("empty"), b"").unwrap();
+    git_in(dir.path(), &["add", "empty"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "add empty"]);
+    assert_last_log_patch_matches_git(dir.path());
+}
+
+#[test]
+fn log_patch_non_utf8_text_matches_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    std::fs::write(dir.path().join("f"), b"good\n").unwrap();
+    git_in(dir.path(), &["add", "f"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "init"]);
+    std::fs::write(dir.path().join("f"), b"bad\xff\n").unwrap();
+    git_in(dir.path(), &["add", "f"]);
+    git_in(dir.path(), &["commit", "-q", "-m", "bad bytes"]);
+    assert_last_log_patch_matches_git(dir.path());
+}
+
 #[test]
 fn log_patch_corpus_matches_git_histogram() {
     let dir = TempDir::new().expect("tempdir");

@@ -12,7 +12,8 @@ fn is_iso_8859_1(label: &str) -> bool {
     )
 }
 
-fn decode_latin1(bytes: &[u8]) -> String {
+/// Map each byte to U+0000..U+00FF for Git-style line diffs on non-UTF-8 blobs.
+pub(crate) fn decode_latin1(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len());
     for &b in bytes {
         s.push(char::from_u32(u32::from(b)).unwrap_or('\u{FFFD}'));
@@ -20,7 +21,8 @@ fn decode_latin1(bytes: &[u8]) -> String {
     s
 }
 
-fn encode_latin1_lossy(unicode: &str) -> Vec<u8> {
+/// Encode a string produced by [`decode_latin1`] back to raw bytes for patch output.
+pub(crate) fn encode_latin1_lossy(unicode: &str) -> Vec<u8> {
     unicode
         .chars()
         .map(|c| {

@@ -6,7 +6,8 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct LineInterner {
     lines: Vec<Box<str>>,
-    index: HashMap<(u64, u32), u32>,
+    /// Hash bucket chains (only lines sharing the same crc32+length key).
+    index: HashMap<(u64, u32), Vec<u32>>,
 }
 
 impl LineInterner {
@@ -17,19 +18,16 @@ impl LineInterner {
             crc32fast::hash(line.as_bytes()) as u64,
             u32::try_from(line.len()).unwrap_or(u32::MAX),
         );
-        if let Some(&id) = self.index.get(&key) {
-            if self.lines[id as usize].as_ref() == line {
-                return id;
-            }
-        }
-        for (i, existing) in self.lines.iter().enumerate() {
-            if existing.as_ref() == line {
-                return i as u32;
+        if let Some(candidates) = self.index.get(&key) {
+            for &id in candidates {
+                if self.lines[id as usize].as_ref() == line {
+                    return id;
+                }
             }
         }
         let id = u32::try_from(self.lines.len()).expect("line interner overflow");
         self.lines.push(line.into());
-        self.index.insert(key, id);
+        self.index.entry(key).or_default().push(id);
         id
     }
 
@@ -40,5 +38,22 @@ impl LineInterner {
             out.push(self.intern(line));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LineInterner;
+
+    #[test]
+    fn intern_many_unique_lines_is_linear() {
+        let mut interner = LineInterner::default();
+        let n = 10_000usize;
+        for i in 0..n {
+            let line = format!("unique line {i}\n");
+            let id = interner.intern(&line);
+            assert_eq!(id as usize, i);
+        }
+        assert_eq!(interner.lines.len(), n);
     }
 }
