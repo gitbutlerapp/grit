@@ -36,6 +36,19 @@ fn bench_index_mutate(c: &mut Criterion) {
     fsmn_group.finish();
 }
 
+fn bench_switch_wide_100k(c: &mut Criterion) {
+    let fx = HotPathsFixture::heavy();
+    let to_tree = fx.tree_with_fraction_changed(0.10);
+    let mut group = c.benchmark_group("checkout/switch_wide_100k");
+    group.bench_function("H_10pct", |b| {
+        fx.reset_worktree_to_head();
+        b.iter(|| {
+            bench_checkout_between_trees(&fx.repo, &fx.head_tree, &to_tree);
+        });
+    });
+    group.finish();
+}
+
 fn bench_checkout(c: &mut Criterion) {
     let mut group = c.benchmark_group("checkout_between_trees");
     for (label, fx) in [
@@ -121,6 +134,7 @@ criterion_group!(
     config = Criterion::default().sample_size(10);
     targets = bench_index_mutate,
     bench_checkout,
+    bench_switch_wide_100k,
     bench_staging_scan,
     bench_push_stash_group,
     bench_apply_stash_group,
