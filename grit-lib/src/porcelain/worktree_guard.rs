@@ -127,14 +127,6 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
         .ok()
         .map(Arc::new);
-    let worktree_rules = match config.as_ref() {
-        Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts(
-            repo,
-            index,
-            cfg.clone(),
-        )?))),
-        None => None,
-    };
     let (unstaged, index_changed) = diff_index_to_worktree_with_options(
         repo.odb(),
         index,
@@ -144,8 +136,9 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             ignore_submodule_untracked: true,
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
             refresh_index_stat_in_pass: false,
+            for_status: true,
+            stat_parallel_threads: Some(1),
             config,
-            worktree_rules,
             restrict_to_paths: Some(path_filter),
             ..Default::default()
         },
@@ -205,7 +198,10 @@ fn staged_diff_for_tree_switch_paths(
         if index_entry.is_some_and(|e| e.intent_to_add()) {
             continue;
         }
-        let head = head_by_path.get(path).copied().unwrap_or(HeadTreeSide::Absent);
+        let head = head_by_path
+            .get(path)
+            .copied()
+            .unwrap_or(HeadTreeSide::Absent);
         match (head, index_entry) {
             (HeadTreeSide::Absent, None) => {}
             (HeadTreeSide::Absent, Some(ie)) => {
@@ -664,13 +660,9 @@ mod tests {
         let (full_staged, full_unstaged, _) =
             local_change_diffs(&repo, &mut index3, Some(head_tree)).expect("full");
         let mut index4 = repo.load_index().expect("index");
-        let (scoped_staged, scoped_unstaged, _) = local_change_diffs_for_tree_changes(
-            &repo,
-            &mut index4,
-            Some(head_tree),
-            &tree_changes,
-        )
-        .expect("scoped");
+        let (scoped_staged, scoped_unstaged, _) =
+            local_change_diffs_for_tree_changes(&repo, &mut index4, Some(head_tree), &tree_changes)
+                .expect("scoped");
         assert_eq!(full_staged, scoped_staged);
         assert_eq!(full_unstaged, scoped_unstaged);
     }
