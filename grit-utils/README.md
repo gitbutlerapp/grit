@@ -68,7 +68,19 @@ cargo build --release -p grit-cli -p grit-utils
 
 # Smaller fixtures for CI (`GRIT_BENCH_LINUX=1` or `--with-linux` adds linux)
 ./target/release/grit-bench campaign --smoke --no-network --format json --output /tmp/campaign-smoke.json
+
+# Production baseline (two consecutive runs, ±10% compare) — see scripts/capture-production-campaign-baseline.sh
+./grit-utils/scripts/capture-production-campaign-baseline.sh
 ```
+
+Committed production scorecard artifacts:
+
+| File | Role |
+| --- | --- |
+| `baselines/campaign-before.json` | First production campaign capture |
+| `baselines/campaign-after.json` | Second consecutive capture (same VM, same flags) |
+| `baselines/campaign-consecutive-compare.txt` | `grit-bench compare … --tolerance 0.10` output (exit 0 when stable) |
+| `baselines/campaign-before.ledger.md` | 1.1× ledger from the first capture |
 
 ### Campaign fixtures
 
