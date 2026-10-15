@@ -30,6 +30,19 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
             black_box(result.commits.len())
         });
     });
+    group.bench_function("count_f00000", |b| {
+        b.iter(|| {
+            let opts = RevListOptions {
+                paths: vec![String::from("f00000.txt")],
+                count: true,
+                use_commit_graph: true,
+                use_commit_graph_bloom: true,
+                ..Default::default()
+            };
+            let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+            black_box(result.commit_count())
+        });
+    });
     group.finish();
 }
 

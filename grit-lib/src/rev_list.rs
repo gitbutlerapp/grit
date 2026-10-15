@@ -10,6 +10,7 @@ use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips};
@@ -1181,6 +1182,28 @@ pub fn rev_list(
 
     if options.maximal_only {
         retain_maximal_commits(&mut graph, &mut included)?;
+    }
+
+    if dense_path_limited && dense_path_limited_count_only_compatible(options) {
+        let count =
+            dense_path_limited_count_from_included(repo, &mut graph, &mut included, options)?;
+        return Ok(RevListResult {
+            commits: Vec::new(),
+            objects: Vec::new(),
+            omitted_objects: Vec::new(),
+            missing_objects: Vec::new(),
+            boundary_commits: Vec::new(),
+            left_right_map: HashMap::new(),
+            cherry_equivalent: HashSet::new(),
+            per_commit_object_counts: Vec::new(),
+            object_walk_tips: Vec::new(),
+            objects_print_commit: Vec::new(),
+            object_segments: Vec::new(),
+            bitmap_object_format: false,
+            reachable_commit_count: Some(count),
+            reachable_non_commit_object_count: None,
+            tip_annotated_tag_by_commit: HashMap::new(),
+        });
     }
 
     let mut ordered = match options.ordering {
@@ -4647,6 +4670,7 @@ fn commit_touches_paths(
             true,
             bloom_ctx.as_ref(),
             oid,
+            None,
         )?;
         if differs {
             return Ok(true);
@@ -4674,6 +4698,7 @@ fn commit_touches_paths(
             nth == 0,
             bloom_ctx.as_ref(),
             oid,
+            None,
         )?;
         if nth == 0 {
             first_parent_differs = differs;
@@ -4819,6 +4844,140 @@ struct DenseBloomCtx<'a> {
     cwd: Option<&'a str>,
 }
 
+/// Memo for literal-path tree-same results during one dense path-limited walk.
+#[derive(Default)]
+struct DenseWalkCache {
+    literal_tree_diff: HashMap<(ObjectId, ObjectId, u64), bool>,
+}
+
+const LITERAL_TREE_DIFF_CAP: usize = 4096;
+
+fn literal_path_hash(path: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn record_literal_tree_diff(
+    cache: &mut DenseWalkCache,
+    old: ObjectId,
+    new: ObjectId,
+    path: &str,
+    differs: bool,
+) {
+    if cache.literal_tree_diff.len() >= LITERAL_TREE_DIFF_CAP {
+        cache.literal_tree_diff.clear();
+    }
+    cache
+        .literal_tree_diff
+        .insert((old, new, literal_path_hash(path)), differs);
+}
+
+/// Trees read while comparing one literal path between two commit trees (bounded, per call).
+#[derive(Default)]
+struct LiteralPathTreeCache {
+    trees: HashMap<ObjectId, Rc<Vec<crate::objects::TreeEntry>>>,
+}
+
+impl LiteralPathTreeCache {
+    fn read_parsed_tree(
+        &mut self,
+        repo: &Repository,
+        tree_oid: ObjectId,
+    ) -> Result<Rc<Vec<crate::objects::TreeEntry>>> {
+        if let Some(entries) = self.trees.get(&tree_oid) {
+            return Ok(Rc::clone(entries));
+        }
+        let entries = Rc::new(read_parsed_tree(repo, tree_oid)?);
+        self.trees.insert(tree_oid, Rc::clone(&entries));
+        Ok(entries)
+    }
+}
+
+/// Plain normalized literal pathspec safe for [`trees_differ_at_literal_path`].
+fn normalized_plain_literal_treesame_path(repo: &Repository, raw_spec: &str) -> Option<String> {
+    if raw_spec.is_empty() || crate::pathspec::pathspec_is_exclude(raw_spec) {
+        return None;
+    }
+    if crate::pathspec::has_glob_chars(raw_spec) || raw_spec.starts_with(':') {
+        return None;
+    }
+    let wt = repo.work_tree()?;
+    let resolved = crate::pathspec::resolve_pathspec(raw_spec, wt, None);
+    if resolved == "." || resolved.is_empty() {
+        return None;
+    }
+    if resolved.starts_with(":(")
+        || crate::pathspec::pathspec_is_exclude(&resolved)
+        || crate::pathspec::has_glob_chars(&resolved)
+    {
+        return None;
+    }
+    Some(resolved)
+}
+
+fn dense_path_limited_count_only_compatible(options: &RevListOptions) -> bool {
+    options.count
+        && !options.objects
+        && options.output_mode == OutputMode::OidOnly
+        && matches!(options.ordering, OrderingMode::Default)
+        && !options.left_right
+        && !options.left_only
+        && !options.right_only
+        && !options.cherry_mark
+        && !options.cherry_pick
+        && options.skip == 0
+        && options.max_count.is_none()
+        && !options.reverse
+        && !options.boundary
+        && !options.in_commit_order
+        && !options.simplify_merges
+        && options.simplify_by_decoration_oids.is_empty()
+        && options.symmetric_left.is_none()
+        && options.symmetric_right.is_none()
+        && options.filter.is_none()
+        && !options.filter_print_omitted
+        && options.missing_action == MissingAction::Error
+        && !options.wants_parent_rewrite()
+}
+
+fn dense_path_limited_count_from_included(
+    repo: &Repository,
+    graph: &mut CommitGraph<'_>,
+    included: &mut HashSet<ObjectId>,
+    options: &RevListOptions,
+) -> Result<usize> {
+    if options.until_cutoff.is_some() || options.since_cutoff.is_some() {
+        let until = options.until_cutoff;
+        let since = options.since_cutoff;
+        included.retain(|oid| {
+            let ts = graph.committer_time(*oid);
+            if let Some(u) = until {
+                if ts > u {
+                    return false;
+                }
+            }
+            if let Some(s) = since {
+                if ts < s {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+    if options.no_kept_objects {
+        let kept = kept_object_ids(repo).unwrap_or_default();
+        included.retain(|oid| !kept.contains(oid));
+    }
+    if options.unpacked_only {
+        let packed = packed_object_set(repo);
+        included.retain(|oid| !packed.contains(oid));
+    }
+    Ok(included.len())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn walk_dense_path_limited_closure(
     repo: &Repository,
@@ -4834,6 +4993,7 @@ fn walk_dense_path_limited_closure(
     let mut selected = HashSet::new();
     let mut walk_order = Vec::new();
     let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
+    let mut cache = DenseWalkCache::default();
 
     while let Some(oid) = queue.pop_front() {
         if excluded.contains(&oid) || !walked.insert(oid) {
@@ -4841,7 +5001,9 @@ fn walk_dense_path_limited_closure(
         }
         walk_order.push(oid);
 
-        let action = dense_path_limited_action(repo, graph, oid, paths, sparse, show_pulls, bloom)?;
+        let action = dense_path_limited_action(
+            repo, graph, oid, paths, sparse, show_pulls, bloom, &mut cache,
+        )?;
         if action.visible {
             selected.insert(oid);
         }
@@ -4861,6 +5023,7 @@ struct DensePathAction {
     parents_to_walk: Vec<ObjectId>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dense_path_limited_action(
     repo: &Repository,
     graph: &mut CommitGraph<'_>,
@@ -4869,12 +5032,13 @@ fn dense_path_limited_action(
     sparse: bool,
     show_pulls: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
+    cache: &mut DenseWalkCache,
 ) -> Result<DensePathAction> {
-    let commit = load_commit(repo, oid)?;
+    let commit_tree = graph.commit_tree(oid)?;
     let parents = graph.parents_of(oid)?;
 
     if parents.is_empty() {
-        let visible = sparse || tree_has_pathspec_match(repo, commit.tree, "", paths)?;
+        let visible = sparse || tree_has_pathspec_match_cached(repo, commit_tree, "", paths)?;
         return Ok(DensePathAction {
             visible,
             parents_to_walk: Vec::new(),
@@ -4885,16 +5049,17 @@ fn dense_path_limited_action(
     let mut differs_any = false;
     let mut first_parent_differs = false;
     for (nth, parent_oid) in parents.iter().enumerate() {
-        let parent = load_commit(repo, *parent_oid)?;
+        let parent_tree = graph.commit_tree(*parent_oid)?;
         let differs = trees_differ_for_pathspecs_with_bloom(
             repo,
-            commit.tree,
-            parent.tree,
+            commit_tree,
+            parent_tree,
             "",
             paths,
             nth == 0,
             bloom,
             oid,
+            Some(cache),
         )?;
         if differs {
             if nth == 0 {
@@ -5049,8 +5214,17 @@ fn tree_has_pathspec_match(
     prefix: &str,
     pathspecs: &[String],
 ) -> Result<bool> {
+    tree_has_pathspec_match_cached(repo, tree_oid, prefix, pathspecs)
+}
+
+fn tree_has_pathspec_match_cached(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    prefix: &str,
+    pathspecs: &[String],
+) -> Result<bool> {
     let entries = read_parsed_tree(repo, tree_oid)?;
-    for entry in entries {
+    for entry in &entries {
         let name = String::from_utf8_lossy(&entry.name);
         let path = if prefix.is_empty() {
             name.into_owned()
@@ -5063,7 +5237,7 @@ fn tree_has_pathspec_match(
         }
         if is_tree
             && crate::pathspec::pathspec_wants_descent_for_rev_tree(&path, pathspecs)
-            && tree_has_pathspec_match(repo, entry.oid, &path, pathspecs)?
+            && tree_has_pathspec_match_cached(repo, entry.oid, &path, pathspecs)?
         {
             return Ok(true);
         }
@@ -5081,7 +5255,14 @@ fn trees_differ_for_pathspecs(
     prefix: &str,
     pathspecs: &[String],
 ) -> Result<bool> {
-    trees_differ_for_pathspecs_optional(repo, Some(old_tree), Some(new_tree), prefix, pathspecs)
+    trees_differ_for_pathspecs_optional(
+        repo,
+        Some(old_tree),
+        Some(new_tree),
+        prefix,
+        pathspecs,
+        None,
+    )
 }
 
 fn trees_differ_for_pathspecs_optional(
@@ -5090,7 +5271,19 @@ fn trees_differ_for_pathspecs_optional(
     new_tree: Option<ObjectId>,
     prefix: &str,
     pathspecs: &[String],
+    mut cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
+    if prefix.is_empty() && pathspecs.len() == 1 {
+        if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
+            return trees_differ_at_literal_path(
+                repo,
+                old_tree,
+                new_tree,
+                &literal,
+                cache.as_deref_mut(),
+            );
+        }
+    }
     match (old_tree, new_tree) {
         (None, None) => Ok(false),
         (Some(a), Some(b)) if a == b => Ok(false),
@@ -5132,7 +5325,7 @@ fn trees_differ_tree_entries(
                         let path = format_path_for_tree_diff(prefix, &name);
                         if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
                             if is_tree_mode(o.mode) {
-                                if tree_has_pathspec_match(repo, o.oid, &path, pathspecs)? {
+                                if tree_has_pathspec_match_cached(repo, o.oid, &path, pathspecs)? {
                                     return Ok(true);
                                 }
                             } else {
@@ -5146,7 +5339,7 @@ fn trees_differ_tree_entries(
                         let path = format_path_for_tree_diff(prefix, &name);
                         if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
                             if is_tree_mode(n.mode) {
-                                if tree_has_pathspec_match(repo, n.oid, &path, pathspecs)? {
+                                if tree_has_pathspec_match_cached(repo, n.oid, &path, pathspecs)? {
                                     return Ok(true);
                                 }
                             } else {
@@ -5166,8 +5359,13 @@ fn trees_differ_tree_entries(
                             if o.oid != n.oid || canon_tree_mode(o.mode) != canon_tree_mode(n.mode)
                             {
                                 if o_is_tree && n_is_tree {
-                                    if trees_differ_for_pathspecs(
-                                        repo, o.oid, n.oid, &path, pathspecs,
+                                    if trees_differ_for_pathspecs_optional(
+                                        repo,
+                                        Some(o.oid),
+                                        Some(n.oid),
+                                        &path,
+                                        pathspecs,
+                                        None,
                                     )? {
                                         return Ok(true);
                                     }
@@ -5179,7 +5377,14 @@ fn trees_differ_tree_entries(
                                 && crate::pathspec::pathspec_wants_descent_for_rev_tree(
                                     &path, pathspecs,
                                 )
-                                && trees_differ_for_pathspecs(repo, o.oid, n.oid, &path, pathspecs)?
+                                && trees_differ_for_pathspecs_optional(
+                                    repo,
+                                    Some(o.oid),
+                                    Some(n.oid),
+                                    &path,
+                                    pathspecs,
+                                    None,
+                                )?
                             {
                                 return Ok(true);
                             }
@@ -5194,7 +5399,7 @@ fn trees_differ_tree_entries(
                 let path = format_path_for_tree_diff(prefix, &name);
                 if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
                     if is_tree_mode(o.mode) {
-                        if tree_has_pathspec_match(repo, o.oid, &path, pathspecs)? {
+                        if tree_has_pathspec_match_cached(repo, o.oid, &path, pathspecs)? {
                             return Ok(true);
                         }
                     } else {
@@ -5208,7 +5413,7 @@ fn trees_differ_tree_entries(
                 let path = format_path_for_tree_diff(prefix, &name);
                 if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
                     if is_tree_mode(n.mode) {
-                        if tree_has_pathspec_match(repo, n.oid, &path, pathspecs)? {
+                        if tree_has_pathspec_match_cached(repo, n.oid, &path, pathspecs)? {
                             return Ok(true);
                         }
                     } else {
@@ -5231,6 +5436,137 @@ fn format_path_for_tree_diff(prefix: &str, name: &str) -> String {
     }
 }
 
+fn tree_entry_by_name<'a>(
+    entries: &'a [crate::objects::TreeEntry],
+    name: &str,
+    name_is_tree: bool,
+) -> Option<&'a crate::objects::TreeEntry> {
+    let name_bytes = name.as_bytes();
+    let idx = entries.binary_search_by(|e| {
+        crate::objects::tree_entry_cmp(&e.name, is_tree_mode(e.mode), name_bytes, name_is_tree)
+    });
+    idx.ok().and_then(|i| {
+        let entry = &entries[i];
+        if entry.name.as_slice() == name_bytes {
+            Some(entry)
+        } else {
+            None
+        }
+    })
+}
+
+/// Lookup a tree entry by name, trying directory ordering first then file ordering.
+fn tree_entry_by_name_dir_or_file<'a>(
+    entries: &'a [crate::objects::TreeEntry],
+    name: &str,
+) -> Option<&'a crate::objects::TreeEntry> {
+    if let Some(entry) = tree_entry_by_name(entries, name, true) {
+        if is_tree_mode(entry.mode) {
+            return Some(entry);
+        }
+    }
+    tree_entry_by_name(entries, name, false)
+}
+
+fn tree_oid_at_literal_prefix(
+    repo: &Repository,
+    tree: ObjectId,
+    components: &[&str],
+    trees: &mut LiteralPathTreeCache,
+) -> Result<Option<ObjectId>> {
+    if components.is_empty() {
+        return Ok(Some(tree));
+    }
+    let mut current = tree;
+    for &part in components {
+        let entries = trees.read_parsed_tree(repo, current)?;
+        let Some(entry) = tree_entry_by_name(entries.as_ref(), part, true) else {
+            return Ok(None);
+        };
+        if !is_tree_mode(entry.mode) {
+            return Ok(None);
+        }
+        current = entry.oid;
+    }
+    Ok(Some(current))
+}
+
+fn trees_differ_at_literal_path(
+    repo: &Repository,
+    old_tree: Option<ObjectId>,
+    new_tree: Option<ObjectId>,
+    path: &str,
+    diff_cache: Option<&mut DenseWalkCache>,
+) -> Result<bool> {
+    match (old_tree, new_tree) {
+        (None, None) => Ok(false),
+        (Some(a), Some(b)) if a == b => Ok(false),
+        (old_o, new_o) => {
+            let path_hash = literal_path_hash(path);
+            if let (Some(old), Some(new)) = (old_o, new_o) {
+                if old == new {
+                    return Ok(false);
+                }
+                if let Some(cache) = diff_cache.as_ref() {
+                    if let Some(&differs) = cache.literal_tree_diff.get(&(old, new, path_hash)) {
+                        return Ok(differs);
+                    }
+                }
+            }
+            let path_trimmed = path.trim_end_matches('/');
+            let parts: Vec<&str> = path_trimmed.split('/').filter(|p| !p.is_empty()).collect();
+            if parts.is_empty() {
+                return Ok(false);
+            }
+            let (dir, leaf) = parts.split_at(parts.len().saturating_sub(1));
+            let leaf = leaf[0];
+            let mut trees = LiteralPathTreeCache::default();
+            let (old_dir, new_dir) = match (old_o, new_o) {
+                (Some(old), Some(new)) => (
+                    tree_oid_at_literal_prefix(repo, old, dir, &mut trees)?,
+                    tree_oid_at_literal_prefix(repo, new, dir, &mut trees)?,
+                ),
+                (Some(old), None) => (
+                    tree_oid_at_literal_prefix(repo, old, dir, &mut trees)?,
+                    None,
+                ),
+                (None, Some(new)) => (
+                    None,
+                    tree_oid_at_literal_prefix(repo, new, dir, &mut trees)?,
+                ),
+                (None, None) => (None, None),
+            };
+            let read_dir = |tree: Option<ObjectId>,
+                            trees: &mut LiteralPathTreeCache|
+             -> Result<Rc<Vec<crate::objects::TreeEntry>>> {
+                match tree {
+                    Some(oid) => trees.read_parsed_tree(repo, oid),
+                    None => Ok(Rc::new(Vec::new())),
+                }
+            };
+            let old_entries = read_dir(old_dir, &mut trees)?;
+            let new_entries = read_dir(new_dir, &mut trees)?;
+            // Leaf may be a file (d1/f3.txt) or directory (outer/inner, outer/inner/); Git
+            // tree ordering differs for the two, so try directory key first then file.
+            let old_ent = tree_entry_by_name_dir_or_file(old_entries.as_ref(), leaf);
+            let new_ent = tree_entry_by_name_dir_or_file(new_entries.as_ref(), leaf);
+            let differs = match (old_ent, new_ent) {
+                (None, None) => false,
+                (None, Some(_)) | (Some(_), None) => true,
+                (Some(o), Some(n)) => {
+                    o.oid != n.oid || canon_tree_mode(o.mode) != canon_tree_mode(n.mode)
+                }
+            };
+            if let (Some(old), Some(new)) = (old_o, new_o) {
+                if let Some(cache) = diff_cache {
+                    record_literal_tree_diff(cache, old, new, path, differs);
+                }
+            }
+            Ok(differs)
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn trees_differ_for_pathspecs_with_bloom(
     repo: &Repository,
@@ -5241,6 +5577,7 @@ fn trees_differ_for_pathspecs_with_bloom(
     first_parent: bool,
     bloom: Option<&DenseBloomCtx<'_>>,
     commit_oid: ObjectId,
+    cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     let mut bloom_ret = BloomPrecheck::Inapplicable;
     if first_parent {
@@ -5265,7 +5602,14 @@ fn trees_differ_for_pathspecs_with_bloom(
             }
         }
     }
-    let differs = trees_differ_for_pathspecs(repo, commit_tree, parent_tree, prefix, pathspecs)?;
+    let differs = trees_differ_for_pathspecs_optional(
+        repo,
+        Some(commit_tree),
+        Some(parent_tree),
+        prefix,
+        pathspecs,
+        cache,
+    )?;
     if first_parent && bloom_ret == BloomPrecheck::Maybe && !differs {
         if let Some(ctx) = bloom {
             if let Some(stats) = ctx.stats {

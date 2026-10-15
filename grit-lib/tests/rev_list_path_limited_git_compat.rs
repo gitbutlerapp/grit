@@ -132,6 +132,18 @@ fn path_limited_count_and_limit_match_git() {
         .expect("grit count");
     assert_eq!(grit_count, git_count);
 
+    let listed = repo
+        .rev_walk()
+        .commits(
+            &["HEAD"],
+            &RevWalkListOptions {
+                paths: vec![path.to_owned()],
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit list");
+    assert_eq!(listed.len(), grit_count);
+
     let git_limit = git(wt, &["rev-list", "-3", "HEAD", "--", path]);
     let grit_limit = repo
         .rev_walk()
@@ -317,4 +329,147 @@ fn path_limited_root_gitlink_matches_git() {
         .expect("grit count");
     assert_eq!(grit_count, git_count);
     assert_eq!(git_count, 1);
+}
+
+fn grit_path_count(wt: &std::path::Path, path: &str) -> usize {
+    open_grit_repo(wt)
+        .rev_walk()
+        .count(
+            &["HEAD"],
+            &RevWalkListOptions {
+                paths: vec![path.to_owned()],
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit count")
+}
+
+fn git_path_count(wt: &std::path::Path, path: &str) -> usize {
+    git(wt, &["rev-list", "--count", "HEAD", "--", path])
+        .trim()
+        .parse()
+        .expect("git count")
+}
+
+#[test]
+fn path_limited_single_directory_name_count_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("foo")).expect("mkdir");
+    std::fs::write(wt.join("foo/a.txt"), "1\n").expect("write");
+    git(wt, &["add", "foo/a.txt"]);
+    git(wt, &["commit", "-m", "add foo"]);
+    std::fs::write(wt.join("foo/a.txt"), "2\n").expect("write");
+    git(wt, &["add", "foo/a.txt"]);
+    git(wt, &["commit", "-m", "touch foo"]);
+
+    let git_count = git_path_count(wt, "foo");
+    let grit_count = grit_path_count(wt, "foo");
+    assert_eq!(grit_count, git_count);
+    assert_eq!(git_count, 2);
+}
+
+#[test]
+fn path_limited_directory_trailing_slash_count_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_linear_touch_repo(wt, 40);
+    for path in ["d1", "d1/"] {
+        let git_count = git_path_count(wt, path);
+        let grit_count = grit_path_count(wt, path);
+        assert_eq!(grit_count, git_count, "path {path:?}");
+        assert!(git_count > 0, "path {path:?}");
+    }
+}
+
+#[test]
+fn path_limited_nested_directory_count_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("outer/inner")).expect("mkdir");
+    std::fs::write(wt.join("outer/inner/file.txt"), "1\n").expect("write");
+    git(wt, &["add", "outer/inner/file.txt"]);
+    git(wt, &["commit", "-m", "add nested"]);
+    std::fs::write(wt.join("outer/inner/file.txt"), "2\n").expect("write");
+    git(wt, &["add", "outer/inner/file.txt"]);
+    git(wt, &["commit", "-m", "touch nested"]);
+
+    for path in ["outer/inner", "outer/inner/"] {
+        let git_count = git_path_count(wt, path);
+        let grit_count = grit_path_count(wt, path);
+        assert_eq!(grit_count, git_count, "path {path:?}");
+        assert_eq!(git_count, 2, "path {path:?}");
+    }
+}
+
+#[test]
+fn path_limited_glob_under_directory_count_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_linear_touch_repo(wt, 40);
+    let path = "d1/*.txt";
+    let git_count = git_path_count(wt, path);
+    let grit_count = grit_path_count(wt, path);
+    assert_eq!(grit_count, git_count);
+    assert!(git_count > 0);
+}
+
+#[test]
+fn path_limited_dot_pathspec_matches_unrestricted_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_linear_touch_repo(wt, 40);
+    let unrestricted: usize = git(wt, &["rev-list", "--count", "HEAD"])
+        .trim()
+        .parse()
+        .expect("git unrestricted count");
+    for path in [".", "./"] {
+        assert_eq!(git_path_count(wt, path), unrestricted, "git path {path:?}");
+        assert_eq!(
+            grit_path_count(wt, path),
+            unrestricted,
+            "grit path {path:?}"
+        );
+    }
+}
+
+#[test]
+fn path_limited_dot_slash_file_and_dir_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q"]);
+    std::fs::create_dir_all(wt.join("outer/inner")).expect("mkdir");
+    std::fs::write(wt.join("outer/inner/file.txt"), "1\n").expect("write");
+    git(wt, &["add", "outer/inner/file.txt"]);
+    git(wt, &["commit", "-m", "one"]);
+    std::fs::write(wt.join("outer/inner/file.txt"), "2\n").expect("write");
+    git(wt, &["add", "outer/inner/file.txt"]);
+    git(wt, &["commit", "-m", "two"]);
+
+    for path in ["./outer/inner/file.txt", "./outer/inner/"] {
+        let git_count = git_path_count(wt, path);
+        let grit_count = grit_path_count(wt, path);
+        assert_eq!(grit_count, git_count, "path {path:?}");
+        assert_eq!(git_count, 2, "path {path:?}");
+    }
+}
+
+#[test]
+fn path_limited_glob_star_not_literal_prefix_overmatch() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_linear_touch_repo(wt, 40);
+    let glob = "d1/f1*";
+    let git_glob = git_path_count(wt, glob);
+    let grit_glob = grit_path_count(wt, glob);
+    assert_eq!(grit_glob, git_glob);
+    let git_one = git_path_count(wt, "d1/f1.txt");
+    let grit_one = grit_path_count(wt, "d1/f1.txt");
+    assert_eq!(grit_one, git_one);
+    assert_ne!(
+        git_glob, git_one,
+        "fixture should distinguish glob from single file"
+    );
 }

@@ -101,6 +101,7 @@ fn rev_list_options_from_walk(
         paths: walk.paths.clone(),
         count,
         use_commit_graph: true,
+        use_commit_graph_bloom: !walk.paths.is_empty(),
         symmetric_left: parsed.symmetric_left,
         symmetric_right: parsed.symmetric_right,
         ..RevListOptions::default()
