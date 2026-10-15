@@ -35,26 +35,28 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
 
 /// Read hex object ids from stdin and emit `git cat-file --batch-check` lines.
 pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout().lock();
-    for line in stdin.lock().lines() {
-        let line = line.context("read oid line")?;
-        let hex = line.trim();
-        if hex.is_empty() {
-            continue;
-        }
-        let oid = ObjectId::from_hex(hex).with_context(|| format!("parse oid {hex}"))?;
-        match repo.odb().read_info(&oid) {
-            Ok(info) => {
-                writeln!(stdout, "{oid} {} {}", info.kind.as_str(), info.size)?;
+    repo.odb().with_pack_read_context(|| {
+        let stdin = io::stdin();
+        let mut stdout = io::stdout().lock();
+        for line in stdin.lock().lines() {
+            let line = line.context("read oid line")?;
+            let hex = line.trim();
+            if hex.is_empty() {
+                continue;
             }
-            Err(Error::ObjectNotFound(_)) => {
-                writeln!(stdout, "{oid} missing")?;
+            let oid = ObjectId::from_hex(hex).with_context(|| format!("parse oid {hex}"))?;
+            match repo.odb().read_info(&oid) {
+                Ok(info) => {
+                    writeln!(stdout, "{oid} {} {}", info.kind.as_str(), info.size)?;
+                }
+                Err(Error::ObjectNotFound(_)) => {
+                    writeln!(stdout, "{oid} missing")?;
+                }
+                Err(e) => return Err(e.into()),
             }
-            Err(e) => return Err(e.into()),
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Emit every packed object in pack-file offset order (like `cat-file --batch-all-objects --unordered`).

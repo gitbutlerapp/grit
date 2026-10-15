@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use fixture::{OdbBackendCase, OdbBackendFixtures};
+use fixture::{ObjectBenchFixtures, OdbBackendCase, OdbBackendFixtures};
 use grit_lib::objects::{ObjectId, ObjectKind};
 
 fn fixtures() -> &'static OdbBackendFixtures {
@@ -58,6 +58,25 @@ fn bench_odb_backend(c: &mut Criterion) {
     bench_case(&mut group, "pack_100k", &fx.pack_100k);
     bench_case(&mut group, "midx_8", &fx.midx_8);
     bench_case(&mut group, "alternate_only", &fx.alternate_only);
+
+    let pack_fx = ObjectBenchFixtures::global();
+    group.bench_function("read_deep_delta_chain", |b| {
+        let odb = &pack_fx.odb;
+        let oid = &pack_fx.packed_delta_oid;
+        b.iter(|| {
+            odb.with_pack_read_context(|| black_box(odb.read(oid).expect("read deep delta chain")))
+        });
+    });
+    group.bench_function("read_info_packed", |b| {
+        let odb = &pack_fx.odb;
+        let oid = &pack_fx.packed_delta_oid;
+        b.iter(|| {
+            odb.with_pack_read_context(|| {
+                black_box(odb.read_info(oid).expect("read_info packed delta"))
+            })
+        });
+    });
+
     group.finish();
 }
 

@@ -9,6 +9,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use grit_lib::objects::odb::store::{ObjectStore, PackFilter, PackedObjects};
+use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::pack_store::PackStore;
 use grit_lib::objects::{Object, ObjectId, ObjectKind};
@@ -131,6 +132,28 @@ fn deep_delta_repo() -> (TempDir, PathBuf) {
 fn packed_store(objects: &Path) -> PackedObjects {
     clear_pack_cache();
     PackedObjects::new(Arc::new(PackStore::new(objects.to_path_buf())))
+}
+
+#[test]
+fn git_repack_packs_stay_identical_with_tiny_delta_base_cache() {
+    let (_dir, objects) = deep_delta_repo();
+    let repo = _dir.path();
+    let git_map = git_batch_all_objects(repo);
+    std::fs::write(repo.join("config"), "[core]\n\tdeltaBaseCacheLimit = 512\n")
+        .expect("write config");
+    clear_pack_cache();
+    let odb = Odb::new(&objects).with_config_git_dir(repo.to_path_buf());
+    for round in 0..3 {
+        odb.with_pack_read_context(|| {
+            for (oid, (git_kind, git_size)) in &git_map {
+                let grit = odb.read(oid).expect("read");
+                assert_eq!(grit.kind, *git_kind, "round {round} kind");
+                assert_eq!(grit.data.len() as u64, *git_size, "round {round} size");
+                let git_obj = git_cat_file(repo, oid);
+                assert_eq!(grit.data, git_obj.data, "round {round} payload");
+            }
+        });
+    }
 }
 
 #[test]

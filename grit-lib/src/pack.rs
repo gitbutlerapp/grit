@@ -4481,6 +4481,9 @@ mod tests {
         let Some((_tmp, idx, tip, _odb)) = build_ofs_delta_chain_pack(32) else {
             return;
         };
+        let expected = read_object_from_pack(&idx, &tip)
+            .expect("baseline read")
+            .data;
         pack_cache::test_set_delta_base_cache_byte_limit(&idx.pack_path, 4096);
         let _ = read_object_from_pack(&idx, &tip).expect("prime cache");
         assert!(
@@ -4488,6 +4491,11 @@ mod tests {
             "cache bytes {} exceeded cap",
             pack_cache::test_delta_base_cache_bytes_used(&idx.pack_path)
         );
+        pack_cache::test_set_delta_base_cache_byte_limit(&idx.pack_path, 512);
+        for round in 0..8 {
+            let got = read_object_from_pack(&idx, &tip).expect("read after eviction");
+            assert_eq!(got.data, expected, "round {round} must stay byte-identical");
+        }
         pack_cache::test_set_delta_base_cache_byte_limit(
             &idx.pack_path,
             pack_cache::DELTA_BASE_CACHE_DEFAULT,
