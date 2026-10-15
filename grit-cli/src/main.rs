@@ -904,9 +904,7 @@ fn reject_non_human_plumbing(cli: &Cli, opts: &OutputOptions) -> Result<()> {
 }
 
 fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
-    match cli.command.unwrap_or(Command::Status {
-        untracked: None,
-    }) {
+    match cli.command.unwrap_or(Command::Status { untracked: None }) {
         Command::Init {
             path,
             bare,

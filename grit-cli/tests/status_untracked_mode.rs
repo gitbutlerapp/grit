@@ -37,6 +37,53 @@ fn grit_json(repo: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&out.stdout).expect("json")
 }
 
+fn grit_ok(repo: &Path, args: &[&str]) {
+    let out = Command::new(GRIT)
+        .args(args)
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("grit");
+    assert!(
+        out.status.success(),
+        "grit {:?} failed:\n{}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn git_ok(repo: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git");
+    assert!(
+        out.status.success(),
+        "git {:?} failed:\n{}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn git_untracked_set(repo: &Path) -> std::collections::BTreeSet<String> {
+    git_lines(repo, &["ls-files", "-o", "--exclude-standard"])
+        .into_iter()
+        .collect()
+}
+
+fn grit_untracked_set(repo: &Path, args: &[&str]) -> std::collections::BTreeSet<String> {
+    grit_json(repo, args)["untracked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_owned())
+        .collect()
+}
+
 fn git_lines(repo: &Path, args: &[&str]) -> Vec<String> {
     let out = Command::new("git")
         .args(args)
@@ -118,6 +165,78 @@ fn status_untracked_all_lists_every_file_and_matches_git() -> TestResult {
     assert!(grit_untracked.contains("src/main.rs"));
     assert!(grit_untracked.contains("plain.txt"));
 
+    Ok(())
+}
+
+fn seed_untracked_tree(repo: &Path) -> TestResult {
+    fs::create_dir_all(repo.join("docs"))?;
+    fs::create_dir_all(repo.join("src"))?;
+    fs::write(repo.join("docs/a.txt"), "a\n")?;
+    fs::write(repo.join("docs/b.txt"), "b\n")?;
+    fs::write(repo.join("src/main.rs"), "fn main() {}\n")?;
+    fs::write(repo.join("plain.txt"), "p\n")?;
+    Ok(())
+}
+
+#[test]
+fn status_untracked_all_after_untracked_cache_normal_mode() -> TestResult {
+    let base = tempfile::tempdir()?;
+    let repo = base.path().join("r");
+    fs::create_dir_all(&repo)?;
+    Command::new(GRIT)
+        .args(["init", "."])
+        .current_dir(&repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .status()
+        .expect("grit init");
+    grit_ok(&repo, &["config", "core.untrackedCache", "true"]);
+    seed_untracked_tree(&repo)?;
+    git_ok(&repo, &["update-index", "--untracked-cache"]);
+
+    let _ = grit_json(&repo, &["status"]);
+    let expanded = grit_untracked_set(&repo, &["status", "--untracked", "all"]);
+    assert_eq!(expanded, git_untracked_set(&repo));
+
+    let collapsed = grit_json(&repo, &["status"]);
+    let collapsed_set: std::collections::BTreeSet<_> = collapsed["untracked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .expect("untracked path")
+                .trim_end_matches('/')
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        collapsed_set,
+        ["docs", "plain.txt", "src"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<std::collections::BTreeSet<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn status_untracked_all_from_config_without_flag() -> TestResult {
+    let base = tempfile::tempdir()?;
+    let repo = base.path().join("r");
+    fs::create_dir_all(&repo)?;
+    Command::new(GRIT)
+        .args(["init", "."])
+        .current_dir(&repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .status()
+        .expect("grit init");
+    grit_ok(&repo, &["config", "status.showUntrackedFiles", "all"]);
+    seed_untracked_tree(&repo)?;
+
+    let grit_set = grit_untracked_set(&repo, &["status"]);
+    assert_eq!(grit_set, git_untracked_set(&repo));
     Ok(())
 }
 

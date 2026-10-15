@@ -936,7 +936,7 @@ pub fn try_untracked_from_valid_cache(
     } else {
         DIR_SHOW_OTHER_DIRECTORIES | DIR_HIDE_EMPTY_DIRECTORIES
     };
-    if uc.dir_flags != requested_flags && uc.dir_flags != dir_flags_from_config(config) {
+    if uc.dir_flags != requested_flags {
         return Ok(None);
     }
     let Some(root) = uc.root.as_ref() else {
@@ -972,7 +972,7 @@ pub fn refresh_untracked_cache_for_status(
     };
 
     let mut mode_switched = false;
-    if uc.dir_flags != requested_flags && uc.dir_flags != dir_flags_from_config(config) {
+    if uc.dir_flags != requested_flags {
         *uc = UntrackedCache::new_shell(requested_flags, untracked_cache_ident(work_tree));
         mode_switched = true;
     }
