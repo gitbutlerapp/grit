@@ -37,13 +37,16 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
             if hex.is_empty() {
                 continue;
             }
-            let oid = ObjectId::from_hex_ascii(hex)
+            let oid = ObjectId::from_hex(std::str::from_utf8(hex).context("oid line utf-8")?)
                 .with_context(|| format!("parse oid {}", String::from_utf8_lossy(hex)))?;
             if let Some(reader) = fast.as_mut() {
-                let object = reader
-                    .read_object(&oid)
-                    .with_context(|| format!("read {}", String::from_utf8_lossy(hex)))?;
-                write_batch_object_body(&mut stdout, hex, &object)?;
+                match reader.read_object(&oid) {
+                    Ok(object) => write_batch_object_body(&mut stdout, hex, &object)?,
+                    Err(Error::ObjectNotFound(_)) => {
+                        write_batch_object(&mut stdout, repo, hex, &oid)?
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             } else {
                 write_batch_object(&mut stdout, repo, hex, &oid)?;
             }
@@ -73,11 +76,15 @@ pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
             if hex.is_empty() {
                 continue;
             }
-            let oid = ObjectId::from_hex_ascii(hex)
+            let oid = ObjectId::from_hex(std::str::from_utf8(hex).context("oid line utf-8")?)
                 .with_context(|| format!("parse oid {}", String::from_utf8_lossy(hex)))?;
             let hex_str = std::str::from_utf8(hex).context("oid line utf-8")?;
             let info_result = if let Some(reader) = fast.as_mut() {
-                reader.read_info(&oid)
+                match reader.read_info(&oid) {
+                    Ok(info) => Ok(info),
+                    Err(Error::ObjectNotFound(_)) => repo.odb().read_info(&oid),
+                    Err(e) => Err(e),
+                }
             } else {
                 repo.odb().read_info(&oid)
             };

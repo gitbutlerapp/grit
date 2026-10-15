@@ -8187,6 +8187,12 @@ pub fn count_changes_with_algorithm(
     (ins, del)
 }
 
+/// Count insertions and deletions using Git's histogram line-diff engine.
+#[must_use]
+pub fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
+    count_changes_with_algorithm(old_content, new_content, similar::Algorithm::Myers, true)
+}
+
 /// Line count for diffstat/`--numstat`, matching Git's `count_lines()` in `diff.c`.
 ///
 /// Counts newline-terminated lines; a final line without trailing newline still counts as one line.

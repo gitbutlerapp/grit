@@ -7,7 +7,7 @@ mod s7;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use grit_lib::diff::{count_changes_with_algorithm, diff_trees};
+use grit_lib::diff::{count_changes_git_histogram, count_changes_with_algorithm, diff_trees};
 use similar::Algorithm;
 
 use s7::HistoryBenchFixtures;
@@ -48,14 +48,7 @@ fn bench_blob_myers_10k_lines(c: &mut Criterion) {
         });
     });
     group.bench_function("histogram", |b| {
-        b.iter(|| {
-            black_box(count_changes_with_algorithm(
-                old,
-                new,
-                Algorithm::Myers,
-                true,
-            ))
-        });
+        b.iter(|| black_box(count_changes_git_histogram(old, new)));
     });
     group.finish();
 }

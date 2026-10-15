@@ -185,6 +185,7 @@ pub(crate) mod environment;
 pub mod error;
 mod ewah_bitmap;
 pub(crate) mod line_interner;
+pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
 
 pub(crate) mod bitmap_walk;
