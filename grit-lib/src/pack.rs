@@ -18,7 +18,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
-use std::io::Read;
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -304,6 +303,7 @@ pub(crate) mod pack_cache {
         PACK_HIT_INDEX.with(|cell| {
             *cell.borrow_mut() = Some((objects_dir.to_path_buf(), Arc::clone(idx)));
         });
+        promote_pack_index(objects_dir, &idx.idx_path);
     }
 
     pub(crate) fn find_offset_for_batch(
@@ -318,7 +318,9 @@ pub(crate) mod pack_cache {
             if slot.as_ref().is_none_or(|(path, _)| path != &idx.idx_path) {
                 *slot = Some((idx.idx_path.clone(), 0));
             }
-            let (_, cursor) = slot.as_mut().expect("initialized above");
+            let Some((_, cursor)) = slot.as_mut() else {
+                return idx.find_offset(oid);
+            };
             idx.find_offset_monotonic(oid, cursor)
         })
     }

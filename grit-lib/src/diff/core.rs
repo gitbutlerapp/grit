@@ -6693,7 +6693,7 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
     if old_path == "/dev/null" {
         out.write_all(b"--- /dev/null\n")?;
     } else if src_prefix.is_empty() {
-        write!(out, "--- {old_path}\n")?;
+        writeln!(out, "--- {old_path}")?;
     } else {
         out.write_all(b"--- ")?;
         out.write_all(
@@ -6704,7 +6704,7 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
     if new_path == "/dev/null" {
         out.write_all(b"+++ /dev/null\n")?;
     } else if dst_prefix.is_empty() {
-        write!(out, "+++ {new_path}\n")?;
+        writeln!(out, "+++ {new_path}")?;
     } else {
         out.write_all(b"+++ ")?;
         out.write_all(
@@ -6720,7 +6720,7 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
     let op_groups = group_diff_ops_gap(compacted_ops, context_lines, max_common_gap);
 
     let mut hunk_buf = String::new();
-    let mut body = String::new();
+    let mut eof_annot = UnifiedDiffNoNewlineAnnotator::new(old_content, new_content);
     for ops in op_groups {
         if ops.is_empty() {
             continue;
@@ -6729,26 +6729,22 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
         hunk_buf.clear();
         use std::fmt::Write as FmtWrite;
         let _ = FmtWrite::write_fmt(&mut hunk_buf, format_args!("{hunk}"));
+        let mut fragment = hunk_buf.clone();
         if let Some(first_newline) = hunk_buf.find('\n') {
             let header_line = &hunk_buf[..first_newline];
             let rest = &hunk_buf[first_newline..];
             if let Some(func_ctx) =
                 extract_function_context(header_line, &old_lines, funcname_matcher)
             {
-                body.push_str(header_line);
-                body.push(' ');
-                body.push_str(&func_ctx);
-                body.push_str(rest);
-            } else {
-                body.push_str(&hunk_buf);
+                fragment.clear();
+                fragment.push_str(header_line);
+                fragment.push(' ');
+                fragment.push_str(&func_ctx);
+                fragment.push_str(rest);
             }
-        } else {
-            body.push_str(&hunk_buf);
         }
+        eof_annot.write_hunk(out, &fragment)?;
     }
-
-    let annotated = annotate_unified_diff_no_newline_at_eof(&body, old_content, new_content);
-    out.write_all(annotated.as_bytes())?;
     Ok(())
 }
 
@@ -7988,29 +7984,54 @@ fn parse_unified_range_start(spec: &str) -> Option<usize> {
     }
 }
 
-/// Insert Git `\ No newline at end of file` after `-`/`+` hunk lines when that side of the
-/// file lacks a trailing newline on the last line.
-#[must_use]
-pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str) -> String {
-    let old_last = last_line_index_without_trailing_newline(old);
-    let new_last = last_line_index_without_trailing_newline(new);
-    if old_last.is_none() && new_last.is_none() {
-        return patch.to_string();
+/// Tracks hunk line numbers while streaming `\ No newline at end of file` markers.
+struct UnifiedDiffNoNewlineAnnotator {
+    old_last: Option<usize>,
+    new_last: Option<usize>,
+    old_line: usize,
+    new_line: usize,
+    passthrough: bool,
+}
+
+impl UnifiedDiffNoNewlineAnnotator {
+    fn new(old: &str, new: &str) -> Self {
+        let old_last = last_line_index_without_trailing_newline(old);
+        let new_last = last_line_index_without_trailing_newline(new);
+        Self {
+            old_last,
+            new_last,
+            old_line: 1,
+            new_line: 1,
+            passthrough: old_last.is_none() && new_last.is_none(),
+        }
     }
-    let mut out = String::with_capacity(patch.len() + 64);
-    let mut old_line = 1usize;
-    let mut new_line = 1usize;
-    let mut lines = patch.lines().peekable();
-    while let Some(line) = lines.next() {
+
+    fn write_hunk<W: std::io::Write>(&mut self, out: &mut W, patch: &str) -> Result<()> {
+        if self.passthrough {
+            out.write_all(patch.as_bytes())?;
+            return Ok(());
+        }
+        let mut lines = patch.lines().peekable();
+        while let Some(line) = lines.next() {
+            self.write_annotated_line(out, line, &mut lines)?;
+        }
+        Ok(())
+    }
+
+    fn write_annotated_line<W: std::io::Write>(
+        &mut self,
+        out: &mut W,
+        line: &str,
+        lines: &mut std::iter::Peekable<std::str::Lines<'_>>,
+    ) -> Result<()> {
         if let Some((o, n)) = line
             .strip_prefix("@@ ")
             .and_then(|_| parse_unified_hunk_starts(line))
         {
-            old_line = o;
-            new_line = n;
-            out.push_str(line);
-            out.push('\n');
-            continue;
+            self.old_line = o;
+            self.new_line = n;
+            writeln!(out, "{line}")?;
+            return Ok(());
         }
         if line.starts_with("--- ")
             || line.starts_with("+++ ")
@@ -8018,55 +8039,71 @@ pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str
             || line.starts_with("diff --cc ")
             || line.starts_with("diff --combined ")
         {
-            out.push_str(line);
-            out.push('\n');
-            continue;
+            writeln!(out, "{line}")?;
+            return Ok(());
         }
         if line.starts_with('-') {
-            out.push_str(line);
-            out.push('\n');
+            writeln!(out, "{line}")?;
             let already_marked = lines
                 .peek()
                 .is_some_and(|next| *next == "\\ No newline at end of file");
-            if !already_marked && old_last == Some(old_line.saturating_sub(1)) {
-                out.push_str("\\ No newline at end of file\n");
+            if !already_marked && self.old_last == Some(self.old_line.saturating_sub(1)) {
+                writeln!(out, "\\ No newline at end of file")?;
             }
-            old_line += 1;
-            continue;
+            self.old_line += 1;
+            return Ok(());
         }
         if line.starts_with('+') {
-            out.push_str(line);
-            out.push('\n');
+            writeln!(out, "{line}")?;
             let already_marked = lines
                 .peek()
                 .is_some_and(|next| *next == "\\ No newline at end of file");
-            if !already_marked && new_last == Some(new_line.saturating_sub(1)) {
-                out.push_str("\\ No newline at end of file\n");
+            if !already_marked && self.new_last == Some(self.new_line.saturating_sub(1)) {
+                writeln!(out, "\\ No newline at end of file")?;
             }
-            new_line += 1;
-            continue;
+            self.new_line += 1;
+            return Ok(());
         }
         if line.starts_with(' ') {
-            out.push_str(line);
-            out.push('\n');
+            writeln!(out, "{line}")?;
             let already_marked = lines
                 .peek()
                 .is_some_and(|next| *next == "\\ No newline at end of file");
             if !already_marked {
-                let old_idx = old_line.saturating_sub(1);
-                let new_idx = new_line.saturating_sub(1);
-                if old_last == Some(old_idx) || new_last == Some(new_idx) {
-                    out.push_str("\\ No newline at end of file\n");
+                let old_idx = self.old_line.saturating_sub(1);
+                let new_idx = self.new_line.saturating_sub(1);
+                if self.old_last == Some(old_idx) || self.new_last == Some(new_idx) {
+                    writeln!(out, "\\ No newline at end of file")?;
                 }
             }
-            old_line += 1;
-            new_line += 1;
-            continue;
+            self.old_line += 1;
+            self.new_line += 1;
+            return Ok(());
         }
-        out.push_str(line);
-        out.push('\n');
+        writeln!(out, "{line}")?;
+        Ok(())
     }
-    out
+}
+
+/// Insert Git `\ No newline at end of file` after `-`/`+` hunk lines when that side of the
+/// file lacks a trailing newline on the last line.
+#[must_use]
+pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str) -> String {
+    let mut annotator = UnifiedDiffNoNewlineAnnotator::new(old, new);
+    if annotator.passthrough {
+        return patch.to_string();
+    }
+    let mut out = Vec::with_capacity(patch.len() + 64);
+    let mut lines = patch.lines().peekable();
+    while let Some(line) = lines.next() {
+        if annotator
+            .write_annotated_line(&mut out, line, &mut lines)
+            .is_err()
+        {
+            return patch.to_string();
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| patch.to_string())
 }
 
 /// Normalise one line like Git's `-b` / `--ignore-space-change`.

@@ -129,6 +129,17 @@ fn log_patch_empty_file_add_matches_git() {
 }
 
 #[test]
+fn log_patch_quoted_tab_path_matches_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+    let name = format!("tab{}name.txt", '\t');
+    std::fs::write(dir.path().join(&name), b"x\n").unwrap();
+    git_in(dir.path(), &["add", "."]);
+    git_in(dir.path(), &["commit", "-q", "-m", "tab path"]);
+    assert_last_log_patch_matches_git(dir.path());
+}
+
+#[test]
 fn log_patch_non_utf8_text_matches_git() {
     let dir = TempDir::new().expect("tempdir");
     git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);

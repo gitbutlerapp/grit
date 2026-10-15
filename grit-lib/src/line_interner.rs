@@ -25,7 +25,11 @@ impl LineInterner {
                 }
             }
         }
-        let id = u32::try_from(self.lines.len()).expect("line interner overflow");
+        let len = self.lines.len();
+        if len > u32::MAX as usize {
+            return u32::MAX;
+        }
+        let id = len as u32;
         self.lines.push(line.into());
         self.index.entry(key).or_default().push(id);
         id

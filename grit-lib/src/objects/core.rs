@@ -318,8 +318,14 @@ impl ObjectId {
             ));
         }
         let mut out = [0u8; 20];
-        for (i, chunk) in bytes.chunks_exact(2).enumerate() {
+        let (pairs, remainder) = bytes.as_chunks::<2>();
+        for (i, chunk) in pairs.iter().enumerate() {
             out[i] = (hex_nibble(chunk[0])? << 4) | hex_nibble(chunk[1])?;
+        }
+        if !remainder.is_empty() {
+            return Err(Error::InvalidObjectId(
+                String::from_utf8_lossy(bytes).into_owned(),
+            ));
         }
         Self::from_bytes(&out)
     }

@@ -1,5 +1,6 @@
 //! Git-compatible `log -p` / `show` patch output streamed to a [`Write`](std::io::Write).
 
+use std::collections::HashMap;
 use std::io::Write;
 
 use crate::blame::{parse_diff_algorithm_name, BlameDiffAlgorithm};
@@ -7,10 +8,11 @@ use crate::commit_pretty::abbrev_hex;
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::merge_file;
+use crate::objects::CommitData;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::quote_path::format_diff_path_with_prefix;
 use crate::repo::Repository;
-use crate::rev_parse::abbreviate_object_id;
 
 use super::{
     diff_trees, empty_blob_oid, write_unified_diff_with_prefix_and_funcname_and_algorithm,
@@ -124,13 +126,77 @@ pub fn write_commit_log_patch<W: Write>(
     let odb = repo.odb();
     let raw = odb.read(oid)?;
     let commit = parse_commit(&raw.data)?;
+    let parent_tree = parent_tree_for_commit(odb, &commit, None)?;
+    write_parsed_commit_log_patch(out, repo, odb, oid, &commit, parent_tree, opts)
+}
+
+/// Like [`write_commit_log_patch`] for many commits (avoids re-reading parent commits).
+///
+/// # Errors
+///
+/// Propagates ODB read, tree diff, and I/O errors.
+pub fn write_commits_log_patch<W: Write>(
+    repo: &Repository,
+    out: &mut W,
+    oids: &[ObjectId],
+    opts: &LogPatchOptions,
+) -> Result<()> {
+    if oids.is_empty() {
+        return Ok(());
+    }
+    let odb = repo.odb();
+    let mut trees_by_commit: HashMap<ObjectId, ObjectId> = HashMap::with_capacity(oids.len());
+    let mut parsed: Vec<(ObjectId, CommitData)> = Vec::with_capacity(oids.len());
+    for oid in oids {
+        let raw = odb.read(oid)?;
+        let commit = parse_commit(&raw.data)?;
+        trees_by_commit.insert(*oid, commit.tree);
+        parsed.push((*oid, commit));
+    }
+    for (i, (oid, commit)) in parsed.iter().enumerate() {
+        let parent_tree = parent_tree_for_commit(odb, commit, Some(&trees_by_commit))?;
+        write_parsed_commit_log_patch(out, repo, odb, oid, commit, parent_tree, opts)?;
+        if i + 1 < parsed.len() {
+            writeln!(out)?;
+        }
+    }
+    Ok(())
+}
+
+fn parent_tree_for_commit(
+    odb: &Odb,
+    commit: &CommitData,
+    trees_by_commit: Option<&HashMap<ObjectId, ObjectId>>,
+) -> Result<Option<ObjectId>> {
+    if commit.parents.is_empty() {
+        return Ok(None);
+    }
+    let parent = commit.parents[0];
+    if let Some(map) = trees_by_commit {
+        if let Some(tree) = map.get(&parent) {
+            return Ok(Some(*tree));
+        }
+    }
+    let parent_raw = odb.read(&parent)?;
+    Ok(Some(parse_commit(&parent_raw.data)?.tree))
+}
+
+fn write_parsed_commit_log_patch<W: Write>(
+    out: &mut W,
+    repo: &Repository,
+    odb: &Odb,
+    oid: &ObjectId,
+    commit: &CommitData,
+    parent_tree: Option<ObjectId>,
+    opts: &LogPatchOptions,
+) -> Result<()> {
     match opts.commit_header {
         LogPatchCommitHeader::Full => {
             writeln!(out, "commit {oid}")?;
             if commit.parents.len() > 1 {
                 let mut parts = Vec::with_capacity(commit.parents.len());
                 for parent in &commit.parents {
-                    parts.push(abbreviate_object_id(repo, *parent, opts.abbrev_len)?);
+                    parts.push(abbrev_hex(parent, opts.abbrev_len));
                 }
                 writeln!(out, "Merge: {}", parts.join(" "))?;
             }
@@ -148,12 +214,6 @@ pub fn write_commit_log_patch<W: Write>(
             writeln!(out)?;
         }
     }
-    let parent_tree = if commit.parents.is_empty() {
-        None
-    } else {
-        let parent_raw = odb.read(&commit.parents[0])?;
-        Some(parse_commit(&parent_raw.data)?.tree)
-    };
     let entries = diff_trees(odb, parent_tree.as_ref(), Some(&commit.tree), "")?;
     for entry in entries {
         write_diff_entry_log_patch(out, repo, odb, &entry, opts)?;
@@ -251,7 +311,7 @@ fn log_patch_parse_mode_u32(mode: &str) -> u32 {
 /// Propagates ODB reads and I/O errors.
 pub fn write_diff_entry_log_patch<W: Write>(
     out: &mut W,
-    repo: &Repository,
+    _repo: &Repository,
     odb: &Odb,
     entry: &DiffEntry,
     opts: &LogPatchOptions,
@@ -266,7 +326,13 @@ pub fn write_diff_entry_log_patch<W: Write>(
         .as_deref()
         .or(entry.old_path.as_deref())
         .unwrap_or("dev/null");
-    writeln!(out, "diff --git a/{git_old} b/{git_new}")?;
+    const QUOTE_FULLY: bool = true;
+    writeln!(
+        out,
+        "diff --git {} {}",
+        format_diff_path_with_prefix("a/", git_old, QUOTE_FULLY),
+        format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
+    )?;
 
     let old_mode = log_patch_parse_mode_u32(&entry.old_mode);
     let new_mode = log_patch_parse_mode_u32(&entry.new_mode);
@@ -306,14 +372,14 @@ pub fn write_diff_entry_log_patch<W: Write>(
                     out,
                     "index {}..{}",
                     abbrev_hex(&zero_oid(), opts.abbrev_len),
-                    abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?
+                    abbrev_hex(&entry.new_oid, opts.abbrev_len)
                 )?;
             }
             DiffStatus::Deleted => {
                 writeln!(
                     out,
                     "index {}..{}",
-                    abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
+                    abbrev_hex(&entry.old_oid, opts.abbrev_len),
                     abbrev_hex(&zero_oid(), opts.abbrev_len)
                 )?;
             }
@@ -321,16 +387,16 @@ pub fn write_diff_entry_log_patch<W: Write>(
                 writeln!(
                     out,
                     "index {}..{}",
-                    abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
-                    abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?
+                    abbrev_hex(&entry.old_oid, opts.abbrev_len),
+                    abbrev_hex(&entry.new_oid, opts.abbrev_len)
                 )?;
             }
             _ => {
                 writeln!(
                     out,
                     "index {}..{} {}",
-                    abbreviate_object_id(repo, entry.old_oid, opts.abbrev_len)?,
-                    abbreviate_object_id(repo, entry.new_oid, opts.abbrev_len)?,
+                    abbrev_hex(&entry.old_oid, opts.abbrev_len),
+                    abbrev_hex(&entry.new_oid, opts.abbrev_len),
                     index_mode
                 )?;
             }
@@ -347,12 +413,12 @@ pub fn write_diff_entry_log_patch<W: Write>(
         let old_side = if old_mode == 0 {
             "/dev/null".to_owned()
         } else {
-            format!("a/{git_old}")
+            format_diff_path_with_prefix("a/", git_old, QUOTE_FULLY)
         };
         let new_side = if new_mode == 0 {
             "/dev/null".to_owned()
         } else {
-            format!("b/{git_new}")
+            format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
         };
         writeln!(out, "Binary files {old_side} and {new_side} differ")?;
         return Ok(());
@@ -366,50 +432,63 @@ pub fn write_diff_entry_log_patch<W: Write>(
             crate::commit_encoding::decode_latin1(&new_bytes),
         )
     } else {
-        (
-            std::str::from_utf8(&old_bytes)
-                .expect("valid utf-8 checked above")
-                .to_owned(),
-            std::str::from_utf8(&new_bytes)
-                .expect("valid utf-8 checked above")
-                .to_owned(),
-        )
+        let old_s = std::str::from_utf8(&old_bytes)
+            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
+        let new_s = std::str::from_utf8(&new_bytes)
+            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
+        (old_s.to_owned(), new_s.to_owned())
     };
     let old_path = if old_mode == 0 {
         "/dev/null".to_owned()
     } else {
-        format!("a/{git_old}")
+        git_old.to_owned()
     };
     let new_path = if new_mode == 0 {
         "/dev/null".to_owned()
     } else {
-        format!("b/{git_new}")
+        git_new.to_owned()
     };
     let d = &opts.diff;
-    let mut patch_buf = Vec::new();
-    write_unified_diff_with_prefix_and_funcname_and_algorithm(
-        &mut patch_buf,
-        &old_text,
-        &new_text,
-        &old_path,
-        &new_path,
-        d.context_lines,
-        d.inter_hunk_context,
-        "",
-        "",
-        None,
-        d.algorithm,
-        false,
-        d.use_git_histogram,
-        d.indent_heuristic,
-        true,
-    )?;
     if byte_oriented {
-        out.write_all(&crate::commit_encoding::encode_latin1_lossy(
-            std::str::from_utf8(&patch_buf).expect("patch is latin1"),
-        ))?;
+        let mut patch_buf = Vec::new();
+        write_unified_diff_with_prefix_and_funcname_and_algorithm(
+            &mut patch_buf,
+            &old_text,
+            &new_text,
+            &old_path,
+            &new_path,
+            d.context_lines,
+            d.inter_hunk_context,
+            "a/",
+            "b/",
+            None,
+            d.algorithm,
+            false,
+            d.use_git_histogram,
+            d.indent_heuristic,
+            QUOTE_FULLY,
+        )?;
+        let patch_str = std::str::from_utf8(&patch_buf)
+            .map_err(|_| crate::error::Error::CorruptObject("patch re-encoding failed".into()))?;
+        out.write_all(&crate::commit_encoding::encode_latin1_lossy(patch_str))?;
     } else {
-        out.write_all(&patch_buf)?;
+        write_unified_diff_with_prefix_and_funcname_and_algorithm(
+            out,
+            &old_text,
+            &new_text,
+            &old_path,
+            &new_path,
+            d.context_lines,
+            d.inter_hunk_context,
+            "a/",
+            "b/",
+            None,
+            d.algorithm,
+            false,
+            d.use_git_histogram,
+            d.indent_heuristic,
+            QUOTE_FULLY,
+        )?;
     }
     Ok(())
 }

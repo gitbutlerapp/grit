@@ -6,7 +6,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{write_commit_log_patch, LogPatchOptions};
+use grit_lib::diff::{write_commits_log_patch, LogPatchOptions};
 use grit_lib::error::Error;
 use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
 use grit_lib::objects::pack::{
@@ -212,6 +212,7 @@ pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
         let opts = RevListOptions {
             max_count: Some(limit),
+            use_commit_graph: true,
             ..Default::default()
         };
         let result =
@@ -219,13 +220,7 @@ pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
         let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let patch_opts = LogPatchOptions::git_default(&config);
         let mut stdout = io::stdout().lock();
-        let commits = &result.commits;
-        for (i, oid) in commits.iter().enumerate() {
-            write_commit_log_patch(repo, &mut stdout, oid, &patch_opts)?;
-            if i + 1 < commits.len() {
-                writeln!(stdout)?;
-            }
-        }
+        write_commits_log_patch(repo, &mut stdout, &result.commits, &patch_opts)?;
         Ok(())
     })
 }
