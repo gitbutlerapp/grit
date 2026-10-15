@@ -6708,6 +6708,7 @@ pub struct grit_lib::objects::odb::Odb
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::append_alternate_objects_line(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::append_file_alternate(&self, &std::path::Path) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::Odb::approximate_object_count(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::objects::odb::Odb::config_git_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::objects::odb::Odb::count_loose_objects(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::objects::odb::Odb::disable_mem_overlay(&self)
@@ -9646,6 +9647,7 @@ pub struct grit_lib::prelude::Odb
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::append_alternate_objects_line(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::append_file_alternate(&self, &std::path::Path) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::Odb::approximate_object_count(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::objects::odb::Odb::config_git_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::objects::odb::Odb::count_loose_objects(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::objects::odb::Odb::disable_mem_overlay(&self)

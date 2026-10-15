@@ -1,6 +1,8 @@
 //! Human-oriented commit one-line formats shared by porcelain commands.
 
+use crate::error::Result;
 use crate::objects::ObjectId;
+use crate::odb::Odb;
 
 /// Abbreviate `oid` to at most `abbrev_len` hex characters (minimum 4, maximum 40).
 #[must_use]
@@ -8,6 +10,36 @@ pub fn abbrev_hex(oid: &ObjectId, abbrev_len: usize) -> String {
     let hex = oid.to_hex();
     let n = abbrev_len.clamp(4, 40).min(hex.len());
     hex[..n].to_owned()
+}
+
+/// Git's automatic minimum abbreviation length from approximate object count.
+///
+/// Matches Git's `odb_find_abbrev_len` when `min_length < 0` (MSB of count, halved for hex digits,
+/// floored at 7).
+#[must_use]
+pub fn auto_abbrev_len_for_object_count(count: usize) -> usize {
+    const FALLBACK: usize = 7;
+    if count == 0 {
+        return FALLBACK;
+    }
+    let mut val = count as u64;
+    let mut msb = 0u32;
+    while val > 1 {
+        val >>= 1;
+        msb += 1;
+    }
+    let bit_width = msb + 1;
+    let hex_min = (bit_width as usize).div_ceil(2);
+    hex_min.max(FALLBACK)
+}
+
+/// Approximate object count for auto `core.abbrev` (local pack index sizes + loose files).
+///
+/// # Errors
+///
+/// Propagates ODB pack listing and loose enumeration errors.
+pub fn approximate_object_count(odb: &Odb) -> Result<usize> {
+    odb.approximate_object_count()
 }
 
 /// Return the pretty subject for a commit or tag message.

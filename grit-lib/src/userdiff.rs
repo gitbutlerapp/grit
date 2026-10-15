@@ -410,7 +410,7 @@ impl FuncnameMatcher {
             if rule.negate {
                 return None;
             }
-            return Some(matched_text);
+            return Some(matched_text.trim_end().to_owned());
         }
         None
     }

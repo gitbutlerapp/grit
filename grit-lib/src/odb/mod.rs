@@ -1736,6 +1736,25 @@ impl Odb {
         Ok(count)
     }
 
+    /// Approximate object count for Git-style automatic `core.abbrev` sizing.
+    ///
+    /// Sums object counts from cached pack indexes (no per-object scan) plus loose files under
+    /// this database's `objects/` directory. Matches Git's `ODB_COUNT_OBJECTS_APPROXIMATE` well
+    /// enough for abbreviation heuristics on typical repositories.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack index listing and loose enumeration failures.
+    pub fn approximate_object_count(&self) -> Result<usize> {
+        let pack_objects: Result<usize> = self.with_pack_read_context(|| {
+            let indexes = pack::read_local_pack_indexes_cached(self.objects_dir())?;
+            Ok(indexes.iter().map(|idx| idx.len()).sum())
+        });
+        let mut count = pack_objects?;
+        count += self.count_loose_objects()?;
+        Ok(count)
+    }
+
     /// Zlib-compress canonical loose store bytes using the repository's loose level.
     ///
     /// # Errors

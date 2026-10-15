@@ -3,8 +3,11 @@
 use std::collections::HashMap;
 use std::io::Write;
 
+use crate::attributes::load_gitattributes_for_check_attr_source;
 use crate::blame::{parse_diff_algorithm_name, BlameDiffAlgorithm};
-use crate::commit_pretty::abbrev_hex;
+use crate::commit_pretty::{
+    abbrev_hex, approximate_object_count, auto_abbrev_len_for_object_count,
+};
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::merge_file;
@@ -14,6 +17,7 @@ use crate::odb::Odb;
 use crate::oid_abbrev_cache::OidAbbrevCache;
 use crate::quote_path::format_diff_path_with_prefix;
 use crate::repo::Repository;
+use crate::userdiff::{matcher_for_path_parsed, FuncnameMatcher};
 
 use super::{
     diff_trees, empty_blob_oid, write_unified_diff_with_prefix_and_funcname_and_algorithm,
@@ -99,18 +103,47 @@ impl LogPatchOptions {
     /// Defaults matching `git log -p` on a typical repository.
     #[must_use]
     pub fn git_default(config: &ConfigSet) -> Self {
-        let abbrev_len = config
-            .get("core.abbrev")
-            .and_then(|v| v.parse::<i64>().ok())
-            .map(|n| n as usize)
-            .unwrap_or(7)
-            .clamp(4, 40);
         Self {
             diff: LogPatchDiffOptions::from_config(config),
-            abbrev_len,
+            abbrev_len: 7,
             commit_header: LogPatchCommitHeader::Full,
         }
     }
+}
+
+fn resolve_core_abbrev_len(config: &ConfigSet, odb: &Odb) -> Result<usize> {
+    if let Some(v) = config.get("core.abbrev") {
+        if v.eq_ignore_ascii_case("auto") {
+            let count = approximate_object_count(odb)?;
+            return Ok(auto_abbrev_len_for_object_count(count));
+        }
+        if let Ok(n) = v.parse::<i64>() {
+            return Ok((n as usize).clamp(4, 40));
+        }
+    }
+    let count = approximate_object_count(odb)?;
+    Ok(auto_abbrev_len_for_object_count(count))
+}
+
+fn effective_log_patch_options(
+    repo: &Repository,
+    opts: &LogPatchOptions,
+) -> Result<LogPatchOptions> {
+    let config = repo.config()?.clone();
+    let mut out = opts.clone();
+    out.abbrev_len = resolve_core_abbrev_len(&config, repo.odb())?;
+    Ok(out)
+}
+
+fn log_patch_funcname_matcher(
+    repo: &Repository,
+    config: &ConfigSet,
+    tree_oid: &ObjectId,
+    rel_path: &str,
+) -> Result<Option<FuncnameMatcher>> {
+    let parsed = load_gitattributes_for_check_attr_source(repo, tree_oid)?;
+    matcher_for_path_parsed(config, &parsed.rules, &parsed.macros, rel_path, false)
+        .map_err(crate::error::Error::Message)
 }
 
 /// Write one commit in `git log -p --no-color --format=%H` shape (no patch for merges).
@@ -128,6 +161,7 @@ pub fn write_commit_log_patch<W: Write>(
     let raw = odb.read(oid)?;
     let commit = parse_commit(&raw.data)?;
     let parent_tree = parent_tree_for_commit(odb, &commit, None)?;
+    let opts = effective_log_patch_options(repo, opts)?;
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     write_parsed_commit_log_patch(
         out,
@@ -136,7 +170,7 @@ pub fn write_commit_log_patch<W: Write>(
         oid,
         &commit,
         parent_tree,
-        opts,
+        &opts,
         &mut abbrev_cache,
     )
 }
@@ -164,8 +198,9 @@ pub fn write_commits_log_patch<W: Write>(
         trees_by_commit.insert(*oid, commit.tree);
         parsed.push((*oid, commit));
     }
+    let opts = effective_log_patch_options(repo, opts)?;
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
-    for (i, (oid, commit)) in parsed.iter().enumerate() {
+    for (oid, commit) in &parsed {
         let parent_tree = parent_tree_for_commit(odb, commit, Some(&trees_by_commit))?;
         write_parsed_commit_log_patch(
             out,
@@ -174,12 +209,9 @@ pub fn write_commits_log_patch<W: Write>(
             oid,
             commit,
             parent_tree,
-            opts,
+            &opts,
             &mut abbrev_cache,
         )?;
-        if i + 1 < parsed.len() {
-            writeln!(out)?;
-        }
     }
     Ok(())
 }
@@ -204,14 +236,34 @@ fn parent_tree_for_commit(
 
 fn abbrev_for_index_line(
     cache: &mut OidAbbrevCache,
-    odb: &Odb,
+    repo: &Repository,
     oid: &ObjectId,
     min_len: usize,
 ) -> Result<String> {
     if *oid == zero_oid() {
         return Ok(abbrev_hex(oid, min_len));
     }
-    cache.abbrev(odb, oid)
+    cache.abbrev(repo, oid)
+}
+
+fn abbrev_index_pair(
+    cache: &mut OidAbbrevCache,
+    repo: &Repository,
+    old_oid: &ObjectId,
+    new_oid: &ObjectId,
+    min_len: usize,
+) -> Result<(String, String)> {
+    let old = abbrev_for_index_line(cache, repo, old_oid, min_len)?;
+    let new = abbrev_for_index_line(cache, repo, new_oid, min_len)?;
+    let len = old.len().max(new.len());
+    let pad = |oid: &ObjectId, abbrev: String| {
+        if abbrev.len() >= len {
+            return abbrev;
+        }
+        let hex = oid.to_hex();
+        hex[..len.min(hex.len())].to_string()
+    };
+    Ok((pad(old_oid, old), pad(new_oid, new)))
 }
 
 fn write_parsed_commit_log_patch<W: Write>(
@@ -232,7 +284,7 @@ fn write_parsed_commit_log_patch<W: Write>(
                 for parent in &commit.parents {
                     parts.push(abbrev_for_index_line(
                         abbrev_cache,
-                        odb,
+                        repo,
                         parent,
                         opts.abbrev_len,
                     )?);
@@ -255,7 +307,15 @@ fn write_parsed_commit_log_patch<W: Write>(
     }
     let entries = diff_trees(odb, parent_tree.as_ref(), Some(&commit.tree), "")?;
     for entry in entries {
-        write_diff_entry_log_patch(out, repo, odb, &entry, opts, abbrev_cache)?;
+        write_diff_entry_log_patch_with_tree(
+            out,
+            repo,
+            odb,
+            &entry,
+            opts,
+            abbrev_cache,
+            Some(&commit.tree),
+        )?;
     }
     Ok(())
 }
@@ -350,12 +410,25 @@ fn log_patch_parse_mode_u32(mode: &str) -> u32 {
 /// Propagates ODB reads and I/O errors.
 pub fn write_diff_entry_log_patch<W: Write>(
     out: &mut W,
-    _repo: &Repository,
+    repo: &Repository,
+    odb: &Odb,
+    entry: &DiffEntry,
+    opts: &LogPatchOptions,
+) -> Result<()> {
+    let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
+    write_diff_entry_log_patch_with_tree(out, repo, odb, entry, opts, &mut abbrev_cache, None)
+}
+
+fn write_diff_entry_log_patch_with_tree<W: Write>(
+    out: &mut W,
+    repo: &Repository,
     odb: &Odb,
     entry: &DiffEntry,
     opts: &LogPatchOptions,
     abbrev_cache: &mut OidAbbrevCache,
+    new_tree: Option<&ObjectId>,
 ) -> Result<()> {
+    let config = repo.config()?.clone();
     let git_old = entry
         .old_path
         .as_deref()
@@ -417,37 +490,44 @@ pub fn write_diff_entry_log_patch<W: Write>(
         };
         match entry.status {
             DiffStatus::Added => {
-                writeln!(
-                    out,
-                    "index {}..{}",
-                    abbrev_for_index_line(abbrev_cache, odb, &zero_oid(), opts.abbrev_len)?,
-                    abbrev_for_index_line(abbrev_cache, odb, &entry.new_oid, opts.abbrev_len)?
+                let (old_a, new_a) = abbrev_index_pair(
+                    abbrev_cache,
+                    repo,
+                    &zero_oid(),
+                    &entry.new_oid,
+                    opts.abbrev_len,
                 )?;
+                writeln!(out, "index {old_a}..{new_a}")?;
             }
             DiffStatus::Deleted => {
-                writeln!(
-                    out,
-                    "index {}..{}",
-                    abbrev_for_index_line(abbrev_cache, odb, &entry.old_oid, opts.abbrev_len)?,
-                    abbrev_for_index_line(abbrev_cache, odb, &zero_oid(), opts.abbrev_len)?
+                let (old_a, new_a) = abbrev_index_pair(
+                    abbrev_cache,
+                    repo,
+                    &entry.old_oid,
+                    &zero_oid(),
+                    opts.abbrev_len,
                 )?;
+                writeln!(out, "index {old_a}..{new_a}")?;
             }
             DiffStatus::Renamed | DiffStatus::Copied => {
-                writeln!(
-                    out,
-                    "index {}..{}",
-                    abbrev_for_index_line(abbrev_cache, odb, &entry.old_oid, opts.abbrev_len)?,
-                    abbrev_for_index_line(abbrev_cache, odb, &entry.new_oid, opts.abbrev_len)?
+                let (old_a, new_a) = abbrev_index_pair(
+                    abbrev_cache,
+                    repo,
+                    &entry.old_oid,
+                    &entry.new_oid,
+                    opts.abbrev_len,
                 )?;
+                writeln!(out, "index {old_a}..{new_a}")?;
             }
             _ => {
-                writeln!(
-                    out,
-                    "index {}..{} {}",
-                    abbrev_for_index_line(abbrev_cache, odb, &entry.old_oid, opts.abbrev_len)?,
-                    abbrev_for_index_line(abbrev_cache, odb, &entry.new_oid, opts.abbrev_len)?,
-                    index_mode
+                let (old_a, new_a) = abbrev_index_pair(
+                    abbrev_cache,
+                    repo,
+                    &entry.old_oid,
+                    &entry.new_oid,
+                    opts.abbrev_len,
                 )?;
+                writeln!(out, "index {old_a}..{new_a} {index_mode}")?;
             }
         }
     }
@@ -498,6 +578,12 @@ pub fn write_diff_entry_log_patch<W: Write>(
         git_new.to_owned()
     };
     let d = &opts.diff;
+    let funcname_matcher = if let Some(tree) = new_tree {
+        log_patch_funcname_matcher(repo, &config, tree, git_new)?
+    } else {
+        None
+    };
+    let funcname_ref = funcname_matcher.as_ref();
     if byte_oriented {
         let mut patch_buf = Vec::new();
         write_unified_diff_with_prefix_and_funcname_and_algorithm(
@@ -510,7 +596,7 @@ pub fn write_diff_entry_log_patch<W: Write>(
             d.inter_hunk_context,
             "a/",
             "b/",
-            None,
+            funcname_ref,
             d.algorithm,
             false,
             d.use_git_histogram,
@@ -531,7 +617,7 @@ pub fn write_diff_entry_log_patch<W: Write>(
             d.inter_hunk_context,
             "a/",
             "b/",
-            None,
+            funcname_ref,
             d.algorithm,
             false,
             d.use_git_histogram,
@@ -579,8 +665,7 @@ mod tests {
         repo.odb().write(ObjectKind::Blob, b"x")?;
         let mut out = Cursor::new(Vec::new());
         let opts = LogPatchOptions::git_default(&ConfigSet::default());
-        let mut cache = OidAbbrevCache::new(opts.abbrev_len);
-        write_diff_entry_log_patch(&mut out, &repo, repo.odb(), &entry, &opts, &mut cache)?;
+        write_diff_entry_log_patch(&mut out, &repo, repo.odb(), &entry, &opts)?;
         let text = String::from_utf8(out.into_inner()).expect("utf-8");
         assert!(text.contains("copy from src/a.txt"));
         assert!(text.contains("copy to dst/b.txt"));

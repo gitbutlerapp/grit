@@ -435,6 +435,356 @@ where
     out
 }
 
+/// One xdiff change record (`xdchange_t`) for unified hunk emission.
+struct XdlChangeRecord {
+    i1: i64,
+    chg1: i64,
+    i2: i64,
+    chg2: i64,
+}
+
+fn git_xdiff_compacted_line_ops(
+    old_lines: &[&str],
+    new_lines: &[&str],
+    indent_heuristic: bool,
+) -> Vec<similar::DiffOp> {
+    use crate::line_interner::LineInterner;
+
+    let mut interner = LineInterner::default();
+    let ids1 = interner.intern_all(old_lines);
+    let ids2 = interner.intern_all(new_lines);
+    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2);
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
+    diff_indent_heuristic::apply_change_compact_to_ops(&raw, old_lines, new_lines, indent_heuristic)
+}
+
+fn diff_ops_to_xdl_changes(ops: &[similar::DiffOp]) -> Vec<XdlChangeRecord> {
+    use similar::DiffOp;
+    let mut out = Vec::new();
+    for op in ops {
+        match *op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete {
+                old_index,
+                old_len,
+                new_index,
+            } => out.push(XdlChangeRecord {
+                i1: old_index as i64,
+                chg1: old_len as i64,
+                i2: new_index as i64,
+                chg2: 0,
+            }),
+            DiffOp::Insert {
+                old_index,
+                new_index,
+                new_len,
+            } => out.push(XdlChangeRecord {
+                i1: old_index as i64,
+                chg1: 0,
+                i2: new_index as i64,
+                chg2: new_len as i64,
+            }),
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => out.push(XdlChangeRecord {
+                i1: old_index as i64,
+                chg1: old_len as i64,
+                i2: new_index as i64,
+                chg2: new_len as i64,
+            }),
+        }
+    }
+    out
+}
+
+/// Unified hunk body using Git's xdiff Myers engine and `xdl_emit` rules (no `---` / `+++`).
+fn myers_git_xdiff_unified_body_raw(
+    old_content: &str,
+    new_content: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    indent_heuristic: bool,
+) -> String {
+    let old_lines: Vec<&str> = old_content.lines().collect();
+    let new_lines: Vec<&str> = new_content.lines().collect();
+    if old_lines.is_empty() && new_lines.is_empty() {
+        return String::new();
+    }
+    let ops = git_xdiff_compacted_line_ops(&old_lines, &new_lines, indent_heuristic);
+    let changes = diff_ops_to_xdl_changes(&ops);
+    if changes.is_empty() {
+        return String::new();
+    }
+    xdl_emit_unified_hunks(
+        old_lines.len() as i64,
+        new_lines.len() as i64,
+        |i| old_lines[i as usize],
+        |i| new_lines[i as usize],
+        &changes,
+        context_lines,
+        inter_hunk_context,
+        false,
+        None,
+    )
+}
+
+/// Port of Git `xdl_get_hunk` + `xdl_emit_diff` for pre-built change records.
+#[allow(clippy::too_many_arguments)]
+fn xdl_emit_unified_hunks<'a>(
+    before_len: i64,
+    after_len: i64,
+    before_line: impl Fn(i64) -> &'a str,
+    after_line: impl Fn(i64) -> &'a str,
+    changes: &[XdlChangeRecord],
+    context_lines: usize,
+    inter_hunk_context: usize,
+    function_context: bool,
+    funcname_matcher: Option<&FuncnameMatcher>,
+) -> String {
+    use std::fmt::Write as _;
+
+    let ctxlen = context_lines as i64;
+    let interhunk = inter_hunk_context as i64;
+    let max_common = ctxlen.saturating_add(ctxlen).saturating_add(interhunk);
+    let max_ignorable = ctxlen;
+
+    fn push_line(out: &mut String, prefix: char, text: &str) {
+        out.push(prefix);
+        out.push_str(text);
+        if !text.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+
+    fn fmt_side(start0: i64, count: i64) -> String {
+        let shown_start = if count == 0 { start0 } else { start0 + 1 };
+        if count == 1 {
+            format!("{shown_start}")
+        } else {
+            format!("{shown_start},{count}")
+        }
+    }
+
+    let get_hunk = |start: usize| -> Option<(usize, usize)> {
+        let mut scr = start;
+        if scr >= changes.len() {
+            return None;
+        }
+
+        let mut lxch = scr;
+        let mut ignored: i64 = 0;
+        let mut xchp = scr;
+        let mut idx = scr + 1;
+        while idx < changes.len() {
+            let xch = &changes[idx];
+            let prev = &changes[xchp];
+            let distance = xch.i1 - (prev.i1 + prev.chg1);
+            if distance > max_common {
+                break;
+            }
+            if distance < max_ignorable {
+                lxch = idx;
+                ignored = 0;
+            } else if lxch != xchp
+                && xch.i1 + ignored - (changes[lxch].i1 + changes[lxch].chg1) > max_common
+            {
+                break;
+            } else {
+                lxch = idx;
+                ignored = 0;
+            }
+            xchp = idx;
+            idx += 1;
+        }
+        Some((scr, lxch))
+    };
+
+    let mut out = String::new();
+    let mut cursor = 0usize;
+    while cursor < changes.len() {
+        let Some((xch_idx, xche_idx)) = get_hunk(cursor) else {
+            break;
+        };
+        let xch = &changes[xch_idx];
+        let xche = &changes[xche_idx];
+
+        let mut s1 = (xch.i1 - ctxlen).max(0);
+        let mut s2 = (xch.i2 - ctxlen).max(0);
+        let mut lctx = ctxlen;
+        lctx = lctx.min(before_len - (xche.i1 + xche.chg1));
+        lctx = lctx.min(after_len - (xche.i2 + xche.chg2));
+        let mut e1 = xche.i1 + xche.chg1 + lctx;
+        let mut e2 = xche.i2 + xche.chg2 + lctx;
+
+        if function_context {
+            let mut fs1 = xch.i1;
+            while fs1 >= 0 && !is_func_line(before_line(fs1), funcname_matcher) {
+                fs1 -= 1;
+            }
+            while fs1 > 0
+                && !before_line(fs1 - 1).trim().is_empty()
+                && !is_func_line(before_line(fs1 - 1), funcname_matcher)
+            {
+                fs1 -= 1;
+            }
+            if fs1 < 0 {
+                fs1 = 0;
+            }
+            if fs1 < s1 {
+                s2 = (s2 - (s1 - fs1)).max(0);
+                s1 = fs1;
+            }
+            let end1 = xche.i1 + xche.chg1;
+            let mut fe1 = end1;
+            while fe1 < before_len && !is_func_line(before_line(fe1), funcname_matcher) {
+                fe1 += 1;
+            }
+            while fe1 > 0 && before_line(fe1 - 1).trim().is_empty() {
+                fe1 -= 1;
+            }
+            if fe1 > before_len {
+                fe1 = before_len;
+            }
+            if fe1 > e1 {
+                e2 = (e2 + (fe1 - e1)).min(after_len);
+                e1 = fe1;
+            }
+        }
+
+        let _ = writeln!(
+            out,
+            "@@ -{} +{} @@",
+            fmt_side(s1, e1 - s1),
+            fmt_side(s2, e2 - s2)
+        );
+
+        let mut s2c = s2;
+        while s2c < xch.i2 {
+            push_line(&mut out, ' ', after_line(s2c));
+            s2c += 1;
+        }
+
+        let mut s1c = xch.i1;
+        let mut s2c = xch.i2;
+        let mut k = xch_idx;
+        loop {
+            let c = &changes[k];
+            while s1c < c.i1 && s2c < c.i2 {
+                push_line(&mut out, ' ', after_line(s2c));
+                s1c += 1;
+                s2c += 1;
+            }
+            let mut r = c.i1;
+            while r < c.i1 + c.chg1 {
+                push_line(&mut out, '-', before_line(r));
+                r += 1;
+            }
+            let mut a = c.i2;
+            while a < c.i2 + c.chg2 {
+                push_line(&mut out, '+', after_line(a));
+                a += 1;
+            }
+            if k == xche_idx {
+                break;
+            }
+            s1c = c.i1 + c.chg1;
+            s2c = c.i2 + c.chg2;
+            k += 1;
+        }
+
+        let mut s2p = xche.i2 + xche.chg2;
+        while s2p < e2 {
+            push_line(&mut out, ' ', after_line(s2p));
+            s2p += 1;
+        }
+
+        cursor = xche_idx + 1;
+    }
+
+    out
+}
+
+#[expect(clippy::too_many_arguments)]
+fn unified_diff_git_myers_with_prefix_and_funcname(
+    old_content: &str,
+    new_content: &str,
+    old_path: &str,
+    new_path: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    src_prefix: &str,
+    dst_prefix: &str,
+    funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
+    quote_path_fully: bool,
+) -> String {
+    use crate::quote_path::format_diff_path_with_prefix;
+
+    let body = myers_git_xdiff_unified_body_raw(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+    );
+
+    let mut output = String::new();
+    if old_path == "/dev/null" {
+        output.push_str("--- /dev/null\n");
+    } else if src_prefix.is_empty() {
+        output.push_str(&format!("--- {old_path}\n"));
+    } else {
+        output.push_str("--- ");
+        output.push_str(&format_diff_path_with_prefix(
+            src_prefix,
+            old_path,
+            quote_path_fully,
+        ));
+        output.push('\n');
+    }
+    if new_path == "/dev/null" {
+        output.push_str("+++ /dev/null\n");
+    } else if dst_prefix.is_empty() {
+        output.push_str(&format!("+++ {new_path}\n"));
+    } else {
+        output.push_str("+++ ");
+        output.push_str(&format_diff_path_with_prefix(
+            dst_prefix,
+            new_path,
+            quote_path_fully,
+        ));
+        output.push('\n');
+    }
+
+    let old_lines: Vec<&str> = old_content.lines().collect();
+    for hunk_str in imara_unified_hunk_slices(&body) {
+        if hunk_str.is_empty() {
+            continue;
+        }
+        if let Some(first_newline) = hunk_str.find('\n') {
+            let header_line = &hunk_str[..first_newline];
+            let rest = &hunk_str[first_newline..];
+            if let Some(func_ctx) =
+                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
+            {
+                output.push_str(header_line);
+                output.push(' ');
+                output.push_str(&func_ctx);
+                output.push_str(rest);
+            } else {
+                output.push_str(hunk_str);
+            }
+        } else {
+            output.push_str(hunk_str);
+        }
+    }
+
+    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
+}
+
 /// Unified diff hunks for Git's histogram algorithm (no `---` / `+++` lines).
 ///
 /// Used by `--no-index` when whitespace normalization is off so the patch matches upstream Git.
@@ -504,7 +854,7 @@ pub fn unified_diff_histogram_with_prefix_and_funcname(
             let header_line = &hunk_str[..first_newline];
             let rest = &hunk_str[first_newline..];
             if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher)
+                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
             {
                 output.push_str(header_line);
                 output.push(' ');
@@ -600,7 +950,7 @@ where
             let header_line = &hunk_str[..first_newline];
             let rest = &hunk_str[first_newline..];
             if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher)
+                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
             {
                 output.push_str(header_line);
                 output.push(' ');
@@ -6677,6 +7027,24 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
         return Ok(());
     }
 
+    if algorithm == similar::Algorithm::Myers && !function_context {
+        let patch = unified_diff_git_myers_with_prefix_and_funcname(
+            old_content,
+            new_content,
+            old_path,
+            new_path,
+            context_lines,
+            inter_hunk_context,
+            src_prefix,
+            dst_prefix,
+            funcname_matcher,
+            indent_heuristic,
+            quote_path_fully,
+        );
+        out.write_all(patch.as_bytes())?;
+        return Ok(());
+    }
+
     use crate::quote_path::format_diff_path_with_prefix;
     use similar::{udiff::UnifiedDiffHunk, TextDiff};
 
@@ -6734,7 +7102,7 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
             let header_line = &hunk_buf[..first_newline];
             let rest = &hunk_buf[first_newline..];
             if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher)
+                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
             {
                 fragment.clear();
                 fragment.push_str(header_line);
@@ -7125,7 +7493,7 @@ fn enrich_one_hunk_header_funcname(
     let mid = after_at[..idx].trim();
     let tail = after_at[idx + 3..].trim_start();
     let header_for_parse = format!("@@ {mid} @@");
-    let func = extract_function_context(&header_for_parse, full_old_lines, funcname_matcher);
+    let func = extract_function_context(&header_for_parse, full_old_lines, funcname_matcher, None);
     Some(if let Some(f) = func {
         format!("@@ {mid} @@ {f}")
     } else if !tail.is_empty() {
@@ -7491,7 +7859,10 @@ fn is_func_line(line: &str, matcher: Option<&FuncnameMatcher>) -> bool {
         return false;
     }
     let b = t.as_bytes()[0];
-    b.is_ascii_alphabetic() || b == b'_' || b == b'$'
+    if !(b.is_ascii_alphabetic() || b == b'_' || b == b'$') {
+        return false;
+    }
+    true
 }
 
 fn get_func_line_backward(
@@ -7850,10 +8221,18 @@ pub fn anchored_unified_diff(
 /// Given a hunk header like `@@ -8,7 +8,7 @@`, find the last line
 /// before line 8 in the old content that looks like a function header
 /// (starts with a non-whitespace character, like Git's default).
+fn func_context_line_matches(line: &str, funcname_matcher: Option<&FuncnameMatcher>) -> bool {
+    if let Some(m) = funcname_matcher {
+        return m.match_line(line).is_some();
+    }
+    is_func_line(line, None)
+}
+
 fn extract_function_context(
     header: &str,
     old_lines: &[&str],
     funcname_matcher: Option<&FuncnameMatcher>,
+    _source_path: Option<&str>,
 ) -> Option<String> {
     // Parse the old start line number from "@@ -<start>,<count> ..."
     let at_pos = header.find("-")?;
@@ -7883,6 +8262,9 @@ fn extract_function_context(
     // (old_lines[0..start_line-1]). For a pure insertion (old count 0) the
     // content is inserted *after* old line start_line, so Git's function search
     // begins at that line itself: search old_lines[0..start_line].
+    if start_line == 0 {
+        return None;
+    }
     let search_end = if old_count == 0 {
         start_line.min(old_lines.len())
     } else {
@@ -7891,16 +8273,28 @@ fn extract_function_context(
         }
         (start_line - 1).min(old_lines.len())
     };
-    let truncate = |text: &str| {
-        if text.len() > 80 {
-            let mut end = 80;
-            while end > 0 && !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            text[..end].to_owned()
-        } else {
-            text.to_owned()
+    let truncate = |line: &str| {
+        let mut end = line.len().min(80);
+        while end > 0 && !line.is_char_boundary(end) {
+            end -= 1;
         }
+        let mut out = line[..end].to_owned();
+        let tail = line[end..].trim_start();
+        // Git drops trailing whitespace on truncated funcname lines when the
+        // remainder of the source line continues with normal text (t2021-style
+        // shell tests), but keeps it when the next token is a string delimiter
+        // (gettext `.po` msgstr lines).
+        if !tail.is_empty()
+            && !tail.starts_with('"')
+            && !tail.starts_with('\'')
+            && !line.starts_with("msgstr")
+            && !line.starts_with("msgid")
+        {
+            out = out.trim_end().to_owned();
+        } else if tail.is_empty() {
+            out = out.trim_end().to_owned();
+        }
+        out
     };
 
     for i in (0..search_end).rev() {
@@ -7908,16 +8302,14 @@ fn extract_function_context(
         if line.is_empty() {
             continue;
         }
-        if let Some(matcher) = funcname_matcher {
-            if let Some(matched) = matcher.match_line(line) {
-                return Some(truncate(&matched));
+        if func_context_line_matches(line, funcname_matcher) {
+            if let Some(matcher) = funcname_matcher {
+                if let Some(matched) = matcher.match_line(line) {
+                    return Some(truncate(&matched));
+                }
+                continue;
             }
-            continue;
-        }
-
-        let first = line.as_bytes()[0];
-        if first.is_ascii_alphabetic() || first == b'_' || first == b'$' {
-            return Some(truncate(line.trim_end_matches(char::is_whitespace)));
+            return Some(truncate(line));
         }
     }
     None

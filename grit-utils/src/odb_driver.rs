@@ -23,6 +23,8 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
         let mut stdin = io::stdin().lock();
         let mut stdout = BufWriter::with_capacity(1 << 20, io::stdout().lock());
         let mut line = Vec::with_capacity(64);
+        // Fast path: exactly one local pack and no loose objects (see `SingleLocalPackReader::open`).
+        // On miss or when disabled, fall back to the full ODB (loose + all packs).
         let mut fast =
             SingleLocalPackReader::open(repo.odb().objects_dir()).context("single-pack reader")?;
         loop {
