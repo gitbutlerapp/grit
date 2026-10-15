@@ -44,7 +44,8 @@ use crate::odb::UnreachablePackRetention;
 use crate::pack_bitmap::{PackBitmapWriteOptions, PackBitmapWriter};
 use crate::pack_object_select::{enumerate_pack_objects, PackEnumerateOptions};
 use crate::pack_objects::{
-    build_pack, build_pack_from_send_list_with_parallel_threads, PackBuildOptions,
+    build_pack_from_send_list_with_parallel_threads, build_pack_with_write_threads,
+    PackBuildOptions,
 };
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
 use crate::progress::{NeverCancel, NullProgress};
@@ -702,14 +703,12 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     let run_incremental = opts.incremental;
 
     let skip_repack = should_auto_skip_repack(
-        odb,
-        &roots,
         loose_before,
         packs_before,
         run_incremental,
         opts.auto_skip,
         cfg.as_ref(),
-    )?;
+    );
 
     if opts.dry_run {
         report.objects = if skip_repack {
@@ -968,45 +967,36 @@ fn pack_loose_objects_incremental(
     )
 }
 
-/// Whether maintenance should skip rebuilding packs (Git `gc` auto heuristics).
-fn has_unreachable_packed_objects(odb: &Odb, roots: &[ObjectId]) -> Result<bool> {
-    let reachable = reachability_closure_for_roots(odb, roots)?;
-    let mut found = false;
-    odb.primary()?
-        .packed_objects()
-        .for_each_removable_pack_object(&mut |oid| {
-            if !reachable.contains(oid) {
-                found = true;
-                return std::ops::ControlFlow::Break(());
-            }
-            std::ops::ControlFlow::Continue(())
-        })?;
-    Ok(found)
-}
-
+/// Whether maintenance should skip rebuilding packs (Git `gc --auto` heuristics).
+///
+/// Unreachable or grace-protected objects in an existing pack do **not** trigger repack; only
+/// `gc.auto` (loose count) and `gc.autoPackLimit` (pack count) do, matching Git.
 fn should_auto_skip_repack(
-    odb: &Odb,
-    roots: &[ObjectId],
     loose_objects: usize,
     pack_count: usize,
     incremental: bool,
     auto_skip: bool,
     config: Option<&ConfigSet>,
-) -> Result<bool> {
-    if !auto_skip || incremental || loose_objects > 0 {
-        return Ok(false);
+) -> bool {
+    if !auto_skip || incremental {
+        return false;
+    }
+    if !config.is_some_and(ConfigSet::gc_auto_loose_disabled) {
+        let loose_auto = config
+            .map(ConfigSet::gc_auto_loose_limit)
+            .unwrap_or(6700);
+        if loose_objects >= loose_auto {
+            return false;
+        }
     }
     if pack_count == 0 {
-        return Ok(true);
+        return loose_objects == 0;
+    }
+    if config.is_some_and(ConfigSet::gc_auto_pack_limit_disabled) {
+        return true;
     }
     let pack_limit = config.map(ConfigSet::gc_auto_pack_limit).unwrap_or(50);
-    if pack_count > pack_limit {
-        return Ok(false);
-    }
-    if has_unreachable_packed_objects(odb, roots)? {
-        return Ok(false);
-    }
-    Ok(true)
+    pack_count <= pack_limit
 }
 
 /// Delete unreachable loose objects using `gc.pruneExpire` or an explicit cutoff.
@@ -1079,15 +1069,23 @@ pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
         return Ok(stats);
     }
 
-    stats.prune = if repack_opts.keep_unreachable {
-        PruneStats::default()
-    } else {
-        PruneStats {
+    if repack_opts.keep_unreachable {
+        stats.prune = PruneStats::default();
+        stats.prune_ran = false;
+    } else if stats.repack.unreachable_prune_ran {
+        stats.prune = PruneStats {
             pruned: stats.repack.unreachable_loose_pruned,
             kept: stats.repack.unreachable_loose_kept,
-        }
-    };
-    stats.prune_ran = stats.repack.unreachable_prune_ran;
+        };
+        stats.prune_ran = true;
+    } else {
+        let roots = collect_maintenance_object_roots(repo)?;
+        let keep_newer_than = repack_opts.prune_older_than.map(offset_to_system_time);
+        let prune_start = Instant::now();
+        stats.prune = prune_loose_unreachable(odb, &roots, keep_newer_than)?;
+        stats.phase_timings.prune_ms = duration_ms(prune_start.elapsed());
+        stats.prune_ran = true;
+    }
 
     if opts.write_commit_graph {
         let start = Instant::now();
@@ -1251,7 +1249,7 @@ fn build_repack_pack(
     threads: Option<usize>,
 ) -> Result<Vec<u8>> {
     if !keep_unreachable {
-        return build_pack(odb, roots, &[], opts);
+        return build_pack_with_write_threads(odb, roots, &[], opts, threads);
     }
     let empty_shallow = HashSet::new();
     let selection = enumerate_pack_objects(
@@ -1333,7 +1331,11 @@ fn count_pack_files(pack_dir: &Path) -> usize {
         .ok()
         .map(|rd| {
             rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+                .filter(|e| {
+                    let path = e.path();
+                    path.extension().is_some_and(|ext| ext == "pack")
+                        && !pack_has_keep_marker(pack_dir, &path)
+                })
                 .count()
         })
         .unwrap_or(0)
@@ -1474,6 +1476,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::{NeverCancel, NullProgress};
@@ -1502,11 +1505,30 @@ mod tests {
         )
         .expect("commit");
         git_cmd(dir.path(), &["repack", "-a", "-d"]);
-        let roots = collect_maintenance_object_roots(&repo).expect("roots");
-        let odb = repo.odb();
-        assert!(should_auto_skip_repack(odb, &roots, 0, 1, false, true, None).unwrap());
-        assert!(!should_auto_skip_repack(odb, &roots, 3, 1, false, true, None).unwrap());
-        assert!(!should_auto_skip_repack(odb, &roots, 0, 51, false, true, None).unwrap());
+        assert!(should_auto_skip_repack(0, 1, false, true, None));
+        assert!(should_auto_skip_repack(3, 1, false, true, None));
+        assert!(!should_auto_skip_repack(6700, 1, false, true, None));
+        assert!(!should_auto_skip_repack(0, 51, false, true, None));
+        let mut disabled = ConfigSet::new();
+        let file = ConfigFile::parse(
+            Path::new(".git/config"),
+            "[gc]\n\tautoPackLimit = 0\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        disabled.merge(&file);
+        assert!(should_auto_skip_repack(0, 2, false, true, Some(&disabled)));
+    }
+
+    #[test]
+    fn count_pack_files_ignores_keep_markers() {
+        let dir = TempDir::new().unwrap();
+        let pack_dir = dir.path().join("pack");
+        fs::create_dir_all(&pack_dir).unwrap();
+        fs::write(pack_dir.join("pack-aaa.pack"), b"PACK").unwrap();
+        fs::write(pack_dir.join("pack-bbb.pack"), b"PACK").unwrap();
+        fs::write(pack_dir.join("pack-bbb.keep"), b"").unwrap();
+        assert_eq!(count_pack_files(&pack_dir), 1);
     }
 
     fn git_cmd(dir: &Path, args: &[&str]) {

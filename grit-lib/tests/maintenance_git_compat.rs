@@ -591,9 +591,9 @@ fn assert_grace_protected_packed_unreachable_gc_matches_git(fixture: &GraceProte
         .expect("open grit repo");
     let now_unix = 1_791_979_200_i64;
     let stats = gc(&grit_repo, &GcOptions::with_reflog_policy(now_unix, false)).expect("grit gc");
-    assert!(
-        stats.repack.removed_pack_files >= 1,
-        "grit gc repack must remove the superseded pack"
+    assert_eq!(
+        stats.repack.removed_pack_files, 0,
+        "grit gc must skip repack for a single pack (auto heuristics), like git gc --auto"
     );
     assert!(
         cat_file_exists(grit_fixture.path(), &fixture.side_hex),
@@ -601,26 +601,23 @@ fn assert_grace_protected_packed_unreachable_gc_matches_git(fixture: &GraceProte
     );
     let grit_packs = pack_stems(&grit_fixture.path().join(".git"));
     assert!(
-        !grit_packs.iter().any(|s| s == &fixture.old_pack_stem),
-        "superseded pack must be removed after grit gc"
+        grit_packs.iter().any(|s| s == &fixture.old_pack_stem),
+        "original pack must remain after grit gc auto-style skip"
     );
     assert!(
-        grit_repo.odb().object_path(&fixture.side_oid).is_file(),
-        "retained oid must be materialized as loose after grit gc, not only in removed pack"
+        !grit_repo.odb().object_path(&fixture.side_oid).is_file(),
+        "grace-protected unreachable commit stays packed, not loosened"
     );
 
-    git(
-        git_fixture.path(),
-        &["gc", "--prune=2.weeks.ago", "--quiet"],
-    );
+    git(git_fixture.path(), &["gc", "--auto", "--quiet"]);
     assert!(
         cat_file_exists(git_fixture.path(), &fixture.side_hex),
-        "system git gc --prune=2.weeks.ago must retain recent unreachable packed commit"
+        "system git gc --auto must retain recent unreachable packed commit"
     );
     let git_packs = pack_stems(&git_fixture.path().join(".git"));
     assert!(
-        !git_packs.iter().any(|s| s == &fixture.old_pack_stem),
-        "superseded pack must be removed after system git gc"
+        git_packs.iter().any(|s| s == &fixture.old_pack_stem),
+        "system git gc --auto must keep the existing pack"
     );
 }
 
@@ -810,14 +807,14 @@ fn gc_packs_loose_objects_like_git() {
         .expect("open grit copy");
     gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
 
-    git(git_dir.path(), &["gc", "--quiet"]);
+    git(git_dir.path(), &["gc", "--auto", "--quiet"]);
 
     assert_eq!(
         git_loose_object_count(grit_dir.path()),
         git_loose_object_count(git_dir.path()),
-        "grit gc must pack loose objects like git gc"
+        "grit gc must match git gc --auto loose-object counts when below gc.auto"
     );
-    assert_eq!(git_loose_object_count(grit_dir.path()), 0);
+    assert_eq!(git_loose_object_count(grit_dir.path()), 3);
     git_fsck(grit_dir.path(), true);
 }
 
@@ -852,6 +849,41 @@ fn repack_consolidates_multiple_packs_like_git_repack_ad() {
         "grit repack must consolidate packs like git repack -ad"
     );
     assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 1);
+}
+
+#[test]
+fn gc_twice_on_single_pack_does_not_rewrite_or_loosen() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let pack_dir = grit_copy.path().join(".git/objects/pack");
+    let pack_before = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .expect("pack file")
+        .path();
+    let pack_bytes_before = std::fs::read(&pack_before).expect("read pack");
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let opts = GcOptions::with_reflog_policy(1_700_000_000, false);
+    gc(&repo, &opts).expect("grit gc first");
+    gc(&repo, &opts).expect("grit gc second");
+    let pack_after = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .expect("pack file")
+        .path();
+    assert_eq!(
+        pack_bytes_before,
+        std::fs::read(&pack_after).expect("read pack after two gc runs")
+    );
+    assert_eq!(git_loose_object_count(grit_copy.path()), 0);
+    git_fsck(grit_copy.path(), true);
 }
 
 #[test]
@@ -891,6 +923,40 @@ fn gc_skips_repack_when_single_pack_and_no_loose_like_git() {
         "grit gc must skip repack on a single-pack repo with no loose objects"
     );
     git_fsck(grit_copy.path(), true);
+}
+
+#[test]
+fn gc_autopacklimit_zero_keeps_two_packs_like_git_gc_auto() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "gc.autoPackLimit", "0"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c2"]);
+    git(dir.path(), &["repack", "-d"]);
+    let git_dir = dir.path().join(".git");
+    assert_eq!(
+        git_pack_count(&git_dir),
+        2,
+        "fixture must have two pack files"
+    );
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let git_copy = TempDir::new().expect("git");
+    duplicate_repo_tree(dir.path(), git_copy.path());
+
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    git(git_copy.path(), &["gc", "--auto", "--quiet"]);
+
+    assert_eq!(
+        git_pack_count(&grit_copy.path().join(".git")),
+        git_pack_count(&git_copy.path().join(".git")),
+        "grit gc must not consolidate packs when gc.autoPackLimit=0, like git gc --auto"
+    );
+    assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 2);
 }
 
 #[test]
