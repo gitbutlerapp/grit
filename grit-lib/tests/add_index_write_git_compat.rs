@@ -112,3 +112,32 @@ fn cache_tree_after_add_matches_git_write_tree() {
     assert!(!grit_stages.is_empty());
     assert_git_fsck_strict(&repo_dir);
 }
+
+#[test]
+fn add_untracked_path_keeps_index_entries_canonical() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path().join("repo");
+    fs::create_dir_all(&repo_dir).unwrap();
+    git(&repo_dir, &["init", "-q", "-b", "main", "."]);
+    fs::write(repo_dir.join("zzz.txt"), "z\n").unwrap();
+    git(&repo_dir, &["add", "zzz.txt"]);
+    git(&repo_dir, &["commit", "-q", "-m", "initial"]);
+
+    fs::write(repo_dir.join("aaa.txt"), "a\n").unwrap();
+
+    let grit = open_grit(&repo_dir);
+    let opts = StageOptions {
+        pathspecs: Vec::new(),
+        pathspec_sources: Vec::new(),
+        mode: StageMode::All,
+    };
+    stage(&grit, &opts, &mut NullProgress).expect("grit add");
+
+    assert_git_fsck_strict(&repo_dir);
+    let index = grit.index_handle().load().expect("load index");
+    assert!(index.entries_are_sorted(), "index paths must stay sorted for git fsck");
+    assert_eq!(
+        index.entries().first().map(|e| e.path.as_slice()),
+        Some(b"aaa.txt" as &[u8])
+    );
+}

@@ -86,7 +86,9 @@ pub fn stage_tracked_modifications(
 
     let summary = stage_tracked_modifications_in_index(repo, work_tree, &index_path, &mut index)?;
 
-    if !summary.modified.is_empty() || !summary.removed.is_empty() {
+    if summary.change_count() > 0 {
+        replay_deferred_untracked_invalidations(&mut index, &summary);
+        index.ensure_canonical_order();
         repo.write_index_at(&index_path, &mut index)?;
     }
 
@@ -96,7 +98,11 @@ pub fn stage_tracked_modifications(
 /// Like [`stage_tracked_modifications`], but mutates a caller-owned index without writing it.
 ///
 /// Useful when the caller will merge further index updates before a single write (for example
-/// `git commit --dry-run`).
+/// `git commit --dry-run` or `grit add` after a tracked scan).
+///
+/// When [`StageTrackedSummary::untracked_invalidation_deferred`] is true, call
+/// [`replay_deferred_untracked_invalidations`] on the same index before persisting it (as
+/// [`stage_tracked_modifications`] does automatically).
 ///
 /// # Parameters
 /// - `repo` — repository handle (object store).
@@ -146,6 +152,21 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         index.defer_untracked_cache_invalidation = false;
     }
     result
+}
+
+/// Replay UNTR invalidations suppressed during a bulk tracked restage.
+///
+/// Required before writing the index when [`StageTrackedSummary::untracked_invalidation_deferred`]
+/// is true (see [`stage_tracked_modifications_in_index`]).
+pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &StageTrackedSummary) {
+    if !summary.untracked_invalidation_deferred {
+        return;
+    }
+    for raw in summary.modified.iter().chain(summary.removed.iter()) {
+        let path = std::str::from_utf8(raw)
+            .map_or_else(|_| String::from_utf8_lossy(raw).into_owned(), str::to_owned);
+        index.invalidate_untracked_cache_for_path(&path);
+    }
 }
 
 fn stage_tracked_modifications_in_index_body(
@@ -1295,7 +1316,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn defer_untracked_flag_cleared_after_io_error() {
-        unsafe { std::env::set_var("GRIT_TEST_BULK_THRESHOLD", "4") };
+        crate::porcelain::bulk_index::set_large_index_restage_threshold_for_test(4);
 
         let dir = TempDir::new().unwrap();
         let repo = init_repository(
@@ -1336,5 +1357,6 @@ mod tests {
         );
 
         fs::set_permissions(&blocked, fs::Permissions::from_mode(0o644)).unwrap();
+        crate::porcelain::bulk_index::clear_large_index_restage_threshold_for_test();
     }
 }

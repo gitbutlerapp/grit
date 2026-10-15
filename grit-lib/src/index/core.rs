@@ -2546,6 +2546,21 @@ impl Index {
         if self.entries_sorted {
             return;
         }
+        self.sort_entries_canonical();
+    }
+
+    /// Restore Git canonical `(path, stage)` order before writing the index.
+    ///
+    /// Unlike [`Self::sort`], this re-sorts when the sorted flag is stale (for example after
+    /// appending entries without using [`Self::add_or_replace`]).
+    pub fn ensure_canonical_order(&mut self) {
+        if self.entries_sorted && self.entries_are_sorted() {
+            return;
+        }
+        self.sort_entries_canonical();
+    }
+
+    fn sort_entries_canonical(&mut self) {
         self.entries
             .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
         self.entries_sorted = true;

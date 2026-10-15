@@ -26,7 +26,7 @@ use crate::porcelain::index_mode::{
 };
 use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
 use crate::porcelain::stage_tracked::{
-    stage_tracked_modifications_in_index_with_rules, StageTrackedSummary,
+    replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
 };
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
@@ -89,7 +89,7 @@ impl StageOutcome {
 
 /// Stage every tracked and untracked change for [`crate::porcelain::commit`].
 ///
-/// Uses the stat-trust tracked scan from [`stage_tracked_modifications_in_index`] instead of
+/// Uses the stat-trust tracked scan from [`stage_tracked_modifications_in_index_with_rules`] instead of
 /// the diff-for-staging pipeline, then stages untracked paths the same way as [`stage`] with
 /// [`StageMode::All`].
 ///
@@ -190,6 +190,7 @@ fn stage_inner(
             &mut index,
             &mut rules_guard,
         )?;
+        replay_deferred_untracked_invalidations(&mut index, &summary);
         tracked_scan_summary = Some(summary);
         (Vec::new(), std::collections::BTreeMap::new())
     } else {
@@ -334,10 +335,6 @@ fn stage_inner(
         )?;
     }
 
-    if let Some(summary) = &tracked_scan_summary {
-        replay_deferred_untracked_invalidations(&mut index, summary);
-    }
-
     if has_unmerged && !opts.pathspecs.is_empty() {
         outcome.modified +=
             stage_unmerged_paths_matching_pathspecs(repo, work_tree, &matches, &mut index, &rules)?;
@@ -349,25 +346,11 @@ fn stage_inner(
     }
 
     if outcome.total() > 0 {
-        if !index.entries_sorted {
-            index.sort();
-        }
+        index.ensure_canonical_order();
         repo.write_index(&mut index)?;
     }
 
     Ok(outcome)
-}
-
-/// Replay UNTR invalidations suppressed during a bulk tracked restage.
-fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &StageTrackedSummary) {
-    if !summary.untracked_invalidation_deferred {
-        return;
-    }
-    for raw in summary.modified.iter().chain(summary.removed.iter()) {
-        if let Ok(path) = std::str::from_utf8(raw) {
-            index.invalidate_untracked_cache_for_path(path);
-        }
-    }
 }
 
 /// Stage worktree content for explicit pathspecs that match unmerged index entries.
@@ -777,16 +760,15 @@ fn stage_untracked_paths_parallel(
         batch_entries.push(entry);
         outcome.added += 1;
     }
-    if !batch_entries.is_empty() {
-        for entry in &batch_entries {
-            if let Ok(rel) = std::str::from_utf8(&entry.path) {
-                mark_fsmonitor_staged(index, rel);
-            }
+    let staged_batch_count = batch_entries.len();
+    for entry in batch_entries {
+        if let Ok(rel) = std::str::from_utf8(&entry.path) {
+            mark_fsmonitor_staged(index, rel);
         }
-        index.entries.extend(batch_entries);
-        if index.fsmonitor_last_update.is_some() {
-            index.fsmonitor_validity_changed();
-        }
+        index.add_or_replace(entry);
+    }
+    if staged_batch_count > 0 && index.fsmonitor_last_update.is_some() {
+        index.fsmonitor_validity_changed();
     }
 
     for path in deferred {
