@@ -3352,6 +3352,9 @@ pub grit_lib::error::Error::Io(core::io::error::Error)
 pub grit_lib::error::Error::LooseHashMismatch
 pub grit_lib::error::Error::LooseHashMismatch::path: alloc::string::String
 pub grit_lib::error::Error::LooseHashMismatch::real_oid: alloc::string::String
+pub grit_lib::error::Error::LooseObjectWrite
+pub grit_lib::error::Error::LooseObjectWrite::path: alloc::string::String
+pub grit_lib::error::Error::LooseObjectWrite::source: std::io::Error
 pub grit_lib::error::Error::MergeCommit
 pub grit_lib::error::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::Message(alloc::string::String)
@@ -4071,10 +4074,10 @@ pub fn grit_lib::index::Index::sync_fsmonitor_dirty_bitmap(&mut self)
 pub fn grit_lib::index::Index::take_resolve_undo_record(&mut self, &[u8]) -> core::option::Option<grit_lib::index::resolve_undo::ResolveUndoRecord>
 pub fn grit_lib::index::Index::try_collapse_sparse_directories(&mut self, &grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &[alloc::string::String], bool, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) -> bool
-pub fn grit_lib::index::Index::write(&self, &std::path::Path) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_to_path(&self, &std::path::Path, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config(&self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config_and_policy(&self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::Index
@@ -8514,6 +8517,7 @@ pub mod grit_lib::porcelain::stage_tracked
 pub struct grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::modified: alloc::vec::Vec<alloc::vec::Vec<u8>>
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::removed: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::untracked_invalidation_deferred: bool
 impl grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub fn grit_lib::porcelain::stage_tracked::StageTrackedSummary::change_count(&self) -> usize
 impl core::clone::Clone for grit_lib::porcelain::stage_tracked::StageTrackedSummary
@@ -8937,6 +8941,9 @@ pub grit_lib::prelude::Error::Io(core::io::error::Error)
 pub grit_lib::prelude::Error::LooseHashMismatch
 pub grit_lib::prelude::Error::LooseHashMismatch::path: alloc::string::String
 pub grit_lib::prelude::Error::LooseHashMismatch::real_oid: alloc::string::String
+pub grit_lib::prelude::Error::LooseObjectWrite
+pub grit_lib::prelude::Error::LooseObjectWrite::path: alloc::string::String
+pub grit_lib::prelude::Error::LooseObjectWrite::source: std::io::Error
 pub grit_lib::prelude::Error::MergeCommit
 pub grit_lib::prelude::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::Message(alloc::string::String)
@@ -9465,10 +9472,10 @@ pub fn grit_lib::index::Index::sync_fsmonitor_dirty_bitmap(&mut self)
 pub fn grit_lib::index::Index::take_resolve_undo_record(&mut self, &[u8]) -> core::option::Option<grit_lib::index::resolve_undo::ResolveUndoRecord>
 pub fn grit_lib::index::Index::try_collapse_sparse_directories(&mut self, &grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &[alloc::string::String], bool, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) -> bool
-pub fn grit_lib::index::Index::write(&self, &std::path::Path) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_to_path(&self, &std::path::Path, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config(&self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config_and_policy(&self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::Index
