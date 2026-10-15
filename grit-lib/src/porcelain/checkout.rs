@@ -16,6 +16,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::crlf;
 use crate::diff::{diff_trees, format_mode, DiffEntry, DiffStatus};
@@ -85,7 +86,8 @@ fn checkout_populated_tree(
     let mut prospective_index = index.clone();
     prospective_index.entries = crate::porcelain::merge::tree_to_index_entries(repo, tree_oid, "")?;
     prospective_index.sort();
-    let rules = WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)?;
+    let rules =
+        WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)?;
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
     let mut new_entries: Vec<IndexEntry> = Vec::new();
@@ -434,16 +436,19 @@ fn checkout_tree_changes_with_progress(
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
 
-    let mut index = repo.load_index()?;
+    let index = Arc::new(repo.load_index()?);
     let config = repo.config()?;
     let ignorecase = config
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
     let precompose = repo.pathspec_precompose_enabled();
-    let prospective_index = prospective_index_for_checkout(&index, changes);
-    let rules =
-        WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config.clone())?;
+    let rules = if tree_changes_touch_gitattributes(changes) {
+        let prospective_index = prospective_index_for_checkout(index.as_ref(), changes);
+        WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config.clone())?
+    } else {
+        WorktreeRules::from_parts_index_attributes_only(repo, index.as_ref(), config.clone())?
+    };
     let conv = rules.conversion().clone();
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
@@ -481,7 +486,7 @@ fn checkout_tree_changes_with_progress(
         };
         let mode = parse_git_mode(&change.new_mode);
         if mode == MODE_GITLINK {
-            if let Some(existing) = index.get(path.as_bytes(), 0) {
+            if let Some(existing) = index.as_ref().get(path.as_bytes(), 0) {
                 if existing.oid == change.new_oid
                     && existing.mode == MODE_GITLINK
                     && gitlink_worktree_matches_index(&work_tree.join(path))
@@ -504,12 +509,12 @@ fn checkout_tree_changes_with_progress(
             progress.inc(1);
             continue;
         }
-        if let Some(existing) = index.get(path.as_bytes(), 0) {
+        if let Some(existing) = index.as_ref().get(path.as_bytes(), 0) {
             if crate::diff::path_checkout_skip_blob_write_when_up_to_date(
                 repo.odb(),
                 repo.git_dir(),
                 work_tree,
-                &index,
+                index.as_ref(),
                 existing,
                 &change.new_oid,
                 mode,
@@ -605,6 +610,9 @@ fn checkout_tree_changes_with_progress(
 
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
 
+    drop(rules);
+    let mut index = Arc::into_inner(index)
+        .ok_or_else(|| Error::PathError("internal error: checkout index still shared".into()))?;
     index.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), new_entries);
     repo.write_index(&mut index)?;
     progress.finish();
@@ -617,6 +625,17 @@ struct DelayedCheckoutTarget {
     mode: u32,
     oid: ObjectId,
     change: DiffEntry,
+}
+
+fn tree_changes_touch_gitattributes(changes: &[DiffEntry]) -> bool {
+    use std::ffi::OsStr;
+    use std::path::Path;
+    changes.iter().any(|change| {
+        [change.old_path.as_deref(), change.new_path.as_deref()]
+            .into_iter()
+            .flatten()
+            .any(|path| Path::new(path).file_name() == Some(OsStr::new(".gitattributes")))
+    })
 }
 
 /// Index after applying `changes`, used to resolve destination `.gitattributes` before writes land.

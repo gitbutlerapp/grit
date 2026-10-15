@@ -126,6 +126,24 @@ impl WorktreeRules {
     ///
     /// Returns I/O errors from loading exclude/attribute files.
     pub fn from_parts(repo: &Repository, index: &Index, config: Arc<ConfigSet>) -> Result<Self> {
+        Self::from_parts_with_attribute_source(repo, index, config, false)
+    }
+
+    /// Like [`Self::from_parts`], but reads nested `.gitattributes` only from the index snapshot.
+    pub(crate) fn from_parts_index_attributes_only(
+        repo: &Repository,
+        index: &Index,
+        config: Arc<ConfigSet>,
+    ) -> Result<Self> {
+        Self::from_parts_with_attribute_source(repo, index, config, true)
+    }
+
+    fn from_parts_with_attribute_source(
+        repo: &Repository,
+        index: &Index,
+        config: Arc<ConfigSet>,
+        gitattributes_index_only: bool,
+    ) -> Result<Self> {
         let work_tree = repo
             .work_tree()
             .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?
@@ -138,14 +156,14 @@ impl WorktreeRules {
             &config,
             index,
             repo.odb(),
-            false,
+            gitattributes_index_only,
         )?;
         let attrs = AttributeState {
             work_tree,
             _git_dir: repo.git_dir().to_path_buf(),
             odb: repo.odb().clone(),
             gitattributes_index: gitattributes_index_map(index),
-            gitattributes_index_only: false,
+            gitattributes_index_only,
             stack_prefix,
             info_rules,
             dir_fragment: RefCell::new(HashMap::new()),
@@ -174,38 +192,16 @@ impl WorktreeRules {
         prospective_index: &Index,
         config: Arc<ConfigSet>,
     ) -> Result<Self> {
-        let work_tree = repo
-            .work_tree()
-            .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?
-            .to_path_buf();
-        let conversion = ConversionConfig::from_config_with_runner(&config, repo.command_runner());
-        let ignore = RefCell::new(IgnoreMatcher::from_repository(repo)?);
-        let (stack_prefix, info_rules) = load_attribute_stack_prefix_and_info(
-            repo,
-            &work_tree,
-            &config,
-            prospective_index,
-            repo.odb(),
-            true,
-        )?;
-        let attrs = AttributeState {
-            work_tree,
-            _git_dir: repo.git_dir().to_path_buf(),
-            odb: repo.odb().clone(),
-            gitattributes_index: gitattributes_index_map(prospective_index),
-            gitattributes_index_only: true,
-            stack_prefix,
-            info_rules,
-            dir_fragment: RefCell::new(HashMap::new()),
-            stack_without_info_by_dir: RefCell::new(HashMap::new()),
-        };
-        Ok(Self {
-            config,
-            conversion,
-            ignore,
-            attrs,
-            caches: Arc::clone(repo.caches()),
-        })
+        Self::from_parts_index_attributes_only(repo, prospective_index, config)
+    }
+
+    /// Like [`Self::from_checkout_prospective_index`], but takes ownership of the index view.
+    pub(crate) fn from_checkout_prospective_index_owned(
+        repo: &Repository,
+        prospective_index: Index,
+        config: Arc<ConfigSet>,
+    ) -> Result<Self> {
+        Self::from_checkout_prospective_index(repo, &prospective_index, config)
     }
 
     /// Long-running filter-process registry for this repository handle.

@@ -15040,7 +15040,7 @@ pub fn grit_lib::worktree::worktree_rules::WorktreeRules::config_arc(&self) -> a
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::conversion(&self) -> &grit_lib::worktree::crlf::ConversionConfig
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::file_attrs(&self, &str, bool) -> grit_lib::worktree::crlf::FileAttrs
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::filter_process(&self) -> &grit_lib::filter_process::FilterProcessState
-pub fn grit_lib::worktree::worktree_rules::WorktreeRules::from_checkout_prospective_index(&grit_lib::repo::Repository, &grit_lib::index::Index, alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>) -> grit_lib::error::Result<Self>
+pub fn grit_lib::worktree::worktree_rules::WorktreeRules::from_checkout_prospective_index(&grit_lib::repo::Repository, grit_lib::index::Index, alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>) -> grit_lib::error::Result<Self>
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::from_parts(&grit_lib::repo::Repository, &grit_lib::index::Index, alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>) -> grit_lib::error::Result<Self>
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::from_repository(&grit_lib::repo::Repository, &grit_lib::index::Index) -> grit_lib::error::Result<Self>
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::ignore(&self) -> core::cell::Ref<'_, grit_lib::worktree::ignore::IgnoreMatcher>

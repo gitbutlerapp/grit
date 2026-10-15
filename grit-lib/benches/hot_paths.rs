@@ -41,7 +41,7 @@ fn bench_switch_wide_100k(c: &mut Criterion) {
     let mut group = c.benchmark_group("checkout/switch_wide_100k");
     group.bench_function("H_10pct_switch", |b| {
         b.iter_batched(
-            || fx.reset_worktree_to_head(),
+            || fx.reset_for_switch_benchmark(),
             |_| bench_switch_wide(fx),
             BatchSize::SmallInput,
         );
@@ -163,3 +163,27 @@ criterion_group!(
     bench_pick_paths
 );
 criterion_main!(hot_paths);
+
+#[cfg(test)]
+mod smoke {
+    use super::hot_paths_fixture::{bench_switch_wide, HotPathsFixture};
+
+    #[test]
+    fn switch_wide_roundtrip_on_large_fixture() {
+        let fx = HotPathsFixture::large();
+        fx.reset_for_switch_benchmark();
+        bench_switch_wide(fx);
+        fx.reset_for_switch_benchmark();
+        bench_switch_wide(fx);
+    }
+
+    #[test]
+    #[ignore = "slow: builds 100k-file fixture"]
+    fn switch_wide_roundtrip_on_heavy_fixture() {
+        let fx = HotPathsFixture::heavy();
+        fx.reset_for_switch_benchmark();
+        bench_switch_wide(fx);
+        fx.reset_for_switch_benchmark();
+        bench_switch_wide(fx);
+    }
+}
