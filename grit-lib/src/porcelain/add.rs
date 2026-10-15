@@ -28,9 +28,10 @@ use crate::porcelain::index_mode::{
 use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
 use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
+    stage_tracked_modifications_in_index_with_rules_and_side_untracked,
 };
 use crate::porcelain::status::{
-    collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
+    collect_untracked_and_ignored_inner, finalize_side_untracked_for_staging, IgnoredMode,
     UntrackedScan,
 };
 use crate::progress::ProgressSink;
@@ -187,23 +188,43 @@ fn stage_inner(
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let mut icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
+    let mut icase_map = ignorecase.then(|| Stage0IcasePathMap::from_index(&index, true));
 
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
     let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !ignorecase;
+    let bulk_empty_index_add =
+        opts.mode == StageMode::All && index.entries.is_empty() && opts.pathspecs.is_empty();
+    let fused_untracked_scan = use_tracked_scan
+        && opts.mode == StageMode::All
+        && opts.pathspecs.is_empty()
+        && !bulk_empty_index_add;
+    let mut side_untracked = Vec::new();
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
         (Vec::new(), std::collections::BTreeMap::new())
     } else if use_tracked_scan {
         let mut rules_guard = lock_rules(&rules_arc)?;
-        let summary = stage_tracked_modifications_in_index_with_rules(
-            repo,
-            work_tree,
-            &index_path,
-            &mut index,
-            &mut rules_guard,
-            staging_thresholds,
-        )?;
+        let summary = if fused_untracked_scan {
+            stage_tracked_modifications_in_index_with_rules_and_side_untracked(
+                repo,
+                work_tree,
+                &index_path,
+                &mut index,
+                &mut rules_guard,
+                staging_thresholds,
+                &mut side_untracked,
+            )?
+        } else {
+            stage_tracked_modifications_in_index_with_rules(
+                repo,
+                work_tree,
+                &index_path,
+                &mut index,
+                &mut rules_guard,
+                staging_thresholds,
+                None,
+            )?
+        };
         tracked_scan_summary = Some(summary);
         (Vec::new(), std::collections::BTreeMap::new())
     } else {
@@ -226,8 +247,6 @@ fn stage_inner(
     };
 
     let rules = lock_rules(&rules_arc)?;
-    let bulk_empty_index_add =
-        opts.mode == StageMode::All && index.entries.is_empty() && opts.pathspecs.is_empty();
     let untracked = if opts.mode == StageMode::All {
         if bulk_empty_index_add {
             let scan = UntrackedScan {
@@ -245,12 +264,23 @@ fn stage_inner(
                 &rules,
             )?;
             untracked
+        } else if fused_untracked_scan {
+            supplement_untracked_at_work_tree_root(work_tree, &index, &mut side_untracked)?;
+            supplement_untracked_in_indexed_ancestor_dirs(work_tree, &index, &mut side_untracked)?;
+            finalize_side_untracked_for_staging(
+                repo,
+                &mut index,
+                work_tree,
+                side_untracked,
+                &opts.pathspecs,
+                &rules,
+            )?
         } else {
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,
                 show_all: untracked_show_all_matching_index(&index),
                 sort_paths: true,
-                use_untracked_cache: true,
+                use_untracked_cache: false,
             };
             let (untracked, _, _) = collect_untracked_and_ignored_inner(
                 repo,
@@ -263,7 +293,7 @@ fn stage_inner(
             if untracked.is_empty() {
                 untracked
             } else {
-                expand_untracked_for_staging_with_rules(
+                crate::porcelain::status::expand_untracked_for_staging_with_rules(
                     repo,
                     &mut index,
                     work_tree,
@@ -313,7 +343,9 @@ fn stage_inner(
                 }
                 continue;
             }
-            icase_map.remove_alias_of(&mut index, path.as_bytes());
+            if let Some(map) = icase_map.as_mut() {
+                map.remove_alias_of(&mut index, path.as_bytes());
+            }
             apply_tracked_stage_plan(
                 repo,
                 work_tree,
@@ -330,11 +362,15 @@ fn stage_inner(
     }
 
     if ignorecase {
-        outcome.modified +=
-            stage_ignorecase_spelling_updates(work_tree, &icase_map, &matches, &mut index)?;
+        if let Some(map) = icase_map.as_ref() {
+            outcome.modified +=
+                stage_ignorecase_spelling_updates(work_tree, map, &matches, &mut index)?;
+        }
     }
 
     if !untracked.is_empty() {
+        let icase =
+            icase_map.get_or_insert_with(|| Stage0IcasePathMap::from_index(&index, ignorecase));
         let indexed_any_stage: HashSet<Vec<u8>> =
             index.entries.iter().map(|e| e.path.clone()).collect();
         stage_untracked_paths_parallel(
@@ -344,7 +380,7 @@ fn stage_inner(
             &matches,
             &indexed_any_stage,
             &rules,
-            &mut icase_map,
+            icase,
             &mut index,
             parallelism,
             opts.executable_hint,
@@ -367,10 +403,121 @@ fn stage_inner(
             replay_deferred_untracked_invalidations(&mut index, summary);
         }
         index.ensure_canonical_order();
-        repo.write_index(&mut index)?;
+        repo.write_index_staging(&mut index)?;
     }
 
     Ok(outcome)
+}
+
+/// Collect untracked files that sit in indexed ancestor directories but outside indexed
+/// subdirectories (for example `a/b/untracked.txt` beside indexed `a/b/c/tracked.txt`).
+fn supplement_untracked_in_indexed_ancestor_dirs(
+    work_tree: &Path,
+    index: &Index,
+    out: &mut Vec<String>,
+) -> Result<()> {
+    use std::collections::{BTreeSet, HashSet};
+    let mut dirs_with_direct_files = HashSet::new();
+    for e in &index.entries {
+        if e.stage() != 0 {
+            continue;
+        }
+        let Ok(rel) = std::str::from_utf8(&e.path) else {
+            continue;
+        };
+        if let Some((dir, _file)) = rel.rsplit_once('/') {
+            dirs_with_direct_files.insert(dir.to_string());
+        }
+    }
+    let mut dirs = BTreeSet::new();
+    for e in &index.entries {
+        if e.stage() != 0 {
+            continue;
+        }
+        let Ok(rel) = std::str::from_utf8(&e.path) else {
+            continue;
+        };
+        let Some(mut parent) = rel.rsplit_once('/').map(|(p, _)| p.to_string()) else {
+            continue;
+        };
+        loop {
+            if !dirs_with_direct_files.contains(&parent) {
+                dirs.insert(parent.clone());
+            }
+            parent = match parent.rsplit_once('/') {
+                Some((anc, _)) => anc.to_string(),
+                None => break,
+            };
+        }
+    }
+    for dir in dirs {
+        let abs = work_tree.join(&dir);
+        let rd = match fs::read_dir(&abs) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        let dir_prefix = format!("{dir}/");
+        for ent in rd {
+            let ent = ent.map_err(Error::Io)?;
+            let name = ent.file_name().to_string_lossy().into_owned();
+            if name == ".git" {
+                continue;
+            }
+            let rel = format!("{dir_prefix}{name}");
+            if index.get(rel.as_bytes(), 0).is_some() {
+                continue;
+            }
+            let meta = ent.metadata().map_err(Error::Io)?;
+            let file_type = meta.file_type();
+            if file_type.is_dir() && !file_type.is_symlink() {
+                let nested = format!("{rel}/");
+                let has_tracked_child = index.entries.iter().any(|e| {
+                    e.stage() == 0
+                        && std::str::from_utf8(&e.path)
+                            .ok()
+                            .is_some_and(|p| p.starts_with(&nested))
+                });
+                if has_tracked_child {
+                    continue;
+                }
+                out.push(format!("{rel}/"));
+            } else if file_type.is_file() || file_type.is_symlink() {
+                out.push(rel);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn supplement_untracked_at_work_tree_root(
+    work_tree: &Path,
+    index: &Index,
+    out: &mut Vec<String>,
+) -> Result<()> {
+    let indexed_top: HashSet<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .filter_map(|e| std::str::from_utf8(&e.path).ok())
+        .filter_map(|p| p.split('/').next())
+        .map(str::to_owned)
+        .collect();
+    let rd = fs::read_dir(work_tree).map_err(Error::Io)?;
+    for ent in rd {
+        let ent = ent.map_err(Error::Io)?;
+        let name = ent.file_name().to_string_lossy().into_owned();
+        if name == ".git" || indexed_top.contains(&name) {
+            continue;
+        }
+        let meta = ent.metadata().map_err(Error::Io)?;
+        let file_type = meta.file_type();
+        if file_type.is_dir() && !file_type.is_symlink() {
+            out.push(format!("{name}/"));
+        } else if file_type.is_file() || file_type.is_symlink() {
+            out.push(name);
+        }
+    }
+    Ok(())
 }
 
 /// Stage worktree content for explicit pathspecs that match unmerged index entries.

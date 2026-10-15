@@ -26,6 +26,22 @@ fn untr_root_valid(index_bytes: &[u8]) -> bool {
         .is_some_and(|r| r.valid)
 }
 
+fn assert_untr_warmed(index_bytes: &[u8]) {
+    let idx = Index::parse(index_bytes).expect("parse index");
+    let uc = idx
+        .untracked_cache
+        .as_ref()
+        .expect("UNTR extension must exist after warm-up");
+    let root = uc
+        .root
+        .as_ref()
+        .expect("UNTR root must exist after warm-up");
+    assert!(
+        root.valid,
+        "UNTR root must be valid before bulk defer replay"
+    );
+}
+
 fn small_bulk_thresholds() -> IndexStagingThresholds {
     IndexStagingThresholds {
         large_index_restage: 64,
@@ -58,7 +74,10 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
     }
     git(&repo_dir, &["add", "-A"]);
     git(&repo_dir, &["commit", "-q", "-m", "initial"]);
+    git(&repo_dir, &["config", "core.untrackedCache", "true"]);
+    git(&repo_dir, &["update-index", "--untracked-cache"]);
     git(&repo_dir, &["status", "-s"]);
+    assert_untr_warmed(&fs::read(repo_dir.join(".git/index")).expect("index"));
 
     for i in 0..20 {
         let p = repo_dir.join(format!("d{i:03}/f.txt"));
@@ -97,7 +116,10 @@ fn stage_tracked_modifications_public_api_replays_untr_after_bulk_removal() {
     }
     git(&repo_dir, &["add", "-A"]);
     git(&repo_dir, &["commit", "-q", "-m", "initial"]);
+    git(&repo_dir, &["config", "core.untrackedCache", "true"]);
+    git(&repo_dir, &["update-index", "--untracked-cache"]);
     git(&repo_dir, &["status", "-s"]);
+    assert_untr_warmed(&fs::read(repo_dir.join(".git/index")).expect("index"));
 
     for i in 0..20 {
         let p = repo_dir.join(format!("d{i:03}/f.txt"));

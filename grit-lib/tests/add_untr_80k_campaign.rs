@@ -30,6 +30,22 @@ fn untr_root_valid(index_bytes: &[u8]) -> bool {
         .is_some_and(|r| r.valid)
 }
 
+fn assert_untr_warmed(index_bytes: &[u8]) {
+    let idx = Index::parse(index_bytes).expect("parse index");
+    let uc = idx
+        .untracked_cache
+        .as_ref()
+        .expect("UNTR extension must exist after warm-up");
+    let root = uc
+        .root
+        .as_ref()
+        .expect("UNTR root must exist after warm-up");
+    assert!(
+        root.valid,
+        "UNTR root must be valid before bulk defer replay"
+    );
+}
+
 fn seed_tracked_files(repo_dir: &Path, count: usize) {
     for batch_start in (0..count).step_by(500) {
         let batch_end = (batch_start + 500).min(count);
@@ -47,7 +63,10 @@ fn init_committed_repo(repo_dir: &Path) {
     seed_tracked_files(repo_dir, ENTRIES);
     git(repo_dir, &["add", "-A"]);
     git(repo_dir, &["commit", "-q", "-m", "initial"]);
+    git(repo_dir, &["config", "core.untrackedCache", "true"]);
+    git(repo_dir, &["update-index", "--untracked-cache"]);
     git(repo_dir, &["status", "-s"]);
+    assert_untr_warmed(&fs::read(repo_dir.join(".git/index")).expect("index"));
 }
 
 fn remove_first_n_files(repo_dir: &Path, n: usize) {

@@ -225,6 +225,28 @@ impl RepositoryBuilder {
     }
 }
 
+/// Optional index pre-write maintenance during [`Repository`] persistence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IndexPersistOptions {
+    /// When true, large indices may gain a UNTR shell extension (status optimization).
+    pub auto_untracked_cache_shell: bool,
+    /// When true, racily-clean entries may be re-hashed before write.
+    pub smudge_racily_clean: bool,
+}
+
+impl IndexPersistOptions {
+    /// Default hooks and extensions for status, checkout, and similar paths.
+    pub const STANDARD: Self = Self {
+        auto_untracked_cache_shell: true,
+        smudge_racily_clean: true,
+    };
+    /// Minimal work for porcelain staging after a fresh worktree scan (`git add`).
+    pub const PORCELAIN_STAGING: Self = Self {
+        auto_untracked_cache_shell: false,
+        smudge_racily_clean: false,
+    };
+}
+
 /// A handle to an open Git repository.
 ///
 /// # Examples
@@ -1245,6 +1267,18 @@ impl Repository {
         self.write_index_with_post_index_change(index, false, false)
     }
 
+    /// Write the index after porcelain staging (`git add`) without auto-installing UNTR.
+    pub(crate) fn write_index_staging(&self, index: &mut Index) -> Result<()> {
+        self.write_index_at_split_with_post_index_change(
+            &self.index_path(),
+            index,
+            WriteSplitIndexRequest::default(),
+            false,
+            false,
+            IndexPersistOptions::PORCELAIN_STAGING,
+        )
+    }
+
     /// Acquire `.git/index.lock` before mutating the working tree for index+worktree commands.
     ///
     /// Call [`Self::commit_index_update`] to persist the index and release the lock, or drop the
@@ -1447,6 +1481,7 @@ impl Repository {
             WriteSplitIndexRequest::default(),
             updated_workdir,
             updated_skipworktree,
+            IndexPersistOptions::STANDARD,
         )
     }
 
@@ -1457,7 +1492,14 @@ impl Repository {
         index: &mut Index,
         split: WriteSplitIndexRequest,
     ) -> Result<()> {
-        self.write_index_at_split_with_post_index_change(path, index, split, false, false)
+        self.write_index_at_split_with_post_index_change(
+            path,
+            index,
+            split,
+            false,
+            false,
+            IndexPersistOptions::STANDARD,
+        )
     }
 
     /// Write the index to `path`, optionally emitting a split index, with explicit hook flags.
@@ -1479,6 +1521,7 @@ impl Repository {
         split: WriteSplitIndexRequest,
         updated_workdir: bool,
         updated_skipworktree: bool,
+        persist: IndexPersistOptions,
     ) -> Result<()> {
         test_inject_index_write_fail()?;
         // The on-disk index format (entry OID width and trailing checksum) is
@@ -1490,16 +1533,24 @@ impl Repository {
         let prev_index_mtime = crate::index::index_file_mtime(path);
         let cfg = self.config()?;
         if let Some(work_tree) = self.work_tree.as_deref() {
-            crate::untracked_cache::ensure_untracked_cache_shell(index, work_tree, cfg.as_ref());
-            crate::diff::smudge_racily_clean_entries(
-                &self.odb,
-                &self.git_dir,
-                index,
-                work_tree,
-                prev_index_mtime,
-                Some(cfg.as_ref()),
-                Some(self.caches().filters()),
-            );
+            if persist.auto_untracked_cache_shell {
+                crate::untracked_cache::ensure_untracked_cache_shell(
+                    index,
+                    work_tree,
+                    cfg.as_ref(),
+                );
+            }
+            if persist.smudge_racily_clean {
+                crate::diff::smudge_racily_clean_entries(
+                    &self.odb,
+                    &self.git_dir,
+                    index,
+                    work_tree,
+                    prev_index_mtime,
+                    Some(cfg.as_ref()),
+                    Some(self.caches().filters()),
+                );
+            }
         }
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
         write_index_file_split(

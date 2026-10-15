@@ -16,7 +16,8 @@ use crate::error::{Error, Result};
 use crate::hash::Parallelism;
 use crate::index::index_file_mtime;
 use crate::index::{
-    entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_GITLINK,
+    entry_from_metadata, entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry,
+    MODE_GITLINK,
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::BULK_NEW_LOOSE_WRITE;
@@ -28,7 +29,7 @@ use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeB
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
     for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
-    BlobDiskLookup, WorktreeBlobScanOptions,
+    supplement_untracked_beside_stat_skipped_indexed_dirs, BlobDiskLookup, WorktreeBlobScanOptions,
 };
 
 /// Summary of paths updated while staging tracked modifications/deletions.
@@ -161,7 +162,29 @@ pub fn stage_tracked_modifications_in_index_with_thresholds(
 ) -> Result<StageTrackedSummary> {
     let mut rules = WorktreeRules::from_repository(repo, index)?;
     stage_tracked_modifications_in_index_with_rules(
-        repo, work_tree, index_path, index, &mut rules, thresholds,
+        repo, work_tree, index_path, index, &mut rules, thresholds, None,
+    )
+}
+
+/// Like [`stage_tracked_modifications_in_index_with_rules`], also collecting untracked
+/// sibling paths seen during directory-grouped stat scans (for fused `git add` walks).
+pub(crate) fn stage_tracked_modifications_in_index_with_rules_and_side_untracked(
+    repo: &Repository,
+    work_tree: &Path,
+    index_path: &Path,
+    index: &mut Index,
+    rules: &mut WorktreeRules,
+    thresholds: IndexStagingThresholds,
+    side_untracked: &mut Vec<String>,
+) -> Result<StageTrackedSummary> {
+    stage_tracked_modifications_in_index_with_rules(
+        repo,
+        work_tree,
+        index_path,
+        index,
+        rules,
+        thresholds,
+        Some(side_untracked),
     )
 }
 
@@ -173,6 +196,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     index: &mut Index,
     rules: &mut WorktreeRules,
     thresholds: IndexStagingThresholds,
+    side_untracked: Option<&mut Vec<String>>,
 ) -> Result<StageTrackedSummary> {
     let entry_count_at_start = index.entries.len();
     let bulk_untr_defer = entry_count_at_start >= thresholds.large_index_restage;
@@ -196,6 +220,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         bulk_untr_defer,
         parallel_restage,
         rules,
+        side_untracked,
     );
     if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = false;
@@ -208,6 +233,9 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
 /// Required before writing the index when [`StageTrackedSummary::untracked_invalidation_deferred`]
 /// is true (see [`stage_tracked_modifications_in_index`]).
 pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &StageTrackedSummary) {
+    if index.untracked_cache.is_none() {
+        return;
+    }
     if !summary.untracked_invalidation_deferred {
         return;
     }
@@ -228,6 +256,7 @@ pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &Stag
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn stage_tracked_modifications_in_index_body(
     repo: &Repository,
     work_tree: &Path,
@@ -236,6 +265,7 @@ fn stage_tracked_modifications_in_index_body(
     bulk_untr_defer: bool,
     parallel_restage: bool,
     rules: &mut WorktreeRules,
+    mut side_untracked: Option<&mut Vec<String>>,
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
     let precompose_unicode = effective_core_precomposeunicode_with_config(
@@ -297,24 +327,9 @@ fn stage_tracked_modifications_in_index_body(
     let rules_config = repo
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
-    let mut honor_fsmonitor = false;
-    if let Ok(cfg) = repo.config() {
-        let default_runner = crate::command_runner::system_command_runner();
-        let boundary = crate::fsmonitor::FsmonitorQueryBoundary(
-            crate::environment::wall_clock_unix_timestamp_nanos(),
-        );
-        let refresh_opts = crate::fsmonitor::FsmonitorRefreshOptions::with_query_boundary(boundary);
-        let refresh = crate::fsmonitor::refresh_index(
-            index,
-            repo.git_dir(),
-            work_tree,
-            cfg.as_ref(),
-            Some(default_runner.as_ref()),
-            &refresh_opts,
-        )?;
-        honor_fsmonitor = refresh.honor_valid_bits;
-    }
-    let blob_dirs = group_blob_entries_by_dir(index, honor_fsmonitor);
+    // Staging must stat every tracked path (including fsmonitor-valid rows) so deletions
+    // and worktree replacements are not skipped after `git status` refreshed valid bits.
+    let blob_dirs = group_blob_entries_by_dir(index, false);
     let work_tree_owned = work_tree.to_path_buf();
     let dir_abs = move |dir: &str| {
         if dir.is_empty() {
@@ -334,17 +349,18 @@ fn stage_tracked_modifications_in_index_body(
         .unwrap_or(true);
     let blob_count: usize = blob_dirs.values().map(|v| v.len()).sum();
     let thread_policy = repo.thread_policy();
+    let stat_threads = stat_scan_thread_count(
+        &thread_policy,
+        rules_config.as_ref(),
+        WorktreeBlobScanOptions {
+            preload_index,
+            stat_parallel_threads: None,
+        },
+        blob_count,
+    );
     let blob_scan_opts = WorktreeBlobScanOptions {
         preload_index,
-        stat_parallel_threads: Some(stat_scan_thread_count(
-            &thread_policy,
-            rules_config.as_ref(),
-            WorktreeBlobScanOptions {
-                preload_index,
-                stat_parallel_threads: None,
-            },
-            blob_count,
-        )),
+        stat_parallel_threads: Some(stat_threads),
     };
     let parallelism = thread_policy
         .resolve(
@@ -353,6 +369,9 @@ fn stage_tracked_modifications_in_index_body(
         )
         .parallelism();
     let mut deferred_restage: Vec<DeferredRestageJob> = Vec::new();
+    if let Some(out) = side_untracked.as_mut() {
+        supplement_untracked_beside_stat_skipped_indexed_dirs(index, work_tree, out)?;
+    }
     for_each_blob_by_directory_parallel(
         &blob_dirs,
         blob_scan_opts,
@@ -373,8 +392,9 @@ fn stage_tracked_modifications_in_index_body(
                     path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
                 }
         },
-        |_entry_index, rel_path, lookup| {
-            let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
+        side_untracked,
+        |entry_index, rel_path, lookup| {
+            let Some(idx_e) = index_entry_at_scan_index(index, entry_index, rel_path) else {
                 return Ok(());
             };
             if idx_e.stage() != 0 {
@@ -421,12 +441,17 @@ fn stage_tracked_modifications_in_index_body(
     )?;
 
     if !deferred_restage.is_empty() {
+        let restage_parallelism = if deferred_restage.len() < 512 {
+            Parallelism::new(std::num::NonZeroUsize::MIN)
+        } else {
+            parallelism
+        };
         summary.modified.extend(restage_deferred_jobs(
             repo,
             index,
             rules,
             trust_filemode,
-            parallelism,
+            restage_parallelism,
             &deferred_restage,
         )?);
     }
@@ -568,6 +593,23 @@ struct DeferredRestageJob {
     abs_path: PathBuf,
     /// Worktree metadata from the directory stat scan (avoids a second `stat` during restage).
     meta: fs::Metadata,
+}
+
+/// Resolve the index row for a directory-grouped stat visit.
+///
+/// Prefer the scan's `entry_index` (O(1)) when it still points at the same stage-0 path; fall back
+/// to a binary search after in-scan removals reshuffle or truncate the entry vector.
+fn index_entry_at_scan_index(
+    index: &Index,
+    entry_index: usize,
+    rel_path: &str,
+) -> Option<IndexEntry> {
+    if let Some(e) = index.entries.get(entry_index) {
+        if e.stage() == 0 && std::str::from_utf8(&e.path).ok() == Some(rel_path) {
+            return Some(e.clone());
+        }
+    }
+    index.get(rel_path.as_bytes(), 0).cloned()
 }
 
 fn refresh_present_tracked_path(
@@ -721,7 +763,7 @@ fn restage_deferred_jobs(
         if prep.oid == idx_oid && (mode_for_index == idx_mode || !trust_filemode) {
             continue;
         }
-        let entry = entry_from_stat(&job.abs_path, &job.raw_path, prep.oid, mode_for_index)?;
+        let entry = entry_from_metadata(&job.meta, &job.raw_path, prep.oid, mode_for_index);
         modified.push(job.raw_path.clone());
         replacements.push(entry);
     }

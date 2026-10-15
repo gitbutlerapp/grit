@@ -3498,6 +3498,7 @@ fn diff_index_to_worktree_inner(
         |rel_path| {
             dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
         },
+        None,
         |entry_index, path_str_ref, lookup| {
             if use_fsmonitor_stat_skip {
                 let ie_skip = &index.entries[entry_index];
@@ -4372,6 +4373,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
         |rel_path| {
             dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
         },
+        None,
         |entry_index, path_str_ref, lookup| {
             let BlobDiskLookup::Present(meta) = lookup else {
                 return Ok(());

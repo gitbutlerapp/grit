@@ -437,6 +437,38 @@ pub fn expand_untracked_for_staging(
     expand_untracked_for_staging_with_rules(repo, index, work_tree, untracked, pathspecs, &rules)
 }
 
+/// Filter and expand untracked paths collected during a fused tracked stat scan (`git add`).
+pub(crate) fn finalize_side_untracked_for_staging(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    mut candidates: Vec<String>,
+    pathspecs: &[String],
+    rules: &crate::worktree_rules::WorktreeRules,
+) -> Result<Vec<String>> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    candidates.sort();
+    candidates.dedup();
+    let mut ignore = rules.ignore().clone();
+    let mut kept = Vec::with_capacity(candidates.len());
+    for path in candidates {
+        if path.ends_with('/') {
+            kept.push(path);
+            continue;
+        }
+        if ignore.is_path_ignored(repo, Some(index), &path, false)? {
+            continue;
+        }
+        kept.push(path);
+    }
+    if kept.is_empty() {
+        return Ok(Vec::new());
+    }
+    expand_untracked_for_staging_with_rules(repo, index, work_tree, kept, pathspecs, rules)
+}
+
 /// Like [`expand_untracked_for_staging`], reusing an existing
 /// [`crate::worktree_rules::WorktreeRules`] for every nested directory walk.
 pub fn expand_untracked_for_staging_with_rules(
