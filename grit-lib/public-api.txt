@@ -2994,6 +2994,7 @@ pub grit_lib::diff::DiffIndexToWorktreeOptions::for_status: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::ignore_submodule_untracked: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::index_mtime: core::option::Option<(u32, u32)>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_index_stat_in_pass: bool
+pub grit_lib::diff::DiffIndexToWorktreeOptions::restrict_to_paths: core::option::Option<alloc::rcs::arc::Arc<alloc::collections::btree::set::BTreeSet<alloc::string::String>>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::repository_git_dir: core::option::Option<std::path::PathBuf>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::simplify_gitlinks: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::stat_parallel_threads: core::option::Option<usize>
