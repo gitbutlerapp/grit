@@ -696,8 +696,12 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     let pack_opts = opts.pack_build.unwrap_or_else(|| {
         if opts.incremental {
             PackBuildOptions::for_local_copy(cfg.as_ref())
-        } else {
+        } else if opts.auto_skip {
+            // `grit gc`: fast on-disk reuse when a repack is actually required.
             PackBuildOptions::for_repack_rewrite(cfg.as_ref())
+        } else {
+            // Explicit `grit repack`: match Git repack delta consolidation quality.
+            PackBuildOptions::for_local_copy(cfg.as_ref())
         }
     });
 
