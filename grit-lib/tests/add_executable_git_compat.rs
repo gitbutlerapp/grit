@@ -134,6 +134,85 @@ fn add_executable_mode_only_on_tracked_file() {
         after.starts_with("100755 "),
         "expected 755 after hint: {after}"
     );
+
+    create_commit(&repo, &commit_req("executable"), &mut NullProgress).expect("commit");
+    let tree_line = git_out(root, &["ls-tree", "HEAD", "tool.sh"]);
+    assert!(
+        tree_line.starts_with("100755 blob"),
+        "committed tree must be executable, not stale cache-tree 644: {tree_line}"
+    );
+
+    let fsck = Command::new("git")
+        .current_dir(root)
+        .args(["fsck", "--strict"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git fsck");
+    assert!(
+        fsck.status.success(),
+        "git fsck --strict: {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+
+    let cached_diff = git_out(root, &["diff", "--cached"]);
+    assert!(
+        cached_diff.is_empty(),
+        "index should match HEAD after commit, got staged diff: {cached_diff}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn filemode_false_stages_regular_to_symlink_typechange() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "core.filemode", "false"]);
+    fs::write(root.join("target.txt"), "link me\n").expect("write target");
+    fs::write(root.join("path"), "regular\n").expect("write");
+
+    let repo = Repository::discover(Some(root), &Default::default()).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &commit_req("base"), &mut NullProgress).expect("commit");
+
+    fs::remove_file(root.join("path")).expect("remove");
+    symlink(root.join("target.txt"), root.join("path")).expect("symlink");
+
+    stage(
+        &repo,
+        &StageOptions {
+            pathspecs: vec!["path".to_owned()],
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("stage symlink");
+
+    let grit_index = git_out(root, &["ls-files", "-s", "path"]);
+    assert!(
+        grit_index.starts_with("120000 "),
+        "grit must stage symlink typechange as 120000: {grit_index}"
+    );
+
+    let git_repo = tempfile::tempdir().expect("git copy");
+    let gr = git_repo.path();
+    git(gr, &["init", "-q", "-b", "main"]);
+    git(gr, &["config", "core.filemode", "false"]);
+    fs::write(gr.join("target.txt"), "link me\n").expect("write");
+    fs::write(gr.join("path"), "regular\n").expect("write");
+    git(gr, &["add", "-A"]);
+    git(gr, &["commit", "-qm", "base"]);
+    fs::remove_file(gr.join("path")).expect("remove");
+    symlink(gr.join("target.txt"), gr.join("path")).expect("symlink");
+    git(gr, &["add", "path"]);
+    let git_index = git_out(gr, &["ls-files", "-s", "path"]);
+    assert!(
+        git_index.starts_with("120000 "),
+        "git reference: {git_index}"
+    );
 }
 
 #[test]

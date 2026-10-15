@@ -8042,10 +8042,8 @@ impl core::marker::Unpin for grit_lib::porcelain::index_mode::StageExecutableHin
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::index_mode::StageExecutableHint
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::index_mode::StageExecutableHint
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::index_mode::StageExecutableHint
-pub fn grit_lib::porcelain::index_mode::is_chmod_eligible_mode(u32) -> bool
 pub fn grit_lib::porcelain::index_mode::set_index_entry_executable(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::index_mode::set_stage0_file_mode(&mut grit_lib::index::Index, &[u8], u32) -> grit_lib::error::Result<bool>
-pub fn grit_lib::porcelain::index_mode::staged_mode_with_hint(u32, grit_lib::porcelain::index_mode::StageExecutableHint) -> u32
 pub mod grit_lib::porcelain::log
 pub enum grit_lib::porcelain::log::DecorationKind
 pub grit_lib::porcelain::log::DecorationKind::Branch

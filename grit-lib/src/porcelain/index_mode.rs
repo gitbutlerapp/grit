@@ -22,13 +22,13 @@ pub enum StageExecutableHint {
 
 /// Returns whether `mode` is a regular file mode that may be toggled executable/non-executable.
 #[must_use]
-pub fn is_chmod_eligible_mode(mode: u32) -> bool {
+pub(crate) fn is_chmod_eligible_mode(mode: u32) -> bool {
     mode == MODE_REGULAR || mode == MODE_EXECUTABLE
 }
 
 /// Apply an explicit staging hint to a base mode derived from the worktree or index.
 #[must_use]
-pub fn staged_mode_with_hint(base: u32, hint: StageExecutableHint) -> u32 {
+pub(crate) fn staged_mode_with_hint(base: u32, hint: StageExecutableHint) -> u32 {
     match hint {
         StageExecutableHint::None => base,
         StageExecutableHint::SetExecutable if is_chmod_eligible_mode(base) => MODE_EXECUTABLE,
@@ -64,11 +64,7 @@ pub fn set_stage0_file_mode(index: &mut Index, path: &[u8], mode: u32) -> Result
     let Some(entry) = index.get_mut(path, 0) else {
         return Ok(false);
     };
-    if entry.mode == MODE_SYMLINK
-        || entry.mode == MODE_GITLINK
-        || entry.mode == MODE_TREE
-        || !is_chmod_eligible_mode(entry.mode) && !is_chmod_eligible_mode(mode)
-    {
+    if !is_chmod_eligible_mode(entry.mode) {
         return Err(Error::Message(format!(
             "cannot set executable bit on '{}'",
             String::from_utf8_lossy(path)
@@ -84,6 +80,7 @@ pub fn set_stage0_file_mode(index: &mut Index, path: &[u8], mode: u32) -> Result
         return Ok(false);
     }
     entry.mode = mode;
+    index.invalidate_cache_tree_for_path(path);
     Ok(true)
 }
 
@@ -153,6 +150,7 @@ pub(crate) fn apply_executable_hint_to_index(
         }
         if let Some(entry) = index.get_mut(&path, 0) {
             entry.mode = target;
+            index.invalidate_cache_tree_for_path(&path);
             updated += 1;
         }
     }
@@ -218,5 +216,21 @@ mod tests {
             index.get(b"run.sh", 0).expect("entry").mode,
             MODE_EXECUTABLE
         );
+    }
+
+    #[test]
+    fn set_stage0_file_mode_rejects_unknown_entry_mode() {
+        let mut index = Index::new();
+        index.add_or_replace(regular_entry("x", 0o100664));
+        let err = set_stage0_file_mode(&mut index, b"x", MODE_EXECUTABLE).unwrap_err();
+        assert!(matches!(err, Error::Message(_)));
+    }
+
+    #[test]
+    fn set_stage0_file_mode_rejects_invalid_target_mode() {
+        let mut index = Index::new();
+        index.add_or_replace(regular_entry("run.sh", MODE_REGULAR));
+        let err = set_stage0_file_mode(&mut index, b"run.sh", MODE_SYMLINK).unwrap_err();
+        assert!(matches!(err, Error::Message(_)));
     }
 }

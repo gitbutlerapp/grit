@@ -4744,7 +4744,9 @@ fn staged_index_file_mode(trust_filemode: bool, index_mode: u32, worktree_mode: 
     if trust_filemode {
         return worktree_mode;
     }
-    if index_mode == MODE_REGULAR || index_mode == MODE_EXECUTABLE {
+    let index_is_regular = index_mode == MODE_REGULAR || index_mode == MODE_EXECUTABLE;
+    let worktree_is_regular = worktree_mode == MODE_REGULAR || worktree_mode == MODE_EXECUTABLE;
+    if index_is_regular && worktree_is_regular {
         index_mode
     } else {
         worktree_mode
