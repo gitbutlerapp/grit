@@ -2827,6 +2827,8 @@ fn parallel_process_blob_worktree_jobs(
                 } else {
                     eff_oid
                 };
+                let staged_mode =
+                    staged_index_file_mode(trust_filemode, job.entry.mode, job.worktree_mode);
                 Ok(Some((
                     job.entry_index,
                     DiffEntry {
@@ -2834,7 +2836,7 @@ fn parallel_process_blob_worktree_jobs(
                         old_path: Some(path_owned.clone()),
                         new_path: Some(path_owned),
                         old_mode: format_mode(job.entry.mode),
-                        new_mode: format_mode(job.worktree_mode),
+                        new_mode: format_mode(staged_mode),
                         old_oid: job.entry.oid,
                         new_oid,
                         score: None,
@@ -2990,12 +2992,17 @@ fn push_index_blob_worktree_diff(
         } else {
             eff_oid
         };
+        let new_mode = if materialize_dirty_blobs {
+            staged_index_file_mode(trust_filemode, ie.mode, worktree_mode)
+        } else {
+            worktree_mode
+        };
         result.push(DiffEntry {
             status: DiffStatus::Modified,
             old_path: Some(path_owned.clone()),
             new_path: Some(path_owned),
             old_mode: format_mode(ie.mode),
-            new_mode: format_mode(worktree_mode),
+            new_mode: format_mode(new_mode),
             old_oid: ie.oid,
             new_oid,
             score: None,
@@ -4729,6 +4736,19 @@ pub fn materialize_worktree_blob(
         true,
         filter_process,
     )
+}
+
+/// Mode to store when staging a blob whose worktree stat differs from the index entry.
+fn staged_index_file_mode(trust_filemode: bool, index_mode: u32, worktree_mode: u32) -> u32 {
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR};
+    if trust_filemode {
+        return worktree_mode;
+    }
+    if index_mode == MODE_REGULAR || index_mode == MODE_EXECUTABLE {
+        index_mode
+    } else {
+        worktree_mode
+    }
 }
 
 /// Derive a Git file mode from filesystem metadata.

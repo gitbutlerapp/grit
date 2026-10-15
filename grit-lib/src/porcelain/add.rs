@@ -22,8 +22,7 @@ use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::index_mode::{
-    apply_executable_hint_to_index, is_chmod_eligible_mode, staged_mode_with_hint,
-    StageExecutableHint,
+    apply_executable_hint_to_index, staged_mode_with_hint, StageExecutableHint,
 };
 use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
 use crate::porcelain::stage_tracked::stage_tracked_modifications_in_index;
@@ -470,22 +469,6 @@ fn merge_tracked_stage_plan(
     }
 }
 
-fn staged_mode_for_tracked_plan(
-    index: &Index,
-    rel_path: &str,
-    plan_mode: u32,
-    trust_filemode: bool,
-) -> u32 {
-    if trust_filemode {
-        return plan_mode;
-    }
-    index
-        .get(rel_path.as_bytes(), 0)
-        .map(|e| e.mode)
-        .filter(|mode| is_chmod_eligible_mode(*mode))
-        .unwrap_or(plan_mode)
-}
-
 fn mode_with_executable_hint(
     base_mode: u32,
     rel_path: &str,
@@ -507,7 +490,7 @@ fn mode_from_diff_octal(mode: &str) -> Result<u32> {
 
 #[allow(clippy::too_many_arguments)]
 fn apply_tracked_stage_plan(
-    repo: &Repository,
+    _repo: &Repository,
     work_tree: &Path,
     rel_path: &str,
     plan: &TrackedStagePlan,
@@ -517,11 +500,6 @@ fn apply_tracked_stage_plan(
     executable_hint: StageExecutableHint,
     matches: &impl Fn(&str) -> bool,
 ) -> Result<()> {
-    let trust_filemode = repo
-        .config()
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.filemode").and_then(|r| r.ok()))
-        .unwrap_or(true);
     let abs = work_tree.join(rel_path);
 
     if plan.gitlink {
@@ -542,12 +520,7 @@ fn apply_tracked_stage_plan(
     }
 
     let oid = plan.oid;
-    let mode = mode_with_executable_hint(
-        staged_mode_for_tracked_plan(index, rel_path, plan.mode, trust_filemode),
-        rel_path,
-        executable_hint,
-        matches,
-    );
+    let mode = mode_with_executable_hint(plan.mode, rel_path, executable_hint, matches);
     let mut entry = if let Some(stat) = cached_stat {
         stat.index_entry(rel_path.as_bytes(), oid, mode)
     } else {
