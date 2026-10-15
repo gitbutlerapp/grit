@@ -171,3 +171,7 @@ name = "clone_layout"
 path = "tests/clone_layout.rs"
 required-features = ["http-ureq"]
 
+[[test]]
+name = "add_untr_80k_campaign"
+path = "tests/add_untr_80k_campaign.rs"
+
