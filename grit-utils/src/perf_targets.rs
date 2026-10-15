@@ -279,7 +279,11 @@ ratio = 1.1
             message: "hyperfine grit run failed".into(),
         });
         assert_eq!(
-            targets.classify(&scenario_with_failure("git-dot-git/log", 0.0, failure.clone())),
+            targets.classify(&scenario_with_failure(
+                "git-dot-git/log",
+                0.0,
+                failure.clone()
+            )),
             LedgerStatus::Fail
         );
         Ok(())
