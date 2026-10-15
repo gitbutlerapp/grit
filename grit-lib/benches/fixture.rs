@@ -123,7 +123,7 @@ fn index_pack_in_dir(dir: &Path, pack_bytes: &[u8], stem: &str) -> PackIndex {
     read_pack_index(&idx_path).expect("read generated idx")
 }
 
-fn install_indexed_pack(objects_dir: &Path, stem: &str, pack_bytes: &[u8]) -> PackIndex {
+pub(crate) fn install_indexed_pack(objects_dir: &Path, stem: &str, pack_bytes: &[u8]) -> PackIndex {
     let pack_dir = objects_dir.join("pack");
     std::fs::create_dir_all(&pack_dir).expect("pack dir");
     let scratch = tempfile::tempdir().expect("index-pack scratch");
@@ -251,7 +251,7 @@ fn deepest_deltified_oid(pack_bytes: &[u8], stem: &str) -> (ObjectId, u64) {
     (oid, depth)
 }
 
-fn build_delta_chain_pack(depth: usize) -> (Vec<u8>, ObjectId, u64) {
+pub(crate) fn build_delta_chain_pack(depth: usize) -> (Vec<u8>, ObjectId, u64) {
     let tmp = tempfile::tempdir().expect("delta chain tempdir");
     let repo = Repository::init(
         tmp.path(),

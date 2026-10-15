@@ -300,7 +300,28 @@ impl ObjectId {
     ///
     /// Returns [`Error::InvalidObjectId`] if the string is not a valid hex OID.
     pub fn from_hex(s: &str) -> Result<Self> {
+        if s.len() == HashAlgo::Sha1.hex_len() {
+            return Self::from_hex_ascii(s.as_bytes());
+        }
         s.parse()
+    }
+
+    /// Parse a fixed-width lowercase/uppercase ASCII hex OID (40 chars for SHA-1).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidObjectId`] when `bytes` is not exactly 40 hex digits.
+    pub fn from_hex_ascii(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != HashAlgo::Sha1.hex_len() {
+            return Err(Error::InvalidObjectId(
+                String::from_utf8_lossy(bytes).into_owned(),
+            ));
+        }
+        let mut out = [0u8; 20];
+        for (i, chunk) in bytes.chunks_exact(2).enumerate() {
+            out[i] = (hex_nibble(chunk[0])? << 4) | hex_nibble(chunk[1])?;
+        }
+        Self::from_bytes(&out)
     }
 
     /// The suffix used as the filename inside the loose prefix dir (the digest
@@ -341,6 +362,16 @@ impl fmt::Display for ObjectId {
 impl fmt::Debug for ObjectId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ObjectId({})", self.to_hex())
+    }
+}
+
+#[inline]
+fn hex_nibble(b: u8) -> Result<u8> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        _ => Err(Error::InvalidObjectId(format!("invalid hex nibble: {b}"))),
     }
 }
 

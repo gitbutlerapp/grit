@@ -223,6 +223,41 @@ impl PackIndex {
         self.find_position(oid).map(|i| self.offset_at(i))
     }
 
+    /// Like [`Self::find_offset`] but optimized for monotonically non-decreasing `oid` probes.
+    ///
+    /// Updates `cursor` to the matching row on success. When the probe regresses (out-of-order
+    /// input), falls back to fanout + binary search and resets `cursor`.
+    #[must_use]
+    pub fn find_offset_monotonic(&self, oid: &ObjectId, cursor: &mut usize) -> Option<u64> {
+        let needle = oid.as_bytes();
+        if needle.len() != self.layout.hash_bytes {
+            return None;
+        }
+        let len = self.len();
+        if *cursor >= len {
+            *cursor = 0;
+        }
+        if *cursor < len && compare_oid_bytes(self.oid_at(*cursor), needle) == Ordering::Greater {
+            if let Some(pos) = self.find_position(oid) {
+                *cursor = pos;
+                return Some(self.offset_at(pos));
+            }
+            return None;
+        }
+        let mut pos = *cursor;
+        while pos < len {
+            match compare_oid_bytes(self.oid_at(pos), needle) {
+                Ordering::Less => pos += 1,
+                Ordering::Equal => {
+                    *cursor = pos;
+                    return Some(self.offset_at(pos));
+                }
+                Ordering::Greater => return None,
+            }
+        }
+        None
+    }
+
     /// Whether this pack index contains the given OID.
     #[must_use]
     pub fn contains(&self, oid: &ObjectId) -> bool {
