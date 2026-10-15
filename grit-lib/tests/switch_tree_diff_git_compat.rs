@@ -149,3 +149,83 @@ fn switch_refuses_dirty_conflicting_path_and_leaves_file() {
     let after = std::fs::read(tmp.path().join("hot.txt")).expect("read after");
     assert_eq!(before, after, "conflicting dirty file must be untouched");
 }
+
+#[cfg(unix)]
+#[test]
+fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+
+    std::fs::write(tmp.path().join("run.sh"), b"#!/bin/sh\n").expect("write");
+    std::fs::write(tmp.path().join("plain.txt"), b"file\n").expect("write");
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "main"]);
+
+    git(tmp.path(), &["checkout", "-q", "-b", "target"]);
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(tmp.path().join("run.sh"))
+            .expect("meta")
+            .permissions();
+        perms.set_mode(0o100755);
+        std::fs::set_permissions(tmp.path().join("run.sh"), perms).expect("chmod");
+    }
+    std::fs::remove_file(tmp.path().join("plain.txt")).expect("remove file");
+    std::fs::create_dir_all(tmp.path().join("plain.txt")).expect("file to dir");
+    std::fs::write(tmp.path().join("plain.txt/inner.txt"), b"inner\n").expect("inner");
+    symlink("plain.txt/inner.txt", tmp.path().join("link.txt")).expect("symlink");
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "target"]);
+    git(tmp.path(), &["checkout", "-q", "main"]);
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let target_oid =
+        ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect("switch");
+
+    assert!(
+        git_porcelain(tmp.path()).trim().is_empty(),
+        "git status --porcelain must be empty after type/mode switch, got:\n{}",
+        git_porcelain(tmp.path())
+    );
+    assert!(
+        git_diff_index_head(tmp.path()).trim().is_empty(),
+        "git diff-index HEAD must be empty, got:\n{}",
+        git_diff_index_head(tmp.path())
+    );
+    git_fsck(tmp.path());
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "main".into(),
+                oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim())
+                    .expect("main oid"),
+            },
+        },
+    )
+    .expect("switch back");
+    assert!(
+        git_porcelain(tmp.path()).trim().is_empty(),
+        "git status must be clean after switch back"
+    );
+}

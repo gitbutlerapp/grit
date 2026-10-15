@@ -9,7 +9,7 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use hot_paths_fixture::{
     bench_apply_stash, bench_checkout_between_trees, bench_pick_path, bench_push_stash,
-    bench_stage_scan, HotPathsFixture,
+    bench_stage_scan, bench_switch_wide, HotPathsFixture,
 };
 
 fn bench_index_mutate(c: &mut Criterion) {
@@ -38,13 +38,13 @@ fn bench_index_mutate(c: &mut Criterion) {
 
 fn bench_switch_wide_100k(c: &mut Criterion) {
     let fx = HotPathsFixture::heavy();
-    let to_tree = fx.tree_with_fraction_changed(0.10);
     let mut group = c.benchmark_group("checkout/switch_wide_100k");
-    group.bench_function("H_10pct", |b| {
-        fx.reset_worktree_to_head();
-        b.iter(|| {
-            bench_checkout_between_trees(&fx.repo, &fx.head_tree, &to_tree);
-        });
+    group.bench_function("H_10pct_switch", |b| {
+        b.iter_batched(
+            || fx.reset_worktree_to_head(),
+            |_| bench_switch_wide(fx),
+            BatchSize::SmallInput,
+        );
     });
     group.finish();
 }

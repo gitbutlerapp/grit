@@ -138,6 +138,8 @@ fn symlink_metadata_path(path: &Path) -> io::Result<fs::Metadata> {
     fs::symlink_metadata(path)
 }
 
+use std::collections::BTreeSet;
+
 use crate::error::{Error, Result};
 use crate::index::{Index, MODE_GITLINK};
 
@@ -173,6 +175,42 @@ pub(crate) fn group_blob_entries_by_dir(index: &Index) -> HashMap<String, Vec<Bl
         by_dir.entry(dir).or_default().push(BlobInDir {
             file_name,
             rel_path: rel_path.to_owned(),
+            entry_index,
+        });
+    }
+    by_dir
+}
+
+/// Like [`group_blob_entries_by_dir`], but only for repository-relative paths in `paths`.
+#[must_use]
+pub(crate) fn group_blob_entries_by_dir_for_paths(
+    index: &Index,
+    paths: &BTreeSet<String>,
+) -> HashMap<String, Vec<BlobInDir>> {
+    let mut by_dir: HashMap<String, Vec<BlobInDir>> = HashMap::new();
+    for path in paths {
+        let path_bytes = path.as_bytes();
+        let Some(ie) = index.get(path_bytes, 0) else {
+            continue;
+        };
+        if ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
+            continue;
+        }
+        if ie.mode == MODE_GITLINK {
+            continue;
+        }
+        let Ok(entry_index) = index.entries.binary_search_by(|e| {
+            e.path
+                .as_slice()
+                .cmp(path_bytes)
+                .then_with(|| e.stage().cmp(&0))
+        }) else {
+            continue;
+        };
+        let (dir, file_name) = split_dir_file(path);
+        by_dir.entry(dir).or_default().push(BlobInDir {
+            file_name,
+            rel_path: path.clone(),
             entry_index,
         });
     }

@@ -15,6 +15,7 @@ use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::stash::{apply_stash, push_stash, StashCreateOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
@@ -43,6 +44,8 @@ pub struct HotPathsFixture {
     pub _dir: TempDir,
     pub repo: Repository,
     pub head_tree: ObjectId,
+    pub main_head_oid: ObjectId,
+    pub wide_switch_tip: ObjectId,
     pub file_paths: Vec<String>,
     index_mutate_plan: IndexMutatePlan,
 }
@@ -60,11 +63,16 @@ impl HotPathsFixture {
         populate_worktree(dir.path(), file_count, dir_count);
         let file_paths = list_txt_paths(dir.path());
         let head_tree = commit_all(&repo, "initial").expect("initial commit");
+        let main_head_oid = refs::resolve_ref(repo.git_dir(), "HEAD").expect("HEAD");
+        let wide_switch_tip =
+            prepare_wide_switch_tip(&repo, &file_paths, head_tree, main_head_oid);
         let index_mutate_plan = build_index_mutate_plan(&repo);
         Self {
             _dir: dir,
             repo,
             head_tree,
+            main_head_oid,
+            wide_switch_tip,
             file_paths,
             index_mutate_plan,
         }
@@ -355,6 +363,66 @@ fn commit_all(repo: &Repository, message: &str) -> Result<ObjectId> {
 
 pub fn bench_checkout_between_trees(repo: &Repository, from: &ObjectId, to: &ObjectId) {
     checkout_between_trees(repo, Some(from), to).expect("checkout_between_trees");
+}
+
+fn prepare_wide_switch_tip(
+    repo: &Repository,
+    file_paths: &[String],
+    head_tree: ObjectId,
+    main_head_oid: ObjectId,
+) -> ObjectId {
+    let wide_tree = tree_with_fraction_changed_on_repo(repo, file_paths, 0.10);
+    let tip = write_tree_commit(repo, wide_tree, &[main_head_oid], "bench-wide switch");
+    refs::write_ref(repo.git_dir(), "refs/heads/bench-wide", &tip).expect("wide branch ref");
+    checkout_between_trees(repo, Some(&head_tree), &head_tree).expect("restore main tree");
+    tip
+}
+
+fn tree_with_fraction_changed_on_repo(
+    repo: &Repository,
+    file_paths: &[String],
+    fraction: f64,
+) -> ObjectId {
+    let n = ((file_paths.len() as f64) * fraction).round() as usize;
+    let n = n.max(1);
+    let work_tree = repo.work_tree().expect("work tree");
+    let mut index = repo.index_handle().load().expect("load index");
+    for path in file_paths.iter().take(n) {
+        let abs = work_tree.join(path);
+        std::fs::write(&abs, format!("changed-{path}\n")).expect("write");
+        let data = std::fs::read(&abs).expect("read");
+        let oid = repo
+            .odb()
+            .write(ObjectKind::Blob, &data)
+            .expect("blob");
+        let entry = entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry");
+        index.add_or_replace(entry);
+    }
+    index.sort();
+    write_tree_update_index(&repo.odb(), &mut index, "", WriteTreeFlags::silent()).expect("tree")
+}
+
+pub fn bench_switch_wide(fx: &HotPathsFixture) {
+    switch_repository(
+        &fx.repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "bench-wide".into(),
+                oid: fx.wide_switch_tip,
+            },
+        },
+    )
+    .expect("switch wide");
+    switch_repository(
+        &fx.repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "main".into(),
+                oid: fx.main_head_oid,
+            },
+        },
+    )
+    .expect("switch main");
 }
 
 pub fn bench_stage_scan(repo: &Repository) {

@@ -5,7 +5,7 @@
 //! the index once, refreshes stat data when needed, and computes those slices without rename
 //! detection, ahead/behind, stash counts, or in-progress operation state.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -116,7 +116,8 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         return Ok((Vec::new(), Vec::new(), false));
     }
     let path_filter = Arc::new(paths);
-    let staged = staged_diff_for_tree_switch_paths(index, tree_changes, path_filter.as_ref())?;
+    let head_by_path = head_tree_sides_from_changes(tree_changes);
+    let staged = staged_diff_for_tree_switch_paths(index, &head_by_path, path_filter.as_ref())?;
 
     let work_tree = repo
         .work_tree()
@@ -162,16 +163,21 @@ fn parse_diff_mode(mode: &str) -> u32 {
     u32::from_str_radix(mode, 8).unwrap_or(0)
 }
 
-fn head_tree_side_at_path(path: &str, tree_changes: &[DiffEntry]) -> HeadTreeSide {
+fn head_tree_sides_from_changes(tree_changes: &[DiffEntry]) -> HashMap<String, HeadTreeSide> {
+    let mut map = HashMap::with_capacity(tree_changes.len());
     for change in tree_changes {
-        if change.old_path.as_deref() == Some(path) {
-            return HeadTreeSide::Present {
+        let Some(path) = &change.old_path else {
+            continue;
+        };
+        map.insert(
+            path.clone(),
+            HeadTreeSide::Present {
                 oid: change.old_oid,
                 mode: parse_diff_mode(&change.old_mode),
-            };
-        }
+            },
+        );
     }
-    HeadTreeSide::Absent
+    map
 }
 
 fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String> {
@@ -189,40 +195,18 @@ fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String>
 
 fn staged_diff_for_tree_switch_paths(
     index: &Index,
-    tree_changes: &[DiffEntry],
+    head_by_path: &HashMap<String, HeadTreeSide>,
     paths: &BTreeSet<String>,
 ) -> Result<Vec<DiffEntry>> {
     let mut staged = Vec::new();
     for path in paths {
         let path_bytes = path.as_bytes();
-        if index
-            .entries
-            .iter()
-            .any(|e| e.path.as_slice() == path_bytes && e.stage() != 0)
-        {
-            if let Some(ie) = index
-                .entries
-                .iter()
-                .find(|e| e.path.as_slice() == path_bytes && e.stage() != 0)
-            {
-                staged.push(DiffEntry {
-                    status: DiffStatus::Unmerged,
-                    old_path: Some(path.clone()),
-                    new_path: Some(path.clone()),
-                    old_mode: format_mode(ie.mode),
-                    new_mode: format_mode(ie.mode),
-                    old_oid: ie.oid,
-                    new_oid: ie.oid,
-                    score: None,
-                });
-            }
-            continue;
-        }
         let index_entry = index.get(path_bytes, 0);
         if index_entry.is_some_and(|e| e.intent_to_add()) {
             continue;
         }
-        match (head_tree_side_at_path(path, tree_changes), index_entry) {
+        let head = head_by_path.get(path).copied().unwrap_or(HeadTreeSide::Absent);
+        match (head, index_entry) {
             (HeadTreeSide::Absent, None) => {}
             (HeadTreeSide::Absent, Some(ie)) => {
                 staged.push(DiffEntry {
