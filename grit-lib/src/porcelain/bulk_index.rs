@@ -2,8 +2,11 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Parallel blob reread and deferred UNTR invalidation apply at this index entry count and above.
+/// Deferred UNTR invalidation and cache-tree drop apply at this entry count and above.
 const DEFAULT_LARGE_INDEX_RESTAGE_THRESHOLD: usize = 80_000;
+
+/// Parallel tracked blob reread batches activate at this entry count (below bulk UNTR defer).
+const DEFAULT_PARALLEL_TRACKED_RESTAGE_THRESHOLD: usize = 4_096;
 
 static TEST_THRESHOLD_OVERRIDE: AtomicUsize = AtomicUsize::new(0);
 
@@ -31,11 +34,20 @@ pub fn clear_test_threshold_override() {
     TEST_THRESHOLD_OVERRIDE.store(0, Ordering::SeqCst);
 }
 
-/// Entry count at which bulk restage optimizations activate.
+/// Entry count at which bulk UNTR deferral and cache-tree drop activate.
 pub(crate) fn large_index_restage_threshold() -> usize {
+    threshold_or_default(DEFAULT_LARGE_INDEX_RESTAGE_THRESHOLD)
+}
+
+/// Entry count at which parallel tracked restage batches activate.
+pub(crate) fn parallel_tracked_restage_threshold() -> usize {
+    threshold_or_default(DEFAULT_PARALLEL_TRACKED_RESTAGE_THRESHOLD)
+}
+
+fn threshold_or_default(default: usize) -> usize {
     let override_n = TEST_THRESHOLD_OVERRIDE.load(Ordering::SeqCst);
     if override_n > 0 {
         return override_n;
     }
-    DEFAULT_LARGE_INDEX_RESTAGE_THRESHOLD
+    default
 }
