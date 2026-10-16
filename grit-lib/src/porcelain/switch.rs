@@ -550,15 +550,24 @@ fn gitlink_worktree_head_matches_target(entry: &DiffEntry, target: TargetTreeEnt
     target.mode == MODE_GITLINK && entry.new_oid == target.oid
 }
 
+/// Failure while verifying a tree transition without overwriting local edits.
+#[derive(Debug)]
+pub(crate) enum TreeTransitionVerifyError {
+    /// Staged or unstaged edits on paths that the target tree would overwrite.
+    WouldOverwrite(Vec<String>),
+    /// Preparation or diff computation failed.
+    Failed(Error),
+}
+
 /// Run the checkout half of a prepared tree transition (index + worktree).
 /// Refuse when staged/unstaged edits on tree-diff paths would be overwritten.
 pub(crate) fn verify_tree_transition_allow_local(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
-) -> std::result::Result<(), Vec<String>> {
-    let mut prepared =
-        prepare_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|_| Vec::new())?;
+) -> std::result::Result<(), TreeTransitionVerifyError> {
+    let mut prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree)
+        .map_err(TreeTransitionVerifyError::Failed)?;
     let tree_changes = prepared.plan.tree_changes.clone();
     let untracked =
         crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes(
@@ -566,7 +575,7 @@ pub(crate) fn verify_tree_transition_allow_local(
             &tree_changes,
         );
     if !untracked.is_empty() {
-        return Err(untracked);
+        return Err(TreeTransitionVerifyError::WouldOverwrite(untracked));
     }
     let (staged, unstaged, _) =
         crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
@@ -575,13 +584,9 @@ pub(crate) fn verify_tree_transition_allow_local(
             from_tree.copied(),
             &tree_changes,
         )
-        .map_err(|_| Vec::new())?;
-    ensure_local_changes_compatible_with_switch(
-        &prepared.index,
-        &staged,
-        &unstaged,
-        &tree_changes,
-    )?;
+        .map_err(TreeTransitionVerifyError::Failed)?;
+    ensure_local_changes_compatible_with_switch(&prepared.index, &staged, &unstaged, &tree_changes)
+        .map_err(TreeTransitionVerifyError::WouldOverwrite)?;
     Ok(())
 }
 

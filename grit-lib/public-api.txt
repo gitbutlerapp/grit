@@ -3891,12 +3891,16 @@ pub grit_lib::history::HistoryError::Conflict::paths: alloc::vec::Vec<alloc::str
 pub grit_lib::history::HistoryError::DivergentBranch
 pub grit_lib::history::HistoryError::DivergentBranch::name: alloc::string::String
 pub grit_lib::history::HistoryError::EmptyMessage
+pub grit_lib::history::HistoryError::InsertBeforeOnMerge
+pub grit_lib::history::HistoryError::InsertBeforeOnMerge::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten
 pub grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::history::HistoryError::MergeCommitInReplay
 pub grit_lib::history::HistoryError::MergeCommitInReplay::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::NotInHistory
 pub grit_lib::history::HistoryError::NotInHistory::commit: grit_lib::objects::ObjectId
+pub grit_lib::history::HistoryError::Planning
+pub grit_lib::history::HistoryError::Planning::message: alloc::string::String
 pub grit_lib::history::HistoryError::RefApply
 pub grit_lib::history::HistoryError::RefApply::message: alloc::string::String
 pub grit_lib::history::HistoryError::RefCasMismatch

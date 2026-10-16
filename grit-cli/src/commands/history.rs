@@ -277,6 +277,13 @@ fn map_history_error(err: HistoryError) -> anyhow::Error {
             paths.dedup();
             json_error::operation_conflict("history reword", paths)
         }
+        HistoryError::Planning { message } => {
+            anyhow::anyhow!("history rewrite planning failed: {message}")
+        }
+        HistoryError::InsertBeforeOnMerge { commit } => {
+            let short = &commit.to_hex()[..7];
+            anyhow::anyhow!("insert-before on merge commit {short} is not supported")
+        }
         HistoryError::MergeCommitInReplay { commit } => {
             let short = &commit.to_hex()[..7];
             anyhow::anyhow!(

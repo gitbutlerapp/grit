@@ -59,7 +59,7 @@ fn record_merge_call() {
 /// # Errors
 ///
 /// Returns [`HistoryError`] for conflicts, unsupported merges, scope violations, and empty-policy
-/// aborts. Wraps object and revwalk failures as [`HistoryError::Conflict`] with a message path.
+/// aborts. Repository read failures surface as [`HistoryError::Planning`].
 pub fn plan_rewrite(
     repo: &Repository,
     edits: &HistoryEdits,
@@ -134,6 +134,10 @@ pub fn plan_rewrite(
 
         if old.parents.len() > 1 && edit.is_none() {
             return Err(HistoryError::MergeCommitInReplay { commit: old_oid });
+        }
+
+        if matches!(edit, Some(CommitEdit::InsertBefore(_))) && old.parents.len() > 1 {
+            return Err(HistoryError::InsertBeforeOnMerge { commit: old_oid });
         }
 
         if matches!(edit, Some(CommitEdit::Drop)) {
@@ -244,9 +248,8 @@ pub fn plan_rewrite(
 }
 
 fn library_err(err: Error) -> HistoryError {
-    HistoryError::Conflict {
-        commit: ObjectId::null(crate::objects::HashAlgo::Sha1),
-        paths: vec![err.to_string()],
+    HistoryError::Planning {
+        message: err.to_string(),
     }
 }
 
@@ -361,9 +364,8 @@ fn commit_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>, His
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
     let raw = repo.odb().read(&oid).map_err(library_err)?;
     if raw.kind != ObjectKind::Commit {
-        return Err(HistoryError::Conflict {
-            commit: oid,
-            paths: vec!["object is not a commit".to_owned()],
+        return Err(HistoryError::Planning {
+            message: format!("{oid} is not a commit object"),
         });
     }
     parse_commit(&raw.data).map_err(library_err)
