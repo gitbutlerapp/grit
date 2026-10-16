@@ -198,6 +198,7 @@ fn checkout_between_trees_slow(
         progress,
         None,
         CheckoutApplyOptions::default(),
+        None,
     )
 }
 
@@ -439,6 +440,7 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
         &mut NullProgress,
         None,
         CheckoutApplyOptions::default(),
+        None,
     )
 }
 
@@ -469,7 +471,13 @@ pub fn checkout_tree_changes_with_index(
     changes: &[DiffEntry],
     index: &mut Index,
 ) -> Result<()> {
-    checkout_tree_changes_with_index_opts(repo, changes, index, CheckoutApplyOptions::default())
+    checkout_tree_changes_with_index_opts(
+        repo,
+        changes,
+        index,
+        CheckoutApplyOptions::default(),
+        None,
+    )
 }
 
 /// Like [`checkout_tree_changes_with_index`], with apply-time tuning for trusted callers.
@@ -478,8 +486,16 @@ pub(crate) fn checkout_tree_changes_with_index_opts(
     changes: &[DiffEntry],
     index: &mut Index,
     apply: CheckoutApplyOptions,
+    attribute_changes: Option<&[DiffEntry]>,
 ) -> Result<()> {
-    checkout_tree_changes_with_progress(repo, changes, &mut NullProgress, Some(index), apply)
+    checkout_tree_changes_with_progress(
+        repo,
+        changes,
+        &mut NullProgress,
+        Some(index),
+        apply,
+        attribute_changes,
+    )
 }
 
 /// Top-level directories whose tracked files are entirely removed by `delete_paths`.
@@ -514,7 +530,7 @@ pub(crate) fn wholesale_deleted_directories(
                 if !entry.path.starts_with(prefix.as_bytes()) {
                     break;
                 }
-                if entry.stage() == 0 {
+                if entry.stage() == 0 && entry.mode != MODE_GITLINK {
                     count += 1;
                 }
             }
@@ -524,7 +540,7 @@ pub(crate) fn wholesale_deleted_directories(
         }
     } else {
         for entry in &index.entries {
-            if entry.stage() != 0 {
+            if entry.stage() != 0 || entry.mode == MODE_GITLINK {
                 continue;
             }
             let Ok(path) = std::str::from_utf8(&entry.path) else {
@@ -560,6 +576,38 @@ fn delete_path_is_scheduled(rel: &str, delete_paths: &HashSet<String>, ignorecas
     } else {
         delete_paths.contains(rel)
     }
+}
+
+/// Untracked and ignored paths collected under wholesale delete trees before switch checkout.
+pub(crate) struct WholesaleWorktreeScan<'a> {
+    pub untracked: &'a [String],
+    pub ignored: &'a [String],
+    pub ignorecase: bool,
+}
+
+fn wholesale_dir_has_extra_paths(dir: &str, scan: &WholesaleWorktreeScan<'_>) -> bool {
+    scan.untracked
+        .iter()
+        .chain(scan.ignored.iter())
+        .any(|path| path_is_under_dir(path, dir, scan.ignorecase))
+}
+
+fn path_is_under_dir(path: &str, dir: &str, ignorecase: bool) -> bool {
+    let prefix = format!("{dir}/");
+    if ignorecase {
+        path.eq_ignore_ascii_case(dir)
+            || path
+                .get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
+    } else {
+        path == dir || path.starts_with(&prefix)
+    }
+}
+
+/// Wholesale directories that passed switch prepare safety checks.
+#[derive(Debug, Default)]
+pub(crate) struct WholesalePrecomputeResult {
+    pub safe_directories: BTreeSet<String>,
 }
 
 pub(crate) fn wholesale_directory_safe_to_remove(
@@ -604,32 +652,6 @@ pub(crate) fn wholesale_directory_safe_to_remove(
     true
 }
 
-/// Untracked and ignored paths collected under wholesale delete trees before switch checkout.
-pub(crate) struct WholesaleWorktreeScan<'a> {
-    pub untracked: &'a [String],
-    pub ignored: &'a [String],
-    pub ignorecase: bool,
-}
-
-fn wholesale_dir_has_extra_paths(dir: &str, scan: &WholesaleWorktreeScan<'_>) -> bool {
-    scan.untracked
-        .iter()
-        .chain(scan.ignored.iter())
-        .any(|path| path_is_under_dir(path, dir, scan.ignorecase))
-}
-
-fn path_is_under_dir(path: &str, dir: &str, ignorecase: bool) -> bool {
-    let prefix = format!("{dir}/");
-    if ignorecase {
-        path.eq_ignore_ascii_case(dir)
-            || path
-                .get(..prefix.len())
-                .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
-    } else {
-        path == dir || path.starts_with(&prefix)
-    }
-}
-
 /// On-disk safety walk for wholesale directory removal, parallelized for switch prepare.
 pub(crate) fn precompute_wholesale_safe_directories(
     repo: &Repository,
@@ -639,17 +661,23 @@ pub(crate) fn precompute_wholesale_safe_directories(
     ignorecase: bool,
     worktree_scan: Option<&WholesaleWorktreeScan<'_>>,
     gitlink_deletes: &HashSet<String>,
-) -> BTreeSet<String> {
+) -> WholesalePrecomputeResult {
     let candidates = wholesale_deleted_directories(index, delete_paths);
     if candidates.is_empty() {
-        return BTreeSet::new();
+        return WholesalePrecomputeResult::default();
     }
     if let Some(scan) = worktree_scan {
-        let filtered = candidates
+        let filtered: BTreeSet<String> = candidates
             .into_iter()
             .filter(|dir| !wholesale_dir_has_extra_paths(dir, scan))
             .collect();
-        return filter_wholesale_dirs_with_populated_gitlinks(work_tree, filtered, gitlink_deletes);
+        return WholesalePrecomputeResult {
+            safe_directories: filter_wholesale_dirs_with_populated_gitlinks(
+                work_tree,
+                filtered,
+                gitlink_deletes,
+            ),
+        };
     }
     let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
     let needs_walk: Vec<String> = candidates.into_iter().collect();
@@ -657,7 +685,7 @@ pub(crate) fn precompute_wholesale_safe_directories(
     let config = repo.config().ok();
     let cfg = config.as_deref().unwrap_or(&default_cfg);
     let options = repo.thread_policy().resolve(ParallelOp::Checkout, cfg);
-    if needs_walk.len() >= 2 && options.threads.get() > 1 {
+    let safe: BTreeSet<String> = if needs_walk.len() >= 2 && options.threads.get() > 1 {
         let wt = work_tree.to_path_buf();
         let delete_set = delete_set.clone();
         let safe_flags = try_par_map(&needs_walk, options, 0, |dir| {
@@ -676,18 +704,26 @@ pub(crate) fn precompute_wholesale_safe_directories(
                 })
                 .collect()
         });
-        let safe: BTreeSet<String> = needs_walk
+        needs_walk
             .into_iter()
             .zip(safe_flags)
             .filter_map(|(dir, safe)| safe.then_some(dir))
-            .collect();
-        return filter_wholesale_dirs_with_populated_gitlinks(work_tree, safe, gitlink_deletes);
+            .collect()
+    } else {
+        needs_walk
+            .into_iter()
+            .filter(|dir| {
+                wholesale_directory_safe_to_remove(work_tree, dir, &delete_set, ignorecase)
+            })
+            .collect()
+    };
+    WholesalePrecomputeResult {
+        safe_directories: filter_wholesale_dirs_with_populated_gitlinks(
+            work_tree,
+            safe,
+            gitlink_deletes,
+        ),
     }
-    let safe = needs_walk
-        .into_iter()
-        .filter(|dir| wholesale_directory_safe_to_remove(work_tree, dir, &delete_set, ignorecase))
-        .collect();
-    filter_wholesale_dirs_with_populated_gitlinks(work_tree, safe, gitlink_deletes)
 }
 
 fn wholesale_deleted_directories_on_disk(
@@ -758,7 +794,10 @@ fn wholesale_deleted_directories_on_disk(
     filter_wholesale_dirs_with_populated_gitlinks(work_tree, trusted, gitlink_deletes)
 }
 
-fn path_under_wholesale_directory(path: &str, wholesale_dirs: &BTreeSet<String>) -> bool {
+pub(crate) fn path_under_wholesale_directory(
+    path: &str,
+    wholesale_dirs: &BTreeSet<String>,
+) -> bool {
     wholesale_dirs.iter().any(|dir| {
         path == dir.as_str()
             || path
@@ -773,6 +812,7 @@ fn checkout_tree_changes_with_progress(
     progress: &mut dyn ProgressSink,
     reuse_index: Option<&mut Index>,
     apply: CheckoutApplyOptions,
+    attribute_changes: Option<&[DiffEntry]>,
 ) -> Result<()> {
     let work_tree = repo
         .work_tree()
@@ -792,8 +832,9 @@ fn checkout_tree_changes_with_progress(
         .and_then(|r| r.ok())
         .unwrap_or(false);
     let precompose = repo.pathspec_precompose_enabled();
-    let rules = if tree_changes_touch_gitattributes(changes) {
-        let prospective_index = prospective_index_for_checkout(index, changes);
+    let attr_changes = attribute_changes.unwrap_or(changes);
+    let rules = if tree_changes_touch_gitattributes(attr_changes) {
+        let prospective_index = prospective_index_for_checkout(index, attr_changes);
         WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config.clone())?
     } else {
         WorktreeRules::from_parts_index_attributes_only(repo, index, config.clone())?
@@ -825,15 +866,19 @@ fn checkout_tree_changes_with_progress(
             (parse_git_mode(&c.old_mode) == MODE_GITLINK).then(|| path.clone())
         })
         .collect();
-    let wholesale_candidates = wholesale_deleted_directories_on_disk(
-        repo,
-        work_tree,
-        index,
-        &delete_paths,
-        ignorecase,
-        &apply,
-        &gitlink_deletes,
-    );
+    let wholesale_candidates = if apply.wholesale_safety_precomputed {
+        apply.preverified_wholesale_dirs.clone()
+    } else {
+        wholesale_deleted_directories_on_disk(
+            repo,
+            work_tree,
+            index,
+            &delete_paths,
+            ignorecase,
+            &apply,
+            &gitlink_deletes,
+        )
+    };
     let mut wholesale_dirs_removed = BTreeSet::new();
     for dir in &wholesale_candidates {
         let abs = work_tree.join(dir);
@@ -894,7 +939,9 @@ fn checkout_tree_changes_with_progress(
                         deleted_abs_paths.push(abs);
                     }
                 }
-                paths_to_remove.push(path.as_bytes().to_vec());
+                if !path_under_wholesale_directory(path, &wholesale_dirs_removed) {
+                    paths_to_remove.push(path.as_bytes().to_vec());
+                }
             }
             progress.inc(1);
             continue;
@@ -1034,7 +1081,16 @@ fn checkout_tree_changes_with_progress(
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
 
     drop(rules);
-    index_mut.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), new_entries);
+    if !wholesale_dirs_removed.is_empty() {
+        index_mut.drop_derived_index_extensions();
+    }
+    index_mut.defer_untracked_cache_invalidation = !wholesale_dirs_removed.is_empty();
+    index_mut.remove_prefixes_paths_and_insert(
+        &wholesale_dirs_removed,
+        paths_to_remove.iter().map(|p| p.as_slice()),
+        new_entries,
+    );
+    index_mut.defer_untracked_cache_invalidation = false;
     repo.write_index(index_mut)?;
     progress.finish();
     Ok(())
@@ -1258,13 +1314,23 @@ fn parse_git_mode(mode: &str) -> u32 {
     u32::from_str_radix(mode, 8).unwrap_or(MODE_REGULAR)
 }
 
-/// True when `path` is a gitlink directory with an initialized submodule (`.git` file or dir).
 fn gitlink_worktree_is_populated(path: &Path) -> bool {
     if !path.is_dir() {
         return false;
     }
     let git_meta = path.join(".git");
     git_meta.is_file() || git_meta.is_dir()
+}
+
+/// Wholesale directory roots safe to remove when untracked/ignored trust already passed.
+pub(crate) fn trusted_wholesale_remove_dirs(
+    work_tree: &Path,
+    index: &Index,
+    delete_paths: &[String],
+    gitlink_deletes: &HashSet<String>,
+) -> BTreeSet<String> {
+    let candidates = wholesale_deleted_directories(index, delete_paths);
+    filter_wholesale_dirs_with_populated_gitlinks(work_tree, candidates, gitlink_deletes)
 }
 
 /// Drop wholesale-removal candidates when a deleted gitlink under `dir` still has a worktree.

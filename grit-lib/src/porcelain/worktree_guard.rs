@@ -20,7 +20,9 @@ use crate::index::StatMatchPolicy;
 use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
-use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
+use crate::porcelain::status::{
+    collect_untracked_and_ignored_with_cache, IgnoredMode,
+};
 use crate::repo::Repository;
 use crate::state::resolve_head;
 use crate::worktree_rules::WorktreeRules;
@@ -110,6 +112,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     index: &mut Index,
     head_tree: Option<ObjectId>,
     tree_changes: &[DiffEntry],
+    skip_worktree_stat_paths: Option<&BTreeSet<String>>,
 ) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>, bool)> {
     let _ = head_tree;
     if index.entries.iter().any(|e| e.stage() != 0) {
@@ -129,21 +132,32 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_mtime_for_diff(index, index_file_mtime(&index_path));
     let stat_policy = StatMatchPolicy::from_config(repo.config().ok().as_deref());
+    let paths_for_stat = skip_worktree_stat_paths.map_or_else(
+        || path_filter.as_ref().clone(),
+        |skip| {
+            path_filter
+                .iter()
+                .filter(|path| !skip.contains(*path))
+                .cloned()
+                .collect()
+        },
+    );
     if staged.is_empty()
         && !touched_paths_include_gitlinks(index, path_filter.as_ref())
         && !touched_paths_include_racy_index_entries(
             index,
-            path_filter.as_ref(),
+            &paths_for_stat,
             index_mtime,
             stat_policy,
         )
-        && worktree_stats_match_index_on_paths(
-            repo,
-            index,
-            path_filter.as_ref(),
-            index_mtime,
-            stat_policy,
-        )?
+        && (paths_for_stat.is_empty()
+            || worktree_stats_match_index_on_paths(
+                repo,
+                index,
+                &paths_for_stat,
+                index_mtime,
+                stat_policy,
+            )?)
     {
         return Ok((staged, Vec::new(), false));
     }
@@ -246,7 +260,7 @@ fn worktree_stats_match_index_on_paths(
         .as_ref()
         .and_then(|c| c.get_bool("core.preloadIndex").and_then(|r| r.ok()))
         .unwrap_or(true);
-    let stat_parallel_threads = (paths.len() >= 48).then(|| {
+    let stat_parallel_threads = (paths.len() >= 32).then(|| {
         repo.thread_policy()
             .resolve(
                 ParallelOp::IndexRefresh,
@@ -516,8 +530,15 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         .ok()
         .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
-    let (untracked, ignored) =
-        collect_untracked_and_ignored(repo, index, work_tree, ignored_mode, true, &specs)?;
+    let (untracked, ignored) = collect_untracked_and_ignored_with_cache(
+        repo,
+        index,
+        work_tree,
+        ignored_mode,
+        true,
+        &specs,
+        false,
+    )?;
     let trust_wholesale = delete_roots.is_empty() || {
         let under_delete_root = |path: &str| {
             let root = path.split('/').next().unwrap_or(path);
@@ -907,9 +928,14 @@ mod tests {
         let (full_staged, full_unstaged, _) =
             local_change_diffs(&repo, &mut index3, Some(head_tree)).expect("full");
         let mut index4 = repo.load_index().expect("index");
-        let (scoped_staged, scoped_unstaged, _) =
-            local_change_diffs_for_tree_changes(&repo, &mut index4, Some(head_tree), &tree_changes)
-                .expect("scoped");
+        let (scoped_staged, scoped_unstaged, _) = local_change_diffs_for_tree_changes(
+            &repo,
+            &mut index4,
+            Some(head_tree),
+            &tree_changes,
+            None,
+        )
+        .expect("scoped");
         assert_eq!(full_staged, scoped_staged);
         assert_eq!(full_unstaged, scoped_unstaged);
     }
@@ -1019,6 +1045,7 @@ mod tests {
             &mut index_probe,
             Some(head_tree),
             &tree_changes,
+            None,
         )
         .expect("scoped diffs");
         assert!(
@@ -1126,6 +1153,7 @@ mod tests {
             &mut index_probe,
             Some(head_tree),
             &tree_changes,
+            None,
         )
         .expect("scoped diffs");
         let calls = worktree_metadata_probe_count();

@@ -8,8 +8,11 @@ use crate::error::{Error, Result};
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::{
-    checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,
-    CheckoutApplyOptions, WholesaleWorktreeScan,
+    checkout_tree_changes_with_index_opts, path_under_wholesale_directory, CheckoutApplyOptions,
+};
+use crate::porcelain::checkout::{
+    precompute_wholesale_safe_directories, trusted_wholesale_remove_dirs,
+    wholesale_deleted_directories, WholesalePrecomputeResult, WholesaleWorktreeScan,
 };
 use crate::porcelain::checkout_reflog::{
     append_head_checkout_reflog, checkout_reflog_from_label, finish_switch_ref_updates,
@@ -355,24 +358,40 @@ fn switch_to_target(
     let mut prepared = prepare_tree_switch_allow_local(repo, &target_tree)?;
     ensure_no_untracked_overwrite(&prepared.plan.untracked, &prepared.plan.tree_changes)?;
 
-    let tree_changes: Vec<DiffEntry> = prepared
+    let wholesale_skip = &prepared.preverified_wholesale_dirs;
+    let attribute_tree_changes: Vec<DiffEntry> = prepared
         .plan
         .tree_changes
-        .into_iter()
+        .iter()
         .filter(|change| {
             path_from_diff(change)
                 .is_none_or(|path| !prepared.preserve_worktree_paths.contains(path))
         })
+        .cloned()
         .collect();
-    let delete_count = tree_changes
+    let apply_tree_changes: Vec<DiffEntry> = attribute_tree_changes
+        .iter()
+        .filter(|change| {
+            if change.status == DiffStatus::Deleted {
+                if let Some(path) = change.old_path.as_deref() {
+                    if path_under_wholesale_directory(path, wholesale_skip) {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect();
+    let delete_count = attribute_tree_changes
         .iter()
         .filter(|c| c.status == DiffStatus::Deleted)
         .count();
     let checkout_parallel_threshold =
-        (tree_changes.len() >= 150 || delete_count >= 150).then_some(0);
+        (attribute_tree_changes.len() >= 150 || delete_count >= 150).then_some(0);
     checkout_tree_changes_with_index_opts(
         repo,
-        &tree_changes,
+        &apply_tree_changes,
         &mut prepared.index,
         CheckoutApplyOptions {
             parallel_prepare_blobs: true,
@@ -381,6 +400,7 @@ fn switch_to_target(
             preverified_wholesale_dirs: prepared.preverified_wholesale_dirs,
             wholesale_safety_precomputed: prepared.wholesale_safety_precomputed,
         },
+        Some(&attribute_tree_changes),
     )?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
@@ -441,59 +461,59 @@ fn prepare_tree_switch_allow_local(
     } else {
         crate::diff::diff_trees(repo.odb(), from_tree, Some(to_tree), "")?
     };
-    let (staged, unstaged, _index_changed) =
-        crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
-            repo,
-            &mut snapshot.index,
-            snapshot.head_tree,
-            &tree_changes,
-        )?;
-    let preserve_worktree_paths = ensure_local_changes_compatible_with_switch(
-        &snapshot.index,
-        &staged,
-        &unstaged,
-        &tree_changes,
-    )?;
-
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
-    let (untracked, wholesale_ignored, trust_wholesale_dir_removal, traditional_ignore_scan) =
-        collect_untracked_and_wholesale_trust_for_tree_changes(
-            repo,
-            &mut snapshot.index,
-            work_tree,
-            &tree_changes,
-        )?;
-    let ignorecase = repo
-        .config()
-        .ok()
-        .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
-        .unwrap_or(false);
     let delete_paths: Vec<String> = tree_changes
         .iter()
         .filter(|c| c.status == DiffStatus::Deleted)
         .filter_map(|c| c.old_path.clone())
         .collect();
-    let gitlink_deletes: HashSet<String> = tree_changes
-        .iter()
-        .filter(|c| c.status == DiffStatus::Deleted)
-        .filter_map(|c| {
-            let path = c.old_path.as_ref()?;
-            let mode = u32::from_str_radix(&c.old_mode, 8).unwrap_or(0);
-            (mode == MODE_GITLINK).then(|| path.clone())
-        })
-        .collect();
-    let (preverified_wholesale_dirs, wholesale_safety_precomputed) =
+    let index_wholesale_dirs = wholesale_deleted_directories(&snapshot.index, &delete_paths);
+    let wholesale_switch = !index_wholesale_dirs.is_empty();
+
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+
+    let (
+        staged,
+        unstaged,
+        untracked,
+        trust_wholesale_dir_removal,
+        preverified_wholesale_dirs,
+        wholesale_safety_precomputed,
+    ) = if wholesale_switch {
+        let (untracked, wholesale_ignored, trust_wholesale_dir_removal, traditional_ignore_scan) =
+            collect_untracked_and_wholesale_trust_for_tree_changes(
+                repo,
+                &mut snapshot.index,
+                work_tree,
+                &tree_changes,
+            )?;
+        let ignorecase = repo
+            .config()
+            .ok()
+            .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
+            .unwrap_or(false);
+        let gitlink_deletes: HashSet<String> = tree_changes
+            .iter()
+            .filter(|c| c.status == DiffStatus::Deleted)
+            .filter_map(|c| {
+                let path = c.old_path.as_ref()?;
+                let mode = u32::from_str_radix(&c.old_mode, 8).unwrap_or(0);
+                (mode == MODE_GITLINK).then(|| path.clone())
+            })
+            .collect();
+        let mut preverified_wholesale_dirs;
+        let mut wholesale_safety_precomputed;
         if trust_wholesale_dir_removal || delete_paths.is_empty() {
-            (BTreeSet::new(), false)
+            preverified_wholesale_dirs = BTreeSet::new();
+            wholesale_safety_precomputed = false;
         } else {
             let scan = traditional_ignore_scan.then(|| WholesaleWorktreeScan {
                 untracked: &untracked,
                 ignored: &wholesale_ignored,
                 ignorecase,
             });
-            (
+            let WholesalePrecomputeResult { safe_directories } =
                 precompute_wholesale_safe_directories(
                     repo,
                     work_tree,
@@ -502,10 +522,109 @@ fn prepare_tree_switch_allow_local(
                     ignorecase,
                     scan.as_ref(),
                     &gitlink_deletes,
-                ),
-                true,
+                );
+            preverified_wholesale_dirs = safe_directories;
+            wholesale_safety_precomputed = true;
+        }
+        if trust_wholesale_dir_removal && !index_wholesale_dirs.is_empty() {
+            preverified_wholesale_dirs = trusted_wholesale_remove_dirs(
+                work_tree,
+                &snapshot.index,
+                &delete_paths,
+                &gitlink_deletes,
+            );
+            wholesale_safety_precomputed = true;
+        }
+        let wholesale_dirs_for_stat_skip = if trust_wholesale_dir_removal {
+            index_wholesale_dirs
+        } else {
+            preverified_wholesale_dirs.clone()
+        };
+        let skip_worktree_stat_paths =
+            deleted_paths_under_wholesale_dirs(&tree_changes, &wholesale_dirs_for_stat_skip);
+        let (staged, unstaged, _index_changed) =
+            crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
+                repo,
+                &mut snapshot.index,
+                snapshot.head_tree,
+                &tree_changes,
+                (!skip_worktree_stat_paths.is_empty()).then_some(&skip_worktree_stat_paths),
+            )?;
+        (
+            staged,
+            unstaged,
+            untracked,
+            trust_wholesale_dir_removal,
+            preverified_wholesale_dirs,
+            wholesale_safety_precomputed,
+        )
+    } else {
+        let (staged, unstaged, _index_changed) =
+            crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
+                repo,
+                &mut snapshot.index,
+                snapshot.head_tree,
+                &tree_changes,
+                None,
+            )?;
+        let (untracked, wholesale_ignored, trust_wholesale_dir_removal, traditional_ignore_scan) =
+            collect_untracked_and_wholesale_trust_for_tree_changes(
+                repo,
+                &mut snapshot.index,
+                work_tree,
+                &tree_changes,
+            )?;
+        let ignorecase = repo
+            .config()
+            .ok()
+            .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
+            .unwrap_or(false);
+        let gitlink_deletes: HashSet<String> = tree_changes
+            .iter()
+            .filter(|c| c.status == DiffStatus::Deleted)
+            .filter_map(|c| {
+                let path = c.old_path.as_ref()?;
+                let mode = u32::from_str_radix(&c.old_mode, 8).unwrap_or(0);
+                (mode == MODE_GITLINK).then(|| path.clone())
+            })
+            .collect();
+        let WholesalePrecomputeResult {
+            safe_directories: preverified_wholesale_dirs,
+        } = if trust_wholesale_dir_removal || delete_paths.is_empty() {
+            WholesalePrecomputeResult::default()
+        } else {
+            let scan = traditional_ignore_scan.then(|| WholesaleWorktreeScan {
+                untracked: &untracked,
+                ignored: &wholesale_ignored,
+                ignorecase,
+            });
+            precompute_wholesale_safe_directories(
+                repo,
+                work_tree,
+                &snapshot.index,
+                &delete_paths,
+                ignorecase,
+                scan.as_ref(),
+                &gitlink_deletes,
             )
         };
+        let wholesale_safety_precomputed = !delete_paths.is_empty() && !trust_wholesale_dir_removal;
+        (
+            staged,
+            unstaged,
+            untracked,
+            trust_wholesale_dir_removal,
+            preverified_wholesale_dirs,
+            wholesale_safety_precomputed,
+        )
+    };
+
+    let preserve_worktree_paths = ensure_local_changes_compatible_with_switch(
+        &snapshot.index,
+        &staged,
+        &unstaged,
+        &tree_changes,
+    )?;
     Ok(PreparedSwitch {
         plan: TreeSwitchPlan {
             untracked,
@@ -526,6 +645,23 @@ fn commit_tree(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
 
 fn path_from_diff(entry: &DiffEntry) -> Option<&str> {
     entry.new_path.as_deref().or(entry.old_path.as_deref())
+}
+
+/// Tree-diff delete paths under wholesale directory removal; safe to skip worktree stat during prepare.
+fn deleted_paths_under_wholesale_dirs(
+    tree_changes: &[DiffEntry],
+    wholesale_dirs: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    if wholesale_dirs.is_empty() {
+        return BTreeSet::new();
+    }
+    tree_changes
+        .iter()
+        .filter(|c| c.status == DiffStatus::Deleted)
+        .filter_map(|c| c.old_path.as_deref())
+        .filter(|path| path_under_wholesale_directory(path, wholesale_dirs))
+        .map(str::to_owned)
+        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -641,6 +777,38 @@ mod tests {
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
         (dir, repo)
+    }
+
+    #[test]
+    fn deleted_paths_under_wholesale_dirs_only_lists_deletes() {
+        use crate::objects::HashAlgo;
+        let null = ObjectId::null(HashAlgo::Sha1);
+        let wholesale = BTreeSet::from(["d0000".to_owned()]);
+        let changes = vec![
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("d0000/f0000.txt".into()),
+                new_path: None,
+                old_mode: "100644".into(),
+                new_mode: "100644".into(),
+                old_oid: null,
+                new_oid: null,
+                score: None,
+            },
+            DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some("d0001/f0000.txt".into()),
+                new_path: Some("d0001/f0000.txt".into()),
+                old_mode: "100644".into(),
+                new_mode: "100644".into(),
+                old_oid: null,
+                new_oid: null,
+                score: None,
+            },
+        ];
+        let skip = deleted_paths_under_wholesale_dirs(&changes, &wholesale);
+        assert_eq!(skip.len(), 1);
+        assert!(skip.contains("d0000/f0000.txt"));
     }
 
     fn commit_on_branch(
