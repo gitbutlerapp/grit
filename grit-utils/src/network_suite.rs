@@ -25,6 +25,7 @@ fn refresh_http_mirror(git: &Path, bare: &Path) -> Result<()> {
     Ok(())
 }
 use crate::network_http::{GitHttpBackendServer, GritHttpServer};
+use crate::network_verify::verify_clone_against_bare;
 use crate::scenarios::RunConfig;
 use crate::schema::{BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION};
 use crate::shell::shell_command;
@@ -201,6 +202,13 @@ fn run_clone_scenarios(
             prepare: Some(prepare),
         },
     )?;
+    verify_clone_against_bare(git, bare, &clone_dest, &meta.default_branch).with_context(|| {
+        format!(
+            "grit clone correctness check failed for {} ({})",
+            id,
+            transport.label()
+        )
+    })?;
     Ok(vec![scenario])
 }
 

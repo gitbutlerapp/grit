@@ -24,6 +24,7 @@ pub mod maintenance_suite;
 pub mod network_fixture;
 pub mod network_http;
 pub mod network_suite;
+pub mod network_verify;
 pub mod odb_driver;
 pub mod odb_fixture;
 pub mod odb_suite;
