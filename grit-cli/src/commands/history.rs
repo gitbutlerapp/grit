@@ -8,8 +8,8 @@ use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-    RewritePlan,
+    apply_rewrite, drop as history_drop, reword, ApplyOptions, EmptyPolicy, HistoryError, RefScope,
+    RewriteOptions, RewritePlan,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
@@ -52,10 +52,10 @@ pub struct HistoryRewriteArgs {
     pub update_refs: UpdateRefs,
 }
 
-/// Result of `grit history reword`.
+/// Result of `grit history reword`, `grit history drop`, and related rewrite subcommands.
 #[derive(Debug, Serialize, JsonSchema)]
-pub struct HistoryRewordOutcome {
-    /// Operation name (`reword`).
+pub struct HistoryRewriteOutcome {
+    /// Operation name (for example `reword` or `drop`).
     pub operation: String,
     /// Original and replacement commit OIDs for every rewritten commit.
     pub rewritten: Vec<RewrittenPair>,
@@ -96,10 +96,16 @@ pub struct HeadPair {
     pub new: String,
 }
 
-impl HumanRender for HistoryRewordOutcome {
+impl HumanRender for HistoryRewriteOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.dry_run {
             outln!(w, "Dry run — refs would change:");
+        } else if self.operation == "drop" {
+            outln!(
+                w,
+                "Dropped 1 commit, replayed {} descendant commit(s)",
+                self.rewritten.len()
+            );
         } else {
             outln!(w, "Rewrote {} commit(s)", self.rewritten.len());
         }
@@ -117,9 +123,9 @@ impl HumanRender for HistoryRewordOutcome {
     }
 }
 
-impl MarkdownRender for HistoryRewordOutcome {
+impl MarkdownRender for HistoryRewriteOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_history_reword_outcome(w, self)?;
+        markdown::print_history_rewrite_outcome(w, self)?;
         Ok(())
     }
 }
@@ -130,7 +136,7 @@ pub fn run_reword(
     message: Option<String>,
     message_file: Option<String>,
     shared: &HistoryRewriteArgs,
-) -> Result<HistoryRewordOutcome> {
+) -> Result<HistoryRewriteOutcome> {
     let message = read_message(message, message_file)?;
     let repo = context::discover()?;
     let commit_oid = resolve_revision_as_commit(&repo, commit)
@@ -155,9 +161,9 @@ pub fn run_reword(
             committer,
         },
     )
-    .map_err(map_history_error)?;
+    .map_err(|e| map_history_error(e, "reword"))?;
     let subject = rewritten_subject(&repo, &plan, commit_oid)?;
-    let mut outcome = outcome_from_plan(&repo, &plan, shared.dry_run)?;
+    let mut outcome = outcome_from_plan(&repo, &plan, "reword", shared.dry_run)?;
     if !shared.dry_run {
         let identity = context::committer_reflog_identity(env, &config)?;
         apply_rewrite(
@@ -168,7 +174,50 @@ pub fn run_reword(
                 reflog_message: format!("history reword: {subject}"),
             },
         )
-        .map_err(map_history_error)?;
+        .map_err(|e| map_history_error(e, "reword"))?;
+    }
+    outcome.dry_run = shared.dry_run;
+    Ok(outcome)
+}
+
+/// Remove `commit` from history and replay descendants onto its parent.
+pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewriteOutcome> {
+    let repo = context::discover()?;
+    let commit_oid = resolve_revision_as_commit(&repo, commit)
+        .with_context(|| format!("could not resolve commit '{commit}'"))?;
+    let env = repo.environment();
+    let config =
+        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+    let committer = context::identity(
+        env,
+        &config,
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        context::wall_clock_now(env),
+    )?;
+    let plan = history_drop(
+        &repo,
+        commit_oid,
+        &RewriteOptions {
+            scope: shared.update_refs.into(),
+            empty: EmptyPolicy::Drop,
+            committer,
+        },
+    )
+    .map_err(|e| map_history_error(e, "drop"))?;
+    let subject = dropped_subject(&repo, commit_oid)?;
+    let mut outcome = outcome_from_plan(&repo, &plan, "drop", shared.dry_run)?;
+    if !shared.dry_run {
+        let identity = context::committer_reflog_identity(env, &config)?;
+        apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity,
+                reflog_message: format!("history drop: {subject}"),
+            },
+        )
+        .map_err(|e| map_history_error(e, "drop"))?;
     }
     outcome.dry_run = shared.dry_run;
     Ok(outcome)
@@ -194,6 +243,11 @@ fn read_message(message: Option<String>, message_file: Option<String>) -> Result
     }
 }
 
+fn dropped_subject(repo: &grit_lib::repo::Repository, dropped: ObjectId) -> Result<String> {
+    let commit = context::read_commit(repo, &dropped)?;
+    Ok(context::subject_line(&commit.message))
+}
+
 fn rewritten_subject(
     repo: &grit_lib::repo::Repository,
     plan: &RewritePlan,
@@ -212,8 +266,9 @@ fn rewritten_subject(
 fn outcome_from_plan(
     repo: &grit_lib::repo::Repository,
     plan: &RewritePlan,
+    operation: &str,
     dry_run: bool,
-) -> Result<HistoryRewordOutcome> {
+) -> Result<HistoryRewriteOutcome> {
     let rewritten = plan
         .commits
         .iter()
@@ -234,8 +289,8 @@ fn outcome_from_plan(
         })
         .collect();
     let head = head_pair(repo, plan)?;
-    Ok(HistoryRewordOutcome {
-        operation: "reword".into(),
+    Ok(HistoryRewriteOutcome {
+        operation: operation.into(),
         rewritten,
         refs,
         head,
@@ -269,13 +324,13 @@ fn head_commit_oid(repo: &grit_lib::repo::Repository) -> Result<ObjectId> {
     }
 }
 
-fn map_history_error(err: HistoryError) -> anyhow::Error {
+fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
         HistoryError::EmptyMessage => anyhow::anyhow!("commit message cannot be empty"),
         HistoryError::Conflict { mut paths, .. } => {
             paths.sort();
             paths.dedup();
-            json_error::operation_conflict("history reword", paths)
+            json_error::operation_conflict(&format!("history {operation}"), paths)
         }
         HistoryError::Planning { message } => {
             anyhow::anyhow!("history rewrite planning failed: {message}")
@@ -286,15 +341,23 @@ fn map_history_error(err: HistoryError) -> anyhow::Error {
         }
         HistoryError::MergeCommitInReplay { commit } => {
             let short = &commit.to_hex()[..7];
-            anyhow::anyhow!(
-                "{short} is a merge commit — grit history reword cannot replay merges yet"
-            )
+            if operation == "drop" {
+                anyhow::anyhow!("cannot drop merge commit {short}")
+            } else {
+                anyhow::anyhow!(
+                    "{short} is a merge commit — grit history {operation} cannot replay merges yet"
+                )
+            }
         }
         HistoryError::RootCommit { commit } => {
             let short = &commit.to_hex()[..7];
-            anyhow::anyhow!(
-                "{short} is a root commit and cannot be dropped or replayed without a parent"
-            )
+            if operation == "drop" {
+                anyhow::anyhow!("cannot drop root commit {short}")
+            } else {
+                anyhow::anyhow!(
+                    "{short} is a root commit and cannot be dropped or replayed without a parent"
+                )
+            }
         }
         HistoryError::BecameEmpty { commit } => {
             let short = &commit.to_hex()[..7];

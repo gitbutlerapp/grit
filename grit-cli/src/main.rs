@@ -187,6 +187,13 @@ enum StashAction {
 /// Subcommands of `grit history`.
 #[derive(Debug, Subcommand)]
 enum HistoryAction {
+    /// Remove a commit and replay descendants onto its parent.
+    Drop {
+        /// Commit to remove (revision spec).
+        commit: String,
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
     /// Replace a commit message and replay descendants onto the new history.
     Reword {
         /// Commit to reword (revision spec).
@@ -1278,6 +1285,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts, ctx),
         Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts, ctx),
         Command::History { action } => match action {
+            HistoryAction::Drop { commit, shared } => {
+                emit(&commands::history::run_drop(&commit, &shared)?, opts, ctx)
+            }
             HistoryAction::Reword {
                 commit,
                 message,

@@ -8,7 +8,7 @@ use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment};
-use crate::commands::history::HistoryRewordOutcome;
+use crate::commands::history::HistoryRewriteOutcome;
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
 use crate::commands::revert::RevertOutcome;
@@ -485,12 +485,17 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
     Ok(())
 }
 
-/// Result of `grit history reword`.
-pub fn print_history_reword_outcome(
+/// Result of `grit history reword`, `grit history drop`, and related rewrite subcommands.
+pub fn print_history_rewrite_outcome(
     w: &mut dyn Write,
-    outcome: &HistoryRewordOutcome,
+    outcome: &HistoryRewriteOutcome,
 ) -> anyhow::Result<()> {
-    outln!(w, "## History reword");
+    let title = match outcome.operation.as_str() {
+        "drop" => "History drop",
+        "reword" => "History reword",
+        other => return Err(anyhow::anyhow!("unknown history operation {other}")),
+    };
+    outln!(w, "## {title}");
     outln!(w);
     if outcome.dry_run {
         outln!(w, "- Dry run (refs unchanged)");

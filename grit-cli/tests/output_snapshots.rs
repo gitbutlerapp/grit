@@ -237,6 +237,21 @@ fn snapshot_history_reword() {
     );
 }
 
+fn prepare_history_drop(fixture: &CliFixture) {
+    fixture
+        .run(&["commit", "-m", "third on main"])
+        .expect_success("commit third on main for history drop snapshot");
+}
+
+#[test]
+fn snapshot_history_drop() {
+    snapshot_fresh(
+        "history_drop",
+        &["history", "drop", "HEAD~1"],
+        prepare_history_drop,
+    );
+}
+
 #[test]
 fn snapshot_revert() {
     snapshot_fresh("revert", &["revert", "HEAD"], |fixture| {

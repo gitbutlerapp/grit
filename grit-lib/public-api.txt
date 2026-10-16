@@ -4106,6 +4106,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::history::RewrittenCommit
 pub fn grit_lib::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::history::RewritePlan, &grit_lib::history::ApplyOptions) -> core::result::Result<grit_lib::history::AppliedRewrite, grit_lib::history::HistoryError>
 pub fn grit_lib::history::normalize_rewrite_message(&str) -> core::result::Result<alloc::string::String, grit_lib::history::HistoryError>
 pub fn grit_lib::history::plan_rewrite(&grit_lib::repo::Repository, &grit_lib::history::HistoryEdits, &grit_lib::history::RewriteOptions) -> core::result::Result<grit_lib::history::RewritePlan, grit_lib::history::HistoryError>
+pub fn grit_lib::history::drop(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::history::RewriteOptions) -> core::result::Result<grit_lib::history::RewritePlan, grit_lib::history::HistoryError>
 pub fn grit_lib::history::reword(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, alloc::string::String, &grit_lib::history::RewriteOptions) -> core::result::Result<grit_lib::history::RewritePlan, grit_lib::history::HistoryError>
 pub type grit_lib::history::HistoryEdits = alloc::collections::btree::map::BTreeMap<grit_lib::objects::ObjectId, grit_lib::history::CommitEdit>
 pub mod grit_lib::index

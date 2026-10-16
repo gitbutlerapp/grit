@@ -14,6 +14,8 @@ The [`history`](rustdoc:grit_lib::history) module supports stateless history edi
 
 For a single message change, [`reword`](rustdoc:grit_lib::history::reword) builds the [`CommitEdit`](rustdoc:grit_lib::history::CommitEdit) and runs [`plan_rewrite`](rustdoc:grit_lib::history::plan_rewrite) after [`normalize_rewrite_message`](rustdoc:grit_lib::history::normalize_rewrite_message) (stripspace, trailing newline, reject empty).
 
+To remove one commit, [`drop`](rustdoc:grit_lib::history::drop) inserts [`CommitEdit::Drop`](rustdoc:grit_lib::history::CommitEdit) for that OID (rejecting root and merge commits) and plans replay of descendants onto the mapped parent.
+
 ## Apply options and result
 
 [`ApplyOptions`](rustdoc:grit_lib::history::ApplyOptions) supplies the reflog identity and message written for every ref update in the batch.

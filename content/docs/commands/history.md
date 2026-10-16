@@ -8,6 +8,7 @@ order: 6
 ## Synopsis
 
 ```text
+grit history drop <commit> [--dry-run] [--update-refs=(branches|head)]
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
 grit history reword <commit> [--dry-run] [--update-refs=(branches|head)]
@@ -23,6 +24,12 @@ Shared behavior for every subcommand:
 - **`--dry-run`** — print which refs would move; refs, the index, and the worktree stay unchanged. New commit objects are still written during planning, matching Git’s `git history --dry-run` model.
 - **`--update-refs`** — `branches` (default) updates every local branch whose tip descends from the edited commit; `head` updates only the commit `HEAD` points at.
 
+### `drop`
+
+Remove one commit from history and replay its descendants onto that commit’s first parent. The dropped commit’s tree changes are omitted; descendant commits are replayed with three-way merges like other history rewrites.
+
+You cannot drop a **root** commit (no parent) or a **merge** commit. If a descendant is a merge, planning refuses (merge replay is not supported yet).
+
 ### `reword`
 
 Replace one commit’s message and replay descendants onto the rewritten history. Author, tree, and parents stay the same on the edited commit; committer identity and time come from your configured committer and `GIT_COMMITTER_DATE`, like [`grit commit`](commit.md).
@@ -35,13 +42,29 @@ If any descendant commit is a **merge**, planning refuses with an error (merge r
 
 | Option | Description |
 | --- | --- |
+| `<commit>` | Commit to drop or reword (revision spec). |
+| `--dry-run` | List ref updates without moving refs. |
+| `--update-refs` | `branches` (default) or `head`. |
+| `-m`, `--message` | (`reword` only) New commit message (conflicts with `--message-file`). |
+| `--message-file` | (`reword` only) Read the new message from a file, or `-` for stdin. |
+
+### `reword` options
+
+| Option | Description |
+| --- | --- |
 | `<commit>` | Commit to reword (revision spec). |
 | `-m`, `--message` | New commit message (conflicts with `--message-file`). |
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
-| `--dry-run` | List ref updates without moving refs. |
-| `--update-refs` | `branches` (default) or `head`. |
-
 ## Examples
+
+Drop the parent of `HEAD` on a linear branch:
+
+```console
+$ grit history drop HEAD~1
+Dropped 1 commit, replayed 1 descendant commit(s)
+  commit d4e5f60 → c0ffee0
+  refs/heads/main f6a7b89 → b1b2b3b
+```
 
 Reword the parent of `HEAD` on a linear branch:
 
@@ -63,14 +86,16 @@ Dry run — refs would change:
 
 ## JSON output
 
-Schema: [v1](/schemas/history.reword/v1.json)
+Drop schema: [v1](/schemas/history.drop/v1.json) — pass `--json` on `grit history drop`.
 
-Pass `--json` on `grit history reword`:
+Reword schema: [v1](/schemas/history.reword/v1.json) — pass `--json` on `grit history reword`.
+
+Both subcommands emit the same object shape:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | Always `"reword"`. |
-| `rewritten` | array | `{old,new}` full hex OIDs for each rewritten commit. |
+| `operation` | string | `"drop"` or `"reword"`. |
+| `rewritten` | array | `{old,new}` full hex OIDs for each replayed commit (`drop` omits the removed commit). |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
 | `dry_run` | boolean | `true` when `--dry-run` was set. |
@@ -102,9 +127,9 @@ On replay conflicts, stdout is a single JSON object (exit code 1) with `error`, 
 
 ## Markdown output
 
-Schema: [v1](/schemas/history.reword/v1.json)
+Schemas: [drop v1](/schemas/history.drop/v1.json), [reword v1](/schemas/history.reword/v1.json)
 
-Pass [`--markdown`](../global-options/) for a `History reword` heading, rewritten commits, ref updates, and optional `HEAD` movement.
+Pass [`--markdown`](../global-options/) for a `History drop` or `History reword` heading, replayed commits, ref updates, and optional `HEAD` movement.
 
 ## See also
 
