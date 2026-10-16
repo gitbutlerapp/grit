@@ -94,6 +94,14 @@ pub fn list_branch_head_refs(repo: &Path) -> Result<Vec<String>> {
     Ok(refs.into_iter().map(|(name, _)| name).collect())
 }
 
+/// Remove branch tips introduced by campaign network scenarios on a tag-pinned bare remote.
+pub fn clear_branch_head_refs(git: &Path, repo: &Path) -> Result<()> {
+    for name in list_branch_head_refs(repo)? {
+        run_git(git, repo, &["update-ref", "-d", &format!("refs/heads/{name}")])?;
+    }
+    Ok(())
+}
+
 /// A tag-only bitmap fixture must not retain upstream branch tips.
 pub fn assert_tag_pinned_fixture_refs(repo: &Path) -> Result<()> {
     let heads = list_branch_head_refs(repo)?;
