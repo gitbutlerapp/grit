@@ -1221,6 +1221,7 @@ impl core::marker::UnsafeUnpin for grit_lib::config::environment::RepositoryOpti
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::environment::RepositoryOptions
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::config::environment::offset_from_epoch_and_tz(i64, core::option::Option<&str>) -> time::offset_date_time::OffsetDateTime
+pub fn grit_lib::config::environment::wall_clock_unix_timestamp_nanos() -> u64
 pub mod grit_lib::config::git_date
 pub mod grit_lib::config::git_date::approx
 pub fn grit_lib::config::git_date::approx::approxidate_careful(&str, core::option::Option<&mut i32>) -> u64
@@ -2988,14 +2989,17 @@ impl core::marker::UnsafeUnpin for grit_lib::diff::DiffEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffEntry
 pub struct grit_lib::diff::DiffIndexToWorktreeOptions
+pub grit_lib::diff::DiffIndexToWorktreeOptions::command_runner: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::config: core::option::Option<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::error_on_broken_gitlinks: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::for_status: bool
+pub grit_lib::diff::DiffIndexToWorktreeOptions::fsmonitor_query_boundary: core::option::Option<grit_lib::fsmonitor::FsmonitorQueryBoundary>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::ignore_submodule_untracked: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::index_mtime: core::option::Option<(u32, u32)>
+pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_fsmonitor: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_index_stat_in_pass: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::restrict_to_paths: core::option::Option<alloc::rcs::arc::Arc<alloc::collections::btree::set::BTreeSet<alloc::string::String>>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::repository_git_dir: core::option::Option<std::path::PathBuf>
+pub grit_lib::diff::DiffIndexToWorktreeOptions::restrict_to_paths: core::option::Option<alloc::rcs::arc::Arc<alloc::collections::btree::set::BTreeSet<alloc::string::String>>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::simplify_gitlinks: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::stat_parallel_threads: core::option::Option<usize>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::thread_policy: core::option::Option<grit_lib::parallel::ThreadPolicy>
@@ -3009,8 +3013,8 @@ impl core::marker::Send for grit_lib::diff::DiffIndexToWorktreeOptions
 impl core::marker::Sync for grit_lib::diff::DiffIndexToWorktreeOptions
 impl core::marker::Unpin for grit_lib::diff::DiffIndexToWorktreeOptions
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffIndexToWorktreeOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
 pub struct grit_lib::diff::DiffPostprocessOptions
 pub grit_lib::diff::DiffPostprocessOptions::break_score: core::option::Option<u64>
 pub grit_lib::diff::DiffPostprocessOptions::copy_threshold: core::option::Option<u32>
@@ -3651,6 +3655,63 @@ impl core::marker::UnsafeUnpin for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::SparseCheckoutWarning
 pub type grit_lib::error::Result<T> = core::result::Result<T, grit_lib::error::Error>
+pub mod grit_lib::fsmonitor
+pub struct grit_lib::fsmonitor::FsmonitorQueryBoundary(pub u64)
+impl core::clone::Clone for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub fn grit_lib::fsmonitor::FsmonitorQueryBoundary::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::cmp::PartialEq for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub fn grit_lib::fsmonitor::FsmonitorQueryBoundary::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub fn grit_lib::fsmonitor::FsmonitorQueryBoundary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::StructuralPartialEq for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Freeze for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Send for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Sync for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Unpin for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::UnsafeUnpin for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub struct grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub grit_lib::fsmonitor::FsmonitorRefreshOptions::query_boundary: grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub fn grit_lib::fsmonitor::FsmonitorRefreshOptions::with_query_boundary(grit_lib::fsmonitor::FsmonitorQueryBoundary) -> Self
+impl core::clone::Clone for grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub fn grit_lib::fsmonitor::FsmonitorRefreshOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub fn grit_lib::fsmonitor::FsmonitorRefreshOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Freeze for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Send for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Sync for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Unpin for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::UnsafeUnpin for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub struct grit_lib::fsmonitor::FsmonitorRefreshResult
+pub grit_lib::fsmonitor::FsmonitorRefreshResult::honor_valid_bits: bool
+pub grit_lib::fsmonitor::FsmonitorRefreshResult::index_changed: bool
+impl core::clone::Clone for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::fsmonitor::FsmonitorRefreshResult::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::cmp::PartialEq for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::fsmonitor::FsmonitorRefreshResult::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::fsmonitor::FsmonitorRefreshResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::StructuralPartialEq for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Freeze for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Send for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Sync for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Unpin for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::UnsafeUnpin for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::fsmonitor::entry_skips_worktree_stat(&grit_lib::index::IndexEntry, &grit_lib::index::Index) -> bool
+pub fn grit_lib::fsmonitor::git_style_windows_pipe_name_from_absolute_ipc(&str) -> alloc::string::String
+pub fn grit_lib::fsmonitor::refresh_index(&mut grit_lib::index::Index, &std::path::Path, &std::path::Path, &grit_lib::config::ConfigSet, core::option::Option<&dyn grit_lib::command_runner::CommandRunner>, &grit_lib::fsmonitor::FsmonitorRefreshOptions) -> grit_lib::error::Result<grit_lib::fsmonitor::FsmonitorRefreshResult>
+pub fn grit_lib::fsmonitor::v1_hook_token(grit_lib::fsmonitor::FsmonitorQueryBoundary) -> alloc::string::String
 pub mod grit_lib::index
 pub mod grit_lib::index::handle
 pub struct grit_lib::index::handle::IndexHandle<'repo>
@@ -4075,10 +4136,10 @@ pub fn grit_lib::index::Index::sync_fsmonitor_dirty_bitmap(&mut self)
 pub fn grit_lib::index::Index::take_resolve_undo_record(&mut self, &[u8]) -> core::option::Option<grit_lib::index::resolve_undo::ResolveUndoRecord>
 pub fn grit_lib::index::Index::try_collapse_sparse_directories(&mut self, &grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &[alloc::string::String], bool, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) -> bool
-pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write(&self, &std::path::Path) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_to_path(&self, &std::path::Path, bool) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config(&self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config_and_policy(&self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::Index
@@ -7856,6 +7917,10 @@ pub grit_lib::porcelain::add::StageOptions::executable_hint: grit_lib::porcelain
 pub grit_lib::porcelain::add::StageOptions::mode: grit_lib::porcelain::add::StageMode
 pub grit_lib::porcelain::add::StageOptions::pathspec_sources: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+impl grit_lib::porcelain::add::StageOptions
+pub fn grit_lib::porcelain::add::StageOptions::all() -> Self
+pub fn grit_lib::porcelain::add::StageOptions::pathspecs(alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::add::StageOptions::update() -> Self
 impl core::clone::Clone for grit_lib::porcelain::add::StageOptions
 pub fn grit_lib::porcelain::add::StageOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::add::StageOptions
@@ -8515,27 +8580,6 @@ pub fn grit_lib::porcelain::revert::committer_timestamp(&str) -> i64
 pub fn grit_lib::porcelain::revert::merge_commit_message_for_revert(&grit_lib::objects::CommitData, grit_lib::objects::ObjectId, bool, char) -> (alloc::string::String, alloc::string::String)
 pub fn grit_lib::porcelain::revert::revision_set_newest_first(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub mod grit_lib::porcelain::stage_tracked
-pub struct grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-pub grit_lib::porcelain::stage_tracked::IndexStagingThresholds::large_index_restage: usize
-pub grit_lib::porcelain::stage_tracked::IndexStagingThresholds::parallel_tracked_restage: usize
-impl core::clone::Clone for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::cmp::PartialEq for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::eq(&self, &Self) -> bool
-impl core::default::Default for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::default() -> Self
-impl core::fmt::Debug for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-pub fn grit_lib::porcelain::stage_tracked::IndexStagingThresholds::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::marker::StructuralPartialEq for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::marker::Freeze for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::marker::Send for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::marker::Sync for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::marker::Unpin for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::stage_tracked::IndexStagingThresholds
 pub struct grit_lib::porcelain::stage_tracked::StageTrackedSummary
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::modified: alloc::vec::Vec<alloc::vec::Vec<u8>>
 pub grit_lib::porcelain::stage_tracked::StageTrackedSummary::removed: alloc::vec::Vec<alloc::vec::Vec<u8>>
@@ -8559,11 +8603,8 @@ impl core::marker::Unpin for grit_lib::porcelain::stage_tracked::StageTrackedSum
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::stage_tracked::StageTrackedSummary
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::stage_tracked::StageTrackedSummary
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::stage_tracked::StageTrackedSummary
-pub fn grit_lib::porcelain::stage_tracked::replay_deferred_untracked_invalidations(&mut grit_lib::index::Index, &grit_lib::porcelain::stage_tracked::StageTrackedSummary)
 pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications(&grit_lib::repo::Repository, &std::path::Path) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
 pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index(&grit_lib::repo::Repository, &std::path::Path, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
-pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index_with_thresholds(&grit_lib::repo::Repository, &std::path::Path, &std::path::Path, &mut grit_lib::index::Index, grit_lib::porcelain::stage_tracked::IndexStagingThresholds) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
-pub fn grit_lib::porcelain::stage_tracked::stage_tracked_modifications_with_thresholds(&grit_lib::repo::Repository, &std::path::Path, grit_lib::porcelain::stage_tracked::IndexStagingThresholds) -> grit_lib::error::Result<grit_lib::porcelain::stage_tracked::StageTrackedSummary>
 pub mod grit_lib::porcelain::staging
 pub fn grit_lib::porcelain::staging::stage_worktree_changes(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<usize>
 pub mod grit_lib::porcelain::stash
@@ -9498,10 +9539,10 @@ pub fn grit_lib::index::Index::sync_fsmonitor_dirty_bitmap(&mut self)
 pub fn grit_lib::index::Index::take_resolve_undo_record(&mut self, &[u8]) -> core::option::Option<grit_lib::index::resolve_undo::ResolveUndoRecord>
 pub fn grit_lib::index::Index::try_collapse_sparse_directories(&mut self, &grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &[alloc::string::String], bool, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) -> bool
-pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write(&self, &std::path::Path) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_to_path(&self, &std::path::Path, bool) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config(&self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config_and_policy(&self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::Index
@@ -14876,6 +14917,63 @@ pub fn grit_lib::worktree::crlf::path_has_gitattribute(&[grit_lib::worktree::crl
 pub fn grit_lib::worktree::crlf::run_filter(&dyn grit_lib::command_runner::CommandRunner, &str, &[u8], &str) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::FilterError>
 pub fn grit_lib::worktree::crlf::should_convert_to_crlf(&grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &[u8]) -> bool
 pub type grit_lib::worktree::crlf::GitAttributes = alloc::vec::Vec<grit_lib::worktree::crlf::AttrRule>
+pub mod grit_lib::worktree::fsmonitor
+pub struct grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary(pub u64)
+impl core::clone::Clone for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub fn grit_lib::fsmonitor::FsmonitorQueryBoundary::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::cmp::PartialEq for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub fn grit_lib::fsmonitor::FsmonitorQueryBoundary::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub fn grit_lib::fsmonitor::FsmonitorQueryBoundary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::StructuralPartialEq for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Freeze for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Send for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Sync for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::Unpin for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::marker::UnsafeUnpin for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::fsmonitor::FsmonitorQueryBoundary
+pub struct grit_lib::worktree::fsmonitor::FsmonitorRefreshOptions
+pub grit_lib::worktree::fsmonitor::FsmonitorRefreshOptions::query_boundary: grit_lib::fsmonitor::FsmonitorQueryBoundary
+impl grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub fn grit_lib::fsmonitor::FsmonitorRefreshOptions::with_query_boundary(grit_lib::fsmonitor::FsmonitorQueryBoundary) -> Self
+impl core::clone::Clone for grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub fn grit_lib::fsmonitor::FsmonitorRefreshOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub fn grit_lib::fsmonitor::FsmonitorRefreshOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Freeze for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Send for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Sync for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::Unpin for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::marker::UnsafeUnpin for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshOptions
+pub struct grit_lib::worktree::fsmonitor::FsmonitorRefreshResult
+pub grit_lib::worktree::fsmonitor::FsmonitorRefreshResult::honor_valid_bits: bool
+pub grit_lib::worktree::fsmonitor::FsmonitorRefreshResult::index_changed: bool
+impl core::clone::Clone for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::fsmonitor::FsmonitorRefreshResult::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::cmp::PartialEq for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::fsmonitor::FsmonitorRefreshResult::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::fsmonitor::FsmonitorRefreshResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::StructuralPartialEq for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Freeze for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Send for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Sync for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::Unpin for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::marker::UnsafeUnpin for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshResult
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::fsmonitor::FsmonitorRefreshResult
+pub fn grit_lib::worktree::fsmonitor::entry_skips_worktree_stat(&grit_lib::index::IndexEntry, &grit_lib::index::Index) -> bool
+pub fn grit_lib::worktree::fsmonitor::git_style_windows_pipe_name_from_absolute_ipc(&str) -> alloc::string::String
+pub fn grit_lib::worktree::fsmonitor::refresh_index(&mut grit_lib::index::Index, &std::path::Path, &std::path::Path, &grit_lib::config::ConfigSet, core::option::Option<&dyn grit_lib::command_runner::CommandRunner>, &grit_lib::fsmonitor::FsmonitorRefreshOptions) -> grit_lib::error::Result<grit_lib::fsmonitor::FsmonitorRefreshResult>
+pub fn grit_lib::worktree::fsmonitor::v1_hook_token(grit_lib::fsmonitor::FsmonitorQueryBoundary) -> alloc::string::String
 pub mod grit_lib::worktree::ignore
 pub enum grit_lib::worktree::ignore::IgnoreSource
 pub grit_lib::worktree::ignore::IgnoreSource::CoreExcludesFile(alloc::string::String)

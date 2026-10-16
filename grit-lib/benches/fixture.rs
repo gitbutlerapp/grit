@@ -219,10 +219,7 @@ fn grit_commit_file(
     let mut progress = NullProgress;
     stage(
         repo,
-        &StageOptions {
-            pathspecs: vec![rel_path.to_owned()],
-            ..StageOptions::default()
-        },
+        &StageOptions::pathspecs(vec![rel_path.to_owned()]),
         &mut progress,
     )?;
     grit_record_commit(repo, parent, message)

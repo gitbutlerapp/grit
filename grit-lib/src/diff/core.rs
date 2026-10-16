@@ -3488,6 +3488,9 @@ fn diff_index_to_worktree_inner(
     let mut staging_hash_jobs: Vec<StagingHashJob> = Vec::new();
     let mut stat_refresh_verified = vec![false; index.entries.len()];
     for_each_blob_by_directory_parallel(
+        None,
+        None,
+        None,
         &blob_dirs,
         blob_scan,
         &thread_policy,
@@ -4363,6 +4366,9 @@ pub fn refresh_index_stat_content_verified_with_rules(
     let filter_fp = rules_lock.as_ref().map(|r| r.filter_process());
     let thread_policy = crate::parallel::ThreadPolicy::default();
     for_each_blob_by_directory_parallel(
+        None,
+        None,
+        None,
         &blob_dirs,
         blob_scan,
         &thread_policy,

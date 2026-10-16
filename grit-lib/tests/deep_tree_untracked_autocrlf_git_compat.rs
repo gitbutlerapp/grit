@@ -42,17 +42,7 @@ fn status_and_add_see_interior_untracked_on_indexed_chain() {
         model.untracked
     );
 
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: Vec::new(),
-            pathspec_sources: Vec::new(),
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("add all");
+    let outcome = stage(&repo, &StageOptions::all(), &mut NullProgress).expect("add all");
     assert!(outcome.total() >= 1, "add must stage untracked sibling");
 
     let index = repo.index_handle().load().expect("index");
@@ -86,17 +76,7 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: Vec::new(),
-            pathspec_sources: Vec::new(),
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("grit add all");
+    stage(&repo, &StageOptions::all(), &mut NullProgress).expect("grit add all");
 
     let grit_staged_oid = repo
         .index_handle()

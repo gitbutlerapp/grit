@@ -73,10 +73,7 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
     // grit add f — keep the file
     let add_keep = stage(
         &repo,
-        &StageOptions {
-            pathspecs: vec!["f".into()],
-            ..StageOptions::default()
-        },
+        &StageOptions::pathspecs(vec!["f".into()]),
         &mut NullProgress,
     )
     .expect("add keep");

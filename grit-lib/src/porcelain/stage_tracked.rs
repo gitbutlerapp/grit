@@ -21,14 +21,15 @@ use crate::index::{
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::BULK_NEW_LOOSE_WRITE;
-pub use crate::porcelain::bulk_index::IndexStagingThresholds;
+use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
-    for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
+    for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stage0_indexed_blob_modes,
+    stage0_indexed_paths, stat_scan_thread_count,
     supplement_untracked_beside_stat_skipped_indexed_dirs, BlobDiskLookup, WorktreeBlobScanOptions,
 };
 
@@ -84,7 +85,7 @@ pub fn stage_tracked_modifications(
 /// # Errors
 ///
 /// Same as [`stage_tracked_modifications`].
-pub fn stage_tracked_modifications_with_thresholds(
+pub(crate) fn stage_tracked_modifications_with_thresholds(
     repo: &Repository,
     work_tree: &Path,
     thresholds: IndexStagingThresholds,
@@ -122,8 +123,8 @@ pub fn stage_tracked_modifications_with_thresholds(
 /// Useful when the caller will merge further index updates before a single write (for example
 /// `git commit --dry-run` or `grit add` after a tracked scan).
 ///
-/// When [`StageTrackedSummary::untracked_invalidation_deferred`] is true, call
-/// [`replay_deferred_untracked_invalidations`] on the same index before persisting it (as
+/// When [`StageTrackedSummary::untracked_invalidation_deferred`] is true, replay deferred
+/// untracked-cache invalidation on the same index before persisting it (as
 /// [`stage_tracked_modifications`] does automatically).
 ///
 /// # Parameters
@@ -153,7 +154,7 @@ pub fn stage_tracked_modifications_in_index(
 }
 
 /// Like [`stage_tracked_modifications_in_index`], with explicit staging thresholds.
-pub fn stage_tracked_modifications_in_index_with_thresholds(
+pub(crate) fn stage_tracked_modifications_in_index_with_thresholds(
     repo: &Repository,
     work_tree: &Path,
     index_path: &Path,
@@ -232,7 +233,10 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
 ///
 /// Required before writing the index when [`StageTrackedSummary::untracked_invalidation_deferred`]
 /// is true (see [`stage_tracked_modifications_in_index`]).
-pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &StageTrackedSummary) {
+pub(crate) fn replay_deferred_untracked_invalidations(
+    index: &mut Index,
+    summary: &StageTrackedSummary,
+) {
     if index.untracked_cache.is_none() {
         return;
     }
@@ -372,7 +376,16 @@ fn stage_tracked_modifications_in_index_body(
     if let Some(out) = side_untracked.as_mut() {
         supplement_untracked_beside_stat_skipped_indexed_dirs(index, work_tree, out)?;
     }
+    let collect_side_untracked = side_untracked.is_some();
+    let indexed_stage0 = stage0_indexed_paths(index);
+    let indexed_blob_modes = stage0_indexed_blob_modes(index);
+    let indexed_stage0_for_scan = collect_side_untracked.then_some(&indexed_stage0);
+    let indexed_blob_modes_for_scan = collect_side_untracked.then_some(&indexed_blob_modes);
+    let work_tree_for_untracked = collect_side_untracked.then_some(work_tree);
     for_each_blob_by_directory_parallel(
+        indexed_stage0_for_scan,
+        indexed_blob_modes_for_scan,
+        work_tree_for_untracked,
         &blob_dirs,
         blob_scan_opts,
         &thread_policy,
@@ -943,6 +956,7 @@ mod tests {
     use std::fs;
     use std::io::Write;
 
+    use crate::config::environment::RepositoryOptions;
     use crate::diff::{entry_is_racy, stat_matches};
     use crate::index::{
         entry_from_metadata, index_file_mtime, Index, MODE_EXECUTABLE, MODE_REGULAR,
@@ -1440,6 +1454,61 @@ mod tests {
         let ie = after.get(b"f.txt", 0).expect("staged f.txt");
         assert!(!ie.intent_to_add(), "full add clears intent-to-add");
         assert_ne!(ie.oid, empty, "index must store real content blob");
+    }
+
+    fn untr_root_valid(index_bytes: &[u8]) -> bool {
+        let idx = Index::parse(index_bytes).expect("parse index");
+        idx.untracked_cache
+            .as_ref()
+            .and_then(|uc| uc.root.as_ref())
+            .is_some_and(|r| r.valid)
+    }
+
+    #[test]
+    fn small_threshold_bulk_defer_replays_untr_after_mass_removal() {
+        use std::process::Command;
+
+        if !Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            return;
+        }
+        let thresholds = IndexStagingThresholds {
+            large_index_restage: 64,
+            parallel_tracked_restage: 64,
+        };
+        let tmp = TempDir::new().unwrap();
+        let repo_dir = tmp.path();
+        grit_test_support::git(repo_dir, &["init", "-q", "-b", "main", "."]);
+        const ENTRIES: usize = 80;
+        for i in 0..ENTRIES {
+            let dir = repo_dir.join(format!("d{i:03}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("f.txt"), format!("{i}\n")).unwrap();
+        }
+        grit_test_support::git(repo_dir, &["add", "-A"]);
+        grit_test_support::git(repo_dir, &["commit", "-q", "-m", "initial"]);
+        grit_test_support::git(repo_dir, &["config", "core.untrackedCache", "true"]);
+        grit_test_support::git(repo_dir, &["update-index", "--untracked-cache"]);
+        grit_test_support::git(repo_dir, &["status", "-s"]);
+
+        for i in 0..20 {
+            let _ = fs::remove_file(repo_dir.join(format!("d{i:03}/f.txt")));
+        }
+
+        let repo = Repository::discover(Some(repo_dir), &RepositoryOptions::empty()).unwrap();
+        let wt = repo.work_tree().unwrap();
+        let summary = stage_tracked_modifications_with_thresholds(&repo, wt, thresholds).unwrap();
+        assert_eq!(summary.removed.len(), 20);
+        assert!(summary.untracked_invalidation_deferred);
+
+        let grit_index = fs::read(repo_dir.join(".git/index")).unwrap();
+        assert!(
+            !untr_root_valid(&grit_index),
+            "small-threshold bulk defer must invalidate UNTR root"
+        );
     }
 
     #[test]

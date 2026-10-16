@@ -1323,10 +1323,14 @@ impl Index {
 
     /// Write the index to a file, computing and appending the trailing SHA-1.
     ///
+    /// Takes `&self` because canonical entry order is restored on a temporary copy when the
+    /// in-memory index is out of sort order; callers may keep using the original [`Index`] layout
+    /// after write (for example paths appended without resorting).
+    ///
     /// # Errors
     ///
     /// Returns [`Error::Io`] on filesystem errors.
-    pub fn write(&mut self, path: &Path) -> Result<()> {
+    pub fn write(&self, path: &Path) -> Result<()> {
         let git_dir = path.parent();
         let config = git_dir.and_then(|d| {
             ConfigSet::load(&crate::environment::Environment::empty(), Some(d), true).ok()
@@ -1340,13 +1344,13 @@ impl Index {
     /// # Errors
     ///
     /// Same as [`Self::write`].
-    pub fn write_with_config(&mut self, path: &Path, config: &ConfigSet) -> Result<()> {
+    pub fn write_with_config(&self, path: &Path, config: &ConfigSet) -> Result<()> {
         self.write_with_config_and_policy(path, config, crate::parallel::ThreadPolicy::default())
     }
 
     /// Write the index using config and an explicit thread policy (EOIE/IEOT emission).
     pub fn write_with_config_and_policy(
-        &mut self,
+        &self,
         path: &Path,
         config: &ConfigSet,
         policy: crate::parallel::ThreadPolicy,
@@ -1358,13 +1362,13 @@ impl Index {
     /// Write this index to `path` with an explicit trailing-checksum policy.
     ///
     /// When `skip_hash` is true, the trailing SHA-1 is written as all zeros (Git `index.skipHash`).
-    pub fn write_to_path(&mut self, path: &Path, skip_hash: bool) -> Result<()> {
+    pub fn write_to_path(&self, path: &Path, skip_hash: bool) -> Result<()> {
         self.write_to_path_with_config(path, skip_hash, None)
     }
 
     /// Like [`Self::write_to_path`], but uses `config` for `core.lockfilepid` instead of reloading.
     pub(crate) fn write_to_path_with_config(
-        &mut self,
+        &self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1378,7 +1382,7 @@ impl Index {
     }
 
     pub(crate) fn write_to_path_with_config_and_policy(
-        &mut self,
+        &self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1388,7 +1392,7 @@ impl Index {
     }
 
     pub(crate) fn write_to_path_with_config_and_lock_policy(
-        &mut self,
+        &self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1408,7 +1412,7 @@ impl Index {
     /// Like [`Self::write_to_path_with_config_and_lock`], but can leave the index uncommitted
     /// when `commit` is false (bytes are written to an existing [`IndexLock`] only).
     pub(crate) fn write_to_path_with_config_and_lock_mode(
-        &mut self,
+        &self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1426,7 +1430,7 @@ impl Index {
     }
 
     pub(crate) fn write_to_path_with_config_and_lock_mode_policy(
-        &mut self,
+        &self,
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
@@ -1508,13 +1512,18 @@ impl Index {
     }
 
     fn serialize_index_body(
-        &mut self,
+        &self,
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
     ) -> Result<Vec<u8>> {
-        self.ensure_canonical_order();
         let mut body = Vec::new();
-        self.serialize_into_with_options(&mut body, config, policy)?;
+        if self.entries_sorted && self.entries_are_sorted() {
+            self.serialize_into_with_options(&mut body, config, policy)?;
+        } else {
+            let mut sorted = self.clone();
+            sorted.sort_entries_canonical();
+            sorted.serialize_into_with_options(&mut body, config, policy)?;
+        }
         Ok(body)
     }
 

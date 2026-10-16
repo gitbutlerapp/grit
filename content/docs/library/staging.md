@@ -13,7 +13,9 @@ See also the [Repository](../repository/) and [Objects](../objects/) pages for o
 
 ## Staging paths
 
-[`porcelain::add::stage`](rustdoc:grit_lib::porcelain::add::stage) compares the index to the work tree once, hashes changed blobs, and writes the index back. Pass [`StageOptions`](rustdoc:grit_lib::porcelain::add::StageOptions) for pathspecs and [`StageMode`](rustdoc:grit_lib::porcelain::add::StageMode) (`All` vs `Update`). Long-running staging reports through a [`ProgressSink`](rustdoc:grit_lib::progress::ProgressSink); examples use [`NullProgress`](rustdoc:grit_lib::progress::NullProgress) when no UI is needed.
+[`porcelain::add::stage`](rustdoc:grit_lib::porcelain::add::stage) compares the index to the work tree once, hashes changed blobs, and writes the index back. Use [`StageOptions::all`](rustdoc:grit_lib::porcelain::add::StageOptions::all) or [`StageOptions::update`](rustdoc:grit_lib::porcelain::add::StageOptions::update) for pathless `git add` / `git add -u`, or [`StageOptions::pathspecs`](rustdoc:grit_lib::porcelain::add::StageOptions::pathspecs) when staging explicit paths. Long-running staging reports through a [`ProgressSink`](rustdoc:grit_lib::progress::ProgressSink); examples use [`NullProgress`](rustdoc:grit_lib::progress::NullProgress) when no UI is needed.
+
+[`Index::write`](rustdoc:grit_lib::index::Index::write) takes `&self`: if in-memory entries are out of canonical order, grit sorts a temporary copy for the on-disk format without mutating your [`Index`](rustdoc:grit_lib::index::Index) handle.
 
 The `grit add` command is a thin wrapper around this API.
 

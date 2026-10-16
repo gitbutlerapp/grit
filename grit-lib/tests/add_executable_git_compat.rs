@@ -54,18 +54,9 @@ fn add_executable_stages_100755_when_filemode_false() {
     fs::write(root.join("tool.sh"), "#!/bin/sh\necho hi\n").expect("write");
 
     let repo = Repository::discover(Some(root), &Default::default()).expect("open");
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec!["tool.sh".to_owned()],
-            pathspec_sources: vec!["tool.sh".to_owned()],
-            mode: StageMode::All,
-            executable_hint: StageExecutableHint::SetExecutable,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("stage");
+    let mut opts = StageOptions::pathspecs(vec!["tool.sh".to_owned()]);
+    opts.executable_hint = StageExecutableHint::SetExecutable;
+    let outcome = stage(&repo, &opts, &mut NullProgress).expect("stage");
     assert_eq!(
         outcome.total(),
         1,
@@ -97,13 +88,7 @@ fn add_executable_mode_only_on_tracked_file() {
     let repo = Repository::discover(Some(root), &Default::default()).expect("open");
     stage(
         &repo,
-        &StageOptions {
-            pathspecs: vec!["tool.sh".to_owned()],
-            pathspec_sources: vec!["tool.sh".to_owned()],
-            mode: StageMode::All,
-            executable_hint: StageExecutableHint::None,
-            ..StageOptions::default()
-        },
+        &StageOptions::pathspecs(vec!["tool.sh".to_owned()]),
         &mut NullProgress,
     )
     .expect("stage");
@@ -112,18 +97,9 @@ fn add_executable_mode_only_on_tracked_file() {
     let before = git_out(root, &["ls-files", "-s", "tool.sh"]);
     assert!(before.starts_with("100644 "), "baseline 644: {before}");
 
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec!["tool.sh".to_owned()],
-            pathspec_sources: vec!["tool.sh".to_owned()],
-            mode: StageMode::All,
-            executable_hint: StageExecutableHint::SetExecutable,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("chmod stage");
+    let mut chmod_opts = StageOptions::pathspecs(vec!["tool.sh".to_owned()]);
+    chmod_opts.executable_hint = StageExecutableHint::SetExecutable;
+    let outcome = stage(&repo, &chmod_opts, &mut NullProgress).expect("chmod stage");
     assert_eq!(
         outcome.modified, 1,
         "mode-only update should stage one path"
@@ -183,10 +159,7 @@ fn filemode_false_stages_regular_to_symlink_typechange() {
 
     stage(
         &repo,
-        &StageOptions {
-            pathspecs: vec!["path".to_owned()],
-            ..StageOptions::default()
-        },
+        &StageOptions::pathspecs(vec!["path".to_owned()]),
         &mut NullProgress,
     )
     .expect("stage symlink");
@@ -224,31 +197,16 @@ fn add_does_not_clobber_existing_executable_in_index() {
     fs::write(root.join("tool.sh"), "v1\n").expect("write");
 
     let repo = Repository::discover(Some(root), &Default::default()).expect("open");
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec!["tool.sh".to_owned()],
-            pathspec_sources: vec!["tool.sh".to_owned()],
-            mode: StageMode::All,
-            executable_hint: StageExecutableHint::SetExecutable,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("stage");
+    let mut first = StageOptions::pathspecs(vec!["tool.sh".to_owned()]);
+    first.executable_hint = StageExecutableHint::SetExecutable;
+    stage(&repo, &first, &mut NullProgress).expect("stage");
     let staged = git_out(root, &["ls-files", "-s", "tool.sh"]);
     assert!(staged.starts_with("100755 "));
 
     fs::write(root.join("tool.sh"), "v2\n").expect("write");
     stage(
         &repo,
-        &StageOptions {
-            pathspecs: vec!["tool.sh".to_owned()],
-            pathspec_sources: vec!["tool.sh".to_owned()],
-            mode: StageMode::All,
-            executable_hint: StageExecutableHint::None,
-            ..StageOptions::default()
-        },
+        &StageOptions::pathspecs(vec!["tool.sh".to_owned()]),
         &mut NullProgress,
     )
     .expect("restage");

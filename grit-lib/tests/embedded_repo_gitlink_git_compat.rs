@@ -50,17 +50,7 @@ fn add_stages_unregistered_embedded_repo_as_gitlink() {
     fs::create_dir_all(&inner).expect("mkdir inner");
     init_nested_git_repo(&inner);
 
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: Vec::new(),
-            pathspec_sources: Vec::new(),
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("grit add all");
+    stage(&repo, &StageOptions::all(), &mut NullProgress).expect("grit add all");
 
     let index = repo.index_handle().load().expect("index");
     let entry = index
@@ -100,17 +90,7 @@ fn add_skips_gitignored_embedded_repo() {
     fs::create_dir_all(&inner).expect("mkdir inner");
     init_nested_git_repo(&inner);
 
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: Vec::new(),
-            pathspec_sources: Vec::new(),
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("grit add all");
+    stage(&repo, &StageOptions::all(), &mut NullProgress).expect("grit add all");
 
     let grit_ls = git(root, &["ls-files", "-s"]);
     assert!(
@@ -135,17 +115,7 @@ fn add_does_not_treat_placeholder_dot_git_as_embedded_repo() {
     fs::create_dir_all(root.join("inner/.git")).expect("placeholder .git");
     fs::write(root.join("inner/file"), b"data\n").expect("write file");
 
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: Vec::new(),
-            pathspec_sources: Vec::new(),
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("grit add all");
+    stage(&repo, &StageOptions::all(), &mut NullProgress).expect("grit add all");
 
     let index = repo.index_handle().load().expect("index");
     assert!(
@@ -207,17 +177,7 @@ fn add_stages_nested_linked_worktree_as_gitlink() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: Vec::new(),
-            pathspec_sources: Vec::new(),
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("grit add all");
+    stage(&repo, &StageOptions::all(), &mut NullProgress).expect("grit add all");
 
     let index = repo.index_handle().load().expect("index");
     let entry = index

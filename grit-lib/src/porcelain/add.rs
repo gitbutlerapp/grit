@@ -68,7 +68,38 @@ pub struct StageOptions {
     pub executable_hint: StageExecutableHint,
     /// Override bulk/parallel staging thresholds (integration tests only).
     #[doc(hidden)]
-    pub staging_thresholds: Option<IndexStagingThresholds>,
+    pub(crate) staging_thresholds: Option<IndexStagingThresholds>,
+}
+
+impl StageOptions {
+    /// Pathless `git add` (all tracked and untracked paths).
+    #[must_use]
+    pub fn all() -> Self {
+        Self {
+            mode: StageMode::All,
+            ..Self::default()
+        }
+    }
+
+    /// Pathless `git add -u` (tracked paths only).
+    #[must_use]
+    pub fn update() -> Self {
+        Self {
+            mode: StageMode::Update,
+            ..Self::default()
+        }
+    }
+
+    /// Explicit pathspecs with matching sources (same strings as resolved paths).
+    #[must_use]
+    pub fn pathspecs(pathspecs: Vec<String>) -> Self {
+        Self {
+            pathspecs: pathspecs.clone(),
+            pathspec_sources: pathspecs,
+            mode: StageMode::All,
+            ..Self::default()
+        }
+    }
 }
 
 /// Counts returned by [`stage`].
@@ -426,7 +457,9 @@ fn supplement_untracked_in_indexed_ancestor_dirs(
             continue;
         };
         if let Some((dir, _file)) = rel.rsplit_once('/') {
-            dirs_with_direct_files.insert(dir.to_string());
+            if e.mode != MODE_GITLINK {
+                dirs_with_direct_files.insert(dir.to_string());
+            }
         }
     }
     let mut dirs = BTreeSet::new();
@@ -450,6 +483,17 @@ fn supplement_untracked_in_indexed_ancestor_dirs(
             };
         }
     }
+    for e in &index.entries {
+        if e.stage() != 0 || e.mode != MODE_GITLINK {
+            continue;
+        }
+        let Ok(rel) = std::str::from_utf8(&e.path) else {
+            continue;
+        };
+        if let Some((dir, _)) = rel.rsplit_once('/') {
+            dirs.insert(dir.to_string());
+        }
+    }
     for dir in dirs {
         let abs = work_tree.join(&dir);
         let rd = match fs::read_dir(&abs) {
@@ -467,9 +511,12 @@ fn supplement_untracked_in_indexed_ancestor_dirs(
             if index.get(rel.as_bytes(), 0).is_some() {
                 continue;
             }
-            let meta = ent.metadata().map_err(Error::Io)?;
-            let file_type = meta.file_type();
-            if file_type.is_dir() && !file_type.is_symlink() {
+            let file_type = ent.file_type().map_err(Error::Io)?;
+            if file_type.is_symlink() {
+                out.push(rel);
+                continue;
+            }
+            if file_type.is_dir() {
                 let nested = format!("{rel}/");
                 let has_tracked_child = index.entries.iter().any(|e| {
                     e.stage() == 0
@@ -481,7 +528,7 @@ fn supplement_untracked_in_indexed_ancestor_dirs(
                     continue;
                 }
                 out.push(format!("{rel}/"));
-            } else if file_type.is_file() || file_type.is_symlink() {
+            } else if file_type.is_file() {
                 out.push(rel);
             }
         }

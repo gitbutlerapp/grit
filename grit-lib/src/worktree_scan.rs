@@ -249,7 +249,10 @@ pub(crate) fn supplement_untracked_beside_stat_skipped_indexed_dirs(
         };
         let (dir_readable, on_disk) = read_directory_map(&abs_dir)?;
         if dir_readable {
-            collect_untracked_siblings_in_dir(&dir, blobs, &on_disk, out);
+            let paths = stage0_indexed_paths(index);
+            out.extend(collect_untracked_siblings_in_dir(
+                &dir, blobs, &on_disk, &paths,
+            ));
         }
     }
     Ok(())
@@ -321,22 +324,22 @@ fn index_ordered_blob_paths(by_dir: &HashMap<String, Vec<BlobInDir>>) -> Vec<(us
 
 #[allow(clippy::type_complexity)]
 fn preload_blob_lookups_parallel(
+    indexed_stage0_paths: Option<Arc<HashSet<Vec<u8>>>>,
     by_dir: &HashMap<String, Vec<BlobInDir>>,
     entry_slots: usize,
     threads: usize,
     symlink_missing: &HashSet<String>,
     dir_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
     file_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
-    mut side_untracked: Option<&mut Vec<String>>,
-) -> Result<Vec<Option<BlobDiskLookup>>> {
+) -> Result<(Vec<Option<BlobDiskLookup>>, Vec<String>)> {
     if by_dir.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     let mut dirs: Vec<String> = by_dir.keys().cloned().collect();
     dirs.sort();
     let mut lookups: Vec<Option<BlobDiskLookup>> = (0..entry_slots).map(|_| None).collect();
     let chunk_size = dirs.len().div_ceil(threads);
-    std::thread::scope(|scope| {
+    let merged_untracked = std::thread::scope(|scope| -> Result<Vec<String>> {
         let mut handles = Vec::new();
         for dir_chunk in dirs.chunks(chunk_size) {
             let mut partial_dirs = HashMap::new();
@@ -348,12 +351,16 @@ fn preload_blob_lookups_parallel(
             let symlink_missing = symlink_missing.clone();
             let dir_abs = Arc::clone(&dir_abs);
             let file_abs = Arc::clone(&file_abs);
+            let paths = indexed_stage0_paths.as_ref().map(Arc::clone);
             handles.push(scope.spawn(
                 move || -> Result<(Vec<(usize, BlobDiskLookup)>, Vec<String>)> {
                     let mut local =
                         Vec::with_capacity(partial_dirs.values().map(|v| v.len()).sum::<usize>());
                     let mut local_untracked = Vec::new();
                     for_each_blob_by_directory(
+                        paths.as_deref(),
+                        None,
+                        None,
                         &partial_dirs,
                         |dir| dir_abs(dir),
                         |rel| file_abs(rel),
@@ -368,12 +375,11 @@ fn preload_blob_lookups_parallel(
                 },
             ));
         }
+        let mut merged_untracked = Vec::new();
         for handle in handles {
             match handle.join() {
                 Ok(Ok((local, local_untracked))) => {
-                    if let Some(out) = side_untracked.as_deref_mut() {
-                        out.extend(local_untracked);
-                    }
+                    merged_untracked.extend(local_untracked);
                     for (entry_index, lookup) in local {
                         if entry_index >= lookups.len() {
                             return Err(Error::Message(format!(
@@ -391,9 +397,9 @@ fn preload_blob_lookups_parallel(
                 }
             }
         }
-        Ok(())
+        Ok(merged_untracked)
     })?;
-    Ok(lookups)
+    Ok((lookups, merged_untracked))
 }
 
 /// Visit grouped blob entries with one `read_dir` per distinct parent directory.
@@ -404,11 +410,12 @@ fn collect_untracked_siblings_in_dir(
     dir: &str,
     blobs: &[BlobInDir],
     on_disk: &HashMap<String, fs::DirEntry>,
-    out: &mut Vec<String>,
-) {
+    indexed_stage0_paths: &HashSet<Vec<u8>>,
+) -> Vec<String> {
+    let mut out = Vec::new();
     let tracked: HashSet<&str> = blobs.iter().map(|b| b.file_name.as_str()).collect();
     for (name, entry) in on_disk {
-        if tracked.contains(name.as_str()) || name == ".git" {
+        if name == ".git" {
             continue;
         }
         let rel = if dir.is_empty() {
@@ -416,19 +423,80 @@ fn collect_untracked_siblings_in_dir(
         } else {
             format!("{dir}/{name}")
         };
-        let Ok(meta) = entry.metadata() else {
+        if indexed_stage0_paths.contains(rel.as_bytes()) {
+            continue;
+        }
+        if tracked.contains(name.as_str()) {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
             continue;
         };
-        let file_type = meta.file_type();
-        if file_type.is_dir() && !file_type.is_symlink() {
+        if file_type.is_symlink() {
+            out.push(rel);
+            continue;
+        }
+        if file_type.is_dir() {
             out.push(format!("{rel}/"));
-        } else if file_type.is_file() || file_type.is_symlink() {
+        } else if file_type.is_file() {
             out.push(rel);
         }
     }
+    out
 }
 
+/// Untracked paths inside a worktree directory (used when a tracked file path became a directory).
+pub(crate) fn collect_untracked_children_in_directory(
+    work_tree: &Path,
+    dir_rel: &str,
+    indexed_stage0_paths: &HashSet<Vec<u8>>,
+) -> Result<Vec<String>> {
+    let abs = if dir_rel.is_empty() {
+        work_tree.to_path_buf()
+    } else {
+        work_tree.join(dir_rel)
+    };
+    let (readable, on_disk) = read_directory_map(&abs)?;
+    if !readable {
+        return Ok(Vec::new());
+    }
+    Ok(collect_untracked_siblings_in_dir(
+        dir_rel,
+        &[],
+        &on_disk,
+        indexed_stage0_paths,
+    ))
+}
+
+#[must_use]
+pub(crate) fn stage0_indexed_paths(index: &Index) -> HashSet<Vec<u8>> {
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .map(|e| e.path.clone())
+        .collect()
+}
+
+#[must_use]
+pub(crate) fn stage0_indexed_blob_modes(index: &Index) -> HashMap<String, u32> {
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .filter_map(|e| {
+            std::str::from_utf8(&e.path)
+                .ok()
+                .map(|p| (p.to_owned(), e.mode))
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn for_each_blob_by_directory<F>(
+    indexed_stage0_paths: Option<&HashSet<Vec<u8>>>,
+    indexed_blob_modes: Option<&HashMap<String, u32>>,
+    work_tree_for_untracked: Option<&Path>,
     by_dir: &HashMap<String, Vec<BlobInDir>>,
     dir_abs: impl Fn(&str) -> PathBuf,
     file_abs: impl Fn(&str) -> PathBuf,
@@ -455,13 +523,14 @@ where
         }
 
         if blobs.len() < READ_DIR_AMORTIZE_MIN {
-            if side_untracked.is_some() {
+            if let (Some(out), Some(paths)) = (side_untracked.as_deref_mut(), indexed_stage0_paths)
+            {
                 let abs_dir = dir_abs(&dir);
                 let (dir_readable, on_disk) = read_directory_map(&abs_dir)?;
                 if dir_readable {
-                    if let Some(out) = side_untracked.as_deref_mut() {
-                        collect_untracked_siblings_in_dir(&dir, blobs, &on_disk, out);
-                    }
+                    out.extend(collect_untracked_siblings_in_dir(
+                        &dir, blobs, &on_disk, paths,
+                    ));
                 }
             }
             for blob in blobs {
@@ -479,6 +548,14 @@ where
                     }
                     Err(e) => BlobDiskLookup::Io(e),
                 };
+                maybe_collect_file_to_directory_untracked(
+                    indexed_stage0_paths,
+                    indexed_blob_modes,
+                    work_tree_for_untracked,
+                    side_untracked.as_deref_mut(),
+                    &blob.rel_path,
+                    &lookup,
+                )?;
                 visit(blob.entry_index, &blob.rel_path, lookup)?;
             }
             continue;
@@ -486,9 +563,11 @@ where
 
         let abs_dir = dir_abs(&dir);
         let (dir_readable, on_disk) = read_directory_map(&abs_dir)?;
-        if dir_readable {
-            if let Some(out) = side_untracked.as_deref_mut() {
-                collect_untracked_siblings_in_dir(&dir, blobs, &on_disk, out);
+        if let (Some(out), Some(paths)) = (side_untracked.as_deref_mut(), indexed_stage0_paths) {
+            if dir_readable {
+                out.extend(collect_untracked_siblings_in_dir(
+                    &dir, blobs, &on_disk, paths,
+                ));
             }
         }
         for blob in blobs {
@@ -502,15 +581,64 @@ where
             } else {
                 lookup_blob_in_directory(&on_disk, &blob.file_name, &target)
             };
+            maybe_collect_file_to_directory_untracked(
+                indexed_stage0_paths,
+                indexed_blob_modes,
+                work_tree_for_untracked,
+                side_untracked.as_deref_mut(),
+                &blob.rel_path,
+                &lookup,
+            )?;
             visit(blob.entry_index, &blob.rel_path, lookup)?;
         }
     }
     Ok(())
 }
 
+fn maybe_collect_file_to_directory_untracked(
+    indexed_stage0_paths: Option<&HashSet<Vec<u8>>>,
+    indexed_blob_modes: Option<&HashMap<String, u32>>,
+    work_tree: Option<&Path>,
+    side_untracked: Option<&mut Vec<String>>,
+    rel_path: &str,
+    lookup: &BlobDiskLookup,
+) -> Result<()> {
+    let Some(out) = side_untracked else {
+        return Ok(());
+    };
+    let (Some(paths), Some(modes), Some(wt)) =
+        (indexed_stage0_paths, indexed_blob_modes, work_tree)
+    else {
+        return Ok(());
+    };
+    let BlobDiskLookup::Present(meta) = lookup else {
+        return Ok(());
+    };
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Ok(());
+    }
+    let Some(mode) = modes.get(rel_path) else {
+        return Ok(());
+    };
+    if (*mode & 0o170000) != 0o100000 {
+        return Ok(());
+    }
+    let abs = wt.join(rel_path);
+    if abs.join(".git").exists() {
+        return Ok(());
+    }
+    out.extend(collect_untracked_children_in_directory(
+        wt, rel_path, paths,
+    )?);
+    Ok(())
+}
+
 /// Like [`for_each_blob_by_directory`], optionally preloading disk lookups in parallel.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn for_each_blob_by_directory_parallel<F>(
+    indexed_stage0_paths: Option<&HashSet<Vec<u8>>>,
+    indexed_blob_modes: Option<&HashMap<String, u32>>,
+    work_tree_for_untracked: Option<&Path>,
     by_dir: &HashMap<String, Vec<BlobInDir>>,
     scan_options: WorktreeBlobScanOptions,
     thread_policy: &crate::parallel::ThreadPolicy,
@@ -519,7 +647,7 @@ pub(crate) fn for_each_blob_by_directory_parallel<F>(
     dir_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
     file_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
     mut has_symlink_ancestor: impl FnMut(&str) -> bool,
-    side_untracked: Option<&mut Vec<String>>,
+    mut side_untracked: Option<&mut Vec<String>>,
     mut visit: F,
 ) -> Result<()>
 where
@@ -554,27 +682,42 @@ where
             .map(|(entry_index, _)| *entry_index)
             .max()
             .map_or(0, |i| i + 1);
-        let mut preloaded = preload_blob_lookups_parallel(
+        let paths_arc = indexed_stage0_paths.map(|set| Arc::new(set.clone()));
+        let (mut preloaded, parallel_untracked) = preload_blob_lookups_parallel(
+            paths_arc,
             by_dir,
             entry_slots,
             threads,
             &symlink_missing,
             Arc::clone(&dir_abs_arc),
             Arc::clone(&file_abs_arc),
-            side_untracked,
         )?;
+        if let Some(out) = side_untracked.as_deref_mut() {
+            out.extend(parallel_untracked);
+        }
         for (entry_index, rel_path) in &ordered {
             let lookup = preloaded[*entry_index].take().ok_or_else(|| {
                 Error::Message(format!(
                     "parallel blob stat preload missing index entry {entry_index}"
                 ))
             })?;
+            maybe_collect_file_to_directory_untracked(
+                indexed_stage0_paths,
+                indexed_blob_modes,
+                work_tree_for_untracked,
+                side_untracked.as_deref_mut(),
+                rel_path,
+                &lookup,
+            )?;
             visit(*entry_index, rel_path, lookup)?;
         }
         return Ok(());
     }
 
     for_each_blob_by_directory(
+        indexed_stage0_paths,
+        indexed_blob_modes,
+        work_tree_for_untracked,
         by_dir,
         |dir| dir_abs_arc(dir),
         |rel| file_abs_arc(rel),
@@ -582,6 +725,20 @@ where
         side_untracked,
         visit,
     )
+}
+
+fn lookup_blob_dir_entry(entry: &fs::DirEntry) -> BlobDiskLookup {
+    match entry.file_type() {
+        Ok(t) if t.is_symlink() => match symlink_metadata_path(&entry.path()) {
+            Ok(m) => BlobDiskLookup::Present(m),
+            Err(e) => BlobDiskLookup::Io(e),
+        },
+        Ok(_) => match dir_entry_metadata(entry) {
+            Ok(m) => BlobDiskLookup::Present(m),
+            Err(e) => BlobDiskLookup::Io(e),
+        },
+        Err(e) => BlobDiskLookup::Io(e),
+    }
 }
 
 fn dir_entry_name_matches(index_file_name: &str, entry: &fs::DirEntry) -> bool {
@@ -606,17 +763,11 @@ fn lookup_blob_in_directory(
     target_abs: &Path,
 ) -> BlobDiskLookup {
     if let Some(entry) = on_disk.get(index_file_name) {
-        return match dir_entry_metadata(entry) {
-            Ok(m) => BlobDiskLookup::Present(m),
-            Err(e) => BlobDiskLookup::Io(e),
-        };
+        return lookup_blob_dir_entry(entry);
     }
     for entry in on_disk.values() {
         if dir_entry_name_matches(index_file_name, entry) {
-            return match dir_entry_metadata(entry) {
-                Ok(m) => BlobDiskLookup::Present(m),
-                Err(e) => BlobDiskLookup::Io(e),
-            };
+            return lookup_blob_dir_entry(entry);
         }
     }
     match symlink_metadata_path(target_abs) {
@@ -700,6 +851,9 @@ mod tests {
         };
         let file_abs = |rel: &str| wt.join(rel);
         for_each_blob_by_directory(
+            None,
+            None,
+            None,
             &grouped,
             dir_abs,
             file_abs,
@@ -754,8 +908,12 @@ mod tests {
             entry_from_stat(&wt.join("d0/tracked.txt"), b"d0/tracked.txt", oid, 0o100644).unwrap(),
         );
         let grouped = group_blob_entries_by_dir(&index, false);
+        let paths = stage0_indexed_paths(&index);
         let mut side = Vec::new();
         for_each_blob_by_directory(
+            Some(&paths),
+            None,
+            None,
             &grouped,
             |dir| {
                 if dir.is_empty() {
@@ -799,6 +957,9 @@ mod tests {
         };
         let file_abs = |rel: &str| wt.join(rel);
         for_each_blob_by_directory(
+            None,
+            None,
+            None,
             &grouped,
             dir_abs,
             file_abs,
@@ -844,6 +1005,9 @@ mod tests {
         let file_abs = |rel: &str| wt.join(rel);
         let mut seen = 0;
         for_each_blob_by_directory(
+            None,
+            None,
+            None,
             &grouped,
             dir_abs,
             file_abs,
@@ -903,6 +1067,9 @@ mod tests {
         let config = crate::config::ConfigSet::new();
         let mut seen = 0;
         for_each_blob_by_directory_parallel(
+            None,
+            None,
+            None,
             &grouped,
             WorktreeBlobScanOptions {
                 preload_index: true,
@@ -970,6 +1137,9 @@ mod tests {
         let config = crate::config::ConfigSet::new();
         let mut seen = 0;
         for_each_blob_by_directory_parallel(
+            None,
+            None,
+            None,
             &grouped,
             WorktreeBlobScanOptions {
                 preload_index: true,

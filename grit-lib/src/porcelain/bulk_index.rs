@@ -4,11 +4,11 @@
 ///
 /// Passed explicitly into staging APIs so tests can use smaller limits without process-wide state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct IndexStagingThresholds {
+pub(crate) struct IndexStagingThresholds {
     /// Deferred UNTR invalidation and cache-tree drop at or above this stage-0 entry count.
-    pub large_index_restage: usize,
+    pub(crate) large_index_restage: usize,
     /// Parallel tracked blob reread batches at or above this entry count.
-    pub parallel_tracked_restage: usize,
+    pub(crate) parallel_tracked_restage: usize,
 }
 
 impl Default for IndexStagingThresholds {

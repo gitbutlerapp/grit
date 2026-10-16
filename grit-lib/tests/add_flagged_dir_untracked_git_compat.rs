@@ -22,17 +22,7 @@ fn seed_repo(root: &std::path::Path) {
 
 fn grit_add_all(root: &std::path::Path) -> usize {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: Vec::new(),
-            pathspec_sources: Vec::new(),
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("add all");
+    let outcome = stage(&repo, &StageOptions::all(), &mut NullProgress).expect("add all");
     outcome.total()
 }
 

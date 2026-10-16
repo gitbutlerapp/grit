@@ -112,10 +112,7 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
     fs::write(root.join("f"), b"x\n").expect("worktree file");
     stage(
         &repo,
-        &StageOptions {
-            pathspecs: vec![".".to_owned()],
-            ..StageOptions::default()
-        },
+        &StageOptions::pathspecs(vec![".".to_owned()]),
         &mut NullProgress,
     )
     .expect("stage");

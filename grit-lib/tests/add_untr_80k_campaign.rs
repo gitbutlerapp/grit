@@ -4,9 +4,7 @@ mod support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
-use grit_lib::porcelain::stage_tracked::{
-    stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
-};
+use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::repo::Repository;
 use std::fs;
 use std::io::Write;
@@ -99,12 +97,7 @@ fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
 
     let grit = open_grit(grit_dir.path());
     let wt = grit.work_tree().expect("work tree");
-    let campaign_thresholds = IndexStagingThresholds {
-        large_index_restage: LARGE_THRESHOLD,
-        parallel_tracked_restage: LARGE_THRESHOLD,
-    };
-    let summary = stage_tracked_modifications_with_thresholds(&grit, wt, campaign_thresholds)
-        .expect("stage tracked");
+    let summary = stage_tracked_modifications(&grit, wt).expect("stage tracked");
     assert_eq!(summary.removed.len(), REMOVE);
     assert!(
         summary.untracked_invalidation_deferred,

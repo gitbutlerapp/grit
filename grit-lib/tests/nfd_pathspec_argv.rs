@@ -58,17 +58,10 @@ fn library_nfd_resolved_pathspec_stages_nfc_index_entry() {
     let wt = repo.work_tree().expect("work tree");
     let nfd_resolved = resolve_pathspec_with_argv_precompose(&nfd_name, wt, None, true);
 
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec![nfd_resolved],
-            pathspec_sources: vec![nfd_name.clone()],
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut grit_lib::progress::NullProgress,
-    )
-    .expect("stage nfd pathspec");
+    let mut opts = StageOptions::pathspecs(vec![nfd_resolved]);
+    opts.pathspec_sources = vec![nfd_name.clone()];
+    let outcome =
+        stage(&repo, &opts, &mut grit_lib::progress::NullProgress).expect("stage nfd pathspec");
 
     assert!(
         outcome.total() > 0,
