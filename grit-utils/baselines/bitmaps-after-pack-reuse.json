@@ -19,7 +19,7 @@
   },
   "scenarios": [
     {
-      "id": "rev-list-count-git.git",
+      "id": "rev-list-count-git.git-pack-reuse",
       "group": "bitmaps",
       "fixture": "git.git",
       "description": "rev-list --count --all",
@@ -84,7 +84,7 @@
       "ratio": 18.753229566424302
     },
     {
-      "id": "rev-list-count-objects-git.git",
+      "id": "rev-list-count-objects-git.git-pack-reuse",
       "group": "bitmaps",
       "fixture": "git.git",
       "description": "rev-list --count --objects --all --use-bitmap-index",
@@ -256,7 +256,7 @@
       "ratio": 63.60645639488178
     },
     {
-      "id": "serve-clone-git.git",
+      "id": "serve-clone-git.git-pack-reuse",
       "group": "bitmaps",
       "fixture": "git.git",
       "description": "upload-pack --stateless-rpc full ref closure (side-band thin-pack ofs-delta)",
