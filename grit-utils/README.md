@@ -13,6 +13,11 @@ Utility crate for the Grit workspace. The primary binary is **`grit-bench`**, a 
 ```bash
 cargo build --release -p grit-cli -p grit-utils
 
+# Fixture cache (git.git at pinned tag + synthetic tiers S/M/L)
+./target/release/grit-bench fixtures list --format json
+./target/release/grit-bench fixtures prepare --format markdown
+./target/release/grit-bench fixtures prepare --offline --only git-git   # fail if git.git missing
+
 # Deterministic synthetic benchmark repo (grit-lib backed, seeded)
 ./target/release/grit-bench fixture synth --tier S --out /tmp/synth-s
 ./target/release/grit-bench fixture synth --tier M --out /tmp/synth-m --format json
@@ -99,6 +104,16 @@ Reports use `"schema_version": 1`. All times in scenario stats are **millisecond
     "grit": "grit 0.5.0",
     "grit_commit": "abc123…"
   },
+  "fixtures": [
+    {
+      "name": "synth-s",
+      "tier": "S",
+      "head_oid": "abc123…",
+      "object_count": 12345,
+      "ref_count": 1000,
+      "file_count": 2000
+    }
+  ],
   "scenarios": [
     {
       "id": "status-dirty-1000",
@@ -122,6 +137,17 @@ Reports use `"schema_version": 1`. All times in scenario stats are **millisecond
 ```
 
 **Ratio** is `grit_median_ms / git_median_ms`. Values below `1.0` mean grit is faster on median time.
+
+### Fixture cache
+
+Prepared fixtures live under **`GRIT_BENCH_CACHE`** (default `$XDG_CACHE_HOME/grit-bench` or `~/.cache/grit-bench`):
+
+| Name | Contents |
+| --- | --- |
+| `git.git` | Bare upstream [git.git](https://github.com/git/git) at tag **`v2.47.0`** (`GRIT_BENCH_GIT_GIT_TAG`); `HEAD` must match the pinned oid |
+| `synth-s`, `synth-m`, `synth-l` | Deterministic grit-lib synthetic tiers (same shapes as `fixture synth`) |
+
+Mutating scenarios should take a **`git clone --local`** copy via [`fixture_registry::copy_for_use`](src/fixture_registry.rs) so the cache stays immutable.
 
 ### Scenario groups (current)
 
