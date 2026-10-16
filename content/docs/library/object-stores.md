@@ -3,23 +3,23 @@ title: Object stores
 summary: Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.
 ---
 
-By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::odb::Odb) (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with [`OdbBuilder`](rustdoc:grit_lib::odb::OdbBuilder) and [`RepositoryBuilder`](rustdoc:grit_lib::repo::RepositoryBuilder).
+By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::objects::odb::Odb) (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) and [`RepositoryBuilder`](rustdoc:grit_lib::repo::RepositoryBuilder).
 
 ## Traits
 
 | Trait | Role |
 | ----- | ---- |
-| [`ObjectStore`](rustdoc:grit_lib::odb::store::ObjectStore) | Read, metadata, streaming, enumeration |
-| [`WritableObjectStore`](rustdoc:grit_lib::odb::store::WritableObjectStore) | Insert objects (idempotent writes) |
+| [`ObjectStore`](rustdoc:grit_lib::objects::odb::store::ObjectStore) | Read, metadata, streaming, enumeration |
+| [`WritableObjectStore`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore) | Insert objects (idempotent writes) |
 
-Built-in backends live under [`grit_lib::odb::store`](rustdoc:grit_lib::odb::store) (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others).
+Built-in backends live under [`grit_lib::odb::store`](rustdoc:grit_lib::objects::odb::store) (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others).
 
 ## Lookup order
 
-For a given [`Odb`](rustdoc:grit_lib::odb::Odb) handle:
+For a given [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handle:
 
 1. In-memory overlay (when enabled for merge-tree-style operations)
-2. **Primary** store — files source by default, or your custom [`WritableObjectStore`](rustdoc:grit_lib::odb::store::WritableObjectStore)
+2. **Primary** store — files source by default, or your custom [`WritableObjectStore`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore)
 3. Extra read sources from `OdbBuilder::push_read_source`
 4. Alternate object directories when `OdbBuilder::alternates` is true (`info/alternates`, environment alternates, submodule object dirs)
 
@@ -53,7 +53,7 @@ Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_st
 
 ## Conformance tests
 
-The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites. Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](rustdoc:grit_lib::odb::OdbBuilder).
+The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites. Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder).
 
 ## Example: append-only packfile KV store
 

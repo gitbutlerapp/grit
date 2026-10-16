@@ -7,17 +7,17 @@ Grit is designed to be **linked into other Rust programs**, not only invoked as 
 
 ## Environment
 
-[`Environment`](rustdoc:grit_lib::environment::Environment) holds Git discovery and configuration variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_*`, home paths, author/committer overrides, transport trace flags, and related fields). Construct it with:
+[`Environment`](rustdoc:grit_lib::config::environment::Environment) holds Git discovery and configuration variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_*`, home paths, author/committer overrides, transport trace flags, and related fields). Construct it with:
 
 - `Environment::empty()` — defaults only (`cwd = "."`).
-- [`Environment::from_vars`](rustdoc:grit_lib::environment::Environment) — parse an iterator of `(key, value)` pairs plus an explicit working directory (no reads from `std::env` inside the library).
-- `Environment::capture_process()` — **CLI boundary only**: snapshot the current process into an [`Environment`](rustdoc:grit_lib::environment::Environment).
+- [`Environment::from_vars`](rustdoc:grit_lib::config::environment::Environment) — parse an iterator of `(key, value)` pairs plus an explicit working directory (no reads from `std::env` inside the library).
+- `Environment::capture_process()` — **CLI boundary only**: snapshot the current process into an [`Environment`](rustdoc:grit_lib::config::environment::Environment).
 
 Pass the same `Environment` into [`Repository`](rustdoc:grit_lib::repo::Repository) ([`discover`](rustdoc:grit_lib::repo::Repository) / [`open`](rustdoc:grit_lib::repo::Repository)) and into [`ConfigSet`](rustdoc:grit_lib::config::ConfigSet) loading.
 
 ## RepositoryOptions
 
-[`RepositoryOptions`](rustdoc:grit_lib::environment::RepositoryOptions) bundles everything needed to open a repository besides paths:
+[`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions) bundles everything needed to open a repository besides paths:
 
 | Field | Role |
 | --- | --- |
@@ -28,7 +28,7 @@ Pass the same `Environment` into [`Repository`](rustdoc:grit_lib::repo::Reposito
 | `reference_unix_time` | Wall clock for rev-parse date selectors (`@{yesterday}`, etc.) |
 | Test knobs | `test_assume_different_owner`, `force_split_index`, … |
 
-Use `RepositoryOptions::with_environment` and `with_command_runner` on [`RepositoryOptions`](rustdoc:grit_lib::environment::RepositoryOptions); assign `diagnostics` when you need a custom sink.
+Use `RepositoryOptions::with_environment` and `with_command_runner` on [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions); assign `diagnostics` when you need a custom sink.
 
 ## DiagnosticSink and ProgressSink
 
@@ -40,7 +40,7 @@ Long-running work (status, fetch, pack indexing) takes a [`ProgressSink`](rustdo
 
 [`CommandRunner`](rustdoc:grit_lib::command_runner::CommandRunner) is the only production path that spawns OS processes from the library ([`SystemCommandRunner`](rustdoc:grit_lib::command_runner::SystemCommandRunner)). Hooks, smudge/clean filters, credential helpers, and signing helpers build a [`CommandSpec`](rustdoc:grit_lib::command_runner::CommandSpec) and call `spawn`.
 
-For tests, [`RecordingRunner`](rustdoc:grit_lib::command_runner::RecordingRunner) records specs and returns scripted exit codes. Install it on [`RepositoryOptions`](rustdoc:grit_lib::environment::RepositoryOptions) before [`Repository::open`](rustdoc:grit_lib::repo::Repository) or [`Repository::discover`](rustdoc:grit_lib::repo::Repository).
+For tests, [`RecordingRunner`](rustdoc:grit_lib::command_runner::RecordingRunner) records specs and returns scripted exit codes. Install it on [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions) before [`Repository::open`](rustdoc:grit_lib::repo::Repository) or [`Repository::discover`](rustdoc:grit_lib::repo::Repository).
 
 ## Typed errors
 

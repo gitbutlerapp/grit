@@ -17,7 +17,7 @@ Commit-to-commit diffs resolve each commit’s tree with [`parse_commit`](rustdo
 
 ## Blob diffs
 
-For a single modified file, read old and new bytes from [`Odb`](rustdoc:grit_lib::odb::Odb) and pass them to [`unified_diff`](rustdoc:grit_lib::diff::unified_diff) (histogram algorithm, Git-compatible hunks). The CLI builds human, `--json`, and `--markdown` views from `DiffEntry` lists plus optional unified bodies.
+For a single modified file, read old and new bytes from [`Odb`](rustdoc:grit_lib::objects::odb::Odb) and pass them to [`unified_diff`](rustdoc:grit_lib::diff::unified_diff) (histogram algorithm, Git-compatible hunks). The CLI builds human, `--json`, and `--markdown` views from `DiffEntry` lists plus optional unified bodies.
 
 ## Porcelain models
 

@@ -7,7 +7,7 @@ Configuration in grit-lib follows Git’s cascade (system, global, local, worktr
 
 ## Loading outside a handle
 
-[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) parses the cascade from disk given an [`Environment`](rustdoc:grit_lib::environment::Environment) and optional git directory. The library does not read `std::env` during load — embedders pass variables explicitly (see [Embedding](../embedding/) and [Repository](../repository/)).
+[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) parses the cascade from disk given an [`Environment`](rustdoc:grit_lib::config::environment::Environment) and optional git directory. The library does not read `std::env` during load — embedders pass variables explicitly (see [Embedding](../embedding/) and [Repository](../repository/)).
 
 ## Local writes
 

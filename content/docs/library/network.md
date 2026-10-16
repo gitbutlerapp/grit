@@ -9,14 +9,14 @@ Network operations in grit-lib center on [`Remote`](rustdoc:grit_lib::remote::Re
 
 | Scheme / form | [`RemoteUrl`](rustdoc:grit_lib::remote::RemoteUrl) variant | Transport |
 | --- | --- | --- |
-| Path or `file://` | `Local` / `File` | [`fetch_local`](rustdoc:grit_lib::transfer::fetch_local) / [`push_local`](rustdoc:grit_lib::transfer::push_local) |
-| `git://` | `Git` | [`GitDaemonTransport`](rustdoc:grit_lib::transport::GitDaemonTransport) |
-| `ssh://`, scp-style | `Ssh` | [`SshTransport`](rustdoc:grit_lib::transport::SshTransport) (repo [`CommandRunner`](rustdoc:grit_lib::command_runner::CommandRunner)) |
-| `http(s)://` | `Http` / `Https` | [`http_fetch`](rustdoc:grit_lib::transport::http::http_fetch) / [`push_http`](rustdoc:grit_lib::push::push_http) |
+| Path or `file://` | `Local` / `File` | [`fetch_local`](rustdoc:grit_lib::remote::transfer::fetch_local) / [`push_local`](rustdoc:grit_lib::remote::transfer::push_local) |
+| `git://` | `Git` | [`GitDaemonTransport`](rustdoc:grit_lib::remote::transport::GitDaemonTransport) |
+| `ssh://`, scp-style | `Ssh` | [`SshTransport`](rustdoc:grit_lib::remote::transport::SshTransport) (repo [`CommandRunner`](rustdoc:grit_lib::command_runner::CommandRunner)) |
+| `http(s)://` | `Http` / `Https` | [`http_fetch`](rustdoc:grit_lib::remote::transport::http::http_fetch) / [`push_http`](rustdoc:grit_lib::remote::push::push_http) |
 
-Parse a literal URL with [`RemoteUrl::try_from`](rustdoc:grit_lib::remote::RemoteUrl). Load `remote.<name>.url`, optional `pushurl`, and `fetch` refspecs (default `+refs/heads/*:refs/remotes/<name>/*`) via [`Remote::from_config`](rustdoc:grit_lib::remote::Remote). Config applies [`url_rewrite`](rustdoc:grit_lib::url_rewrite) `insteadOf` / `pushInsteadOf` rules the same way Git does.
+Parse a literal URL with [`RemoteUrl::try_from`](rustdoc:grit_lib::remote::RemoteUrl). Load `remote.<name>.url`, optional `pushurl`, and `fetch` refspecs (default `+refs/heads/*:refs/remotes/<name>/*`) via [`Remote::from_config`](rustdoc:grit_lib::remote::Remote). Config applies [`url_rewrite`](rustdoc:grit_lib::remote::url_rewrite) `insteadOf` / `pushInsteadOf` rules the same way Git does.
 
-Local paths resolve through [`resolve_local_remote_git_dir`](rustdoc:grit_lib::transport_path::resolve_local_remote_git_dir) from the repository root, not the process cwd.
+Local paths resolve through [`resolve_local_remote_git_dir`](rustdoc:grit_lib::remote::transport_path::resolve_local_remote_git_dir) from the repository root, not the process cwd.
 
 ## list refs
 
@@ -24,13 +24,13 @@ Local paths resolve through [`resolve_local_remote_git_dir`](rustdoc:grit_lib::t
 
 ## Fetch and push
 
-[`Remote::fetch`](rustdoc:grit_lib::remote::Remote) accepts [`FetchOptions`](rustdoc:grit_lib::transfer::FetchOptions) and a [`Progress`](rustdoc:grit_lib::fetch::Progress) sink; fetch negotiates protocol v2 when the server supports it. [`Remote::push`](rustdoc:grit_lib::remote::Remote) uses [`PushRefSpec`](rustdoc:grit_lib::transfer::PushRefSpec) and returns [`PushOutcome`](rustdoc:grit_lib::transfer::PushOutcome).
+[`Remote::fetch`](rustdoc:grit_lib::remote::Remote) accepts [`FetchOptions`](rustdoc:grit_lib::remote::transfer::FetchOptions) and a [`Progress`](rustdoc:grit_lib::remote::fetch::Progress) sink; fetch negotiates protocol v2 when the server supports it. [`Remote::push`](rustdoc:grit_lib::remote::Remote) uses [`PushRefSpec`](rustdoc:grit_lib::remote::transfer::PushRefSpec) and returns [`PushOutcome`](rustdoc:grit_lib::remote::transfer::PushOutcome).
 
-HTTP remotes need an [`HttpClient`](rustdoc:grit_lib::transport::http::HttpClient). Implement [`HttpClientFactory`](rustdoc:grit_lib::remote::HttpClientFactory) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](rustdoc:grit_lib::credentials::HelperCredentialProvider)).
+HTTP remotes need an [`HttpClient`](rustdoc:grit_lib::remote::transport::http::HttpClient). Implement [`HttpClientFactory`](rustdoc:grit_lib::remote::HttpClientFactory) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider)).
 
 ## Credentials and progress
 
-[`HelperCredentialProvider`](rustdoc:grit_lib::credentials::HelperCredentialProvider) satisfies HTTP `401` responses from configured `credential.helper` programs and never opens a TTY. Pass [`NoProgress`](rustdoc:grit_lib::fetch::NoProgress) to ignore sideband progress, or implement [`Progress::message`](rustdoc:grit_lib::fetch::Progress) for side-band channel 2. Set [`FetchOptions`](rustdoc:grit_lib::transfer::FetchOptions) `remote_progress` to omit `no-progress` on the wire so the remote may emit channel 2; decode chunks with [`SidebandLines`](rustdoc:grit_lib::sideband_lines::SidebandLines) into [`RemoteLine`](rustdoc:grit_lib::sideband_lines::RemoteLine) updates and lines.
+[`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider) satisfies HTTP `401` responses from configured `credential.helper` programs and never opens a TTY. Pass [`NoProgress`](rustdoc:grit_lib::remote::fetch::NoProgress) to ignore sideband progress, or implement [`Progress::message`](rustdoc:grit_lib::remote::fetch::Progress) for side-band channel 2. Set [`FetchOptions`](rustdoc:grit_lib::remote::transfer::FetchOptions) `remote_progress` to omit `no-progress` on the wire so the remote may emit channel 2; decode chunks with [`SidebandLines`](rustdoc:grit_lib::remote::sideband_lines::SidebandLines) into [`RemoteLine`](rustdoc:grit_lib::remote::sideband_lines::RemoteLine) updates and lines.
 
 ## Example
 

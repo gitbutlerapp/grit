@@ -6,10 +6,10 @@ summary: Three-way tree merge and merge-base helpers in the diff and revwalk dom
 Merge **orchestration** (sequencer state, hooks, editors, messages) stays in `grit-cli`. The library exposes tree and index transforms embedders and porcelain reuse:
 
 - [`revwalk::merge_base`](rustdoc:grit_lib::revwalk::merge_base) — common ancestors (`merge_bases_first_vs_rest`, ancestor checks).
-- [`diff::merge_trees`](rustdoc:grit_lib::diff::merge_trees) — rename-aware three-way tree merge ([`merge_trees_three_way`](rustdoc:grit_lib::merge_trees::merge_trees_three_way)), conflict-marker blobs, and [`TreeMergeOutput`](rustdoc:grit_lib::merge_trees::TreeMergeOutput).
+- [`diff::merge_trees`](rustdoc:grit_lib::diff::merge_trees) — rename-aware three-way tree merge ([`merge_trees_three_way`](rustdoc:grit_lib::diff::merge_trees::merge_trees_three_way)), conflict-marker blobs, and [`TreeMergeOutput`](rustdoc:grit_lib::diff::merge_trees::TreeMergeOutput).
 - [`porcelain::merge`](rustdoc:grit_lib::porcelain::merge) — fast-forward/octopus index composition and checkout helpers the CLI calls.
 
-Pass explicit [`MergeFavor`](rustdoc:grit_lib::merge_file::MergeFavor) and [`WhitespaceMergeOptions`](rustdoc:grit_lib::merge_trees::WhitespaceMergeOptions) into tree merges; pass identity and timestamps into commit-writing porcelain.
+Pass explicit [`MergeFavor`](rustdoc:grit_lib::diff::merge_file::MergeFavor) and [`WhitespaceMergeOptions`](rustdoc:grit_lib::diff::merge_trees::WhitespaceMergeOptions) into tree merges; pass identity and timestamps into commit-writing porcelain.
 
 ## Example
 

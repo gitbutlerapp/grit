@@ -182,7 +182,7 @@ $ grit push --tags
 
 ## Offline bundles and linked worktrees
 
-To move commits without a network, [`grit bundle create`](../commands/bundle/) writes a single file; [`grit bundle unbundle`](../commands/bundle/) ingests it into another repository. For a second checkout of the same repository, [`grit worktree add`](../commands/worktree/) creates a linked working tree; [`grit worktree lock`](../commands/worktree/) marks one as locked when you need to prevent accidental removal.
+To move commits without a network, [`grit bundle create`](../bundle/) writes a single file; [`grit bundle unbundle`](../bundle/) ingests it into another repository. For a second checkout of the same repository, [`grit worktree add`](../worktree/) creates a linked working tree; [`grit worktree lock`](../worktree/) marks one as locked when you need to prevent accidental removal.
 
 ## Scripting
 
