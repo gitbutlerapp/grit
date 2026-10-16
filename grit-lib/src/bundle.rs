@@ -463,13 +463,7 @@ pub fn write_bundle(
             &have_closure,
         )
         .map_err(|e| BundleError::Io(e.to_string()))?;
-        build_pack_from_send_list(
-            &repo.odb,
-            &send,
-            &have_closure,
-            &pack_opts,
-            &HashMap::new(),
-        )
+        build_pack_from_send_list(&repo.odb, &send, &have_closure, &pack_opts, &HashMap::new())
             .map_err(|e| BundleError::Io(e.to_string()))?
     } else {
         build_pack(&repo.odb, &include_oids, &haves, &pack_opts)

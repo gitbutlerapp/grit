@@ -234,7 +234,6 @@ pub use crate::pack_objects::{
     PackObjectsOptions, PackStats,
 };
 
-
 pub(crate) use crate::pack_objects::build_pack_for_local_fetch;
 
 /// Expand a thin pack by appending missing ref-delta bases from `odb`, matching

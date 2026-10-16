@@ -137,8 +137,8 @@ pub fn run_create(path: PathBuf, revs: Vec<String>) -> Result<BundleCreateOutcom
     if revs.is_empty() {
         bail!("at least one revision is required");
     }
-    let refs = bundle_remote::write_bundle_from_rev_specs(&repo, &path, &revs)
-        .map_err(map_lib_error)?;
+    let refs =
+        bundle_remote::write_bundle_from_rev_specs(&repo, &path, &revs).map_err(map_lib_error)?;
     Ok(BundleCreateOutcome {
         path: path.display().to_string(),
         refs,

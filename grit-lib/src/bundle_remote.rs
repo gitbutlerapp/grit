@@ -46,12 +46,7 @@ pub fn write_bundle_from_rev_specs(
         objects: true,
         ..Default::default()
     };
-    let revs = crate::rev_list::rev_list(
-        repo,
-        &positive_specs,
-        &negative_specs,
-        &rev_opts,
-    )?;
+    let revs = crate::rev_list::rev_list(repo, &positive_specs, &negative_specs, &rev_opts)?;
 
     let mut include: Vec<(ObjectId, String)> = Vec::new();
     for spec in &positive_specs {
@@ -66,10 +61,7 @@ pub fn write_bundle_from_rev_specs(
     }
     if include.is_empty() {
         for oid in &revs.commits {
-            include.push((
-                *oid,
-                format!("refs/heads/bundle-tip/{}", oid.to_hex()),
-            ));
+            include.push((*oid, format!("refs/heads/bundle-tip/{}", oid.to_hex())));
         }
     }
     if include.is_empty() {
@@ -95,12 +87,7 @@ fn display_ref_for_spec(repo: &Repository, spec: &str, _oid: ObjectId) -> Result
     let resolve = |name: &str| crate::refs::resolve_ref(&repo.git_dir, name).ok();
     let (count, _) = crate::worktree_ref::resolve_ref_dwim(resolve, spec);
     if count == 1 {
-        for rule in [
-            "{0}",
-            "refs/{0}",
-            "refs/heads/{0}",
-            "refs/remotes/{0}",
-        ] {
+        for rule in ["{0}", "refs/{0}", "refs/heads/{0}", "refs/remotes/{0}"] {
             let candidate = rule.replace("{0}", spec);
             if crate::refs::resolve_ref(&repo.git_dir, &candidate).is_ok() {
                 return Ok(candidate);
@@ -173,7 +160,10 @@ fn default_branch_from_bundle_head(
     refs: &[(String, ObjectId)],
     init_default_branch: Option<&str>,
 ) -> Option<String> {
-    let head_oid = refs.iter().find(|(name, _)| name == "HEAD").map(|(_, oid)| *oid)?;
+    let head_oid = refs
+        .iter()
+        .find(|(name, _)| name == "HEAD")
+        .map(|(_, oid)| *oid)?;
 
     if let Some(name) = init_default_branch {
         if bundle_branch_tip_matches(refs, name, head_oid) {
@@ -199,7 +189,11 @@ fn default_branch_from_bundle_head(
     None
 }
 
-fn bundle_branch_tip_matches(refs: &[(String, ObjectId)], branch: &str, head_oid: ObjectId) -> bool {
+fn bundle_branch_tip_matches(
+    refs: &[(String, ObjectId)],
+    branch: &str,
+    head_oid: ObjectId,
+) -> bool {
     let full = format!("refs/heads/{branch}");
     refs.iter()
         .any(|(name, oid)| name == &full && *oid == head_oid)

@@ -337,9 +337,7 @@ impl Odb {
 
     #[doc(hidden)]
     #[must_use]
-    pub fn hot_path_metrics_arc(
-        &self,
-    ) -> Arc<crate::hot_path_test_metrics::HotPathTestMetrics> {
+    pub fn hot_path_metrics_arc(&self) -> Arc<crate::hot_path_test_metrics::HotPathTestMetrics> {
         Arc::clone(&self.hot_path_test_metrics)
     }
 

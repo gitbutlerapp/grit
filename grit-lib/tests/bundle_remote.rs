@@ -158,7 +158,10 @@ fn clone_from_bundle_matches_git_default_branch_when_head_not_first() {
         url: bundle_path.to_str().unwrap().to_owned(),
         dest: grit_dest.path().to_path_buf(),
         environment: Environment::empty(),
-        ..CloneOptions::new(bundle_path.to_str().unwrap(), grit_dest.path().to_path_buf())
+        ..CloneOptions::new(
+            bundle_path.to_str().unwrap(),
+            grit_dest.path().to_path_buf(),
+        )
     };
     let outcome = clone_repo(&opts, &mut NoProgress, None).expect("grit clone from bundle");
 
