@@ -961,6 +961,18 @@ On main  ·  even with origin/main
 Nothing to commit — working tree clean.
 ```
 
+Merge in progress with a conflict:
+
+```console
+$ grit status
+On main  ·  merging — resolve conflicts
+
+Staged
+  !  conflict      f
+
+→ resolve conflicts, then grit commit "message"
+```
+
 Check from a script whether the working tree is clean:
 
 ```console
@@ -984,6 +996,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `unstaged` | array | Unstaged changes with `path` and `status`. |
 | `untracked` | array | Paths of untracked files. |
 | `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
+| `merging` | boolean | `true` when a merge is in progress (`MERGE_HEAD` exists). |
+| `in_progress` | array | Stable operation ids while work is paused (for example `merge`, `rebase`). Omitted when empty. |
+| `conflicts` | array | Paths with unmerged index stages. Omitted when empty. |
 
 Example:
 
@@ -3308,6 +3323,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack_receive` | module | Stream side-band pack data from fetch/clone into memory or a pack temp file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/index.html) |
 | `grit_lib::pack_receive::PackReceiveTarget` | enum | Where demuxed pack bytes are stored. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/enum.PackReceiveTarget.html) |
 | `grit_lib::pack_receive::TempPackReceive` | struct | A temp pack file under objects/pack/ for streaming clone/fetch receive. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/struct.TempPackReceive.html) |
+| `grit_lib::pack_reuse` | module | Verbatim pack reuse for bitmap-accelerated upload-pack (streaming PACK v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_reuse/index.html) |
+| `grit_lib::pack_reuse::ReuseWriteStats` | struct | Counters updated while streaming reused pack bytes. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_reuse/struct.ReuseWriteStats.html) |
+| `grit_lib::pack_reuse::StreamingReuse` | struct | Active verbatim reuse context while streaming a pack body. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_reuse/struct.StreamingReuse.html) |
 | `grit_lib::pack_rev` | module | On-disk pack reverse index (.rev) — RIDX format matching Git’s pack-write.c. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_rev/index.html) |
 | `grit_lib::pack_store` | module | Repository-scoped pack and MIDX read caches. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/index.html) |
 | `grit_lib::pack_store::PackStore` | struct | Per-objects/ cache of pack indexes, bytes, MIDX views, and delta-base LRU state. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) |
@@ -3326,6 +3344,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pathspec::PathspecMatchContext` | struct | Optional path metadata for literal pathspecs with a trailing / (tree-walk / diff-tree). | [API](https://docs.rs/grit-lib/latest/grit_lib/pathspec/struct.PathspecMatchContext.html) |
 | `grit_lib::pkt_line` | module | Git pkt-line format helpers. | [API](https://docs.rs/grit-lib/latest/grit_lib/pkt_line/index.html) |
 | `grit_lib::pkt_line::Packet` | enum | A single packet read from the wire. | [API](https://docs.rs/grit-lib/latest/grit_lib/pkt_line/enum.Packet.html) |
+| `grit_lib::pkt_line::SidebandChannel1Writer` | struct | Incrementally frame pack bytes on sideband channel 1 (64k pkt-lines). | [API](https://docs.rs/grit-lib/latest/grit_lib/pkt_line/struct.SidebandChannel1Writer.html) |
 | `grit_lib::plumbing` | module | Plumbing operations — low-level, machine-stable building blocks that map ~1:1 to a Git plumbing command (e.g. | [API](https://docs.rs/grit-lib/latest/grit_lib/plumbing/index.html) |
 | `grit_lib::porcelain` | module | Porcelain operations — user-facing engines that assemble a structured result model from plumbing pieces (e.g. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/index.html) |
 | `grit_lib::porcelain::add` | module | Stage working-tree changes into the index (git add). | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/index.html) |
@@ -3546,8 +3565,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::transport::Transport` | trait | A factory that connects to a remote and performs the protocol handshake. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/trait.Transport.html) |
 | `grit_lib::transport::http` | module | Smart-HTTP Git transport over a pluggable HTTP client. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/index.html) |
 | `grit_lib::transport::http::HttpClient` | trait | The minimal HTTP surface the smart-HTTP transport needs. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/trait.HttpClient.html) |
-| `grit_lib::transport::http::SmartHttpConnection` | struct | A live smart-HTTP connection: the parsed advertisement plus the context needed to issue the stateless-RPC POST. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/struct.SmartHttpConnection.html) |
 | `grit_lib::transport::http::SmartHttpTransport` | struct | A smart-HTTP Transport over a pluggable HttpClient. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/struct.SmartHttpTransport.html) |
+| `grit_lib::transport::stateless_http` | module | Smart-HTTP Connection over stateless POST rounds (upload-pack) or a single POST body (receive-pack). | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/stateless_http/index.html) |
+| `grit_lib::transport::stateless_http::StatelessHttpConnection` | struct | A live smart-HTTP connection backed by HttpClient stateless RPC. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/stateless_http/struct.StatelessHttpConnection.html) |
 | `grit_lib::transport_path` | module | Safety checks and path resolution for local transport URLs (matches Git connect.c / path.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/transport_path/index.html) |
 | `grit_lib::transport_path::NoDirectoryName` | struct | Error returned by git_url_basename when no directory name can be derived from a URL. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport_path/struct.NoDirectoryName.html) |
 | `grit_lib::transport_path::TransportPathError` | enum | Errors returned while validating local transport paths. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport_path/enum.TransportPathError.html) |
@@ -3589,25 +3609,55 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 
 > Query pack and MIDX commit bitmaps for fast object reachability and counting.
 
-Git stores optional **reachability bitmaps** alongside pack and multi-pack-index files. grit-lib can decode those bitmaps ([`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html)) and run **want/have** reachability queries ([`ReachabilityQuery`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachabilityQuery.html), [`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html)) without walking every tree.
+Git stores optional **reachability bitmaps** alongside pack and multi-pack-index (MIDX) files. grit-lib reads and writes Git-compatible **BITM v1** sidecars (EWAH-compressed sets, XOR commit chains, optional name-hash cache and lookup table). Use them for fast rev-list counting, fetch negotiation, and pack generation without walking the full object graph on every request.
 
-## Opening an index
+For pack-only write options and on-disk layout details, see the **pack-bitmaps** guide page in this section (`content/docs/library/pack-bitmaps.md`).
 
-[`BitmapIndex::open`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) prefers a MIDX bitmap when present, otherwise a pack sidecar. It returns `Ok(None)` when no valid bitmap exists.
+## Reading pack and MIDX bitmaps
 
-## Reachability queries
+[`BitmapIndex::open`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) on a [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) picks the active index: **MIDX bitmap when present**, otherwise the largest pack’s `.bitmap`. It returns `Ok(None)` when no valid sidecar exists (missing file, zero-byte placeholder, or corrupt header).
 
-[`BitmapIndex::reachability`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) (see [`bitmap_walk`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/index.html)) takes a repository handle, a [`ReachabilityQuery`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachabilityQuery.html) (wants, haves, optional [`ObjectFilter`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.ObjectFilter.html)), and [`MissingAction`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.MissingAction.html) for missing links. It returns [`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html) or [`BitmapWalkUnsupported`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.BitmapWalkUnsupported.html) when the repository is shallow or the filter needs a non-bitmap walk (`sparse:oid`, `tree:<n>` with `n > 0`).
+After open:
+
+- [`BitmapIndex::commit_bitmap`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) decodes one commit’s reachability set (type-filtered EWAH).
+- [`BitmapIndex::oid_at`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) / [`object_count`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) map pack positions to object ids.
+- Optional [`name_hash`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) entries come from the name-hash cache (path hashes during tree walks).
+- [`has_lookup_table`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) reports whether a lookup table chunk is present.
+
+Integration tests in `grit-lib/tests/pack_bitmap_read_git_compat.rs` round-trip **git-written** and **grit-written** pack bitmaps and MIDX bitmaps against `git rev-list --test-bitmap`.
+
+## Querying reachability
+
+[`BitmapIndex::reachability`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) takes a [`ReachabilityQuery`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachabilityQuery.html) (wants, haves, optional [`ObjectFilter`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.ObjectFilter.html)), and [`MissingAction`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.MissingAction.html) for missing links. It returns [`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html) or [`BitmapWalkUnsupported`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.BitmapWalkUnsupported.html) when the repository is shallow or the filter needs a non-bitmap walk (`sparse:oid`, `tree:<n>` with `n > 0`, and similar).
 
 [`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html) exposes `object_ids` for indexed and **extended** (out-of-namespace) objects, and `iter_grouped_by_kind` for oids in Git’s bitmap order (commits, trees, blobs, tags).
 
-## Pack generation
+[`BitmapIndex::verify_commit`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) compares a stored commit bitmap with a fresh non-bitmap walk (same idea as `git rev-list --test-bitmap`).
 
-[`build_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack.html) and [`build_pack_with_shallow_and_filter`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack_with_shallow_and_filter.html) enumerate objects via [`enumerate_pack_objects`](https://docs.rs/grit-lib/latest/grit_lib/pack_object_select/fn.enumerate_pack_objects.html) when [`PackBuildOptions::use_bitmaps`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html) is true (the default) and a [`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) is available. Upload-pack reads `pack.useBitmaps` and `uploadpack.allowBitmaps` through [`PackBuildOptions::use_bitmaps_for_upload_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html). When bitmap enumeration is unsupported or disabled, grit falls back to the object walk; object sets stay the same.
+## Writing pack bitmaps
 
-## Verifying on-disk bitmaps
+[`PackBitmapWriter`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriter.html) and [`Repository::write_pack_bitmap`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) build a `.bitmap` for an **existing** pack index whose objects are closed under reachability from the repository’s refs (typical after `git repack -ad`). Pass [`PackBitmapWriteOptions`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriteOptions.html) explicitly, or use [`ConfigSet::pack_bitmap_write_options`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) for Git’s `pack.writeBitmapHashCache`, `pack.writeBitmapLookupTable`, and `pack.preferBitmapTips`.
 
-[`BitmapIndex::verify_commit`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) compares a stored commit bitmap with a fresh walk (similar to `git rev-list --test-bitmap`).
+If no `.rev` sidecar exists, the writer creates one so object order matches Git’s pack-offset order. Output is deterministic for identical inputs. A pack that is not closed under reachability returns [`PackBitmapWriteError::NotClosed`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/enum.PackBitmapWriteError.html).
+
+## MIDX bitmaps
+
+When grit writes or compacts a multi-pack-index with bitmap support enabled, it emits real MIDX `.bitmap` chunks (and matching `.rev` sidecars) instead of zero-byte placeholders. [`BitmapIndex::open`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) prefers that MIDX bitmap for reachability queries. See `grit-lib/tests/midx_write_coverage.rs` and `reads_git_midx_bitmap` in `pack_bitmap_read_git_compat.rs`.
+
+## Fallback semantics
+
+When bitmaps are missing, truncated, or unsupported for the requested walk:
+
+- [`BitmapIndex::open`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) returns `Ok(None)`; callers fall back to graph walks.
+- Corrupt sidecars may emit diagnostics (for example EWAH or index corruption) while still completing the operation via fallback where Git would.
+- [`rev_list`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/fn.rev_list.html) uses bitmap fast paths when [`RevListOptions`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/struct.RevListOptions.html) allow it (`--use-bitmap-index` semantics); incompatible options or shallow repos fall back transparently (see `grit-lib/tests/rev_list_bitmaps.rs`).
+- [`build_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack.html) and upload-pack use [`enumerate_pack_objects`](https://docs.rs/grit-lib/latest/grit_lib/pack_object_select/fn.enumerate_pack_objects.html) when [`PackBuildOptions::use_bitmaps`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html) is true and a [`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) is available; otherwise the object walk runs with the same resulting set.
+
+## Not supported yet
+
+- **Pseudo-merge** and other experimental bitmap encodings Git may gate behind feature flags.
+- **Incremental MIDX** bitmap chains (Git rejects `repack -d` with bitmaps unless `--no-write-bitmap-index`; grit does not write bitmaps for incremental repacks).
+- UX-only upstream cases (`--progress`, JGit interop, `pack.preferBitmapTips` misconfiguration messages) are not CLI goals; library APIs accept explicit tip lists via `PackBitmapWriteOptions`.
 
 ## Example
 
@@ -3707,7 +3757,7 @@ fn main() -> ExitCode {
 }
 ```
 
-Run against a repository with a pack bitmap (`git repack -adb`):
+Run against a repository with a pack bitmap (`git repack -adb` or grit’s writer):
 
 ```bash
 cargo run --example count_reachable -- /path/to/repo HEAD
@@ -4910,14 +4960,36 @@ The rev-list gap is dominated by history/object enumeration in `grit-lib`, not b
 
 ## grit-bench: reachability bitmaps (`git.git`)
 
-Scenario group **`bitmaps`** measures rev-list counting and a full-ref stateless **`upload-pack`** clone against a bare clone of upstream **`git/git`** at a pinned tag (`v2.47.0` by default), prepared with **`git repack -adb`** and **`git commit-graph write --reachable`**. Library workloads run through hidden **`grit-bench drive`** commands (`rev-list-count`, `rev-list-count-objects`, `serve-clone`).
+Scenario group **`bitmaps`** measures three acceptance metrics on upstream **`git/git`**: commit counting, object counting with bitmap index, and stateless **`upload-pack`** clone serving. The fixture is a bare **single-branch tag clone** at **`v2.47.0`** (override with **`GRIT_BENCH_GIT_GIT_TAG`**) under **`GRIT_BENCH_ODB_CACHE`**, prepared once with **Git-written** pack bitmaps (`git repack -adb`, `git commit-graph write --reachable`) and separately with **grit-written** pack bitmaps (`git repack -ad`, commit-graph, then `PackBitmapWriter` — see `ensure_bitmaps_grit_repo` in `grit-utils/src/bitmap_fixture.rs`). Library workloads use hidden **`grit-bench drive`** commands (`rev-list-count`, `rev-list-count-objects`, `serve-clone`); Git runs the equivalent **`git rev-list`** / **`git upload-pack`** invocations with the same isolated config as other grit-bench suites.
+
+**Methodology.** Hyperfine warmups and minimum runs match other factory captures (see each JSON `machine` block). Ratios are **Grit median ÷ Git median**. **Peak RSS** is recorded per side via `grit-bench measure-rss` / hyperfine wrappers. **`serve-clone`** runs under **`GRIT_BENCH_SERVE_TIMEOUT_SECS`** (default **120**) and **`GRIT_BENCH_SERVE_MAX_RSS_GIB`** (default **12**). Reproducibility: run the suite twice back-to-back on the same fixture; medians should agree within **±10% relative** (`grit-bench compare … --tolerance 0.10` uses an absolute ratio tolerance — interpret large ratios accordingly).
 
 ```bash
 cargo build --release -p grit-utils -p grit-cli
-./target/release/grit-bench bitmaps --format json --output grit-utils/baselines/bitmaps-before.json
+./target/release/grit-bench bitmaps --format json --output grit-utils/baselines/bitmaps-after.json
+# Optional second fixture (grit-written bitmap sidecar):
+GRIT_BENCH_BITMAPS_REPO="$(grit-bench …)" ./target/release/grit-bench bitmaps --repo "$GRIT_BENCH_BITMAPS_GRIT_REPO" …
 ```
 
-Baseline **`bitmaps-before.json`** (factory VM, 2026-10-10): **`rev-list-count-git.git`** — git ~63 ms vs grit ~207 ms; **`rev-list-count-objects-git.git`** — git ~24 ms vs grit ~546 s (no pack bitmap reader yet); **`serve-clone-git.git`** — git ~785 ms, grit **failed** (`memory_cap` / OOM under the serve time and RSS caps). Re-run with **`--repo`** after the cached fixture exists under **`GRIT_BENCH_ODB_CACHE`**.
+**Before (`bitmaps-before.json`, 2026-10-10, pre-reader/writer stack):** bitmap reader missing — object count ~**23 000×** vs Git; serve-clone hit **memory_cap**.
+
+**After acceptance (`bitmaps-after.json`, factory VM 2026-10-16, release `grit` on the pack-reuse + bitmap stack):**
+
+| Scenario | Git median | Grit median | Ratio | Grit peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| `rev-list-count-git.git` | 57.3 ms | 1033.2 ms | **18.0×** | ~285 MiB |
+| `rev-list-count-objects-git.git` | 16.8 ms | 1064.6 ms | **63.2×** | ~286 MiB |
+| `serve-clone-git.git` | 691.6 ms | *(120 s cap)* | — | timeout (`exit 124`) |
+
+Two back-to-back runs on the git-prepared fixture (2026-10-16) agreed within **~6–8% relative** on Grit medians for the rev-list scenarios (`971 ms` vs `1033 ms` count; `984 ms` vs `1065 ms` object count).
+
+**Acceptance bar (roadmap item 14):** each ratio **≤ 1.2×** (and serve-clone within the same bar). The after run **passes compatibility** (bitmaps read/write, serve packs validate with `git index-pack --strict` after the thin-pack reuse fix) but **misses the 1.2× performance bar** on all three command-level metrics on this tag-heavy **`git.git`** fixture (~954 tag refs). Follow-ups (not retargeting the bar):
+
+- **Multi-tip bitmap counting:** optimize `rev-list --count --all` / `--objects --use-bitmap-index` when hundreds of tag tips are present (Git ~60 ms vs grit ~1 s on the same fixture).
+- **Serve-clone wall time:** upload-pack on the full closure must complete under the factory serve cap without timing out; profile pack reuse + enumeration on `git.git`.
+- **Re-run `bitmaps-after.json`** after those land; keep **`bitmaps-before.json`** for regression context.
+
+Intermediate capture on the same VM before the final writer stack (**2026-10-10**) remains in **`bitmaps-before.json`** for the generated tables (`rev-list-count` **~3.3×**, object count unusable, serve **memory_cap**).
 
 ## grit-lib: parallel index-pack (in-memory)
 
@@ -5087,7 +5159,7 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | Operation | Scenarios | Median Grit / Git | Worst Grit / Git |
 | --- | ---: | ---: | ---: |
 | add | 2 | 2.56× | 2.59× |
-| bitmaps | 3 | 3.42× | 22454.26× |
+| bitmaps | 3 | 17.93× | 63.72× |
 | commit | 2 | 0.58× | 0.68× |
 | delta_encode | 2 | — | — |
 | merge | 2 | 3.40× | 3.84× |
@@ -5108,9 +5180,9 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `rev-list-count-git.git` | git.git | 63.7 | 218 | 3.42× | ±35.7 ms |
-| `rev-list-count-objects-git.git` | git.git | 24.3 | 546,442 | 22454.26× | ±5,375 ms |
-| `serve-clone-git.git` | git.git | 819 | 0.00 | 0.00× | ±0.00 ms |
+| `rev-list-count-git.git` | git.git | 57.7 | 1,034 | 17.93× | ±4.35 ms |
+| `rev-list-count-objects-git.git` | git.git | 17.0 | 1,082 | 63.72× | ±55.0 ms |
+| `serve-clone-git.git` | git.git | 682 | 0.00 | 0.00× | ±0.00 ms |
 
 ### commit
 

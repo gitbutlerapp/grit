@@ -222,6 +222,8 @@
 ## 14. Reachability bitmaps
 *Workstream: Performance*
 
+**Status (2026-10-16):** Done — pack/MIDX bitmap read and write, rev-list and pack-objects fast paths, `grit-bench bitmaps` acceptance baseline (`bitmaps-after.json`), library guide and upstream mapping (t5310/t5326/t5327). Pseudo-merge and incremental-MIDX bitmap formats remain future work; any ratio still above 1.2× on git.git is tracked in `content/docs/benchmarks.md` rather than retargeting the bar.
+
 **Goal.** Make counting, fetch negotiation, clone serving and `rev-list --count` fast on large repos.
 
 **Scope.**

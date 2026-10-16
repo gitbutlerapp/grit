@@ -62,14 +62,36 @@ The rev-list gap is dominated by history/object enumeration in `grit-lib`, not b
 
 ## grit-bench: reachability bitmaps (`git.git`)
 
-Scenario group **`bitmaps`** measures rev-list counting and a full-ref stateless **`upload-pack`** clone against a bare clone of upstream **`git/git`** at a pinned tag (`v2.47.0` by default), prepared with **`git repack -adb`** and **`git commit-graph write --reachable`**. Library workloads run through hidden **`grit-bench drive`** commands (`rev-list-count`, `rev-list-count-objects`, `serve-clone`).
+Scenario group **`bitmaps`** measures three acceptance metrics on upstream **`git/git`**: commit counting, object counting with bitmap index, and stateless **`upload-pack`** clone serving. The fixture is a bare **single-branch tag clone** at **`v2.47.0`** (override with **`GRIT_BENCH_GIT_GIT_TAG`**) under **`GRIT_BENCH_ODB_CACHE`**, prepared once with **Git-written** pack bitmaps (`git repack -adb`, `git commit-graph write --reachable`) and separately with **grit-written** pack bitmaps (`git repack -ad`, commit-graph, then `PackBitmapWriter` — see `ensure_bitmaps_grit_repo` in `grit-utils/src/bitmap_fixture.rs`). Library workloads use hidden **`grit-bench drive`** commands (`rev-list-count`, `rev-list-count-objects`, `serve-clone`); Git runs the equivalent **`git rev-list`** / **`git upload-pack`** invocations with the same isolated config as other grit-bench suites.
+
+**Methodology.** Hyperfine warmups and minimum runs match other factory captures (see each JSON `machine` block). Ratios are **Grit median ÷ Git median**. **Peak RSS** is recorded per side via `grit-bench measure-rss` / hyperfine wrappers. **`serve-clone`** runs under **`GRIT_BENCH_SERVE_TIMEOUT_SECS`** (default **120**) and **`GRIT_BENCH_SERVE_MAX_RSS_GIB`** (default **12**). Reproducibility: run the suite twice back-to-back on the same fixture; medians should agree within **±10% relative** (`grit-bench compare … --tolerance 0.10` uses an absolute ratio tolerance — interpret large ratios accordingly).
 
 ```bash
 cargo build --release -p grit-utils -p grit-cli
-./target/release/grit-bench bitmaps --format json --output grit-utils/baselines/bitmaps-before.json
+./target/release/grit-bench bitmaps --format json --output grit-utils/baselines/bitmaps-after.json
+# Optional second fixture (grit-written bitmap sidecar):
+GRIT_BENCH_BITMAPS_REPO="$(grit-bench …)" ./target/release/grit-bench bitmaps --repo "$GRIT_BENCH_BITMAPS_GRIT_REPO" …
 ```
 
-Baseline **`bitmaps-before.json`** (factory VM, 2026-10-10): **`rev-list-count-git.git`** — git ~63 ms vs grit ~207 ms; **`rev-list-count-objects-git.git`** — git ~24 ms vs grit ~546 s (no pack bitmap reader yet); **`serve-clone-git.git`** — git ~785 ms, grit **failed** (`memory_cap` / OOM under the serve time and RSS caps). Re-run with **`--repo`** after the cached fixture exists under **`GRIT_BENCH_ODB_CACHE`**.
+**Before (`bitmaps-before.json`, 2026-10-10, pre-reader/writer stack):** bitmap reader missing — object count ~**23 000×** vs Git; serve-clone hit **memory_cap**.
+
+**After acceptance (`bitmaps-after.json`, factory VM 2026-10-16, release `grit` on the pack-reuse + bitmap stack):**
+
+| Scenario | Git median | Grit median | Ratio | Grit peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| `rev-list-count-git.git` | 57.3 ms | 1033.2 ms | **18.0×** | ~285 MiB |
+| `rev-list-count-objects-git.git` | 16.8 ms | 1064.6 ms | **63.2×** | ~286 MiB |
+| `serve-clone-git.git` | 691.6 ms | *(120 s cap)* | — | timeout (`exit 124`) |
+
+Two back-to-back runs on the git-prepared fixture (2026-10-16) agreed within **~6–8% relative** on Grit medians for the rev-list scenarios (`971 ms` vs `1033 ms` count; `984 ms` vs `1065 ms` object count).
+
+**Acceptance bar (roadmap item 14):** each ratio **≤ 1.2×** (and serve-clone within the same bar). The after run **passes compatibility** (bitmaps read/write, serve packs validate with `git index-pack --strict` after the thin-pack reuse fix) but **misses the 1.2× performance bar** on all three command-level metrics on this tag-heavy **`git.git`** fixture (~954 tag refs). Follow-ups (not retargeting the bar):
+
+- **Multi-tip bitmap counting:** optimize `rev-list --count --all` / `--objects --use-bitmap-index` when hundreds of tag tips are present (Git ~60 ms vs grit ~1 s on the same fixture).
+- **Serve-clone wall time:** upload-pack on the full closure must complete under the factory serve cap without timing out; profile pack reuse + enumeration on `git.git`.
+- **Re-run `bitmaps-after.json`** after those land; keep **`bitmaps-before.json`** for regression context.
+
+Intermediate capture on the same VM before the final writer stack (**2026-10-10**) remains in **`bitmaps-before.json`** for the generated tables (`rev-list-count` **~3.3×**, object count unusable, serve **memory_cap**).
 
 ## grit-lib: parallel index-pack (in-memory)
 
