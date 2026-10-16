@@ -181,13 +181,6 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         index.defer_untracked_cache_invalidation = true;
     }
 
-    // Git's index often carries a valid TREE extension; per-path invalidation during a bulk
-    // restage devolves into thousands of tree walks. Drop it once up front at campaign scale.
-    if bulk_untr_defer && index.cache_tree.is_some() {
-        index.cache_tree = None;
-        index.cache_tree_root = None;
-    }
-
     let result = stage_tracked_modifications_in_index_body(
         repo,
         work_tree,
@@ -211,16 +204,18 @@ pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &Stag
     if !summary.untracked_invalidation_deferred {
         return;
     }
-    if summary.modified.is_empty() && summary.removed.is_empty() {
+    if summary.removed.is_empty() {
+        // Tracked blob edits alone do not change which paths are untracked; skip UNTR work so
+        // commit/add hot paths can reuse a warm untracked cache (issue #1064).
         return;
     }
-    for raw in summary.modified.iter().chain(summary.removed.iter()) {
+    for raw in &summary.removed {
         let path = std::str::from_utf8(raw)
             .map_or_else(|_| String::from_utf8_lossy(raw).into_owned(), str::to_owned);
         index.invalidate_untracked_cache_for_path(&path);
     }
     // Per-path invalidation is a no-op when UNTR has no directory node for a path; tracked-set
-    // changes during bulk defer still require marking the root invalid (Git invalidates UNTR).
+    // removals during bulk defer still require marking the root invalid (Git invalidates UNTR).
     if let Some(uc) = index.untracked_cache.as_mut() {
         if let Some(root) = uc.root.as_mut() {
             root.valid = false;

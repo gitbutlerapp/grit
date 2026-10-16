@@ -101,6 +101,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
             show_all: false,
             sort_paths: true,
             use_untracked_cache: false,
+            refresh_cache_on_miss: true,
         },
         &worktree_rules,
     )?;

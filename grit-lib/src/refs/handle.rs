@@ -53,6 +53,7 @@ impl<'repo> References<'repo> {
     ///     sign_override: None,
     ///     amend: false,
     ///     assume_worktree_synced: false,
+    ///     staged_path_changes: None,
     /// };
     /// let _ = create_commit(&repo, &req, &mut NullProgress)?;
     /// let main = RefName::try_from("refs/heads/main").expect("valid ref");
@@ -103,6 +104,7 @@ impl<'repo> References<'repo> {
     ///     sign_override: None,
     ///     amend: false,
     ///     assume_worktree_synced: false,
+    ///     staged_path_changes: None,
     /// };
     /// let commit = create_commit(&repo, &req, &mut NullProgress)?.oid;
     /// let name = RefName::try_from("refs/heads/handle-demo").expect("valid ref");

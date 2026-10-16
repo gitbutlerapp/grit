@@ -68,6 +68,7 @@ fn many_commits(repo: &Repository, n: usize) {
                 sign_override: None,
                 amend: false,
                 assume_worktree_synced: false,
+                staged_path_changes: None,
             },
             &mut NullProgress,
         )

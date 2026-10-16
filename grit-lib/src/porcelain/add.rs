@@ -111,6 +111,22 @@ pub fn stage_for_commit(
     stage_with_tracked_scan(repo, &opts, progress)
 }
 
+/// Stage tracked modifications/deletions for commit without walking for untracked files.
+///
+/// Same tracked scan as [`stage_for_commit`], but skips the untracked/ignored directory walk.
+/// Use when the caller will handle untracked separately or when the index already reflects
+/// every path that should appear in the next commit (issue #1064 hot path).
+pub fn stage_tracked_for_commit(
+    repo: &Repository,
+    progress: &mut dyn ProgressSink,
+) -> Result<StageOutcome> {
+    let opts = StageOptions {
+        mode: StageMode::Update,
+        ..StageOptions::default()
+    };
+    stage_with_tracked_scan(repo, &opts, progress)
+}
+
 /// Stage paths matching `opts` into the index.
 ///
 /// Loads the index, compares it to the work tree once, hashes only changed or new
@@ -235,6 +251,7 @@ fn stage_inner(
                 show_all: true,
                 sort_paths: false,
                 use_untracked_cache: false,
+                refresh_cache_on_miss: true,
             };
             let (untracked, _, _) = collect_untracked_and_ignored_inner(
                 repo,
@@ -246,11 +263,14 @@ fn stage_inner(
             )?;
             untracked
         } else {
+            let commit_untr_cache_only = use_tracked_scan
+                && index.entries.len() >= crate::untracked_cache::AUTO_UNTRACKED_CACHE_MIN_ENTRIES;
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,
                 show_all: untracked_show_all_matching_index(&index),
                 sort_paths: true,
                 use_untracked_cache: true,
+                refresh_cache_on_miss: !commit_untr_cache_only,
             };
             let (untracked, _, _) = collect_untracked_and_ignored_inner(
                 repo,

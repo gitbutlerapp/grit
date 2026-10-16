@@ -7911,6 +7911,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::add::Stage
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::add::StageOutcome
 pub fn grit_lib::porcelain::add::stage(&grit_lib::repo::Repository, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub fn grit_lib::porcelain::add::stage_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
+pub fn grit_lib::porcelain::add::stage_tracked_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub mod grit_lib::porcelain::branch
 pub struct grit_lib::porcelain::branch::CreateBranchOutcome
 pub grit_lib::porcelain::branch::CreateBranchOutcome::name: alloc::string::String
@@ -8045,6 +8046,7 @@ pub struct grit_lib::porcelain::commit::CommitRequest
 pub grit_lib::porcelain::commit::CommitRequest::allow_empty: bool
 pub grit_lib::porcelain::commit::CommitRequest::amend: bool
 pub grit_lib::porcelain::commit::CommitRequest::assume_worktree_synced: bool
+pub grit_lib::porcelain::commit::CommitRequest::staged_path_changes: core::option::Option<usize>
 pub grit_lib::porcelain::commit::CommitRequest::author: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::committer: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::message: alloc::string::String

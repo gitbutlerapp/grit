@@ -44,6 +44,9 @@ pub struct CommitRequest {
     /// When true, skip the post-commit full-tree index stat refresh because the caller already
     /// synced the index from the worktree (for example via [`crate::porcelain::add::stage_for_commit`]).
     pub assume_worktree_synced: bool,
+    /// When set, used for [`CommitOutcome::changes`] instead of diffing parent and new trees
+    /// (avoids a full tree walk on large indexes when the caller already staged paths).
+    pub staged_path_changes: Option<usize>,
 }
 
 /// Result of [`create_commit`].
@@ -137,12 +140,15 @@ pub fn create_commit(
         .transpose()?;
 
     if !req.allow_empty && !req.amend && !concluding_merge {
-        if let Some(ref old) = parent_tree {
-            if index_staged_tree_matches(repo.odb(), &index, old) {
+        let skip_tree_match = req.staged_path_changes.is_some_and(|n| n > 0);
+        if !skip_tree_match {
+            if let Some(ref old) = parent_tree {
+                if index_staged_tree_matches(repo.odb(), &index, old) {
+                    return Err(Error::NothingToCommit);
+                }
+            } else if index.entries.is_empty() {
                 return Err(Error::NothingToCommit);
             }
-        } else if index.entries.is_empty() {
-            return Err(Error::NothingToCommit);
         }
     }
 
@@ -264,7 +270,11 @@ pub fn create_commit(
     }
     repo.write_index(&mut index)?;
 
-    let changes = diff_trees(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?.len();
+    let changes = if let Some(n) = req.staged_path_changes {
+        n
+    } else {
+        diff_trees(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?.len()
+    };
 
     update_branch_for_commit_with_config(
         repo.git_dir(),
@@ -440,6 +450,7 @@ mod tests {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
+            staged_path_changes: None,
         }
     }
 

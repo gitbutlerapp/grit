@@ -42,6 +42,7 @@ fn commit_req(message: &str) -> CommitRequest {
         sign_override: None,
         amend: false,
         assume_worktree_synced: false,
+        staged_path_changes: None,
     }
 }
 

@@ -64,6 +64,7 @@ pub fn clean_untracked(
         show_all,
         sort_paths: true,
         use_untracked_cache: false,
+        refresh_cache_on_miss: true,
     };
 
     let (untracked, ignored, _) = collect_untracked_and_ignored_inner(

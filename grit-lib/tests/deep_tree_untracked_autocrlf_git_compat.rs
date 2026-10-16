@@ -132,6 +132,7 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
+            staged_path_changes: None,
         },
         &mut NullProgress,
     )
