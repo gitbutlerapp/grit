@@ -46,6 +46,9 @@ cargo build --release -p grit-cli -p grit-utils
 # Ledger plus JSON: write ledger next to the JSON path
 ./target/release/grit-bench campaign --ledger --format json --output baselines/campaign-before.json
 
+# Classify a committed report without re-running hyperfine (exits 1 if any `fail` row)
+./target/release/grit-bench campaign --ledger --from baselines/campaign-after.json
+
 # Smaller fixtures for CI (`GRIT_BENCH_LINUX=1` or `--with-linux` adds linux)
 ./target/release/grit-bench campaign --smoke --no-network --format json --output /tmp/campaign-smoke.json
 ```
