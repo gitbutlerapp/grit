@@ -1332,19 +1332,31 @@ pub(crate) fn line_diff_ops_git_xdiff_compacted(
     use std::collections::HashMap;
 
     let mut interner: HashMap<&str, u32> = HashMap::new();
-    let mut ids1: Vec<u32> = Vec::with_capacity(old_lines.len());
+    let mut ids1 = Vec::with_capacity(old_lines.len());
     for &line in old_lines {
         let next = interner.len() as u32;
         let id = *interner.entry(line).or_insert(next);
         ids1.push(id);
     }
-    let mut ids2: Vec<u32> = Vec::with_capacity(new_lines.len());
+    let mut ids2 = Vec::with_capacity(new_lines.len());
     for &line in new_lines {
         let next = interner.len() as u32;
         let id = *interner.entry(line).or_insert(next);
         ids2.push(id);
     }
-    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2);
+    line_diff_ops_git_xdiff_compacted_ids(&ids1, &ids2, old_lines, new_lines, indent_heuristic)
+}
+
+/// Like [`line_diff_ops_git_xdiff_compacted`], but reuses precomputed line ids for each side.
+#[must_use]
+pub(crate) fn line_diff_ops_git_xdiff_compacted_ids(
+    old_ids: &[u32],
+    new_ids: &[u32],
+    old_lines: &[&str],
+    new_lines: &[&str],
+    indent_heuristic: bool,
+) -> Vec<similar::DiffOp> {
+    let (changed1, changed2) = git_xdiff::changed_flags(old_ids, new_ids);
     let ops = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     diff_indent_heuristic::apply_change_compact_to_ops(&ops, old_lines, new_lines, indent_heuristic)
 }

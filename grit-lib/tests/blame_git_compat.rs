@@ -709,6 +709,81 @@ fn blame_matches_git_porcelain_at_head_rev_and_line_range() {
 }
 
 #[test]
+fn blame_interior_blank_lines_match_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "blanks.txt";
+    std::fs::write(root.join(file), "alpha\n\nbeta\n\ngamma\n").expect("write");
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "init with interior blank lines"]);
+
+    std::fs::write(root.join(file), "alpha\n\nbeta changed\n\ngamma\n").expect("write");
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "edit beta"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    assert_blame_matches(&repo, root, file, None, None);
+}
+
+#[test]
+fn blame_consecutive_and_trailing_blank_lines_match_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "blanks2.txt";
+    std::fs::write(root.join(file), "alpha\n\n\nbeta\n\n").expect("write");
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "consecutive and trailing blanks"]);
+
+    std::fs::write(root.join(file), "alpha\n\n\nbeta edited\n\n").expect("write");
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "edit beta with blanks preserved"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    assert_blame_matches(&repo, root, file, None, None);
+}
+
+/// Bloom must still skip when a sibling file in the same directory changed.
+#[test]
+fn blame_bloom_skip_when_sibling_in_directory_changed_matches_git() {
+    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    std::fs::create_dir_all(root.join("builtin")).expect("dir");
+    std::fs::write(root.join("builtin/target.c"), "stable line\n").expect("write");
+    std::fs::write(root.join("builtin/sibling.c"), "other\n").expect("write");
+    git_run(root, &["add", "builtin"]);
+    git_run(root, &["commit", "-m", "add sibling files"]);
+
+    std::fs::write(root.join("builtin/sibling.c"), "other changed\n").expect("write");
+    git_run(root, &["add", "builtin/sibling.c"]);
+    git_run(root, &["commit", "-m", "touch sibling only"]);
+
+    for n in 0..10 {
+        git_run(
+            root,
+            &["commit", "--allow-empty", "-m", &format!("noop {n}")],
+        );
+    }
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("graph");
+    assert_blame_matches(&repo, root, "builtin/target.c", None, None);
+}
+
+#[test]
 fn blame_respects_graft_over_commit_graph_bloom() {
     use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
 
