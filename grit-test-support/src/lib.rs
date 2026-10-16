@@ -548,11 +548,24 @@ fn run_program(
     }
 }
 
+/// Drop `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS` overrides inherited from the
+/// test runner (for example CI jobs that set parallel Git config).
+pub fn clear_inherited_git_config_overrides(cmd: &mut Command) -> &mut Command {
+    cmd.env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_CONFIG_PARAMETERS");
+    for i in 0..64 {
+        cmd.env_remove(format!("GIT_CONFIG_KEY_{i}"));
+        cmd.env_remove(format!("GIT_CONFIG_VALUE_{i}"));
+    }
+    cmd
+}
+
 /// Apply deterministic Git identity, date, and config isolation to a command.
 ///
 /// `cmd` is the child command being prepared. The returned mutable reference is
 /// the same command, allowing additional builder calls by the caller.
 pub fn configure_git_env(cmd: &mut Command) -> &mut Command {
+    clear_inherited_git_config_overrides(cmd);
     cmd.env("GIT_AUTHOR_NAME", AUTHOR_NAME)
         .env("GIT_AUTHOR_EMAIL", AUTHOR_EMAIL)
         .env("GIT_COMMITTER_NAME", AUTHOR_NAME)

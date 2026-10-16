@@ -7,25 +7,29 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use grit_test_support::configure_git_env;
+
 type TestResult = Result<(), Box<dyn Error>>;
 
 const GRIT: &str = env!("CARGO_BIN_EXE_grit");
 
-fn null_device() -> &'static str {
-    if cfg!(windows) {
-        "NUL"
-    } else {
-        "/dev/null"
-    }
+fn grit_cmd() -> Command {
+    let mut cmd = Command::new(GRIT);
+    configure_git_env(&mut cmd);
+    cmd
+}
+
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    configure_git_env(&mut cmd);
+    cmd
 }
 
 fn grit_json(repo: &Path, args: &[&str]) -> serde_json::Value {
-    let out = Command::new(GRIT)
+    let out = grit_cmd()
         .args(args)
         .arg("--json")
         .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .output()
         .expect("grit");
     assert!(
@@ -38,11 +42,9 @@ fn grit_json(repo: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 fn grit_ok(repo: &Path, args: &[&str]) {
-    let out = Command::new(GRIT)
+    let out = grit_cmd()
         .args(args)
         .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .output()
         .expect("grit");
     assert!(
@@ -54,11 +56,9 @@ fn grit_ok(repo: &Path, args: &[&str]) {
 }
 
 fn git_ok(repo: &Path, args: &[&str]) {
-    let out = Command::new("git")
+    let out = git_cmd()
         .args(args)
         .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .output()
         .expect("git");
     assert!(
@@ -85,11 +85,9 @@ fn grit_untracked_set(repo: &Path, args: &[&str]) -> std::collections::BTreeSet<
 }
 
 fn git_lines(repo: &Path, args: &[&str]) -> Vec<String> {
-    let out = Command::new("git")
+    let out = git_cmd()
         .args(args)
         .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .output()
         .expect("git");
     assert!(
@@ -118,11 +116,9 @@ fn status_untracked_all_lists_every_file_and_matches_git() -> TestResult {
     fs::write(repo.join("src/main.rs"), "fn main() {}\n")?;
     fs::write(repo.join("plain.txt"), "p\n")?;
 
-    Command::new(GRIT)
+    grit_cmd()
         .args(["init", "."])
         .current_dir(&repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .status()
         .expect("grit init");
 
@@ -183,11 +179,9 @@ fn status_untracked_all_after_untracked_cache_normal_mode() -> TestResult {
     let base = tempfile::tempdir()?;
     let repo = base.path().join("r");
     fs::create_dir_all(&repo)?;
-    Command::new(GRIT)
+    grit_cmd()
         .args(["init", "."])
         .current_dir(&repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .status()
         .expect("grit init");
     grit_ok(&repo, &["config", "core.untrackedCache", "true"]);
@@ -225,11 +219,9 @@ fn status_untracked_all_from_config_without_flag() -> TestResult {
     let base = tempfile::tempdir()?;
     let repo = base.path().join("r");
     fs::create_dir_all(&repo)?;
-    Command::new(GRIT)
+    grit_cmd()
         .args(["init", "."])
         .current_dir(&repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .status()
         .expect("grit init");
     grit_ok(&repo, &["config", "status.showUntrackedFiles", "all"]);
@@ -245,39 +237,36 @@ fn status_rejects_invalid_show_untracked_files_config_like_git() -> TestResult {
     let base = tempfile::tempdir()?;
     let repo = base.path();
     fs::write(repo.join("lonely.txt"), "x\n")?;
-    Command::new(GRIT)
+    grit_cmd()
         .args(["init", "."])
         .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .status()
         .expect("grit init");
     grit_ok(repo, &["config", "status.showUntrackedFiles", "false"]);
 
-    let grit = Command::new(GRIT)
+    let grit = grit_cmd()
         .args(["status", "--json"])
         .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .output()
         .expect("grit status");
+
+    let git = git_cmd()
+        .args(["status", "--porcelain"])
+        .current_dir(repo)
+        .output()
+        .expect("git status");
+
+    assert_eq!(
+        grit.status.success(),
+        git.status.success(),
+        "grit and git must agree on invalid showUntrackedFiles=false (grit stdout: {}, git stderr: {})",
+        String::from_utf8_lossy(&grit.stdout),
+        String::from_utf8_lossy(&git.stderr)
+    );
     assert!(
         !grit.status.success(),
         "grit must reject invalid showUntrackedFiles like git:\n{}",
         String::from_utf8_lossy(&grit.stdout)
-    );
-
-    let git = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
-        .output()
-        .expect("git status");
-    assert_ne!(
-        git.status.code(),
-        Some(0),
-        "system git must reject showUntrackedFiles=false"
     );
     Ok(())
 }
@@ -287,11 +276,9 @@ fn status_untracked_no_omits_untracked_paths() -> TestResult {
     let base = tempfile::tempdir()?;
     let repo = base.path();
     fs::write(repo.join("lonely.txt"), "x\n")?;
-    Command::new(GRIT)
+    grit_cmd()
         .args(["init", "."])
         .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .status()
         .expect("grit init");
 
