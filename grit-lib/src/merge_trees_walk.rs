@@ -363,7 +363,19 @@ pub(crate) fn three_way_on_touched_paths(
     ours_paths.sort();
     ours_paths.dedup();
 
+    // When the other side renamed base paths to `new`, those destinations are also in
+    // `touched`. The rename source iteration already merges at `new`; skip duplicate passes.
+    let mut theirs_rename_destinations: HSet<Vec<u8>> = HSet::new();
+    for (old, new) in theirs_old_to_new {
+        if old != new && touched.contains(old) {
+            theirs_rename_destinations.insert(new.clone());
+        }
+    }
+
     for op in ours_paths {
+        if theirs_rename_destinations.contains(&op) && !ours_new_to_old.contains_key(&op) {
+            continue;
+        }
         let bp = if let Some(old) = ours_new_to_old.get(&op) {
             Some(old.clone())
         } else if base.contains_key(&op) {
