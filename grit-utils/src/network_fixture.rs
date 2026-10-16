@@ -453,7 +453,9 @@ pub fn ensure_campaign_bare_network_meta(
     let fetch_base = if tag_only {
         let tag = std::env::var("GRIT_BENCH_GIT_GIT_TAG")
             .unwrap_or_else(|_| crate::real_repo_fixture::DEFAULT_GIT_GIT_TAG.to_owned());
-        rev_parse(git, bare, &tag).or_else(|_| rev_parse(git, bare, "HEAD"))?
+        rev_parse(git, bare, &format!("{tag}^{{commit}}"))
+            .or_else(|_| rev_parse(git, bare, &format!("refs/tags/{tag}^{{commit}}")))
+            .or_else(|_| rev_parse(git, bare, "HEAD^{commit}"))?
     } else {
         rev_parse(
             git,
@@ -634,6 +636,7 @@ mod tests {
 
         let client = crate::network_suite::ensure_network_client_repo(&git, &bare)?;
         assert!(client.join(".git").exists());
+        crate::network_suite::prepare_network_fetch_incr(&git, &bare)?;
         crate::network_suite::prepare_network_push(&git, &bare)?;
         Ok(())
     }
