@@ -85,6 +85,28 @@ pub enum HistoryError {
         paths: Vec<String>,
     },
 
+    /// Selected commits do not form one connected component with allowed parents.
+    #[error("the selected commits are not a connected revision range")]
+    RangeNotConnected,
+
+    /// More than one tip commit appears in the selected range.
+    #[error("the revision range contains more than one tip commit")]
+    MultipleTips,
+
+    /// A fixup/amend/squash commit targets a commit outside the range.
+    #[error("cannot squash {commit}: its fixup/amend/squash target is outside the range")]
+    MarkerTargetOutsideRange {
+        /// Marker commit that could not be folded.
+        commit: ObjectId,
+    },
+
+    /// A `squash!` commit would lose its message without combining interactively.
+    #[error("squashing {commit} would discard its message; use --combine or -m")]
+    SquashDiscardsMessage {
+        /// Commit whose message would be dropped.
+        commit: ObjectId,
+    },
+
     /// A planned ref no longer matches the stored value (compare-and-swap failure).
     #[error("ref {name} changed since the rewrite plan was built")]
     RefCasMismatch {

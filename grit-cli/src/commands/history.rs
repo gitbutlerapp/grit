@@ -8,8 +8,8 @@ use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-    RewritePlan,
+    apply_rewrite, reword, squash, ApplyOptions, EmptyPolicy, HistoryError, RefScope,
+    RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
@@ -52,10 +52,10 @@ pub struct HistoryRewriteArgs {
     pub update_refs: UpdateRefs,
 }
 
-/// Result of `grit history reword`.
+/// Result of a `grit history` rewrite subcommand.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct HistoryRewordOutcome {
-    /// Operation name (`reword`).
+    /// Operation name (`reword`, `squash`, …).
     pub operation: String,
     /// Original and replacement commit OIDs for every rewritten commit.
     pub rewritten: Vec<RewrittenPair>,
@@ -155,9 +155,9 @@ pub fn run_reword(
             committer,
         },
     )
-    .map_err(map_history_error)?;
+    .map_err(|e| map_history_error(e, "reword"))?;
     let subject = rewritten_subject(&repo, &plan, commit_oid)?;
-    let mut outcome = outcome_from_plan(&repo, &plan, shared.dry_run)?;
+    let mut outcome = outcome_from_plan(&repo, &plan, "reword", shared.dry_run)?;
     if !shared.dry_run {
         let identity = context::committer_reflog_identity(env, &config)?;
         apply_rewrite(
@@ -168,10 +168,97 @@ pub fn run_reword(
                 reflog_message: format!("history reword: {subject}"),
             },
         )
-        .map_err(map_history_error)?;
+        .map_err(|e| map_history_error(e, "reword"))?;
     }
     outcome.dry_run = shared.dry_run;
     Ok(outcome)
+}
+
+/// Fold `range` into the oldest selected commit and replay descendants.
+pub fn run_squash(
+    range: &[String],
+    combine: bool,
+    message: Option<String>,
+    message_file: Option<String>,
+    shared: &HistoryRewriteArgs,
+) -> Result<HistoryRewordOutcome> {
+    if range.is_empty() {
+        bail!("revision range is required");
+    }
+    let squash_message = parse_squash_message(combine, message, message_file)?;
+    let repo = context::discover()?;
+    let env = repo.environment();
+    let config =
+        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+    let committer = context::identity(
+        env,
+        &config,
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        context::wall_clock_now(env),
+    )?;
+    let range_refs: Vec<&str> = range.iter().map(String::as_str).collect();
+    let plan = squash(
+        &repo,
+        &range_refs,
+        &SquashOptions {
+            message: squash_message,
+            rewrite: RewriteOptions {
+                scope: shared.update_refs.into(),
+                empty: EmptyPolicy::Drop,
+                committer,
+            },
+        },
+    )
+    .map_err(|e| map_history_error(e, "squash"))?;
+    let reflog_range = range.join(" ");
+    let mut outcome = outcome_from_plan(&repo, &plan, "squash", shared.dry_run)?;
+    if !shared.dry_run {
+        let identity = context::committer_reflog_identity(env, &config)?;
+        apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity,
+                reflog_message: format!("history squash: updating {reflog_range}"),
+            },
+        )
+        .map_err(|e| map_history_error(e, "squash"))?;
+    }
+    outcome.dry_run = shared.dry_run;
+    Ok(outcome)
+}
+
+fn parse_squash_message(
+    combine: bool,
+    message: Option<String>,
+    message_file: Option<String>,
+) -> Result<SquashMessage> {
+    let custom = match (message, message_file) {
+        (Some(_), Some(_)) => bail!("use either -m/--message or --message-file, not both"),
+        (None, None) => None,
+        (Some(m), None) => Some(m),
+        (None, Some(path)) => {
+            if path == "-" {
+                let mut buf = String::new();
+                io::stdin()
+                    .read_to_string(&mut buf)
+                    .context("could not read message from stdin")?;
+                Some(buf)
+            } else {
+                Some(
+                    std::fs::read_to_string(&path)
+                        .with_context(|| format!("could not read message file '{path}'"))?,
+                )
+            }
+        }
+    };
+    match (combine, custom) {
+        (true, Some(_)) => bail!("use either --combine or -m/--message-file, not both"),
+        (true, None) => Ok(SquashMessage::Combine),
+        (false, Some(text)) => Ok(SquashMessage::Custom(text)),
+        (false, None) => Ok(SquashMessage::Oldest),
+    }
 }
 
 fn read_message(message: Option<String>, message_file: Option<String>) -> Result<String> {
@@ -212,6 +299,7 @@ fn rewritten_subject(
 fn outcome_from_plan(
     repo: &grit_lib::repo::Repository,
     plan: &RewritePlan,
+    operation: &str,
     dry_run: bool,
 ) -> Result<HistoryRewordOutcome> {
     let rewritten = plan
@@ -235,7 +323,7 @@ fn outcome_from_plan(
         .collect();
     let head = head_pair(repo, plan)?;
     Ok(HistoryRewordOutcome {
-        operation: "reword".into(),
+        operation: operation.into(),
         rewritten,
         refs,
         head,
@@ -269,13 +357,32 @@ fn head_commit_oid(repo: &grit_lib::repo::Repository) -> Result<ObjectId> {
     }
 }
 
-fn map_history_error(err: HistoryError) -> anyhow::Error {
+fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
+    let label = format!("history {operation}");
     match err {
         HistoryError::EmptyMessage => anyhow::anyhow!("commit message cannot be empty"),
+        HistoryError::RangeNotConnected => {
+            anyhow::anyhow!("the selected commits are not a connected revision range")
+        }
+        HistoryError::MultipleTips => {
+            anyhow::anyhow!("the revision range contains more than one tip commit")
+        }
+        HistoryError::MarkerTargetOutsideRange { commit } => {
+            let short = &commit.to_hex()[..7];
+            anyhow::anyhow!(
+                "cannot squash {short}: its fixup/amend/squash target is outside the range"
+            )
+        }
+        HistoryError::SquashDiscardsMessage { commit } => {
+            let short = &commit.to_hex()[..7];
+            anyhow::anyhow!(
+                "squashing {short} would discard its message; use --combine or -m/--message"
+            )
+        }
         HistoryError::Conflict { mut paths, .. } => {
             paths.sort();
             paths.dedup();
-            json_error::operation_conflict("history reword", paths)
+            json_error::operation_conflict(&label, paths)
         }
         HistoryError::Planning { message } => {
             anyhow::anyhow!("history rewrite planning failed: {message}")
@@ -289,6 +396,9 @@ fn map_history_error(err: HistoryError) -> anyhow::Error {
             anyhow::anyhow!(
                 "{short} is a merge commit — grit history reword cannot replay merges yet"
             )
+        }
+        HistoryError::RootCommit { .. } if operation == "squash" => {
+            anyhow::anyhow!("cannot squash down to root commit")
         }
         HistoryError::RootCommit { commit } => {
             let short = &commit.to_hex()[..7];

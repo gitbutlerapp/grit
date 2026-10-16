@@ -3895,18 +3895,24 @@ pub grit_lib::history::HistoryError::InsertBeforeOnMerge
 pub grit_lib::history::HistoryError::InsertBeforeOnMerge::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten
 pub grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::history::HistoryError::MarkerTargetOutsideRange
+pub grit_lib::history::HistoryError::MarkerTargetOutsideRange::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::MergeCommitInReplay
 pub grit_lib::history::HistoryError::MergeCommitInReplay::commit: grit_lib::objects::ObjectId
+pub grit_lib::history::HistoryError::MultipleTips
 pub grit_lib::history::HistoryError::NotInHistory
 pub grit_lib::history::HistoryError::NotInHistory::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::Planning
 pub grit_lib::history::HistoryError::Planning::message: alloc::string::String
 pub grit_lib::history::HistoryError::RefApply
 pub grit_lib::history::HistoryError::RefApply::message: alloc::string::String
+pub grit_lib::history::HistoryError::RangeNotConnected
 pub grit_lib::history::HistoryError::RefCasMismatch
 pub grit_lib::history::HistoryError::RefCasMismatch::name: alloc::string::String
 pub grit_lib::history::HistoryError::RootCommit
 pub grit_lib::history::HistoryError::RootCommit::commit: grit_lib::objects::ObjectId
+pub grit_lib::history::HistoryError::SquashDiscardsMessage
+pub grit_lib::history::HistoryError::SquashDiscardsMessage::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::WorktreeApply
 pub grit_lib::history::HistoryError::WorktreeApply::message: alloc::string::String
 impl core::clone::Clone for grit_lib::history::HistoryError
@@ -4107,6 +4113,14 @@ pub fn grit_lib::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::
 pub fn grit_lib::history::normalize_rewrite_message(&str) -> core::result::Result<alloc::string::String, grit_lib::history::HistoryError>
 pub fn grit_lib::history::plan_rewrite(&grit_lib::repo::Repository, &grit_lib::history::HistoryEdits, &grit_lib::history::RewriteOptions) -> core::result::Result<grit_lib::history::RewritePlan, grit_lib::history::HistoryError>
 pub fn grit_lib::history::reword(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, alloc::string::String, &grit_lib::history::RewriteOptions) -> core::result::Result<grit_lib::history::RewritePlan, grit_lib::history::HistoryError>
+pub fn grit_lib::history::squash(&grit_lib::repo::Repository, &[&str], &grit_lib::history::SquashOptions) -> core::result::Result<grit_lib::history::RewritePlan, grit_lib::history::HistoryError>
+pub enum grit_lib::history::SquashMessage
+pub grit_lib::history::SquashMessage::Combine
+pub grit_lib::history::SquashMessage::Custom
+pub grit_lib::history::SquashMessage::Oldest
+pub struct grit_lib::history::SquashOptions
+pub grit_lib::history::SquashOptions::message: grit_lib::history::SquashMessage
+pub grit_lib::history::SquashOptions::rewrite: grit_lib::history::RewriteOptions
 pub type grit_lib::history::HistoryEdits = alloc::collections::btree::map::BTreeMap<grit_lib::objects::ObjectId, grit_lib::history::CommitEdit>
 pub mod grit_lib::index
 pub mod grit_lib::index::handle

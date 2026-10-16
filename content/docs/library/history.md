@@ -14,6 +14,8 @@ The [`history`](rustdoc:grit_lib::history) module supports stateless history edi
 
 For a single message change, [`reword`](rustdoc:grit_lib::history::reword) builds the [`CommitEdit`](rustdoc:grit_lib::history::CommitEdit) and runs [`plan_rewrite`](rustdoc:grit_lib::history::plan_rewrite) after [`normalize_rewrite_message`](rustdoc:grit_lib::history::normalize_rewrite_message) (stripspace, trailing newline, reject empty).
 
+To fold a revision range, [`squash`](rustdoc:grit_lib::history::squash) resolves the range (connected, single tip), validates fixup/amend/squash markers, builds [`HistoryEdits`](rustdoc:grit_lib::history::HistoryEdits) (rewrite oldest with tip tree, drop inner commits), then calls [`plan_rewrite`](rustdoc:grit_lib::history::plan_rewrite). Use [`SquashMessage`](rustdoc:grit_lib::history::SquashMessage) for oldest, combined, or custom messages.
+
 ## Apply options and result
 
 [`ApplyOptions`](rustdoc:grit_lib::history::ApplyOptions) supplies the reflog identity and message written for every ref update in the batch.

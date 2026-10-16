@@ -11,6 +11,8 @@ order: 6
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
 grit history reword <commit> [--dry-run] [--update-refs=(branches|head)]
+grit history squash <revision-range>... [--combine | -m <message> | --message-file <path|->]
+grit history squash <revision-range>... [--dry-run] [--update-refs=(branches|head)]
 ```
 
 ## Description
@@ -31,13 +33,28 @@ Provide exactly one of `-m` / `--message` or `--message-file` (use `-` to read f
 
 If any descendant commit is a **merge**, planning refuses with an error (merge replay is not supported yet). Use a linear range or wait for later `grit history` subcommands that handle merges.
 
+### `squash`
+
+Fold a **revision range** into the oldest commit in that range, keep that commit’s author and parents (including merge parents when the oldest commit is a merge), take the range tip’s tree, and replay commits above the range unchanged. Range syntax matches `git rev-list` (`base..tip`, `^excl`, multiple tips).
+
+Message mode (pick one; default keeps the oldest message, including `amend!` adjustments inside the range):
+
+- **`--combine`** — autosquash-style combined message (comment lines from Git’s squash template are stripped; no editor).
+- **`-m` / `--message-file`** — explicit message (same normalization as [`grit commit`](commit.md)).
+
+`fixup!` / `squash!` / `amend!` commits whose target is outside the range are refused unless the range is only markers for one target. Squashing `squash!` without `--combine` or `-m` fails when a message would be discarded.
+
+With **`--update-refs=branches`** (default), grit refuses when a local branch tip points at a commit inside the range but is not the range tip (use **`--update-refs=head`** to rewrite only the current branch).
+
 ## Options
 
 | Option | Description |
 | --- | --- |
 | `<commit>` | Commit to reword (revision spec). |
-| `-m`, `--message` | New commit message (conflicts with `--message-file`). |
+| `<revision-range>` | One or more rev-list tokens (`A..B`, `^A`, tips). |
+| `-m`, `--message` | New commit message (conflicts with `--message-file`; on `squash`, conflicts with `--combine`). |
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
+| `--combine` | (`squash` only) Combine messages autosquash-style. |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |
 
@@ -63,13 +80,13 @@ Dry run — refs would change:
 
 ## JSON output
 
-Schema: [v1](/schemas/history.reword/v1.json)
+Schemas: [reword v1](/schemas/history.reword/v1.json), [squash v1](/schemas/history.squash/v1.json)
 
-Pass `--json` on `grit history reword`:
+Pass `--json` on `grit history reword` or `grit history squash`:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | Always `"reword"`. |
+| `operation` | string | `"reword"` or `"squash"`. |
 | `rewritten` | array | `{old,new}` full hex OIDs for each rewritten commit. |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |

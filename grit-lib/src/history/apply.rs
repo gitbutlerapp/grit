@@ -3,9 +3,9 @@
 use std::fs;
 
 use crate::config::ConfigSet;
-use crate::objects::ObjectId;
 use crate::diff::{diff_trees, DiffStatus};
 use crate::index::write_tree::write_tree_from_index;
+use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local, verify_tree_transition_allow_local,
@@ -267,11 +267,7 @@ fn restore_worktree_after_failed_apply(
             if change.status == DiffStatus::Deleted {
                 continue;
             }
-            let Some(path) = change
-                .new_path
-                .as_deref()
-                .or(change.old_path.as_deref())
-            else {
+            let Some(path) = change.new_path.as_deref().or(change.old_path.as_deref()) else {
                 continue;
             };
             if index.get(path.as_bytes(), 0).is_some() {
@@ -283,11 +279,10 @@ fn restore_worktree_after_failed_apply(
             }
         }
     }
-    let index_tree = write_tree_from_index(repo.odb(), &index, "").map_err(|e| {
-        HistoryError::WorktreeApply {
+    let index_tree =
+        write_tree_from_index(repo.odb(), &index, "").map_err(|e| HistoryError::WorktreeApply {
             message: e.to_string(),
-        }
-    })?;
+        })?;
     checkout_hard_to_tree_from_head_tree(repo, old, &index_tree).map_err(|e| {
         HistoryError::WorktreeApply {
             message: format!("failed to restore worktree after apply error: {e}"),
