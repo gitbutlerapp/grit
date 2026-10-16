@@ -148,16 +148,19 @@ fn reset_worktree_from_bare(git: &Path, bare: &Path, worktree: &Path) -> Result<
 }
 
 /// Hyperfine prepare hook: restore the deep-history worktree with fresh loose objects.
-pub fn run_prepare_maintenance(git: &Path) -> Result<()> {
+pub fn run_prepare_maintenance(git: &Path, worktree: Option<&Path>) -> Result<()> {
     let bare = std::env::var("GRIT_BENCH_MAINTENANCE_BARE")
         .map(PathBuf::from)
         .context("GRIT_BENCH_MAINTENANCE_BARE must be set for prepare-maintenance")?;
-    if std::env::var("GRIT_BENCH_CAMPAIGN_CWD").is_ok() {
-        let worktree = bench_work_dir();
+    let campaign_worktree = worktree
+        .map(PathBuf::from)
+        .or_else(|| std::env::var("GRIT_BENCH_CAMPAIGN_CWD").ok().map(PathBuf::from));
+    if let Some(worktree) = campaign_worktree {
         if !worktree.join(GC_BASE_MARKER).is_file() {
             anyhow::bail!(
-                "missing {} in campaign worktree (write gc base before gc scenarios)",
-                GC_BASE_MARKER
+                "missing {} in {} (write gc base before gc scenarios)",
+                GC_BASE_MARKER,
+                worktree.display()
             );
         }
         return restore_gc_worktree(git, &worktree);
