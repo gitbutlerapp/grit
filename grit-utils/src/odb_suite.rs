@@ -327,6 +327,7 @@ pub fn run_odb_suite(
             grit: tool_version(grit_cli),
             grit_commit: grit_source_commit(),
         },
+        fixtures: vec![],
         scenarios,
     })
 }
@@ -432,6 +433,7 @@ pub fn run_odb_backend_suite(
             grit: tool_version(grit_cli),
             grit_commit: grit_source_commit(),
         },
+        fixtures: vec![],
         scenarios,
     })
 }

@@ -107,6 +107,7 @@ pub fn run_local_clone_suite(
             grit: tool_version(grit),
             grit_commit: grit_source_commit(),
         },
+        fixtures: vec![],
         scenarios: vec![scenario],
     })
 }

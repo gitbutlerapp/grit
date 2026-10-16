@@ -58,6 +58,18 @@ pub struct BenchFailure {
     pub message: String,
 }
 
+/// Cached fixture identity recorded in benchmark reports.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FixtureRecord {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    pub head_oid: String,
+    pub object_count: u64,
+    pub ref_count: u64,
+    pub file_count: u64,
+}
+
 /// One benchmark scenario (grit vs git).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScenarioResult {
@@ -82,6 +94,8 @@ pub struct BenchReport {
     pub timestamp: String,
     pub machine: MachineInfo,
     pub tools: ToolVersions,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixtures: Vec<FixtureRecord>,
     pub scenarios: Vec<ScenarioResult>,
 }
 

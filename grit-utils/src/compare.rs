@@ -107,6 +107,7 @@ mod tests {
                 grit: "grit".into(),
                 grit_commit: None,
             },
+            fixtures: vec![],
             scenarios: vec![ScenarioResult {
                 id: id.into(),
                 group: "g".into(),

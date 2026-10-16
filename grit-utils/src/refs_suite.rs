@@ -377,6 +377,7 @@ pub fn run_refs_suite(
             grit: tool_version(grit_cli),
             grit_commit: grit_source_commit(),
         },
+        fixtures: vec![],
         scenarios,
     })
 }

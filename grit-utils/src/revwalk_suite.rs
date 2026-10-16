@@ -137,6 +137,7 @@ pub fn run_revwalk_suite(
             grit: tool_version(grit),
             grit_commit: grit_source_commit(),
         },
+        fixtures: vec![],
         scenarios,
     })
 }

@@ -103,6 +103,7 @@ mod tests {
                 grit: "grit 0.5.0".into(),
                 grit_commit: Some("abc123".into()),
             },
+            fixtures: vec![],
             scenarios: vec![ScenarioResult {
                 id: "status-dirty-100".into(),
                 group: "status".into(),

@@ -8,6 +8,7 @@ use grit_utils::campaign_suite::{run_campaign_suite, CampaignOptions};
 use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::fixture::{DeepLeafDogfoodSpec, DenseLeafDogfoodSpec};
+use grit_utils::fixture_registry::{self, FixtureKind};
 use grit_utils::fsck_suite::run_fsck_suite;
 use grit_utils::ignore_suite::run_ignore_suite;
 use grit_utils::local_clone_suite::run_local_clone_suite;
@@ -235,6 +236,11 @@ enum Cmd {
         #[arg(long, default_value = "0.10")]
         tolerance: f64,
     },
+    /// Prepare and list cached benchmark fixtures (git.git + synthetic tiers)
+    Fixtures {
+        #[command(subcommand)]
+        action: FixturesCmd,
+    },
     /// Deterministic synthetic repository fixtures for benchmarks
     Fixture {
         #[command(subcommand)]
@@ -397,6 +403,21 @@ impl From<SynthTierArg> for SynthTier {
 }
 
 #[derive(Subcommand)]
+enum FixturesCmd {
+    /// Show fixtures present under the cache directory
+    List,
+    /// Download or generate fixtures into the cache
+    Prepare {
+        /// Fail when `git.git` is missing instead of cloning from GitHub
+        #[arg(long)]
+        offline: bool,
+        /// Restrict to these fixtures (default: all)
+        #[arg(long, value_enum)]
+        only: Vec<FixtureKind>,
+    },
+}
+
+#[derive(Subcommand)]
 enum FixtureCmd {
     /// Build a deterministic synthetic repo (grit-lib, no `git` shell).
     Synth {
@@ -459,6 +480,66 @@ fn render_synth_report(format: &OutputFormat, report: &SynthReport) -> Result<St
                 repo_path: report.repo_path.display().to_string(),
             })?)
         }
+    }
+}
+
+fn render_fixtures_list(
+    format: &OutputFormat,
+    records: &[grit_utils::schema::FixtureRecord],
+) -> Result<String> {
+    use grit_utils::schema::FixtureRecord;
+    match format {
+        OutputFormat::Text => {
+            if records.is_empty() {
+                return Ok(format!(
+                    "No fixtures in cache ({}).\n",
+                    fixture_registry::cache_root().display()
+                ));
+            }
+            let mut out = String::from("name\ttier\thead\tobjects\trefs\tfiles\n");
+            for FixtureRecord {
+                name,
+                tier,
+                head_oid,
+                object_count,
+                ref_count,
+                file_count,
+            } in records
+            {
+                let tier = tier.as_deref().unwrap_or("-");
+                out.push_str(&format!(
+                    "{name}\t{tier}\t{head_oid}\t{object_count}\t{ref_count}\t{file_count}\n"
+                ));
+            }
+            Ok(out)
+        }
+        OutputFormat::Markdown => {
+            let mut out = String::from("## Cached fixtures\n\n");
+            if records.is_empty() {
+                out.push_str(&format!(
+                    "_No fixtures under `{}`._\n",
+                    fixture_registry::cache_root().display()
+                ));
+                return Ok(out);
+            }
+            out.push_str("| name | tier | head | objects | refs | files |\n| --- | --- | --- | ---: | ---: | ---: |\n");
+            for FixtureRecord {
+                name,
+                tier,
+                head_oid,
+                object_count,
+                ref_count,
+                file_count,
+            } in records
+            {
+                let tier = tier.as_deref().unwrap_or("-");
+                out.push_str(&format!(
+                    "| `{name}` | {tier} | `{head_oid}` | {object_count} | {ref_count} | {file_count} |\n"
+                ));
+            }
+            Ok(out)
+        }
+        OutputFormat::Json => Ok(serde_json::to_string_pretty(records)?),
     }
 }
 
@@ -673,6 +754,20 @@ fn main() -> Result<()> {
         }
         Cmd::RefsDriver { workload } => {
             return run_refs_drive(workload);
+        }
+        Cmd::Fixtures { action } => {
+            let git = resolve_binary("git", cli.git.as_deref())?;
+            let body = match action {
+                FixturesCmd::List => {
+                    render_fixtures_list(&cli.format, &fixture_registry::list_cached(&git)?)?
+                }
+                FixturesCmd::Prepare { offline, only } => {
+                    let records = fixture_registry::prepare_all(&git, only, *offline)?;
+                    render_fixtures_list(&cli.format, &records)?
+                }
+            };
+            write_output(&cli, &body)?;
+            return Ok(());
         }
         Cmd::Fixture { fixture } => {
             match fixture {
@@ -1092,7 +1187,8 @@ fn main() -> Result<()> {
         | Cmd::PrepareParallelClone { .. }
         | Cmd::PrepareParallelIndexPack { .. }
         | Cmd::RefsDriver { .. }
-        | Cmd::Fixture { .. } => unreachable!(),
+        | Cmd::Fixture { .. }
+        | Cmd::Fixtures { .. } => unreachable!(),
     };
 
     let ledger_wrote_markdown = matches!(cli.command, Cmd::Campaign { ledger: true, .. })

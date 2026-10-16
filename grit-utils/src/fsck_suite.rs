@@ -83,6 +83,7 @@ pub fn run_fsck_suite(
             grit: tool_version(grit),
             grit_commit: grit_source_commit(),
         },
+        fixtures: vec![],
         scenarios: vec![scenario],
     })
 }

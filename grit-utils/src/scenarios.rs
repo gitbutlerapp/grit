@@ -977,6 +977,16 @@ pub(crate) fn build_report(
     timestamp: time::OffsetDateTime,
     scenarios: Vec<ScenarioResult>,
 ) -> BenchReport {
+    build_report_with_fixtures(git, grit, timestamp, scenarios, Vec::new())
+}
+
+pub(crate) fn build_report_with_fixtures(
+    git: &Path,
+    grit: &Path,
+    timestamp: time::OffsetDateTime,
+    scenarios: Vec<ScenarioResult>,
+    fixtures: Vec<crate::schema::FixtureRecord>,
+) -> BenchReport {
     BenchReport {
         schema_version: SCHEMA_VERSION,
         timestamp: format_timestamp(timestamp),
@@ -1001,6 +1011,7 @@ pub(crate) fn build_report(
             grit: tool_version(grit),
             grit_commit: grit_source_commit(),
         },
+        fixtures,
         scenarios,
     }
 }
