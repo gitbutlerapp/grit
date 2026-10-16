@@ -1627,22 +1627,11 @@ fn compute_blame_with_session(
         // Merge commits (2+ parents): sequential `pass_blame_to_parent` order from git/blame.c —
         // each line is attributed to the first parent whose version matches after line mapping.
         // Octopus merges and `.git/info/grafts` with many synthetic parents use the same rule.
-        let mut all_parents_have_path = parents.len() >= 2;
-        if all_parents_have_path {
-            for parent_oid in &parents {
-                if session
-                    .resolve_blob_at_commit(odb, *parent_oid, &current_path, &mut commit_cache)?
-                    .is_none()
-                {
-                    all_parents_have_path = false;
-                    break;
-                }
-            }
-        }
 
         // git/blame.c `pass_whole_blame`: when any parent has the same blob as the merge
-        // result, pass all remaining lines to that parent without merge diffs.
-        if !first_parent_only && !is_ignored && parents.len() >= 2 && all_parents_have_path {
+        // result, pass all remaining lines to that parent without merge diffs (even if another
+        // parent lacks `current_path`).
+        if !first_parent_only && !is_ignored && parents.len() >= 2 {
             for parent_oid in &parents {
                 if let Some((blob, mode)) = session.resolve_blob_at_commit(
                     odb,
@@ -2465,12 +2454,10 @@ fn bloom_may_skip_to_first_parent(
     if object_parents.first() != Some(&parent_oid) {
         return Ok(false);
     }
-    let Some(chain) = session.commit_graph.as_ref() else {
+    let Some(chain) = session.commit_graph.clone() else {
         return Ok(false);
     };
-    if session.bloom_pathspec.is_empty() {
-        session.bloom_pathspec.push(path.to_owned());
-    }
+    session.set_bloom_path(path);
     Ok(matches!(
         chain.bloom_precheck_for_paths(
             odb,

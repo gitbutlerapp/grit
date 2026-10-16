@@ -435,6 +435,68 @@ fn blame_merge_and_rename_parent_path_matches_git() {
     assert_blame_matches(&repo, dir, "live/result.txt", None, None);
 }
 
+/// After a rename, Bloom skips must query the renamed path (not a stale pathspec).
+#[test]
+fn blame_bloom_skip_after_rename_matches_git() {
+    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    std::fs::write(root.join("before.txt"), "stable\n").unwrap();
+    git_run(root, &["add", "before.txt"]);
+    git_run(root, &["commit", "-m", "add before.txt"]);
+
+    git_run(root, &["mv", "before.txt", "after.txt"]);
+    git_run(root, &["add", "-A"]);
+    git_run(root, &["commit", "-m", "rename to after.txt"]);
+
+    for n in 0..12 {
+        git_run(
+            root,
+            &["commit", "--allow-empty", "-m", &format!("noop {n}")],
+        );
+    }
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("graph");
+    let dir = repo.work_tree().expect("worktree");
+    assert_blame_matches(&repo, dir, "after.txt", None, None);
+}
+
+/// `pass_whole_blame` may target a parent with the same blob even if a sibling lacks the path.
+#[test]
+fn blame_pass_whole_when_sibling_parent_lacks_path_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    std::fs::write(root.join("shared.txt"), "payload\n").unwrap();
+    git_run(root, &["add", "shared.txt"]);
+    git_run(root, &["commit", "-m", "base"]);
+
+    git_run(root, &["branch", "keep"]);
+    git_run(root, &["branch", "drop"]);
+    git_run(root, &["checkout", "drop"]);
+    git_run(root, &["rm", "shared.txt"]);
+    git_run(root, &["commit", "-m", "drop shared.txt"]);
+
+    git_run(root, &["checkout", "keep"]);
+    git_run(
+        root,
+        &["merge", "-s", "ours", "drop", "-m", "merge keep tree"],
+    );
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let dir = repo.work_tree().expect("worktree");
+    assert_blame_matches(&repo, dir, "shared.txt", None, None);
+}
+
 #[test]
 fn blame_matches_git_porcelain_after_adcb_permutation() {
     let tmp = tempfile::tempdir().expect("tempdir");
