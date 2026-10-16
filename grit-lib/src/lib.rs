@@ -203,6 +203,7 @@ pub(crate) mod git_path;
 pub(crate) mod gitmodules;
 pub(crate) mod hash;
 pub(crate) mod hide_refs;
+pub mod history;
 pub(crate) mod hooks;
 pub(crate) mod ident;
 pub(crate) mod ident_config;

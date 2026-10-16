@@ -749,6 +749,10 @@ pub enum Error {
     #[error(transparent)]
     Hook(#[from] crate::hooks::HookError),
 
+    /// History rewrite planning failed ([`crate::history::HistoryError`]).
+    #[error(transparent)]
+    History(#[from] crate::history::HistoryError),
+
     /// An [`ObjectStore`](crate::odb::store::ObjectStore) backend does not implement the
     /// requested operation (for example filesystem-only helpers on an in-memory store).
     #[error("object store does not support: {operation}")]

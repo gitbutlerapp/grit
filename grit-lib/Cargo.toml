@@ -90,6 +90,10 @@ name = "history"
 harness = false
 
 [[bench]]
+name = "history_rewrite"
+harness = false
+
+[[bench]]
 name = "fsck"
 harness = false
 
