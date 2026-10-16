@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::schema::ScenarioResult;
+use crate::schema::{BenchReport, ScenarioResult};
 
 /// Default grit/git ratio target when a scenario has no explicit entry.
 pub const DEFAULT_TARGET_RATIO: f64 = 1.1;
@@ -153,6 +153,23 @@ pub fn is_owned_by_item_14(scenario_id: &str) -> bool {
         || scenario_id.contains("revs-count-deep")
 }
 
+/// Load a committed grit-bench JSON report (`schema_version` 1).
+pub fn load_bench_report(path: &Path) -> Result<BenchReport> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("read bench report {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("parse bench report {}", path.display()))
+}
+
+/// Scenario ids classified as `fail` against `targets`.
+pub fn ledger_failures(report: &BenchReport, targets: &PerfTargets) -> Vec<String> {
+    report
+        .scenarios
+        .iter()
+        .filter(|s| targets.classify(s) == LedgerStatus::Fail)
+        .map(|s| s.id.clone())
+        .collect()
+}
+
 /// Render a markdown scorecard table for `report` using `targets`.
 pub fn render_ledger_markdown(
     report: &crate::schema::BenchReport,
@@ -249,5 +266,16 @@ owned_by_item_14 = true
         assert!(is_owned_by_item_14("git-dot-git/rev-list-count"));
         assert!(is_owned_by_item_14("serve-clone-git.git"));
         assert!(!is_owned_by_item_14("git-dot-git/status-clean"));
+    }
+
+    #[test]
+    fn load_committed_campaign_before_report() -> Result<()> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("baselines/campaign-before.json");
+        if !path.is_file() {
+            return Ok(());
+        }
+        let report = load_bench_report(&path)?;
+        assert!(!report.scenarios.is_empty());
+        Ok(())
     }
 }
