@@ -421,6 +421,11 @@ fn default_branch_on_bare(git: &Path, bare: &Path) -> Result<String> {
             return Ok(short);
         }
     }
+    for candidate in ["master", "main"] {
+        if rev_parse(git, bare, &format!("refs/heads/{candidate}")).is_ok() {
+            return Ok(candidate.into());
+        }
+    }
     Ok("main".into())
 }
 
