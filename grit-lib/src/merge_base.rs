@@ -1039,6 +1039,9 @@ fn dequeue_commit_for_intersect_walk(
                 tally.apply_label(before, -1);
                 return Some(node.oid);
             }
+            // Queue holds only stale commits: no new merge-base candidates can appear.
+            // `reduce_to_best` removes redundant bases afterward (Git paint_down_to_common).
+            return None;
         } else if allow_rank_stop
             && (tally.open_on_a == 0 || tally.open_on_b == 0)
             && node.rank != UNRANKED_COMMIT
@@ -1122,6 +1125,10 @@ fn walk_intersecting_histories(
         if labels.get(&oid).copied().unwrap_or(0) & MARK_PRUNED == 0 {
             bases.push(oid);
         }
+    }
+    if !collect_every_base && !bases.is_empty() {
+        let candidates: HashSet<ObjectId> = bases.into_iter().collect();
+        bases = reduce_to_best(candidates, cache)?;
     }
     sort_merge_bases_for_git_output(cache, &mut bases)?;
     Ok(bases)
@@ -1416,6 +1423,32 @@ mod tests {
             },
         )?;
         Repository::open(dir.path(), &RepositoryOptions::empty())
+    }
+
+    #[test]
+    fn merge_base_unranked_deep_linear_finds_base_without_full_history_scan() -> Result<()> {
+        use std::time::Instant;
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let mut parent = write_commit_same_time(&repo.odb(), &[], "root", 100)?;
+        for i in 1..3000 {
+            parent = write_commit_same_time(&repo.odb(), &[parent], &format!("c{i}"), 100 + i)?;
+        }
+        let tip = parent;
+        let mut old = tip;
+        for _ in 0..1500 {
+            old = first_parent_oid(&mut CommitGraphCache::new(&repo), old)?;
+        }
+        let start = Instant::now();
+        let bases = merge_bases_first_vs_rest(&repo, tip, &[old])?;
+        let elapsed = start.elapsed();
+        assert_eq!(bases, vec![old]);
+        assert!(
+            elapsed.as_millis() < 750,
+            "unranked intersect walk should stop at stale-only, took {elapsed:?}"
+        );
+        Ok(())
     }
 
     #[test]
