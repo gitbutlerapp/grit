@@ -56,6 +56,7 @@ fn bench_with_env(
             prepare: prepare.map(str::to_string),
             warmup: cfg.warmup,
             min_runs: cfg.min_runs,
+            exact_runs: cfg.exact_runs,
             command_name: Some(command_name.into()),
             env_prefix: Some(env_prefix.to_string()),
         },

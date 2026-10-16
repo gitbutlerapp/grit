@@ -165,6 +165,42 @@ jobs:
 
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
+  bench-scenarios-smoke:
+    name: bench-scenarios-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install reftable-capable Git (>= 2.45)
+        run: |
+          sudo add-apt-repository -y ppa:git-core/ppa
+          sudo apt-get update
+          sudo apt-get install -y git
+          git version
+
+      - name: Install hyperfine (grit-bench scenario suite)
+        run: |
+          HYPERFINE_VERSION=1.19.0
+          curl -fsSL "https://github.com/sharkdp/hyperfine/releases/download/v${HYPERFINE_VERSION}/hyperfine_${HYPERFINE_VERSION}_amd64.deb" -o /tmp/hyperfine.deb
+          sudo dpkg -i /tmp/hyperfine.deb
+          hyperfine --version
+
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bench-scenarios-smoke
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Scenario suite smoke (TIER=S, timings not gated)
+        env:
+          GRIT_REQUIRE_REFTABLE_GIT: "1"
+        run: make bench-scenarios TIER=S SMOKE=1
+
   test-threaded:
     name: test-threaded
     runs-on: ubuntu-latest

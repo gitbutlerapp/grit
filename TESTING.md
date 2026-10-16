@@ -552,6 +552,27 @@ Reproduce locally with **`make docs-check`**; preview with **`make docs`** (dev 
 
 Performance work compares `grit-lib` operations and `grit` commands against system `git` on the same machine (see **ROADMAP.md** item 2). Use Criterion benchmarks in `grit-lib` for library operations and `grit-bench` (`grit-utils`) for command-level comparisons, and record results when changing hot paths.
 
+### One command per suite (`make bench-lib`, `make bench-scenarios`)
+
+From the repository root (requires **hyperfine** on `PATH` for scenario runs):
+
+```bash
+make bench-lib                              # all Criterion benches → target/bench/criterion-summary.json
+make bench-scenarios TIER=M                 # full scenario matrix (default tier M)
+make bench-scenarios TIER=S SMOKE=1         # CI smoke: one iteration per scenario, small fixtures
+```
+
+| Target | Output | Schema |
+| --- | --- | --- |
+| `bench-lib` | `target/bench/criterion-summary.json` | `schema_version: 1`, `driver: "criterion"`, grit-only timings (ms) |
+| `bench-scenarios` | `target/bench/scenarios-<host>.json` and `.md` | grit-bench v1 (git vs grit, `ratio` per scenario) |
+
+**Tiers:** `TIER=S|M|L` selects the registry synthetic fixture (`synth-s` / `synth-m` / `synth-l`). **`SMOKE=1`** passes `--smoke` to `grit-bench scenarios` (exactly one hyperfine run, tiny network/parallel fixtures, skips ODB backend / bitmaps / refs).
+
+CI job **`bench-scenarios-smoke`** installs hyperfine and runs `make bench-scenarios TIER=S SMOKE=1`. Failures mean a scenario argv or prepare hook broke; wall times are not compared to baselines.
+
+Detail: [Benchmark harness](content/docs/benchmarking.md).
+
 ### Criterion (`grit-lib`)
 
 Criterion micro-benchmarks live under `grit-lib/benches/` (harness disabled). Shared fixture modules build deterministic repos in a temp directory using `grit-lib`; the object suite calls the system `git` binary only for `index-pack` / `repack` when a real `.idx` is required.

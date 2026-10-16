@@ -24,11 +24,11 @@ pub fn log_sample_batch(pages: usize) -> usize {
     (TARGET_LOG_PAGE_PASSES / pages.max(1)).clamp(8, 256)
 }
 
-fn tier_for_smoke(smoke: bool) -> SynthTier {
-    if smoke {
+fn tier_for_run(requested: SynthTier, smoke: bool) -> SynthTier {
+    if smoke && requested != SynthTier::S {
         SynthTier::S
     } else {
-        SynthTier::L
+        requested
     }
 }
 
@@ -102,10 +102,11 @@ pub fn run_history_suite(
     bench_exe: &Path,
     cfg: &RunConfig,
     odb_cfg: &OdbRunConfig,
+    tier: SynthTier,
     smoke: bool,
     timestamp: time::OffsetDateTime,
 ) -> Result<BenchReport> {
-    let tier = tier_for_smoke(smoke);
+    let tier = tier_for_run(tier, smoke);
     let spec = tier.spec();
     let repo = ensure_synth_history_repo(git, tier)?;
     let meta = load_history_meta(&repo).context("load history meta")?;

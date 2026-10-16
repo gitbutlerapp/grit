@@ -74,6 +74,11 @@ pub enum PrepareKind {
     StashReset,
     MaintenanceReset,
     DiffDirtyReset,
+    WorktreeStatusClean,
+    WorktreeStatusDirty,
+    WorktreeAdd,
+    WorktreeCommit,
+    WorktreeDiff,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -81,6 +86,8 @@ pub enum PrepareKind {
 pub struct RunConfig {
     pub warmup: u32,
     pub min_runs: u32,
+    /// When set, each hyperfine invocation uses `--runs N` (exact sample count).
+    pub exact_runs: Option<u32>,
     pub prepare_bin: PathBuf,
     /// When true, scenarios use `GIT_CONFIG_NOSYSTEM` and an empty global config file.
     pub isolated_config: bool,
@@ -104,6 +111,7 @@ fn bench_tool(
             prepare: prepare.map(str::to_string),
             warmup: cfg.warmup,
             min_runs: cfg.min_runs,
+            exact_runs: cfg.exact_runs,
             command_name: Some(command_name.into()),
             env_prefix,
         },
@@ -125,6 +133,11 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::StashReset => "prepare-stash",
         PrepareKind::MaintenanceReset => "prepare-maintenance",
         PrepareKind::DiffDirtyReset => "prepare-diff-dirty",
+        PrepareKind::WorktreeStatusClean => "prepare-worktree-status-clean",
+        PrepareKind::WorktreeStatusDirty => "prepare-worktree-status-dirty",
+        PrepareKind::WorktreeAdd => "prepare-worktree-add",
+        PrepareKind::WorktreeCommit => "prepare-worktree-commit",
+        PrepareKind::WorktreeDiff => "prepare-worktree-diff",
     };
     shell_command(
         &cfg.prepare_bin,
@@ -1098,6 +1111,11 @@ fn hot_path_spec(file_count: usize, fsmonitor: bool) -> HotPathRepoSpec {
 
 fn sh_script(script: String) -> Vec<String> {
     vec!["-c".into(), script]
+}
+
+/// Shell `-c` argv for hyperfine when the scenario body is a full shell script.
+pub(crate) fn sh_script_internal(script: String) -> Vec<String> {
+    sh_script(script)
 }
 
 fn switch_argv(grit: &Path, git: &Path, meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {

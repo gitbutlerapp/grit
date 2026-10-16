@@ -85,6 +85,8 @@ pub struct HyperfineRun {
     pub prepare: Option<String>,
     pub warmup: u32,
     pub min_runs: u32,
+    /// When set, hyperfine runs exactly this many timed iterations (`--runs`), not `--min-runs`.
+    pub exact_runs: Option<u32>,
     pub command_name: Option<String>,
     /// Optional `env VAR=val …` prefix applied before `command` (inside the `cd` wrapper).
     pub env_prefix: Option<String>,
@@ -109,12 +111,18 @@ pub fn run_hyperfine(hyperfine: &Path, run: &HyperfineRun) -> Result<HyperfineRe
     });
 
     let mut cmd = Command::new(hyperfine);
-    cmd.arg("--export-json")
-        .arg(&export_path)
-        .arg("--warmup")
-        .arg(run.warmup.to_string())
-        .arg("--min-runs")
-        .arg(run.min_runs.to_string());
+    cmd.arg("--export-json").arg(&export_path);
+    if let Some(runs) = run.exact_runs {
+        cmd.arg("--warmup")
+            .arg("0")
+            .arg("--runs")
+            .arg(runs.to_string());
+    } else {
+        cmd.arg("--warmup")
+            .arg(run.warmup.to_string())
+            .arg("--min-runs")
+            .arg(run.min_runs.to_string());
+    }
 
     if let Some(prepare) = prepare {
         cmd.arg("--prepare").arg(prepare);

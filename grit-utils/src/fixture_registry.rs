@@ -43,11 +43,25 @@ impl FixtureKind {
     }
 
     fn cache_name(self) -> &'static str {
+        self.public_cache_name()
+    }
+
+    /// Stable cache directory name for this fixture (used in reports and paths).
+    pub fn public_cache_name(self) -> &'static str {
         match self {
             Self::GitGit => "git.git",
             Self::SynthS => "synth-s",
             Self::SynthM => "synth-m",
             Self::SynthL => "synth-l",
+        }
+    }
+
+    /// Map a synthetic tier to the registry fixture kind.
+    pub fn from_synth_tier(tier: SynthTier) -> Self {
+        match tier {
+            SynthTier::S => Self::SynthS,
+            SynthTier::M => Self::SynthM,
+            SynthTier::L => Self::SynthL,
         }
     }
 }

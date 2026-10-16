@@ -22,7 +22,14 @@ export CARGO_BUILD_JOBS
 LLVM_COV_TARGET ?= target/llvm-cov-target
 GRIT_COV_BIN := $(CURDIR)/$(LLVM_COV_TARGET)/debug/grit
 
-.PHONY: all build debug test clippy fmt doc gate clean docs docs-check coverage public-api public-api-check
+.PHONY: all build debug test clippy fmt doc gate clean docs docs-check coverage public-api public-api-check bench-lib bench-scenarios
+
+BENCH_DIR := target/bench
+CRITERION_DIR := target/criterion
+TIER ?= M
+TIER_ARG := $(shell echo $(TIER) | tr 'A-Z' 'a-z')
+SMOKE ?= 0
+SCENARIO_HOST := $(shell hostname -s 2>/dev/null || echo localhost)
 
 all: build
 
@@ -46,6 +53,18 @@ doc:
 
 gate:
 	./scripts/gate.sh
+
+bench-lib:
+	@mkdir -p $(BENCH_DIR)
+	$(CARGO) build --release -p grit-utils
+	$(CARGO) bench -p grit-lib --features unstable-bench-helpers
+	./target/release/grit-bench criterion-summary --criterion-dir $(CRITERION_DIR) --format json --output $(BENCH_DIR)/criterion-summary.json
+
+bench-scenarios:
+	@mkdir -p $(BENCH_DIR)
+	$(CARGO) build --release -p grit-cli -p grit-http-server -p grit-utils
+	./target/release/grit-bench scenarios --tier $(TIER_ARG) $(if $(filter 1,$(SMOKE)),--smoke,) --format json --output $(BENCH_DIR)/scenarios-$(SCENARIO_HOST).json
+	./target/release/grit-bench scenarios --tier $(TIER_ARG) $(if $(filter 1,$(SMOKE)),--smoke,) --format markdown --output $(BENCH_DIR)/scenarios-$(SCENARIO_HOST).md
 
 public-api:
 	./scripts/public-api.sh generate

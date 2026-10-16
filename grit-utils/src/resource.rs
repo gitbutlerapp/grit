@@ -141,6 +141,7 @@ pub fn bench_with_peak_rss(
             prepare: prepare.map(str::to_string),
             warmup,
             min_runs,
+            exact_runs: None,
             command_name: Some(command_name.into()),
             env_prefix: env_prefix.map(str::to_string),
         },
