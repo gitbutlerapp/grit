@@ -29,6 +29,8 @@ Replace one commit’s message and replay descendants onto the rewritten history
 
 Provide exactly one of `-m` / `--message` or `--message-file` (use `-` to read from stdin). Grit does not open an editor.
 
+If any descendant commit is a **merge**, planning refuses with an error (merge replay is not supported yet). Use a linear range or wait for later `grit history` subcommands that handle merges.
+
 ## Options
 
 | Option | Description |
@@ -70,7 +72,7 @@ Pass `--json` on `grit history reword`:
 | `operation` | string | Always `"reword"`. |
 | `rewritten` | array | `{old,new}` full hex OIDs for each rewritten commit. |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
-| `head` | object or omitted | `{old,new}` when `HEAD`'s commit OID changes; omitted when unchanged. |
+| `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
 | `dry_run` | boolean | `true` when `--dry-run` was set. |
 
 Example:
@@ -86,15 +88,12 @@ Example:
   ],
   "refs": [
     {
-      "name": "refs/heads/main",
+      "name": "refs/heads/side",
       "old": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
       "new": "9f8e7d6c5b4a392817061524334352637281910"
     }
   ],
-  "head": {
-    "old": "9f8e7d6c5b4a392817061524334352637281910",
-    "new": "9f8e7d6c5b4a392817061524334352637281910"
-  },
+  "head": null,
   "dry_run": false
 }
 ```

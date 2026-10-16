@@ -325,8 +325,34 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
         );
         obj.insert("$id".into(), schema_id(command).into());
     }
+    if command == "history.reword" {
+        ensure_required_nullable_head(&mut value);
+    }
     canonicalize_json(&mut value);
     value
+}
+
+/// `schemars` omits `Option` fields from `required`; stable `--json` always emits `head`.
+fn ensure_required_nullable_head(schema: &mut serde_json::Value) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+    let Some(props) = obj.get("properties").and_then(|p| p.as_object()) else {
+        return;
+    };
+    if !props.contains_key("head") {
+        return;
+    }
+    let required = obj
+        .entry("required")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    let Some(arr) = required.as_array_mut() else {
+        return;
+    };
+    if !arr.iter().any(|v| v.as_str() == Some("head")) {
+        arr.push(serde_json::Value::String("head".into()));
+        arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
 }
 
 fn canonicalize_json(value: &mut serde_json::Value) {

@@ -361,6 +361,46 @@ fn history_reword_update_refs_head() -> TestResult {
 }
 
 #[test]
+fn history_reword_json_head_null_when_head_unchanged() -> TestResult {
+    let scratch = Scratch::new("head-null")?;
+    let dir = scratch.path();
+    let (_a, b, c) = init_linear_repo(dir)?;
+    git(dir, &["branch", "side", &b])?;
+    fs::write(dir.join("side.txt"), b"side\n")?;
+    git(dir, &["checkout", "side"])?;
+    git(dir, &["add", "side.txt"])?;
+    git(dir, &["commit", "-m", "side tip"])?;
+    let side_tip = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
+    git(dir, &["checkout", "main"])?;
+    let head_before = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
+    assert_eq!(head_before, c);
+    let out = gs(
+        dir,
+        [
+            "history",
+            "reword",
+            &side_tip,
+            "-m",
+            "side reworded",
+            "--json",
+        ],
+    )?;
+    assert!(out.success(), "{}", out.stderr);
+    let json = parse_json(&out.stdout)?;
+    assert!(
+        json.get("head").is_some(),
+        "head key must be present: {json}"
+    );
+    assert!(
+        json["head"].is_null(),
+        "head must be null when HEAD commit is unchanged: {json}"
+    );
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), head_before);
+    git_fsck_strict(dir)?;
+    Ok(())
+}
+
+#[test]
 fn history_reword_json_schema() -> TestResult {
     let scratch = Scratch::new("schema")?;
     let dir = scratch.path();

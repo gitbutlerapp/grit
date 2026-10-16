@@ -61,8 +61,7 @@ pub struct HistoryRewordOutcome {
     pub rewritten: Vec<RewrittenPair>,
     /// Planned or applied ref tip updates.
     pub refs: Vec<RefPair>,
-    /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; otherwise omitted.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged.
     pub head: Option<HeadPair>,
     /// Whether refs were left unchanged (`true` for `--dry-run`).
     pub dry_run: bool,
