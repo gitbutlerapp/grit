@@ -16,6 +16,21 @@ pub enum HistoryError {
     #[error("commit message cannot be empty")]
     EmptyMessage,
 
+    /// [`super::fixup`](crate::history::fixup) requires a working tree and index.
+    #[error("history fixup cannot run in a bare repository")]
+    BareRepository,
+
+    /// No staged changes relative to `HEAD`'s tree.
+    #[error("nothing to fixup: no staged changes")]
+    NothingStaged,
+
+    /// Applying staged changes onto the target would make that commit empty.
+    #[error("fixup makes commit {commit} empty")]
+    FixupMakesTargetEmpty {
+        /// Target commit that would become empty.
+        commit: ObjectId,
+    },
+
     /// Object database, revwalk, or other repository read failed during planning.
     #[error("history rewrite planning failed: {message}")]
     Planning {
