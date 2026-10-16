@@ -86,6 +86,48 @@ pub fn should_drop_tail_match_for_myers(
     parent_lines.iter().filter(|line| **line == tail).count() >= 2
 }
 
+fn should_drop_tail_match_for_myers_blob(
+    diff_algorithm: BlameDiffAlgorithm,
+    parent_idx: usize,
+    current_idx: usize,
+    parent: &BlobLines,
+) -> bool {
+    if diff_algorithm != BlameDiffAlgorithm::Myers {
+        return false;
+    }
+    if parent.is_empty() || parent_idx + 1 != parent.len() {
+        return false;
+    }
+    if current_idx <= parent_idx {
+        return false;
+    }
+    let tail = parent.line(parent_idx);
+    (0..parent.len())
+        .filter(|&i| parent.line(i) == tail)
+        .count()
+        >= 2
+}
+
+fn common_affix_trim_blob_lines(
+    old: &BlobLines,
+    new: &BlobLines,
+) -> (usize, usize, usize, usize, usize, usize) {
+    let mut prefix = 0usize;
+    while prefix < old.len() && prefix < new.len() && old.line(prefix) == new.line(prefix) {
+        prefix += 1;
+    }
+    let mut suffix = 0usize;
+    while suffix < old.len().saturating_sub(prefix)
+        && suffix < new.len().saturating_sub(prefix)
+        && old.line(old.len() - 1 - suffix) == new.line(new.len() - 1 - suffix)
+    {
+        suffix += 1;
+    }
+    let old_mid_end = old.len().saturating_sub(suffix);
+    let new_mid_end = new.len().saturating_sub(suffix);
+    (prefix, suffix, prefix, old_mid_end, prefix, new_mid_end)
+}
+
 fn common_affix_trim<'a>(
     old: &'a [&'a str],
     new: &'a [&'a str],
@@ -114,6 +156,60 @@ pub fn build_line_map(
     indent_heuristic: bool,
 ) -> Vec<Option<usize>> {
     build_line_map_with_changed_flags(old, new, diff_algorithm, indent_heuristic, false).0
+}
+
+/// Like [`build_line_map_with_changed_flags`], but reads line text from owned strings without
+/// building full-file `&str` slices (prefix/suffix mapping only touches unchanged ends).
+#[allow(clippy::too_many_arguments)]
+fn build_line_map_with_changed_flags_owned(
+    old: &BlobLines,
+    new: &BlobLines,
+    diff_algorithm: BlameDiffAlgorithm,
+    indent_heuristic: bool,
+    with_changed_flags: bool,
+) -> (Vec<Option<usize>>, Vec<bool>) {
+    let (prefix, suffix, old_lo, old_hi, new_lo, new_hi) = common_affix_trim_blob_lines(old, new);
+    let mut map = vec![None; new.len()];
+    let mut flags = vec![false; new.len()];
+    for (i, slot) in map.iter_mut().take(prefix).enumerate() {
+        *slot = Some(i);
+    }
+    for i in 0..suffix {
+        let new_idx = new.len() - suffix + i;
+        let old_idx = old.len() - suffix + i;
+        map[new_idx] = Some(old_idx);
+    }
+    if old_lo >= old_hi && new_lo >= new_hi {
+        return (map, flags);
+    }
+    let old_mid_refs: Vec<&str> = (old_lo..old_hi).map(|i| old.line(i)).collect();
+    let new_mid_refs: Vec<&str> = (new_lo..new_hi).map(|i| new.line(i)).collect();
+    let ops = if diff_algorithm == BlameDiffAlgorithm::Myers {
+        crate::diff::line_diff_ops_git_xdiff_compacted(
+            &old_mid_refs,
+            &new_mid_refs,
+            indent_heuristic,
+        )
+    } else {
+        crate::diff_indent_heuristic::diff_slice_ops_compacted(
+            &old_mid_refs,
+            &new_mid_refs,
+            diff_algorithm.to_similar(),
+            indent_heuristic,
+        )
+    };
+    let mid_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_mid_refs.len());
+    for (j, parent) in mid_map.into_iter().enumerate() {
+        map[prefix + j] = parent.map(|idx| idx + prefix);
+    }
+    if with_changed_flags {
+        let mid_flags =
+            crate::diff_indent_heuristic::new_line_changed_flags_from_ops(&ops, new_mid_refs.len());
+        for (j, flag) in mid_flags.into_iter().enumerate() {
+            flags[prefix + j] = flag;
+        }
+    }
+    (map, flags)
 }
 
 /// Like [`build_line_map`], optionally returning xdiff-style changed flags for the new side
@@ -685,7 +781,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::commit_graph_file::{BloomPrecheck, CommitGraphChain};
+use crate::commit_graph_file::CommitGraphChain;
 use crate::config::ConfigSet;
 use crate::crlf::{
     convert_to_worktree_eager, get_file_attrs, load_gitattributes, load_gitattributes_from_index,
@@ -1100,6 +1196,56 @@ struct BlobCacheKey {
     mode: u32,
 }
 
+/// Blob text split into lines without per-line `String` allocations.
+#[derive(Clone)]
+struct BlobLines {
+    text: Arc<String>,
+    /// Exclusive end byte offset of each line in `text`.
+    line_ends: Arc<Vec<usize>>,
+}
+
+impl BlobLines {
+    fn from_content(content: String) -> Self {
+        let text = Arc::new(content);
+        let parts = content_lines(text.as_str());
+        let mut line_ends = Vec::with_capacity(parts.len());
+        let mut pos = 0usize;
+        for (i, part) in parts.iter().enumerate() {
+            pos += part.len();
+            line_ends.push(pos);
+            if i + 1 < parts.len() {
+                pos += 1;
+            }
+        }
+        Self {
+            text,
+            line_ends: Arc::new(line_ends),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.line_ends.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.line_ends.is_empty()
+    }
+
+    fn line(&self, idx: usize) -> &str {
+        let end = self.line_ends[idx];
+        let start = if idx == 0 {
+            0
+        } else {
+            self.line_ends[idx - 1] + 1
+        };
+        &self.text[start..end]
+    }
+
+    fn to_vec(&self) -> Vec<String> {
+        (0..self.len()).map(|i| self.line(i).to_owned()).collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PathCacheKey {
     tree: ObjectId,
@@ -1120,6 +1266,8 @@ struct PairMapCacheKey {
     include_stop_blame: bool,
 }
 
+type BloomKeyCacheEntry = (String, u32, Arc<Vec<Vec<u32>>>);
+
 #[derive(Clone)]
 struct PairMapCacheValue {
     diff_line_map: Arc<Vec<Option<usize>>>,
@@ -1135,7 +1283,8 @@ struct BlameSession<'a> {
     copy_score_parallel: ParallelOptions,
     commit_graph: Option<Arc<CommitGraphChain>>,
     bloom_pathspec: Vec<String>,
-    blob_lines: HashMap<BlobCacheKey, Arc<Vec<String>>>,
+    bloom_key_cache: Option<BloomKeyCacheEntry>,
+    blob_lines: HashMap<BlobCacheKey, Arc<BlobLines>>,
     path_entries: HashMap<PathCacheKey, Option<(ObjectId, u32)>>,
     pair_maps: HashMap<PairMapCacheKey, PairMapCacheValue>,
 }
@@ -1157,6 +1306,7 @@ impl<'a> BlameSession<'a> {
             copy_score_parallel: diff_rename_parallel_options(&config, thread_policy),
             commit_graph: None,
             bloom_pathspec: Vec::new(),
+            bloom_key_cache: None,
             blob_lines: HashMap::new(),
             path_entries: HashMap::new(),
             pair_maps: HashMap::new(),
@@ -1169,6 +1319,29 @@ impl<'a> BlameSession<'a> {
         }
         self.bloom_pathspec.clear();
         self.bloom_pathspec.push(path.to_owned());
+        self.bloom_key_cache = None;
+    }
+
+    fn bloom_keys_for_path(
+        &mut self,
+        path: &str,
+        settings: &crate::bloom::BloomFilterSettings,
+    ) -> Arc<Vec<Vec<u32>>> {
+        let version = settings.hash_version;
+        let needs_refresh = self
+            .bloom_key_cache
+            .as_ref()
+            .is_none_or(|(p, v, _)| p != path || *v != version);
+        if needs_refresh {
+            let norm = crate::pathspec::bloom_lookup_prefix_with_cwd(path, None)
+                .unwrap_or_else(|| path.to_owned());
+            let keys = crate::bloom::bloom_keyvec_for_path(norm.as_str(), settings);
+            self.bloom_key_cache = Some((path.to_owned(), version, Arc::new(keys)));
+        }
+        if let Some((_, _, keys)) = &self.bloom_key_cache {
+            return Arc::clone(keys);
+        }
+        Arc::new(Vec::new())
     }
 
     fn resolve_blob_at_commit(
@@ -1182,16 +1355,11 @@ impl<'a> BlameSession<'a> {
         self.resolve_path_in_tree(meta.tree, path)
     }
 
-    fn line_refs(lines: &Arc<Vec<String>>) -> Vec<&str> {
-        lines.iter().map(String::as_str).collect()
+    fn line_refs(lines: &BlobLines) -> Vec<&str> {
+        (0..lines.len()).map(|i| lines.line(i)).collect()
     }
 
-    fn load_blob_lines(
-        &mut self,
-        oid: ObjectId,
-        path: &str,
-        mode: u32,
-    ) -> Result<Arc<Vec<String>>> {
+    fn load_blob_lines(&mut self, oid: ObjectId, path: &str, mode: u32) -> Result<Arc<BlobLines>> {
         let key = BlobCacheKey {
             oid,
             path: path.to_owned(),
@@ -1208,11 +1376,7 @@ impl<'a> BlameSession<'a> {
             self.textconv_ctx,
             self.use_textconv,
         )?;
-        let parsed: Vec<String> = content_lines(&content)
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-        let lines = Arc::new(parsed);
+        let lines = Arc::new(BlobLines::from_content(content));
         self.blob_lines.insert(key, Arc::clone(&lines));
         Ok(lines)
     }
@@ -1243,8 +1407,8 @@ impl<'a> BlameSession<'a> {
         child_oid: ObjectId,
         child_path: &str,
         child_mode: u32,
-        par_lines: &Arc<Vec<String>>,
-        cur_lines: &Arc<Vec<String>>,
+        par_lines: &BlobLines,
+        cur_lines: &BlobLines,
         diff_algorithm: BlameDiffAlgorithm,
         indent_heuristic: bool,
         is_ignored: bool,
@@ -1267,38 +1431,61 @@ impl<'a> BlameSession<'a> {
         }
 
         let identity_map = parent_oid == child_oid && par_lines.len() == cur_lines.len();
-        let par_refs = Self::line_refs(par_lines);
-        let cur_refs = Self::line_refs(cur_lines);
         let (diff_line_map, xdiff_changed) = if identity_map {
             (
                 (0..cur_lines.len()).map(Some).collect(),
                 vec![false; cur_lines.len()],
             )
         } else if include_stop_blame {
-            build_line_map_with_changed_flags(
-                &par_refs,
-                &cur_refs,
+            build_line_map_with_changed_flags_owned(
+                par_lines,
+                cur_lines,
                 diff_algorithm,
                 indent_heuristic,
                 true,
             )
         } else {
             (
-                build_line_map(&par_refs, &cur_refs, diff_algorithm, indent_heuristic),
+                build_line_map_with_changed_flags_owned(
+                    par_lines,
+                    cur_lines,
+                    diff_algorithm,
+                    indent_heuristic,
+                    false,
+                )
+                .0,
                 Vec::new(),
             )
         };
         let (line_map, stop_blame_on_current) = if include_stop_blame {
-            let mut line_map = build_exact_relocate_line_map(&par_refs, &cur_refs, &diff_line_map);
-            if is_ignored {
-                line_map = build_fuzzy_line_map(&par_refs, &cur_refs, &line_map);
-            }
-            let stop = if par_lines.len() == cur_lines.len() {
-                blame_stops_on_current_commit(&diff_line_map, &line_map, &xdiff_changed)
+            if !is_ignored
+                && par_lines.len() == cur_lines.len()
+                && diff_line_map.iter().all(|m| m.is_some())
+                && xdiff_changed.iter().all(|&f| !f)
+            {
+                (diff_line_map.clone(), vec![false; cur_lines.len()])
+            } else if !is_ignored && diff_line_map.iter().all(|m| m.is_some()) {
+                let stop = if par_lines.len() == cur_lines.len() {
+                    blame_stops_on_current_commit(&diff_line_map, &diff_line_map, &xdiff_changed)
+                } else {
+                    Vec::new()
+                };
+                (diff_line_map.clone(), stop)
             } else {
-                Vec::new()
-            };
-            (line_map, stop)
+                let par_refs = Self::line_refs(par_lines);
+                let cur_refs = Self::line_refs(cur_lines);
+                let mut line_map =
+                    build_exact_relocate_line_map(&par_refs, &cur_refs, &diff_line_map);
+                if is_ignored {
+                    line_map = build_fuzzy_line_map(&par_refs, &cur_refs, &line_map);
+                }
+                let stop = if par_lines.len() == cur_lines.len() {
+                    blame_stops_on_current_commit(&diff_line_map, &line_map, &xdiff_changed)
+                } else {
+                    Vec::new()
+                };
+                (line_map, stop)
+            }
         } else {
             (Vec::new(), Vec::new())
         };
@@ -1450,7 +1637,7 @@ fn compute_blame_with_session(
 
     let mut result: Vec<BlameLine> = Vec::with_capacity(num_lines);
     // Store final content for output
-    let final_lines: Vec<String> = (*start_lines).clone();
+    let final_lines: Vec<String> = start_lines.to_vec();
 
     let mut current_oid = start_oid;
     let mut current_blob_oid = blob_oid;
@@ -1460,6 +1647,8 @@ fn compute_blame_with_session(
     let mut deferred_seq: u64 = 0;
 
     session.set_bloom_path(&current_path);
+    let mut walk_lines: Option<(ObjectId, Arc<BlobLines>)> =
+        Some((current_blob_oid, Arc::clone(&start_lines)));
 
     'blame_loop: loop {
         if pending.is_empty() {
@@ -1469,10 +1658,29 @@ fn compute_blame_with_session(
                 current_blob_mode = origin.mode;
                 current_path = origin.path;
                 session.set_bloom_path(&current_path);
+                walk_lines = None;
                 pending = origin.pending;
                 continue;
             }
             break;
+        }
+
+        if !ignore_revs.contains(&current_oid) {
+            let (new_oid, new_mode) = advance_across_unchanged_first_parents(
+                session,
+                odb,
+                current_oid,
+                current_blob_oid,
+                current_blob_mode,
+                &current_path,
+                grafts,
+                &mut commit_cache,
+            )?;
+            if new_oid != current_oid {
+                current_oid = new_oid;
+                current_blob_mode = new_mode;
+                continue 'blame_loop;
+            }
         }
 
         let commit = get_blame_commit(odb, current_oid, &mut commit_cache)?;
@@ -1501,12 +1709,16 @@ fn compute_blame_with_session(
 
         let is_ignored = ignore_revs.contains(&current_oid);
 
+        if first_parent_only && parents.len() > 1 {
+            parents.truncate(1);
+        }
+
         // If an ignored merge commit is encountered, try to continue blame
         // through the parent that actually contributed each line.
         if is_ignored && parents.len() > 1 {
             let cur_lines_arc =
                 session.load_blob_lines(current_blob_oid, &current_path, current_blob_mode)?;
-            let cur_lines = BlameSession::line_refs(&cur_lines_arc);
+            let cur_lines = BlameSession::line_refs(cur_lines_arc.as_ref());
 
             let mut parent_lines: Vec<Option<Vec<String>>> = Vec::new();
             let mut parent_blames: Vec<Option<Vec<BlameLine>>> = Vec::new();
@@ -1517,7 +1729,7 @@ fn compute_blame_with_session(
                 {
                     let p_lines_arc =
                         session.load_blob_lines(p_blob_oid, &current_path, p_blob_mode)?;
-                    let p_lines = (*p_lines_arc).clone();
+                    let p_lines = p_lines_arc.to_vec();
                     let p_blame = compute_blame_with_session(
                         odb,
                         *parent_oid,
@@ -1663,7 +1875,7 @@ fn compute_blame_with_session(
 
             let mut parent_blobs: Vec<Option<(ObjectId, ObjectId, u32)>> =
                 vec![None; parents.len()];
-            let mut par_lines_vec: Vec<Option<Arc<Vec<String>>>> = vec![None; parents.len()];
+            let mut par_lines_vec: Vec<Option<Arc<BlobLines>>> = vec![None; parents.len()];
             let mut maps: Vec<Option<Arc<Vec<Option<usize>>>>> = vec![None; parents.len()];
 
             let mut buckets: Vec<Vec<TrackedLine>> = vec![Vec::new(); parents.len()];
@@ -1719,8 +1931,8 @@ fn compute_blame_with_session(
                     current_blob_oid,
                     &current_path,
                     current_blob_mode,
-                    &pl_arc,
-                    &cur_lines_arc,
+                    pl_arc.as_ref(),
+                    cur_lines_arc.as_ref(),
                     map_algo,
                     indent_heuristic,
                     false,
@@ -1746,10 +1958,10 @@ fn compute_blame_with_session(
                 }
                 for t in remaining {
                     let idx = t.current_idx;
-                    let cur_line = cur_lines_arc.get(idx).map(String::as_str);
+                    let cur_line = Some(cur_lines_arc.line(idx));
                     let m = map.get(idx).copied().flatten();
                     if let Some(p_idx) = m {
-                        let text_ok = par_lines.get(p_idx).map(String::as_str) == cur_line;
+                        let text_ok = Some(par_lines.line(p_idx)) == cur_line;
                         if text_ok && p_idx < parent_line_count && !used_in_parent[i][p_idx] {
                             used_in_parent[i][p_idx] = true;
                             buckets[i].push(TrackedLine {
@@ -1813,6 +2025,7 @@ fn compute_blame_with_session(
                     current_oid = p;
                     current_blob_oid = blob;
                     current_blob_mode = mode;
+                    walk_lines = None;
                     pending = std::mem::take(&mut buckets[0]);
                 } else if deferred_queue.is_empty() {
                     break 'blame_loop;
@@ -1822,21 +2035,6 @@ fn compute_blame_with_session(
         }
 
         let parent_oid = parents[0];
-        if parents.len() == 1
-            && session.commit_graph.is_some()
-            && bloom_may_skip_to_first_parent(
-                session,
-                odb,
-                current_oid,
-                parent_oid,
-                &current_path,
-                grafts,
-                &mut commit_cache,
-            )?
-        {
-            current_oid = parent_oid;
-            continue 'blame_loop;
-        }
         let parent_commit = get_blame_commit(odb, parent_oid, &mut commit_cache)?;
         let mut parent_blob_entry =
             session.resolve_blob_at_commit(odb, parent_oid, &current_path, &mut commit_cache)?;
@@ -1888,7 +2086,7 @@ fn compute_blame_with_session(
                         &current_path,
                         current_blob_mode,
                     )?;
-                    let cur_lines = BlameSession::line_refs(&cur_lines_arc);
+                    let cur_lines = BlameSession::line_refs(cur_lines_arc.as_ref());
                     let mut entries = Vec::new();
                     collect_tree_file_entries(odb, &parent_commit.tree, "", &mut entries)?;
                     let mut by_content: HashMap<String, Vec<(String, BlameLine)>> = HashMap::new();
@@ -1906,7 +2104,7 @@ fn compute_blame_with_session(
                         }
 
                         let source_lines_arc = session.load_blob_lines(oid, &path, mode)?;
-                        let source_lines = BlameSession::line_refs(&source_lines_arc);
+                        let source_lines = BlameSession::line_refs(source_lines_arc.as_ref());
                         let overlap = cur_lines
                             .iter()
                             .filter(|line| source_lines.iter().any(|src| src == *line))
@@ -2035,12 +2233,16 @@ fn compute_blame_with_session(
             }
             Some((p_blob_oid, p_blob_mode)) => {
                 // Diff current vs parent
-                let cur_lines_arc =
-                    session.load_blob_lines(current_blob_oid, &current_path, current_blob_mode)?;
+                let cur_lines_arc = match walk_lines.take() {
+                    Some((oid, lines)) if oid == current_blob_oid => lines,
+                    _ => session.load_blob_lines(
+                        current_blob_oid,
+                        &current_path,
+                        current_blob_mode,
+                    )?,
+                };
                 let par_lines_arc =
                     session.load_blob_lines(p_blob_oid, &parent_blob_path, p_blob_mode)?;
-                let cur_lines = BlameSession::line_refs(&cur_lines_arc);
-                let par_lines = BlameSession::line_refs(&par_lines_arc);
                 let maps = session.parent_child_line_maps(
                     p_blob_oid,
                     &parent_blob_path,
@@ -2048,8 +2250,8 @@ fn compute_blame_with_session(
                     current_blob_oid,
                     &current_path,
                     current_blob_mode,
-                    &par_lines_arc,
-                    &cur_lines_arc,
+                    par_lines_arc.as_ref(),
+                    cur_lines_arc.as_ref(),
                     diff_algorithm,
                     indent_heuristic,
                     is_ignored,
@@ -2059,12 +2261,13 @@ fn compute_blame_with_session(
                 let stop_blame_on_current = maps.stop_blame_on_current.as_slice();
                 let mut inserted_copy_source: Option<CopySourceBlameCache> = None;
                 if copy_depth >= 3 {
+                    let cur_line_refs = BlameSession::line_refs(cur_lines_arc.as_ref());
                     if let Some((source_path, source_blame)) = find_copy_source_blame(
                         odb,
                         parent_oid,
                         &parent_commit.tree,
                         &current_path,
-                        &cur_lines,
+                        &cur_line_refs,
                         ignore_revs,
                         diff_algorithm,
                         textconv_ctx,
@@ -2091,11 +2294,11 @@ fn compute_blame_with_session(
                 for t in pending.drain(..) {
                     if t.current_idx < line_map.len() {
                         if let Some(parent_idx) = line_map[t.current_idx] {
-                            if should_drop_tail_match_for_myers(
+                            if should_drop_tail_match_for_myers_blob(
                                 diff_algorithm,
                                 parent_idx,
                                 t.current_idx,
-                                &par_lines,
+                                par_lines_arc.as_ref(),
                             ) {
                                 if is_ignored {
                                     still_pending.push(TrackedLine {
@@ -2121,10 +2324,8 @@ fn compute_blame_with_session(
                             // Line came from parent — keep tracking
                             let carried_ignored = if is_ignored {
                                 let unchanged = parent_idx == t.current_idx
-                                    && par_lines
-                                        .get(parent_idx)
-                                        .zip(cur_lines.get(t.current_idx))
-                                        .is_some_and(|(p, c)| p == c);
+                                    && par_lines_arc.line(parent_idx)
+                                        == cur_lines_arc.line(t.current_idx);
                                 if unchanged {
                                     t.ignored
                                 } else {
@@ -2162,9 +2363,9 @@ fn compute_blame_with_session(
                             // only keep walking when the same-slot parent line
                             // is text-identical; otherwise keep blame on the
                             // ignored commit and mark as unblamable.
-                            let cur_line = cur_lines.get(t.current_idx).copied();
-                            if t.current_idx < par_lines.len()
-                                && cur_line.is_some_and(|line| line == par_lines[t.current_idx])
+                            if t.current_idx < par_lines_arc.len()
+                                && cur_lines_arc.line(t.current_idx)
+                                    == par_lines_arc.line(t.current_idx)
                             {
                                 still_pending.push(TrackedLine {
                                     final_lineno: t.final_lineno,
@@ -2188,7 +2389,7 @@ fn compute_blame_with_session(
                             if let Some((source_path, by_content, used)) =
                                 inserted_copy_source.as_mut()
                             {
-                                let line_text = cur_lines.get(t.current_idx).copied().unwrap_or("");
+                                let line_text = cur_lines_arc.line(t.current_idx);
                                 let used_key = line_text.to_owned();
                                 let used_count = used.get(&used_key).copied().unwrap_or(0);
                                 if let Some(pb) = by_content
@@ -2254,6 +2455,7 @@ fn compute_blame_with_session(
                 current_oid = parent_oid;
                 current_blob_oid = p_blob_oid;
                 current_blob_mode = p_blob_mode;
+                walk_lines = Some((p_blob_oid, Arc::clone(&par_lines_arc)));
                 if parent_blob_path != current_path {
                     current_path = parent_blob_path;
                     session.set_bloom_path(&current_path);
@@ -2436,8 +2638,80 @@ fn get_blame_commit(
     Ok(meta)
 }
 
+/// Skip first-parent history while Bloom filters or an identical blob show `path` unchanged.
+#[allow(clippy::too_many_arguments)]
+fn advance_across_unchanged_first_parents(
+    session: &mut BlameSession<'_>,
+    odb: &Odb,
+    mut current_oid: ObjectId,
+    blob_oid: ObjectId,
+    mut blob_mode: u32,
+    path: &str,
+    grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+) -> Result<(ObjectId, u32)> {
+    session.set_bloom_path(path);
+    let chain = session.commit_graph.clone();
+    loop {
+        if grafts.contains_key(&current_oid) {
+            break;
+        }
+        let parent_oid = if let Some(ref chain) = chain {
+            if let Some((parents, _)) = chain.graph_commit(&current_oid) {
+                parents.first().copied()
+            } else {
+                commit_parents_for_blame(odb, current_oid, grafts, commit_cache)?
+                    .first()
+                    .copied()
+            }
+        } else {
+            commit_parents_for_blame(odb, current_oid, grafts, commit_cache)?
+                .first()
+                .copied()
+        };
+        let Some(parent_oid) = parent_oid else {
+            break;
+        };
+        if chain.is_some()
+            && bloom_may_skip_to_first_parent(
+                session,
+                odb,
+                current_oid,
+                parent_oid,
+                path,
+                grafts,
+                commit_cache,
+                true,
+            )?
+        {
+            current_oid = parent_oid;
+            continue;
+        }
+        if let Some((p_blob, p_mode)) =
+            session.resolve_blob_at_commit(odb, parent_oid, path, commit_cache)?
+        {
+            if p_blob == blob_oid {
+                current_oid = fast_forward_same_blob(
+                    odb,
+                    session,
+                    parent_oid,
+                    blob_oid,
+                    path,
+                    grafts,
+                    commit_cache,
+                )?;
+                blob_mode = p_mode;
+                continue;
+            }
+        }
+        break;
+    }
+    Ok((current_oid, blob_mode))
+}
+
 /// Commit-graph Bloom filters describe path changes vs the commit object's first parent.
 /// Skip the shortcut when grafts replace parents or the walk target is not that parent.
+#[allow(clippy::too_many_arguments)]
 fn bloom_may_skip_to_first_parent(
     session: &mut BlameSession<'_>,
     odb: &Odb,
@@ -2446,29 +2720,40 @@ fn bloom_may_skip_to_first_parent(
     path: &str,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
     commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    parent_is_first_in_graph: bool,
 ) -> Result<bool> {
     if grafts.contains_key(&current_oid) {
         return Ok(false);
     }
-    let object_parents = commit_object_parents(session, odb, current_oid, commit_cache)?;
-    if object_parents.first() != Some(&parent_oid) {
-        return Ok(false);
+    if !parent_is_first_in_graph {
+        let object_parents = commit_object_parents(session, odb, current_oid, commit_cache)?;
+        if object_parents.first() != Some(&parent_oid) {
+            return Ok(false);
+        }
     }
     let Some(chain) = session.commit_graph.clone() else {
         return Ok(false);
     };
     session.set_bloom_path(path);
-    Ok(matches!(
-        chain.bloom_precheck_for_paths(
-            odb,
-            current_oid,
-            session.bloom_pathspec.as_slice(),
-            None,
-            -1,
-            true,
-        ),
-        Ok(BloomPrecheck::DefinitelyNot)
+    Ok(bloom_precheck_definitely_not(
+        session,
+        &chain,
+        current_oid,
+        path,
     ))
+}
+
+fn bloom_precheck_definitely_not(
+    session: &mut BlameSession<'_>,
+    chain: &CommitGraphChain,
+    oid: ObjectId,
+    path: &str,
+) -> bool {
+    let Some(settings) = chain.bloom_settings_for_commit(&oid) else {
+        return false;
+    };
+    let keys = session.bloom_keys_for_path(path, &settings);
+    chain.bloom_definitely_not_for_keys(oid, keys.as_slice())
 }
 
 /// Parent OIDs stored in the commit object (or commit-graph), ignoring grafts.
@@ -2670,6 +2955,25 @@ fn author_epoch_from_identity(identity: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blob_lines_preserves_interior_and_trailing_blank_lines() {
+        let cases = [
+            "alpha\n\nbeta\n\ngamma\n",
+            "only\n",
+            "\n",
+            "a\n\n\nb\n",
+            "head\n\n",
+        ];
+        for content in cases {
+            let blob = BlobLines::from_content(content.to_owned());
+            let expected: Vec<String> = content_lines(content)
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            assert_eq!(blob.to_vec(), expected, "content={content:?}");
+        }
+    }
 
     #[test]
     fn build_line_map_maps_unchanged_lines_and_drops_replaced() {

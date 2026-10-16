@@ -1260,6 +1260,12 @@ impl CommitGraphChain {
         }
     }
 
+    /// Bloom filter settings stored for `oid`'s commit-graph layer, if any.
+    pub(crate) fn bloom_settings_for_commit(&self, oid: &ObjectId) -> Option<BloomFilterSettings> {
+        let (layer_idx, _) = self.find_commit(oid)?;
+        self.layers[layer_idx].bloom_settings
+    }
+
     /// Lexicographic position in the full chain, or `None` if not in any layer.
     pub fn find_commit(&self, oid: &ObjectId) -> Option<(usize, u32)> {
         for (i, layer) in self.layers.iter().enumerate() {
@@ -1481,6 +1487,40 @@ impl CommitGraphChain {
             return Ok(BloomPrecheck::DefinitelyNot);
         }
         Ok(BloomPrecheck::Maybe)
+    }
+
+    /// Like [`Self::bloom_precheck_for_paths`], but reuses precomputed Bloom keys for one path.
+    pub(crate) fn bloom_definitely_not_for_keys(
+        &self,
+        oid: ObjectId,
+        path_keys: &[Vec<u32>],
+    ) -> bool {
+        use crate::bloom::bloom_filter_contains;
+
+        if path_keys.is_empty() {
+            return false;
+        }
+        let Some((layer_idx, lex)) = self.find_commit(&oid) else {
+            return false;
+        };
+        let layer = &self.layers[layer_idx];
+        let Some(settings) = layer.bloom_settings.as_ref() else {
+            return false;
+        };
+        let Some(filter) = layer.bloom_filter_slice(lex) else {
+            return false;
+        };
+        if filter.is_empty() {
+            return false;
+        }
+        for key in path_keys {
+            match bloom_filter_contains(key, filter, settings) {
+                Ok(true) => return false,
+                Ok(false) => {}
+                Err(crate::bloom::BloomFilterInvalid) => return false,
+            }
+        }
+        true
     }
 }
 
