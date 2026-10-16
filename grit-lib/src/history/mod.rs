@@ -10,7 +10,7 @@
 //!
 //! Library guide: history rewrite planning (see [`plan_rewrite`]).
 //!
-//! ```no_run
+//! ```rust
 //! use grit_lib::history::{
 //!     plan_rewrite, CommitEdit, HistoryEdits, RefScope, RewriteOptions, EmptyPolicy,
 //! };
