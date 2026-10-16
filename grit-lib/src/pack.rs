@@ -3179,6 +3179,36 @@ pub fn read_packed_delta_dependency(
     }
 }
 
+/// Byte offset in `pack_bytes` where the zlib payload starts for a delta object at `object_offset`.
+pub(crate) fn pack_delta_zlib_start(
+    pack_bytes: &[u8],
+    object_offset: u64,
+    hash_bytes: usize,
+) -> Result<usize> {
+    let mut pos = object_offset as usize;
+    let (ty, _) = parse_pack_object_header(pack_bytes, &mut pos)?;
+    match ty {
+        PackedType::OfsDelta => {
+            let _ = parse_ofs_delta_base(pack_bytes, &mut pos, object_offset)?;
+            Ok(pos)
+        }
+        PackedType::RefDelta => {
+            let end = pos
+                .checked_add(hash_bytes)
+                .ok_or_else(|| Error::CorruptObject("ref-delta base oid overflow".to_owned()))?;
+            if end > pack_bytes.len() {
+                return Err(Error::CorruptObject(
+                    "truncated ref-delta base oid".to_owned(),
+                ));
+            }
+            Ok(end)
+        }
+        _ => Err(Error::CorruptObject(
+            "pack_delta_zlib_start on non-delta object".to_owned(),
+        )),
+    }
+}
+
 fn parse_ofs_delta_base(bytes: &[u8], pos: &mut usize, this_offset: u64) -> Result<u64> {
     let mut c = *bytes
         .get(*pos)

@@ -284,6 +284,39 @@ fn sha256_reuse() {
 }
 
 #[test]
+fn thin_pack_bitmap_reuse_index_pack_strict_ok() {
+    let fx = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_history(&fx);
+    git_ok(&fx, &["repack", "-adb"]);
+    let git_dir = fx.path().join(".git");
+    let repo = Repository::open(&git_dir, None).expect("open");
+    let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
+    let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
+    let opts = PackBuildOptions {
+        delta: true,
+        thin: true,
+        use_ofs_delta: true,
+        use_bitmaps: true,
+        ..PackBuildOptions::default()
+    };
+    let mut buf = Vec::new();
+    let mut progress = |_ev: PackProgress| {};
+    write_upload_pack_stream(
+        &repo,
+        &[tip],
+        &[parent],
+        &HashSet::new(),
+        &HashSet::new(),
+        None,
+        &opts,
+        &mut progress,
+        &mut buf,
+    )
+    .expect("thin pack with bitmap ofs reuse");
+    git_index_pack_strict(&buf, HashAlgo::Sha1, true, Some(fx.path()));
+}
+
+#[test]
 fn thin_pack_ref_delta_conversion() {
     let fx = RepoFixture::init(HashAlgo::Sha1).expect("init");
     build_history(&fx);
