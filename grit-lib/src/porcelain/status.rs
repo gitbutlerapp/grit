@@ -345,9 +345,38 @@ pub(crate) fn collect_untracked_for_commit_after_tracked_scan(
     }
 
     if summary.removed.is_empty() {
-        return collect_untracked_root_level_files(
-            repo, index, work_tree, pathspecs, rules, show_all,
-        );
+        let mut untracked = collect_untracked_root_level_files(
+            repo,
+            index,
+            work_tree,
+            pathspecs,
+            rules,
+            show_all,
+        )?;
+        let mut dirs = BTreeSet::new();
+        for raw in &summary.modified {
+            let path = std::str::from_utf8(raw).map_or_else(
+                |_| String::from_utf8_lossy(raw).into_owned(),
+                str::to_owned,
+            );
+            if let Some((parent, _)) = path.rsplit_once('/') {
+                dirs.insert(parent.to_owned());
+            }
+        }
+        for dir in dirs {
+            let mut local = collect_untracked_files_in_directory(
+                repo,
+                index,
+                work_tree,
+                &dir,
+                rules,
+                show_all,
+            )?;
+            untracked.append(&mut local);
+        }
+        untracked.sort_unstable();
+        untracked.dedup();
+        return Ok(untracked);
     }
 
     let (untracked, _, _) = collect_untracked_and_ignored_with_rules(
@@ -359,6 +388,81 @@ pub(crate) fn collect_untracked_for_commit_after_tracked_scan(
         pathspecs,
         rules,
     )?;
+    Ok(untracked)
+}
+
+fn collect_untracked_files_in_directory(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    rel_dir: &str,
+    rules: &crate::worktree_rules::WorktreeRules,
+    show_all: bool,
+) -> Result<Vec<String>> {
+    let abs_dir = work_tree.join(rel_dir);
+    let entries: Vec<DirEntry> = match fs::read_dir(&abs_dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+        Err(_) => return Ok(Vec::new()),
+    };
+    let ignorecase = rules
+        .config()
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let tracked_paths =
+        crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(index, ignorecase);
+    let gitlinks: HashSet<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode == crate::index::MODE_GITLINK)
+        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+        .collect();
+    let precompose_unicode =
+        crate::precompose_config::effective_core_precomposeunicode_with_config(
+            Some(repo.git_dir()),
+            Some(rules.config()),
+        );
+    let mut matcher = rules.ignore().clone();
+    let mut untracked = Vec::new();
+    let mut ignored = Vec::new();
+    for entry in entries {
+        if crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false) {
+            if show_all {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let child_rel = if rel_dir.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{rel_dir}/{name}")
+                };
+                if !tracked_paths.contains(&child_rel)
+                    && !gitlinks.contains(&child_rel)
+                    && !matcher.is_path_ignored(repo, Some(index), &child_rel, false)?
+                {
+                    untracked.push(format!("{child_rel}/"));
+                }
+            }
+            continue;
+        }
+        let _ = visit_untracked_dir_entry(
+            repo,
+            index,
+            work_tree,
+            &gitlinks,
+            &mut matcher,
+            IgnoredMode::No,
+            show_all,
+            false,
+            None::<&Cell<bool>>,
+            precompose_unicode,
+            &tracked_paths,
+            rel_dir,
+            &entry,
+            &[],
+            None,
+            &mut untracked,
+            &mut ignored,
+        )?;
+    }
     Ok(untracked)
 }
 
