@@ -153,6 +153,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<NotesOutcome>("notes.remove"),
         entry::<PickOutcome>("pick"),
         entry::<HistoryRewordOutcome>("history.reword"),
+        entry::<HistoryRewordOutcome>("history.fixup"),
         entry::<RevertOutcome>("revert"),
         entry::<StashPushOutcome>("stash"),
         entry::<StashPushOutcome>("stash.push"),
@@ -278,6 +279,7 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
         },
         "history" => match positional.get(1).copied() {
             Some("reword") => "history.reword",
+            Some("fixup") => "history.fixup",
             _ => return None,
         },
         cmd if NO_JSON_COMMANDS.contains(&cmd) => return None,
@@ -325,7 +327,7 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
         );
         obj.insert("$id".into(), schema_id(command).into());
     }
-    if command == "history.reword" {
+    if command == "history.reword" || command == "history.fixup" {
         ensure_required_nullable_head(&mut value);
     }
     canonicalize_json(&mut value);

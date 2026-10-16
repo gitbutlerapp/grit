@@ -8,8 +8,8 @@ use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-    RewritePlan,
+    apply_fixup_rewrite, apply_rewrite, fixup, reword, staged_fixup_paths, ApplyOptions,
+    EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions, RewritePlan,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
@@ -41,6 +41,28 @@ impl From<UpdateRefs> for RefScope {
     }
 }
 
+/// How empty commits are handled during history rewrite.
+#[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
+pub enum EmptyPolicyArg {
+    /// Omit commits whose tree matches the new parent.
+    #[default]
+    Drop,
+    /// Keep empty commits.
+    Keep,
+    /// Refuse when a commit would become empty.
+    Abort,
+}
+
+impl From<EmptyPolicyArg> for EmptyPolicy {
+    fn from(value: EmptyPolicyArg) -> Self {
+        match value {
+            EmptyPolicyArg::Drop => EmptyPolicy::Drop,
+            EmptyPolicyArg::Keep => EmptyPolicy::Keep,
+            EmptyPolicyArg::Abort => EmptyPolicy::Abort,
+        }
+    }
+}
+
 /// Shared flags for history rewrite subcommands.
 #[derive(Debug, clap::Args)]
 pub struct HistoryRewriteArgs {
@@ -52,7 +74,7 @@ pub struct HistoryRewriteArgs {
     pub update_refs: UpdateRefs,
 }
 
-/// Result of `grit history reword`.
+/// Result of `grit history reword` or `grit history fixup`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct HistoryRewordOutcome {
     /// Operation name (`reword`).
@@ -101,7 +123,12 @@ impl HumanRender for HistoryRewordOutcome {
         if self.dry_run {
             outln!(w, "Dry run — refs would change:");
         } else {
-            outln!(w, "Rewrote {} commit(s)", self.rewritten.len());
+            let verb = if self.operation == "fixup" {
+                "Fixed up"
+            } else {
+                "Rewrote"
+            };
+            outln!(w, "{verb} {} commit(s)", self.rewritten.len());
         }
         for pair in &self.rewritten {
             let old_short = pair.old.get(..7).unwrap_or(&pair.old);
@@ -155,7 +182,7 @@ pub fn run_reword(
             committer,
         },
     )
-    .map_err(map_history_error)?;
+    .map_err(map_history_error_reword)?;
     let subject = rewritten_subject(&repo, &plan, commit_oid)?;
     let mut outcome = outcome_from_plan(&repo, &plan, shared.dry_run)?;
     if !shared.dry_run {
@@ -168,9 +195,114 @@ pub fn run_reword(
                 reflog_message: format!("history reword: {subject}"),
             },
         )
-        .map_err(map_history_error)?;
+        .map_err(map_history_error_reword)?;
     }
     outcome.dry_run = shared.dry_run;
+    Ok(outcome)
+}
+
+/// Apply staged changes onto `commit` and replay descendants.
+pub fn run_fixup(
+    commit: &str,
+    message: Option<String>,
+    message_file: Option<String>,
+    empty: EmptyPolicyArg,
+    shared: &HistoryRewriteArgs,
+) -> Result<HistoryRewordOutcome> {
+    let message = read_optional_message(message, message_file)?;
+    let repo = context::discover()?;
+    let commit_oid = resolve_revision_as_commit(&repo, commit)
+        .with_context(|| format!("could not resolve commit '{commit}'"))?;
+    let staged_paths = staged_fixup_paths(&repo).map_err(map_history_error_fixup)?;
+    let env = repo.environment();
+    let config =
+        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+    let committer = context::identity(
+        env,
+        &config,
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        context::wall_clock_now(env),
+    )?;
+    let plan = fixup(
+        &repo,
+        commit_oid,
+        &FixupOptions {
+            message,
+            empty: empty.into(),
+            rewrite: RewriteOptions {
+                scope: shared.update_refs.into(),
+                empty: empty.into(),
+                committer,
+            },
+        },
+    )
+    .map_err(map_history_error_fixup)?;
+    let subject = fixup_reflog_subject(&repo, &plan, commit_oid, commit)?;
+    let mut outcome = outcome_from_plan_fixup(&repo, &plan, shared.dry_run)?;
+    if !shared.dry_run {
+        let identity = context::committer_reflog_identity(env, &config)?;
+        apply_fixup_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity,
+                reflog_message: format!("history fixup: {subject}"),
+            },
+            &staged_paths,
+        )
+        .map_err(map_history_error_fixup)?;
+    }
+    outcome.dry_run = shared.dry_run;
+    Ok(outcome)
+}
+
+fn read_optional_message(
+    message: Option<String>,
+    message_file: Option<String>,
+) -> Result<Option<String>> {
+    match (message, message_file) {
+        (Some(_), Some(_)) => bail!("use either -m/--message or --message-file, not both"),
+        (None, None) => Ok(None),
+        (Some(m), None) => Ok(Some(m)),
+        (None, Some(path)) => {
+            if path == "-" {
+                let mut buf = String::new();
+                io::stdin()
+                    .read_to_string(&mut buf)
+                    .context("could not read message from stdin")?;
+                Ok(Some(buf))
+            } else {
+                Ok(Some(std::fs::read_to_string(&path).with_context(|| {
+                    format!("could not read message file '{path}'")
+                })?))
+            }
+        }
+    }
+}
+
+fn fixup_reflog_subject(
+    repo: &grit_lib::repo::Repository,
+    plan: &RewritePlan,
+    target: ObjectId,
+    rev: &str,
+) -> Result<String> {
+    if let Some(row) = plan.commits.iter().find(|r| r.old == target) {
+        if let Some(new) = row.new {
+            let commit = context::read_commit(repo, &new)?;
+            return Ok(context::subject_line(&commit.message));
+        }
+    }
+    Ok(rev.to_owned())
+}
+
+fn outcome_from_plan_fixup(
+    repo: &grit_lib::repo::Repository,
+    plan: &RewritePlan,
+    dry_run: bool,
+) -> Result<HistoryRewordOutcome> {
+    let mut outcome = outcome_from_plan(repo, plan, dry_run)?;
+    outcome.operation = "fixup".into();
     Ok(outcome)
 }
 
@@ -269,13 +401,29 @@ fn head_commit_oid(repo: &grit_lib::repo::Repository) -> Result<ObjectId> {
     }
 }
 
-fn map_history_error(err: HistoryError) -> anyhow::Error {
+fn map_history_error_reword(err: HistoryError) -> anyhow::Error {
+    map_history_error(err, "history reword")
+}
+
+fn map_history_error_fixup(err: HistoryError) -> anyhow::Error {
+    map_history_error(err, "history fixup")
+}
+
+fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
         HistoryError::EmptyMessage => anyhow::anyhow!("commit message cannot be empty"),
+        HistoryError::BareRepository => {
+            anyhow::anyhow!("cannot run fixup in a bare repository")
+        }
+        HistoryError::NothingStaged => anyhow::anyhow!("nothing to fixup: no staged changes"),
+        HistoryError::FixupMakesTargetEmpty { commit } => {
+            let short = &commit.to_hex()[..7];
+            anyhow::anyhow!("fixup makes commit {short} empty")
+        }
         HistoryError::Conflict { mut paths, .. } => {
             paths.sort();
             paths.dedup();
-            json_error::operation_conflict("history reword", paths)
+            json_error::operation_conflict(operation, paths)
         }
         HistoryError::Planning { message } => {
             anyhow::anyhow!("history rewrite planning failed: {message}")
