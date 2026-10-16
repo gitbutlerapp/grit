@@ -11,7 +11,9 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::index::{Index, MODE_GITLINK};
 use crate::porcelain::stash::remove_empty_dirs;
-use crate::porcelain::status::{collect_untracked_and_ignored_inner, IgnoredMode, UntrackedScan};
+use crate::porcelain::status::{
+    collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
+};
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
@@ -64,7 +66,7 @@ pub fn clean_untracked(
         show_all,
         sort_paths: true,
         use_untracked_cache: false,
-        refresh_cache_on_miss: true,
+        cache_miss: UntrackedCacheMissAction::RefreshFull,
     };
 
     let (untracked, ignored, _) = collect_untracked_and_ignored_inner(

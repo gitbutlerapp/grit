@@ -6,9 +6,10 @@
 
 use crate::config::ConfigSet;
 use crate::diff::refresh_index_stat_content_verified_with_rules;
-use crate::diff::{diff_trees, zero_oid};
+use crate::diff::{diff_tree_path_change_count, zero_oid};
 use crate::error::{Error, Result};
 use crate::hooks::{run_commit_hook_checked, CommitHookEnv};
+use crate::index::Index;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::progress::ProgressSink;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
@@ -86,6 +87,33 @@ pub struct CommitOutcome {
 pub fn create_commit(
     repo: &Repository,
     req: &CommitRequest,
+    progress: &mut dyn ProgressSink,
+) -> Result<CommitOutcome> {
+    let mut index = repo.load_index()?;
+    create_commit_with_index(repo, &mut index, req, progress)
+}
+
+/// Stage every worktree change and record a commit using a single in-memory index (issue #1064).
+///
+/// Avoids an extra index load/write between implicit staging and commit tree construction.
+///
+/// # Errors
+///
+/// Same as [`create_commit`], plus staging failures from [`crate::porcelain::add::stage_for_commit_on_index`].
+pub fn commit_worktree(
+    repo: &Repository,
+    req: &CommitRequest,
+    progress: &mut dyn ProgressSink,
+) -> Result<CommitOutcome> {
+    let mut index = repo.load_index()?;
+    crate::porcelain::add::stage_for_commit_on_index(repo, &mut index, progress)?;
+    create_commit_with_index(repo, &mut index, req, progress)
+}
+
+fn create_commit_with_index(
+    repo: &Repository,
+    mut index: &mut Index,
+    req: &CommitRequest,
     _progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
     let head = resolve_head(repo.git_dir())?;
@@ -128,7 +156,6 @@ pub fn create_commit(
         replaced_tip = Some(tip);
     }
 
-    let mut index = repo.load_index()?;
     if index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged);
     }
@@ -271,7 +298,11 @@ pub fn create_commit(
     }
     repo.write_index(&mut index)?;
 
-    let changes = diff_trees(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?.len();
+    let changes = if parent_tree.as_ref() == Some(&tree) {
+        0
+    } else {
+        diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
+    };
 
     update_branch_for_commit_with_config(
         repo.git_dir(),

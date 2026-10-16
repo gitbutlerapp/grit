@@ -16,7 +16,7 @@ use crate::index::{entry_from_metadata, index_file_mtime, Index, MODE_GITLINK, M
 use crate::objects::ObjectKind;
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
-    UntrackedScan,
+    UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
@@ -101,7 +101,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
             show_all: false,
             sort_paths: true,
             use_untracked_cache: false,
-            refresh_cache_on_miss: true,
+            cache_miss: UntrackedCacheMissAction::RefreshFull,
         },
         &worktree_rules,
     )?;

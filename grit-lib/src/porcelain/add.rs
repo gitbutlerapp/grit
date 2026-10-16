@@ -30,8 +30,8 @@ use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
 };
 use crate::porcelain::status::{
-    collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
-    UntrackedScan,
+    collect_untracked_and_ignored_inner, collect_untracked_for_commit_after_tracked_scan,
+    expand_untracked_for_staging_with_rules, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
@@ -111,20 +111,19 @@ pub fn stage_for_commit(
     stage_with_tracked_scan(repo, &opts, progress)
 }
 
-/// Stage tracked modifications/deletions for commit without walking for untracked files.
+/// Like [`stage_for_commit`], but updates a caller-owned index and does not write it to disk.
 ///
-/// Same tracked scan as [`stage_for_commit`], but skips the untracked/ignored directory walk.
-/// Use when the caller will handle untracked separately or when the index already reflects
-/// every path that should appear in the next commit (issue #1064 hot path).
-pub fn stage_tracked_for_commit(
+/// Used by [`crate::porcelain::commit::commit_worktree`] to avoid reloading the index.
+pub(crate) fn stage_for_commit_on_index(
     repo: &Repository,
+    index: &mut Index,
     progress: &mut dyn ProgressSink,
 ) -> Result<StageOutcome> {
     let opts = StageOptions {
-        mode: StageMode::Update,
+        mode: StageMode::All,
         ..StageOptions::default()
     };
-    stage_with_tracked_scan(repo, &opts, progress)
+    stage_inner_on_index(repo, &opts, progress, true, index, false)
 }
 
 /// Stage paths matching `opts` into the index.
@@ -175,8 +174,20 @@ fn untracked_show_all_matching_index(index: &Index) -> bool {
 fn stage_inner(
     repo: &Repository,
     opts: &StageOptions,
+    progress: &mut dyn ProgressSink,
+    tracked_scan: bool,
+) -> Result<StageOutcome> {
+    let mut index = repo.load_index()?;
+    stage_inner_on_index(repo, opts, progress, tracked_scan, &mut index, true)
+}
+
+fn stage_inner_on_index(
+    repo: &Repository,
+    opts: &StageOptions,
     _progress: &mut dyn ProgressSink,
     tracked_scan: bool,
+    mut index: &mut Index,
+    write_index: bool,
 ) -> Result<StageOutcome> {
     let work_tree = repo
         .work_tree()
@@ -184,7 +195,6 @@ fn stage_inner(
 
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
-    let mut index = repo.load_index()?;
 
     // One attribute/ignore/conversion context for the whole add: the worktree diff, the
     // untracked walk and blob conversion all reuse the files it has already loaded.
@@ -251,7 +261,7 @@ fn stage_inner(
                 show_all: true,
                 sort_paths: false,
                 use_untracked_cache: false,
-                refresh_cache_on_miss: true,
+                cache_miss: UntrackedCacheMissAction::RefreshFull,
             };
             let (untracked, _, _) = collect_untracked_and_ignored_inner(
                 repo,
@@ -262,17 +272,39 @@ fn stage_inner(
                 &rules,
             )?;
             untracked
+        } else if use_tracked_scan && tracked_scan_summary.is_some() {
+            let summary = tracked_scan_summary.as_ref().expect("tracked summary");
+            let untracked = collect_untracked_for_commit_after_tracked_scan(
+                repo,
+                index,
+                work_tree,
+                &opts.pathspecs,
+                &rules,
+                summary,
+            )?;
+            if untracked.is_empty() {
+                untracked
+            } else {
+                expand_untracked_for_staging_with_rules(
+                    repo,
+                    index,
+                    work_tree,
+                    untracked,
+                    &opts.pathspecs,
+                    &rules,
+                )?
+            }
         } else {
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,
-                show_all: untracked_show_all_matching_index(&index),
+                show_all: untracked_show_all_matching_index(index),
                 sort_paths: true,
                 use_untracked_cache: true,
-                refresh_cache_on_miss: true,
+                cache_miss: UntrackedCacheMissAction::RefreshFull,
             };
             let (untracked, _, _) = collect_untracked_and_ignored_inner(
                 repo,
-                &mut index,
+                index,
                 work_tree,
                 &opts.pathspecs,
                 scan,
@@ -283,7 +315,7 @@ fn stage_inner(
             } else {
                 expand_untracked_for_staging_with_rules(
                     repo,
-                    &mut index,
+                    index,
                     work_tree,
                     untracked,
                     &opts.pathspecs,
@@ -382,10 +414,12 @@ fn stage_inner(
 
     if outcome.total() > 0 {
         if let Some(summary) = &tracked_scan_summary {
-            replay_deferred_untracked_invalidations(&mut index, summary);
+            replay_deferred_untracked_invalidations(index, summary);
         }
         index.ensure_canonical_order();
-        repo.write_index(&mut index)?;
+        if write_index {
+            repo.write_index(index)?;
+        }
     }
 
     Ok(outcome)

@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -14,7 +14,6 @@ use std::io::Write;
 use crate::context::{self, subject_line};
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-use grit_lib::porcelain::add::stage_for_commit;
 
 /// Result of `grit commit`.
 #[derive(Serialize, JsonSchema)]
@@ -61,8 +60,6 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     }
 
-    stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
-
     if repo.index_handle().load()?.has_unmerged_entries() {
         return Err(map_commit_error(Error::IndexUnmerged));
     }
@@ -98,7 +95,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         )?
     };
 
-    let outcome = create_commit(
+    let outcome = commit_worktree(
         &repo,
         &CommitRequest {
             message: message_text.to_owned(),
