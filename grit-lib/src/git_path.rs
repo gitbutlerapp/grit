@@ -766,7 +766,7 @@ fn lexical_normalize_path_buf(path: PathBuf) -> PathBuf {
 /// Repository-relative path with forward slashes when `path` lies under `work_tree`.
 #[must_use]
 pub fn strip_worktree_prefix(path: &Path, work_tree: &Path) -> Option<String> {
-    let path_key = path_lexical_for_disk_compare(path);
+    let path_key = apply_macos_private_alias_for_compare(path_lexical_for_disk_compare(path));
     let wt_key = path_for_disk_compare(work_tree);
     let rel = path_key.strip_prefix(&wt_key).ok()?;
     Some(path_to_git_slash(rel))
@@ -827,6 +827,24 @@ pub fn relative_path_for_display(from: &Path, to: &Path) -> Option<String> {
     }
 }
 
+/// Normalize macOS `/private` spellings for path comparison keys.
+///
+/// `/tmp` and `/private/tmp` refer to the same directory; use the spelling without
+/// `/private` when that path exists so lexical query paths match a canonical work tree.
+#[must_use]
+fn apply_macos_private_alias_for_compare(path: PathBuf) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(stripped) = path.strip_prefix("/private") {
+            let without_private = PathBuf::from("/").join(stripped);
+            if without_private.exists() {
+                return without_private;
+            }
+        }
+    }
+    path
+}
+
 /// Canonicalize a path for on-disk comparison (macOS `/private` aliasing).
 ///
 /// On macOS, `/tmp` and `/private/tmp` refer to the same directory; Git stores and
@@ -837,19 +855,10 @@ pub fn relative_path_for_display(from: &Path, to: &Path) -> Option<String> {
 #[must_use]
 pub fn path_for_disk_compare(path: &Path) -> PathBuf {
     let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(stripped) = canon.strip_prefix("/private") {
-            let without_private = PathBuf::from("/").join(stripped);
-            if without_private.exists() {
-                return without_private;
-            }
-        }
-    }
     #[cfg(windows)]
     let canon =
         PathBuf::from(strip_verbatim_path_prefix_str(&canon.display().to_string()).into_owned());
-    canon
+    apply_macos_private_alias_for_compare(canon)
 }
 
 /// Git `setup.c` `prefix_path_gently` (POSIX).
@@ -1030,6 +1039,28 @@ mod git_path_component_tests {
         assert_eq!(
             strip_worktree_prefix(&file, &repo).as_deref(),
             Some("d/a.txt")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn strip_worktree_prefix_macos_private_tmp_alias() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let canon = tmp.path().canonicalize().expect("canonicalize tempdir");
+        let public = if let Ok(stripped) = canon.strip_prefix("/private") {
+            std::path::PathBuf::from("/").join(stripped)
+        } else {
+            canon.clone()
+        };
+        if public == canon {
+            return;
+        }
+        std::fs::create_dir_all(public.join("nested")).expect("mkdir");
+        let file_public = public.join("nested/file.txt");
+        std::fs::write(&file_public, b"x").expect("write");
+        assert_eq!(
+            strip_worktree_prefix(&file_public, &canon).as_deref(),
+            Some("nested/file.txt")
         );
     }
 
