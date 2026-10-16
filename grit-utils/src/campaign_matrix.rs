@@ -662,26 +662,31 @@ fn append_fsck_gc_repack(
         gc_allows_grit_failure,
     )?);
 
-    // Grit repack currently requires a worktree; still measure git on the bare remote.
-    out.push(run_matrix_scenario(
+    let repack = Scenario {
+        id: sid(fixture.id, "repack"),
+        group: "maintenance".into(),
+        fixture: fixture.label.clone(),
+        description: "repack on bare remote (git: -adf; grit skipped on bare)".into(),
+        grit_argv: vec!["repack".into()],
+        git_argv: vec!["repack".into(), "-adf".into()],
+        driver: Driver::Cli,
+        prepare_kind: None,
+        grit_via_shell: false,
+        git_via_shell: false,
+    };
+    // Grit repack requires a worktree; invoking it on bare hangs instead of failing fast.
+    out.push(run_scenario_git_only_with_grit_failure(
         hyperfine,
         git,
         grit,
         cfg,
-        &Scenario {
-            id: sid(fixture.id, "repack"),
-            group: "maintenance".into(),
-            fixture: fixture.label.clone(),
-            description: "repack on bare remote (git: -adf; grit: modern repack)".into(),
-            grit_argv: vec!["repack".into()],
-            git_argv: vec!["repack".into(), "-adf".into()],
-            driver: Driver::Cli,
-            prepare_kind: None,
-            grit_via_shell: false,
-            git_via_shell: false,
-        },
+        &repack,
         &fixture.bare,
-        true,
+        BenchFailure {
+            kind: "unsupported".into(),
+            message: "grit repack requires a worktree; bare remotes are measured with git repack only"
+                .into(),
+        },
     )?);
     Ok(())
 }
