@@ -465,6 +465,14 @@ fn prepare_tree_switch_allow_local(
         preverified_wholesale_dirs,
         wholesale_safety_precomputed,
     ) = if wholesale_switch {
+        let (staged, unstaged, _index_changed) =
+            crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
+                repo,
+                &mut snapshot.index,
+                snapshot.head_tree,
+                &tree_changes,
+                None,
+            )?;
         let (untracked, wholesale_ignored, trust_wholesale_dir_removal, traditional_ignore_scan) =
             collect_untracked_and_wholesale_trust_for_tree_changes(
                 repo,
@@ -519,14 +527,6 @@ fn prepare_tree_switch_allow_local(
             );
             wholesale_safety_precomputed = true;
         }
-        let (staged, unstaged, _index_changed) =
-            crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
-                repo,
-                &mut snapshot.index,
-                snapshot.head_tree,
-                &tree_changes,
-                None,
-            )?;
         (
             staged,
             unstaged,

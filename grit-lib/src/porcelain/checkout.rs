@@ -883,11 +883,7 @@ fn checkout_tree_changes_with_progress(
         })
         .collect();
     let wholesale_candidates = if apply.wholesale_safety_precomputed {
-        filter_wholesale_dirs_with_populated_gitlinks(
-            work_tree,
-            apply.preverified_wholesale_dirs.clone(),
-            &gitlink_deletes,
-        )
+        apply.preverified_wholesale_dirs.clone()
     } else {
         wholesale_deleted_directories_on_disk(
             repo,
