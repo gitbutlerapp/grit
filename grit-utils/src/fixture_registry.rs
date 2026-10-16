@@ -22,10 +22,14 @@ pub const DEFAULT_GIT_GIT_HEAD: &str = "777489f9e09c8d0dd6b12f9d90de6376330577a2
 #[value(rename_all = "kebab-case")]
 pub enum FixtureKind {
     /// Upstream git.git at the pinned tag (bare).
+    #[value(alias = "git.git")]
     GitGit,
     /// Synthetic tier S (grit-lib generator).
+    #[value(alias = "synth-S")]
     SynthS,
+    #[value(alias = "synth-M")]
     SynthM,
+    #[value(alias = "synth-L")]
     SynthL,
 }
 
@@ -42,7 +46,8 @@ impl FixtureKind {
         }
     }
 
-    fn cache_name(self) -> &'static str {
+    /// Stable cache directory name (`synth-s`, `git.git`, …).
+    pub fn cache_name(self) -> &'static str {
         match self {
             Self::GitGit => "git.git",
             Self::SynthS => "synth-s",

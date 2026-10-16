@@ -43,6 +43,10 @@ cargo build --release -p grit-cli -p grit-utils
 # All status/add scenarios
 ./target/release/grit-bench all --sizes 100,1000,10000
 
+# Worktree scenarios on a cached registry fixture (status / add / commit / diff)
+./target/release/grit-bench fixtures prepare --only synth-s
+./target/release/grit-bench run --group worktree --fixture synth-s --format json --output /tmp/worktree-synth-s.json
+
 # Compare two JSON reports (exit 1 if any scenario ratio drifts > tolerance)
 ./target/release/grit-bench compare baseline.json candidate.json --tolerance 0.10
 
@@ -162,6 +166,16 @@ Mutating scenarios should take a **`git clone --local`** copy via [`fixture_regi
 | `revert-{N}` | pick | Same fixture as pick; `git revert --no-edit` vs `grit revert` on the topic tip; reset between runs |
 | `merge-{N}` | merge | Same topology as pick; `git merge -q --no-edit` vs `grit merge` |
 | `pick-series-{N}` | pick | 20 commits: `git cherry-pick base..topic` vs 20 sequential `grit pick` (upper bound — process startup) |
+
+**Worktree group** (`grit-bench run --group worktree --fixture <kind>`) runs on registry fixtures (`synth-s`, `synth-m`, `synth-l`, `git-git`). Each scenario uses hyperfine `--prepare` to reset the clone identically for git and grit; stdout/stderr are discarded (`> /dev/null`). Repos pin `core.untrackedCache=false` and `core.fsmonitor=false` locally, with the same isolated git env as other suites.
+
+| ID pattern | What it measures |
+| --- | --- |
+| `worktree-status-clean-{fixture}` | Clean tree: `git status -s` vs `grit status` |
+| `worktree-status-dirty-{fixture}` | ~1% tracked files modified plus ~1% untracked files |
+| `worktree-add-{fixture}` | Stage the modified path set (`git add` paths vs `grit add`) |
+| `worktree-commit-{fixture}` | Commit after staging ~1% modified paths |
+| `worktree-diff-{fixture}` | Unstaged worktree vs index (`git diff` vs `grit diff`) |
 
 Hot-path scenarios set `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` to an empty file. Append `-fsmn` to the scenario id when `--fsmonitor-fixture` is used (trivial hook v2 + FSMN index extension).
 

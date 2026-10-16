@@ -45,6 +45,8 @@ pub mod serve_request;
 pub mod shell;
 pub mod stats;
 pub mod synth;
+pub mod worktree_fixture;
+pub mod worktree_suite;
 
 pub use compare::compare_reports;
 pub use schema::{BenchReport, ScenarioResult};
