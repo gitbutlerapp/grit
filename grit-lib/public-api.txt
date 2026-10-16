@@ -129,6 +129,73 @@ pub fn grit_lib::apply::materialize_binary_patch_reverse(&grit_lib::apply::Binar
 pub fn grit_lib::apply::materialize_binary_patch_section(&grit_lib::apply::BinaryPatchSection, core::option::Option<&[u8]>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::apply::parse_patch(&str, usize, &str, bool, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>>
 pub fn grit_lib::apply::write_git_binary_patch(&[u8], &[u8], &str, &str) -> grit_lib::error::Result<alloc::string::String>
+pub mod grit_lib::bench_fixture
+pub mod grit_lib::bench_fixture::synth
+pub enum grit_lib::bench_fixture::synth::SynthTier
+pub grit_lib::bench_fixture::synth::SynthTier::L
+pub grit_lib::bench_fixture::synth::SynthTier::M
+pub grit_lib::bench_fixture::synth::SynthTier::S
+impl grit_lib::bench_fixture::synth::SynthTier
+pub fn grit_lib::bench_fixture::synth::SynthTier::parse_name(&str) -> grit_lib::error::Result<Self>
+pub fn grit_lib::bench_fixture::synth::SynthTier::spec(self) -> grit_lib::bench_fixture::synth::TierSpec
+impl core::clone::Clone for grit_lib::bench_fixture::synth::SynthTier
+pub fn grit_lib::bench_fixture::synth::SynthTier::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::bench_fixture::synth::SynthTier
+impl core::cmp::PartialEq for grit_lib::bench_fixture::synth::SynthTier
+pub fn grit_lib::bench_fixture::synth::SynthTier::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::bench_fixture::synth::SynthTier
+pub fn grit_lib::bench_fixture::synth::SynthTier::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::bench_fixture::synth::SynthTier
+impl core::marker::StructuralPartialEq for grit_lib::bench_fixture::synth::SynthTier
+impl core::marker::Freeze for grit_lib::bench_fixture::synth::SynthTier
+impl core::marker::Send for grit_lib::bench_fixture::synth::SynthTier
+impl core::marker::Sync for grit_lib::bench_fixture::synth::SynthTier
+impl core::marker::Unpin for grit_lib::bench_fixture::synth::SynthTier
+impl core::marker::UnsafeUnpin for grit_lib::bench_fixture::synth::SynthTier
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bench_fixture::synth::SynthTier
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::bench_fixture::synth::SynthTier
+pub struct grit_lib::bench_fixture::synth::SynthReport
+pub grit_lib::bench_fixture::synth::SynthReport::commit_count: usize
+pub grit_lib::bench_fixture::synth::SynthReport::file_count: usize
+pub grit_lib::bench_fixture::synth::SynthReport::generation_ms: u64
+pub grit_lib::bench_fixture::synth::SynthReport::head: alloc::string::String
+pub grit_lib::bench_fixture::synth::SynthReport::pack_uncompressed_bytes: u64
+pub grit_lib::bench_fixture::synth::SynthReport::ref_count: usize
+pub grit_lib::bench_fixture::synth::SynthReport::repo_path: std::path::PathBuf
+pub grit_lib::bench_fixture::synth::SynthReport::tier: grit_lib::bench_fixture::synth::SynthTier
+impl core::clone::Clone for grit_lib::bench_fixture::synth::SynthReport
+pub fn grit_lib::bench_fixture::synth::SynthReport::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::bench_fixture::synth::SynthReport
+pub fn grit_lib::bench_fixture::synth::SynthReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::bench_fixture::synth::SynthReport
+impl core::marker::Send for grit_lib::bench_fixture::synth::SynthReport
+impl core::marker::Sync for grit_lib::bench_fixture::synth::SynthReport
+impl core::marker::Unpin for grit_lib::bench_fixture::synth::SynthReport
+impl core::marker::UnsafeUnpin for grit_lib::bench_fixture::synth::SynthReport
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bench_fixture::synth::SynthReport
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::bench_fixture::synth::SynthReport
+pub struct grit_lib::bench_fixture::synth::TierSpec
+pub grit_lib::bench_fixture::synth::TierSpec::blob_body_bytes: usize
+pub grit_lib::bench_fixture::synth::TierSpec::commit_count: usize
+pub grit_lib::bench_fixture::synth::TierSpec::edits_per_commit: usize
+pub grit_lib::bench_fixture::synth::TierSpec::file_count: usize
+pub grit_lib::bench_fixture::synth::TierSpec::loose_after_pack: usize
+pub grit_lib::bench_fixture::synth::TierSpec::ref_count: usize
+pub grit_lib::bench_fixture::synth::TierSpec::seed: u64
+pub grit_lib::bench_fixture::synth::TierSpec::tier: grit_lib::bench_fixture::synth::SynthTier
+impl core::clone::Clone for grit_lib::bench_fixture::synth::TierSpec
+pub fn grit_lib::bench_fixture::synth::TierSpec::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::bench_fixture::synth::TierSpec
+pub fn grit_lib::bench_fixture::synth::TierSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::bench_fixture::synth::TierSpec
+impl core::marker::Freeze for grit_lib::bench_fixture::synth::TierSpec
+impl core::marker::Send for grit_lib::bench_fixture::synth::TierSpec
+impl core::marker::Sync for grit_lib::bench_fixture::synth::TierSpec
+impl core::marker::Unpin for grit_lib::bench_fixture::synth::TierSpec
+impl core::marker::UnsafeUnpin for grit_lib::bench_fixture::synth::TierSpec
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bench_fixture::synth::TierSpec
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::bench_fixture::synth::TierSpec
+pub fn grit_lib::bench_fixture::synth::generate_synth_repo(&std::path::Path, grit_lib::bench_fixture::synth::SynthTier) -> grit_lib::error::Result<grit_lib::bench_fixture::synth::SynthReport>
 pub mod grit_lib::blame
 pub enum grit_lib::blame::BlameDiffAlgorithm
 pub grit_lib::blame::BlameDiffAlgorithm::Histogram
@@ -7805,6 +7872,46 @@ pub fn grit_lib::objects::serialize_tree(&[grit_lib::objects::TreeEntry]) -> all
 pub fn grit_lib::objects::tag_header_field(&[u8], &[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::objects::tag_object_line_oid(&[u8]) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::tree_entry_cmp(&[u8], bool, &[u8], bool) -> core::cmp::Ordering
+pub mod grit_lib::pack_write
+pub struct grit_lib::pack_write::InstallPackOptions
+pub grit_lib::pack_write::InstallPackOptions::hash_algo: grit_lib::objects::HashAlgo
+pub grit_lib::pack_write::InstallPackOptions::stem: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::pack_write::InstallPackOptions
+pub fn grit_lib::pack_write::InstallPackOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::pack_write::InstallPackOptions
+pub fn grit_lib::pack_write::InstallPackOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::pack_write::InstallPackOptions
+pub fn grit_lib::pack_write::InstallPackOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::pack_write::InstallPackOptions
+impl core::marker::Send for grit_lib::pack_write::InstallPackOptions
+impl core::marker::Sync for grit_lib::pack_write::InstallPackOptions
+impl core::marker::Unpin for grit_lib::pack_write::InstallPackOptions
+impl core::marker::UnsafeUnpin for grit_lib::pack_write::InstallPackOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pack_write::InstallPackOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pack_write::InstallPackOptions
+pub struct grit_lib::pack_write::PackIndexWriteEntry
+pub grit_lib::pack_write::PackIndexWriteEntry::offset: u64
+pub grit_lib::pack_write::PackIndexWriteEntry::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::pack_write::PackIndexWriteEntry
+pub fn grit_lib::pack_write::PackIndexWriteEntry::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pack_write::PackIndexWriteEntry
+impl core::cmp::PartialEq for grit_lib::pack_write::PackIndexWriteEntry
+pub fn grit_lib::pack_write::PackIndexWriteEntry::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::pack_write::PackIndexWriteEntry
+pub fn grit_lib::pack_write::PackIndexWriteEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::pack_write::PackIndexWriteEntry
+impl core::marker::Freeze for grit_lib::pack_write::PackIndexWriteEntry
+impl core::marker::Send for grit_lib::pack_write::PackIndexWriteEntry
+impl core::marker::Sync for grit_lib::pack_write::PackIndexWriteEntry
+impl core::marker::Unpin for grit_lib::pack_write::PackIndexWriteEntry
+impl core::marker::UnsafeUnpin for grit_lib::pack_write::PackIndexWriteEntry
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pack_write::PackIndexWriteEntry
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pack_write::PackIndexWriteEntry
+pub fn grit_lib::pack_write::enumerate_whole_pack_entries(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::pack_write::PackIndexWriteEntry>>
+pub fn grit_lib::pack_write::install_pack_stream(&std::path::Path, &[u8], grit_lib::pack_write::InstallPackOptions) -> grit_lib::error::Result<(std::path::PathBuf, std::path::PathBuf)>
+pub fn grit_lib::pack_write::pack_index_v2_offset_tables(&[grit_lib::pack_write::PackIndexWriteEntry]) -> (alloc::vec::Vec<u32>, alloc::vec::Vec<u64>)
+pub fn grit_lib::pack_write::whole_pack_uncompressed_size(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::error::Result<u64>
+pub fn grit_lib::pack_write::write_pack_index_v2(&std::path::Path, &std::path::Path, &[grit_lib::pack_write::PackIndexWriteEntry], usize) -> grit_lib::error::Result<()>
 pub mod grit_lib::parallel
 pub enum grit_lib::parallel::ParallelHashError<E>
 pub grit_lib::parallel::ParallelHashError::Task(E)
@@ -11250,6 +11357,25 @@ impl<'a> core::marker::Unpin for grit_lib::refs::BranchCommitRefUpdate<'a>
 impl<'a> core::marker::UnsafeUnpin for grit_lib::refs::BranchCommitRefUpdate<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::BranchCommitRefUpdate<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::refs::BranchCommitRefUpdate<'a>
+pub struct grit_lib::refs::PackedRefRecord
+pub grit_lib::refs::PackedRefRecord::oid: grit_lib::objects::ObjectId
+pub grit_lib::refs::PackedRefRecord::peeled: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::refs::PackedRefRecord::refname: alloc::string::String
+impl core::clone::Clone for grit_lib::refs::PackedRefRecord
+pub fn grit_lib::refs::PackedRefRecord::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::PackedRefRecord
+impl core::cmp::PartialEq for grit_lib::refs::PackedRefRecord
+pub fn grit_lib::refs::PackedRefRecord::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::refs::PackedRefRecord
+pub fn grit_lib::refs::PackedRefRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::PackedRefRecord
+impl core::marker::Freeze for grit_lib::refs::PackedRefRecord
+impl core::marker::Send for grit_lib::refs::PackedRefRecord
+impl core::marker::Sync for grit_lib::refs::PackedRefRecord
+impl core::marker::Unpin for grit_lib::refs::PackedRefRecord
+impl core::marker::UnsafeUnpin for grit_lib::refs::PackedRefRecord
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::PackedRefRecord
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::PackedRefRecord
 pub struct grit_lib::refs::PackedRefs
 impl grit_lib::refs::PackedRefs
 pub fn grit_lib::refs::PackedRefs::get(&self, &str) -> core::option::Option<grit_lib::objects::ObjectId>
@@ -11341,6 +11467,7 @@ pub fn grit_lib::refs::update_direct_ref_on_store(&dyn grit_lib::refs::store::Re
 pub fn grit_lib::refs::verify_branch_commit_cas(core::option::Option<grit_lib::objects::ObjectId>, core::option::Option<grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::verify_ref_transaction_batch(&std::path::Path, &[grit_lib::refs::RefBatchItem]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub fn grit_lib::refs::verify_refname_available_for_create(&std::path::Path, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
+pub fn grit_lib::refs::write_packed_refs_file(&std::path::Path, &[grit_lib::refs::PackedRefRecord]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::write_ref(&std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::write_ref_cached(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::refs::PackedRefs) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::write_ref_cas(&std::path::Path, &str, &grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
