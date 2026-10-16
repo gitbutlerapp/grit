@@ -9,11 +9,13 @@ use time::OffsetDateTime;
 
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
-use crate::fixture::{remove_dir_robust, scratch_dir};
+use crate::fixture::{bench_work_dir, remove_dir_robust, scratch_dir};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::network_fixture::{ensure_fixture, NetworkFixtureKind, NetworkProfile};
 use crate::scenarios::{run_scenario, Driver, PrepareKind, RunConfig, Scenario};
 use crate::schema::{BenchReport, ToolVersions, SCHEMA_VERSION};
+
+const GC_BASE_MARKER: &str = ".grit-bench-gc-base";
 
 pub(crate) fn git_env(cmd: &mut Command) {
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -77,11 +79,89 @@ fn prepare_gc_fixture(git: &Path, bare: &Path) -> Result<PathBuf> {
     Ok(work)
 }
 
+/// Record the current `HEAD` so campaign gc prepare can `reset --hard` without recloning.
+pub fn write_gc_base_marker(git: &Path, repo: &Path) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(["rev-parse", "HEAD"]).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git rev-parse HEAD for gc base")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "rev-parse failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let oid = String::from_utf8(out.stdout).context("rev-parse stdout")?;
+    fs::write(repo.join(GC_BASE_MARKER), oid.trim().as_bytes()).context("write gc base marker")?;
+    Ok(())
+}
+
+fn restore_gc_worktree(git: &Path, worktree: &Path) -> Result<()> {
+    let base = fs::read_to_string(worktree.join(GC_BASE_MARKER)).context("read gc base marker")?;
+    let mut reset = Command::new(git);
+    reset
+        .args(["reset", "--hard", base.trim()])
+        .current_dir(worktree);
+    git_env(&mut reset);
+    let out = reset.output().context("git reset --hard gc base")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "reset failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let mut clean = Command::new(git);
+    clean.args(["clean", "-fdx"]).current_dir(worktree);
+    git_env(&mut clean);
+    let out = clean.output().context("git clean")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "clean failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    seed_loose_objects(git, worktree)
+}
+
+fn reset_worktree_from_bare(git: &Path, bare: &Path, worktree: &Path) -> Result<()> {
+    if let Some(parent) = worktree.parent() {
+        fs::create_dir_all(parent).context("create worktree parent")?;
+    }
+    if std::env::var("GRIT_BENCH_CAMPAIGN_CWD").is_ok() {
+        remove_dir_robust(worktree);
+        fs::create_dir_all(worktree).context("recreate campaign worktree")?;
+    } else {
+        clear_dir_contents(worktree)?;
+    }
+    let mut cmd = Command::new(git);
+    cmd.args(["clone", bare.to_str().context("bare path utf-8")?, "."])
+        .current_dir(worktree);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git clone into campaign worktree")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "prepare clone failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
 /// Hyperfine prepare hook: restore the deep-history worktree with fresh loose objects.
 pub fn run_prepare_maintenance(git: &Path) -> Result<()> {
     let bare = std::env::var("GRIT_BENCH_MAINTENANCE_BARE")
         .map(PathBuf::from)
         .context("GRIT_BENCH_MAINTENANCE_BARE must be set for prepare-maintenance")?;
+    if std::env::var("GRIT_BENCH_CAMPAIGN_CWD").is_ok() {
+        let worktree = bench_work_dir();
+        if !worktree.join(GC_BASE_MARKER).is_file() {
+            anyhow::bail!(
+                "missing {} in campaign worktree (write gc base before gc scenarios)",
+                GC_BASE_MARKER
+            );
+        }
+        return restore_gc_worktree(git, &worktree);
+    }
     let _work = prepare_gc_fixture(git, &bare)?;
     Ok(())
 }

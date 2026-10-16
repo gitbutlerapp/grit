@@ -638,7 +638,7 @@ fn append_fsck_gc_repack(
         fixture.bare.display().to_string(),
     );
     if !smoke {
-        seed_loose_objects(git, &fixture.worktree)?;
+        crate::maintenance_suite::write_gc_base_marker(git, &fixture.worktree)?;
     }
     out.push(run_scenario(
         hyperfine,
