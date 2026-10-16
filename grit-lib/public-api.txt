@@ -5331,10 +5331,12 @@ impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bitmap::
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bitmap::ReachabilityQuery<'a>
 pub struct grit_lib::objects::bitmap::ReachableSet
 impl grit_lib::objects::bitmap::ReachableSet
+pub fn grit_lib::objects::bitmap::ReachableSet::bitmap_index(&self) -> &alloc::rcs::arc::Arc<grit_lib::objects::bitmap::BitmapIndex>
 pub fn grit_lib::objects::bitmap::ReachableSet::contains(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::bitmap::ReachableSet::count(&self) -> usize
 pub fn grit_lib::objects::bitmap::ReachableSet::count_by_kind(&self, grit_lib::objects::ObjectKind) -> core::result::Result<usize, grit_lib::objects::bitmap::BitmapWalkError>
 pub fn grit_lib::objects::bitmap::ReachableSet::count_by_kind_popcount(&self, grit_lib::objects::ObjectKind) -> core::result::Result<usize, grit_lib::objects::bitmap::BitmapWalkError>
+pub fn grit_lib::objects::bitmap::ReachableSet::extended_objects(&self) -> &[(grit_lib::objects::ObjectId, grit_lib::objects::ObjectKind)]
 pub fn grit_lib::objects::bitmap::ReachableSet::iter_by_kind(&self, grit_lib::objects::ObjectKind) -> impl core::iter::traits::iterator::Iterator<Item = grit_lib::objects::ObjectId> + '_
 pub fn grit_lib::objects::bitmap::ReachableSet::iter_grouped_by_kind(&self) -> impl core::iter::traits::iterator::Iterator<Item = grit_lib::objects::ObjectId> + '_
 pub fn grit_lib::objects::bitmap::ReachableSet::object_ids(&self) -> std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
@@ -7236,7 +7238,7 @@ pub fn grit_lib::objects::pack::read_pack_bytes_cached(&std::path::Path) -> grit
 pub fn grit_lib::objects::pack::read_pack_index(&std::path::Path) -> grit_lib::error::Result<grit_lib::objects::pack::PackIndex>
 pub fn grit_lib::objects::pack::read_pack_index_cached(&std::path::Path) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::pack::PackIndex>>
 pub fn grit_lib::objects::pack::read_pack_index_no_verify(&std::path::Path) -> grit_lib::error::Result<grit_lib::objects::pack::PackIndex>
-pub fn grit_lib::objects::pack::read_packed_delta_dependency(&[u8], u64) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack::PackedDeltaDependency>>
+pub fn grit_lib::objects::pack::read_packed_delta_dependency(&[u8], u64, usize) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack::PackedDeltaDependency>>
 pub fn grit_lib::objects::pack::refresh_pack_bytes_signature(&std::path::Path, std::time::SystemTime)
 pub fn grit_lib::objects::pack::reprepare_pack_directory_on_miss(&std::path::Path) -> grit_lib::error::Result<bool>
 pub fn grit_lib::objects::pack::revalidate_stale_pack_bytes(&std::path::Path) -> grit_lib::error::Result<bool>
@@ -7285,6 +7287,7 @@ impl core::marker::UnsafeUnpin for grit_lib::objects::pack_object_select::PackOb
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack_object_select::PackObjectSelection
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack_object_select::PackObjectSelection
 pub fn grit_lib::objects::pack_object_select::enumerate_pack_objects(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::objects::pack_object_select::PackEnumerateOptions<'_>) -> grit_lib::error::Result<grit_lib::objects::pack_object_select::PackObjectSelection>
+pub fn grit_lib::objects::pack_object_select::try_bitmap_reachable_for_upload(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<core::option::Option<(grit_lib::objects::bitmap::ReachableSet, std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>)>>
 pub mod grit_lib::objects::pack_objects
 pub enum grit_lib::objects::pack_objects::PackProgress
 pub grit_lib::objects::pack_objects::PackProgress::Enumerated
@@ -7382,6 +7385,10 @@ pub struct grit_lib::objects::pack_objects::PackStats
 pub grit_lib::objects::pack_objects::PackStats::delta_count: u32
 pub grit_lib::objects::pack_objects::PackStats::object_count: u32
 pub grit_lib::objects::pack_objects::PackStats::pack_bytes: u64
+pub grit_lib::objects::pack_objects::PackStats::pack_ofs_fixup_objects: u32
+pub grit_lib::objects::pack_objects::PackStats::pack_ref_from_ofs_objects: u32
+pub grit_lib::objects::pack_objects::PackStats::verbatim_reuse_bytes: u64
+pub grit_lib::objects::pack_objects::PackStats::verbatim_reuse_objects: u32
 impl core::clone::Clone for grit_lib::objects::pack_objects::PackStats
 pub fn grit_lib::objects::pack_objects::PackStats::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::objects::pack_objects::PackStats
@@ -7409,6 +7416,7 @@ pub fn grit_lib::objects::pack_objects::build_pack_with_parallel_threads(&grit_l
 pub fn grit_lib::objects::pack_objects::build_pack_with_shallow_and_filter(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack_objects::build_pack_with_write_threads(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::objects::pack_objects::PackBuildOptions, core::option::Option<usize>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack_objects::reachable_closure(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, bool, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub fn grit_lib::objects::pack_objects::write_upload_pack_stream(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<grit_lib::objects::pack_objects::PackStats>
 pub mod grit_lib::objects::pack_receive
 pub enum grit_lib::objects::pack_receive::PackReceiveOutcome
 pub grit_lib::objects::pack_receive::PackReceiveOutcome::File(std::path::PathBuf)
@@ -7878,6 +7886,39 @@ pub fn grit_lib::objects::serialize_tree(&[grit_lib::objects::TreeEntry]) -> all
 pub fn grit_lib::objects::tag_header_field(&[u8], &[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::objects::tag_object_line_oid(&[u8]) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::tree_entry_cmp(&[u8], bool, &[u8], bool) -> core::cmp::Ordering
+pub mod grit_lib::pack_reuse
+pub struct grit_lib::pack_reuse::ReuseWriteStats
+pub grit_lib::pack_reuse::ReuseWriteStats::pack_ofs_fixup_objects: u32
+pub grit_lib::pack_reuse::ReuseWriteStats::pack_ref_from_ofs_objects: u32
+pub grit_lib::pack_reuse::ReuseWriteStats::verbatim_reuse_bytes: u64
+pub grit_lib::pack_reuse::ReuseWriteStats::verbatim_reuse_objects: u32
+impl core::clone::Clone for grit_lib::pack_reuse::ReuseWriteStats
+pub fn grit_lib::pack_reuse::ReuseWriteStats::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pack_reuse::ReuseWriteStats
+impl core::cmp::PartialEq for grit_lib::pack_reuse::ReuseWriteStats
+pub fn grit_lib::pack_reuse::ReuseWriteStats::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::pack_reuse::ReuseWriteStats
+pub fn grit_lib::pack_reuse::ReuseWriteStats::default() -> Self
+impl core::fmt::Debug for grit_lib::pack_reuse::ReuseWriteStats
+pub fn grit_lib::pack_reuse::ReuseWriteStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::pack_reuse::ReuseWriteStats
+impl core::marker::StructuralPartialEq for grit_lib::pack_reuse::ReuseWriteStats
+impl core::marker::Freeze for grit_lib::pack_reuse::ReuseWriteStats
+impl core::marker::Send for grit_lib::pack_reuse::ReuseWriteStats
+impl core::marker::Sync for grit_lib::pack_reuse::ReuseWriteStats
+impl core::marker::Unpin for grit_lib::pack_reuse::ReuseWriteStats
+impl core::marker::UnsafeUnpin for grit_lib::pack_reuse::ReuseWriteStats
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pack_reuse::ReuseWriteStats
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pack_reuse::ReuseWriteStats
+pub struct grit_lib::pack_reuse::StreamingReuse
+impl core::marker::Freeze for grit_lib::pack_reuse::StreamingReuse
+impl core::marker::Send for grit_lib::pack_reuse::StreamingReuse
+impl core::marker::Sync for grit_lib::pack_reuse::StreamingReuse
+impl core::marker::Unpin for grit_lib::pack_reuse::StreamingReuse
+impl core::marker::UnsafeUnpin for grit_lib::pack_reuse::StreamingReuse
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pack_reuse::StreamingReuse
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pack_reuse::StreamingReuse
+pub fn grit_lib::pack_reuse::try_write_streaming_pack(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack_objects::PackStats>>
 pub mod grit_lib::pack_write
 pub struct grit_lib::pack_write::InstallPackOptions
 pub grit_lib::pack_write::InstallPackOptions::hash_algo: grit_lib::objects::HashAlgo
@@ -11748,6 +11789,20 @@ impl core::marker::Unpin for grit_lib::remote::pkt_line::Packet
 impl core::marker::UnsafeUnpin for grit_lib::remote::pkt_line::Packet
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::pkt_line::Packet
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::pkt_line::Packet
+pub struct grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W: core::io::write::Write + ?core::marker::Sized + 'a>
+impl<'a, W: core::io::write::Write + ?core::marker::Sized + 'a> grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W>
+pub fn grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W>::finish(self) -> core::io::error::Result<()>
+pub fn grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W>::new(&'a mut W) -> Self
+impl<'a, W: core::io::write::Write + ?core::marker::Sized + 'a> core::io::write::Write for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W>
+pub fn grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W>::flush(&mut self) -> core::io::error::Result<()>
+pub fn grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W>::write(&mut self, &[u8]) -> core::io::error::Result<usize>
+impl<'a, W> core::marker::Freeze for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W> where &'a mut W: core::marker::Freeze, W: ?core::marker::Sized
+impl<'a, W> core::marker::Send for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W> where &'a mut W: core::marker::Send, W: ?core::marker::Sized
+impl<'a, W> core::marker::Sync for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W> where &'a mut W: core::marker::Sync, W: ?core::marker::Sized
+impl<'a, W> core::marker::Unpin for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W> where &'a mut W: core::marker::Unpin, W: ?core::marker::Sized
+impl<'a, W> core::marker::UnsafeUnpin for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W> where &'a mut W: core::marker::UnsafeUnpin, W: ?core::marker::Sized
+impl<'a, W> core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W> where &'a mut W: core::panic::unwind_safe::RefUnwindSafe, W: ?core::marker::Sized
+impl<'a, W> !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::pkt_line::SidebandChannel1Writer<'a, W>
 pub const grit_lib::remote::pkt_line::DELIM: &str
 pub const grit_lib::remote::pkt_line::FLUSH: &str
 pub const grit_lib::remote::pkt_line::RESPONSE_END: &str
@@ -12374,6 +12429,10 @@ pub struct grit_lib::remote::transfer::PackStats
 pub grit_lib::remote::transfer::PackStats::delta_count: u32
 pub grit_lib::remote::transfer::PackStats::object_count: u32
 pub grit_lib::remote::transfer::PackStats::pack_bytes: u64
+pub grit_lib::remote::transfer::PackStats::pack_ofs_fixup_objects: u32
+pub grit_lib::remote::transfer::PackStats::pack_ref_from_ofs_objects: u32
+pub grit_lib::remote::transfer::PackStats::verbatim_reuse_bytes: u64
+pub grit_lib::remote::transfer::PackStats::verbatim_reuse_objects: u32
 impl core::clone::Clone for grit_lib::objects::pack_objects::PackStats
 pub fn grit_lib::objects::pack_objects::PackStats::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::objects::pack_objects::PackStats

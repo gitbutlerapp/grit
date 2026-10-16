@@ -4,6 +4,7 @@
 [map]
 apply = "apply"
 attributes = "worktree::attributes"
+bench_fixture = "bench_fixture"
 bitmap_walk = "objects::bitmap"
 blame = "blame"
 bloom = "diff::bloom"
