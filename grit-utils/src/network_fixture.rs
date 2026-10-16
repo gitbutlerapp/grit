@@ -421,6 +421,11 @@ fn default_branch_on_bare(git: &Path, bare: &Path) -> Result<String> {
             return Ok(short);
         }
     }
+    for candidate in ["master", "main"] {
+        if rev_parse(git, bare, &format!("refs/heads/{candidate}")).is_ok() {
+            return Ok(candidate.into());
+        }
+    }
     Ok("main".into())
 }
 
@@ -438,16 +443,27 @@ pub fn ensure_campaign_bare_network_meta(
     } else {
         NetworkProfile::Production
     };
-    let default_branch = default_branch_on_bare(git, bare)?;
-    let fetch_base = rev_parse(
-        git,
-        bare,
-        &format!(
-            "refs/heads/{default_branch}~{}",
-            profile.incremental_fetch_commits()
-        ),
-    )
-    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
+    let tag_only = crate::real_repo_fixture::list_branch_head_refs(bare)?.is_empty();
+    let default_branch = if tag_only {
+        "master".into()
+    } else {
+        default_branch_on_bare(git, bare)?
+    };
+    let fetch_base = if tag_only {
+        let tag = std::env::var("GRIT_BENCH_GIT_GIT_TAG")
+            .unwrap_or_else(|_| crate::real_repo_fixture::DEFAULT_GIT_GIT_TAG.to_owned());
+        rev_parse(git, bare, &tag).or_else(|_| rev_parse(git, bare, "HEAD"))?
+    } else {
+        rev_parse(
+            git,
+            bare,
+            &format!(
+                "refs/heads/{default_branch}~{}",
+                profile.incremental_fetch_commits()
+            ),
+        )
+        .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?
+    };
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: "CampaignRealRepo".into(),
@@ -461,6 +477,16 @@ pub fn ensure_campaign_bare_network_meta(
         fetch_base_oid: fetch_base,
         default_branch,
     };
+    if tag_only {
+        let branch_ref = format!("refs/heads/{}", meta.default_branch);
+        if rev_parse(git, bare, &branch_ref).is_err() {
+            run_git(
+                git,
+                Some(bare),
+                &["update-ref", &branch_ref, &meta.fetch_base_oid],
+            )?;
+        }
+    }
     fs::write(meta_path(bare), serde_json::to_string_pretty(&meta)?)?;
     Ok(meta)
 }
