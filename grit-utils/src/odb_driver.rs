@@ -533,6 +533,149 @@ fn read_blob_or_empty(repo: &Repository, oid: ObjectId, missing: bool) -> Result
     Ok(object.data)
 }
 
+/// `rev-list --count HEAD` (commits reachable from `HEAD`).
+pub fn rev_list_count_head(repo: &Repository) -> Result<()> {
+    let opts = RevListOptions {
+        count: true,
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let result =
+        rev_list(repo, &["HEAD".to_string()], &[], &opts).context("rev-list --count HEAD")?;
+    let n = result.commit_count();
+    println!("{n}");
+    Ok(())
+}
+
+/// Emit `git blame --porcelain` for one worktree path at `HEAD`.
+pub fn blame_porcelain(repo: &Repository, path: &str) -> Result<()> {
+    use grit_lib::blame::{blame_file, BlameOptions};
+    use grit_lib::state::{resolve_head, HeadState};
+    use std::io::{BufWriter, Write};
+
+    let start = match resolve_head(repo.git_dir())? {
+        HeadState::Detached { oid } => oid,
+        HeadState::Branch { oid: Some(oid), .. } => oid,
+        HeadState::Branch { oid: None, .. } | HeadState::Invalid => {
+            anyhow::bail!("cannot blame: HEAD does not resolve to a commit");
+        }
+    };
+    let result = blame_file(
+        repo,
+        path,
+        &BlameOptions {
+            start: Some(start),
+            ..Default::default()
+        },
+    )
+    .context("blame_file")?;
+
+    let mut stdout = BufWriter::new(io::stdout().lock());
+    let mut i = 0usize;
+    while i < result.lines.len() {
+        let commit = result.lines[i].commit;
+        let orig_start = result.lines[i].original_line;
+        let final_start = result.lines[i].final_line;
+        let mut count = 1usize;
+        while i + count < result.lines.len() && result.lines[i + count].commit == commit {
+            count += 1;
+        }
+        write_blame_porcelain_header(
+            &mut stdout,
+            repo,
+            commit,
+            orig_start,
+            final_start,
+            count,
+            path,
+            &result.commits,
+        )?;
+        for line in &result.lines[i..i + count] {
+            let content = line.content.trim_end_matches(['\r', '\n']);
+            writeln!(stdout, "\t{content}")?;
+        }
+        i += count;
+    }
+    stdout.flush()?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_blame_porcelain_header(
+    out: &mut impl Write,
+    repo: &Repository,
+    commit: ObjectId,
+    orig: usize,
+    final_line: usize,
+    num_lines: usize,
+    path: &str,
+    commits: &std::collections::HashMap<ObjectId, grit_lib::blame::BlameCommitInfo>,
+) -> Result<()> {
+    writeln!(out, "{} {orig} {final_line} {num_lines}", commit.to_hex())?;
+    let mut block = String::new();
+    let meta = commits.get(&commit);
+    let obj = repo.odb().read(&commit).ok();
+    let parsed = obj.as_ref().and_then(|o| parse_commit(&o.data).ok());
+    let author = meta
+        .map(|m| m.author.as_str())
+        .or_else(|| parsed.as_ref().map(|c| c.author.as_str()))
+        .unwrap_or("");
+    let committer = parsed
+        .as_ref()
+        .map(|c| c.committer.as_str())
+        .unwrap_or(author);
+    let summary = meta
+        .map(|m| m.summary.as_str())
+        .or_else(|| {
+            parsed.as_ref().and_then(|c| {
+                c.message
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .map(str::trim)
+            })
+        })
+        .unwrap_or("");
+    let (author_name, author_mail, author_time, author_tz) = split_identity(author);
+    let (committer_name, committer_mail, committer_time, committer_tz) = split_identity(committer);
+    block.push_str(&format!("author {author_name}\n"));
+    block.push_str(&format!("author-mail {author_mail}\n"));
+    block.push_str(&format!("author-time {author_time}\n"));
+    block.push_str(&format!("author-tz {author_tz}\n"));
+    block.push_str(&format!("committer {committer_name}\n"));
+    block.push_str(&format!("committer-mail {committer_mail}\n"));
+    block.push_str(&format!("committer-time {committer_time}\n"));
+    block.push_str(&format!("committer-tz {committer_tz}\n"));
+    block.push_str(&format!("summary {summary}\n"));
+    block.push_str(&format!("filename {path}\n"));
+    write!(out, "{block}")?;
+    Ok(())
+}
+
+fn split_identity(identity: &str) -> (String, String, String, String) {
+    let parts: Vec<&str> = identity.rsplitn(3, ' ').collect();
+    if parts.len() >= 3 {
+        let tz = parts[0].to_string();
+        let time = parts[1].to_string();
+        let name_mail = parts[2..].join(" ");
+        let mail = name_mail
+            .split_once('<')
+            .and_then(|(_, rest)| rest.strip_suffix('>'))
+            .map(|m| format!("<{m}>"))
+            .unwrap_or_else(|| "<>".to_string());
+        let name = name_mail
+            .split_once('<')
+            .map(|(n, _)| n.trim())
+            .unwrap_or("");
+        return (name.to_string(), mail, time, tz);
+    }
+    (
+        identity.to_string(),
+        "<>".to_string(),
+        "0".to_string(),
+        "+0000".to_string(),
+    )
+}
+
 /// `rev-list --count --all` (commit count only).
 pub fn rev_list_count(repo: &Repository) -> Result<()> {
     let opts = RevListOptions {

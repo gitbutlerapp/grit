@@ -23,7 +23,7 @@ pub struct OdbRunConfig {
     pub prepare_bin: PathBuf,
 }
 
-fn run_odb_scenario(
+pub(crate) fn run_odb_scenario(
     hyperfine: &Path,
     bench_exe: &Path,
     git: &Path,

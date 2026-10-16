@@ -9,6 +9,7 @@ use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::fixture::{DeepLeafDogfoodSpec, DenseLeafDogfoodSpec};
 use grit_utils::fsck_suite::run_fsck_suite;
+use grit_utils::history_suite::run_history_suite;
 use grit_utils::ignore_suite::run_ignore_suite;
 use grit_utils::local_clone_suite::run_local_clone_suite;
 use grit_utils::maintenance_prepare::run_prepare_maintenance;
@@ -118,6 +119,12 @@ enum Cmd {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000])]
         sizes: Vec<usize>,
     },
+    /// Log, show, rev-list count, blame, and cat-file batch on synthetic fixtures
+    History {
+        /// Tier S fixture and fewer timed runs (CI integration tests).
+        #[arg(long)]
+        smoke: bool,
+    },
     /// Blame one file with deep linear history vs `git blame --porcelain`
     Blame {
         #[arg(long, default_value_t = 2_000)]
@@ -194,6 +201,12 @@ enum Cmd {
     Drive {
         #[command(subcommand)]
         workload: DriveCmd,
+    },
+    /// Internal: library-backed workloads for history and ODB benchmarks
+    #[command(hide = true, name = "lib-op")]
+    LibOp {
+        #[command(subcommand)]
+        workload: LibOpCmd,
     },
     /// Internal: library-backed workloads for ref benchmarks
     #[command(hide = true)]
@@ -474,6 +487,13 @@ enum RefsDriveCmd {
 }
 
 #[derive(Subcommand)]
+enum LibOpCmd {
+    RevListCountHead { repo: PathBuf },
+    BlamePorcelain { repo: PathBuf, path: String },
+    CatFileBatch { repo: PathBuf },
+}
+
+#[derive(Subcommand)]
 enum DriveCmd {
     CatFileBatch {
         repo: PathBuf,
@@ -592,6 +612,24 @@ fn run_refs_drive(workload: &RefsDriveCmd) -> Result<()> {
     Ok(())
 }
 
+fn run_lib_op(workload: &LibOpCmd) -> Result<()> {
+    match workload {
+        LibOpCmd::RevListCountHead { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_list_count_head(&repo)?;
+        }
+        LibOpCmd::BlamePorcelain { repo, path } => {
+            let repo = open_repo(repo)?;
+            odb_driver::blame_porcelain(&repo, path)?;
+        }
+        LibOpCmd::CatFileBatch { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::cat_file_batch(&repo)?;
+        }
+    }
+    Ok(())
+}
+
 fn run_drive(workload: &DriveCmd) -> Result<()> {
     match workload {
         DriveCmd::CatFileBatch { repo } => {
@@ -670,6 +708,9 @@ fn main() -> Result<()> {
         }
         Cmd::Drive { workload } => {
             return run_drive(workload);
+        }
+        Cmd::LibOp { workload } => {
+            return run_lib_op(workload);
         }
         Cmd::RefsDriver { workload } => {
             return run_refs_drive(workload);
@@ -876,6 +917,20 @@ fn main() -> Result<()> {
             eprintln!("Running log benchmarks...");
             let cfg = run_config(&cli, false);
             run_log_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::History { smoke } => {
+            eprintln!("Running history and object-inspection benchmarks...");
+            let cfg = run_config(&cli, true);
+            let odb_cfg = OdbRunConfig {
+                warmup: cli.warmup,
+                min_runs: cli.min_runs,
+                prepare_bin: std::env::current_exe()
+                    .unwrap_or_else(|_| PathBuf::from("grit-bench")),
+            };
+            let bench_exe = std::env::current_exe().context("current exe")?;
+            run_history_suite(
+                &hyperfine, &git, &grit, &bench_exe, &cfg, &odb_cfg, *smoke, timestamp,
+            )?
         }
         Cmd::Blame { commits } => {
             eprintln!("Running blame benchmarks...");
@@ -1092,6 +1147,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareParallelClone { .. }
         | Cmd::PrepareParallelIndexPack { .. }
         | Cmd::RefsDriver { .. }
+        | Cmd::LibOp { .. }
         | Cmd::Fixture { .. } => unreachable!(),
     };
 
@@ -1106,6 +1162,7 @@ fn main() -> Result<()> {
         cli.command,
         Cmd::Odb
             | Cmd::OdbBackend
+            | Cmd::History { .. }
             | Cmd::Refs
             | Cmd::Bitmaps { .. }
             | Cmd::Network { .. }

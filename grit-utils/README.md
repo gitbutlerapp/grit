@@ -38,6 +38,10 @@ cargo build --release -p grit-cli -p grit-utils
 # All status/add scenarios
 ./target/release/grit-bench all --sizes 100,1000,10000
 
+# History scenarios (log, show, rev-list count, blame, cat-file batch) on synthetic fixtures
+./target/release/grit-bench history --format json --output baselines/history-synth-L.json
+./target/release/grit-bench history --smoke --format json --output /tmp/history-smoke.json
+
 # Compare two JSON reports (exit 1 if any scenario ratio drifts > tolerance)
 ./target/release/grit-bench compare baseline.json candidate.json --tolerance 0.10
 
@@ -136,6 +140,14 @@ Reports use `"schema_version": 1`. All times in scenario stats are **millisecond
 | `revert-{N}` | pick | Same fixture as pick; `git revert --no-edit` vs `grit revert` on the topic tip; reset between runs |
 | `merge-{N}` | merge | Same topology as pick; `git merge -q --no-edit` vs `grit merge` |
 | `pick-series-{N}` | pick | 20 commits: `git cherry-pick base..topic` vs 20 sequential `grit pick` (upper bound — process startup) |
+| `history-log-first-{N}` | history | First *N* commits (`git log -N --oneline` vs paged `grit log`); **`driver: cli`** |
+| `history-log-all` | history | Full `main` history on the synthetic fixture; **`driver: cli`** |
+| `history-rev-list-count` | history | `git rev-list --count HEAD` vs `grit-bench lib-op rev-list-count-head`; **`driver: lib`** |
+| `history-blame` | history | High-churn path: `git blame --porcelain` vs `grit-bench lib-op blame-porcelain`; **`driver: lib`** |
+| `history-show` | history | One commit (`git show` vs `grit show`); **`driver: cli`** |
+| `history-cat-file-batch` | history | Sorted OIDs reachable from `HEAD` fed to `cat-file --batch`; grit side uses **`lib-op cat-file-batch`**; **`driver: lib`** |
+
+Library-backed scenarios (`driver: lib`) run through the hidden `grit-bench lib-op` subcommand (same workloads as `grit-bench drive` for cat-file batch). Correctness is checked before timing: rev-list count equality, blame porcelain line attribution, and byte-identical cat-file batch output vs system `git`.
 
 Hot-path scenarios set `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` to an empty file. Append `-fsmn` to the scenario id when `--fsmonitor-fixture` is used (trivial hook v2 + FSMN index extension).
 

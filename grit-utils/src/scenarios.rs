@@ -32,7 +32,6 @@ use crate::stats::{failed_timing_stats, median_ratio, timing_from_hyperfine};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Driver {
     Cli,
-    #[allow(dead_code)]
     Lib,
 }
 
@@ -770,7 +769,7 @@ for _ in $(seq 1 {pages}); do
   fi
   printf '%s\n' "$page" | awk '!/^→/ && !/^$/ {{print}}'
   before=$(printf '%s\n' "$page" | sed -n 's/^→ more: grit log --before=//p')
-  [ -z "$before" ] && break
+  if [ -z "$before" ]; then break; fi
 done"#
     )
 }
