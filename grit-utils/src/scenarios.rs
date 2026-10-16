@@ -785,7 +785,7 @@ for _ in $(seq 1 {pages}); do
     page=$({grit_q} log --before="$before") || exit $?
   fi
   printf '%s\n' "$page" | awk '!/^→/ && !/^$/ {{print}}'
-  before=$(printf '%s\n' "$page" | sed -n 's/^→ more: grit log --before=//p')
+  before=$(printf '%s\n' "$page" | sed -n 's|^→ more: grit log --before=||p')
   if [ -z "$before" ]; then break; fi
 done"#
     )
@@ -817,6 +817,11 @@ mod log_bench_tests {
         assert!(script.contains("seq 1 100"));
         let grit_q = shell_quote(&grit.to_string_lossy());
         assert!(script.contains(&format!("page=$({grit_q} log)")));
+        assert!(
+            script.contains("if [ -z \"$before\" ]; then break; fi"),
+            "must not use `[ -z ] && break` under set -eu"
+        );
+        assert!(script.contains("sed -n 's|^→ more: grit log --before=||p'"));
     }
 }
 
