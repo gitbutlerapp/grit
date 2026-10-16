@@ -5,7 +5,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{commit_worktree, create_commit, CommitRequest};
+use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -165,4 +166,82 @@ fn stage_for_commit_stages_untracked_below_auto_cache_threshold() {
     let repo2 = open_repo(&repo2_root);
     let out2 = stage(&repo2, &StageOptions::default(), &mut NullProgress).expect("stage");
     assert_eq!(out2.added, 1);
+}
+
+fn large_index_fixture(root: &std::path::Path) {
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    let n = AUTO_UNTRACKED_CACHE_MIN_ENTRIES;
+    for i in 0..n {
+        let rel = format!("d{i:04}/f.txt");
+        let path = root.join(&rel);
+        fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+        fs::write(&path, format!("{i}\n")).expect("write");
+    }
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "fill index"]);
+}
+
+fn commit_worktree_req(message: &str) -> CommitRequest {
+    let id = ident();
+    CommitRequest {
+        message: message.to_owned(),
+        author: id.clone(),
+        committer: id,
+        allow_empty: false,
+        sign_override: None,
+        amend: false,
+        assume_worktree_synced: true,
+        skip_pre_commit_tree_match: true,
+    }
+}
+
+/// Tracked edit in `d0000` and a new nested untracked file under an unrelated directory tree.
+fn apply_unrelated_tracked_and_untracked(root: &std::path::Path) {
+    fs::write(root.join("d0000/f.txt"), "edited\n").expect("edit tracked");
+    let nested = root.join("other-zone/deep/nested/new.txt");
+    fs::create_dir_all(nested.parent().unwrap()).expect("mkdir");
+    fs::write(&nested, "fresh\n").expect("untracked");
+}
+
+#[test]
+fn commit_worktree_stages_unrelated_untracked_cold_untr_cache() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    large_index_fixture(root);
+    apply_unrelated_tracked_and_untracked(root);
+
+    let repo = open_repo(root);
+    commit_worktree(&repo, &commit_worktree_req("both"), &mut NullProgress).expect("commit");
+
+    let porcelain = git(root, &["status", "--porcelain"]);
+    assert!(
+        porcelain.trim().is_empty(),
+        "commit must stage tracked and distant untracked paths (cold UNTR): {porcelain}"
+    );
+    assert_eq!(
+        git(root, &["show", "HEAD:other-zone/deep/nested/new.txt"]).trim(),
+        "fresh"
+    );
+    assert_eq!(git(root, &["show", "HEAD:d0000/f.txt"]).trim(), "edited");
+}
+
+#[test]
+fn commit_worktree_stages_unrelated_untracked_warm_untr_cache() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    large_index_fixture(root);
+
+    let repo = open_repo(root);
+    status(&repo, &StatusOptions::default(), &mut NullProgress).expect("warm UNTR via status");
+    apply_unrelated_tracked_and_untracked(root);
+
+    commit_worktree(&repo, &commit_worktree_req("both"), &mut NullProgress).expect("commit");
+
+    let porcelain = git(root, &["status", "--porcelain"]);
+    assert!(
+        porcelain.trim().is_empty(),
+        "commit must stage tracked and distant untracked paths (warm UNTR): {porcelain}"
+    );
 }

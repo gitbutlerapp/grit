@@ -180,6 +180,8 @@ fn create_commit_with_index(
         }
     }
 
+    repo.write_index(&mut index)?;
+
     let commit_env = CommitHookEnv {
         index_file: Some(index_path.as_path()),
         git_editor: Some(":"),

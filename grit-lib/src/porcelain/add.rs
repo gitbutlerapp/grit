@@ -30,8 +30,8 @@ use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
 };
 use crate::porcelain::status::{
-    collect_untracked_and_ignored_inner, collect_untracked_for_commit_after_tracked_scan,
-    expand_untracked_for_staging_with_rules, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
+    collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
+    UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
@@ -272,28 +272,6 @@ fn stage_inner_on_index(
                 &rules,
             )?;
             untracked
-        } else if use_tracked_scan && tracked_scan_summary.is_some() {
-            let summary = tracked_scan_summary.as_ref().expect("tracked summary");
-            let untracked = collect_untracked_for_commit_after_tracked_scan(
-                repo,
-                index,
-                work_tree,
-                &opts.pathspecs,
-                &rules,
-                summary,
-            )?;
-            if untracked.is_empty() {
-                untracked
-            } else {
-                expand_untracked_for_staging_with_rules(
-                    repo,
-                    index,
-                    work_tree,
-                    untracked,
-                    &opts.pathspecs,
-                    &rules,
-                )?
-            }
         } else {
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,

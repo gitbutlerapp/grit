@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
+use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{resolve_head, HeadState};
@@ -60,14 +61,13 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     }
 
-    if repo.index_handle().load()?.has_unmerged_entries() {
-        return Err(map_commit_error(Error::IndexUnmerged));
-    }
-
     let message = match message {
         Some(m) if !m.trim().is_empty() => Some(m),
         None if amend => None,
-        _ => bail!("provide a commit message, e.g. grit commit \"what changed\""),
+        _ => {
+            stage_for_commit(&repo, &mut NullProgress).context("stage for commit")?;
+            bail!("provide a commit message, e.g. grit commit \"what changed\"");
+        }
     };
     let message_text = message.as_deref().unwrap_or("");
 
