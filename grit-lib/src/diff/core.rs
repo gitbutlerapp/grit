@@ -1879,7 +1879,6 @@ fn diff_tree_entries_opts(
 }
 
 fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Vec<DiffEntry>) {
-    use crate::index::MODE_GITLINK;
     let scan_prefix: Vec<u8> = if dir_prefix.is_empty() {
         Vec::new()
     } else {
@@ -1903,9 +1902,6 @@ fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Ve
             if scan_prefix.is_empty() && ie.path.contains(&b'/') {
                 continue;
             }
-            if ie.mode == MODE_GITLINK {
-                continue;
-            }
             let path = String::from_utf8_lossy(&ie.path).into_owned();
             result.push(DiffEntry {
                 status: DiffStatus::Deleted,
@@ -1921,7 +1917,7 @@ fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Ve
         return;
     }
     for ie in &index.entries {
-        if ie.stage() != 0 || ie.mode == MODE_GITLINK {
+        if ie.stage() != 0 {
             continue;
         }
         let Ok(path) = std::str::from_utf8(&ie.path) else {

@@ -265,6 +265,69 @@ fn switch_preserves_ignored_file_in_wholesale_deleted_directory() {
 }
 
 #[test]
+fn switch_preserves_ignored_file_from_nested_tracked_gitignore() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "Test"]);
+    git(tmp.path(), &["config", "gc.auto", "0"]);
+
+    std::fs::create_dir_all(tmp.path().join("d")).expect("mkdir d");
+    std::fs::write(tmp.path().join("d/.gitignore"), "*.log\n").expect("nested gitignore");
+    for i in 0..8 {
+        std::fs::write(
+            tmp.path().join(format!("d/f{i}.txt")),
+            format!("main {i}\n"),
+        )
+        .expect("write");
+    }
+    git(tmp.path(), &["add", "-A"]);
+    git(tmp.path(), &["commit", "-qm", "main"]);
+
+    git(tmp.path(), &["checkout", "-q", "-b", "target"]);
+    git(tmp.path(), &["rm", "-r", "d"]);
+    git(tmp.path(), &["commit", "-qm", "drop d"]);
+    git(tmp.path(), &["checkout", "-q", "main"]);
+
+    std::fs::write(tmp.path().join("d/ignored.log"), b"keep\n").expect("ignored");
+    assert!(
+        std::fs::read(tmp.path().join("d/ignored.log")).is_ok(),
+        "ignored file must exist before switch"
+    );
+
+    git(tmp.path(), &["switch", "-q", "target"]);
+    assert!(
+        std::fs::read(tmp.path().join("d/ignored.log")).is_ok(),
+        "system git must preserve ignored file when rules live in nested tracked .gitignore"
+    );
+    git(tmp.path(), &["switch", "-q", "main"]);
+
+    std::fs::write(tmp.path().join("d/ignored.log"), b"keep\n").expect("ignored again");
+
+    let grit_repo = Repository::open(
+        &tmp.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(tmp.path()),
+    )
+    .expect("open grit repo");
+    let target_oid =
+        ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect("grit switch to target");
+
+    let kept = std::fs::read_to_string(tmp.path().join("d/ignored.log")).expect("ignored kept");
+    assert_eq!(kept, "keep\n");
+}
+
+#[test]
 fn switch_refuses_racy_same_size_dirty_file_like_git() {
     use std::path::Path;
     use std::process::Command;
@@ -551,6 +614,127 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
     assert!(
         git_porcelain(tmp.path()).trim().is_empty(),
         "git status must be clean after switch back"
+    );
+}
+
+fn gitlink_commit_oid(root: &std::path::Path) -> String {
+    use std::io::Write;
+    use std::process::Command;
+    let mut child = Command::new("git")
+        .current_dir(root)
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("hash blob");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"sub\n")
+        .expect("write blob");
+    let blob = String::from_utf8(child.wait_with_output().expect("blob").stdout)
+        .expect("utf8")
+        .trim()
+        .to_owned();
+    let tree = format!("100644 blob {blob}\tf\n");
+    let mut mktree = Command::new("git")
+        .current_dir(root)
+        .args(["mktree"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("mktree");
+    mktree
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(tree.as_bytes())
+        .expect("tree");
+    let sub_tree = String::from_utf8(mktree.wait_with_output().expect("tree out").stdout)
+        .expect("utf8")
+        .trim()
+        .to_owned();
+    let commit = Command::new("git")
+        .current_dir(root)
+        .args(["commit-tree", &sub_tree, "-m", "sub"])
+        .env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("commit-tree");
+    String::from_utf8(commit.wait_with_output().expect("sub commit").stdout)
+        .expect("utf8")
+        .trim()
+        .to_owned()
+}
+
+#[test]
+fn switch_removes_gitlink_when_parent_directory_dropped() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    git(root, &["config", "gc.auto", "0"]);
+
+    std::fs::create_dir_all(root.join("d/sub")).expect("mkdir d/sub");
+    std::fs::write(root.join("d/a.txt"), b"in d\n").expect("write a");
+    let sub_oid = gitlink_commit_oid(root);
+    git(root, &["add", "d/a.txt"]);
+    git(
+        root,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{sub_oid},d/sub"),
+        ],
+    );
+    git(root, &["commit", "-qm", "main with d and gitlink"]);
+
+    git(root, &["checkout", "-q", "-b", "target"]);
+    git(root, &["rm", "-f", "d/a.txt", "d/sub"]);
+    git(root, &["commit", "-qm", "drop d"]);
+    git(root, &["checkout", "-q", "main"]);
+
+    git(root, &["switch", "-q", "target"]);
+    assert!(
+        git_porcelain(root).trim().is_empty(),
+        "git switch must leave clean index after removing d with gitlink"
+    );
+    git(root, &["checkout", "-q", "main"]);
+
+    let grit_repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open grit repo");
+    let target_oid =
+        ObjectId::from_hex(git(root, &["rev-parse", "target"]).trim()).expect("target oid");
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            },
+        },
+    )
+    .expect("grit switch");
+
+    let porcelain = git_porcelain(root);
+    assert!(
+        porcelain.trim().is_empty(),
+        "git status --porcelain must be empty after grit removes d/sub gitlink, got:\n{porcelain}"
+    );
+    let ls_files = git(root, &["ls-files", "-s"]);
+    assert!(
+        !ls_files.lines().any(|line| line.ends_with(" d/sub")),
+        "index must not retain d/sub gitlink entry, got:\n{ls_files}"
     );
 }
 

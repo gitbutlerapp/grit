@@ -514,7 +514,7 @@ pub(crate) fn wholesale_deleted_directories(
                 if !entry.path.starts_with(prefix.as_bytes()) {
                     break;
                 }
-                if entry.stage() == 0 && entry.mode != MODE_GITLINK {
+                if entry.stage() == 0 {
                     count += 1;
                 }
             }
@@ -524,7 +524,7 @@ pub(crate) fn wholesale_deleted_directories(
         }
     } else {
         for entry in &index.entries {
-            if entry.stage() != 0 || entry.mode == MODE_GITLINK {
+            if entry.stage() != 0 {
                 continue;
             }
             let Ok(path) = std::str::from_utf8(&entry.path) else {
@@ -604,6 +604,32 @@ pub(crate) fn wholesale_directory_safe_to_remove(
     true
 }
 
+/// Untracked and ignored paths collected under wholesale delete trees before switch checkout.
+pub(crate) struct WholesaleWorktreeScan<'a> {
+    pub untracked: &'a [String],
+    pub ignored: &'a [String],
+    pub ignorecase: bool,
+}
+
+fn wholesale_dir_has_extra_paths(dir: &str, scan: &WholesaleWorktreeScan<'_>) -> bool {
+    scan.untracked
+        .iter()
+        .chain(scan.ignored.iter())
+        .any(|path| path_is_under_dir(path, dir, scan.ignorecase))
+}
+
+fn path_is_under_dir(path: &str, dir: &str, ignorecase: bool) -> bool {
+    let prefix = format!("{dir}/");
+    if ignorecase {
+        path.eq_ignore_ascii_case(dir)
+            || path
+                .get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
+    } else {
+        path == dir || path.starts_with(&prefix)
+    }
+}
+
 /// On-disk safety walk for wholesale directory removal, parallelized for switch prepare.
 pub(crate) fn precompute_wholesale_safe_directories(
     repo: &Repository,
@@ -611,10 +637,17 @@ pub(crate) fn precompute_wholesale_safe_directories(
     index: &Index,
     delete_paths: &[String],
     ignorecase: bool,
+    worktree_scan: Option<&WholesaleWorktreeScan<'_>>,
 ) -> BTreeSet<String> {
     let candidates = wholesale_deleted_directories(index, delete_paths);
     if candidates.is_empty() {
         return BTreeSet::new();
+    }
+    if let Some(scan) = worktree_scan {
+        return candidates
+            .into_iter()
+            .filter(|dir| !wholesale_dir_has_extra_paths(dir, scan))
+            .collect();
     }
     let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
     let needs_walk: Vec<String> = candidates.into_iter().collect();

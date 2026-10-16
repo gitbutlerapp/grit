@@ -6,7 +6,8 @@
 //! detection, ahead/behind, stash counts, or in-progress operation state.
 
 use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::config::ConfigSet;
@@ -449,28 +450,141 @@ pub(crate) fn untracked_scan_pathspecs_for_tree_changes(tree_changes: &[DiffEntr
     specs.into_iter().collect()
 }
 
+/// Pathspec roots for deleted paths (parent directories), used before wholesale `remove_dir_all`.
+#[must_use]
+pub(crate) fn untracked_scan_pathspecs_for_deletes(tree_changes: &[DiffEntry]) -> Vec<String> {
+    let mut specs = BTreeSet::new();
+    for change in tree_changes {
+        if change.status != DiffStatus::Deleted {
+            continue;
+        }
+        let Some(deleted) = &change.old_path else {
+            continue;
+        };
+        let trimmed = deleted.trim_end_matches('/');
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((top, _rest)) = trimmed.split_once('/') {
+            specs.insert(top.to_owned());
+        } else {
+            specs.insert(trimmed.to_owned());
+        }
+    }
+    specs.into_iter().collect()
+}
+
 pub(crate) fn collect_untracked_for_tree_changes(
     repo: &Repository,
     index: &mut Index,
     work_tree: &Path,
     tree_changes: &[DiffEntry],
 ) -> Result<Vec<String>> {
-    let added_specs = untracked_scan_pathspecs_for_tree_changes(tree_changes);
-    if added_specs.is_empty() {
-        return Ok(Vec::new());
-    }
-    let (untracked, _) =
-        collect_untracked_and_ignored(repo, index, work_tree, IgnoredMode::No, true, &added_specs)?;
+    let (untracked, _, _, _) = collect_untracked_and_wholesale_trust_for_tree_changes(
+        repo,
+        index,
+        work_tree,
+        tree_changes,
+    )?;
     Ok(untracked)
 }
 
-/// Whether switch checkout may skip the on-disk wholesale safety walk.
-///
-/// Always false when tree deletions are present: ignored and untracked extras under a
-/// candidate directory are only visible with a disk walk (or Traditional ignore scan),
-/// and Git preserves them instead of `remove_dir_all`.
-pub(crate) fn wholesale_removal_trust_for_tree_changes(tree_changes: &[DiffEntry]) -> bool {
-    !tree_changes.iter().any(|c| c.status == DiffStatus::Deleted)
+fn exclude_file_has_active_rules(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    content.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && !trimmed.starts_with('#')
+    })
+}
+
+/// Whether ignored paths could exist under wholesale-delete trees without a full Traditional scan.
+fn ignore_sources_might_hide_extras_under_delete_trees(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    delete_roots: &BTreeSet<String>,
+) -> Result<bool> {
+    if work_tree.join(".gitignore").is_file() || index.get(b".gitignore", 0).is_some() {
+        return Ok(true);
+    }
+    for root in delete_roots {
+        let nested = format!("{root}/.gitignore");
+        if index.get(nested.as_bytes(), 0).is_some() || work_tree.join(&nested).is_file() {
+            return Ok(true);
+        }
+    }
+    if exclude_file_has_active_rules(&repo.git_dir().join("info/exclude")) {
+        return Ok(true);
+    }
+    let config = repo.config()?;
+    let env = repo.environment();
+    let global_exclude: Option<PathBuf> = if let Some(raw_path) = config.get("core.excludesfile") {
+        let expanded = crate::config::parse_path(env, &raw_path);
+        Some(if Path::new(&expanded).is_absolute() {
+            PathBuf::from(expanded)
+        } else if let Some(wt) = repo.work_tree() {
+            wt.join(expanded)
+        } else {
+            repo.git_dir().join(expanded)
+        })
+    } else {
+        env.default_xdg_config_git_file("ignore")
+    };
+    if let Some(path) = global_exclude {
+        if exclude_file_has_active_rules(&path) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Untracked paths for added/deleted tree diff paths, ignored paths when needed, and whether
+/// switch checkout may skip wholesale on-disk safety walks.
+pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    tree_changes: &[DiffEntry],
+) -> Result<(Vec<String>, Vec<String>, bool, bool)> {
+    let added_specs = untracked_scan_pathspecs_for_tree_changes(tree_changes);
+    let delete_specs = untracked_scan_pathspecs_for_deletes(tree_changes);
+    let delete_roots: BTreeSet<String> = delete_specs.iter().cloned().collect();
+    let mut pathspecs: BTreeSet<String> = added_specs.iter().cloned().collect();
+    pathspecs.extend(delete_specs);
+    if pathspecs.is_empty() {
+        return Ok((Vec::new(), Vec::new(), true, false));
+    }
+    let specs: Vec<String> = pathspecs.into_iter().collect();
+    let need_traditional_ignored = !delete_roots.is_empty()
+        && ignore_sources_might_hide_extras_under_delete_trees(
+            repo,
+            index,
+            work_tree,
+            &delete_roots,
+        )?;
+    let ignored_mode = if need_traditional_ignored {
+        IgnoredMode::Traditional
+    } else {
+        IgnoredMode::No
+    };
+    let (untracked, ignored) =
+        collect_untracked_and_ignored(repo, index, work_tree, ignored_mode, true, &specs)?;
+    let trust_wholesale = delete_roots.is_empty() || {
+        let under_delete_root = |path: &str| {
+            let root = path.split('/').next().unwrap_or(path);
+            delete_roots.contains(root)
+        };
+        !untracked.iter().any(|p| under_delete_root(p))
+            && !ignored.iter().any(|p| under_delete_root(p))
+    };
+    Ok((
+        untracked,
+        ignored,
+        trust_wholesale,
+        need_traditional_ignored,
+    ))
 }
 
 fn ensure_worktree_clean_with_message(

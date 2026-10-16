@@ -6,15 +6,17 @@ use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, ObjectId};
-use crate::porcelain::checkout::precompute_wholesale_safe_directories;
-use crate::porcelain::checkout::{checkout_tree_changes_with_index_opts, CheckoutApplyOptions};
+use crate::porcelain::checkout::{
+    checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,
+    CheckoutApplyOptions, WholesaleWorktreeScan,
+};
 use crate::porcelain::checkout_reflog::{
     append_head_checkout_reflog, checkout_reflog_from_label, finish_switch_ref_updates,
     is_already_detached_at, is_already_on_branch, switch_create_reflog_source_label,
 };
 use crate::porcelain::worktree_guard::{
-    collect_untracked_for_tree_changes, ensure_no_untracked_overwrite, load_worktree_snapshot,
-    TreeSwitchPlan,
+    collect_untracked_and_wholesale_trust_for_tree_changes, ensure_no_untracked_overwrite,
+    load_worktree_snapshot, TreeSwitchPlan,
 };
 use crate::refs;
 use crate::repo::Repository;
@@ -361,7 +363,12 @@ fn switch_to_target(
                 .is_none_or(|path| !prepared.preserve_worktree_paths.contains(path))
         })
         .collect();
-    let checkout_parallel_threshold = (tree_changes.len() >= 150).then_some(0);
+    let delete_count = tree_changes
+        .iter()
+        .filter(|c| c.status == DiffStatus::Deleted)
+        .count();
+    let checkout_parallel_threshold =
+        (tree_changes.len() >= 150 || delete_count >= 150).then_some(0);
     checkout_tree_changes_with_index_opts(
         repo,
         &tree_changes,
@@ -417,8 +424,8 @@ fn prepare_tree_switch_allow_local(
 ) -> Result<PreparedSwitch> {
     let mut snapshot = load_worktree_snapshot(repo)?;
     let from_tree = snapshot.head_tree.as_ref();
-    let trust_index_for_old_tree = from_tree.is_some()
-        && !snapshot.index.entries.iter().any(|e| e.stage() != 0);
+    let trust_index_for_old_tree =
+        from_tree.is_some() && !snapshot.index.entries.iter().any(|e| e.stage() != 0);
     let tree_changes = if from_tree == Some(to_tree) {
         Vec::new()
     } else if trust_index_for_old_tree {
@@ -450,10 +457,13 @@ fn prepare_tree_switch_allow_local(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
-    let untracked =
-        collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, &tree_changes)?;
-    let trust_wholesale_dir_removal =
-        crate::porcelain::worktree_guard::wholesale_removal_trust_for_tree_changes(&tree_changes);
+    let (untracked, wholesale_ignored, trust_wholesale_dir_removal, traditional_ignore_scan) =
+        collect_untracked_and_wholesale_trust_for_tree_changes(
+            repo,
+            &mut snapshot.index,
+            work_tree,
+            &tree_changes,
+        )?;
     let ignorecase = repo
         .config()
         .ok()
@@ -468,6 +478,11 @@ fn prepare_tree_switch_allow_local(
         if trust_wholesale_dir_removal || delete_paths.is_empty() {
             (BTreeSet::new(), false)
         } else {
+            let scan = traditional_ignore_scan.then(|| WholesaleWorktreeScan {
+                untracked: &untracked,
+                ignored: &wholesale_ignored,
+                ignorecase,
+            });
             (
                 precompute_wholesale_safe_directories(
                     repo,
@@ -475,6 +490,7 @@ fn prepare_tree_switch_allow_local(
                     &snapshot.index,
                     &delete_paths,
                     ignorecase,
+                    scan.as_ref(),
                 ),
                 true,
             )
