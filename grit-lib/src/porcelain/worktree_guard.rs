@@ -120,6 +120,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     if paths.is_empty() {
         return Ok((Vec::new(), Vec::new(), false));
     }
+    let path_count = paths.len();
     let path_filter = Arc::new(paths);
     let head_by_path = head_tree_sides_from_changes(tree_changes);
     let staged = staged_diff_for_tree_switch_paths(index, &head_by_path, path_filter.as_ref())?;
@@ -172,6 +173,15 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         }
         None => None,
     };
+    let stat_parallel_threads = (path_count >= 32).then(|| {
+        repo.thread_policy()
+            .resolve(
+                crate::parallel::ParallelOp::IndexRefresh,
+                config.as_deref().unwrap_or(&ConfigSet::new()),
+            )
+            .threads
+            .get()
+    });
     let (unstaged, index_changed) = diff_index_to_worktree_with_options(
         repo.odb(),
         index,
@@ -182,7 +192,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
             refresh_index_stat_in_pass: false,
             for_status: false,
-            stat_parallel_threads: None,
+            stat_parallel_threads,
             config,
             worktree_rules,
             restrict_to_paths: Some(path_filter),
