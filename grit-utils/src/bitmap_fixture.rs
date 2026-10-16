@@ -3,8 +3,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 use anyhow::{bail, Context, Result};
+use grit_lib::pack::read_local_pack_indexes;
+use grit_lib::pack_bitmap::{PackBitmapWriteOptions, PackBitmapWriter};
+use grit_lib::repo::Repository;
 
 use crate::bench_env::{empty_global_config_path, isolated_env_prefix};
 use crate::fixture::remove_dir_robust;
@@ -51,6 +55,14 @@ fn pinned_tag() -> String {
 }
 
 const READY_MARKER: &str = ".grit-bench-bitmaps-ready";
+const GRIT_READY_MARKER: &str = ".grit-bench-bitmaps-grit-ready";
+
+/// Path to the bitmap-prepared bare `git.git` clone with **grit-written** pack bitmaps.
+pub fn bitmap_grit_repo_cache_path() -> PathBuf {
+    std::env::var("GRIT_BENCH_BITMAPS_GRIT_REPO")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| odb_scratch_root().join("git.git-bitmaps-grit"))
+}
 
 fn stored_fixture_tag(dest: &Path) -> Result<Option<String>> {
     let path = dest.join(READY_MARKER);
@@ -140,6 +152,100 @@ pub fn ensure_bitmaps_git_repo(git: &Path) -> Result<PathBuf> {
     run_git(git, &dest, &["commit-graph", "write", "--reachable"])?;
     ensure_serve_clone_request(&dest)?;
     fs::write(dest.join(READY_MARKER), tag.as_bytes()).context("write ready marker")?;
+    Ok(dest)
+}
+
+fn stored_grit_fixture_tag(dest: &Path) -> Result<Option<String>> {
+    let path = dest.join(GRIT_READY_MARKER);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let tag = fs::read_to_string(&path)
+        .context("read grit bitmap ready marker")?
+        .trim()
+        .to_owned();
+    Ok(Some(tag))
+}
+
+fn grit_fixture_is_current(dest: &Path, tag: &str) -> Result<bool> {
+    let Some(stored) = stored_grit_fixture_tag(dest)? else {
+        return Ok(false);
+    };
+    if stored != tag {
+        return Ok(false);
+    }
+    if !dest.join("HEAD").is_file() {
+        return Ok(false);
+    }
+    if assert_tag_pinned_fixture_refs(dest).is_err() {
+        return Ok(false);
+    }
+    let pack_dir = dest.join("objects/pack");
+    let has_bitmap = fs::read_dir(&pack_dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .any(|e| e.path().extension().is_some_and(|x| x == "bitmap"))
+        })
+        .unwrap_or(false);
+    Ok(has_bitmap)
+}
+
+/// Bare `git.git` at a pinned tag, repacked without Git bitmaps, then `.bitmap` written by grit-lib.
+pub fn ensure_bitmaps_grit_repo(git: &Path) -> Result<PathBuf> {
+    let dest = bitmap_grit_repo_cache_path();
+    let tag = pinned_tag();
+    if grit_fixture_is_current(&dest, &tag)? {
+        return Ok(dest);
+    }
+    if dest.exists() {
+        remove_dir_robust(&dest);
+    }
+    let parent = dest.parent().unwrap_or(Path::new("/tmp"));
+    fs::create_dir_all(parent)?;
+    let name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow::anyhow!("invalid grit bitmap cache path {}", dest.display()))?;
+    eprintln!(
+        "Cloning {GIT_GIT_URL} at tag {tag} (bare, grit bitmaps) into {} …",
+        dest.display()
+    );
+    run_git(
+        git,
+        parent,
+        &[
+            "clone",
+            "--bare",
+            "-q",
+            "--single-branch",
+            "--branch",
+            &tag,
+            GIT_GIT_URL,
+            name,
+        ],
+    )?;
+    assert_tag_pinned_fixture_refs(&dest)?;
+    eprintln!("Preparing grit bitmap fixture (repack -ad, commit-graph, PackBitmapWriter) …");
+    run_git(git, &dest, &["repack", "-a", "-d"])?;
+    run_git(git, &dest, &["commit-graph", "write", "--reachable"])?;
+    let repo = Repository::open(&dest, None).context("open bare git.git for grit bitmap write")?;
+    let idx_path = read_local_pack_indexes(&dest.join("objects"))
+        .context("list pack indexes")?
+        .into_iter()
+        .max_by_key(|i| i.len())
+        .map(|i| i.idx_path)
+        .ok_or_else(|| anyhow::anyhow!("no pack index after repack"))?;
+    PackBitmapWriter::write(
+        &repo,
+        &idx_path,
+        &PackBitmapWriteOptions::default(),
+        SystemTime::UNIX_EPOCH,
+    )
+    .context("write pack bitmap with grit")?;
+    run_git(git, &dest, &["rev-list", "--test-bitmap", "HEAD"])
+        .context("git rev-list --test-bitmap on grit-written bitmap")?;
+    ensure_serve_clone_request(&dest)?;
+    fs::write(dest.join(GRIT_READY_MARKER), tag.as_bytes()).context("write grit ready marker")?;
     Ok(dest)
 }
 
