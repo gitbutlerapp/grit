@@ -934,7 +934,7 @@ pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
             line_end += 1;
         }
         let line = &data[line_start..line_end];
-        let after_nl = line_end.saturating_add(1);
+        let after_nl = (line_end + 1).min(data.len());
         if line.is_empty() {
             let body = data.get(after_nl..).unwrap_or_default();
             let message = commit_encoding::decode_bytes(encoding.as_deref(), body);
@@ -1313,6 +1313,13 @@ mod commit_parse_tests {
         assert_eq!(entry.mode_str(), "40000");
         let tag_body = format!("object {}\ntype commit\ntag t\n\n", oid.to_hex());
         assert_eq!(tag_object_line_oid(tag_body.as_bytes()), Some(oid));
+    }
+
+    #[test]
+    fn parse_commit_non_commit_bytes_does_not_panic() {
+        let tree_bytes = b"100644 blob 0123456789012345678901234567890123456789\tf";
+        let err = parse_commit(tree_bytes).expect_err("tree bytes are not a commit");
+        assert!(matches!(err, Error::CorruptObject(_)));
     }
 
     #[test]

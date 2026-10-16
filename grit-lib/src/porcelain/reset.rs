@@ -3,7 +3,7 @@
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::index::Index;
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::merge::tree_to_index_entries;
 use crate::refs::{self, append_reflog};
@@ -130,7 +130,13 @@ fn ref_label_for_head(head: &HeadState) -> String {
 
 fn commit_tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
     let obj = repo.odb().read(commit)?;
-    Ok(parse_commit(&obj.data)?.tree)
+    match obj.kind {
+        ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
+        ObjectKind::Tree | ObjectKind::Blob => Err(Error::InvalidRef(format!(
+            "object {commit} does not name a commit"
+        ))),
+        ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".into())),
+    }
 }
 
 fn index_from_tree(repo: &Repository, tree_oid: &ObjectId) -> Result<Index> {
@@ -281,6 +287,47 @@ mod tests {
             identity: "T <t@t> 0 +0000".into(),
             message: "reset".into(),
         }
+    }
+
+    #[test]
+    fn reset_committish_peels_annotated_tag() {
+        use crate::objects::{serialize_tag, TagData};
+        use crate::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
+
+        let (_dir, repo) = init_repo();
+        let tip = commit_file(&repo, "f", "1\n", None);
+        let tag_bytes = serialize_tag(&TagData {
+            object: tip,
+            object_type: "commit".into(),
+            tag: "v1".into(),
+            tagger: Some("T <t@t> 0 +0000".into()),
+            message: "release\n".into(),
+        });
+        let tag_oid = repo.odb().write(ObjectKind::Tag, &tag_bytes).expect("tag");
+        refs::write_ref(repo.git_dir(), "refs/tags/v1", &tag_oid).expect("tag ref");
+
+        let resolved =
+            resolve_revision_as_commit_without_index_dwim(&repo, "v1").expect("peel tag to commit");
+        assert_eq!(resolved, tip);
+        reset_to_commit(&repo, &reset_opts(resolved, ResetMode::Hard)).expect("reset to tag");
+        assert_eq!(
+            refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main"),
+            tip
+        );
+    }
+
+    #[test]
+    fn reset_rejects_tree_committish() {
+        use crate::revwalk::rev_parse::resolve_revision;
+
+        let (_dir, repo) = init_repo();
+        commit_file(&repo, "f", "1\n", None);
+        let tree = resolve_revision(&repo, "HEAD^{tree}").expect("tree");
+        let err = reset_to_commit(&repo, &reset_opts(tree, ResetMode::Hard)).expect_err("tree");
+        assert!(
+            matches!(err, Error::InvalidRef(ref msg) if msg.contains("does not name a commit")),
+            "unexpected: {err:?}"
+        );
     }
 
     #[test]

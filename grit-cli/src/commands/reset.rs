@@ -2,8 +2,9 @@
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::error::Error;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, ResetOutcome};
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -95,8 +96,8 @@ pub fn run(rev: Option<String>, soft: bool, _mixed: bool, hard: bool) -> Result<
 
     let repo = context::discover()?;
     let spec = rev.unwrap_or_else(|| "HEAD".to_owned());
-    let target =
-        resolve_revision(&repo, &spec).with_context(|| format!("invalid revision '{spec}'"))?;
+    let target = resolve_revision_as_commit_without_index_dwim(&repo, &spec)
+        .map_err(|err| map_reset_committish_error(err, &spec))?;
 
     let env = repo.environment();
     let config =
@@ -117,4 +118,14 @@ pub fn run(rev: Option<String>, soft: bool, _mixed: bool, hard: bool) -> Result<
     .map_err(anyhow::Error::new)?;
 
     Ok(outcome.into())
+}
+
+fn map_reset_committish_error(err: Error, spec: &str) -> anyhow::Error {
+    match err {
+        Error::InvalidRef(msg) => anyhow::anyhow!(msg),
+        Error::ObjectNotFound(msg) => {
+            anyhow::anyhow!("invalid revision '{spec}': {msg}")
+        }
+        other => anyhow::Error::new(other),
+    }
 }

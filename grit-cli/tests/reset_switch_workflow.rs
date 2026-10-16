@@ -64,6 +64,71 @@ fn git(repo: &Path, args: &[&str]) -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn reset_and_revert_peel_annotated_tag() -> TestResult {
+    let scratch = Scratch::new("reset-tag-peel")?;
+    let repo = scratch.path();
+    gs_ok(repo, ["init"])?;
+    git(repo, &["config", "user.name", "T"])?;
+    git(repo, &["config", "user.email", "t@e.com"])?;
+    fs::write(repo.join("a.txt"), "a\n")?;
+    gs_ok(repo, ["commit", "-m", "one"])?;
+    fs::write(repo.join("a.txt"), "b\n")?;
+    gs_ok(repo, ["commit", "-m", "two"])?;
+
+    let parent = Command::new("git")
+        .args(["rev-parse", "HEAD~1"])
+        .current_dir(repo)
+        .output()?;
+    if !parent.status.success() {
+        return Err(format!(
+            "expected two commits before tagging: {}",
+            String::from_utf8_lossy(&parent.stderr)
+        )
+        .into());
+    }
+    let parent_oid = String::from_utf8_lossy(&parent.stdout).trim().to_owned();
+    gs_ok(
+        repo,
+        ["tag", "v1", "-m", "release", "--object", &parent_oid],
+    )?;
+    gs_ok(repo, ["reset", "--hard", "v1"])?;
+    gs_ok(repo, ["reset", "--soft", "v1"])?;
+    gs_ok(repo, ["revert", "v1"])?;
+
+    Ok(())
+}
+
+#[test]
+fn reset_and_revert_reject_tree_ish_without_panic() -> TestResult {
+    let scratch = Scratch::new("reset-tree-reject")?;
+    let repo = scratch.path();
+    gs_ok(repo, ["init"])?;
+    git(repo, &["config", "user.name", "T"])?;
+    git(repo, &["config", "user.email", "t@e.com"])?;
+    fs::write(repo.join("a.txt"), "a\n")?;
+    git(repo, &["add", "-A"])?;
+    git(repo, &["commit", "-qm", "one"])?;
+
+    for args in [
+        &["reset", "--hard", "HEAD^{tree}"][..],
+        &["revert", "HEAD^{tree}"][..],
+    ] {
+        let out = gs(repo, args);
+        assert!(!out.status.success(), "expected failure for {args:?}");
+        assert_ne!(
+            out.status.code(),
+            Some(101),
+            "must not panic (exit 101): stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("does not name a commit"), "stderr={stderr}");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn reset_soft_uncommit() -> TestResult {
     let scratch = Scratch::new("reset-soft")?;
     let repo = scratch.path();

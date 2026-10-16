@@ -8,7 +8,7 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -43,8 +43,8 @@ impl MarkdownRender for PickOutcome {
 /// Cherry-pick `commit` onto the current branch.
 pub fn run(commit: &str) -> Result<PickOutcome> {
     let repo = context::discover()?;
-    let source_oid = resolve_revision(&repo, commit)
-        .with_context(|| format!("could not resolve commit '{commit}'"))?;
+    let source_oid = resolve_revision_as_commit(&repo, commit)
+        .map_err(|err| map_pick_committish_error(err, commit))?;
     let source = context::read_commit(&repo, &source_oid)?;
     let env = repo.environment();
     let config =
@@ -84,6 +84,16 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         ReplayOutcome::AlreadyApplied => {
             bail!("{short} is already applied on this branch — nothing to pick")
         }
+    }
+}
+
+fn map_pick_committish_error(err: Error, spec: &str) -> anyhow::Error {
+    match err {
+        Error::InvalidRef(msg) => anyhow::anyhow!(msg),
+        Error::ObjectNotFound(msg) => {
+            anyhow::anyhow!("could not resolve commit '{spec}': {msg}")
+        }
+        other => anyhow::Error::new(other),
     }
 }
 
