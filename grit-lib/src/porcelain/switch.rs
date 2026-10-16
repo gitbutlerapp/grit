@@ -75,7 +75,7 @@ pub struct SwitchOutcome {
     pub commit: ObjectId,
 }
 
-struct PreparedSwitch {
+pub(crate) struct PreparedSwitch {
     plan: TreeSwitchPlan,
     /// Tree-diff paths whose unstaged worktree edits must not be overwritten.
     preserve_worktree_paths: HashSet<String>,
@@ -352,36 +352,8 @@ fn switch_to_target(
     let head_before = resolve_head(repo.git_dir())?;
     let target_tree = commit_tree(repo, &target_oid)?;
 
-    let mut prepared = prepare_tree_switch_allow_local(repo, &target_tree)?;
-    ensure_no_untracked_overwrite(&prepared.plan.untracked, &prepared.plan.tree_changes)?;
-
-    let tree_changes: Vec<DiffEntry> = prepared
-        .plan
-        .tree_changes
-        .into_iter()
-        .filter(|change| {
-            path_from_diff(change)
-                .is_none_or(|path| !prepared.preserve_worktree_paths.contains(path))
-        })
-        .collect();
-    let delete_count = tree_changes
-        .iter()
-        .filter(|c| c.status == DiffStatus::Deleted)
-        .count();
-    let checkout_parallel_threshold =
-        (tree_changes.len() >= 150 || delete_count >= 150).then_some(0);
-    checkout_tree_changes_with_index_opts(
-        repo,
-        &tree_changes,
-        &mut prepared.index,
-        CheckoutApplyOptions {
-            parallel_prepare_blobs: true,
-            checkout_parallel_threshold,
-            trust_wholesale_dir_removal: prepared.trust_wholesale_dir_removal,
-            preverified_wholesale_dirs: prepared.preverified_wholesale_dirs,
-            wholesale_safety_precomputed: prepared.wholesale_safety_precomputed,
-        },
-    )?;
+    let prepared = prepare_tree_switch_allow_local(repo, &target_tree)?;
+    checkout_prepared_tree_transition(repo, prepared)?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
         finish_switch_ref_updates(
@@ -423,8 +395,18 @@ fn prepare_tree_switch_allow_local(
     repo: &Repository,
     to_tree: &ObjectId,
 ) -> Result<PreparedSwitch> {
+    let snapshot = load_worktree_snapshot(repo)?;
+    prepare_tree_transition_allow_local(repo, snapshot.head_tree.as_ref(), to_tree)
+}
+
+/// Plan a tree-to-tree checkout that keeps staged/unstaged edits on paths the target tree already matches.
+pub(crate) fn prepare_tree_transition_allow_local(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<PreparedSwitch> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    let from_tree = snapshot.head_tree.as_ref();
+    snapshot.head_tree = from_tree.copied();
     let trust_index_for_old_tree =
         from_tree.is_some() && !snapshot.index.entries.iter().any(|e| e.stage() != 0);
     let tree_changes = if from_tree == Some(to_tree) {
@@ -453,7 +435,10 @@ fn prepare_tree_switch_allow_local(
         &staged,
         &unstaged,
         &tree_changes,
-    )?;
+    )
+    .map_err(|_| {
+        Error::Message("you have uncommitted changes — commit them before switching".into())
+    })?;
 
     let work_tree = repo
         .work_tree()
@@ -565,12 +550,91 @@ fn gitlink_worktree_head_matches_target(entry: &DiffEntry, target: TargetTreeEnt
     target.mode == MODE_GITLINK && entry.new_oid == target.oid
 }
 
-fn ensure_local_changes_compatible_with_switch(
+/// Run the checkout half of a prepared tree transition (index + worktree).
+/// Refuse when staged/unstaged edits on tree-diff paths would be overwritten.
+pub(crate) fn verify_tree_transition_allow_local(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> std::result::Result<(), Vec<String>> {
+    let mut prepared =
+        prepare_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|_| Vec::new())?;
+    let tree_changes = prepared.plan.tree_changes.clone();
+    let untracked =
+        crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes(
+            &prepared.plan.untracked,
+            &tree_changes,
+        );
+    if !untracked.is_empty() {
+        return Err(untracked);
+    }
+    let (staged, unstaged, _) =
+        crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
+            repo,
+            &mut prepared.index,
+            from_tree.copied(),
+            &tree_changes,
+        )
+        .map_err(|_| Vec::new())?;
+    ensure_local_changes_compatible_with_switch(
+        &prepared.index,
+        &staged,
+        &unstaged,
+        &tree_changes,
+    )?;
+    Ok(())
+}
+
+/// Checkout from `from_tree` to `to_tree`, preserving unrelated local edits when possible.
+pub(crate) fn checkout_tree_transition_allow_local(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<()> {
+    let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree)?;
+    checkout_prepared_tree_transition(repo, prepared)
+}
+
+fn checkout_prepared_tree_transition(
+    repo: &Repository,
+    mut prepared: PreparedSwitch,
+) -> Result<()> {
+    ensure_no_untracked_overwrite(&prepared.plan.untracked, &prepared.plan.tree_changes)?;
+    let tree_changes: Vec<DiffEntry> = prepared
+        .plan
+        .tree_changes
+        .into_iter()
+        .filter(|change| {
+            path_from_diff(change)
+                .is_none_or(|path| !prepared.preserve_worktree_paths.contains(path))
+        })
+        .collect();
+    let delete_count = tree_changes
+        .iter()
+        .filter(|c| c.status == DiffStatus::Deleted)
+        .count();
+    let checkout_parallel_threshold =
+        (tree_changes.len() >= 150 || delete_count >= 150).then_some(0);
+    checkout_tree_changes_with_index_opts(
+        repo,
+        &tree_changes,
+        &mut prepared.index,
+        CheckoutApplyOptions {
+            parallel_prepare_blobs: true,
+            checkout_parallel_threshold,
+            trust_wholesale_dir_removal: prepared.trust_wholesale_dir_removal,
+            preverified_wholesale_dirs: prepared.preverified_wholesale_dirs,
+            wholesale_safety_precomputed: prepared.wholesale_safety_precomputed,
+        },
+    )
+}
+
+pub(crate) fn ensure_local_changes_compatible_with_switch(
     index: &crate::index::Index,
     staged: &[DiffEntry],
     unstaged: &[DiffEntry],
     tree_changes: &[DiffEntry],
-) -> Result<HashSet<String>> {
+) -> std::result::Result<HashSet<String>, Vec<String>> {
     let mut target_by_path: HashMap<&str, TargetTreeEntry> = HashMap::new();
     for change in tree_changes {
         if let Some((path, target)) = target_tree_entry_from_diff(change) {
@@ -595,9 +659,7 @@ fn ensure_local_changes_compatible_with_switch(
         {
             continue;
         }
-        return Err(Error::Message(
-            "you have uncommitted changes — commit them before switching".into(),
-        ));
+        return Err(vec![path.to_owned()]);
     }
 
     for entry in unstaged {
@@ -615,9 +677,7 @@ fn ensure_local_changes_compatible_with_switch(
                 continue;
             }
         }
-        return Err(Error::Message(
-            "you have uncommitted changes — commit them before switching".into(),
-        ));
+        return Err(vec![path.to_owned()]);
     }
 
     Ok(preserve_worktree_paths)

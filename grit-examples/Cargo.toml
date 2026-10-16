@@ -87,6 +87,10 @@ path = "src/bin/guide_merge.rs"
 name = "guide_maintenance"
 path = "src/bin/guide_maintenance.rs"
 
+[[bin]]
+name = "history_reword"
+path = "src/bin/history_reword.rs"
+
 [lints]
 workspace = true
 

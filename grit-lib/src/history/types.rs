@@ -112,3 +112,32 @@ pub struct RewritePlan {
     /// How `HEAD` would change if the plan were applied.
     pub head: HeadEffect,
 }
+
+impl RewritePlan {
+    /// `update <ref> <new> <old>` lines accepted by `git update-ref --stdin`.
+    #[must_use]
+    pub fn ref_update_lines(&self) -> Vec<String> {
+        self.ref_updates
+            .iter()
+            .map(|u| format!("update {} {} {}", u.name, u.new.to_hex(), u.old.to_hex()))
+            .collect()
+    }
+}
+
+/// Identity and reflog text recorded when [`super::apply_rewrite`](crate::history::apply_rewrite) moves refs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplyOptions {
+    /// Reflog identity (`Name <email>`).
+    pub identity: String,
+    /// Reflog message for every ref update in the batch.
+    pub reflog_message: String,
+}
+
+/// Result of [`super::apply_rewrite`](crate::history::apply_rewrite).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppliedRewrite {
+    /// Ref updates that were committed.
+    pub ref_updates: Vec<PlannedRefUpdate>,
+    /// Commit OID `HEAD` resolves to after apply.
+    pub head: ObjectId,
+}

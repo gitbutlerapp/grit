@@ -3840,6 +3840,12 @@ pub grit_lib::history::CommitEdit::Rewrite::author: core::option::Option<alloc::
 pub grit_lib::history::CommitEdit::Rewrite::message: core::option::Option<alloc::string::String>
 pub grit_lib::history::CommitEdit::Rewrite::parents: core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub grit_lib::history::CommitEdit::Rewrite::tree: core::option::Option<grit_lib::objects::ObjectId>
+pub struct grit_lib::history::ApplyOptions
+pub grit_lib::history::ApplyOptions::identity: alloc::string::String
+pub grit_lib::history::ApplyOptions::reflog_message: alloc::string::String
+pub struct grit_lib::history::AppliedRewrite
+pub grit_lib::history::AppliedRewrite::head: grit_lib::objects::ObjectId
+pub grit_lib::history::AppliedRewrite::ref_updates: alloc::vec::Vec<grit_lib::history::PlannedRefUpdate>
 pub enum grit_lib::history::EmptyPolicy
 pub grit_lib::history::EmptyPolicy::Abort
 pub grit_lib::history::EmptyPolicy::Drop
@@ -3855,12 +3861,20 @@ pub grit_lib::history::HistoryError::Conflict::commit: grit_lib::objects::Object
 pub grit_lib::history::HistoryError::Conflict::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::history::HistoryError::DivergentBranch
 pub grit_lib::history::HistoryError::DivergentBranch::name: alloc::string::String
+pub grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten
+pub grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::history::HistoryError::MergeCommitInReplay
 pub grit_lib::history::HistoryError::MergeCommitInReplay::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::NotInHistory
 pub grit_lib::history::HistoryError::NotInHistory::commit: grit_lib::objects::ObjectId
 pub grit_lib::history::HistoryError::RootCommit
 pub grit_lib::history::HistoryError::RootCommit::commit: grit_lib::objects::ObjectId
+pub grit_lib::history::HistoryError::RefApply
+pub grit_lib::history::HistoryError::RefApply::message: alloc::string::String
+pub grit_lib::history::HistoryError::RefCasMismatch
+pub grit_lib::history::HistoryError::RefCasMismatch::name: alloc::string::String
+pub grit_lib::history::HistoryError::WorktreeApply
+pub grit_lib::history::HistoryError::WorktreeApply::message: alloc::string::String
 pub type grit_lib::history::HistoryEdits = alloc::collections::BTreeMap<grit_lib::objects::ObjectId, grit_lib::history::CommitEdit>
 pub struct grit_lib::history::HeadEffect
 pub grit_lib::history::HeadEffect::commit_changes: bool
@@ -3885,9 +3899,11 @@ pub struct grit_lib::history::RewritePlan
 pub grit_lib::history::RewritePlan::commits: alloc::vec::Vec<grit_lib::history::RewrittenCommit>
 pub grit_lib::history::RewritePlan::head: grit_lib::history::HeadEffect
 pub grit_lib::history::RewritePlan::ref_updates: alloc::vec::Vec<grit_lib::history::PlannedRefUpdate>
+pub fn grit_lib::history::RewritePlan::ref_update_lines(&self) -> alloc::vec::Vec<alloc::string::String>
 pub struct grit_lib::history::RewrittenCommit
 pub grit_lib::history::RewrittenCommit::new: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::history::RewrittenCommit::old: grit_lib::objects::ObjectId
+pub fn grit_lib::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::history::RewritePlan, &grit_lib::history::ApplyOptions) -> core::result::Result<grit_lib::history::AppliedRewrite, grit_lib::history::HistoryError>
 pub fn grit_lib::history::plan_rewrite(&grit_lib::repo::Repository, &grit_lib::history::HistoryEdits, &grit_lib::history::RewriteOptions) -> core::result::Result<grit_lib::history::RewritePlan, grit_lib::history::HistoryError>
 pub fn grit_lib::history::test_merge_tree_call_count() -> usize
 pub fn grit_lib::history::test_reset_merge_tree_call_count()

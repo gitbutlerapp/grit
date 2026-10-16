@@ -59,4 +59,32 @@ pub enum HistoryError {
         /// Path to the blocking worktree.
         worktree: String,
     },
+
+    /// Applying the plan would overwrite staged or unstaged worktree changes on affected paths.
+    #[error("local changes would be overwritten")]
+    LocalChangesWouldBeOverwritten {
+        /// Repository-relative paths that block the checkout.
+        paths: Vec<String>,
+    },
+
+    /// A planned ref no longer matches the stored value (compare-and-swap failure).
+    #[error("ref {name} changed since the rewrite plan was built")]
+    RefCasMismatch {
+        /// Ref that failed the expected-old check.
+        name: String,
+    },
+
+    /// Ref storage rejected the update batch.
+    #[error("ref update failed: {message}")]
+    RefApply {
+        /// Backend error summary.
+        message: String,
+    },
+
+    /// Index or worktree update failed after refs were already moved.
+    #[error("worktree update failed: {message}")]
+    WorktreeApply {
+        /// Underlying failure.
+        message: String,
+    },
 }
