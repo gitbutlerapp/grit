@@ -1,0 +1,23 @@
+# worktree manual run 2026-10-16T10:27:54Z
+cache=/tmp/tmp.z8XtYukpYT scratch=/tmp/grit-bench-manual-scratch
+== prepare synth-m ==
+name	tier	head	objects	refs	files
+synth-m	M	571d412117493d9f0657597bbaf1df059453ddc8	114463	10000	20000
+== run synth-m (1 warmup, 3 min-runs) ==
+git:  /usr/bin/git (git version 2.43.0)
+grit: /workspace/target/release/grit (grit 0.5.10)
+hyperfine: /usr/local/bin/hyperfine
+
+Running worktree scenarios on fixture synth-m …
+Results written to /tmp/worktree-synth-m.json
+scenarios: 5
+worktree-status-clean-synth-m ratio=3.4000661929602667
+worktree-status-dirty-synth-m ratio=2.8777988775892256
+worktree-add-synth-m ratio=0.02652487943476048
+worktree-commit-synth-m ratio=3.81314092619292
+worktree-diff-synth-m ratio=1.628400467458677
+== prepare synth-l ==
+# (synth-l generation was still running at agent handoff; re-run:
+#   grit-bench fixtures prepare --only synth-l,git-git
+#   grit-bench run --group worktree --fixture synth-l --warmup 1 --min-runs 3 ...
+#   grit-bench run --group worktree --fixture git-git --warmup 1 --min-runs 3 ...)
