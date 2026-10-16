@@ -7,6 +7,10 @@ use thiserror::Error;
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum HistoryError {
+    /// The replacement commit message is empty after whitespace cleanup.
+    #[error("commit message cannot be empty")]
+    EmptyMessage,
+
     /// A three-way replay produced unmerged paths.
     #[error("replay of commit {commit} produced conflicts")]
     Conflict {

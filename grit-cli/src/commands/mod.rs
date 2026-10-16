@@ -15,6 +15,7 @@ pub mod diff;
 pub mod fetch;
 pub mod fsck;
 pub mod gc;
+pub mod history;
 pub mod hooks;
 pub mod ignore;
 pub mod init;

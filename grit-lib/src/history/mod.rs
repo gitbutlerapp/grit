@@ -41,11 +41,13 @@
 mod apply;
 mod error;
 mod plan;
+mod reword;
 mod types;
 
 pub use apply::apply_rewrite;
 pub use error::HistoryError;
 pub use plan::{plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count};
+pub use reword::{normalize_rewrite_message, reword};
 pub use types::{
     AppliedRewrite, ApplyOptions, CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, NewCommit,
     PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,

@@ -4,8 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::history::{
-    apply_rewrite, plan_rewrite, ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope,
-    RewriteOptions,
+    apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -33,20 +32,10 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let repo = open_repo(&root)?;
     let commit: ObjectId = resolve_revision_as_commit(&repo, &spec)?;
 
-    let mut edits = HistoryEdits::new();
-    edits.insert(
-        commit,
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some(format!("{message}\n")),
-            author: None,
-            parents: None,
-        },
-    );
-
-    let plan = plan_rewrite(
+    let plan = reword(
         &repo,
-        &edits,
+        commit,
+        message,
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,

@@ -8,6 +8,7 @@ use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment};
+use crate::commands::history::HistoryRewordOutcome;
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
 use crate::commands::revert::RevertOutcome;
@@ -481,6 +482,44 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
     let src = short_hex(&outcome.source);
     let new = short_hex(&outcome.oid);
     outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
+    Ok(())
+}
+
+/// Result of `grit history reword`.
+pub fn print_history_reword_outcome(
+    w: &mut dyn Write,
+    outcome: &HistoryRewordOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## History reword");
+    outln!(w);
+    if outcome.dry_run {
+        outln!(w, "- Dry run (refs unchanged)");
+    }
+    for pair in &outcome.rewritten {
+        outln!(
+            w,
+            "- commit `{}` → `{}`",
+            short_hex(&pair.old),
+            short_hex(&pair.new)
+        );
+    }
+    for update in &outcome.refs {
+        outln!(
+            w,
+            "- `{}` `{}` → `{}`",
+            update.name,
+            short_hex(&update.old),
+            short_hex(&update.new)
+        );
+    }
+    if let Some(head) = &outcome.head {
+        outln!(
+            w,
+            "- HEAD `{}` → `{}`",
+            short_hex(&head.old),
+            short_hex(&head.new)
+        );
+    }
     Ok(())
 }
 

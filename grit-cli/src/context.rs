@@ -365,6 +365,13 @@ pub fn identity(
     ))
 }
 
+/// Reflog identity for the committer (`Name <email>`), failing when unset like [`identity`].
+pub fn committer_reflog_identity(env: &Environment, config: &ConfigSet) -> Result<String> {
+    let name = resolve_name_with(env, config, IdentRole::Committer).map_err(identity_error)?;
+    let email = resolve_email_with(env, config, IdentRole::Committer).map_err(identity_error)?;
+    Ok(format!("{name} <{email}>"))
+}
+
 /// A best-effort committer identity for reflog entries: never fails, even when
 /// no identity is configured.
 pub fn reflog_identity(env: &Environment, config: &ConfigSet, now: OffsetDateTime) -> String {

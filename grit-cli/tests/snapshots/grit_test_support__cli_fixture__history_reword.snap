@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Rewrote 2 commit(s)\n  commit 72934de → c37ee67\n  commit b5ea30d → 0659df1\n  refs/heads/feature 72934de → c37ee67\n  refs/heads/main b5ea30d → 0659df1\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"operation\": \"reword\",\n  \"rewritten\": [\n    {\n      \"old\": \"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\n      \"new\": \"c37ee67194a68367e5ad89da7e74e6b8a086cdd8\"\n    },\n    {\n      \"old\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"new\": \"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"\n    }\n  ],\n  \"refs\": [\n    {\n      \"name\": \"refs/heads/feature\",\n      \"old\": \"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\n      \"new\": \"c37ee67194a68367e5ad89da7e74e6b8a086cdd8\"\n    },\n    {\n      \"name\": \"refs/heads/main\",\n      \"old\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"new\": \"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"\n    }\n  ],\n  \"head\": {\n    \"old\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n    \"new\": \"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"\n  },\n  \"dry_run\": false\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## History reword\n\n- commit `72934de` → `c37ee67`\n- commit `b5ea30d` → `0659df1`\n- `refs/heads/feature` `72934de` → `c37ee67`\n- `refs/heads/main` `b5ea30d` → `0659df1`\n- HEAD `b5ea30d` → `0659df1`\n",
+    "stderr": ""
+  }
+}

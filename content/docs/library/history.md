@@ -12,6 +12,8 @@ The [`history`](rustdoc:grit_lib::history) module supports stateless history edi
 
 [`CommitEdit`](rustdoc:grit_lib::history::CommitEdit) describes per-commit rewrites, drops, and insert-before commits. [`RewriteOptions`](rustdoc:grit_lib::history::RewriteOptions) controls scope, empty-commit policy, and the committer ident used for new objects.
 
+For a single message change, [`reword`](rustdoc:grit_lib::history::reword) builds the [`CommitEdit`](rustdoc:grit_lib::history::CommitEdit) and runs [`plan_rewrite`](rustdoc:grit_lib::history::plan_rewrite) after [`normalize_rewrite_message`](rustdoc:grit_lib::history::normalize_rewrite_message) (stripspace, trailing newline, reject empty).
+
 ## Apply options and result
 
 [`ApplyOptions`](rustdoc:grit_lib::history::ApplyOptions) supplies the reflog identity and message written for every ref update in the batch.
@@ -20,15 +22,15 @@ The [`history`](rustdoc:grit_lib::history) module supports stateless history edi
 
 ## Dry-run ref lines
 
-[`RewritePlan::ref_update_lines`](rustdoc:grit_lib::history::RewritePlan::ref_update_lines) returns `update <ref> <new> <old>` lines suitable for `git update-ref --stdin`, so callers can preview ref motion without applying.
+[`RewritePlan`](rustdoc:grit_lib::history::RewritePlan) `ref_update_lines` returns `update <ref> <new> <old>` lines suitable for `git update-ref --stdin`, so callers can preview ref motion without applying.
 
 ## Errors
 
 [`HistoryError`](rustdoc:grit_lib::history::HistoryError) covers planning failures (conflicts, out-of-scope commits, branch checked out elsewhere) and apply failures:
 
-- [`LocalChangesWouldBeOverwritten`](rustdoc:grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten) — staged, unstaged, or untracked paths would be clobbered by the planned tree checkout.
-- [`RefCasMismatch`](rustdoc:grit_lib::history::HistoryError::RefCasMismatch) — a ref tip changed after planning; nothing is written.
-- [`RefApply`](rustdoc:grit_lib::history::HistoryError::RefApply) / [`WorktreeApply`](rustdoc:grit_lib::history::WorktreeApply) — ref batch or post-ref checkout failed (apply rolls back ref updates when checkout fails).
+- `LocalChangesWouldBeOverwritten` — staged, unstaged, or untracked paths would be clobbered by the planned tree checkout.
+- `RefCasMismatch` — a ref tip changed after planning; nothing is written.
+- `RefApply` / `WorktreeApply` — ref batch or post-ref checkout failed (apply rolls back ref updates when checkout fails).
 
 ## Example
 
