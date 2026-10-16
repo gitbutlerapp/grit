@@ -183,6 +183,7 @@ pub fn run_bitmaps_suite(
 ) -> Result<BenchReport> {
     let repo = match repo_override {
         Some(p) => {
+            crate::real_repo_fixture::clear_branch_head_refs(git, p)?;
             crate::bitmap_fixture::assert_tag_pinned_fixture_refs(p).context(
                 "bitmap --repo path is not a single-branch tag fixture; delete the cache or omit --repo",
             )?;
