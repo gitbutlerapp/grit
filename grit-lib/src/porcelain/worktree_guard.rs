@@ -545,7 +545,7 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         ignored_mode,
         true,
         &specs,
-        false,
+        true,
     )?;
     let trust_wholesale = delete_roots.is_empty() || {
         let under_delete_root = |path: &str| {

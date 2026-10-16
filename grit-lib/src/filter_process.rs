@@ -29,11 +29,10 @@ pub struct FilterSmudgeMeta {
     pub blob_hex: Option<String>,
 }
 
-pub fn smudge_meta_for_checkout(repo: &Repository, blob_hex: &str) -> FilterSmudgeMeta {
-    let mut meta = FilterSmudgeMeta {
-        blob_hex: Some(blob_hex.to_string()),
-        ..Default::default()
-    };
+/// Shared ref/tree metadata for one checkout apply (read `HEAD` once per batch).
+#[must_use]
+pub fn checkout_smudge_context(repo: &Repository) -> FilterSmudgeMeta {
+    let mut meta = FilterSmudgeMeta::default();
     let Ok(content) = std::fs::read_to_string(repo.git_dir().join("HEAD")) else {
         return meta;
     };
@@ -50,6 +49,23 @@ pub fn smudge_meta_for_checkout(repo: &Repository, blob_hex: &str) -> FilterSmud
         }
     }
     meta
+}
+
+/// Per-blob smudge metadata for checkout, reusing [`checkout_smudge_context`].
+#[must_use]
+pub fn smudge_meta_for_checkout_blob(
+    context: &FilterSmudgeMeta,
+    blob_hex: &str,
+) -> FilterSmudgeMeta {
+    FilterSmudgeMeta {
+        blob_hex: Some(blob_hex.to_owned()),
+        ref_name: context.ref_name.clone(),
+        treeish_hex: context.treeish_hex.clone(),
+    }
+}
+
+pub fn smudge_meta_for_checkout(repo: &Repository, blob_hex: &str) -> FilterSmudgeMeta {
+    smudge_meta_for_checkout_blob(&checkout_smudge_context(repo), blob_hex)
 }
 
 pub(crate) struct RunningFilter {

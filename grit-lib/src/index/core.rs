@@ -2097,22 +2097,37 @@ impl Index {
                 .collect::<Vec<_>>();
             self.entries = merge_sorted_index_entries(kept, replacements);
             self.entries_sorted = true;
-            for dir in dir_prefixes {
-                self.invalidate_after_path_removal(dir.as_bytes());
-            }
-            for path in invalidated_paths {
+            const BULK_INDEX_EXTENSION_INVALIDATE_MIN: usize = 64;
+            let mut invalidations = dir_prefixes.len();
+            for path in &invalidated_paths {
                 if dir_prefixes
                     .iter()
                     .all(|d| !Self::entry_under_directory_prefix(path.as_slice(), d.as_bytes()))
                 {
-                    self.invalidate_after_path_removal(&path);
+                    invalidations += 1;
                 }
             }
-            for path in repl_for_inval {
-                if let Ok(p) = std::str::from_utf8(&path) {
-                    self.invalidate_untracked_cache_for_path(p);
+            invalidations += repl_for_inval.len();
+            if invalidations >= BULK_INDEX_EXTENSION_INVALIDATE_MIN {
+                self.drop_derived_index_extensions();
+            } else {
+                for dir in dir_prefixes {
+                    self.invalidate_after_path_removal(dir.as_bytes());
                 }
-                self.invalidate_cache_tree_for_path(&path);
+                for path in invalidated_paths {
+                    if dir_prefixes
+                        .iter()
+                        .all(|d| !Self::entry_under_directory_prefix(path.as_slice(), d.as_bytes()))
+                    {
+                        self.invalidate_after_path_removal(&path);
+                    }
+                }
+                for path in repl_for_inval {
+                    if let Ok(p) = std::str::from_utf8(&path) {
+                        self.invalidate_untracked_cache_for_path(p);
+                    }
+                    self.invalidate_cache_tree_for_path(&path);
+                }
             }
             self.touch_fsmonitor_after_entry_change();
             return;
@@ -2270,6 +2285,15 @@ impl Index {
             for entry in replacements {
                 self.add_or_replace(entry);
             }
+            return;
+        }
+        const BULK_MERGE_MIN: usize = 64;
+        if replacements.len() >= BULK_MERGE_MIN {
+            self.drop_derived_index_extensions();
+            let kept = std::mem::take(&mut self.entries);
+            self.entries = merge_sorted_index_entries(kept, replacements);
+            self.entries_sorted = true;
+            self.touch_fsmonitor_after_entry_change();
             return;
         }
         let repl_for_inval: Vec<Vec<u8>> = replacements
