@@ -32,12 +32,11 @@ use std::path::Path;
 
 use crate::commit::{assemble_identity, identity_now_from_epoch};
 use crate::config::ConfigSet;
-use crate::diff::{diff_trees, refresh_index_stat_content_verified_with_rules};
+use crate::diff::diff_trees;
 use crate::error::{Error, Result};
 use crate::ident_resolve::{
     resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
 };
-use crate::index::index_file_mtime;
 use crate::index::{Index, IndexEntry};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
 use crate::merge_file::MergeFavor;
@@ -49,11 +48,13 @@ use crate::merge_trees::{
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout::{self, checkout_between_trees};
 use crate::porcelain::commit::write_commit_object;
+use crate::porcelain::index_from_tree::{
+    index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
+};
 use crate::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
 use crate::refs;
 use crate::repo::Repository;
 use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
-use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
 
 /// Flatten a tree object into a recursive list of [`IndexEntry`] values.
@@ -390,7 +391,7 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
 
     let old_index = repo.load_index()?;
     let from_tree = write_tree_from_index(repo.odb(), &old_index, "")?;
-    let mut clean_index = index_from_tree(repo, &head_tree)?;
+    let mut clean_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
     repo.write_index(&mut clean_index)?;
     let changes = diff_trees(repo.odb(), Some(&from_tree), Some(&head_tree), "")?;
     checkout::checkout_tree_changes(repo, &changes)?;
@@ -407,16 +408,6 @@ fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
         )));
     }
     Ok(parse_commit(&obj.data)?.tree)
-}
-
-fn index_from_tree(repo: &Repository, tree_oid: &ObjectId) -> Result<Index> {
-    let entries = tree_to_index_entries(repo, tree_oid, "")?;
-    let mut index = Index::new();
-    for entry in entries {
-        index.push_entry_unsorted(entry);
-    }
-    index.sort();
-    Ok(index)
 }
 
 fn has_tree_merge_conflicts(merged: &TreeMergeOutput) -> bool {
@@ -523,30 +514,6 @@ fn apply_conflict_merge_worktree(
     }
     refresh_stage0_index_stats_from_worktree(repo, work_tree, &mut index)?;
     repo.write_index(&mut index)?;
-    Ok(())
-}
-
-fn refresh_stage0_index_stats_from_worktree(
-    repo: &Repository,
-    work_tree: &Path,
-    index: &mut Index,
-) -> Result<()> {
-    if !index.entries.iter().any(|e| e.stage() == 0) {
-        return Ok(());
-    }
-    let index_mtime = index_file_mtime(&repo.index_path());
-    let rules = WorktreeRules::from_repository(repo, index).ok();
-    let rules_arc = rules.map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
-    let _ = refresh_index_stat_content_verified_with_rules(
-        repo.odb(),
-        repo.git_dir(),
-        index,
-        work_tree,
-        index_mtime,
-        repo.config().ok().as_deref(),
-        None,
-        rules_arc.as_ref(),
-    )?;
     Ok(())
 }
 

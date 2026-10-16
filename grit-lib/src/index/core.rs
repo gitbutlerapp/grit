@@ -232,6 +232,12 @@ impl IndexEntry {
         ((self.flags >> 12) & 0x3) as u8
     }
 
+    /// Whether cached stat fields were never populated (e.g. index built from a tree).
+    #[must_use]
+    pub fn stat_cache_unset(&self) -> bool {
+        self.size == 0 && self.mtime_sec == 0 && self.mtime_nsec == 0
+    }
+
     pub(crate) fn set_stage(&mut self, stage: u8) {
         self.flags = (self.flags & 0x0FFF) | ((stage as u16 & 0x3) << 12);
     }

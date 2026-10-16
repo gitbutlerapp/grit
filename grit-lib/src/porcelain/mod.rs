@@ -59,6 +59,7 @@ pub mod checkout_reflog;
 pub mod cherry_pick;
 pub mod clean;
 pub mod commit;
+pub(crate) mod index_from_tree;
 pub mod index_mode;
 pub mod log;
 pub mod merge;

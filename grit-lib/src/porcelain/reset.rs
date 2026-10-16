@@ -2,10 +2,9 @@
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
-use crate::index::Index;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
-use crate::porcelain::merge::tree_to_index_entries;
+use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
 use crate::refs::{self, append_reflog};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -86,7 +85,7 @@ pub fn reset_to_commit(repo: &Repository, opts: &ResetOptions) -> Result<ResetOu
     match opts.mode {
         ResetMode::Soft => {}
         ResetMode::Mixed => {
-            let mut index = index_from_tree(repo, &target_tree)?;
+            let mut index = index_from_tree_with_worktree_stats(repo, &target_tree)?;
             repo.write_index(&mut index)?;
         }
         ResetMode::Hard => {
@@ -137,16 +136,6 @@ fn commit_tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
         ))),
         ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".into())),
     }
-}
-
-fn index_from_tree(repo: &Repository, tree_oid: &ObjectId) -> Result<Index> {
-    let entries = tree_to_index_entries(repo, tree_oid, "")?;
-    let mut index = Index::new();
-    for entry in entries {
-        index.push_entry_unsorted(entry);
-    }
-    index.sort();
-    Ok(index)
 }
 
 fn update_moving_ref(
@@ -219,6 +208,7 @@ fn write_head_reflog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::index::Index;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::NullProgress;
@@ -232,6 +222,53 @@ mod tests {
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
         (dir, repo)
+    }
+
+    fn commit_two_files(
+        repo: &Repository,
+        paths: &[(&str, &str)],
+        parent: Option<ObjectId>,
+    ) -> ObjectId {
+        let wt = repo.work_tree().expect("wt");
+        let mut index = repo.load_index().expect("index");
+        for (path, contents) in paths {
+            std::fs::write(wt.join(path), contents).expect("write");
+            let oid = repo
+                .odb()
+                .write(ObjectKind::Blob, contents.as_bytes())
+                .expect("blob");
+            let entry = crate::index::entry_from_stat(
+                &wt.join(path),
+                path.as_bytes(),
+                oid,
+                crate::index::MODE_REGULAR,
+            )
+            .expect("entry");
+            index.add_or_replace(entry);
+        }
+        index.sort();
+        let tree = write_tree_update_index(&repo.odb(), &mut index, "", WriteTreeFlags::silent())
+            .expect("tree");
+        repo.write_index(&mut index).expect("write index");
+        let commit = CommitData {
+            tree,
+            parents: parent.into_iter().collect(),
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "c\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let co = repo
+            .odb()
+            .write(ObjectKind::Commit, &serialize_commit(&commit))
+            .expect("commit");
+        refs::write_ref(&repo.git_dir(), "refs/heads/main", &co).expect("branch");
+        refs::write_symbolic_ref(&repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+        co
     }
 
     fn commit_file(
@@ -375,6 +412,40 @@ mod tests {
 
         let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
         assert!(st.staged.is_empty(), "index should match HEAD tree");
+    }
+
+    #[test]
+    fn mixed_reset_at_head_refreshes_index_stat_for_clean_status() {
+        let (_dir, repo) = init_repo();
+        let c1 = commit_file(&repo, "a.txt", "a\n", None);
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join("b.txt"), "b\n").expect("write b");
+        let c2 = commit_two_files(&repo, &[("a.txt", "a\n"), ("b.txt", "b\n")], Some(c1));
+
+        reset_to_commit(&repo, &reset_opts(c2, ResetMode::Mixed)).expect("reset at HEAD");
+
+        let index = repo.load_index().expect("index");
+        assert!(index.get(b"a.txt", 0).expect("a").size > 0);
+        assert!(index.get(b"b.txt", 0).expect("b").size > 0);
+        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        assert!(st.unstaged.is_empty(), "worktree matches HEAD after reset");
+        assert!(st.staged.is_empty());
+    }
+
+    #[test]
+    fn mixed_reset_back_only_lists_paths_that_differ_from_target() {
+        let (_dir, repo) = init_repo();
+        let c1 = commit_two_files(&repo, &[("a.txt", "v1\n"), ("b.txt", "same\n")], None);
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join("a.txt"), "v2\n").expect("edit a");
+        let c2 = commit_two_files(&repo, &[("a.txt", "v2\n"), ("b.txt", "same\n")], Some(c1));
+
+        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset back");
+
+        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let unstaged: Vec<_> = st.unstaged.iter().map(|e| e.path()).collect();
+        assert_eq!(unstaged, ["a.txt"]);
+        let _ = c2;
     }
 
     #[test]

@@ -8759,6 +8759,7 @@ pub fn grit_lib::index::IndexEntry::set_intent_to_add(&mut self, bool)
 pub fn grit_lib::index::IndexEntry::set_skip_worktree(&mut self, bool)
 pub fn grit_lib::index::IndexEntry::skip_worktree(&self) -> bool
 pub fn grit_lib::index::IndexEntry::stage(&self) -> u8
+pub fn grit_lib::index::IndexEntry::stat_cache_unset(&self) -> bool
 pub fn grit_lib::index::IndexLoadOptions::clone(&self) -> Self
 pub fn grit_lib::index::IndexLoadOptions::default() -> Self
 pub fn grit_lib::index::IndexLoadOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result

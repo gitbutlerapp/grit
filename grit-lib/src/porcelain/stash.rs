@@ -31,7 +31,7 @@ use crate::odb::Odb;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::clean::{is_nested_git_worktree, path_in_nested_git_worktree};
 use crate::porcelain::commit::write_commit_object;
-use crate::porcelain::merge::tree_to_index_entries;
+use crate::porcelain::index_from_tree::{index_from_tree, index_from_tree_with_worktree_stats};
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
     UntrackedScan,
@@ -226,17 +226,6 @@ pub struct StashEntry {
     pub oid: ObjectId,
     /// Reflog message (what `git stash list` prints after the colon).
     pub message: String,
-}
-
-/// Build a stage-0 index whose entries match `tree_oid`.
-fn index_from_tree(repo: &Repository, tree_oid: &ObjectId) -> Result<Index> {
-    let entries = tree_to_index_entries(repo, tree_oid, "")?;
-    let mut index = Index::new();
-    for entry in entries {
-        index.push_entry_unsorted(entry);
-    }
-    index.sort();
-    Ok(index)
 }
 
 fn head_branch_label(head: &HeadState) -> String {
@@ -751,7 +740,7 @@ pub fn push_stash(repo: &Repository, options: &StashCreateOptions) -> Result<Opt
         remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
     }
     checkout_between_trees(repo, Some(&built.w_tree), &head_tree)?;
-    let mut head_index = index_from_tree(repo, &head_tree)?;
+    let mut head_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
     repo.write_index(&mut head_index)?;
     Ok(Some(built.w_commit))
 }
@@ -1641,6 +1630,61 @@ mod coverage_tests {
         assert!(!diffs.is_empty());
         drop_stash(&repo, 0, ident).expect("drop");
         assert!(list_stashes(&repo).expect("list").is_empty());
+    }
+
+    #[test]
+    fn push_stash_refreshes_index_stat_for_clean_status() {
+        use crate::porcelain::status::{status, StatusOptions};
+        use crate::progress::NullProgress;
+
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repo(tmp.path());
+        fs::write(tmp.path().join("f"), b"base\n").unwrap();
+        fs::write(tmp.path().join("g"), b"also\n").unwrap();
+        let mut index = repo.load_index().unwrap();
+        for (path, bytes) in [("f", b"base\n" as &[u8]), ("g", b"also\n")] {
+            let oid = repo.odb().write(ObjectKind::Blob, bytes).unwrap();
+            index.add_or_replace(
+                entry_from_stat(&tmp.path().join(path), path.as_bytes(), oid, MODE_REGULAR)
+                    .unwrap(),
+            );
+        }
+        index.sort();
+        repo.write_index(&mut index).unwrap();
+        let tree = write_stash_tree_from_index(&repo, &mut index).unwrap();
+        let commit = CommitData {
+            tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "two files\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let head = write_commit_object(&repo, &commit, None).unwrap();
+        refs::write_ref(repo.git_dir(), "HEAD", &head).unwrap();
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &head).unwrap();
+
+        fs::write(tmp.path().join("f"), b"changed\n").unwrap();
+        let opts = StashCreateOptions {
+            message: None,
+            include_untracked: false,
+            identity: "T <t@t> 1 +0000".into(),
+        };
+        push_stash(&repo, &opts).expect("push").expect("oid");
+
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"f", 0).expect("f").size > 0);
+        assert!(index.get(b"g", 0).expect("g").size > 0);
+        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        assert!(
+            st.unstaged.is_empty(),
+            "worktree matches HEAD after stash push"
+        );
+        assert!(st.staged.is_empty());
     }
 
     #[test]

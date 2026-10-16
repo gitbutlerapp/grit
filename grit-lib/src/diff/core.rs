@@ -3102,6 +3102,9 @@ fn try_push_status_modified_on_size_mismatch(
     for_status: bool,
     result: &mut Vec<DiffEntry>,
 ) -> bool {
+    if ie.stat_cache_unset() {
+        return false;
+    }
     if !for_status || crate::index::munge_index_size(meta.len()) == ie.size {
         return false;
     }
@@ -3737,8 +3740,10 @@ fn diff_index_to_worktree_inner(
                         // When size changed, the status fast path skips content hashing for the
                         // unstaged diff; skip the refresh pass's duplicate read here too.
                         // Mtime-only bumps keep size and still refresh.
-                        let skip_refresh_for_status_diff =
-                            options.for_status && !stat_matches && worktree_size != ie_ref.size;
+                        let skip_refresh_for_status_diff = options.for_status
+                            && !stat_matches
+                            && worktree_size != ie_ref.size
+                            && !ie_ref.stat_cache_unset();
                         let skip_refresh_clean_status = options.for_status
                             && stat_matches
                             && !entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
@@ -10213,6 +10218,39 @@ mod smudge_racily_clean_tests {
         assert!(!super::index_stat_cache_trustworthy(None));
         assert!(!super::index_stat_cache_trustworthy(Some((0, 0))));
         assert!(super::index_stat_cache_trustworthy(Some((1, 0))));
+    }
+
+    #[test]
+    fn status_diff_verifies_content_when_index_stat_cache_unset() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let rel = "unset-stat.txt";
+        let bytes = b"same bytes\n";
+        let oid = odb.hash(ObjectKind::Blob, bytes);
+        fs::write(wt.join(rel), bytes).expect("write");
+        let mut index = Index::new();
+        let mut entry = staged_entry_for_file(&odb, wt, rel, bytes, (100, 0));
+        entry.size = 0;
+        entry.mtime_sec = 0;
+        entry.mtime_nsec = 0;
+        entry.oid = oid;
+        index.entries.push(entry);
+        let (entries, _) = super::diff_index_to_worktree_with_options(
+            &odb,
+            &mut index,
+            wt,
+            super::DiffIndexToWorktreeOptions {
+                repository_git_dir: Some(git_dir),
+                for_status: true,
+                ..Default::default()
+            },
+        )
+        .expect("diff");
+        assert!(
+            entries.is_empty(),
+            "unset stat must not size-mismatch a matching worktree: {entries:?}"
+        );
     }
 
     #[test]
