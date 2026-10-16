@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
-use crate::fixture::{bench_work_dir, remove_dir_robust, scratch_dir};
+use crate::fixture::{remove_dir_robust, scratch_dir};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::network_fixture::{ensure_fixture, NetworkFixtureKind, NetworkProfile};
 use crate::scenarios::{run_scenario, Driver, PrepareKind, RunConfig, Scenario};
@@ -120,7 +120,10 @@ fn restore_gc_worktree(git: &Path, worktree: &Path) -> Result<()> {
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    seed_loose_objects(git, worktree)
+    seed_loose_objects(git, worktree)?;
+    fs::write(worktree.join(GC_BASE_MARKER), base.trim().as_bytes())
+        .context("restore gc base marker after clean")?;
+    Ok(())
 }
 
 fn reset_worktree_from_bare(git: &Path, bare: &Path, worktree: &Path) -> Result<()> {

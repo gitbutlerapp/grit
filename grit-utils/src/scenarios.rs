@@ -133,7 +133,16 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind, repo: &Path) 
         args.push("--worktree".to_string());
         args.push(repo.display().to_string());
     }
-    shell_command(&cfg.prepare_bin, &args)
+    let inner = shell_command(&cfg.prepare_bin, &args);
+    if kind == PrepareKind::MaintenanceReset {
+        if let Ok(bare) = std::env::var("GRIT_BENCH_MAINTENANCE_BARE") {
+            return format!(
+                "GRIT_BENCH_MAINTENANCE_BARE='{}' {inner}",
+                bare.replace('\'', "'\\''")
+            );
+        }
+    }
+    inner
 }
 
 /// Run one scenario at the given repo path.
