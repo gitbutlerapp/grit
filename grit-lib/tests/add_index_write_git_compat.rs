@@ -5,7 +5,7 @@ mod support;
 use std::fs;
 use std::process::Command;
 
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
@@ -19,7 +19,12 @@ use support::{
 };
 
 fn open_grit(wt: &std::path::Path) -> Repository {
-    Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open grit repo")
+    // Match Git subprocess config (`GIT_CONFIG_*` in CI threaded jobs).
+    Repository::discover(
+        Some(wt),
+        &RepositoryOptions::with_environment(Environment::capture_process()),
+    )
+    .expect("open grit repo")
 }
 
 #[test]
