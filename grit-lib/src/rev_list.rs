@@ -988,6 +988,12 @@ pub fn rev_list(
         return Ok(rev_list_result_from_commits(ordered));
     }
 
+    if let Some(ordered) =
+        try_bounded_path_limit_list(repo, &include, &exclude, options, &repo_config)?
+    {
+        return Ok(rev_list_result_from_commits(ordered));
+    }
+
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
 
@@ -5271,7 +5277,7 @@ fn trees_differ_for_pathspecs_optional(
     new_tree: Option<ObjectId>,
     prefix: &str,
     pathspecs: &[String],
-    mut cache: Option<&mut DenseWalkCache>,
+    cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     if prefix.is_empty() && pathspecs.len() == 1 {
         if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
@@ -5280,7 +5286,7 @@ fn trees_differ_for_pathspecs_optional(
                 old_tree,
                 new_tree,
                 &literal,
-                cache.as_deref_mut(),
+                cache,
             );
         }
     }
@@ -5950,6 +5956,162 @@ fn try_bounded_limit_list(
     }
     if options.reverse {
         ordered.reverse();
+    }
+    Ok(Some(ordered))
+}
+
+fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
+    options.max_count.is_some()
+        && !options.paths.is_empty()
+        && !options.full_history
+        && !options.ancestry_path
+        && !options.simplify_merges
+        && !options.sparse
+        && !options.count
+        && can_use_bounded_limit_list(&RevListOptions {
+            paths: Vec::new(),
+            ..options.clone()
+        })
+}
+
+fn dense_bloom_context_for_paths(
+    repo: &Repository,
+    repo_config: &ConfigSet,
+    options: &RevListOptions,
+) -> (Option<Arc<CommitGraphChain>>, bool, i32, Option<String>) {
+    let mut core_cg = match repo_config.get_bool("core.commitgraph") {
+        Some(Ok(b)) => b,
+        _ => true,
+    };
+    if repo.environment().var("GIT_TEST_COMMIT_GRAPH").as_deref() == Some("0") {
+        core_cg = false;
+    }
+    let read_paths = repo_config
+        .get("commitgraph.readchangedpaths")
+        .and_then(|v| crate::config::parse_bool(&v).ok())
+        .unwrap_or(true);
+    let version = repo_config
+        .get("commitgraph.changedpathsversion")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(-1);
+    let use_bloom = core_cg
+        && options.use_commit_graph_bloom
+        && crate::pathspec::pathspecs_allow_bloom(&options.paths);
+    let read_changed = read_paths && options.commit_graph_read_changed_paths;
+    let chain = if use_bloom {
+        repo.caches()
+            .commit_graph_chain(&repo.git_dir().join("objects"))
+    } else {
+        None
+    };
+    let version = if options.commit_graph_changed_paths_version != -1 {
+        options.commit_graph_changed_paths_version
+    } else {
+        version
+    };
+    (chain, read_changed, version, repo.bloom_pathspec_cwd())
+}
+
+/// Git-style combined `--max-count` / `--skip` with dense path limiting: date-priority queue from
+/// tips, TREESAME parent selection per commit, stop once enough path-visible commits are found.
+fn try_bounded_path_limit_list(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+    repo_config: &ConfigSet,
+) -> Result<Option<Vec<ObjectId>>> {
+    if include.is_empty() || !can_use_bounded_path_limit_list(options) {
+        return Ok(None);
+    }
+
+    let Some(max_count) = options.max_count else {
+        return Ok(None);
+    };
+    let mut graph =
+        CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
+    let excluded = if exclude.is_empty() {
+        HashSet::new()
+    } else {
+        walk_closure(&mut graph, exclude)?
+    };
+
+    let (bloom_chain, bloom_read_changed, bloom_version, bloom_cwd) =
+        dense_bloom_context_for_paths(repo, repo_config, options);
+    let bloom_ctx = DenseBloomCtx {
+        chain: bloom_chain.as_deref(),
+        read_changed_paths: bloom_read_changed,
+        changed_paths_version: bloom_version,
+        stats: options.bloom_stats.as_ref(),
+        cwd: bloom_cwd.as_deref(),
+    };
+
+    let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
+    let paths = &options.paths;
+    let mut heap = BinaryHeap::new();
+    let mut queued = HashSet::new();
+    let mut next_seq = 0u64;
+    for &tip in include {
+        if excluded.contains(&tip) || !queued.insert(tip) {
+            continue;
+        }
+        heap.push(CommitDateKey {
+            oid: tip,
+            date: graph.sort_key(tip, author_dates),
+            seq: next_seq,
+        });
+        next_seq += 1;
+    }
+
+    let mut cache = DenseWalkCache::default();
+    let mut visible_seen = 0usize;
+    let mut ordered = Vec::with_capacity(max_count);
+    while let Some(item) = heap.pop() {
+        let oid = item.oid;
+        if excluded.contains(&oid) {
+            continue;
+        }
+
+        let action = dense_path_limited_action(
+            repo,
+            &mut graph,
+            oid,
+            paths,
+            options.sparse,
+            options.show_pulls,
+            Some(&bloom_ctx),
+            &mut cache,
+        )?;
+
+        if action.visible {
+            visible_seen += 1;
+            if visible_seen > options.skip {
+                ordered.push(oid);
+            }
+        }
+
+        if ordered.len() >= max_count {
+            break;
+        }
+
+        for parent in action.parents_to_walk {
+            if excluded.contains(&parent) || !queued.insert(parent) {
+                continue;
+            }
+            heap.push(CommitDateKey {
+                oid: parent,
+                date: graph.sort_key(parent, author_dates),
+                seq: next_seq,
+            });
+            next_seq += 1;
+        }
+    }
+
+    if options.reverse {
+        ordered.reverse();
+    }
+    if options.path_graph_reorder && options.first_parent && !ordered.is_empty() {
+        ordered = reorder_path_limited_graph_commits(repo, &ordered, true)?;
     }
     Ok(Some(ordered))
 }

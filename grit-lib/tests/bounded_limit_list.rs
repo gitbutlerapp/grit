@@ -1,5 +1,7 @@
 //! Regression tests for bounded `rev-list` / `grit log` fast paths.
 
+mod support;
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
@@ -114,4 +116,61 @@ fn exclude_first_parent_only_with_max_count_matches_git() {
     };
     let result = rev_list(&repo, &[second.to_hex()], &[merge.to_hex()], &opts).expect("rev-list");
     assert_eq!(result.commits, vec![second]);
+}
+
+#[test]
+fn bounded_path_limit_stops_at_first_matching_commit() {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    let touch = support::commit_file(wt, "tracked.txt", "t\n", "touch tracked");
+    for i in 0..120 {
+        let content = format!("n{i}\n");
+        let msg = format!("noise {i}");
+        support::commit_file(wt, "noise.txt", &content, &msg);
+    }
+
+    let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+    let opts = RevListOptions {
+        max_count: Some(1),
+        paths: vec!["tracked.txt".to_owned()],
+        ..Default::default()
+    };
+    let result = rev_list(&grit_repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+    assert_eq!(result.commits, vec![touch]);
+
+    support::assert_grit_commits_match_git(
+        wt,
+        &["-n", "1", "HEAD", "--", "tracked.txt"],
+        &[String::from("HEAD")],
+        &[],
+        &opts,
+    );
+}
+
+#[test]
+fn bounded_path_limit_skip_and_max_match_git() {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    support::commit_file(wt, "tracked.txt", "v0\n", "v0");
+    let mut prior = support::commit_file(wt, "tracked.txt", "v1\n", "v1");
+    for i in 2..80 {
+        let content = format!("v{i}\n");
+        let msg = format!("v{i}");
+        prior = support::commit_file(wt, "tracked.txt", &content, &msg);
+    }
+    let _newest = prior;
+
+    let opts = RevListOptions {
+        max_count: Some(3),
+        skip: 1,
+        paths: vec!["tracked.txt".to_owned()],
+        ..Default::default()
+    };
+    support::assert_grit_commits_match_git(
+        wt,
+        &["-n", "3", "--skip", "1", "HEAD", "--", "tracked.txt"],
+        &[String::from("HEAD")],
+        &[],
+        &opts,
+    );
 }
