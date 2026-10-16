@@ -519,6 +519,7 @@ pub(crate) fn wholesale_deleted_directories(
     }
     let candidate_dirs: BTreeSet<String> = deleted_under.keys().cloned().collect();
     let mut indexed_under: BTreeMap<String, usize> = BTreeMap::new();
+    let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
     if index.entries_sorted {
         for dir in &candidate_dirs {
             let prefix = format!("{dir}/");
@@ -530,7 +531,7 @@ pub(crate) fn wholesale_deleted_directories(
                 if !entry.path.starts_with(prefix.as_bytes()) {
                     break;
                 }
-                if entry.stage() == 0 && entry.mode != MODE_GITLINK {
+                if entry.stage() == 0 {
                     count += 1;
                 }
             }
@@ -540,7 +541,7 @@ pub(crate) fn wholesale_deleted_directories(
         }
     } else {
         for entry in &index.entries {
-            if entry.stage() != 0 || entry.mode == MODE_GITLINK {
+            if entry.stage() != 0 {
                 continue;
             }
             let Ok(path) = std::str::from_utf8(&entry.path) else {
@@ -558,11 +559,26 @@ pub(crate) fn wholesale_deleted_directories(
     deleted_under
         .into_iter()
         .filter_map(|(dir, del_count)| {
-            indexed_under
-                .get(&dir)
-                .copied()
-                .filter(|indexed| *indexed == del_count && del_count > 0)
-                .map(|_| dir)
+            let indexed = indexed_under.get(&dir).copied()?;
+            if del_count == 0 || indexed != del_count {
+                return None;
+            }
+            let prefix = format!("{dir}/");
+            for entry in &index.entries {
+                if entry.stage() != 0 {
+                    continue;
+                }
+                let Ok(path) = std::str::from_utf8(&entry.path) else {
+                    continue;
+                };
+                if path != dir.as_str() && !path.starts_with(&prefix) {
+                    continue;
+                }
+                if !delete_path_is_scheduled(path, &delete_set, false) {
+                    return None;
+                }
+            }
+            Some(dir)
         })
         .collect()
 }
@@ -1971,6 +1987,48 @@ mod tests {
             .expect("commit");
         refs::write_ref(repo.git_dir(), "HEAD", &commit_oid).expect("head");
         tree
+    }
+
+    #[test]
+    fn wholesale_deleted_directories_skips_dir_with_remaining_gitlink() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        std::fs::create_dir_all(wt.join("d005")).expect("mkdir");
+        let mut index = repo.load_index().expect("index");
+        let mut delete_paths = Vec::new();
+        for i in 0..50 {
+            let rel = format!("d005/f{i:02}.txt");
+            let abs = wt.join(&rel);
+            std::fs::write(&abs, format!("v{i}\n")).expect("write");
+            let data = fs::read(&abs).expect("read");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            index.add_or_replace(
+                entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+            );
+            delete_paths.push(rel);
+        }
+        let sub_rel = "d005/submodule";
+        std::fs::create_dir_all(wt.join(sub_rel)).expect("gitlink dir");
+        let sub_oid = repo.odb().write(ObjectKind::Blob, b"sub\n").expect("blob");
+        index.add_or_replace(
+            entry_from_stat(&wt.join(sub_rel), sub_rel.as_bytes(), sub_oid, MODE_GITLINK)
+                .expect("gitlink entry"),
+        );
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+        let wholesale = wholesale_deleted_directories(&index, &delete_paths);
+        assert!(
+            wholesale.is_empty(),
+            "gitlink under dir must block wholesale removal"
+        );
     }
 
     #[test]

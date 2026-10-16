@@ -1,3 +1,0 @@
-ancestorEntries = ["grit-lib/src/porcelain/checkout.rs", "grit-lib/src/porcelain/switch.rs"]
-ourEntries = ["grit-lib/src/porcelain/checkout.rs", "grit-lib/src/porcelain/switch.rs"]
-theirEntries = ["grit-lib/src/porcelain/checkout.rs", "grit-lib/src/porcelain/switch.rs"]

@@ -20,9 +20,7 @@ use crate::index::StatMatchPolicy;
 use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
-use crate::porcelain::status::{
-    collect_untracked_and_ignored_with_cache, IgnoredMode,
-};
+use crate::porcelain::status::{collect_untracked_and_ignored_with_cache, IgnoredMode};
 use crate::repo::Repository;
 use crate::state::resolve_head;
 use crate::worktree_rules::WorktreeRules;
