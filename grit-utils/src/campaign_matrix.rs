@@ -89,6 +89,7 @@ pub fn run_fixture_cli_matrix(
     cfg: &RunConfig,
     fixture: &CampaignFixture,
     smoke: bool,
+    include_file_transport: bool,
 ) -> Result<Vec<ScenarioResult>> {
     std::env::set_var(
         "GRIT_BENCH_CAMPAIGN_CWD",
@@ -438,8 +439,24 @@ pub fn run_fixture_cli_matrix(
     append_hot_path_scenarios(hyperfine, git, grit, cfg, fixture, &meta, smoke, &mut out)?;
     append_stash_scenario(hyperfine, git, grit, cfg, fixture, &mut out)?;
     append_fsck_gc_repack(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
-    append_file_transport(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
+    if include_file_transport {
+        append_file_transport(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
+    }
 
+    Ok(out)
+}
+
+/// File:// clone/fetch/push rows (run after bitmap scenarios on tag-pinned git.git).
+pub fn run_fixture_file_transport_matrix(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    smoke: bool,
+) -> Result<Vec<ScenarioResult>> {
+    let mut out = Vec::new();
+    append_file_transport(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
     Ok(out)
 }
 
