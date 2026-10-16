@@ -9,7 +9,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 #[path = "merge_trees_walk.rs"]
 mod merge_trees_walk;
 
-use crate::diff::{detect_renames, diff_trees, DiffStatus};
 use crate::index::{
     entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_REGULAR,
 };
@@ -115,19 +114,31 @@ pub fn merge_trees_three_way(
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<TreeMergeOutput> {
     let odb = &repo.odb();
-    let mut touched =
-        merge_trees_walk::collect_touched_merge_paths(odb, &base_tree, &ours_tree, &theirs_tree)?;
+    let mut diff_cache = merge_trees_walk::MergeTreeDiffCache::new();
+    let mut touched = merge_trees_walk::collect_touched_merge_paths(
+        &mut diff_cache,
+        odb,
+        &base_tree,
+        &ours_tree,
+        &theirs_tree,
+    )?;
 
     let (mut base, mut ours, mut theirs) =
         merge_trees_walk::build_sparse_maps(repo, base_tree, ours_tree, theirs_tree, &touched)?;
 
-    let mut ours_old_to_new_pairs = rename_pairs_base_to_other(odb, &base_tree, &ours_tree)?;
+    let mut ours_old_to_new_pairs = diff_cache
+        .pair_diff(odb, &base_tree, &ours_tree)?
+        .rename_pairs
+        .clone();
     let base_h: HashMap<Vec<u8>, IndexEntry> =
         base.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     let ours_h: HashMap<Vec<u8>, IndexEntry> =
         ours.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     augment_renames_with_same_blob(&base_h, &ours_h, &mut ours_old_to_new_pairs);
-    let mut theirs_pairs = rename_pairs_base_to_other(odb, &base_tree, &theirs_tree)?;
+    let mut theirs_pairs = diff_cache
+        .pair_diff(odb, &base_tree, &theirs_tree)?
+        .rename_pairs
+        .clone();
     let theirs_h: HashMap<Vec<u8>, IndexEntry> =
         theirs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     augment_renames_with_same_blob(&base_h, &theirs_h, &mut theirs_pairs);
@@ -427,29 +438,6 @@ fn parent_has_file(side: &HashMap<Vec<u8>, IndexEntry>, path: &[u8]) -> bool {
 
 type RenamePathPair = (Vec<u8>, Vec<u8>, u32);
 
-fn rename_pairs_base_to_other(
-    odb: &Odb,
-    base_tree: &ObjectId,
-    other_tree: &ObjectId,
-) -> crate::error::Result<Vec<RenamePathPair>> {
-    let mut entries = diff_trees(odb, Some(base_tree), Some(other_tree), "")?;
-    entries = detect_renames(odb, None, entries, 50);
-    let mut out = Vec::new();
-    for e in entries {
-        if e.status != DiffStatus::Renamed {
-            continue;
-        }
-        let Some(old) = e.old_path else {
-            continue;
-        };
-        let Some(new) = e.new_path else {
-            continue;
-        };
-        let score = e.score.unwrap_or(0);
-        out.push((old.into_bytes(), new.into_bytes(), score));
-    }
-    Ok(out)
-}
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn merge_one_path(
     repo: &Repository,

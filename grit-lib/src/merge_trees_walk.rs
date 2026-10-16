@@ -1,7 +1,9 @@
 //! Recursive three-tree merge: skip identical subtrees and compose the result tree in the ODB.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::diff::{detect_renames, diff_trees, DiffEntry, DiffStatus};
 use crate::index::IndexEntry;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
@@ -78,38 +80,101 @@ pub(crate) fn lookup_index_entry_at_path(
     Ok(None)
 }
 
-pub(crate) fn paths_from_tree_diff(
-    odb: &Odb,
-    base: &ObjectId,
-    other: &ObjectId,
-) -> crate::error::Result<HashSet<Vec<u8>>> {
-    use crate::diff::{detect_renames, diff_trees, DiffStatus};
-    let mut entries = diff_trees(odb, Some(base), Some(other), "")?;
-    entries = detect_renames(odb, None, entries, 50);
-    let mut out = HashSet::new();
+/// Cached `diff_trees` + rename detection for one ordered tree pair (merge-ort style reuse).
+pub(crate) struct MergeTreeDiffCache {
+    pairs: HashMap<(ObjectId, ObjectId), TreePairRenameDiff>,
+}
+
+/// Rename-aware diff between two trees, shared by touched-path discovery and rename pairing.
+#[derive(Clone)]
+pub(crate) struct TreePairRenameDiff {
+    pub touched_paths: HashSet<Vec<u8>>,
+    pub rename_pairs: Vec<(Vec<u8>, Vec<u8>, u32)>,
+}
+
+impl MergeTreeDiffCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            pairs: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn pair_diff(
+        &mut self,
+        odb: &Odb,
+        base: &ObjectId,
+        other: &ObjectId,
+    ) -> crate::error::Result<&TreePairRenameDiff> {
+        let key = (*base, *other);
+        Ok(match self.pairs.entry(key) {
+            Entry::Occupied(slot) => slot.into_mut(),
+            Entry::Vacant(slot) => {
+                let mut entries = diff_trees(odb, Some(base), Some(other), "")?;
+                entries = detect_renames(odb, None, entries, 50);
+                slot.insert(tree_pair_rename_diff_from_entries(entries))
+            }
+        })
+    }
+}
+
+fn tree_pair_rename_diff_from_entries(entries: Vec<DiffEntry>) -> TreePairRenameDiff {
+    let mut touched_paths = HashSet::new();
+    let mut rename_pairs = Vec::new();
     for e in entries {
         if e.status == DiffStatus::Unmerged {
             continue;
         }
+        if e.status == DiffStatus::Renamed {
+            let Some(old) = e.old_path else {
+                continue;
+            };
+            let Some(new) = e.new_path else {
+                continue;
+            };
+            let score = e.score.unwrap_or(0);
+            touched_paths.insert(old.as_bytes().to_vec());
+            touched_paths.insert(new.as_bytes().to_vec());
+            rename_pairs.push((old.into_bytes(), new.into_bytes(), score));
+            continue;
+        }
         if let Some(p) = e.old_path {
-            out.insert(p.into_bytes());
+            touched_paths.insert(p.into_bytes());
         }
         if let Some(p) = e.new_path {
-            out.insert(p.into_bytes());
+            touched_paths.insert(p.into_bytes());
         }
     }
-    Ok(out)
+    TreePairRenameDiff {
+        touched_paths,
+        rename_pairs,
+    }
 }
 
 pub(crate) fn collect_touched_merge_paths(
+    cache: &mut MergeTreeDiffCache,
     odb: &Odb,
     base_tree: &ObjectId,
     ours_tree: &ObjectId,
     theirs_tree: &ObjectId,
 ) -> crate::error::Result<HashSet<Vec<u8>>> {
-    let mut touched = paths_from_tree_diff(odb, base_tree, ours_tree)?;
-    touched.extend(paths_from_tree_diff(odb, base_tree, theirs_tree)?);
-    touched.extend(paths_from_tree_diff(odb, ours_tree, theirs_tree)?);
+    let mut touched = cache
+        .pair_diff(odb, base_tree, ours_tree)?
+        .touched_paths
+        .clone();
+    touched.extend(
+        cache
+            .pair_diff(odb, base_tree, theirs_tree)?
+            .touched_paths
+            .iter()
+            .cloned(),
+    );
+    touched.extend(
+        cache
+            .pair_diff(odb, ours_tree, theirs_tree)?
+            .touched_paths
+            .iter()
+            .cloned(),
+    );
     Ok(touched)
 }
 

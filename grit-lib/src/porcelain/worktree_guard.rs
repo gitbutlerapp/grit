@@ -718,14 +718,26 @@ pub fn prepare_tree_checkout(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> Result<()> {
-    let mut snapshot = load_worktree_snapshot(repo)?;
     let tree_changes = diff_trees(repo.odb(), from_tree, Some(to_tree), "")?;
+    prepare_tree_checkout_from_changes(repo, &tree_changes)
+}
+
+/// Untracked guard for a precomputed tree-to-tree diff (reuse with checkout apply).
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when an untracked path would be overwritten, or on I/O/ODB failures.
+pub fn prepare_tree_checkout_from_changes(
+    repo: &Repository,
+    tree_changes: &[DiffEntry],
+) -> Result<()> {
+    let mut snapshot = load_worktree_snapshot(repo)?;
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let untracked =
-        collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, &tree_changes)?;
-    ensure_no_untracked_overwrite(&untracked, &tree_changes)
+        collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, tree_changes)?;
+    ensure_no_untracked_overwrite(&untracked, tree_changes)
 }
 
 #[cfg(test)]

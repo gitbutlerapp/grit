@@ -42,13 +42,16 @@ use crate::index::{Index, IndexEntry};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    apply_tree_merge_output_to_worktree_index, materialized_merge_result_tree,
-    merge_trees_three_way, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
+    apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_three_way,
+    refresh_tree_merge_index_stat_cache, TreeMergeConflictPresentation, TreeMergeOutput,
+    WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout::{self, checkout_between_trees};
 use crate::porcelain::commit::write_commit_object;
-use crate::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
+use crate::porcelain::worktree_guard::{
+    ensure_worktree_clean_for_merge, prepare_tree_checkout, prepare_tree_checkout_from_changes,
+};
 use crate::refs;
 use crate::repo::Repository;
 use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
@@ -348,15 +351,10 @@ pub fn integrate_branch(
         "GIT_COMMITTER_DATE",
     )?;
 
-    let merged_tree = merged.result_tree;
-    prepare_tree_checkout(repo, Some(&into_tree), &merged_tree)?;
-    checkout_between_trees(repo, Some(&into_tree), &merged_tree)?;
-    let mut index = repo.load_index()?;
-    apply_tree_merge_output_to_worktree_index(repo, &mut index, &merged)?;
-    repo.write_index(&mut index)?;
+    apply_clean_tree_merge(repo, &into_tree, &merged)?;
 
     let commit = CommitData {
-        tree: merged_tree,
+        tree: merged.result_tree,
         parents: vec![into_oid, other_oid],
         author,
         committer,
@@ -394,6 +392,23 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     let changes = diff_trees(repo.odb(), Some(&from_tree), Some(&head_tree), "")?;
     checkout::checkout_tree_changes(repo, &changes)?;
     clear_merge_state(repo.git_dir())?;
+    Ok(())
+}
+
+/// Apply a conflict-free three-way merge: one tree diff, sparse index patch, targeted checkout.
+fn apply_clean_tree_merge(
+    repo: &Repository,
+    head_tree: &ObjectId,
+    merged: &TreeMergeOutput,
+) -> Result<()> {
+    let merged_tree = merged.result_tree;
+    let changes = diff_trees(repo.odb(), Some(head_tree), Some(&merged_tree), "")?;
+    prepare_tree_checkout_from_changes(repo, &changes)?;
+    let mut index = repo.load_index()?;
+    apply_tree_merge_output_to_index(&mut index, merged);
+    checkout::checkout_tree_changes_with_index(repo, &changes, &mut index)?;
+    refresh_tree_merge_index_stat_cache(repo, &mut index, merged)?;
+    repo.write_index(&mut index)?;
     Ok(())
 }
 
