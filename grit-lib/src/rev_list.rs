@@ -5281,13 +5281,7 @@ fn trees_differ_for_pathspecs_optional(
 ) -> Result<bool> {
     if prefix.is_empty() && pathspecs.len() == 1 {
         if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
-            return trees_differ_at_literal_path(
-                repo,
-                old_tree,
-                new_tree,
-                &literal,
-                cache,
-            );
+            return trees_differ_at_literal_path(repo, old_tree, new_tree, &literal, cache);
         }
     }
     match (old_tree, new_tree) {
@@ -6028,6 +6022,9 @@ fn try_bounded_path_limit_list(
     let Some(max_count) = options.max_count else {
         return Ok(None);
     };
+    if max_count == 0 {
+        return Ok(Some(Vec::new()));
+    }
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
     let excluded = if exclude.is_empty() {
@@ -6065,7 +6062,7 @@ fn try_bounded_path_limit_list(
 
     let mut cache = DenseWalkCache::default();
     let mut visible_seen = 0usize;
-    let mut ordered = Vec::with_capacity(max_count);
+    let mut ordered = Vec::with_capacity(max_count.min(64));
     while let Some(item) = heap.pop() {
         let oid = item.oid;
         if excluded.contains(&oid) {
@@ -6085,7 +6082,7 @@ fn try_bounded_path_limit_list(
 
         if action.visible {
             visible_seen += 1;
-            if visible_seen > options.skip {
+            if visible_seen > options.skip && ordered.len() < max_count {
                 ordered.push(oid);
             }
         }

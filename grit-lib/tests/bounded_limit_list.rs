@@ -174,3 +174,39 @@ fn bounded_path_limit_skip_and_max_match_git() {
         &opts,
     );
 }
+
+#[test]
+fn bounded_path_limit_zero_emits_nothing_at_matching_tip() {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    support::commit_file(wt, "tracked.txt", "v\n", "touch");
+
+    let opts = RevListOptions {
+        max_count: Some(0),
+        paths: vec!["tracked.txt".to_owned()],
+        ..Default::default()
+    };
+    support::assert_grit_commits_match_git(
+        wt,
+        &["--max-count=0", "HEAD", "--", "tracked.txt"],
+        &[String::from("HEAD")],
+        &[],
+        &opts,
+    );
+}
+
+#[test]
+fn bounded_path_limit_extreme_max_count_does_not_panic() {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    support::commit_file(wt, "tracked.txt", "v\n", "touch");
+
+    let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+    let opts = RevListOptions {
+        max_count: Some(usize::MAX),
+        paths: vec!["tracked.txt".to_owned()],
+        ..Default::default()
+    };
+    let result = rev_list(&grit_repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+    assert_eq!(result.commits.len(), 1);
+}
