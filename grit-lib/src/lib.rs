@@ -186,7 +186,8 @@ pub mod error;
 mod ewah_bitmap;
 pub(crate) mod pack_roll_delta;
 
-pub mod bench_fixture;
+#[path = "bench_fixture/mod.rs"]
+mod bench_fixture_root;
 pub(crate) mod bitmap_walk;
 pub(crate) mod fetch;
 pub(crate) mod fetch_head;
@@ -195,7 +196,8 @@ pub(crate) mod filter_process;
 pub(crate) mod fmt_merge_msg;
 pub(crate) mod fsck;
 pub(crate) mod fsck_standalone;
-pub mod fsmonitor;
+#[path = "fsmonitor.rs"]
+mod fsmonitor_root;
 pub(crate) mod gc;
 pub(crate) mod git_binary_base85;
 pub(crate) mod git_date;
@@ -227,7 +229,8 @@ pub(crate) mod midx;
 pub(crate) mod midx_error;
 pub(crate) mod net_trace;
 pub mod notes;
-pub mod object_inspect;
+#[path = "object_inspect.rs"]
+mod object_inspect_root;
 pub mod objects;
 pub(crate) mod odb;
 pub(crate) mod pack;
@@ -241,10 +244,12 @@ pub(crate) mod pack_name_hash;
 pub(crate) mod pack_object_select;
 pub(crate) mod pack_objects;
 pub(crate) mod pack_receive;
-pub mod pack_reuse;
+#[path = "pack_reuse.rs"]
+mod pack_reuse_root;
 pub(crate) mod pack_rev;
 pub(crate) mod pack_store;
-pub mod pack_write;
+#[path = "pack_write.rs"]
+mod pack_write_root;
 pub(crate) mod pack_zlib;
 pub mod parallel;
 pub(crate) mod patch_ids;
@@ -260,7 +265,8 @@ pub(crate) mod prune_packed;
 pub(crate) mod push;
 pub(crate) mod push_cert;
 pub(crate) mod push_report;
-pub mod quote_path;
+#[path = "quote_path.rs"]
+mod quote_path_root;
 mod read_dir_kind;
 pub(crate) mod receive_pack;
 pub(crate) mod receive_quarantine;
@@ -320,6 +326,18 @@ pub(crate) mod ws;
 pub(crate) mod zlib_inflate;
 
 pub use ref_storage::RefStorageFormat;
+
+/// History rewrite planning and apply.
+pub mod history {
+    pub use crate::history_root::*;
+}
+
+pub use objects::bench_fixture;
+pub use objects::pack_reuse;
+pub use objects::pack_write;
+pub use porcelain::quote_path;
+pub use revwalk::object_inspect;
+pub use worktree::fsmonitor;
 
 #[cfg(test)]
 pub(crate) mod hot_path_test_metrics;

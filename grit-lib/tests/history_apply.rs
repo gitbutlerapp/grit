@@ -423,3 +423,75 @@ fn ref_update_lines_round_trip_through_git_update_ref_stdin() {
     );
     git_fsck_strict(wt);
 }
+
+#[test]
+fn apply_rewrite_failed_checkout_restores_refs_and_preserves_dirty_worktree() {
+    use grit_lib::repo::set_test_inject_index_write_fail_remaining;
+
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
+    commit_file(wt, "local.txt", "base\n", "add local");
+    let grit = open_grit(wt);
+    let staged_oid = {
+        use std::io::Write;
+        let mut child = Command::new("git")
+            .current_dir(wt)
+            .args(["hash-object", "-w", "--stdin"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("hash-object");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(b"staged\n")
+            .expect("write");
+        let out = child.wait_with_output().expect("wait");
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(
+        wt,
+        &[
+            "update-index",
+            "--cacheinfo",
+            "100644",
+            &staged_oid,
+            "local.txt",
+        ],
+    );
+    fs::write(wt.join("local.txt"), "dirty\n").expect("dirty worktree");
+
+    let plan = plan_reword_with_tree(
+        wt,
+        oids["b"],
+        "rewritten-only.txt",
+        b"from rewrite\n",
+        "tree change",
+    );
+    let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");
+    set_test_inject_index_write_fail_remaining(1);
+    let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("injected checkout failure");
+    grit_lib::repo::set_test_inject_index_write_fail(false);
+    assert!(matches!(
+        err,
+        grit_lib::history::HistoryError::WorktreeApply { .. }
+    ));
+    assert_eq!(git_rev_parse(wt, "refs/heads/main"), Some(tip_before));
+    assert_eq!(
+        fs::read_to_string(wt.join("local.txt")).expect("read"),
+        "dirty\n",
+        "unstaged worktree content must survive rollback"
+    );
+    let index_line = git(wt, &["ls-files", "-s", "local.txt"]);
+    assert!(
+        index_line.contains(&staged_oid),
+        "index must still record staged blob, got: {index_line}"
+    );
+    assert!(
+        !wt.join("rewritten-only.txt").exists(),
+        "partial checkout paths must be rolled back"
+    );
+}

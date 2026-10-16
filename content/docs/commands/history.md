@@ -88,12 +88,15 @@ Example:
   ],
   "refs": [
     {
-      "name": "refs/heads/side",
-      "old": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
-      "new": "9f8e7d6c5b4a392817061524334352637281910"
+      "name": "refs/heads/main",
+      "old": "9f8e7d6c5b4a392817061524334352637281910",
+      "new": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
     }
   ],
-  "head": null,
+  "head": {
+    "old": "9f8e7d6c5b4a392817061524334352637281910",
+    "new": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
+  },
   "dry_run": false
 }
 ```

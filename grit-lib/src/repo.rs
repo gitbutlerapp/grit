@@ -3595,7 +3595,6 @@ pub mod caches {
     pub use crate::repo_caches::*;
 }
 
-#[cfg(test)]
 mod index_write_fail_inject {
     use std::cell::RefCell;
 
@@ -3606,8 +3605,8 @@ mod index_write_fail_inject {
 }
 
 /// Debug-only: fail every [`Repository::write_index`] / index lock path while enabled.
-#[cfg(test)]
-pub(crate) fn set_test_inject_index_write_fail(enabled: bool) {
+#[doc(hidden)]
+pub fn set_test_inject_index_write_fail(enabled: bool) {
     index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
     if !enabled {
         index_write_fail_inject::INJECT_REMAINING.with(|c| *c.borrow_mut() = None);
@@ -3615,13 +3614,12 @@ pub(crate) fn set_test_inject_index_write_fail(enabled: bool) {
 }
 
 /// Debug-only: fail the next `remaining` index write attempts, then allow writes.
-#[cfg(test)]
-pub(crate) fn set_test_inject_index_write_fail_remaining(remaining: usize) {
+#[doc(hidden)]
+pub fn set_test_inject_index_write_fail_remaining(remaining: usize) {
     index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = true);
     index_write_fail_inject::INJECT_REMAINING.with(|c| *c.borrow_mut() = Some(remaining));
 }
 
-#[cfg(test)]
 fn test_inject_index_write_fail() -> Result<()> {
     index_write_fail_inject::INJECT.with(|enabled| {
         if !*enabled.borrow() {
@@ -3639,11 +3637,6 @@ fn test_inject_index_write_fail() -> Result<()> {
             )))
         })
     })
-}
-
-#[cfg(not(test))]
-fn test_inject_index_write_fail() -> Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]

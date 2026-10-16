@@ -82,3 +82,7 @@ pub mod worktree_guard;
 pub mod terminal {
     pub use crate::terminal::*;
 }
+pub mod quote_path {
+    //! Shell-style path quoting for display.
+    pub use crate::quote_path_root::*;
+}

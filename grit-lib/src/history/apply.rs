@@ -1,12 +1,12 @@
 //! Apply a [`RewritePlan`] atomically: refs, then index and worktree.
 
+use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 
 use crate::config::ConfigSet;
+use crate::diff::diff_trees;
 use crate::objects::ObjectId;
-use crate::diff::{diff_trees, DiffStatus};
-use crate::index::write_tree::write_tree_from_index;
-use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local, verify_tree_transition_allow_local,
     TreeTransitionVerifyError,
@@ -59,6 +59,14 @@ pub fn apply_rewrite(
     } else {
         None
     };
+    let worktree_snapshot = if needs_worktree {
+        match (old_tree.as_ref(), new_tree.as_ref()) {
+            (Some(old), Some(new)) => Some(snapshot_worktree_for_tree_transition(repo, old, new)?),
+            _ => None,
+        }
+    } else {
+        None
+    };
 
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
@@ -74,9 +82,8 @@ pub fn apply_rewrite(
             let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts).err();
             let worktree_restore = restore_worktree_after_failed_apply(
                 repo,
-                Some(&old),
-                &new,
                 index_snapshot.as_deref(),
+                worktree_snapshot.as_ref(),
             )
             .err();
             return Err(apply_failure_after_ref_update(
@@ -300,59 +307,165 @@ fn apply_failure_after_ref_update(
     }
 }
 
+/// Pre-checkout state for one path in the forward tree transition (missing = absent).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorktreePathSnapshot {
+    bytes: Option<Vec<u8>>,
+    symlink: bool,
+    #[cfg(unix)]
+    mode: u32,
+}
+
+fn snapshot_worktree_for_tree_transition(
+    repo: &Repository,
+    from_tree: &ObjectId,
+    to_tree: &ObjectId,
+) -> Result<HashMap<String, WorktreePathSnapshot>, HistoryError> {
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| HistoryError::WorktreeApply {
+            message: "cannot snapshot worktree in a bare repository".into(),
+        })?;
+    let changes = diff_trees(repo.odb(), Some(from_tree), Some(to_tree), "").map_err(|e| {
+        HistoryError::WorktreeApply {
+            message: e.to_string(),
+        }
+    })?;
+    let mut out = HashMap::new();
+    for change in changes {
+        let Some(path) = tree_transition_path(&change) else {
+            continue;
+        };
+        out.insert(
+            path.to_owned(),
+            read_worktree_path_snapshot(work_tree, path),
+        );
+    }
+    Ok(out)
+}
+
+fn tree_transition_path(change: &crate::diff::DiffEntry) -> Option<&str> {
+    change.new_path.as_deref().or(change.old_path.as_deref())
+}
+
+fn read_worktree_path_snapshot(work_tree: &Path, path: &str) -> WorktreePathSnapshot {
+    let abs = work_tree.join(path);
+    let meta = match fs::symlink_metadata(&abs) {
+        Ok(m) => m,
+        Err(_) => {
+            return WorktreePathSnapshot {
+                bytes: None,
+                symlink: false,
+                #[cfg(unix)]
+                mode: 0o644,
+            };
+        }
+    };
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(&abs).ok();
+        return WorktreePathSnapshot {
+            bytes: target.map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
+            symlink: true,
+            #[cfg(unix)]
+            mode: 0,
+        };
+    }
+    if meta.is_file() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = meta.permissions().mode() & 0o7777;
+            return WorktreePathSnapshot {
+                bytes: fs::read(&abs).ok(),
+                symlink: false,
+                mode,
+            };
+        }
+        #[cfg(not(unix))]
+        {
+            return WorktreePathSnapshot {
+                bytes: fs::read(&abs).ok(),
+                symlink: false,
+            };
+        }
+    }
+    WorktreePathSnapshot {
+        bytes: None,
+        symlink: false,
+        #[cfg(unix)]
+        mode: 0o644,
+    }
+}
+
 fn restore_worktree_after_failed_apply(
     repo: &Repository,
-    old_tree: Option<&ObjectId>,
-    new_tree: &ObjectId,
     index_snapshot: Option<&[u8]>,
+    worktree_snapshot: Option<&HashMap<String, WorktreePathSnapshot>>,
 ) -> Result<(), HistoryError> {
     if let Some(bytes) = index_snapshot {
         fs::write(repo.index_path(), bytes).map_err(|e| HistoryError::WorktreeApply {
             message: e.to_string(),
         })?;
     }
-    let Some(old) = old_tree else {
+    let Some(work_tree) = repo.work_tree() else {
         return Ok(());
     };
-    let index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
-    if let Some(work_tree) = repo.work_tree() {
-        let forward = diff_trees(repo.odb(), Some(old), Some(new_tree), "").map_err(|e| {
-            HistoryError::WorktreeApply {
-                message: e.to_string(),
-            }
+    let Some(snapshot) = worktree_snapshot else {
+        return Ok(());
+    };
+    for (path, saved) in snapshot {
+        let abs = work_tree.join(path);
+        restore_worktree_path(&abs, saved).map_err(|e| HistoryError::WorktreeApply {
+            message: format!("failed to restore '{path}': {e}"),
         })?;
-        for change in forward {
-            if change.status == DiffStatus::Deleted {
-                continue;
+    }
+    Ok(())
+}
+
+fn restore_worktree_path(abs: &Path, saved: &WorktreePathSnapshot) -> std::io::Result<()> {
+    if saved.bytes.is_none() {
+        if abs.is_symlink() || abs.is_file() {
+            fs::remove_file(abs)?;
+        }
+        return Ok(());
+    }
+    let Some(bytes) = saved.bytes.as_ref() else {
+        return Ok(());
+    };
+    if saved.symlink {
+        let _ = fs::remove_file(abs);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let target = String::from_utf8_lossy(bytes);
+            if let Some(parent) = abs.parent() {
+                fs::create_dir_all(parent)?;
             }
-            let Some(path) = change
-                .new_path
-                .as_deref()
-                .or(change.old_path.as_deref())
-            else {
-                continue;
-            };
-            if index.get(path.as_bytes(), 0).is_some() {
-                continue;
-            }
-            let abs = work_tree.join(path);
-            if abs.is_file() {
-                let _ = fs::remove_file(abs);
-            }
+            symlink(target.as_ref(), abs)?;
+        }
+        #[cfg(not(unix))]
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "symlink restore requires unix",
+            ));
+        }
+        return Ok(());
+    }
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(abs, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if saved.mode != 0 {
+            let mut perms = fs::metadata(abs)?.permissions();
+            perms.set_mode(saved.mode);
+            fs::set_permissions(abs, perms)?;
         }
     }
-    let index_tree = write_tree_from_index(repo.odb(), &index, "").map_err(|e| {
-        HistoryError::WorktreeApply {
-            message: e.to_string(),
-        }
-    })?;
-    checkout_hard_to_tree_from_head_tree(repo, old, &index_tree).map_err(|e| {
-        HistoryError::WorktreeApply {
-            message: format!("failed to restore worktree after apply error: {e}"),
-        }
-    })
+    Ok(())
 }
 
 #[cfg(test)]
