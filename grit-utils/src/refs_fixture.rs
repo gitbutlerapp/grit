@@ -383,7 +383,7 @@ pub fn strip_refs_to_empty(git_dir: &Path, base_commit: &str) -> Result<()> {
 
 /// Keep the first `keep` ref lines in `packed-refs` (Git packed-refs format).
 pub fn truncate_packed_refs(repo: &Path, keep: usize) -> Result<()> {
-    let path = repo.join("packed-refs");
+    let path = grit_lib::refs::store::paths::packed_refs_path(repo);
     let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let mut header = String::new();
     let mut ref_lines: Vec<&str> = Vec::new();

@@ -218,17 +218,13 @@ impl FilesRefStore {
         }
         self.insert_head_for_batch_state(&mut refs)?;
 
-        let mut peel_roots: BTreeSet<String> = BTreeSet::new();
         for update in updates {
-            if let Some(RawRef::Symbolic(first)) = refs.get(&update.name) {
-                peel_roots.insert(first.clone());
+            if matches!(refs.get(&update.name), Some(RawRef::Symbolic(_))) {
+                self.insert_symref_peel_chain(&mut refs, &update.name)?;
             }
         }
-        if let Some(RawRef::Symbolic(first)) = refs.get("HEAD") {
-            peel_roots.insert(first.clone());
-        }
-        for start in peel_roots {
-            self.insert_symref_peel_chain(&mut refs, &start)?;
+        if matches!(refs.get("HEAD"), Some(RawRef::Symbolic(_))) {
+            self.insert_symref_peel_chain(&mut refs, "HEAD")?;
         }
 
         Ok(RefBatchState {
