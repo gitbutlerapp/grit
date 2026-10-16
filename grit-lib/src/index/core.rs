@@ -2032,6 +2032,176 @@ impl Index {
         self.invalidate_cache_tree_for_path(path);
     }
 
+    /// One index compaction pass: drop entries under `dir_prefixes`, drop exact `paths`, merge `replacements`.
+    pub fn remove_prefixes_paths_and_insert<'a>(
+        &mut self,
+        dir_prefixes: &BTreeSet<String>,
+        paths: impl IntoIterator<Item = &'a [u8]>,
+        replacements: impl IntoIterator<Item = IndexEntry>,
+    ) {
+        let mut replacements: Vec<IndexEntry> = replacements.into_iter().collect();
+        if !replacements.is_empty() {
+            replacements
+                .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+            dedup_sorted_replacement_entries(&mut replacements);
+        }
+
+        let mut paths: Vec<&[u8]> = paths.into_iter().collect();
+        paths.sort_unstable_by(|a, b| Self::cmp_paths(a, b));
+        paths.dedup_by(|a, b| a == b);
+
+        let mut prefix_bytes: Vec<&[u8]> = dir_prefixes.iter().map(|d| d.as_bytes()).collect();
+        prefix_bytes.sort_unstable_by(|a, b| Self::cmp_paths(a, b));
+        prefix_bytes.dedup_by(|a, b| a == b);
+
+        if dir_prefixes.is_empty() && paths.is_empty() {
+            self.merge_replacements_into_sorted_index(replacements);
+            return;
+        }
+
+        let mut invalidated_paths: Vec<Vec<u8>> = Vec::new();
+        let mut kept = Vec::with_capacity(self.entries.len());
+
+        if self.entries_sorted {
+            let mut path_idx = 0usize;
+            let mut prefix_idx = 0usize;
+            for entry in self.entries.drain(..) {
+                let ep = entry.path.as_slice();
+                while path_idx < paths.len() && Self::cmp_paths(paths[path_idx], ep).is_lt() {
+                    path_idx += 1;
+                }
+                while prefix_idx < prefix_bytes.len()
+                    && Self::directory_prefix_before(prefix_bytes[prefix_idx], ep)
+                {
+                    prefix_idx += 1;
+                }
+                let remove = (path_idx < paths.len()
+                    && Self::cmp_paths(paths[path_idx], ep).is_eq())
+                    || (prefix_idx < prefix_bytes.len()
+                        && Self::entry_under_directory_prefix(ep, prefix_bytes[prefix_idx]));
+                if remove {
+                    if entry.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
+                    }
+                    if invalidated_paths.last().is_none_or(|p| p.as_slice() != ep) {
+                        invalidated_paths.push(entry.path.clone());
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            let repl_for_inval = replacements
+                .iter()
+                .filter(|e| e.stage() == 0)
+                .map(|e| e.path.clone())
+                .collect::<Vec<_>>();
+            self.entries = merge_sorted_index_entries(kept, replacements);
+            self.entries_sorted = true;
+            for dir in dir_prefixes {
+                self.invalidate_after_path_removal(dir.as_bytes());
+            }
+            for path in invalidated_paths {
+                if dir_prefixes
+                    .iter()
+                    .all(|d| !Self::entry_under_directory_prefix(path.as_slice(), d.as_bytes()))
+                {
+                    self.invalidate_after_path_removal(&path);
+                }
+            }
+            for path in repl_for_inval {
+                if let Ok(p) = std::str::from_utf8(&path) {
+                    self.invalidate_untracked_cache_for_path(p);
+                }
+                self.invalidate_cache_tree_for_path(&path);
+            }
+            self.touch_fsmonitor_after_entry_change();
+            return;
+        }
+        if !dir_prefixes.is_empty() {
+            self.remove_directory_prefixes(dir_prefixes);
+        }
+        self.remove_paths_and_insert(paths, replacements);
+    }
+
+    /// Remove every entry whose path equals `dir` or lies under `dir/` for each `dir` in `dirs`.
+    pub fn remove_directory_prefixes(&mut self, dirs: &BTreeSet<String>) {
+        if dirs.is_empty() {
+            return;
+        }
+        let mut prefixes: Vec<&[u8]> = dirs.iter().map(|d| d.as_bytes()).collect();
+        prefixes.sort_unstable_by(|a, b| Self::cmp_paths(a, b));
+        prefixes.dedup_by(|a, b| a == b);
+
+        let mut invalidated_paths: Vec<Vec<u8>> = Vec::new();
+        let mut kept = Vec::with_capacity(self.entries.len());
+
+        if self.entries_sorted {
+            let mut prefix_idx = 0usize;
+            for entry in self.entries.drain(..) {
+                let ep = entry.path.as_slice();
+                while prefix_idx < prefixes.len()
+                    && Self::directory_prefix_before(prefixes[prefix_idx], ep)
+                {
+                    prefix_idx += 1;
+                }
+                let remove = prefix_idx < prefixes.len()
+                    && Self::entry_under_directory_prefix(ep, prefixes[prefix_idx]);
+                if remove {
+                    if entry.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
+                    }
+                    if invalidated_paths.last().is_none_or(|p| p.as_slice() != ep) {
+                        invalidated_paths.push(entry.path.clone());
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            self.entries = kept;
+        } else {
+            for entry in self.entries.drain(..) {
+                let remove = prefixes.iter().any(|prefix| {
+                    Self::entry_under_directory_prefix(entry.path.as_slice(), prefix)
+                });
+                if remove {
+                    if entry.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
+                    }
+                    if invalidated_paths
+                        .last()
+                        .is_none_or(|p| p.as_slice() != entry.path)
+                    {
+                        invalidated_paths.push(entry.path.clone());
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            self.entries = kept;
+        }
+        if invalidated_paths.is_empty() {
+            return;
+        }
+        for dir in dirs {
+            self.invalidate_after_path_removal(dir.as_bytes());
+        }
+        self.touch_fsmonitor_after_entry_change();
+    }
+
+    fn entry_under_directory_prefix(path: &[u8], prefix: &[u8]) -> bool {
+        if path.len() < prefix.len() {
+            return false;
+        }
+        if path[..prefix.len()] != *prefix {
+            return false;
+        }
+        path.len() == prefix.len() || path[prefix.len()] == b'/'
+    }
+
+    fn directory_prefix_before(prefix: &[u8], path: &[u8]) -> bool {
+        Self::cmp_paths(prefix, path).is_lt() && !Self::entry_under_directory_prefix(path, prefix)
+    }
+
     /// Remove many paths (all merge stages per path) in one `O(N + M log M)` compaction pass.
     pub fn remove_paths<'a>(&mut self, paths: impl IntoIterator<Item = &'a [u8]>) {
         use std::collections::BTreeSet;
@@ -4365,6 +4535,20 @@ mod tests {
         assert_eq!(idx.entries[0].path, b"path/a.txt");
         assert_eq!(idx.entries[0].oid, replacement.oid);
         assert_eq!(idx.entries[1].path, b"path/b.txt");
+    }
+
+    #[test]
+    fn remove_directory_prefixes_drops_nested_paths() {
+        let mut idx = Index::new();
+        idx.add_or_replace(make_entry("d005/f0.txt"));
+        idx.add_or_replace(make_entry("d005/f1.txt"));
+        idx.add_or_replace(make_entry("d006/f0.txt"));
+        idx.add_or_replace(make_entry("keep.txt"));
+        idx.remove_directory_prefixes(&BTreeSet::from(["d005".to_owned()]));
+        assert!(idx.get(b"d005/f0.txt", 0).is_none());
+        assert!(idx.get(b"d005/f1.txt", 0).is_none());
+        assert!(idx.get(b"d006/f0.txt", 0).is_some());
+        assert!(idx.get(b"keep.txt", 0).is_some());
     }
 
     #[test]

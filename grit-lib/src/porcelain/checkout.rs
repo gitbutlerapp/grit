@@ -715,7 +715,10 @@ fn wholesale_deleted_directories_on_disk(
     trusted
 }
 
-fn path_under_wholesale_directory(path: &str, wholesale_dirs: &BTreeSet<String>) -> bool {
+pub(crate) fn path_under_wholesale_directory(
+    path: &str,
+    wholesale_dirs: &BTreeSet<String>,
+) -> bool {
     wholesale_dirs.iter().any(|dir| {
         path == dir.as_str()
             || path
@@ -774,14 +777,18 @@ fn checkout_tree_changes_with_progress(
         .filter(|c| c.status == DiffStatus::Deleted)
         .filter_map(|c| c.old_path.clone())
         .collect();
-    let wholesale_candidates = wholesale_deleted_directories_on_disk(
-        repo,
-        work_tree,
-        index,
-        &delete_paths,
-        ignorecase,
-        &apply,
-    );
+    let wholesale_candidates = if apply.wholesale_safety_precomputed {
+        apply.preverified_wholesale_dirs.clone()
+    } else {
+        wholesale_deleted_directories_on_disk(
+            repo,
+            work_tree,
+            index,
+            &delete_paths,
+            ignorecase,
+            &apply,
+        )
+    };
     let mut wholesale_dirs_removed = BTreeSet::new();
     for dir in &wholesale_candidates {
         let abs = work_tree.join(dir);
@@ -842,7 +849,9 @@ fn checkout_tree_changes_with_progress(
                         deleted_abs_paths.push(abs);
                     }
                 }
-                paths_to_remove.push(path.as_bytes().to_vec());
+                if !path_under_wholesale_directory(path, &wholesale_dirs_removed) {
+                    paths_to_remove.push(path.as_bytes().to_vec());
+                }
             }
             progress.inc(1);
             continue;
@@ -982,7 +991,11 @@ fn checkout_tree_changes_with_progress(
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
 
     drop(rules);
-    index_mut.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), new_entries);
+    index_mut.remove_prefixes_paths_and_insert(
+        &wholesale_dirs_removed,
+        paths_to_remove.iter().map(|p| p.as_slice()),
+        new_entries,
+    );
     repo.write_index(index_mut)?;
     progress.finish();
     Ok(())
