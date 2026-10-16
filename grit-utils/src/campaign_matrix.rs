@@ -11,7 +11,6 @@ use crate::campaign_prep::{
 use crate::campaign_worktree::{blame_target_path, dirty_tracked_worktree, list_tracked_files};
 use crate::fixture::prepare_commit_iteration;
 use crate::hot_path_fixture::HotPathMeta;
-use crate::maintenance_suite::seed_loose_objects;
 use crate::network_fixture::{ensure_campaign_bare_network_meta, file_url};
 use crate::network_suite::{ensure_network_client_repo, prepare_network_command};
 use crate::real_repo_fixture::git_env;
@@ -640,7 +639,8 @@ fn append_fsck_gc_repack(
     if !smoke {
         crate::maintenance_suite::write_gc_base_marker(git, &fixture.worktree)?;
     }
-    out.push(run_scenario(
+    let gc_allows_grit_failure = fixture.id == "git-dot-git";
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -658,6 +658,7 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.worktree,
+        gc_allows_grit_failure,
     )?);
 
     out.push(run_scenario(
