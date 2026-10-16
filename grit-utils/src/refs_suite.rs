@@ -5,16 +5,16 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::binary::{grit_source_commit, tool_version};
-use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::refs_fixture::{
-    ensure_refs_fixture, git_supports_reftable, refs_isolated_env, refs_scratch_root, work_dir_for,
-    RefsFixtureKind, RefsFixtureMeta, RefsWorkMode, REF_COUNT,
+    ensure_refs_fixture, git_supports_reftable, refs_isolated_env, refs_scratch_root,
+    work_dir_for, RefsFixtureKind, RefsFixtureMeta, RefsWorkMode, REF_COUNT,
+    REF_COUNT_10K,
 };
+use crate::resource::bench_with_peak_rss;
 use crate::scenarios::{Driver, Scenario};
 use crate::schema::{BenchReport, ScenarioResult, ToolVersions, SCHEMA_VERSION};
 use crate::shell::shell_command;
-use crate::stats::timing_from_hyperfine;
 
 /// Hyperfine tuning for ref scenarios.
 #[derive(Debug, Clone)]
@@ -92,32 +92,30 @@ fn run_refs_scenario(
         shell_command(bench_exe, &scenario.grit_argv)
     };
 
-    let git_entry = run_hyperfine(
+    let (mut git_stats, git_rss) = bench_with_peak_rss(
         hyperfine,
-        &HyperfineRun {
-            command: git_cmd,
-            working_directory: repo.to_path_buf(),
-            prepare: prepare.map(str::to_string),
-            warmup: cfg.warmup,
-            min_runs: cfg.min_runs,
-            command_name: Some("git".into()),
-            env_prefix: env.clone(),
-        },
+        bench_exe,
+        &git_cmd,
+        repo,
+        cfg.warmup,
+        cfg.min_runs,
+        "git",
+        env.as_deref(),
+        prepare,
     )?;
-    let grit_entry = run_hyperfine(
+    let (mut grit_stats, grit_rss) = bench_with_peak_rss(
         hyperfine,
-        &HyperfineRun {
-            command: grit_cmd,
-            working_directory: repo.to_path_buf(),
-            prepare: prepare.map(str::to_string),
-            warmup: cfg.warmup,
-            min_runs: cfg.min_runs,
-            command_name: Some("grit".into()),
-            env_prefix: env.clone(),
-        },
+        bench_exe,
+        &grit_cmd,
+        repo,
+        cfg.warmup,
+        cfg.min_runs,
+        "grit",
+        env.as_deref(),
+        prepare,
     )?;
-    let git_stats = timing_from_hyperfine(&git_entry);
-    let grit_stats = timing_from_hyperfine(&grit_entry);
+    git_stats.peak_rss_bytes = Some(git_rss);
+    grit_stats.peak_rss_bytes = Some(grit_rss);
     let ratio = crate::stats::median_ratio(git_stats.median_ms, grit_stats.median_ms);
 
     Ok(ScenarioResult {
@@ -300,6 +298,70 @@ fn add_fixture_scenarios(
         &shell_command(git, &["update-ref", "--stdin"]),
         &delete_stdin,
     );
+    if kind == RefsFixtureKind::Packed {
+        let work_10k = refs_scratch_root().join("refs-10k-packed-work");
+        let prepare_10k = {
+            let inner = shell_command(
+                bench_exe,
+                &[
+                    "prepare-refs".into(),
+                    "--git".into(),
+                    git.display().to_string(),
+                    "--source".into(),
+                    fixture_path.display().to_string(),
+                    "--work".into(),
+                    work_10k.display().to_string(),
+                    "--mode".into(),
+                    "full".into(),
+                ],
+            );
+            let truncate = shell_command(
+                bench_exe,
+                &[
+                    "truncate-packed-refs".into(),
+                    work_10k.display().to_string(),
+                    REF_COUNT_10K.to_string(),
+                ],
+            );
+            let parent = work_10k
+                .parent()
+                .map(shell_quote_path)
+                .unwrap_or_else(|| "'/'".to_string());
+            format!("cd {parent} && {inner} && {truncate}")
+        };
+        out.push(run_refs_scenario(
+            hyperfine,
+            bench_exe,
+            git,
+            cfg,
+            &Scenario {
+                id: "update-ref-update-1k-refs-10k-packed".into(),
+                group: "refs".into(),
+                fixture: "refs-10k-packed".into(),
+                description: format!(
+                    "update-ref --stdin update 1k existing refs ({REF_COUNT_10K} packed)"
+                ),
+                grit_argv: vec![sh_redirect_stdin(
+                    &shell_command(
+                        bench_exe,
+                        &refs_drive_argv("update-ref-stdin", &work_10k, &[]),
+                    ),
+                    &update_stdin,
+                )],
+                git_argv: vec![sh_redirect_stdin(
+                    &shell_command(git, &["update-ref", "--stdin"]),
+                    &update_stdin,
+                )],
+                driver: Driver::Lib,
+                prepare_kind: None,
+                grit_via_shell: true,
+                git_via_shell: true,
+            },
+            &work_10k,
+            Some(&prepare_10k),
+        )?);
+    }
+
     out.push(run_refs_scenario(
         hyperfine,
         bench_exe,

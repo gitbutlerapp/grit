@@ -12,6 +12,8 @@ use crate::bench_env::{empty_global_config_path, isolated_env_prefix};
 use crate::fixture::remove_dir_robust;
 
 pub const REF_COUNT: usize = 100_000;
+/// Smaller packed-ref fixture for scaling comparisons (10k vs 100k).
+pub const REF_COUNT_10K: usize = 10_000;
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /// Which cached 100k-ref layout to use.
@@ -376,6 +378,41 @@ pub fn strip_refs_to_empty(git_dir: &Path, base_commit: &str) -> Result<()> {
         }
     }
     fs::write(git_dir.join("HEAD"), format!("{base_commit}\n"))?;
+    Ok(())
+}
+
+/// Keep the first `keep` ref lines in `packed-refs` (Git packed-refs format).
+pub fn truncate_packed_refs(repo: &Path, keep: usize) -> Result<()> {
+    let path = repo.join("packed-refs");
+    let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let mut header = String::new();
+    let mut ref_lines: Vec<&str> = Vec::new();
+    for line in raw.lines() {
+        if line.starts_with('#') || line.is_empty() {
+            if !header.is_empty() {
+                header.push('\n');
+            }
+            header.push_str(line);
+        } else {
+            ref_lines.push(line);
+        }
+    }
+    if ref_lines.len() < keep {
+        bail!(
+            "packed-refs has {} refs, cannot truncate to {keep}",
+            ref_lines.len()
+        );
+    }
+    ref_lines.truncate(keep);
+    let mut out = header;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for line in ref_lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    fs::write(&path, out).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
