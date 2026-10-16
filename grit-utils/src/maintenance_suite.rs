@@ -53,7 +53,11 @@ fn clone_deep_worktree(git: &Path, bare: &Path) -> Result<PathBuf> {
 }
 
 pub(crate) fn seed_loose_objects(git: &Path, repo: &Path) -> Result<()> {
-    for i in 0..40 {
+    let count = std::env::var("GRIT_BENCH_GC_SEED_COUNT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(40);
+    for i in 0..count {
         let mut cmd = Command::new(git);
         cmd.args(["commit", "--allow-empty", "-m", &format!("gc-bench-{i}")])
             .current_dir(repo);
