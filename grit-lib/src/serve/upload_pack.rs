@@ -13,7 +13,9 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackProgress};
 use crate::repo::Repository;
 use crate::serve::shallow_upload::{compute_shallow_response, ShallowRequest};
-use crate::serve::upload_pack_policy::{resolve_want_ref, UploadPackPolicy};
+use crate::serve::upload_pack_policy::{
+    resolve_want_ref, validate_wants, validate_wants_filtered, UploadPackPolicy,
+};
 use crate::shallow::INFINITE_DEPTH;
 
 /// Capabilities offered in a v0/v1 advertisement, before the per-repository ones.
@@ -622,9 +624,11 @@ fn fetch_v2(
         object_filter = Some(policy.parse_filter(&config, &spec)?);
     }
 
-    let allowed = allowed_wants(&refs, head_info(repo).oid);
-    if let Some(bad) = wants.iter().find(|w| !allowed.contains(w)) {
-        return Err(ServeError::NotOurRef(*bad));
+    let head = head_info(repo).oid;
+    if object_filter.is_some() {
+        validate_wants_filtered(repo, &wants)?;
+    } else {
+        validate_wants(repo, &refs, head, &wants, &policy)?;
     }
 
     let mut seen = HashSet::new();
