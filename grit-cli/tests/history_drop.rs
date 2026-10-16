@@ -119,16 +119,16 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, Box<dyn Error>> {
 
 fn init_linear_repo(dir: &Path) -> Result<(String, String, String), Box<dyn Error>> {
     git(dir, &["init", "-b", "main"])?;
-    fs::write(dir.join("file.txt"), b"v1\n")?;
-    git(dir, &["add", "file.txt"])?;
+    fs::write(dir.join("first.t"), b"1\n")?;
+    git(dir, &["add", "first.t"])?;
     git(dir, &["commit", "-m", "first"])?;
     let a = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
-    fs::write(dir.join("file.txt"), b"v2\n")?;
-    git(dir, &["add", "file.txt"])?;
+    fs::write(dir.join("second.t"), b"2\n")?;
+    git(dir, &["add", "second.t"])?;
     git(dir, &["commit", "-m", "second"])?;
     let b = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
-    fs::write(dir.join("file.txt"), b"v3\n")?;
-    git(dir, &["add", "file.txt"])?;
+    fs::write(dir.join("third.t"), b"3\n")?;
+    git(dir, &["add", "third.t"])?;
     git(dir, &["commit", "-m", "third"])?;
     let c = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
     Ok((a, b, c))
