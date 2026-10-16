@@ -266,6 +266,8 @@ enum Cmd {
     PrepareMaintenance {
         #[arg(long)]
         git: PathBuf,
+        #[arg(long)]
+        worktree: Option<PathBuf>,
     },
     #[command(hide = true)]
     PrepareRefs {
@@ -609,9 +611,12 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_commit(&git);
         }
-        Cmd::PrepareMaintenance { git } => {
+        Cmd::PrepareMaintenance { git, worktree } => {
             let git = resolve_binary("git", Some(git))?;
-            return grit_utils::maintenance_suite::run_prepare_maintenance(&git);
+            return grit_utils::maintenance_suite::run_prepare_maintenance(
+                &git,
+                worktree.as_deref(),
+            );
         }
         Cmd::ServeGitHttp { root, bind } => {
             let git = resolve_binary("git", cli.git.as_deref())?;
