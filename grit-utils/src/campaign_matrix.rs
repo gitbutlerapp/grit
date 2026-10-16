@@ -342,33 +342,22 @@ pub fn run_fixture_cli_matrix(
         grit_via_shell: false,
         git_via_shell: false,
     };
-    if fixture.id == "git-dot-git" {
-        let grit_args = [
-            "merge-base",
-            meta.main_tip.as_str(),
-            meta.pick_commit.as_str(),
-        ];
-        if let Some(failure) = probe_grit_cli(grit, &fixture.worktree, &grit_args) {
-            out.push(run_scenario_git_only_with_grit_failure(
-                hyperfine,
-                git,
-                grit,
-                cfg,
-                &merge_base,
-                &fixture.worktree,
-                failure,
-            )?);
-        } else {
-            out.push(run_matrix_scenario(
-                hyperfine,
-                git,
-                grit,
-                cfg,
-                &merge_base,
-                &fixture.worktree,
-                false,
-            )?);
-        }
+    let grit_args = [
+        "merge-base",
+        meta.main_tip.as_str(),
+        meta.pick_commit.as_str(),
+    ];
+    let merge_base_allows_grit_failure = !smoke;
+    if let Some(failure) = probe_grit_cli(grit, &fixture.worktree, &grit_args) {
+        out.push(run_scenario_git_only_with_grit_failure(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &merge_base,
+            &fixture.worktree,
+            failure,
+        )?);
     } else {
         out.push(run_matrix_scenario(
             hyperfine,
@@ -377,7 +366,7 @@ pub fn run_fixture_cli_matrix(
             cfg,
             &merge_base,
             &fixture.worktree,
-            false,
+            merge_base_allows_grit_failure,
         )?);
     }
 

@@ -42,6 +42,30 @@ owned_by_item_14 = true
 documented = "grit merge-base exceeds VM memory on git.git until revwalk item 7 lands"
 followup = "ROADMAP item 7"
 
+[scenario."git-dot-git/gc"]
+documented = "grit gc on git.git exceeds factory VM memory; git side timed for ratio ledger"
+followup = "ROADMAP item 21"
+
+[scenario."git-dot-git/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP item 19"
+
+[scenario."chromium-synth/merge-base"]
+documented = "grit merge-base exceeds VM memory on chromium-class synthetic until revwalk item 7 lands"
+followup = "ROADMAP item 7"
+
+[scenario."chromium-synth/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP item 19"
+
+[scenario."linux/merge-base"]
+documented = "grit merge-base on linux kernel clone exceeds factory VM memory until revwalk item 7 lands"
+followup = "ROADMAP item 7"
+
+[scenario."linux/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP item 19"
+
 [scenario."git-dot-git/fsck"]
 documented = "git.git tagger/mode deltas fail grit fsck while git fsck warns only"
 followup = "ROADMAP item 11"

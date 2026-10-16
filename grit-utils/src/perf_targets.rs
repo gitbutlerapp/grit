@@ -122,6 +122,9 @@ impl PerfTargets {
         {
             return LedgerStatus::Documented;
         }
+        if scenario.grit_failure.is_some() {
+            return LedgerStatus::Fail;
+        }
         let target = self.target_ratio(&scenario.id);
         if scenario.ratio <= target {
             LedgerStatus::Pass
@@ -258,6 +261,12 @@ owned_by_item_14 = true
             targets.classify(&scenario("status-clean", 1.2)),
             LedgerStatus::Fail
         );
+        let mut failed = scenario("status-clean", 0.0);
+        failed.grit_failure = Some(crate::schema::BenchFailure {
+            kind: "command_failed".into(),
+            message: "oom".into(),
+        });
+        assert_eq!(targets.classify(&failed), LedgerStatus::Fail);
         Ok(())
     }
 
