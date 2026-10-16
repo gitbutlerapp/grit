@@ -230,6 +230,31 @@ fn midx_preferred_pack_reuse() {
 }
 
 #[test]
+fn thin_pack_bitmap_reuse_index_pack_strict_ok() {
+    let fx = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_history(&fx);
+    std::fs::write(fx.path().join("after.txt"), b"after repack").unwrap();
+    git_ok(&fx, &["add", "after.txt"]);
+    git_ok(&fx, &["commit", "-m", "loose after repack"]);
+    let git_dir = fx.path().join(".git");
+    let repo = Repository::open(&git_dir, None).expect("open");
+    let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
+    let opts = PackBuildOptions {
+        delta: true,
+        thin: true,
+        use_bitmaps: true,
+        use_ofs_delta: true,
+        ..PackBuildOptions::default()
+    };
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
+    git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
+    assert!(
+        stats.verbatim_reuse_bytes > 0 || stats.pack_ref_from_ofs_objects > 0,
+        "expected thin-pack reuse: {stats:?}"
+    );
+}
+
+#[test]
 fn extended_objects_appended() {
     let fx = RepoFixture::init(HashAlgo::Sha1).expect("init");
     build_history(&fx);
