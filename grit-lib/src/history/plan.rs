@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::commit::signing::extra_headers_without_commit_signatures;
 use crate::commit_encoding::identity_raw_for_serialized_commit;
 use crate::error::Error;
 use crate::merge_base::is_ancestor;
@@ -198,15 +199,28 @@ pub fn plan_rewrite(
                 };
                 let author = author.as_deref().unwrap_or(&old.author);
                 let message = message.as_deref().unwrap_or(&old.message);
-                let oid = write_rewritten_commit(
-                    repo,
-                    &old,
-                    tree.unwrap_or(old.tree),
-                    &parent_list,
-                    author,
-                    &opts.committer,
-                    message,
-                )?;
+                let oid = if let Some(explicit_tree) = *tree {
+                    write_rewritten_commit(
+                        repo,
+                        &old,
+                        explicit_tree,
+                        &parent_list,
+                        author,
+                        &opts.committer,
+                        message,
+                    )?
+                } else {
+                    replay_edited_commit(
+                        repo,
+                        &old,
+                        old_oid,
+                        &parent_list,
+                        author,
+                        &opts.committer,
+                        message,
+                        opts,
+                    )?
+                };
                 (oid, Some(oid))
             }
             Some(CommitEdit::Drop) => unreachable!("handled above"),
@@ -374,43 +388,48 @@ fn replay_descendant(
     extra_parent: Option<ObjectId>,
     opts: &RewriteOptions,
 ) -> Result<ObjectId, HistoryError> {
-    let old_parent = *old
-        .parents
-        .first()
-        .ok_or(HistoryError::RootCommit { commit: old_oid })?;
-    let new_parent =
-        extra_parent.unwrap_or_else(|| mapping.get(&old_parent).copied().unwrap_or(old_parent));
+    let (_, new_parent) = replay_parent_pair(repo, old, mapping, extra_parent)?;
+    replay_edited_commit(
+        repo,
+        old,
+        old_oid,
+        &[new_parent],
+        &old.author,
+        &opts.committer,
+        &old.message,
+        opts,
+    )
+}
 
-    let old_parent_tree = commit_tree(repo, old_parent)?;
-    let new_parent_tree = commit_tree(repo, new_parent)?;
-
-    let result_tree = if old_parent_tree == new_parent_tree {
-        old.tree
+/// Replay with author/message overrides and an explicit parent list (implicit tree).
+#[allow(clippy::too_many_arguments)]
+fn replay_edited_commit(
+    repo: &Repository,
+    old: &CommitData,
+    old_oid: ObjectId,
+    parent_list: &[ObjectId],
+    author: &str,
+    committer: &str,
+    message: &str,
+    opts: &RewriteOptions,
+) -> Result<ObjectId, HistoryError> {
+    let empty = empty_tree_oid(repo)?;
+    let old_parent = old.parents.first().copied().unwrap_or(empty);
+    let new_parent = parent_list.first().copied().unwrap_or(empty);
+    let old_parent_tree = if old.parents.is_empty() {
+        empty
     } else {
-        record_merge_call();
-        let merge = merge_trees_three_way(
-            repo,
-            old_parent_tree,
-            new_parent_tree,
-            old.tree,
-            MergeFavor::default(),
-            WhitespaceMergeOptions::default(),
-            None,
-            TreeMergeConflictPresentation::default(),
-        )
-        .map_err(library_err)?;
-
-        if merge.index.has_unmerged_entries() || !merge.conflict_content.is_empty() {
-            return Err(HistoryError::Conflict {
-                commit: old_oid,
-                paths: conflict_paths(&merge),
-            });
-        }
-        merge.result_tree
+        commit_tree(repo, old_parent)?
+    };
+    let new_parent_tree = if parent_list.is_empty() {
+        empty
+    } else {
+        commit_tree(repo, new_parent)?
     };
 
-    let old_tree = old.tree;
-    if old_tree != old_parent_tree && result_tree == new_parent_tree {
+    let result_tree = compute_replayed_tree(repo, old, old_oid, old_parent_tree, new_parent_tree)?;
+
+    if old.tree != old_parent_tree && result_tree == new_parent_tree {
         return match opts.empty {
             EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
             EmptyPolicy::Drop => Ok(new_parent),
@@ -418,10 +437,10 @@ fn replay_descendant(
                 repo,
                 old,
                 result_tree,
-                &[new_parent],
-                &old.author,
-                &opts.committer,
-                &old.message,
+                parent_list,
+                author,
+                committer,
+                message,
             ),
         };
     }
@@ -430,11 +449,64 @@ fn replay_descendant(
         repo,
         old,
         result_tree,
-        &[new_parent],
-        &old.author,
-        &opts.committer,
-        &old.message,
+        parent_list,
+        author,
+        committer,
+        message,
     )
+}
+
+fn replay_parent_pair(
+    repo: &Repository,
+    old: &CommitData,
+    mapping: &HashMap<ObjectId, ObjectId>,
+    extra_parent: Option<ObjectId>,
+) -> Result<(ObjectId, ObjectId), HistoryError> {
+    let empty = empty_tree_oid(repo)?;
+    if old.parents.is_empty() {
+        let new_parent = extra_parent.unwrap_or(empty);
+        return Ok((empty, new_parent));
+    }
+    let old_parent = old.parents[0];
+    let new_parent =
+        extra_parent.unwrap_or_else(|| mapping.get(&old_parent).copied().unwrap_or(old_parent));
+    Ok((old_parent, new_parent))
+}
+
+fn empty_tree_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
+    repo.odb().write(ObjectKind::Tree, &[]).map_err(library_err)
+}
+
+fn compute_replayed_tree(
+    repo: &Repository,
+    old: &CommitData,
+    old_oid: ObjectId,
+    old_parent_tree: ObjectId,
+    new_parent_tree: ObjectId,
+) -> Result<ObjectId, HistoryError> {
+    if old_parent_tree == new_parent_tree {
+        return Ok(old.tree);
+    }
+    record_merge_call();
+    let merge = merge_trees_three_way(
+        repo,
+        old_parent_tree,
+        new_parent_tree,
+        old.tree,
+        MergeFavor::default(),
+        WhitespaceMergeOptions::default(),
+        None,
+        TreeMergeConflictPresentation::default(),
+    )
+    .map_err(library_err)?;
+
+    if merge.index.has_unmerged_entries() || !merge.conflict_content.is_empty() {
+        return Err(HistoryError::Conflict {
+            commit: old_oid,
+            paths: conflict_paths(&merge),
+        });
+    }
+    Ok(merge.result_tree)
 }
 
 fn conflict_paths(merge: &crate::merge_trees::TreeMergeOutput) -> Vec<String> {
@@ -517,7 +589,7 @@ fn write_rewritten_commit(
         encoding,
         message: message.to_owned(),
         raw_message,
-        extra_headers: strip_gpgsig(&template.extra_headers),
+        extra_headers: extra_headers_without_commit_signatures(&template.extra_headers),
     };
     write_commit_data(repo, &data)
 }
@@ -527,44 +599,6 @@ fn write_commit_data(repo: &Repository, data: &CommitData) -> Result<ObjectId, H
     repo.odb()
         .write(ObjectKind::Commit, &bytes)
         .map_err(library_err)
-}
-
-/// Drop OpenPGP signature headers; they are invalid after any rewrite.
-fn strip_gpgsig(extra_headers: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    while i < extra_headers.len() {
-        let line_start = i;
-        while i < extra_headers.len() && extra_headers[i] != b'\n' {
-            i += 1;
-        }
-        let line_end = i;
-        if i < extra_headers.len() {
-            i += 1;
-        }
-        let line = &extra_headers[line_start..line_end];
-        if line.starts_with(b"gpgsig ") {
-            while i < extra_headers.len() {
-                if extra_headers[i] == b'\n' {
-                    i += 1;
-                    if i >= extra_headers.len() || extra_headers[i] != b' ' {
-                        break;
-                    }
-                } else {
-                    while i < extra_headers.len() && extra_headers[i] != b'\n' {
-                        i += 1;
-                    }
-                    if i < extra_headers.len() {
-                        i += 1;
-                    }
-                }
-            }
-            continue;
-        }
-        out.extend_from_slice(&extra_headers[line_start..line_end]);
-        out.push(b'\n');
-    }
-    out
 }
 
 fn plan_ref_updates(

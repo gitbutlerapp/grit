@@ -12,7 +12,11 @@ use grit_lib::history::{
     plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count, CommitEdit,
     EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
 };
-use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
+use grit_lib::index::write_tree::write_tree_from_index;
+use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::objects::{
+    parse_commit, parse_tree, serialize_commit, CommitData, ObjectId, ObjectKind,
+};
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
@@ -23,13 +27,73 @@ fn committer(seq: i64) -> String {
     format!("Planner <plan@grit.test> {seq} +0000")
 }
 
+fn tree_contains_path(repo: &Repository, tree: ObjectId, path: &str) -> bool {
+    let raw = repo.odb().read(&tree).expect("read tree");
+    parse_tree(&raw.data)
+        .expect("parse tree")
+        .iter()
+        .any(|e| e.name.as_slice() == path.as_bytes())
+}
+
+fn tree_plus_file(
+    repo: &Repository,
+    base_tree: ObjectId,
+    path: &str,
+    content: &[u8],
+) -> grit_lib::error::Result<ObjectId> {
+    let blob = repo.odb().write(ObjectKind::Blob, content)?;
+    let raw = repo.odb().read(&base_tree)?;
+    let mut index = Index::new();
+    index.hash_algo = repo.odb().hash_algo();
+    for entry in parse_tree(&raw.data)? {
+        let name = String::from_utf8_lossy(&entry.name).into_owned();
+        index.add_or_replace(index_entry_from_tree(&entry, &name));
+    }
+    index.add_or_replace(IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode: MODE_REGULAR,
+        uid: 0,
+        gid: 0,
+        size: content.len() as u32,
+        oid: blob,
+        flags: path.len().min(0xfff) as u16,
+        flags_extended: None,
+        path: path.as_bytes().to_vec(),
+        base_index_pos: 0,
+    });
+    write_tree_from_index(repo.odb(), &index, "")
+}
+
+fn index_entry_from_tree(entry: &grit_lib::objects::TreeEntry, name: &str) -> IndexEntry {
+    IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode: entry.mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid: entry.oid,
+        flags: name.len().min(0xfff) as u16,
+        flags_extended: None,
+        path: name.as_bytes().to_vec(),
+        base_index_pos: 0,
+    }
+}
+
 fn write_tree_with_blob(
     repo: &grit_lib::repo::Repository,
     path: &str,
     content: &[u8],
 ) -> grit_lib::error::Result<ObjectId> {
-    use grit_lib::index::write_tree::write_tree_from_index;
-    use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
     let blob = repo.odb().write(ObjectKind::Blob, content)?;
     let mut index = Index::new();
     index.hash_algo = repo.odb().hash_algo();
@@ -203,6 +267,217 @@ fn plan_rewrite_preserves_encoding_when_message_unchanged() {
     assert_eq!(parsed.raw_message, raw_body);
     assert_eq!(parsed.committer, committer(9));
     git_fsck_strict(wt);
+}
+
+#[test]
+fn plan_rewrite_implicit_tree_replay_preserves_ancestor_tree_change() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let b_oid = oids["b"];
+    let a_oid = oids["a"];
+    let a_data = parse_commit(&grit.odb().read(&a_oid).expect("read a").data).expect("parse a");
+    let a_tree_with_ancestor =
+        tree_plus_file(&grit, a_data.tree, "ancestor.txt", b"from root\n").expect("tree");
+
+    let mut edits = HistoryEdits::new();
+    edits.insert(
+        a_oid,
+        CommitEdit::Rewrite {
+            tree: Some(a_tree_with_ancestor),
+            message: None,
+            author: None,
+            parents: None,
+        },
+    );
+    edits.insert(
+        b_oid,
+        CommitEdit::Rewrite {
+            tree: None,
+            message: Some("reword child only\n".into()),
+            author: None,
+            parents: None,
+        },
+    );
+    let plan = plan_rewrite(
+        &grit,
+        &edits,
+        &RewriteOptions {
+            scope: RefScope::Branches,
+            empty: EmptyPolicy::Drop,
+            committer: committer(20),
+        },
+    )
+    .expect("plan");
+    let new_b = plan
+        .commits
+        .iter()
+        .find(|r| r.old == b_oid)
+        .and_then(|r| r.new)
+        .expect("rewritten b");
+    let new_b_tree = parse_commit(&grit.odb().read(&new_b).expect("read").data)
+        .expect("parse")
+        .tree;
+    assert!(
+        tree_contains_path(&grit, new_b_tree, "ancestor.txt"),
+        "child replay should include ancestor tree change"
+    );
+    git_fsck_strict(wt);
+}
+
+#[test]
+fn plan_rewrite_insert_before_root_succeeds() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[], &[("r", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let insert_tree = grit.odb().write(ObjectKind::Tree, &[]).expect("empty tree");
+    let mut edits = HistoryEdits::new();
+    edits.insert(
+        oids["r"],
+        CommitEdit::InsertBefore(grit_lib::history::NewCommit {
+            tree: insert_tree,
+            author: "Insert <i@grit.test> 1 +0000".into(),
+            message: "inserted root parent\n".into(),
+        }),
+    );
+    let plan = plan_rewrite(
+        &grit,
+        &edits,
+        &RewriteOptions {
+            scope: RefScope::Branches,
+            empty: EmptyPolicy::Drop,
+            committer: committer(21),
+        },
+    )
+    .expect("insert before root");
+    assert_eq!(plan.commits.len(), 1);
+    assert!(plan.commits[0].new.is_some());
+    git_fsck_strict(wt);
+}
+
+#[test]
+fn plan_rewrite_strips_gpgsig_and_gpgsig_sha256() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    for (header, case) in [
+        (
+            b"gpgsig -----BEGIN PGP SIGNATURE-----\n sig\n -----END PGP SIGNATURE-----\n"
+                .as_slice(),
+            "gpgsig",
+        ),
+        (
+            b"gpgsig-sha256 -----BEGIN PGP SIGNATURE-----\n sig\n -----END PGP SIGNATURE-----\n"
+                .as_slice(),
+            "gpgsig-sha256",
+        ),
+    ] {
+        let parent = oids["a"];
+        let parent_tree = parse_commit(&grit.odb().read(&parent).expect("read").data)
+            .expect("parse")
+            .tree;
+        let signed = grit
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                &serialize_commit(&CommitData {
+                    tree: parent_tree,
+                    parents: vec![parent],
+                    author: "S <s@grit.test> 1 +0000".into(),
+                    committer: "S <s@grit.test> 1 +0000".into(),
+                    author_raw: Vec::new(),
+                    committer_raw: Vec::new(),
+                    encoding: None,
+                    message: format!("signed {case}\n"),
+                    raw_message: None,
+                    extra_headers: header.to_vec(),
+                }),
+            )
+            .expect("write signed");
+        git(wt, &["update-ref", "refs/heads/main", &signed.to_hex()]);
+        let mut edits = HistoryEdits::new();
+        edits.insert(
+            signed,
+            CommitEdit::Rewrite {
+                tree: None,
+                message: Some(format!("reword {case}\n")),
+                author: None,
+                parents: None,
+            },
+        );
+        let plan = plan_rewrite(
+            &grit,
+            &edits,
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: committer(22),
+            },
+        )
+        .expect("plan signed rewrite");
+        let new_oid = plan.commits[0].new.expect("new commit");
+        let parsed = parse_commit(&grit.odb().read(&new_oid).expect("read").data).expect("parse");
+        let raw = String::from_utf8_lossy(&parsed.extra_headers);
+        assert!(
+            !raw.contains("gpgsig"),
+            "expected no signature headers left for {case}, got: {raw}"
+        );
+    }
+}
+
+#[test]
+fn plan_rewrite_keeps_all_merge_parents_on_implicit_tree_reword() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(
+        wt,
+        &[("b", "a"), ("c", "a"), ("m", "b"), ("m", "c")],
+        &[("m", "refs/heads/main")],
+    );
+    git(wt, &["checkout", "-b", "side", &oids["c"].to_hex()]);
+    git(wt, &["checkout", "main"]);
+    git(wt, &["merge", "side", "-m", "merge m"]);
+    let grit = open_grit(wt);
+    let merge_oid = match resolve_head(grit.git_dir()).expect("head") {
+        grit_lib::state::HeadState::Branch { oid: Some(oid), .. } => oid,
+        grit_lib::state::HeadState::Detached { oid } => oid,
+        _ => panic!("expected merge tip"),
+    };
+    let merge_before =
+        parse_commit(&grit.odb().read(&merge_oid).expect("read").data).expect("parse");
+    assert_eq!(merge_before.parents.len(), 2);
+    let mut edits = HistoryEdits::new();
+    edits.insert(
+        merge_oid,
+        CommitEdit::Rewrite {
+            tree: None,
+            message: Some("merge reword only\n".into()),
+            author: None,
+            parents: None,
+        },
+    );
+    let plan = plan_rewrite(
+        &grit,
+        &edits,
+        &RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: committer(23),
+        },
+    )
+    .expect("merge reword");
+    let new_oid = plan
+        .commits
+        .iter()
+        .find(|r| r.old == merge_oid)
+        .and_then(|r| r.new)
+        .expect("new merge");
+    let merge_after = parse_commit(&grit.odb().read(&new_oid).expect("read").data).expect("parse");
+    assert_eq!(merge_after.parents.len(), 2);
+    assert_eq!(merge_after.message, "merge reword only\n");
 }
 
 #[test]
