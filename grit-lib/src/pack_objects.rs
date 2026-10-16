@@ -382,6 +382,22 @@ pub fn write_upload_pack_stream(
     progress: &mut dyn FnMut(PackProgress),
     w: &mut dyn Write,
 ) -> Result<PackStats> {
+    if filter.is_some() {
+        let pack = build_pack_with_shallow_and_filter(
+            &repo.odb,
+            wants,
+            haves,
+            source_shallow,
+            filter,
+            opts,
+        )?;
+        let len = pack.len() as u64;
+        w.write_all(&pack).map_err(Error::Io)?;
+        return Ok(PackStats {
+            pack_bytes: len,
+            ..PackStats::default()
+        });
+    }
     if opts.use_bitmaps {
         if let Some(stats) = crate::pack_reuse::try_write_streaming_pack(
             repo,

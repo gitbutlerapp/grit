@@ -260,27 +260,65 @@ fn extended_objects_appended() {
 fn sha256_reuse() {
     let fx = RepoFixture::init(HashAlgo::Sha256).expect("init");
     git_ok(&fx, &["checkout", "-b", "main"]);
-    std::fs::write(fx.path().join("f"), b"sha256 reuse test").unwrap();
+    std::fs::write(fx.path().join("f"), b"sha256 reuse test v1").unwrap();
     git_ok(&fx, &["add", "f"]);
-    git_ok(&fx, &["commit", "-m", "c"]);
+    git_ok(&fx, &["commit", "-m", "c1"]);
+    std::fs::write(
+        fx.path().join("f"),
+        b"sha256 reuse test v2 longer for delta chain",
+    )
+    .unwrap();
+    git_ok(&fx, &["add", "f"]);
+    git_ok(&fx, &["commit", "-m", "c2"]);
     git_ok(&fx, &["repack", "-adb"]);
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, None).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
+    let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
     let opts = PackBuildOptions {
         delta: true,
         use_bitmaps: true,
+        thin: true,
+        use_ofs_delta: false,
         ..PackBuildOptions::default()
     };
-    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
-    git_index_pack_strict(&pack, HashAlgo::Sha256, false, None);
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[parent], &opts);
+    git_index_pack_strict(&pack, HashAlgo::Sha256, true, Some(fx.path()));
     assert!(
-        stats.verbatim_reuse_bytes > 0,
-        "expected sha256 reuse: {stats:?}"
+        stats.verbatim_reuse_bytes > 0 || stats.pack_ref_from_ofs_objects > 0,
+        "expected sha256 reuse or thin REF conversion: {stats:?}"
     );
     let objects = git_dir.join("objects");
     let blob = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD:f"]).stdout.trim()).unwrap();
     assert_verbatim_blob_in_pack(&objects, &pack, &blob);
+}
+
+#[test]
+fn bitmap_pack_with_haves_git_index_pack_strict() {
+    let fx = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_history(&fx);
+    git_ok(&fx, &["repack", "-adb"]);
+    std::fs::write(fx.path().join("post.txt"), b"post-bitmap loose").unwrap();
+    git_ok(&fx, &["add", "post.txt"]);
+    git_ok(&fx, &["commit", "-m", "post bitmap"]);
+    let git_dir = fx.path().join(".git");
+    let repo = Repository::open(&git_dir, None).expect("open");
+    let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
+    let have = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~2"]).stdout.trim()).unwrap();
+    let opts = PackBuildOptions {
+        delta: true,
+        use_bitmaps: true,
+        use_ofs_delta: true,
+        thin: false,
+        ..PackBuildOptions::default()
+    };
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[have], &opts);
+    git_index_pack_strict(&pack, HashAlgo::Sha1, false, Some(fx.path()));
+    git_fsck(&fx);
+    assert!(
+        stats.verbatim_reuse_bytes > 0 || stats.pack_ofs_fixup_objects > 0,
+        "expected bitmap reuse with haves: {stats:?}"
+    );
 }
 
 #[test]

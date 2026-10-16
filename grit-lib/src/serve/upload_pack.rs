@@ -201,9 +201,24 @@ fn serve_v0(
         (Some(last), false) => write_line(output, &format!("ACK {}", last.to_hex()))?,
         (None, _) => write_line(output, "NAK")?,
     }
+    if request.is_shallow() && !shallow_info_sent && opts.stateless_rpc {
+        if request.deepen == Some(INFINITE_DEPTH) {
+            write_v0_unshallow_info(output, &shallow_resp.unshallow)?;
+        } else {
+            for oid in &shallow_resp.shallow {
+                write_line(output, &format!("shallow {}", oid.to_hex()))?;
+            }
+            for oid in &shallow_resp.unshallow {
+                write_line(output, &format!("unshallow {}", oid.to_hex()))?;
+            }
+            write_flush(output)?;
+        }
+        output.flush()?;
+        shallow_info_sent = true;
+    }
     output.flush()?;
     let sideband = request.caps.contains("side-band-64k");
-    if request.is_shallow() && !shallow_info_sent {
+    if request.is_shallow() && !shallow_info_sent && !opts.stateless_rpc {
         if request.deepen == Some(INFINITE_DEPTH) {
             write_v0_unshallow_info(output, &shallow_resp.unshallow)?;
         } else {
@@ -229,6 +244,7 @@ fn serve_v0(
         sideband,
         &shallow_resp.pack_shallow_grafts,
         &shallow_resp.have_shallow_grafts,
+        None,
     )
 }
 
@@ -539,6 +555,7 @@ fn fetch_v2(
     let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
     let policy = UploadPackPolicy::from_config(&config);
     let mut filter_spec: Option<String> = None;
+    let mut object_filter: Option<crate::rev_list::ObjectFilter> = None;
     let mut want_ref_names: Vec<String> = Vec::new();
     for arg in args {
         if let Some(hex) = arg.strip_prefix("want ") {
@@ -602,7 +619,7 @@ fn fetch_v2(
             write_flush(output)?;
             return Ok(false);
         }
-        policy.parse_filter(&config, &spec)?;
+        object_filter = Some(policy.parse_filter(&config, &spec)?);
     }
 
     let allowed = allowed_wants(&refs, head_info(repo).oid);
@@ -664,6 +681,7 @@ fn fetch_v2(
             true,
             &shallow_resp.pack_shallow_grafts,
             &shallow_resp.have_shallow_grafts,
+            object_filter.as_ref(),
         )?;
     } else {
         stream_response_pack(
@@ -676,6 +694,7 @@ fn fetch_v2(
             true,
             &HashSet::new(),
             &HashSet::new(),
+            object_filter.as_ref(),
         )?;
     }
     Ok(true)
@@ -746,6 +765,7 @@ fn stream_response_pack(
     sideband: bool,
     source_shallow: &HashSet<ObjectId>,
     have_shallow: &HashSet<ObjectId>,
+    filter: Option<&crate::rev_list::ObjectFilter>,
 ) -> Result<()> {
     let mut pack_wants = wants.to_vec();
     if caps.contains("include-tag") {
@@ -769,7 +789,7 @@ fn stream_response_pack(
             common,
             source_shallow,
             have_shallow,
-            None,
+            filter,
             &pack_opts,
             &mut progress,
             &mut framed,
@@ -785,7 +805,7 @@ fn stream_response_pack(
             common,
             source_shallow,
             have_shallow,
-            None,
+            filter,
             &pack_opts,
             &mut progress,
             output,

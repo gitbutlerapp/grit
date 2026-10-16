@@ -231,7 +231,7 @@ fn build_pack_ofs_delta_resolves_reused_base() {
 
     let mut ofs_bases_reused_full = false;
     for rec in &ofs_deltas {
-        let dep = read_packed_delta_dependency(pack_bytes, rec.offset)
+        let dep = read_packed_delta_dependency(pack_bytes, rec.offset, 20)
             .expect("parse delta dependency")
             .expect("delta header");
         if let PackedDeltaDependency::OfsBase { base_offset } = dep {

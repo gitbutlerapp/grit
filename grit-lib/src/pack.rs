@@ -3157,9 +3157,12 @@ pub enum PackedDeltaDependency {
 }
 
 /// If the object at `object_offset` is a delta, return how it refers to its base.
+///
+/// `hash_bytes` is the ref-delta base OID width in this pack (`20` for SHA-1, `32` for SHA-256).
 pub fn read_packed_delta_dependency(
     pack_bytes: &[u8],
     object_offset: u64,
+    hash_bytes: usize,
 ) -> Result<Option<PackedDeltaDependency>> {
     let mut pos = object_offset as usize;
     let (ty, _) = parse_pack_object_header(pack_bytes, &mut pos)?;
@@ -3169,13 +3172,36 @@ pub fn read_packed_delta_dependency(
             Ok(Some(PackedDeltaDependency::OfsBase { base_offset: base }))
         }
         PackedType::RefDelta => {
-            if pos + 20 > pack_bytes.len() {
+            if pos + hash_bytes > pack_bytes.len() {
                 return Err(Error::CorruptObject("truncated ref-delta base oid".into()));
             }
-            let base_oid = ObjectId::from_bytes(&pack_bytes[pos..pos + 20])?;
+            let base_oid = ObjectId::from_bytes(&pack_bytes[pos..pos + hash_bytes])?;
             Ok(Some(PackedDeltaDependency::RefBase { base_oid }))
         }
         _ => Ok(None),
+    }
+}
+
+/// Byte offset where the zlib payload begins for a pack object at `object_offset`.
+pub(crate) fn pack_entry_zlib_start(
+    pack_bytes: &[u8],
+    object_offset: u64,
+    hash_bytes: usize,
+) -> Result<usize> {
+    let mut pos = object_offset as usize;
+    let (ty, _) = parse_pack_object_header(pack_bytes, &mut pos)?;
+    match ty {
+        PackedType::OfsDelta => {
+            parse_ofs_delta_base(pack_bytes, &mut pos, object_offset)?;
+            Ok(pos)
+        }
+        PackedType::RefDelta => {
+            if pos + hash_bytes > pack_bytes.len() {
+                return Err(Error::CorruptObject("truncated ref-delta base oid".into()));
+            }
+            Ok(pos + hash_bytes)
+        }
+        _ => Ok(pos),
     }
 }
 

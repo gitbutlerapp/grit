@@ -578,7 +578,7 @@ fn read_packed_delta_dependency_reports_ofs_and_ref() {
         let pack_bytes = std::fs::read(&pack_path).expect("read pack");
         let idx = read_pack_index(&pack_path.with_extension("idx")).expect("idx");
         let tip_entry = idx.iter().last().expect("tip entry");
-        let dep = read_packed_delta_dependency(&pack_bytes, tip_entry.offset())
+        let dep = read_packed_delta_dependency(&pack_bytes, tip_entry.offset(), 20)
             .expect("parse dep")
             .expect("delta dep");
         assert!(matches!(dep, PackedDeltaDependency::OfsBase { .. }));
@@ -590,7 +590,7 @@ fn read_packed_delta_dependency_reports_ofs_and_ref() {
         let pack_bytes2 = std::fs::read(&pack_path2).expect("read pack2");
         let idx2 = read_pack_index(&pack_path2.with_extension("idx")).expect("idx2");
         let tip2 = idx2.iter().last().expect("tip2");
-        let dep2 = read_packed_delta_dependency(&pack_bytes2, tip2.offset())
+        let dep2 = read_packed_delta_dependency(&pack_bytes2, tip2.offset(), 20)
             .expect("parse ref dep")
             .expect("ref dep");
         assert!(matches!(dep2, PackedDeltaDependency::RefBase { .. }));

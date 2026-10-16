@@ -11,9 +11,9 @@ use crate::ewah_bitmap::Bitmap;
 use crate::midx::{read_midx_btmp_ranges, read_midx_pack_idx_names, read_midx_preferred_idx_name};
 use crate::objects::ObjectId;
 use crate::pack::{
-    find_position_by_pack_offset, pack_entry_raw_end, parse_pack_object_header,
-    read_local_pack_indexes_cached, read_pack_bytes_cached, read_packed_delta_dependency,
-    PackedDeltaDependency, PackedType,
+    find_position_by_pack_offset, pack_entry_raw_end, pack_entry_zlib_start,
+    parse_pack_object_header, read_local_pack_indexes_cached, read_pack_bytes_cached,
+    read_packed_delta_dependency, PackedDeltaDependency, PackedType,
 };
 use crate::pack_index::PackIndex;
 use crate::pack_map::PackData;
@@ -407,7 +407,8 @@ fn delta_base_oid(
     entry_off: u64,
     _hb: usize,
 ) -> Result<Option<ObjectId>> {
-    let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off)? else {
+    let hb = idx.oid_at(0).len();
+    let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hb)? else {
         return Ok(None);
     };
     Ok(Some(match dep {
@@ -461,11 +462,13 @@ fn write_one_reused(
             return Err(Error::CorruptObject("pack reuse CRC mismatch".to_owned()));
         }
     }
+    let hash_bytes = pack.idx.oid_at(0).len();
     let mut p = entry_off as usize;
     let (ty, size) = parse_pack_object_header(pack_bytes, &mut p)?;
+    let zlib_start = pack_entry_zlib_start(pack_bytes, entry_off, hash_bytes)?;
     match ty {
         PackedType::OfsDelta if opts.use_ofs_delta => {
-            let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off)? else {
+            let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes)? else {
                 return Err(Error::CorruptObject(
                     "ofs-delta missing dependency for reuse".to_owned(),
                 ));
@@ -482,15 +485,15 @@ fn write_one_reused(
                 let mut out = Vec::new();
                 encode_pack_object_header(&mut out, 6, size as usize);
                 encode_ofs_delta_distance(&mut out, dist);
-                out.extend_from_slice(&pack_bytes[p..end]);
+                out.extend_from_slice(&pack_bytes[zlib_start..end]);
                 w.write_all(&out).map_err(Error::Io)?;
                 stats.note_ofs_fixup();
-                stats.verbatim_reuse_bytes += (end - p) as u64;
+                stats.verbatim_reuse_bytes += (end - zlib_start) as u64;
                 Ok(out.len() as u64)
             } else if opts.thin {
-                let n = write_ref_delta_from_ofs(w, pack_bytes, entry_off, p, end, size, pack)?;
+                let n = write_ref_delta_from_ofs(w, pack_bytes, entry_off, end, size, pack)?;
                 stats.note_ref_from_ofs();
-                stats.verbatim_reuse_bytes += (end - p) as u64;
+                stats.verbatim_reuse_bytes += (end - zlib_start) as u64;
                 Ok(n)
             } else {
                 return Err(Error::CorruptObject(
@@ -499,9 +502,9 @@ fn write_one_reused(
             }
         }
         PackedType::OfsDelta if !opts.use_ofs_delta && opts.thin => {
-            let n = write_ref_delta_from_ofs(w, pack_bytes, entry_off, p, end, size, pack)?;
+            let n = write_ref_delta_from_ofs(w, pack_bytes, entry_off, end, size, pack)?;
             stats.note_ref_from_ofs();
-            stats.verbatim_reuse_bytes += (end - p) as u64;
+            stats.verbatim_reuse_bytes += (end - zlib_start) as u64;
             Ok(n)
         }
         PackedType::RefDelta => {
@@ -521,12 +524,13 @@ fn write_ref_delta_from_ofs(
     w: &mut dyn Write,
     pack_bytes: &[u8],
     entry_off: u64,
-    header_end: usize,
     end: usize,
     size: u64,
     pack: &BitmappedPack,
 ) -> Result<u64> {
-    let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off)? else {
+    let hash_bytes = pack.idx.oid_at(0).len();
+    let zlib_start = pack_entry_zlib_start(pack_bytes, entry_off, hash_bytes)?;
+    let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes)? else {
         return Err(Error::CorruptObject("missing delta base".to_owned()));
     };
     let base_oid = match dep {
@@ -541,7 +545,7 @@ fn write_ref_delta_from_ofs(
     let mut out = Vec::new();
     encode_pack_object_header(&mut out, 7, size as usize);
     out.extend_from_slice(base_oid.as_bytes());
-    out.extend_from_slice(&pack_bytes[header_end..end]);
+    out.extend_from_slice(&pack_bytes[zlib_start..end]);
     w.write_all(&out).map_err(Error::Io)?;
     Ok(out.len() as u64)
 }

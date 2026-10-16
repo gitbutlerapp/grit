@@ -215,7 +215,7 @@ fn assert_t5303_chain_metadata(fx: &T5303Pack) {
             continue;
         }
         let off = entry.offset();
-        let dep = read_packed_delta_dependency(&pack_bytes, off)
+        let dep = read_packed_delta_dependency(&pack_bytes, off, 20)
             .expect("dep parse")
             .expect("delta");
         if fx.ref_deltas {
