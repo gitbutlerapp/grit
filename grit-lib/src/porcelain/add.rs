@@ -492,22 +492,39 @@ fn supplement_untracked_in_indexed_ancestor_dirs(
         };
         if let Some((dir, _)) = rel.rsplit_once('/') {
             dirs.insert(dir.to_string());
+        } else {
+            dirs.insert(String::new());
         }
     }
+    let indexed_stage0: HashSet<Vec<u8>> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .map(|e| e.path.clone())
+        .collect();
+    let gitlink_paths: HashSet<Vec<u8>> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+        .map(|e| e.path.clone())
+        .collect();
     for dir in dirs {
         let abs = work_tree.join(&dir);
         let rd = match fs::read_dir(&abs) {
             Ok(rd) => rd,
             Err(_) => continue,
         };
-        let dir_prefix = format!("{dir}/");
         for ent in rd {
             let ent = ent.map_err(Error::Io)?;
             let name = ent.file_name().to_string_lossy().into_owned();
             if name == ".git" {
                 continue;
             }
-            let rel = format!("{dir_prefix}{name}");
+            let rel = if dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{dir}/{name}")
+            };
             if index.get(rel.as_bytes(), 0).is_some() {
                 continue;
             }
@@ -517,6 +534,9 @@ fn supplement_untracked_in_indexed_ancestor_dirs(
                 continue;
             }
             if file_type.is_dir() {
+                if gitlink_paths.contains(rel.as_bytes()) {
+                    continue;
+                }
                 let nested = format!("{rel}/");
                 let has_tracked_child = index.entries.iter().any(|e| {
                     e.stage() == 0
@@ -525,6 +545,9 @@ fn supplement_untracked_in_indexed_ancestor_dirs(
                             .is_some_and(|p| p.starts_with(&nested))
                 });
                 if has_tracked_child {
+                    continue;
+                }
+                if indexed_stage0.contains(rel.as_bytes()) {
                     continue;
                 }
                 out.push(format!("{rel}/"));

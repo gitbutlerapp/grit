@@ -238,6 +238,8 @@ pub(crate) fn supplement_untracked_beside_stat_skipped_indexed_dirs(
         .cloned()
         .collect();
     dirs.sort();
+    let paths = stage0_indexed_paths(index);
+    let blob_modes = stage0_indexed_blob_modes(index);
     for dir in dirs {
         let Some(blobs) = all_dirs.get(&dir) else {
             continue;
@@ -249,9 +251,13 @@ pub(crate) fn supplement_untracked_beside_stat_skipped_indexed_dirs(
         };
         let (dir_readable, on_disk) = read_directory_map(&abs_dir)?;
         if dir_readable {
-            let paths = stage0_indexed_paths(index);
             out.extend(collect_untracked_siblings_in_dir(
-                &dir, blobs, &on_disk, &paths,
+                &dir,
+                blobs,
+                &on_disk,
+                &paths,
+                Some(&blob_modes),
+                Some(work_tree),
             ));
         }
     }
@@ -411,6 +417,8 @@ fn collect_untracked_siblings_in_dir(
     blobs: &[BlobInDir],
     on_disk: &HashMap<String, fs::DirEntry>,
     indexed_stage0_paths: &HashSet<Vec<u8>>,
+    indexed_blob_modes: Option<&HashMap<String, u32>>,
+    work_tree: Option<&Path>,
 ) -> Vec<String> {
     let mut out = Vec::new();
     let tracked: HashSet<&str> = blobs.iter().map(|b| b.file_name.as_str()).collect();
@@ -426,12 +434,26 @@ fn collect_untracked_siblings_in_dir(
         if indexed_stage0_paths.contains(rel.as_bytes()) {
             continue;
         }
-        if tracked.contains(name.as_str()) {
-            continue;
-        }
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
+        if tracked.contains(name.as_str()) {
+            if file_type.is_dir() && !file_type.is_symlink() {
+                if let (Some(modes), Some(wt)) = (indexed_blob_modes, work_tree) {
+                    if modes
+                        .get(&rel)
+                        .is_some_and(|mode| (*mode & 0o170000) == 0o100000)
+                    {
+                        if let Ok(children) =
+                            collect_untracked_children_in_directory(wt, &rel, indexed_stage0_paths)
+                        {
+                            out.extend(children);
+                        }
+                    }
+                }
+            }
+            continue;
+        }
         if file_type.is_symlink() {
             out.push(rel);
             continue;
@@ -465,6 +487,8 @@ pub(crate) fn collect_untracked_children_in_directory(
         &[],
         &on_disk,
         indexed_stage0_paths,
+        None,
+        None,
     ))
 }
 
@@ -529,7 +553,12 @@ where
                 let (dir_readable, on_disk) = read_directory_map(&abs_dir)?;
                 if dir_readable {
                     out.extend(collect_untracked_siblings_in_dir(
-                        &dir, blobs, &on_disk, paths,
+                        &dir,
+                        blobs,
+                        &on_disk,
+                        paths,
+                        indexed_blob_modes,
+                        work_tree_for_untracked,
                     ));
                 }
             }
@@ -566,7 +595,12 @@ where
         if let (Some(out), Some(paths)) = (side_untracked.as_deref_mut(), indexed_stage0_paths) {
             if dir_readable {
                 out.extend(collect_untracked_siblings_in_dir(
-                    &dir, blobs, &on_disk, paths,
+                    &dir,
+                    blobs,
+                    &on_disk,
+                    paths,
+                    indexed_blob_modes,
+                    work_tree_for_untracked,
                 ));
             }
         }

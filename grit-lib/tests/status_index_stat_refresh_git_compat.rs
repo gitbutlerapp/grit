@@ -506,20 +506,16 @@ fn status_deep_linear_tree_second_run_stays_fast_with_autocrlf() {
         "clean second status must not rewrite the index"
     );
 
-    // Functional gate: second pass stays clean and must not rewrite the index (see mtime assert above).
-    // Timing oracles are load-sensitive; opt in with GRIT_STRICT_STATUS_PERF=1 locally.
-    if std::env::var_os("GRIT_STRICT_STATUS_PERF").is_some() {
+    assert!(
+        second_elapsed <= first_elapsed + Duration::from_millis(5),
+        "second status should not regress (first {first_elapsed:?}, second {second_elapsed:?})"
+    );
+    let instrumented = std::env::var_os("CARGO_LLVM_COV").is_some();
+    if !instrumented && first_elapsed > Duration::from_millis(40) {
         assert!(
-            second_elapsed <= first_elapsed + Duration::from_millis(50),
-            "second status should not regress (first {first_elapsed:?}, second {second_elapsed:?})"
+            second_elapsed * 2 + Duration::from_millis(5) < first_elapsed,
+            "warm deep-tree status should be faster than the first pass (first {first_elapsed:?}, second {second_elapsed:?})"
         );
-        let instrumented = std::env::var_os("CARGO_LLVM_COV").is_some();
-        if !instrumented && first_elapsed > Duration::from_millis(40) {
-            assert!(
-                second_elapsed * 2 + Duration::from_millis(50) < first_elapsed,
-                "warm deep-tree status should be faster than the first pass (first {first_elapsed:?}, second {second_elapsed:?})"
-            );
-        }
     }
 }
 

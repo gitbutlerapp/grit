@@ -16,14 +16,6 @@ fn open_grit(wt: &std::path::Path) -> Repository {
     Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open grit repo")
 }
 
-fn untr_root_valid(index_bytes: &[u8]) -> bool {
-    let idx = Index::parse(index_bytes).expect("parse index");
-    idx.untracked_cache
-        .as_ref()
-        .and_then(|uc| uc.root.as_ref())
-        .is_some_and(|r| r.valid)
-}
-
 fn assert_untr_warmed(index_bytes: &[u8]) {
     let idx = Index::parse(index_bytes).expect("parse index");
     let uc = idx
@@ -38,6 +30,29 @@ fn assert_untr_warmed(index_bytes: &[u8]) {
         root.valid,
         "UNTR root must be valid before bulk defer replay"
     );
+}
+
+fn assert_untr_root_invalid(index_bytes: &[u8]) {
+    let idx = Index::parse(index_bytes).expect("parse index");
+    let uc = idx
+        .untracked_cache
+        .as_ref()
+        .expect("UNTR extension must remain after bulk defer replay");
+    let root = uc
+        .root
+        .as_ref()
+        .expect("UNTR root entry must remain after bulk defer replay");
+    assert!(
+        !root.valid,
+        "UNTR root must be invalid after bulk defer replay"
+    );
+}
+
+fn warm_untr_cache(repo_dir: &std::path::Path) {
+    git(repo_dir, &["config", "core.untrackedCache", "true"]);
+    git(repo_dir, &["update-index", "--untracked-cache"]);
+    git(repo_dir, &["status", "-s"]);
+    assert_untr_warmed(&fs::read(repo_dir.join(".git/index")).expect("index"));
 }
 
 #[test]
@@ -55,10 +70,7 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
     }
     git(&repo_dir, &["add", "-A"]);
     git(&repo_dir, &["commit", "-q", "-m", "initial"]);
-    git(&repo_dir, &["config", "core.untrackedCache", "true"]);
-    git(&repo_dir, &["update-index", "--untracked-cache"]);
-    git(&repo_dir, &["status", "-s"]);
-    assert_untr_warmed(&fs::read(repo_dir.join(".git/index")).expect("index"));
+    warm_untr_cache(&repo_dir);
 
     for i in 0..20 {
         let p = repo_dir.join(format!("d{i:03}/f.txt"));
@@ -69,17 +81,11 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
     stage(&grit, &StageOptions::all(), &mut NullProgress).expect("grit add");
 
     let grit_index = fs::read(repo_dir.join(".git/index")).expect("grit index");
-    assert!(
-        !untr_root_valid(&grit_index),
-        "grit must invalidate UNTR after bulk defer replay when entries were removed"
-    );
+    assert_untr_root_invalid(&grit_index);
 
     git(&repo_dir, &["add", "-A"]);
     let git_index = fs::read(repo_dir.join(".git/index")).expect("git index");
-    assert!(
-        !untr_root_valid(&git_index),
-        "git reference: UNTR root should be invalid after mass removal add"
-    );
+    assert_untr_root_invalid(&git_index);
 }
 
 #[test]
@@ -97,10 +103,7 @@ fn stage_tracked_modifications_public_api_replays_untr_after_bulk_removal() {
     }
     git(&repo_dir, &["add", "-A"]);
     git(&repo_dir, &["commit", "-q", "-m", "initial"]);
-    git(&repo_dir, &["config", "core.untrackedCache", "true"]);
-    git(&repo_dir, &["update-index", "--untracked-cache"]);
-    git(&repo_dir, &["status", "-s"]);
-    assert_untr_warmed(&fs::read(repo_dir.join(".git/index")).expect("index"));
+    warm_untr_cache(&repo_dir);
 
     for i in 0..500 {
         let p = repo_dir.join(format!("d{i:04}/f.txt"));
@@ -114,8 +117,5 @@ fn stage_tracked_modifications_public_api_replays_untr_after_bulk_removal() {
     assert!(summary.untracked_invalidation_deferred);
 
     let grit_index = fs::read(repo_dir.join(".git/index")).expect("grit index");
-    assert!(
-        !untr_root_valid(&grit_index),
-        "public stage_tracked_modifications must persist invalid UNTR after bulk defer replay"
-    );
+    assert_untr_root_invalid(&grit_index);
 }

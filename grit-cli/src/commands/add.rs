@@ -101,13 +101,15 @@ fn stage_with_hint(
         (specs, selectors.to_vec())
     };
 
-    let opts = StageOptions {
-        pathspecs,
-        pathspec_sources,
-        mode: StageMode::All,
-        executable_hint,
-        staging_thresholds: None,
+    let mut opts = if pathspecs.is_empty() {
+        StageOptions::all()
+    } else {
+        let mut o = StageOptions::pathspecs(pathspecs);
+        o.mode = StageMode::All;
+        o
     };
+    opts.pathspec_sources = pathspec_sources;
+    opts.executable_hint = executable_hint;
     let outcome =
         stage_paths(repo, &opts, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(outcome.total())

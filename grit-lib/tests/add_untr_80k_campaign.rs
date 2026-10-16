@@ -20,14 +20,6 @@ fn open_grit(wt: &Path) -> Repository {
     Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open grit repo")
 }
 
-fn untr_root_valid(index_bytes: &[u8]) -> bool {
-    let idx = Index::parse(index_bytes).expect("parse index");
-    idx.untracked_cache
-        .as_ref()
-        .and_then(|uc| uc.root.as_ref())
-        .is_some_and(|r| r.valid)
-}
-
 fn assert_untr_warmed(index_bytes: &[u8]) {
     let idx = Index::parse(index_bytes).expect("parse index");
     let uc = idx
@@ -112,15 +104,25 @@ fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
         final_count < LARGE_THRESHOLD,
         "final index {final_count} must be below bulk threshold {LARGE_THRESHOLD}"
     );
+    let grit_uc = Index::parse(&grit_index)
+        .expect("parse grit index")
+        .untracked_cache
+        .expect("UNTR after grit stage");
+    let grit_root = grit_uc.root.expect("UNTR root after grit stage");
     assert!(
-        !untr_root_valid(&grit_index),
+        !grit_root.valid,
         "grit must persist invalid UNTR root after bulk defer replay"
     );
 
     git(git_dir.path(), &["add", "-A"]);
     let git_index = fs::read(git_dir.path().join(".git/index")).expect("git index");
+    let git_uc = Index::parse(&git_index)
+        .expect("parse git index")
+        .untracked_cache
+        .expect("UNTR after git add");
+    let git_root = git_uc.root.expect("UNTR root after git add");
     assert!(
-        !untr_root_valid(&git_index),
+        !git_root.valid,
         "git add -A must invalidate UNTR after mass removal"
     );
 }

@@ -99,6 +99,20 @@ fn init_nested_repo(root: &std::path::Path, name: &str) {
 }
 
 #[test]
+fn fused_add_matches_git_untracked_beside_gitlink_in_parent() {
+    parallel_repos(|git_root, grit_root| {
+        init_nested_repo(git_root, "packages/sub");
+        init_nested_repo(grit_root, "packages/sub");
+        git(git_root, &["add", "packages/sub"]);
+        git(grit_root, &["add", "packages/sub"]);
+        git_at_fixed_time(git_root, &["commit", "-qm", "seed"]);
+        git_at_fixed_time(grit_root, &["commit", "-qm", "seed"]);
+        fs::write(git_root.join("packages/loose.txt"), b"beside gitlink\n").unwrap();
+        fs::write(grit_root.join("packages/loose.txt"), b"beside gitlink\n").unwrap();
+    });
+}
+
+#[test]
 fn fused_add_matches_git_untracked_beside_gitlink() {
     parallel_repos(|git_root, grit_root| {
         init_nested_repo(git_root, "sub");
