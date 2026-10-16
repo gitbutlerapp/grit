@@ -858,6 +858,7 @@ pub fn apply_tree_merge_output_to_index(index: &mut Index, merged: &TreeMergeOut
         index.push_entry_unsorted(entry.clone());
     }
     index.sort();
+    index.dedup_paths_keep_last();
 }
 
 /// Refresh stage-0 stat cache for sparse merge index rows after a worktree checkout.

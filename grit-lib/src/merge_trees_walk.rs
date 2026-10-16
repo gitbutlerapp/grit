@@ -363,7 +363,30 @@ pub(crate) fn three_way_on_touched_paths(
     ours_paths.sort();
     ours_paths.dedup();
 
+    let theirs_rename_targets: HSet<Vec<u8>> = theirs_old_to_new.values().cloned().collect();
+
     for op in ours_paths {
+        if theirs_rename_targets.contains(&op) && !ours.contains_key(&op) {
+            let rename_source_will_merge = theirs_old_to_new.iter().any(|(old, new)| {
+                new == &op
+                    && (touched.contains(old)
+                        || base.contains_key(old)
+                        || ours.contains_key(old)
+                        || ours_new_to_old.contains_key(old))
+            });
+            if rename_source_will_merge {
+                if theirs.get(&op).is_some()
+                    || lookup_index_entry_at_path(odb, &theirs_tree, &op)
+                        .ok()
+                        .flatten()
+                        .is_some()
+                {
+                    handled_theirs.insert(op.clone());
+                }
+                continue;
+            }
+        }
+
         let bp = if let Some(old) = ours_new_to_old.get(&op) {
             Some(old.clone())
         } else if base.contains_key(&op) {
