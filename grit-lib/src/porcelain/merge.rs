@@ -42,8 +42,9 @@ use crate::index::{Index, IndexEntry};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    apply_tree_merge_output_to_worktree_index, materialized_merge_result_tree,
-    merge_trees_three_way, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
+    apply_tree_merge_output_to_index, apply_tree_merge_output_to_worktree_index,
+    materialized_merge_result_tree, merge_trees_three_way, TreeMergeConflictPresentation,
+    TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout::{self, checkout_between_trees};
@@ -488,7 +489,8 @@ fn apply_conflict_merge_worktree(
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
     let conflict_paths = conflict_path_set(merged);
-    let mut index = merged.index.clone();
+    let mut index = repo.load_index()?;
+    apply_tree_merge_output_to_index(&mut index, merged);
     if index.has_unmerged_entries() {
         index.clear_cache_tree();
     }
