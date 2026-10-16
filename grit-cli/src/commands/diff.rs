@@ -172,6 +172,8 @@ pub struct DiffRunOptions {
     pub unstaged: bool,
     pub against: Option<String>,
     pub commits: Vec<String>,
+    /// Pathspecs from trailing `PATH` arguments (after `--`).
+    pub paths: Vec<String>,
     /// Intra-line word highlights in structured hunks (human TTY output only).
     pub word_level_inline: bool,
 }
@@ -193,6 +195,9 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let repo = context::discover()?;
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
+    let (commits, path_args) =
+        disambiguate_diff_revision_and_paths(&repo, opts.commits, opts.paths);
+    let pathspecs = resolve_diff_pathspecs(&repo, &path_args)?;
     let diff_options = StructuredDiffOptions {
         context_lines: CONTEXT_LINES,
         word_level_inline: opts.word_level_inline,
@@ -201,13 +206,13 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         anyhow::bail!("--staged and --unstaged cannot be combined");
     }
     if opts.staged {
-        if !opts.commits.is_empty() || opts.against.is_some() {
+        if !commits.is_empty() || opts.against.is_some() {
             anyhow::bail!("--staged cannot be combined with revision arguments or --against");
         }
         return Ok(attach_path_display(
             &repo,
             outcome_from_changes(
-                staged_changes(&repo)?,
+                filter_file_changes(staged_changes(&repo)?, &repo, &pathspecs),
                 &config,
                 &thread_policy,
                 diff_options,
@@ -215,26 +220,26 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         ));
     }
     if opts.unstaged {
-        if !opts.commits.is_empty() || opts.against.is_some() {
+        if !commits.is_empty() || opts.against.is_some() {
             anyhow::bail!("--unstaged cannot be combined with revision arguments or --against");
         }
         return Ok(attach_path_display(
             &repo,
             outcome_from_changes(
-                unstaged_changes(&repo)?,
+                filter_file_changes(unstaged_changes(&repo)?, &repo, &pathspecs),
                 &config,
                 &thread_policy,
                 diff_options,
             ),
         ));
     }
-    if opts.commits.len() > 2 {
+    if commits.len() > 2 {
         anyhow::bail!("at most two commits, or one two-dot range such as A..B");
     }
-    if opts.against.is_some() && !opts.commits.is_empty() {
+    if opts.against.is_some() && !commits.is_empty() {
         anyhow::bail!("--against compares the worktree to a ref and takes no commit arguments");
     }
-    let changes = match opts.commits.len() {
+    let changes = match commits.len() {
         0 => {
             if let Some(spec) = opts.against {
                 against_ref_changes(&repo, &spec)?
@@ -243,54 +248,61 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             }
         }
         1 => {
-            let spec = &opts.commits[0];
+            let spec = &commits[0];
             if let Some((base, tip)) = parse_commit_range(&repo, spec)? {
                 return Ok(attach_path_display(
                     &repo,
-                    outcome_from_tree_structured(tree_commit_changes(
+                    outcome_from_tree_structured(filter_tree_diff(
+                        tree_commit_changes(
+                            &repo,
+                            &base,
+                            &tip,
+                            &config,
+                            &thread_policy,
+                            diff_options,
+                        )?,
                         &repo,
-                        &base,
-                        &tip,
-                        &config,
-                        &thread_policy,
-                        diff_options,
-                    )?),
+                        &pathspecs,
+                    )),
                 ));
             } else if let Ok(oid) = resolve_diff_commit(&repo, spec) {
                 return Ok(attach_path_display(
                     &repo,
-                    outcome_from_tree_structured(commit_changes(
+                    outcome_from_tree_structured(filter_tree_diff(
+                        commit_changes(&repo, &oid, &config, &thread_policy, diff_options)?,
                         &repo,
-                        &oid,
-                        &config,
-                        &thread_policy,
-                        diff_options,
-                    )?),
+                        &pathspecs,
+                    )),
                 ));
-            } else {
+            } else if path_args.is_empty() {
                 single_argument_path_unstaged_diff(&repo, spec)?
+            } else {
+                resolve_diff_commit(&repo, spec)?;
+                unreachable!("resolve_diff_commit errors above");
             }
         }
         2 => {
-            let base = resolve_diff_commit(&repo, &opts.commits[0])?;
-            let tip = resolve_diff_commit(&repo, &opts.commits[1])?;
+            let base = resolve_diff_commit(&repo, &commits[0])?;
+            let tip = resolve_diff_commit(&repo, &commits[1])?;
             return Ok(attach_path_display(
                 &repo,
-                outcome_from_tree_structured(tree_commit_changes(
+                outcome_from_tree_structured(filter_tree_diff(
+                    tree_commit_changes(&repo, &base, &tip, &config, &thread_policy, diff_options)?,
                     &repo,
-                    &base,
-                    &tip,
-                    &config,
-                    &thread_policy,
-                    diff_options,
-                )?),
+                    &pathspecs,
+                )),
             ));
         }
         _ => unreachable!("checked above"),
     };
     Ok(attach_path_display(
         &repo,
-        outcome_from_changes(changes, &config, &thread_policy, diff_options),
+        outcome_from_changes(
+            filter_file_changes(changes, &repo, &pathspecs),
+            &config,
+            &thread_policy,
+            diff_options,
+        ),
     ))
 }
 
@@ -444,6 +456,116 @@ struct FileChange {
     new_bytes: SideBytes,
     binary: bool,
     content_changed: bool,
+}
+
+/// When a path is given without `--`, clap may place it in `commits`; move non-revisions to paths.
+fn disambiguate_diff_revision_and_paths(
+    repo: &grit_lib::repo::Repository,
+    mut commits: Vec<String>,
+    mut paths: Vec<String>,
+) -> (Vec<String>, Vec<String>) {
+    if paths.is_empty() {
+        while commits.len() >= 2 {
+            let Some(tail) = commits.last() else {
+                break;
+            };
+            if resolve_diff_commit(repo, tail).is_ok()
+                || parse_commit_range(repo, tail).ok().flatten().is_some()
+            {
+                break;
+            }
+            let Some(path) = commits.pop() else {
+                break;
+            };
+            paths.push(path);
+        }
+    }
+    (commits, paths)
+}
+
+/// Resolve trailing path arguments the same way as a lone pathspec on `grit diff <path>`.
+fn resolve_diff_pathspecs(
+    repo: &grit_lib::repo::Repository,
+    raw_paths: &[String],
+) -> Result<Vec<String>> {
+    if raw_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
+    let cwd = std::env::current_dir().context("could not read the current directory")?;
+    let prefix = pathdiff(&cwd, work_tree);
+    let mut specs = Vec::with_capacity(raw_paths.len());
+    for pathspec in raw_paths {
+        let resolved = resolve_pathspec_in_worktree_with_git_dir(
+            pathspec,
+            pathspec,
+            work_tree,
+            prefix.as_deref(),
+            Some(repo.git_dir()),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        ensure_pathspec_matches_known_in_repository(repo, pathspec, &resolved)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        specs.push(resolved);
+    }
+    Ok(specs)
+}
+
+fn file_change_matches_pathspecs(
+    repo: &grit_lib::repo::Repository,
+    path: &str,
+    old_path: Option<&str>,
+    specs: &[String],
+) -> bool {
+    if specs.is_empty() {
+        return true;
+    }
+    if repo.paths_match_pathspecs(path, specs) {
+        return true;
+    }
+    if let Some(op) = old_path {
+        if op != path && repo.paths_match_pathspecs(op, specs) {
+            return true;
+        }
+    }
+    false
+}
+
+fn filter_file_changes(
+    changes: Vec<FileChange>,
+    repo: &grit_lib::repo::Repository,
+    specs: &[String],
+) -> Vec<FileChange> {
+    if specs.is_empty() {
+        return changes;
+    }
+    changes
+        .into_iter()
+        .filter(|c| file_change_matches_pathspecs(repo, &c.path, c.old_path.as_deref(), specs))
+        .collect()
+}
+
+fn filter_tree_diff(
+    items: Vec<TreeDiffStructured>,
+    repo: &grit_lib::repo::Repository,
+    specs: &[String],
+) -> Vec<TreeDiffStructured> {
+    if specs.is_empty() {
+        return items;
+    }
+    items
+        .into_iter()
+        .filter(|t| {
+            let e = &t.entry;
+            let path = e
+                .new_path
+                .as_deref()
+                .or(e.old_path.as_deref())
+                .unwrap_or("");
+            let old_path = e.old_path.as_deref();
+            file_change_matches_pathspecs(repo, path, old_path, specs)
+        })
+        .collect()
 }
 
 /// Unstaged diff for one pathspec argument when revision parsing failed (`git diff <path>`).

@@ -8,8 +8,8 @@ order: 3
 ## Synopsis
 
 ```text
-grit diff [--staged] [--unstaged] [--against <ref>] [<commit> [<commit>]]
-grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>]
+grit diff [--staged] [--unstaged] [--against <ref>] [<commit> [<commit>]] [-- <path>…]
+grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>] [-- <path>…]
 ```
 
 ## Description
@@ -17,6 +17,8 @@ grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>]
 With no argument, shows every uncommitted change: the working tree and index together, compared with the last commit (`HEAD`). Pass `--staged` to compare only the index to `HEAD` (staged changes). Pass `--unstaged` to compare only the working tree to the index (changes not yet staged). Pass `--against <ref>` to compare the working tree to another ref’s tree instead of `HEAD` (useful for “what changed since `main`?” while keeping a single commit argument as “show this commit’s patch”).
 
 With one commit, shows the change that commit introduced (its first parent’s tree against its own tree). Commit, range, **staged**, and **unstaged** diffs detect renames by default (Git `-M50`): a move with small edits appears as one `renamed` file instead of a full delete and add. With two commits, or a two-dot range such as `A..B`, shows the tree diff between those commits with the same rename detection. A three-dot range `A...B` diffs from the merge base of `A` and `B` to `B`.
+
+Pass one or more paths after `--` (or as trailing arguments when unambiguous) to limit any diff form to those paths—the same pathspec rules as [`grit log`](log.md). A single positional argument that is neither a revision nor a range is still treated as a worktree path for unstaged changes (`grit diff a.txt`).
 
 Each file starts with its path (UTF-8 names print literally; C-quoted only when the name contains control characters, unless `core.quotepath=true`), and each hunk with its position. Lines have two number columns, the line number before and after the change. In a terminal, removed lines are red, added lines are green, and the words that changed within a line are highlighted. When the output isn't a terminal, or `NO_COLOR` is set, lines are marked with `-` and `+` instead. `--json` and `--markdown` use line-level hunks only (no word-level `emphasis` segments) so large commit-range diffs stay fast. Large tree diffs honor the global `--threads` flag and `index.threads` when loading blobs and computing line diffs. Three lines of unchanged context are shown around each change. Binary files print `Binary file differs` when the blob changed (mode-only binary changes show mode lines only).
 
@@ -26,10 +28,11 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 | Option | Description |
 | --- | --- |
-| `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. |
-| `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. |
-| `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. |
+| `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
+| `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
+| `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
 | `<commit>` | One commit (that commit’s patch), two commits (tree diff), or a range `A..B` / `A...B`. Omit for uncommitted changes. |
+| `<path>…` | After `--`, limit the diff to these paths (all forms above, including `--staged`). |
 
 ## Examples
 
@@ -63,6 +66,12 @@ What changed between two commits?
 ```console
 $ grit diff HEAD~1 HEAD
 $ grit diff HEAD~1..HEAD
+```
+
+Only one file between two branches:
+
+```console
+$ grit diff main feature -- README.md
 ```
 
 What does my worktree look like compared to `main`?

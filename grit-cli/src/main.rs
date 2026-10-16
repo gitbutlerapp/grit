@@ -423,6 +423,9 @@ enum Command {
         /// One commit (that commit's patch), two commits (tree diff), or a range `A..B` / `A...B`.
         #[arg(value_name = "COMMIT")]
         commits: Vec<String>,
+        /// Limit the diff to these paths (after `--`, like `grit log`).
+        #[arg(value_name = "PATH", last = true)]
+        paths: Vec<String>,
     },
     /// Show information about a commit, tag, or branch (defaults to HEAD).
     Show {
@@ -1011,12 +1014,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             unstaged,
             against,
             commits,
+            paths,
         } => emit(
             &commands::diff::run(commands::diff::DiffRunOptions {
                 staged,
                 unstaged,
                 against,
                 commits,
+                paths,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
             })?,
