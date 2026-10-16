@@ -41,9 +41,13 @@ function ms(block: Record<string, unknown>, label: string, field: string): numbe
   return value;
 }
 
+function isCampaignBaseline(rel: string): boolean {
+  return rel.endsWith("campaign-before.json") || rel.endsWith("campaign-after.json");
+}
+
 function loadBundle(baselines: string[]): Bundle {
   const scenarios: Scenario[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, { index: number; rel: string }>();
   let primary: Record<string, any> | undefined;
   for (const rel of baselines) {
     const file = path.resolve(REPO_ROOT, rel);
@@ -53,7 +57,7 @@ function loadBundle(baselines: string[]): Bundle {
     for (const key of ["timestamp", "machine", "tools", "scenarios"]) {
       if (!(key in report)) fail(`${rel} missing ${key}`);
     }
-    primary ??= report;
+    if (!primary || rel.endsWith("campaign-after.json")) primary = report;
     (report.scenarios as Record<string, any>[]).forEach((raw, i) => {
       const label = `${rel} scenario[${i}] (${raw.id ?? "?"})`;
       for (const key of ["id", "group", "fixture", "grit"]) if (!(key in raw)) fail(`${label} missing ${key}`);
@@ -62,9 +66,7 @@ function loadBundle(baselines: string[]): Bundle {
       const gitMean = raw.git ? ms(raw.git, `${label} git`, "mean_ms") : null;
       const gritMean = ms(raw.grit, `${label} grit`, "mean_ms");
       const id = String(raw.id);
-      if (seen.has(id)) fail(`duplicate scenario id ${id}`);
-      seen.add(id);
-      scenarios.push({
+      const row: Scenario = {
         id,
         group: String(raw.group),
         fixture: String(raw.fixture),
@@ -72,7 +74,17 @@ function loadBundle(baselines: string[]): Bundle {
         gritMean,
         gritStddev: ms(raw.grit, `${label} grit`, "stddev_ms"),
         ratio: gitMean ? gritMean / gitMean : null,
-      });
+      };
+      if (seen.has(id)) {
+        const prev = seen.get(id)!;
+        if (isCampaignBaseline(rel) && isCampaignBaseline(prev.rel)) {
+          scenarios[prev.index] = row;
+          continue;
+        }
+        fail(`duplicate scenario id ${id}`);
+      }
+      seen.set(id, { index: scenarios.length, rel });
+      scenarios.push(row);
     });
   }
   if (!primary) fail("no baselines listed");
