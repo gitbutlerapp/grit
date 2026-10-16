@@ -478,6 +478,16 @@ pub fn ensure_campaign_bare_network_meta(
         fetch_base_oid: fetch_base,
         default_branch,
     };
+    if tag_only {
+        let branch_ref = format!("refs/heads/{}", meta.default_branch);
+        if rev_parse(git, bare, &branch_ref).is_err() {
+            run_git(
+                git,
+                Some(bare),
+                &["update-ref", &branch_ref, &meta.fetch_base_oid],
+            )?;
+        }
+    }
     fs::write(meta_path(bare), serde_json::to_string_pretty(&meta)?)?;
     Ok(meta)
 }
@@ -621,6 +631,10 @@ mod tests {
         let meta = ensure_campaign_bare_network_meta(&git, &bare, false)?;
         assert!(meta_path(&bare).is_file());
         assert!(!meta.fetch_base_oid.is_empty());
+
+        let client = crate::network_suite::ensure_network_client_repo(&git, &bare)?;
+        assert!(client.join(".git").exists());
+        crate::network_suite::prepare_network_push(&git, &bare)?;
         Ok(())
     }
 }
