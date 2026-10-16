@@ -322,6 +322,49 @@ pub fn run_fixture_cli_matrix(
         )?);
     }
 
+    if !smoke && fixture.id == "git-dot-git" {
+        let git_dot_git_blame: [(&str, &str, Option<&str>); 4] = [
+            ("blame-makefile", "Makefile", None),
+            ("blame-commit-c", "builtin/commit.c", None),
+            ("blame-makefile-range", "Makefile", Some("1,80")),
+            ("blame-commit-c-range", "builtin/commit.c", Some("1,80")),
+        ];
+        for (name, path, line_range) in git_dot_git_blame {
+            let mut grit_argv = vec!["blame".into()];
+            let mut git_argv = vec!["blame".into(), "--porcelain".into()];
+            if let Some(spec) = line_range {
+                grit_argv.push("-L".into());
+                grit_argv.push(spec.into());
+                git_argv.push("-L".into());
+                git_argv.push(spec.into());
+            }
+            grit_argv.push(path.into());
+            git_argv.push(path.into());
+            out.push(run_scenario(
+                hyperfine,
+                git,
+                grit,
+                cfg,
+                &Scenario {
+                    id: sid(fixture.id, name),
+                    group: "blame".into(),
+                    fixture: fixture.label.clone(),
+                    description: format!(
+                        "blame {path}{}",
+                        line_range.map_or(String::new(), |r| format!(" lines {r}"))
+                    ),
+                    grit_argv,
+                    git_argv,
+                    driver: Driver::Cli,
+                    prepare_kind: None,
+                    grit_via_shell: false,
+                    git_via_shell: false,
+                },
+                &fixture.worktree,
+            )?);
+        }
+    }
+
     let meta = ensure_campaign_hot_path(git, &fixture.worktree)?;
     let merge_base = Scenario {
         id: sid(fixture.id, "merge-base"),

@@ -3,12 +3,10 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::blame::{blame_file, compute_blame, BlameDiffAlgorithm, BlameOptions};
+use grit_lib::blame::{blame_file, BlameOptions};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head, HeadState};
 
 fn git_env(cmd: &mut Command) {
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -405,6 +403,38 @@ fn blame_merge_maps_result_line_to_parent_line_beyond_result_length() {
     );
 }
 
+/// Main renames the blamed file while the merge side keeps the same bytes at another path.
+#[test]
+fn blame_merge_and_rename_parent_path_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    std::fs::write(root.join("start.txt"), "alpha\nbeta\ngamma\n").unwrap();
+    git_run(root, &["add", "start.txt"]);
+    git_run(root, &["commit", "-m", "add start.txt"]);
+
+    git_run(root, &["switch", "-c", "side"]);
+    std::fs::create_dir_all(root.join("side")).unwrap();
+    std::fs::write(root.join("side/branch.txt"), "alpha\nbeta\ngamma\n").unwrap();
+    git_run(root, &["add", "side/branch.txt"]);
+    git_run(root, &["commit", "-m", "side copy at side/branch.txt"]);
+
+    git_run(root, &["switch", "main"]);
+    std::fs::create_dir_all(root.join("live")).unwrap();
+    git_run(root, &["mv", "start.txt", "live/result.txt"]);
+    git_run(root, &["add", "-A"]);
+    git_run(root, &["commit", "-m", "rename to live/result.txt"]);
+
+    git_run(root, &["merge", "--no-ff", "side", "-m", "merge side path"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let dir = repo.work_tree().expect("worktree");
+    assert_blame_matches(&repo, dir, "live/result.txt", None, None);
+}
+
 #[test]
 fn blame_matches_git_porcelain_after_adcb_permutation() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -654,55 +684,4 @@ fn blame_respects_graft_over_commit_graph_bloom() {
     write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("graph");
 
     assert_blame_matches(&repo, root, "f.txt", Some(&child), None);
-}
-
-#[test]
-#[ignore = "manual dogfood timing; set RUN_GIT_GIT_BENCH=1"]
-fn time_git_git_makefile_blame_breakdown() {
-    if std::env::var("RUN_GIT_GIT_BENCH").ok().as_deref() != Some("1") {
-        return;
-    }
-    let wt = std::path::Path::new("/tmp/git-git-wt");
-    if !wt.join("Makefile").exists() {
-        return;
-    }
-    let repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let head = match resolve_head(repo.git_dir()).expect("head") {
-        HeadState::Detached { oid } => oid,
-        HeadState::Branch { oid: Some(oid), .. } => oid,
-        _ => panic!("no head"),
-    };
-    let odb: &Odb = repo.odb();
-    let ignore = std::collections::HashSet::new();
-    let grafts = std::collections::HashMap::new();
-    let tp = repo.thread_policy();
-    let t0 = std::time::Instant::now();
-    let raw = compute_blame(
-        odb,
-        head,
-        "Makefile",
-        &ignore,
-        BlameDiffAlgorithm::Myers,
-        None,
-        false,
-        0,
-        false,
-        &grafts,
-        false,
-        None,
-        &tp,
-    )
-    .expect("compute");
-    eprintln!("compute_blame: {:?} ({} lines)", t0.elapsed(), raw.len());
-    let t1 = std::time::Instant::now();
-    let _full = blame_file(
-        &repo,
-        "Makefile",
-        &BlameOptions {
-            start: Some(head),
-            ..Default::default()
-        },
-    )
-    .expect("blame_file");
-    eprintln!("blame_file total: {:?}", t1.elapsed());
 }
