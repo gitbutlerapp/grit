@@ -27,7 +27,7 @@ The [`history`](rustdoc:grit_lib::history) module supports stateless history edi
 [`HistoryError`](rustdoc:grit_lib::history::HistoryError) covers planning failures (conflicts, out-of-scope commits, branch checked out elsewhere) and apply failures:
 
 - [`LocalChangesWouldBeOverwritten`](rustdoc:grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten) — staged, unstaged, or untracked paths would be clobbered by the planned tree checkout.
-- [`RefCasMismatch`](rustdoc:grit_lib::history::RefCasMismatch) — a ref tip changed after planning; nothing is written.
+- [`RefCasMismatch`](rustdoc:grit_lib::history::HistoryError::RefCasMismatch) — a ref tip changed after planning; nothing is written.
 - [`RefApply`](rustdoc:grit_lib::history::HistoryError::RefApply) / [`WorktreeApply`](rustdoc:grit_lib::history::WorktreeApply) — ref batch or post-ref checkout failed (apply rolls back ref updates when checkout fails).
 
 ## Example
