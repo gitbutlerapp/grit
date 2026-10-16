@@ -793,14 +793,7 @@ fn append_file_transport(
     }
 
     let fetch_dest = fixture.worktree.clone();
-    let grit_fetch = shell_command(
-        grit,
-        &[
-            "fetch".to_string(),
-            "origin".to_string(),
-            "HEAD".to_string(),
-        ],
-    );
+    let grit_fetch = shell_command(grit, &["fetch".to_string(), "origin".to_string()]);
     let git_fetch = shell_command(
         git,
         &[
