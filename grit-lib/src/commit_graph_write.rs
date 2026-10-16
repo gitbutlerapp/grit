@@ -641,7 +641,7 @@ pub fn atomic_replace_commit_graph(
         file.write_all(bytes).map_err(crate::error::Error::Io)?;
         drop(file);
         #[cfg(test)]
-        if test_inject::FAIL_RENAME.load(std::sync::atomic::Ordering::Relaxed) {
+        if test_inject::fail_rename_enabled() {
             return Err(crate::error::Error::Message(
                 "injected commit-graph rename failure".into(),
             ));
@@ -771,12 +771,18 @@ pub(crate) fn peel_to_commit(odb: &Odb, oid: ObjectId) -> Option<ObjectId> {
 
 #[cfg(test)]
 mod test_inject {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::cell::Cell;
 
-    pub static FAIL_RENAME: AtomicBool = AtomicBool::new(false);
+    thread_local! {
+        static FAIL_RENAME: Cell<bool> = const { Cell::new(false) };
+    }
 
     pub fn set_fail_rename(fail: bool) {
-        FAIL_RENAME.store(fail, Ordering::Relaxed);
+        FAIL_RENAME.with(|flag| flag.set(fail));
+    }
+
+    pub fn fail_rename_enabled() -> bool {
+        FAIL_RENAME.with(|flag| flag.get())
     }
 }
 

@@ -5,6 +5,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
+use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::{
     checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,
@@ -474,6 +475,15 @@ fn prepare_tree_switch_allow_local(
         .filter(|c| c.status == DiffStatus::Deleted)
         .filter_map(|c| c.old_path.clone())
         .collect();
+    let gitlink_deletes: HashSet<String> = tree_changes
+        .iter()
+        .filter(|c| c.status == DiffStatus::Deleted)
+        .filter_map(|c| {
+            let path = c.old_path.as_ref()?;
+            let mode = u32::from_str_radix(&c.old_mode, 8).unwrap_or(0);
+            (mode == MODE_GITLINK).then(|| path.clone())
+        })
+        .collect();
     let (preverified_wholesale_dirs, wholesale_safety_precomputed) =
         if trust_wholesale_dir_removal || delete_paths.is_empty() {
             (BTreeSet::new(), false)
@@ -491,6 +501,7 @@ fn prepare_tree_switch_allow_local(
                     &delete_paths,
                     ignorecase,
                     scan.as_ref(),
+                    &gitlink_deletes,
                 ),
                 true,
             )

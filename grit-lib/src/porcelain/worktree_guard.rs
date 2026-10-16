@@ -6,8 +6,7 @@
 //! detection, ahead/behind, stash counts, or in-progress operation state.
 
 use std::collections::{BTreeSet, HashMap};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::config::ConfigSet;
@@ -489,57 +488,6 @@ pub(crate) fn collect_untracked_for_tree_changes(
     Ok(untracked)
 }
 
-fn exclude_file_has_active_rules(path: &Path) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
-        return false;
-    };
-    content.lines().any(|line| {
-        let trimmed = line.trim();
-        !trimmed.is_empty() && !trimmed.starts_with('#')
-    })
-}
-
-/// Whether ignored paths could exist under wholesale-delete trees without a full Traditional scan.
-fn ignore_sources_might_hide_extras_under_delete_trees(
-    repo: &Repository,
-    index: &Index,
-    work_tree: &Path,
-    delete_roots: &BTreeSet<String>,
-) -> Result<bool> {
-    if work_tree.join(".gitignore").is_file() || index.get(b".gitignore", 0).is_some() {
-        return Ok(true);
-    }
-    for root in delete_roots {
-        let nested = format!("{root}/.gitignore");
-        if index.get(nested.as_bytes(), 0).is_some() || work_tree.join(&nested).is_file() {
-            return Ok(true);
-        }
-    }
-    if exclude_file_has_active_rules(&repo.git_dir().join("info/exclude")) {
-        return Ok(true);
-    }
-    let config = repo.config()?;
-    let env = repo.environment();
-    let global_exclude: Option<PathBuf> = if let Some(raw_path) = config.get("core.excludesfile") {
-        let expanded = crate::config::parse_path(env, &raw_path);
-        Some(if Path::new(&expanded).is_absolute() {
-            PathBuf::from(expanded)
-        } else if let Some(wt) = repo.work_tree() {
-            wt.join(expanded)
-        } else {
-            repo.git_dir().join(expanded)
-        })
-    } else {
-        env.default_xdg_config_git_file("ignore")
-    };
-    if let Some(path) = global_exclude {
-        if exclude_file_has_active_rules(&path) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 /// Untracked paths for added/deleted tree diff paths, ignored paths when needed, and whether
 /// switch checkout may skip wholesale on-disk safety walks.
 pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
@@ -557,24 +505,29 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         return Ok((Vec::new(), Vec::new(), true, false));
     }
     let specs: Vec<String> = pathspecs.into_iter().collect();
-    let need_traditional_ignored = !delete_roots.is_empty()
-        && ignore_sources_might_hide_extras_under_delete_trees(
-            repo,
-            index,
-            work_tree,
-            &delete_roots,
-        )?;
+    let need_traditional_ignored = !delete_roots.is_empty();
     let ignored_mode = if need_traditional_ignored {
         IgnoredMode::Traditional
     } else {
         IgnoredMode::No
     };
+    let ignorecase = repo
+        .config()
+        .ok()
+        .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
+        .unwrap_or(false);
     let (untracked, ignored) =
         collect_untracked_and_ignored(repo, index, work_tree, ignored_mode, true, &specs)?;
     let trust_wholesale = delete_roots.is_empty() || {
         let under_delete_root = |path: &str| {
             let root = path.split('/').next().unwrap_or(path);
-            delete_roots.contains(root)
+            if ignorecase {
+                delete_roots
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(root))
+            } else {
+                delete_roots.contains(root)
+            }
         };
         !untracked.iter().any(|p| under_delete_root(p))
             && !ignored.iter().any(|p| under_delete_root(p))
