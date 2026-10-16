@@ -16,6 +16,20 @@ pub enum HistoryError {
     #[error("commit message cannot be empty")]
     EmptyMessage,
 
+    /// Object database, revwalk, or other repository read failed during planning.
+    #[error("history rewrite planning failed: {message}")]
+    Planning {
+        /// Underlying failure summary.
+        message: String,
+    },
+
+    /// `InsertBefore` was requested on a merge commit.
+    #[error("insert-before on merge commit {commit} is not supported")]
+    InsertBeforeOnMerge {
+        /// Merge commit that cannot receive an insert-before edit.
+        commit: ObjectId,
+    },
+
     /// A three-way replay produced unmerged paths.
     #[error("replay of commit {commit} produced conflicts")]
     Conflict {

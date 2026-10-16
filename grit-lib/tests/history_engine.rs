@@ -357,6 +357,88 @@ fn plan_rewrite_insert_before_root_succeeds() {
 }
 
 #[test]
+fn plan_rewrite_insert_before_merge_is_rejected() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let grit = open_grit(wt);
+    let ident = committer(22);
+    let tree_a = write_tree_with_blob(&grit, "a.txt", b"a\n").expect("tree a");
+    let tree_b = write_tree_with_blob(&grit, "b.txt", b"b\n").expect("tree b");
+    let a = write_test_commit(&grit, tree_a, &[], "a", &ident).expect("a");
+    let b = write_test_commit(&grit, tree_b, &[], "b", &ident).expect("b");
+    let merge_tree = write_tree_with_blob(&grit, "m.txt", b"m\n").expect("merge tree");
+    let merge = write_test_commit(&grit, merge_tree, &[a, b], "merge", &ident).expect("merge");
+    write_ref(grit.git_dir(), "refs/heads/main", &merge).expect("ref");
+
+    let insert_tree = grit.odb().write(ObjectKind::Tree, &[]).expect("empty tree");
+    let mut edits = HistoryEdits::new();
+    edits.insert(
+        merge,
+        CommitEdit::InsertBefore(grit_lib::history::NewCommit {
+            tree: insert_tree,
+            author: "Insert <i@grit.test> 1 +0000".into(),
+            message: "inserted parent\n".into(),
+        }),
+    );
+    let err = plan_rewrite(
+        &grit,
+        &edits,
+        &RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: committer(23),
+        },
+    )
+    .expect_err("insert before merge");
+    assert_eq!(
+        err,
+        grit_lib::history::HistoryError::InsertBeforeOnMerge { commit: merge }
+    );
+}
+
+#[test]
+fn plan_rewrite_non_commit_tip_returns_planning_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let grit = grit_lib::repo::Repository::init(
+        dir.path(),
+        &grit_lib::repo::InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+    )
+    .expect("init");
+    let ident = committer(24);
+    let blob = grit
+        .odb()
+        .write(ObjectKind::Blob, b"not a commit")
+        .expect("blob");
+    grit_lib::refs::write_ref(grit.git_dir(), "refs/heads/main", &blob).expect("ref");
+    let mut edits = HistoryEdits::new();
+    edits.insert(
+        blob,
+        CommitEdit::Rewrite {
+            tree: None,
+            message: Some("nope\n".into()),
+            author: None,
+            parents: None,
+        },
+    );
+    let err = plan_rewrite(
+        &grit,
+        &edits,
+        &RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: ident,
+        },
+    )
+    .expect_err("blob tip is not a commit");
+    assert!(
+        matches!(err, grit_lib::history::HistoryError::Planning { .. }),
+        "expected planning error, got {err:?}"
+    );
+}
+
+#[test]
 fn plan_rewrite_strips_gpgsig_and_gpgsig_sha256() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
@@ -994,6 +1076,12 @@ fn history_public_api_coverage_smoke() {
         EmptyPolicy::Keep,
         RefScope::Head,
         HistoryError::EmptyMessage,
+        HistoryError::Planning {
+            message: "coverage".into(),
+        },
+        HistoryError::InsertBeforeOnMerge {
+            commit: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
+        },
         HistoryError::RootCommit {
             commit: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
         },
