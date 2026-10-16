@@ -679,7 +679,7 @@ fn line_similarity_and_lcs(a: &str, b: &str) -> (f64, usize) {
     (sim, lcs)
 }
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
@@ -788,6 +788,48 @@ struct TrackedLine {
     current_idx: usize,
     ignored: bool,
     source_path: Option<String>,
+}
+
+/// Side-branch suspect scheduled by commit date (Git blame priority queue).
+struct DeferredBlameOrigin {
+    sort_date: i64,
+    seq: u64,
+    oid: ObjectId,
+    blob: ObjectId,
+    mode: u32,
+    path: String,
+    pending: Vec<TrackedLine>,
+}
+
+impl PartialEq for DeferredBlameOrigin {
+    fn eq(&self, other: &Self) -> bool {
+        self.seq == other.seq && self.oid == other.oid
+    }
+}
+
+impl Eq for DeferredBlameOrigin {}
+
+impl Ord for DeferredBlameOrigin {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.sort_date.cmp(&other.sort_date) {
+            std::cmp::Ordering::Equal => other.seq.cmp(&self.seq),
+            ord => ord,
+        }
+    }
+}
+
+impl PartialOrd for DeferredBlameOrigin {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn blame_commit_sort_key(session: &BlameSession<'_>, oid: &ObjectId) -> i64 {
+    session
+        .commit_graph
+        .as_ref()
+        .and_then(|cg| cg.graph_commit(oid).map(|(_, t)| t))
+        .unwrap_or(i64::MIN)
 }
 
 /// Cached config and attributes for optional textconv during blame.
@@ -1093,8 +1135,6 @@ struct BlameSession<'a> {
     copy_score_parallel: ParallelOptions,
     commit_graph: Option<Arc<CommitGraphChain>>,
     bloom_pathspec: Vec<String>,
-    /// Blob and mode at the blamed path for commits already visited in this walk.
-    blob_at_commit: HashMap<ObjectId, (ObjectId, u32)>,
     blob_lines: HashMap<BlobCacheKey, Arc<Vec<String>>>,
     path_entries: HashMap<PathCacheKey, Option<(ObjectId, u32)>>,
     pair_maps: HashMap<PairMapCacheKey, PairMapCacheValue>,
@@ -1117,7 +1157,6 @@ impl<'a> BlameSession<'a> {
             copy_score_parallel: diff_rename_parallel_options(&config, thread_policy),
             commit_graph: None,
             bloom_pathspec: Vec::new(),
-            blob_at_commit: HashMap::new(),
             blob_lines: HashMap::new(),
             path_entries: HashMap::new(),
             pair_maps: HashMap::new(),
@@ -1130,15 +1169,6 @@ impl<'a> BlameSession<'a> {
         }
         self.bloom_pathspec.clear();
         self.bloom_pathspec.push(path.to_owned());
-        self.blob_at_commit.clear();
-    }
-
-    fn record_commit_blob(&mut self, commit: ObjectId, blob: ObjectId, mode: u32) {
-        self.blob_at_commit.insert(commit, (blob, mode));
-    }
-
-    fn blob_at_commit_path(&self, commit: ObjectId) -> Option<(ObjectId, u32)> {
-        self.blob_at_commit.get(&commit).copied()
     }
 
     fn resolve_blob_at_commit(
@@ -1148,15 +1178,8 @@ impl<'a> BlameSession<'a> {
         path: &str,
         commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
     ) -> Result<Option<(ObjectId, u32)>> {
-        if let Some(entry) = self.blob_at_commit_path(commit) {
-            return Ok(Some(entry));
-        }
         let meta = get_blame_commit(odb, commit, commit_cache)?;
-        let resolved = self.resolve_path_in_tree(meta.tree, path)?;
-        if let Some((blob, mode)) = resolved {
-            self.record_commit_blob(commit, blob, mode);
-        }
-        Ok(resolved)
+        self.resolve_path_in_tree(meta.tree, path)
     }
 
     fn line_refs(lines: &Arc<Vec<String>>) -> Vec<&str> {
@@ -1354,24 +1377,8 @@ fn fast_forward_same_blob(
         let Some(parent_oid) = parents.first().copied() else {
             break;
         };
-        if parents.len() == 1
-            && session.commit_graph.is_some()
-            && bloom_may_skip_to_first_parent(
-                session,
-                odb,
-                oid,
-                parent_oid,
-                path,
-                grafts,
-                commit_cache,
-            )?
-        {
-            oid = parent_oid;
-            continue;
-        }
-        let Some((p_blob, _mode)) =
-            session.resolve_blob_at_commit(odb, parent_oid, path, commit_cache)?
-        else {
+        let parent_commit = get_blame_commit(odb, parent_oid, commit_cache)?;
+        let Some((p_blob, _mode)) = session.resolve_path_in_tree(parent_commit.tree, path)? else {
             break;
         };
         if p_blob != blob_oid {
@@ -1449,26 +1456,25 @@ fn compute_blame_with_session(
     let mut current_blob_oid = blob_oid;
     let mut current_blob_mode = blob_mode;
     let mut current_path = file_path.to_string();
-    let mut deferred: VecDeque<(ObjectId, ObjectId, u32, String, Vec<TrackedLine>)> =
-        VecDeque::new();
+    let mut deferred_queue: BinaryHeap<DeferredBlameOrigin> = BinaryHeap::new();
+    let mut deferred_seq: u64 = 0;
 
     session.set_bloom_path(&current_path);
 
     'blame_loop: loop {
         if pending.is_empty() {
-            if let Some((oid, blob, mode, path, lines)) = deferred.pop_front() {
-                current_oid = oid;
-                current_blob_oid = blob;
-                current_blob_mode = mode;
-                current_path = path.clone();
+            if let Some(origin) = deferred_queue.pop() {
+                current_oid = origin.oid;
+                current_blob_oid = origin.blob;
+                current_blob_mode = origin.mode;
+                current_path = origin.path;
                 session.set_bloom_path(&current_path);
-                pending = lines;
+                pending = origin.pending;
                 continue;
             }
             break;
         }
 
-        session.record_commit_blob(current_oid, current_blob_oid, current_blob_mode);
         let commit = get_blame_commit(odb, current_oid, &mut commit_cache)?;
         let mut parents = commit_parents_for_blame(odb, current_oid, grafts, &mut commit_cache)?;
 
@@ -1592,7 +1598,7 @@ fn compute_blame_with_session(
                     });
                 }
             }
-            if !deferred.is_empty() {
+            if !deferred_queue.is_empty() {
                 continue 'blame_loop;
             }
             break 'blame_loop;
@@ -1612,7 +1618,7 @@ fn compute_blame_with_session(
                     external_contents: false,
                 });
             }
-            if !deferred.is_empty() {
+            if !deferred_queue.is_empty() {
                 continue 'blame_loop;
             }
             break 'blame_loop;
@@ -1621,10 +1627,22 @@ fn compute_blame_with_session(
         // Merge commits (2+ parents): sequential `pass_blame_to_parent` order from git/blame.c —
         // each line is attributed to the first parent whose version matches after line mapping.
         // Octopus merges and `.git/info/grafts` with many synthetic parents use the same rule.
+        let mut all_parents_have_path = parents.len() >= 2;
+        if all_parents_have_path {
+            for parent_oid in &parents {
+                if session
+                    .resolve_blob_at_commit(odb, *parent_oid, &current_path, &mut commit_cache)?
+                    .is_none()
+                {
+                    all_parents_have_path = false;
+                    break;
+                }
+            }
+        }
 
         // git/blame.c `pass_whole_blame`: when any parent has the same blob as the merge
         // result, pass all remaining lines to that parent without merge diffs.
-        if !first_parent_only && !is_ignored && parents.len() >= 2 {
+        if !first_parent_only && !is_ignored && parents.len() >= 2 && all_parents_have_path {
             for parent_oid in &parents {
                 if let Some((blob, mode)) = session.resolve_blob_at_commit(
                     odb,
@@ -1700,7 +1718,11 @@ fn compute_blame_with_session(
                     continue;
                 }
                 let pl_arc = session.load_blob_lines(blob, &current_path, mode)?;
-                let map_algo = diff_algorithm;
+                let map_algo = if parents.len() > 2 {
+                    BlameDiffAlgorithm::Patience
+                } else {
+                    diff_algorithm
+                };
                 let pair = session.parent_child_line_maps(
                     blob,
                     &current_path,
@@ -1783,13 +1805,16 @@ fn compute_blame_with_session(
                     let Some((p, blob, mode)) = parent_blobs[i] else {
                         continue;
                     };
-                    deferred.push_back((
-                        p,
+                    deferred_queue.push(DeferredBlameOrigin {
+                        sort_date: blame_commit_sort_key(session, &p),
+                        seq: deferred_seq,
+                        oid: p,
                         blob,
                         mode,
-                        current_path.clone(),
-                        std::mem::take(&mut buckets[i]),
-                    ));
+                        path: current_path.clone(),
+                        pending: std::mem::take(&mut buckets[i]),
+                    });
+                    deferred_seq += 1;
                 }
 
                 if !buckets[0].is_empty() {
@@ -1800,35 +1825,29 @@ fn compute_blame_with_session(
                     current_blob_oid = blob;
                     current_blob_mode = mode;
                     pending = std::mem::take(&mut buckets[0]);
-                } else if deferred.is_empty() {
+                } else if deferred_queue.is_empty() {
                     break 'blame_loop;
                 }
                 continue;
             }
         }
 
-        if parents.len() == 1 && session.commit_graph.is_some() {
-            let walk_start = current_oid;
-            while bloom_may_skip_to_first_parent(
+        let parent_oid = parents[0];
+        if parents.len() == 1
+            && session.commit_graph.is_some()
+            && bloom_may_skip_to_first_parent(
                 session,
                 odb,
                 current_oid,
-                parents[0],
+                parent_oid,
                 &current_path,
                 grafts,
                 &mut commit_cache,
-            )? {
-                current_oid = parents[0];
-                parents = commit_parents_for_blame(odb, current_oid, grafts, &mut commit_cache)?;
-                if parents.len() != 1 {
-                    break;
-                }
-            }
-            if current_oid != walk_start {
-                continue 'blame_loop;
-            }
+            )?
+        {
+            current_oid = parent_oid;
+            continue 'blame_loop;
         }
-        let parent_oid = parents[0];
         let parent_commit = get_blame_commit(odb, parent_oid, &mut commit_cache)?;
         let mut parent_blob_entry =
             session.resolve_blob_at_commit(odb, parent_oid, &current_path, &mut commit_cache)?;
@@ -1967,7 +1986,7 @@ fn compute_blame_with_session(
                                 });
                             }
                         }
-                        if !deferred.is_empty() {
+                        if !deferred_queue.is_empty() {
                             continue 'blame_loop;
                         }
                         break 'blame_loop;
@@ -1987,7 +2006,7 @@ fn compute_blame_with_session(
                         external_contents: false,
                     });
                 }
-                if !deferred.is_empty() {
+                if !deferred_queue.is_empty() {
                     continue 'blame_loop;
                 }
                 break 'blame_loop;
@@ -2007,7 +2026,7 @@ fn compute_blame_with_session(
                         external_contents: false,
                     });
                 }
-                if !deferred.is_empty() {
+                if !deferred_queue.is_empty() {
                     continue 'blame_loop;
                 }
                 break 'blame_loop;
