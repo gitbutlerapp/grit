@@ -336,15 +336,16 @@ mod tests {
         )
         .expect("install");
         let idx = read_pack_index(&idx_path).expect("read idx");
-        assert_eq!(idx.entries.len(), 1);
+        assert_eq!(idx.len(), 1);
         let pack_str = pack_path.to_str().expect("pack path utf-8");
         let out = grit_test_support::git_cmd(&["verify-pack", "-s", pack_str])
             .in_dir(tmp.path())
             .exec();
         assert!(out.ok(), "{}", out.dump("git verify-pack"));
+        let first = idx.iter().next().expect("one index entry");
         assert_eq!(
             idx.find_offset(&blob),
-            Some(idx.entries[0].offset),
+            Some(first.offset()),
             "idx offset matches blob"
         );
     }
