@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "core.repositoryformatversion=0\ncore.filemode=true\ncore.bare=false\ncore.logallrefupdates=true\nuser.email=snap@example.com\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"action\": \"list\",\n  \"entries\": [\n    {\n      \"key\": \"core.repositoryformatversion\",\n      \"value\": \"0\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"core.filemode\",\n      \"value\": \"true\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"core.bare\",\n      \"value\": \"false\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"core.logallrefupdates\",\n      \"value\": \"true\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"user.email\",\n      \"value\": \"snap@example.com\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "| Key | Value |\n| --- | --- |\n| `core.repositoryformatversion` | 0 |\n| `core.filemode` | true |\n| `core.bare` | false |\n| `core.logallrefupdates` | true |\n| `user.email` | snap@example.com |\n",
+    "stderr": ""
+  }
+}

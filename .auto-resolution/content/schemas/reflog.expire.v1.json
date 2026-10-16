@@ -1,0 +1,17 @@
+{
+  "$id": "https://grit-scm.com/schemas/reflog.expire/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit reflog expire`.",
+  "properties": {
+    "entries_pruned": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "entries_pruned"
+  ],
+  "title": "ReflogExpireOutcome",
+  "type": "object"
+}

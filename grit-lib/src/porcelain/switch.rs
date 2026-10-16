@@ -546,6 +546,23 @@ fn path_from_diff(entry: &DiffEntry) -> Option<&str> {
     entry.new_path.as_deref().or(entry.old_path.as_deref())
 }
 
+/// Tree-diff delete paths under wholesale directory removal; safe to skip worktree stat during prepare.
+fn deleted_paths_under_wholesale_dirs(
+    tree_changes: &[DiffEntry],
+    wholesale_dirs: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    if wholesale_dirs.is_empty() {
+        return BTreeSet::new();
+    }
+    tree_changes
+        .iter()
+        .filter(|c| c.status == DiffStatus::Deleted)
+        .filter_map(|c| c.old_path.as_deref())
+        .filter(|path| path_under_wholesale_directory(path, wholesale_dirs))
+        .map(str::to_owned)
+        .collect()
+}
+
 #[derive(Clone, Copy)]
 struct TargetTreeEntry {
     oid: ObjectId,
@@ -659,6 +676,38 @@ mod tests {
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
         (dir, repo)
+    }
+
+    #[test]
+    fn deleted_paths_under_wholesale_dirs_only_lists_deletes() {
+        use crate::objects::HashAlgo;
+        let null = ObjectId::null(HashAlgo::Sha1);
+        let wholesale = BTreeSet::from(["d0000".to_owned()]);
+        let changes = vec![
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("d0000/f0000.txt".into()),
+                new_path: None,
+                old_mode: "100644".into(),
+                new_mode: "100644".into(),
+                old_oid: null,
+                new_oid: null,
+                score: None,
+            },
+            DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some("d0001/f0000.txt".into()),
+                new_path: Some("d0001/f0000.txt".into()),
+                old_mode: "100644".into(),
+                new_mode: "100644".into(),
+                old_oid: null,
+                new_oid: null,
+                score: None,
+            },
+        ];
+        let skip = deleted_paths_under_wholesale_dirs(&changes, &wholesale);
+        assert_eq!(skip.len(), 1);
+        assert!(skip.contains("d0000/f0000.txt"));
     }
 
     fn commit_on_branch(

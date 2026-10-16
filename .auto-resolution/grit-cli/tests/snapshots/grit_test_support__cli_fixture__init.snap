@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Initialized empty repository in [REPO]/.git (ref-format: files)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"initialized\": true,\n  \"path\": \"[REPO]/.git\",\n  \"bare\": false,\n  \"branch\": \"main\",\n  \"ref_format\": \"files\"\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Initialized empty repository at `[REPO]/.git` (default branch `main`, ref-format `files`).\n",
+    "stderr": ""
+  }
+}

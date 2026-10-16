@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Grit logo</title>
+  <desc id="desc">A red cog enclosing a Git branch mark, with a red outer circle.</desc>
+  <defs>
+    <style>
+      .red { fill: #d73f27; }
+      .stroke-red {
+        stroke: #d73f27;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+    </style>
+  </defs>
+
+  <g class="red">
+    <circle cx="256" cy="256" r="154"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(0 256 256)"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(45 256 256)"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(90 256 256)"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(135 256 256)"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(180 256 256)"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(225 256 256)"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(270 256 256)"/>
+    <rect x="228" y="66" width="56" height="78" rx="4" transform="rotate(315 256 256)"/>
+  </g>
+
+  <rect x="164" y="164" width="184" height="184" rx="24" fill="#fffaf2" transform="rotate(45 256 256)"/>
+
+  <g fill="none" class="stroke-red" stroke-width="17">
+    <path d="M222 232 L285 268"/>
+    <path d="M298 218 V294"/>
+    <path d="M285 268 H298"/>
+  </g>
+  <g class="red">
+    <circle cx="222" cy="232" r="21"/>
+    <circle cx="298" cy="218" r="21"/>
+    <circle cx="298" cy="294" r="21"/>
+  </g>
+</svg>

@@ -1,0 +1,32 @@
+:root {
+  --bg: #f4f1ea;
+  --ink: #1b1915;
+  --soft: #3d3830;
+  --muted: #7b7466;
+  --line: #d9d3c5;
+  --accent: #e2481f;
+  --chip: #e9e4d8;
+  --ink-soft: #c9c2b3;
+  --ink-muted: #a39b8b;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Space Grotesk", system-ui, sans-serif; }
+a { color: inherit; }
+a:hover { opacity: .7; }
+.mono { font-family: var(--mono); }
+
+/* Highlighted code, shared by docs, blog and homepage (see lib/highlight.ts). */
+.code { background: var(--ink); color: var(--chip); border: 1px solid var(--soft); border-radius: 10px; padding: 14px 16px; font: 14px/1.75 var(--mono); overflow-x: auto; white-space: pre; margin: 12px 0 16px; }
+.code code { font: inherit; background: none; padding: 0; border-radius: 0; color: inherit; }
+.code .cmd { color: var(--bg); }
+.code .out { color: var(--ink-muted); }
+.code .p, .code .k { color: var(--accent); }
+.code .c { color: var(--ink-muted); font-style: italic; }
+.code .s { color: #b7c98f; }
+.code .n { color: #e8b96d; }
+.code .t { color: #86c3b8; }
+.code .f { color: #f3d8a2; }
+.code .a { color: #c8a6d8; }
+.code .cmd .f { color: var(--bg); font-weight: 700; }
+.code .cmd .a { color: #e8b96d; }

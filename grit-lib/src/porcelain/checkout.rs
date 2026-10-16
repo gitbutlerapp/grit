@@ -530,7 +530,7 @@ pub(crate) fn wholesale_deleted_directories(
                 if !entry.path.starts_with(prefix.as_bytes()) {
                     break;
                 }
-                if entry.stage() == 0 {
+                if entry.stage() == 0 && entry.mode != MODE_GITLINK {
                     count += 1;
                 }
             }
@@ -540,7 +540,7 @@ pub(crate) fn wholesale_deleted_directories(
         }
     } else {
         for entry in &index.entries {
-            if entry.stage() != 0 {
+            if entry.stage() != 0 || entry.mode == MODE_GITLINK {
                 continue;
             }
             let Ok(path) = std::str::from_utf8(&entry.path) else {
@@ -1318,13 +1318,23 @@ fn parse_git_mode(mode: &str) -> u32 {
     u32::from_str_radix(mode, 8).unwrap_or(MODE_REGULAR)
 }
 
-/// True when `path` is a gitlink directory with an initialized submodule (`.git` file or dir).
 fn gitlink_worktree_is_populated(path: &Path) -> bool {
     if !path.is_dir() {
         return false;
     }
     let git_meta = path.join(".git");
     git_meta.is_file() || git_meta.is_dir()
+}
+
+/// Wholesale directory roots safe to remove when untracked/ignored trust already passed.
+pub(crate) fn trusted_wholesale_remove_dirs(
+    work_tree: &Path,
+    index: &Index,
+    delete_paths: &[String],
+    gitlink_deletes: &HashSet<String>,
+) -> BTreeSet<String> {
+    let candidates = wholesale_deleted_directories(index, delete_paths);
+    filter_wholesale_dirs_with_populated_gitlinks(work_tree, candidates, gitlink_deletes)
 }
 
 /// Drop wholesale-removal candidates when a deleted gitlink under `dir` still has a worktree.

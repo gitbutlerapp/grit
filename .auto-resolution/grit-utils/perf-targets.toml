@@ -1,0 +1,47 @@
+# Campaign 1.1× scorecard targets for grit-bench campaign scenarios.
+# Ratios are grit_median_ms / git_median_ms (lower is faster for grit).
+
+[default]
+ratio = 1.1
+
+# Roadmap item 14 owns rev-list counting and serve-clone throughput work.
+[scenario."git-dot-git/rev-list-count"]
+owned_by_item_14 = true
+
+[scenario."git-dot-git/rev-list-count-objects"]
+owned_by_item_14 = true
+
+[scenario."git-dot-git/serve-clone"]
+owned_by_item_14 = true
+
+[scenario."chromium-synth/rev-list-count"]
+owned_by_item_14 = true
+
+[scenario."chromium-synth/rev-list-count-objects"]
+owned_by_item_14 = true
+
+[scenario."chromium-synth/serve-clone"]
+owned_by_item_14 = true
+
+[scenario."linux/rev-list-count"]
+owned_by_item_14 = true
+
+[scenario."linux/rev-list-count-objects"]
+owned_by_item_14 = true
+
+[scenario."linux/serve-clone"]
+owned_by_item_14 = true
+
+[scenario."revs-count-deep-no-graph"]
+owned_by_item_14 = true
+
+[scenario."revs-count-deep-commit-graph"]
+owned_by_item_14 = true
+
+[scenario."git-dot-git/merge-base"]
+documented = "grit merge-base exceeds VM memory on git.git until revwalk item 7 lands"
+followup = "ROADMAP item 7"
+
+[scenario."git-dot-git/fsck"]
+documented = "git.git tagger/mode deltas fail grit fsck while git fsck warns only"
+followup = "ROADMAP item 11"

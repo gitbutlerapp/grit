@@ -20,7 +20,9 @@ use crate::index::StatMatchPolicy;
 use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
-use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
+use crate::porcelain::status::{
+    collect_untracked_and_ignored_with_cache, IgnoredMode,
+};
 use crate::repo::Repository;
 use crate::state::resolve_head;
 use crate::worktree_rules::WorktreeRules;
@@ -528,8 +530,15 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         .ok()
         .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
-    let (untracked, ignored) =
-        collect_untracked_and_ignored(repo, index, work_tree, ignored_mode, true, &specs)?;
+    let (untracked, ignored) = collect_untracked_and_ignored_with_cache(
+        repo,
+        index,
+        work_tree,
+        ignored_mode,
+        true,
+        &specs,
+        false,
+    )?;
     let trust_wholesale = delete_roots.is_empty() || {
         let under_delete_root = |path: &str| {
             let root = path.split('/').next().unwrap_or(path);

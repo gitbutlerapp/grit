@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "b5ea30d commit\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"results\": [\n    {\n      \"spec\": \"HEAD\",\n      \"oid\": \"b5ea30d\",\n      \"kind\": \"commit\",\n      \"size\": 201,\n      \"ref_name\": \"HEAD\"\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Resolve\n\n| Spec | OID | Kind | Size | Ref |\n| --- | --- | --- | ---: | --- |\n| `HEAD` | `b5ea30d` | commit | 201 | HEAD |\n",
+    "stderr": ""
+  }
+}

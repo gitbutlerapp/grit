@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "[main 2fb4e89] third (amended)\n3 changes committed\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"oid\": \"2fb4e893c2ca21b3c945ea3fc16a1950ed8b3db4\",\n  \"branch\": \"main\",\n  \"subject\": \"third (amended)\",\n  \"changes\": 3,\n  \"amended\": true\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Commit\n\n- Amended **`main`** at `2fb4e89` — third (amended)\n- **3** changes committed\n",
+    "stderr": ""
+  }
+}

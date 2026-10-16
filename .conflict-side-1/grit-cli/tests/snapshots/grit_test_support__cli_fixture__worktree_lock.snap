@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Locked worktree [REPO]/linked-wt (hold)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"action\": \"lock\",\n  \"path\": \"[REPO]/linked-wt\",\n  \"reason\": \"hold\"\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Worktree lock\n\n- Locked **`[REPO]/linked-wt`** · hold\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "$id": "https://grit-scm.com/schemas/remote.add/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "RemoteEntry": {
+      "description": "One remote in a `list` outcome.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ],
+      "type": "object"
+    },
+    "RemoteRefEntry": {
+      "description": "One ref in a `refs` JSON outcome (annotated tags carry `peeled`; no separate `^{}` row).",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "peeled": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "symref_target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "oid"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).",
+  "oneOf": [
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "list"
+          ],
+          "type": "string"
+        },
+        "remotes": {
+          "items": {
+            "$ref": "#/definitions/RemoteEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "remotes"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "add"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "name",
+        "url"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "refs"
+          ],
+          "type": "string"
+        },
+        "refs": {
+          "items": {
+            "$ref": "#/definitions/RemoteRefEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "refs"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "RemoteOutcome"
+}

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "snap.bundle is valid\nThe bundle uses this hash algorithm: sha1\nThe bundle contains 1 refs:\nb5ea30de417ac84c09b8cfc0acf5f2c39efc611f HEAD\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"path\": \"snap.bundle\",\n  \"ok\": true,\n  \"hash_algorithm\": \"sha1\",\n  \"references\": [\n    {\n      \"name\": \"HEAD\",\n      \"oid\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"\n    }\n  ],\n  \"prerequisites\": [],\n  \"missing_prerequisites\": []\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Bundle verify\n\n- **path:** `snap.bundle`\n- **ok:** true\n- **hash_algorithm:** sha1\n\n| Ref | OID |\n| --- | --- |\n| `HEAD` | `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f` |\n",
+    "stderr": ""
+  }
+}

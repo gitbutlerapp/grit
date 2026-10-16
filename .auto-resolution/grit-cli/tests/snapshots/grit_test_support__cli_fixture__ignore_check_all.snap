@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "noise.log  ← .gitignore:1 *.log\nkeep.txt\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"any_ignored\": true,\n  \"entries\": [\n    {\n      \"path\": \"noise.log\",\n      \"ignored\": true,\n      \"matched\": {\n        \"source\": {\n          \"kind\": \"per_directory\",\n          \"path\": \".gitignore\"\n        },\n        \"line_number\": 1,\n        \"pattern_text\": \"*.log\",\n        \"negative\": false\n      }\n    },\n    {\n      \"path\": \"keep.txt\",\n      \"ignored\": false\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Ignore check\n\n- **any_ignored:** true\n\n- `noise.log` ← `.gitignore:1` `*.log`\n- `keep.txt` (not ignored)\n",
+    "stderr": ""
+  }
+}

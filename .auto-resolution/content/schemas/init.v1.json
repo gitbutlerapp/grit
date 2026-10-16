@@ -1,0 +1,38 @@
+{
+  "$id": "https://grit-scm.com/schemas/init/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit init`.",
+  "properties": {
+    "bare": {
+      "type": "boolean"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "initialized": {
+      "description": "`true` when a new repository was created.",
+      "type": "boolean"
+    },
+    "path": {
+      "description": "The created `.git` directory.",
+      "type": "string"
+    },
+    "ref_format": {
+      "description": "Ref storage backend (`files` or `reftable`).",
+      "type": "string"
+    },
+    "reinitialized": {
+      "description": "`true` when an existing repository was reinitialized in place.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "bare",
+    "branch",
+    "initialized",
+    "path",
+    "ref_format"
+  ],
+  "title": "InitOutcome",
+  "type": "object"
+}

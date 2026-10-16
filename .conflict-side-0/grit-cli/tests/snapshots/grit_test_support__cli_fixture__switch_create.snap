@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Created and switched to branch topic\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"branch\": \"topic\",\n  \"created\": true,\n  \"detached\": false\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Switch\n\n- Created and switched to **`topic`**\n",
+    "stderr": ""
+  }
+}

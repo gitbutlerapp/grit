@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Added note for b5ea30d\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"action\": \"add\",\n  \"notes_ref\": \"refs/notes/commits\",\n  \"object\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n  \"replaced\": false\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Added note for `b5ea30d` on `refs/notes/commits`.\n",
+    "stderr": ""
+  }
+}

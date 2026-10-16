@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "tree cc5dd251b2645c614c83ffc5402450dfe72cedfd\nparent 72934dedd47ecaf7e340fd6c5ef46620187fb317\nauthor Test <test@example.com> 1700000000 +0000\ncommitter Test <test@example.com> 1700000000 +0000\n\nsecond\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"spec\": \"HEAD^{commit}\",\n  \"oid\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n  \"kind\": \"commit\",\n  \"size\": 201,\n  \"content\": {\n    \"kind\": \"commit\",\n    \"encoding\": \"utf-8\",\n    \"text\": \"tree cc5dd251b2645c614c83ffc5402450dfe72cedfd\\nparent 72934dedd47ecaf7e340fd6c5ef46620187fb317\\nauthor Test <test@example.com> 1700000000 +0000\\ncommitter Test <test@example.com> 1700000000 +0000\\n\\nsecond\\n\"\n  }\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Cat\n\n- **spec:** `HEAD^{commit}`\n- **oid:** `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f`\n- **kind:** commit\n- **size:** 201\n\n```text\ntree cc5dd251b2645c614c83ffc5402450dfe72cedfd\nparent 72934dedd47ecaf7e340fd6c5ef46620187fb317\nauthor Test <test@example.com> 1700000000 +0000\ncommitter Test <test@example.com> 1700000000 +0000\n\nsecond\n```\n",
+    "stderr": ""
+  }
+}

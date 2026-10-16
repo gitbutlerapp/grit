@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-10T06:45:00.000000000Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16791945216,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.4",
+    "grit_commit": "bfa2aec31b67c5520f9984b934cdf0ca71feac4c"
+  },
+  "scenarios": [
+    {
+      "id": "delta-encode-text-256k",
+      "group": "delta_encode",
+      "fixture": "synthetic-256k-text",
+      "description": "Criterion DeltaIndex::encode on 256 KiB text base with mid-file insert (grit-lib bench; no system git comparator)",
+      "driver": "criterion",
+      "grit": {
+        "mean_ms": 0.54389,
+        "median_ms": 0.54389,
+        "stddev_ms": 0.0086,
+        "min_ms": 0.53622,
+        "max_ms": 0.55343,
+        "runs_ms": [0.54389]
+      }
+    },
+    {
+      "id": "delta-encode-binary-256k",
+      "group": "delta_encode",
+      "fixture": "synthetic-256k-binary",
+      "description": "Criterion DeltaIndex::encode on 256 KiB binary base with mid-file insert (grit-lib bench; no system git comparator)",
+      "driver": "criterion",
+      "grit": {
+        "mean_ms": 0.35892,
+        "median_ms": 0.35892,
+        "stddev_ms": 0.00073,
+        "min_ms": 0.35819,
+        "max_ms": 0.35965,
+        "runs_ms": [0.35892]
+      }
+    }
+  ]
+}

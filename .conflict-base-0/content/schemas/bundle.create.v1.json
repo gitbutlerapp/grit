@@ -1,0 +1,21 @@
+{
+  "$id": "https://grit-scm.com/schemas/bundle.create/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Outcome of `grit bundle create`.",
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "refs": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "path",
+    "refs"
+  ],
+  "title": "BundleCreateOutcome",
+  "type": "object"
+}

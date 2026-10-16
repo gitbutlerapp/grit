@@ -1,0 +1,84 @@
+{
+  "$id": "https://grit-scm.com/schemas/hooks.run/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "HookEntryJson": {
+      "description": "One hook script on disk.",
+      "properties": {
+        "executable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "executable",
+        "name",
+        "path",
+        "source"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit hooks list` or `grit hooks run`.",
+  "oneOf": [
+    {
+      "description": "Installed hook scripts in the resolved hooks directory.",
+      "properties": {
+        "action": {
+          "enum": [
+            "list"
+          ],
+          "type": "string"
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/definitions/HookEntryJson"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "hooks"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A hook subprocess finished (see `exit_code`).",
+      "properties": {
+        "action": {
+          "enum": [
+            "run"
+          ],
+          "type": "string"
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "executed",
+        "exit_code",
+        "name"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "HooksOutcome"
+}

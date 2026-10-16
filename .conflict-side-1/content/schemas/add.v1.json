@@ -1,0 +1,17 @@
+{
+  "$id": "https://grit-scm.com/schemas/add/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit add`: how many changes were staged.",
+  "properties": {
+    "staged": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "staged"
+  ],
+  "title": "AddOutcome",
+  "type": "object"
+}

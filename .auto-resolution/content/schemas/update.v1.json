@@ -1,0 +1,20 @@
+{
+  "$id": "https://grit-scm.com/schemas/update/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit update`.",
+  "properties": {
+    "updated": {
+      "type": "boolean"
+    },
+    "version": {
+      "description": "The version of `grit` that ran the update (the new version is whatever the installer fetched).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "updated",
+    "version"
+  ],
+  "title": "UpdateOutcome",
+  "type": "object"
+}

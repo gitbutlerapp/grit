@@ -1,0 +1,175 @@
+{
+  "$id": "https://grit-scm.com/schemas/clone/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ClonePhase": {
+      "description": "Timing for one step of the clone.",
+      "properties": {
+        "count": {
+          "description": "Units processed in this step.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "phase": {
+          "description": "`receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`.",
+          "type": "string"
+        },
+        "seconds": {
+          "description": "Wall-clock seconds spent in this step.",
+          "format": "double",
+          "type": "number"
+        },
+        "unit": {
+          "description": "Unit of `count`: `bytes`, `objects` or `files`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "phase",
+        "seconds",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "ObjectTypes": {
+      "description": "Objects received, by type.",
+      "properties": {
+        "blobs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "commits": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "tags": {
+          "description": "Annotated tag objects (not refs).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "trees": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "blobs",
+        "commits",
+        "tags",
+        "trees"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit clone`.",
+  "properties": {
+    "branch": {
+      "description": "Default branch checked out.",
+      "type": "string"
+    },
+    "branches": {
+      "description": "Remote branches fetched.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "branches_with_commits": {
+      "description": "Remote branch names that have commits when `no_checkout_reason` is `unborn_default_branch`.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "bytes": {
+      "description": "Pack bytes received during the fetch.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "Working-tree files checked out.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "no_checkout_reason": {
+      "description": "Why no working-tree checkout happened, when `files` is zero.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_types": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ObjectTypes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Objects received by type, or `null` when the pack was copied from a local repository without being re-indexed."
+    },
+    "objects": {
+      "description": "Objects received during the fetch.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "Destination directory.",
+      "type": "string"
+    },
+    "phases": {
+      "description": "Time spent in each step, in order.",
+      "items": {
+        "$ref": "#/definitions/ClonePhase"
+      },
+      "type": "array"
+    },
+    "seconds": {
+      "description": "Wall-clock seconds for the whole clone.",
+      "format": "double",
+      "type": "number"
+    },
+    "tags": {
+      "description": "Remote tags fetched.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "url": {
+      "type": "string"
+    },
+    "worktree_bytes": {
+      "description": "Total size of the checked-out files, in bytes.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "branch",
+    "branches",
+    "bytes",
+    "files",
+    "objects",
+    "path",
+    "phases",
+    "seconds",
+    "tags",
+    "url",
+    "worktree_bytes"
+  ],
+  "title": "CloneOutcome",
+  "type": "object"
+}

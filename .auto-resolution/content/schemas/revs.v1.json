@@ -1,0 +1,46 @@
+{
+  "$id": "https://grit-scm.com/schemas/revs/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "RevsCommitRow": {
+      "description": "One commit row in `grit revs` output.",
+      "properties": {
+        "oid": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "oid",
+        "subject"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit revs`.",
+  "properties": {
+    "commits": {
+      "description": "Listed commits in `rev-list` order (empty when `--count` is set).",
+      "items": {
+        "$ref": "#/definitions/RevsCommitRow"
+      },
+      "type": "array"
+    },
+    "count": {
+      "description": "Total reachable commits when `--count` is set; otherwise `null`.",
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "commits"
+  ],
+  "title": "RevsOutcome",
+  "type": "object"
+}

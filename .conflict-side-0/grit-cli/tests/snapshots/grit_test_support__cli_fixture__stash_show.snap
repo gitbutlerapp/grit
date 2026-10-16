@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "\n staged.txt  |   1 +\n tracked.txt |   2 +-\n 2 files changed, 2 insertions(+), 1 deletion(-)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"index\": 0,\n  \"stat\": {\n    \"files\": [\n      {\n        \"path\": \"staged.txt\",\n        \"status\": \"added\",\n        \"insertions\": 1,\n        \"deletions\": 0,\n        \"binary\": false\n      },\n      {\n        \"path\": \"tracked.txt\",\n        \"status\": \"modified\",\n        \"insertions\": 1,\n        \"deletions\": 1,\n        \"binary\": false\n      }\n    ],\n    \"files_changed\": 2,\n    \"insertions\": 2,\n    \"deletions\": 1\n  }\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Changes\n\n| File | + | − |\n| --- | ---: | ---: |\n| `staged.txt` | 1 | 0 |\n| `tracked.txt` | 1 | 1 |\n\n2 files changed, 2 insertions(+), 1 deletion(-)\n",
+    "stderr": ""
+  }
+}

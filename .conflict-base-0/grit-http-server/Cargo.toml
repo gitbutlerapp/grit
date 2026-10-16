@@ -1,0 +1,28 @@
+[package]
+name = "grit-http-server"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "Git smart HTTP server powered by grit"
+repository = "https://github.com/gitbutlerapp/grit"
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "grit-http-server"
+path = "src/main.rs"
+
+[dependencies]
+grit-protocol = { version = "0.5", path = "../grit-protocol" }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+anyhow.workspace = true
+clap.workspace = true
+serde = { version = "1", features = ["derive"] }
+base64.workspace = true
+flate2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

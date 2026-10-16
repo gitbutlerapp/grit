@@ -1,0 +1,31 @@
+{
+  "$id": "https://grit-scm.com/schemas/stash.pop/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit stash pop`.",
+  "properties": {
+    "conflict_paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "conflicts": {
+      "type": "boolean"
+    },
+    "dropped": {
+      "type": "boolean"
+    },
+    "index": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "conflicts",
+    "dropped",
+    "index"
+  ],
+  "title": "StashPopOutcome",
+  "type": "object"
+}

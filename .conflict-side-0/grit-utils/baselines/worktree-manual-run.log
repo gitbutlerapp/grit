@@ -1,0 +1,17 @@
+# worktree manual run 2026-10-16T12:50:36Z (post-review harness)
+cache=/tmp/tmp.gzyNkyK8Yu scratch=/tmp/grit-bench-manual-scratch-1792155036
+== prepare synth-m ==
+name	tier	head	objects	refs	files
+synth-m	M	571d412117493d9f0657597bbaf1df059453ddc8	114463	10000	20000
+== run synth-m (warmup 1, min-runs 3) ==
+git:  /usr/bin/git (git version 2.43.0)
+grit: /workspace/target/release/grit (grit 0.5.10)
+hyperfine: /usr/local/bin/hyperfine
+
+Running worktree scenarios on fixture synth-m …
+Results written to /tmp/worktree-synth-m.json
+worktree-status-clean-synth-m ratio=3.968780731330527
+worktree-status-dirty-synth-m ratio=2.818534379847435
+worktree-add-synth-m ratio=30.660184098522627
+worktree-commit-synth-m ratio=3.5473293080460238
+worktree-diff-synth-m ratio=1.9906353358295414

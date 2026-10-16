@@ -1,0 +1,54 @@
+{
+  "$id": "https://grit-scm.com/schemas/fetch/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "FetchUpdate": {
+      "description": "One updated tracking ref. `old_oid`/`new_oid` are full hex, or `null` for a newly-created (`old_oid`) or deleted (`new_oid`) ref.",
+      "properties": {
+        "new_oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old_oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit fetch`: the refs that changed.",
+  "properties": {
+    "remote": {
+      "type": "string"
+    },
+    "updated": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "updates": {
+      "items": {
+        "$ref": "#/definitions/FetchUpdate"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "remote",
+    "updated",
+    "updates"
+  ],
+  "title": "FetchOutcome",
+  "type": "object"
+}

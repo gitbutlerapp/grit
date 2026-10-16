@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "  pushed --delete → origin refs/heads/old-topic\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"remote\": \"origin\",\n  \"branch\": \"--delete\",\n  \"results\": [\n    {\n      \"ref\": \"refs/heads/old-topic\",\n      \"status\": \"ok\"\n    }\n  ],\n  \"rejected\": false\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Push to `origin`\n- **`refs/heads/old-topic`** · pushed `--delete` → `origin refs/heads/old-topic`\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\n  \"any_ignored\": false,\n  \"entries\": []\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "## Ignore check\n\n- **any_ignored:** false\n\nNo matching paths to show.\n",
+    "stderr": ""
+  }
+}

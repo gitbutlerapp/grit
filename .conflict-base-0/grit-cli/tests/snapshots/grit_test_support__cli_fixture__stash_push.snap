@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Saved working directory and index state On main: wip 074d35b\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"oid\": \"074d35b2ff7d12740d75df81826c91a613458885\",\n  \"message\": \"On main: wip\"\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Stash\n\n- Saved **On main: wip** · `074d35b`\n",
+    "stderr": ""
+  }
+}

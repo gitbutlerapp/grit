@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "pre-commit  [REPO]/.git/hooks/pre-commit  executable=yes  hooks_dir\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"action\": \"list\",\n  \"hooks\": [\n    {\n      \"name\": \"pre-commit\",\n      \"path\": \"[REPO]/.git/hooks/pre-commit\",\n      \"executable\": true,\n      \"source\": \"hooks_dir\"\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Hooks\n\n| Name | Path | Executable | Source |\n| --- | --- | --- | --- |\n| `pre-commit` | `[REPO]/.git/hooks/pre-commit` | true | hooks_dir |\n",
+    "stderr": ""
+  }
+}

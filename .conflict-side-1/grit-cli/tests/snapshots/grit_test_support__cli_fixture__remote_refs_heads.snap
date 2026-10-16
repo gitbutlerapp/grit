@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "72934dedd47ecaf7e340fd6c5ef46620187fb317\trefs/heads/feature\nb5ea30de417ac84c09b8cfc0acf5f2c39efc611f\trefs/heads/main\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"action\": \"refs\",\n  \"refs\": [\n    {\n      \"name\": \"refs/heads/feature\",\n      \"oid\": \"72934dedd47ecaf7e340fd6c5ef46620187fb317\"\n    },\n    {\n      \"name\": \"refs/heads/main\",\n      \"oid\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Remote refs\n\n| Ref | Object | Peeled | Symref target |\n| --- | --- | --- | --- |\n| `refs/heads/feature` | `72934dedd47ecaf7e340fd6c5ef46620187fb317` | — | — |\n| `refs/heads/main` | `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f` | — | — |\n\n",
+    "stderr": ""
+  }
+}

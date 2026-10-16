@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Wrote bundle snap.bundle (1 refs).\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"path\": \"snap.bundle\",\n  \"refs\": 1\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Bundle create\n\n- **path:** `snap.bundle`\n- **refs:** 1\n",
+    "stderr": ""
+  }
+}

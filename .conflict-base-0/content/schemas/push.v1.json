@@ -1,0 +1,66 @@
+{
+  "$id": "https://grit-scm.com/schemas/push/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "PushRefOutcomeStatus": {
+      "description": "Per-ref push status in JSON (`ok`, `up_to_date`, or `rejected`).",
+      "enum": [
+        "ok",
+        "up_to_date",
+        "rejected"
+      ],
+      "type": "string"
+    },
+    "PushRefResult": {
+      "description": "One ref's push result.",
+      "properties": {
+        "reason": {
+          "description": "Rejection detail, present only when `status == \"rejected\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/PushRefOutcomeStatus"
+        }
+      },
+      "required": [
+        "ref",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit push`: the per-ref outcomes for the remote.",
+  "properties": {
+    "branch": {
+      "description": "Local branch (short name) that was pushed, or `\"--tags\"` when this push targeted tags instead of the current branch.",
+      "type": "string"
+    },
+    "rejected": {
+      "description": "True when any ref was rejected (dispatch exits non-zero on this).",
+      "type": "boolean"
+    },
+    "remote": {
+      "type": "string"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/definitions/PushRefResult"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "branch",
+    "rejected",
+    "remote",
+    "results"
+  ],
+  "title": "PushOutcome",
+  "type": "object"
+}
