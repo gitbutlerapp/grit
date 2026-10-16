@@ -3270,7 +3270,7 @@ pub fn verify_ref_transaction_batch_reftable(
                         other: dirname.clone(),
                     });
                 }
-                if stack.lookup_ref_oid(&dirname).ok().flatten().is_some() {
+                if stack.lookup_ref(&dirname).ok().flatten().is_some() {
                     return Err(crate::refs::RefnameUnavailable::AncestorExists {
                         blocking: dirname.clone(),
                         new_ref: item.name.clone(),
@@ -4398,6 +4398,98 @@ mod tests {
         let refs = reader.read_refs().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].value, RefValue::Deletion);
+    }
+
+    #[test]
+    fn verify_batch_reftable_symref_ancestor_blocks_child_create() {
+        use crate::objects::ObjectId;
+        use crate::refs::{verify_ref_transaction_batch, RefBatchItem, RefnameUnavailable};
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        reftable_write_symref(
+            &git_dir,
+            "refs/heads/parent",
+            "refs/heads/missing-target",
+            None,
+            None,
+        )
+        .expect("symref parent");
+
+        let child_oid = ObjectId::from_bytes(&[0x44; 20]).expect("oid");
+        let items = vec![RefBatchItem {
+            name: "refs/heads/parent/child".to_owned(),
+            new_oid: Some(child_oid),
+        }];
+        let err = verify_ref_transaction_batch(&git_dir, &items).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RefnameUnavailable::AncestorExists {
+                    ref blocking,
+                    ref new_ref,
+                } if blocking == "refs/heads/parent" && new_ref == "refs/heads/parent/child"
+            ),
+            "unexpected {err:?}"
+        );
+    }
+
+    #[test]
+    fn update_refs_reftable_symref_ancestor_blocks_child_create() {
+        use crate::error::Error;
+        use crate::objects::ObjectId;
+        use crate::refs::gc::{update_refs, RefTransactionItem};
+        use crate::refs::store::RefStoreError;
+        use crate::refs::RefnameUnavailable;
+        use crate::repo::init_repository;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        reftable_write_symref(
+            &git_dir,
+            "refs/heads/parent",
+            "refs/heads/missing-target",
+            None,
+            None,
+        )
+        .expect("symref parent");
+
+        let child_oid = ObjectId::from_bytes(&[0x55; 20]).expect("oid");
+        let err = update_refs(
+            &git_dir,
+            &[RefTransactionItem {
+                name: "refs/heads/parent/child".to_owned(),
+                new_oid: Some(child_oid),
+                expected_old: None,
+            }],
+        )
+        .unwrap_err();
+        match err {
+            Error::RefStore(RefStoreError::NameUnavailable {
+                reason: RefnameUnavailable::AncestorExists { blocking, new_ref },
+            }) => {
+                assert_eq!(blocking, "refs/heads/parent");
+                assert_eq!(new_ref, "refs/heads/parent/child");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]
