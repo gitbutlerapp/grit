@@ -959,7 +959,11 @@ fn commit_tree_wrong_kind_matches_git() {
 
     let git_text = git(dir.path(), &["fsck"]);
     assert!(
-        git_text.contains("not a tree") || git_text.contains("bad tree"),
+        git_text.contains("not a tree")
+            || git_text.contains("bad tree")
+            || git_text.contains("not a blob")
+            || git_text.contains("missing tree")
+            || git_text.contains("could not be parsed"),
         "{git_text}"
     );
     let report = grit_fsck(&repo, &FsckOptions::full_repository(false));

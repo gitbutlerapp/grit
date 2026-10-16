@@ -80,7 +80,6 @@ baseline = [
   "grit-utils/baselines/odb-read-parallel.json",
   "grit-utils/baselines/odb-backend-before.json",
   "grit-utils/baselines/odb-backend-after.json",
-  "grit-utils/baselines/bitmaps-before.json",
   "grit-utils/baselines/bitmaps-after-pack-reuse.json",
   "grit-utils/baselines/bitmaps-after.json",
   "grit-utils/baselines/delta-encode-after.json",
