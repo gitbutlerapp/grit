@@ -491,7 +491,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
                 sign_override: None,
                 amend: false,
                 assume_worktree_synced: false,
-                staged_path_changes: None,
+                skip_pre_commit_tree_match: false,
             },
             &mut NullProgress,
         )

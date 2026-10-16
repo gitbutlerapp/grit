@@ -117,3 +117,34 @@ fn allow_empty_commit_on_clean_tree() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn allow_empty_still_stages_tracked_edits_before_commit() -> TestResult {
+    let scratch = Scratch::new("allow-empty-dirty")?;
+    let root = scratch.path();
+    gs(root, ["init"]);
+    fs::write(root.join("a.txt"), b"base\n")?;
+    assert_eq!(gs(root, ["commit", "-m", "base"]).status, Some(0));
+
+    fs::write(root.join("a.txt"), b"dirty\n")?;
+
+    let empty = gs(root, ["commit", "--allow-empty", "-m", "marker"]);
+    assert_eq!(empty.status, Some(0), "{}", empty.dump());
+    assert!(
+        empty.stdout.contains("1 change"),
+        "expected staged edit in commit output: {}",
+        empty.dump()
+    );
+
+    let status = gs(root, ["status", "--json"]);
+    assert_eq!(status.status, Some(0), "{}", status.dump());
+    let parsed: serde_json::Value = serde_json::from_str(status.stdout.trim())?;
+    assert_eq!(
+        parsed.get("clean").and_then(|v| v.as_bool()),
+        Some(true),
+        "working tree must be clean after commit staged the edit: {}",
+        status.dump()
+    );
+
+    Ok(())
+}

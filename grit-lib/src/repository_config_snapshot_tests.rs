@@ -76,7 +76,7 @@ mod tests {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            staged_path_changes: None,
+            skip_pre_commit_tree_match: false,
         };
         cascade_load_counters::measure(|| {
             create_commit(&repo3, &req, &mut NullProgress).unwrap();

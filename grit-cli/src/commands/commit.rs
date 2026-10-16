@@ -61,11 +61,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     }
 
-    let staged = if allow_empty {
-        grit_lib::porcelain::add::StageOutcome::default()
-    } else {
-        stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?
-    };
+    stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if repo.index_handle().load()?.has_unmerged_entries() {
         return Err(map_commit_error(Error::IndexUnmerged));
@@ -112,14 +108,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
             sign_override: None,
             amend,
             assume_worktree_synced: true,
-            staged_path_changes: if allow_empty {
-                None
-            } else {
-                match staged.total() {
-                    0 => None,
-                    n => Some(n),
-                }
-            },
+            skip_pre_commit_tree_match: true,
         },
         &mut NullProgress,
     )

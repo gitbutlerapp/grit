@@ -8046,7 +8046,7 @@ pub struct grit_lib::porcelain::commit::CommitRequest
 pub grit_lib::porcelain::commit::CommitRequest::allow_empty: bool
 pub grit_lib::porcelain::commit::CommitRequest::amend: bool
 pub grit_lib::porcelain::commit::CommitRequest::assume_worktree_synced: bool
-pub grit_lib::porcelain::commit::CommitRequest::staged_path_changes: core::option::Option<usize>
+pub grit_lib::porcelain::commit::CommitRequest::skip_pre_commit_tree_match: bool
 pub grit_lib::porcelain::commit::CommitRequest::author: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::committer: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::message: alloc::string::String

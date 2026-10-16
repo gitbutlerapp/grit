@@ -86,7 +86,7 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: true,
-            staged_path_changes: None,
+            skip_pre_commit_tree_match: false,
         },
         &mut NullProgress,
     )
@@ -149,7 +149,7 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: true,
-            staged_path_changes: None,
+            skip_pre_commit_tree_match: false,
         },
         &mut NullProgress,
     )

@@ -263,14 +263,12 @@ fn stage_inner(
             )?;
             untracked
         } else {
-            let commit_untr_cache_only = use_tracked_scan
-                && index.entries.len() >= crate::untracked_cache::AUTO_UNTRACKED_CACHE_MIN_ENTRIES;
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,
                 show_all: untracked_show_all_matching_index(&index),
                 sort_paths: true,
                 use_untracked_cache: true,
-                refresh_cache_on_miss: !commit_untr_cache_only,
+                refresh_cache_on_miss: true,
             };
             let (untracked, _, _) = collect_untracked_and_ignored_inner(
                 repo,

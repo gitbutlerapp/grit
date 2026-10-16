@@ -105,7 +105,7 @@ fn create_commit_aborts_on_pre_commit_hook_failure() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            staged_path_changes: None,
+            skip_pre_commit_tree_match: false,
         },
         &mut NullProgress,
     )
@@ -144,7 +144,7 @@ fn commit_msg_hook_receives_editmsg_path_argument() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
-            staged_path_changes: None,
+            skip_pre_commit_tree_match: false,
         },
         &mut NullProgress,
     )
