@@ -315,11 +315,18 @@ fn create_commit_with_index(
     let changes = if parent_tree.as_ref() == Some(&tree) {
         0
     } else if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
-        match req.staged_change_count {
-            Some(n) => n,
-            None => {
+        // Large-index commits skip the tree diff for speed (issue #1064); smaller repos keep
+        // accurate path counts for pre-staged and JSON output.
+        const LARGE_INDEX_CHANGE_COUNT_FAST_PATH: usize = 4096;
+        let large_index = index.entries.len() >= LARGE_INDEX_CHANGE_COUNT_FAST_PATH;
+        if large_index {
+            if let Some(n) = req.staged_change_count.filter(|&n| n > 0) {
+                n
+            } else {
                 diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
             }
+        } else {
+            diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
         }
     } else {
         diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
