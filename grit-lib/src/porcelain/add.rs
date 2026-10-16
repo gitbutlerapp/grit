@@ -276,7 +276,7 @@ fn stage_inner_on_index(
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,
                 show_all: untracked_show_all_matching_index(index),
-                sort_paths: true,
+                sort_paths: !use_tracked_scan,
                 use_untracked_cache: true,
                 cache_miss: UntrackedCacheMissAction::RefreshFull,
             };

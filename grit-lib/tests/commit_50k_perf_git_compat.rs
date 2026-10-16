@@ -10,8 +10,7 @@ use grit_test_support::git;
 const FILE_COUNT: usize = 50_000;
 const EDIT_COUNT: usize = 100;
 const WARM_RUNS: usize = 8;
-/// Target ratio for issue #1064; logged every run — not asserted so CI stays green when the VM is slow.
-const TARGET_GIT_RATIO: f64 = 2.0;
+const MAX_GIT_RATIO: f64 = 2.0;
 
 fn median(mut samples: Vec<Duration>) -> Duration {
     samples.sort();
@@ -119,10 +118,8 @@ fn commit_50k_hundred_edits_within_twice_git() {
         git_med.as_secs_f64(),
         ratio
     );
-    if ratio > TARGET_GIT_RATIO {
-        eprintln!(
-            "note: grit commit is {:.2}x git (target ≤{TARGET_GIT_RATIO}x on this fixture)",
-            ratio
-        );
-    }
+    assert!(
+        ratio <= MAX_GIT_RATIO,
+        "grit commit median {grit_med:?} vs git {git_med:?} (ratio {ratio:.2}x > {MAX_GIT_RATIO}x)"
+    );
 }

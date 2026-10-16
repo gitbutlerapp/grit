@@ -106,6 +106,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
             amend,
             assume_worktree_synced: true,
             skip_pre_commit_tree_match: true,
+            staged_change_count: None,
         },
         &mut NullProgress,
     )

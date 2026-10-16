@@ -424,6 +424,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
             amend: false,
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
+            staged_change_count: None,
         },
         &mut NullProgress,
     )

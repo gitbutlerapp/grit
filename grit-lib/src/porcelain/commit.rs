@@ -49,6 +49,10 @@ pub struct CommitRequest {
     /// match; the post-`write_tree` parent comparison still rejects empty commits (issue #1064).
     #[doc(hidden)]
     pub skip_pre_commit_tree_match: bool,
+    /// When set with [`Self::skip_pre_commit_tree_match`], use this instead of a full tree diff for
+    /// [`CommitOutcome::changes`] (issue #1064).
+    #[doc(hidden)]
+    pub staged_change_count: Option<usize>,
 }
 
 /// Result of [`create_commit`].
@@ -106,8 +110,16 @@ pub fn commit_worktree(
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
     let mut index = repo.load_index()?;
-    crate::porcelain::add::stage_for_commit_on_index(repo, &mut index, progress)?;
-    create_commit_with_index(repo, &mut index, req, progress)
+    let staged =
+        crate::porcelain::add::stage_for_commit_on_index(repo, &mut index, progress)?;
+    if index.has_unmerged_entries() {
+        return Err(Error::IndexUnmerged);
+    }
+    let mut req = req.clone();
+    if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
+        req.staged_change_count = Some(staged.total());
+    }
+    create_commit_with_index(repo, &mut index, &req, progress)
 }
 
 fn create_commit_with_index(
@@ -302,6 +314,13 @@ fn create_commit_with_index(
 
     let changes = if parent_tree.as_ref() == Some(&tree) {
         0
+    } else if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
+        match req.staged_change_count {
+            Some(n) => n,
+            None => {
+                diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
+            }
+        }
     } else {
         diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
     };
@@ -481,6 +500,7 @@ mod tests {
             amend: false,
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
+            staged_change_count: None,
         }
     }
 

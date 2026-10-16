@@ -181,6 +181,13 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         index.defer_untracked_cache_invalidation = true;
     }
 
+    // Git's index often carries a valid TREE extension; per-path invalidation during a bulk
+    // restage devolves into thousands of tree walks. Drop it once up front at campaign scale.
+    if bulk_untr_defer && index.cache_tree.is_some() {
+        index.cache_tree = None;
+        index.cache_tree_root = None;
+    }
+
     let result = stage_tracked_modifications_in_index_body(
         repo,
         work_tree,
