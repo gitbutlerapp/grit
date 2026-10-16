@@ -993,6 +993,7 @@ fn history_public_api_coverage_smoke() {
         CommitEdit::Drop,
         EmptyPolicy::Keep,
         RefScope::Head,
+        HistoryError::EmptyMessage,
         HistoryError::RootCommit {
             commit: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
         },

@@ -12,6 +12,10 @@ pub enum HistoryError {
     #[error(transparent)]
     Library(Box<Error>),
 
+    /// The replacement commit message is empty after whitespace cleanup.
+    #[error("commit message cannot be empty")]
+    EmptyMessage,
+
     /// A three-way replay produced unmerged paths.
     #[error("replay of commit {commit} produced conflicts")]
     Conflict {

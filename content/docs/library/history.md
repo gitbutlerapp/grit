@@ -12,6 +12,8 @@ The [`history`](rustdoc:grit_lib::revwalk::history) module supports stateless hi
 
 [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) describes per-commit rewrites, drops, and insert-before commits. [`RewriteOptions`](rustdoc:grit_lib::revwalk::history::RewriteOptions) controls scope, empty-commit policy, and the committer ident used for new objects.
 
+For a single message change, [`reword`](rustdoc:grit_lib::revwalk::history::reword) builds the [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) and runs [`plan_rewrite`](rustdoc:grit_lib::revwalk::history::plan_rewrite) after [`normalize_rewrite_message`](rustdoc:grit_lib::revwalk::history::normalize_rewrite_message) (stripspace, trailing newline, reject empty).
+
 ## Apply options and result
 
 [`ApplyOptions`](rustdoc:grit_lib::revwalk::history::ApplyOptions) supplies the reflog identity and message written for every ref update in the batch.
