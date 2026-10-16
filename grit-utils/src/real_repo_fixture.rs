@@ -97,7 +97,12 @@ pub fn list_branch_head_refs(repo: &Path) -> Result<Vec<String>> {
 /// Remove branch tips introduced by campaign network scenarios on a tag-pinned bare remote.
 pub fn clear_branch_head_refs(git: &Path, repo: &Path) -> Result<()> {
     for name in list_branch_head_refs(repo)? {
-        run_git(git, repo, &["update-ref", "-d", &format!("refs/heads/{name}")])?;
+        let full = if name.starts_with("refs/") {
+            name
+        } else {
+            format!("refs/heads/{name}")
+        };
+        run_git(git, repo, &["update-ref", "-d", &full])?;
     }
     Ok(())
 }
@@ -344,4 +349,5 @@ mod tests {
         assert!(heads.is_empty(), "unexpected heads: {heads:?}");
         Ok(())
     }
+
 }
