@@ -59,6 +59,7 @@ pub fn run_campaign_suite(
         },
         opts.smoke,
     )?);
+    crate::real_repo_fixture::clear_branch_head_refs(git, &git_bare)?;
     scenarios.extend(prefix_bitmap_report(
         run_bitmaps_suite(
             hyperfine,
