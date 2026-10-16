@@ -12,6 +12,8 @@ grit history drop <commit> [--dry-run] [--update-refs=(branches|head)]
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
 grit history reword <commit> [--dry-run] [--update-refs=(branches|head)]
+grit history fixup <commit> [--empty=(drop|keep|abort)] [-m|--message-file]
+grit history fixup <commit> [--dry-run] [--update-refs=(branches|head)]
 ```
 
 ## Description
@@ -38,15 +40,23 @@ Provide exactly one of `-m` / `--message` or `--message-file` (use `-` to read f
 
 If any descendant commit is a **merge**, planning refuses with an error (merge replay is not supported yet). Use a linear range or wait for later `grit history` subcommands that handle merges.
 
+### `fixup`
+
+Apply **staged** index changes onto an earlier commit and replay descendants. Grit three-way merges `HEAD`'s tree (base), the target commit's tree (ours), and the index tree (theirs), matching upstream `git history fixup`. The target keeps its author and message unless you pass `-m` / `--message-file`.
+
+Requires a working tree with at least one staged change relative to `HEAD`. Bare repositories are rejected. On merge conflicts, nothing is applied.
+
+After a successful apply, staged changes on the paths you fixed are consumed: the index matches the new `HEAD` for those paths, and unrelated unstaged edits stay in the worktree.
+
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `<commit>` | Commit to drop or reword (revision spec). |
+| `<commit>` | Commit to drop, reword, or fix up (revision spec). |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |
-| `-m`, `--message` | (`reword` only) New commit message (conflicts with `--message-file`). |
-| `--message-file` | (`reword` only) Read the new message from a file, or `-` for stdin. |
+| `-m`, `--message` | (`reword` only, required) New commit message (conflicts with `--message-file`). |
+| `--message-file` | (`reword` only, required) Read the new message from a file, or `-` for stdin. |
 
 ### `reword` options
 
@@ -55,6 +65,18 @@ If any descendant commit is a **merge**, planning refuses with an error (merge r
 | `<commit>` | Commit to reword (revision spec). |
 | `-m`, `--message` | New commit message (conflicts with `--message-file`). |
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
+
+### `fixup` options
+
+| Option | Description |
+| --- | --- |
+| `<commit>` | Commit to fix up (revision spec). |
+| `--empty` | `drop` (default), `keep`, or `abort` when the target would become empty. |
+| `-m`, `--message` | Replace the target commit message (optional). |
+| `--message-file` | Read replacement message from a file, or `-` for stdin. |
+| `--dry-run` | List ref updates without moving refs. |
+| `--update-refs` | `branches` (default) or `head`. |
+
 ## Examples
 
 Drop the parent of `HEAD` on a linear branch:
@@ -84,17 +106,29 @@ Dry run — refs would change:
   refs/heads/main f6a7b89 → c0ffee0
 ```
 
+Fix up the parent of `HEAD` using staged edits:
+
+```console
+$ grit add file.txt
+$ grit history fixup HEAD~1
+Fixed up 2 commit(s)
+  commit a1b2c3d → d4e5f60
+  refs/heads/main f6a7b89 → c0ffee0
+```
+
 ## JSON output
 
 Drop schema: [v1](/schemas/history.drop/v1.json) — pass `--json` on `grit history drop`.
 
 Reword schema: [v1](/schemas/history.reword/v1.json) — pass `--json` on `grit history reword`.
 
-Both subcommands emit the same object shape:
+Fixup schema: [v1](/schemas/history.fixup/v1.json) — pass `--json` on `grit history fixup`.
+
+`reword`, `drop`, and `fixup` emit the same object shape:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | `"drop"` or `"reword"`. |
+| `operation` | string | `"drop"`, `"reword"`, or `"fixup"`. |
 | `rewritten` | array | `{old,new}` full hex OIDs for each replayed commit (`drop` omits the removed commit). |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
@@ -130,9 +164,9 @@ On replay conflicts, stdout is a single JSON object (exit code 1) with `error`, 
 
 ## Markdown output
 
-Schemas: [drop v1](/schemas/history.drop/v1.json), [reword v1](/schemas/history.reword/v1.json)
+Schemas: [drop v1](/schemas/history.drop/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json)
 
-Pass [`--markdown`](../global-options/) for a `History drop` or `History reword` heading, replayed commits, ref updates, and optional `HEAD` movement.
+Pass [`--markdown`](../global-options/) for a `History drop`, `History reword`, or `History fixup` heading, replayed commits, ref updates, and optional `HEAD` movement.
 
 ## See also
 

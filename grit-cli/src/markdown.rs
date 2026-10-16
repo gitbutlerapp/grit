@@ -493,6 +493,7 @@ pub fn print_history_rewrite_outcome(
     let title = match outcome.operation.as_str() {
         "drop" => "History drop",
         "reword" => "History reword",
+        "fixup" => "History fixup",
         other => return Err(anyhow::anyhow!("unknown history operation {other}")),
     };
     outln!(w, "## {title}");

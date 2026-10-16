@@ -38,6 +38,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `pick` | [v1](/schemas/pick/v1.json) |
 | `history.drop` | [v1](/schemas/history.drop/v1.json) |
 | `history.reword` | [v1](/schemas/history.reword/v1.json) |
+| `history.fixup` | [v1](/schemas/history.fixup/v1.json) |
 | `pull` | [v1](/schemas/pull/v1.json) |
 | `push` | [v1](/schemas/push/v1.json) |
 | `remote` | [v1](/schemas/remote/v1.json) |

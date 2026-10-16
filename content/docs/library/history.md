@@ -16,6 +16,8 @@ For a single message change, [`reword`](rustdoc:grit_lib::revwalk::history::rewo
 
 To remove one commit, [`drop`](rustdoc:grit_lib::history::drop) inserts [`CommitEdit::Drop`](rustdoc:grit_lib::history::CommitEdit) for that OID (rejecting root and merge commits) and plans replay of descendants onto the mapped parent.
 
+To apply staged index changes onto an earlier commit, [`fixup`](rustdoc:grit_lib::history::fixup) three-way merges `HEAD`'s tree, the target tree, and the index tree, then plans descendant replay. Call [`apply_fixup_rewrite`](rustdoc:grit_lib::history::apply_fixup_rewrite) (not [`apply_rewrite`](rustdoc:grit_lib::history::apply_rewrite)) so staged paths are consumed and the worktree is updated without treating the fixup staging as conflicting local edits.
+
 ## Apply options and result
 
 [`ApplyOptions`](rustdoc:grit_lib::revwalk::history::ApplyOptions) supplies the reflog identity and message written for every ref update in the batch.

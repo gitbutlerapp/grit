@@ -5,8 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::config::ConfigSet;
-use crate::diff::{diff_trees, mode_from_metadata, DiffStatus};
-use crate::index::write_tree::write_tree_from_index;
+use crate::diff::{diff_trees, mode_from_metadata};
 use crate::index::MODE_REGULAR;
 use crate::objects::ObjectId;
 use crate::objects::{parse_commit, parse_tree, ObjectKind};
