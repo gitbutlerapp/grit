@@ -3,9 +3,10 @@
 use std::fs;
 
 use crate::config::ConfigSet;
-use crate::objects::ObjectId;
-use crate::diff::{diff_trees, DiffStatus};
+use crate::diff::{diff_trees, DiffEntry, DiffStatus};
 use crate::index::write_tree::write_tree_from_index;
+use crate::objects::ObjectId;
+use crate::objects::{parse_commit, parse_tree, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local, verify_tree_transition_allow_local,
@@ -22,6 +23,293 @@ use crate::state::resolve_head;
 
 use super::error::HistoryError;
 use super::types::{AppliedRewrite, ApplyOptions, PlannedRefUpdate, RewritePlan};
+
+/// Apply a fixup [`RewritePlan`] and align the index with the new `HEAD` on paths that were staged.
+///
+/// # Errors
+///
+/// Same as [`apply_rewrite`], plus index update failures after a successful ref move.
+pub fn apply_fixup_rewrite(
+    repo: &Repository,
+    plan: &RewritePlan,
+    opts: &ApplyOptions,
+    staged_paths: &[String],
+) -> Result<AppliedRewrite, HistoryError> {
+    if !repo.is_bare() && !staged_paths.is_empty() {
+        let head = resolve_head_commit(repo)?;
+        clear_fixup_staging_before_apply(repo, head, staged_paths)?;
+        let head_tree = commit_tree_for_apply(repo, head)?;
+        align_worktree_to_head_for_paths(repo, head_tree, staged_paths)?;
+    }
+    let applied = apply_fixup_refs_and_worktree(repo, plan, opts)?;
+    Ok(applied)
+}
+
+fn apply_fixup_refs_and_worktree(
+    repo: &Repository,
+    plan: &RewritePlan,
+    opts: &ApplyOptions,
+) -> Result<AppliedRewrite, HistoryError> {
+    let (old_tree, new_tree) = head_tree_transition(plan);
+    let needs_worktree = !repo.is_bare() && head_tree_changes(&old_tree, &new_tree);
+    let index_snapshot = if needs_worktree {
+        fs::read(repo.index_path()).ok()
+    } else {
+        None
+    };
+
+    if !plan.ref_updates.is_empty() {
+        commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
+    }
+
+    if needs_worktree {
+        let (Some(old), Some(new)) = (old_tree, new_tree) else {
+            return Err(HistoryError::WorktreeApply {
+                message: "missing head tree for fixup apply".into(),
+            });
+        };
+        if let Err(apply_err) = apply_fixup_head_tree_diff(repo, Some(&old), &new) {
+            let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts);
+            let restore = restore_worktree_after_failed_apply(
+                repo,
+                Some(&old),
+                &new,
+                index_snapshot.as_deref(),
+            );
+            return Err(match (restore, ref_rollback) {
+                (Err(restore_err), _) => restore_err,
+                (Ok(()), Err(ref_err)) => ref_err,
+                (Ok(()), Ok(())) => apply_err,
+            });
+        }
+    }
+
+    let head = resolve_head_commit(repo)?;
+    Ok(AppliedRewrite {
+        ref_updates: plan.ref_updates.clone(),
+        head,
+    })
+}
+
+fn apply_fixup_head_tree_diff(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<(), HistoryError> {
+    let changes = diff_trees(repo.odb(), from_tree, Some(to_tree), "").map_err(|e| {
+        HistoryError::WorktreeApply {
+            message: e.to_string(),
+        }
+    })?;
+    let mut index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    let Some(worktree) = repo.work_tree() else {
+        return Ok(());
+    };
+    for change in &changes {
+        apply_fixup_diff_entry(repo, worktree, &mut index, change)?;
+    }
+    index.sort();
+    repo.write_index(&mut index)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })
+}
+
+fn apply_fixup_diff_entry(
+    repo: &Repository,
+    worktree: &std::path::Path,
+    index: &mut crate::index::Index,
+    change: &DiffEntry,
+) -> Result<(), HistoryError> {
+    let path = change
+        .new_path
+        .as_deref()
+        .or(change.old_path.as_deref())
+        .ok_or_else(|| HistoryError::WorktreeApply {
+            message: "tree diff entry missing path".into(),
+        })?;
+    let abs = worktree.join(path);
+    if change.status == DiffStatus::Deleted {
+        index.remove_path_all_stages(path.as_bytes());
+        if abs.is_file() {
+            fs::remove_file(&abs).map_err(|e| HistoryError::WorktreeApply {
+                message: e.to_string(),
+            })?;
+        }
+        return Ok(());
+    }
+    let mode = u32::from_str_radix(&change.new_mode, 8).unwrap_or(crate::index::MODE_REGULAR);
+    let oid = change.new_oid;
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent).map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+    }
+    let blob = repo
+        .odb()
+        .read(&oid)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+    fs::write(&abs, &blob.data).map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    let entry = crate::index::IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode,
+        uid: 0,
+        gid: 0,
+        size: blob.data.len() as u32,
+        oid,
+        flags: path.len().min(0xfff) as u16,
+        flags_extended: None,
+        path: path.as_bytes().to_vec(),
+        base_index_pos: 0,
+    };
+    index.add_or_replace(entry);
+    Ok(())
+}
+
+fn clear_fixup_staging_before_apply(
+    repo: &Repository,
+    head_commit: ObjectId,
+    staged_paths: &[String],
+) -> Result<(), HistoryError> {
+    let head_tree = commit_tree_for_apply(repo, head_commit)?;
+    let tree_raw = repo
+        .odb()
+        .read(&head_tree)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+    let tree_entries: std::collections::HashMap<Vec<u8>, (ObjectId, u32)> =
+        parse_tree(&tree_raw.data)
+            .map_err(|e| HistoryError::WorktreeApply {
+                message: e.to_string(),
+            })?
+            .into_iter()
+            .map(|e| (e.name.clone(), (e.oid, e.mode)))
+            .collect();
+    let mut index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    for path in staged_paths {
+        let key = path.as_bytes();
+        if let Some((oid, mode)) = tree_entries.get(key) {
+            if let Some(entry) = index.get_mut(key, 0) {
+                entry.oid = *oid;
+                entry.mode = *mode;
+            }
+        } else {
+            index.remove_path_all_stages(key);
+        }
+    }
+    index.sort();
+    repo.write_index(&mut index)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })
+}
+
+fn align_worktree_to_head_for_paths(
+    repo: &Repository,
+    head_tree: ObjectId,
+    paths: &[String],
+) -> Result<(), HistoryError> {
+    let Some(worktree) = repo.work_tree() else {
+        return Ok(());
+    };
+    for path in paths {
+        let abs = worktree.join(path);
+        match tree_entry_at_path(repo, head_tree, path)? {
+            Some((oid, _mode)) => {
+                if let Some(parent) = abs.parent() {
+                    fs::create_dir_all(parent).map_err(|e| HistoryError::WorktreeApply {
+                        message: e.to_string(),
+                    })?;
+                }
+                let blob = repo
+                    .odb()
+                    .read(&oid)
+                    .map_err(|e| HistoryError::WorktreeApply {
+                        message: e.to_string(),
+                    })?;
+                fs::write(&abs, &blob.data).map_err(|e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                })?;
+            }
+            None => {
+                if abs.is_file() {
+                    fs::remove_file(&abs).map_err(|e| HistoryError::WorktreeApply {
+                        message: e.to_string(),
+                    })?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn tree_entry_at_path(
+    repo: &Repository,
+    tree: ObjectId,
+    path: &str,
+) -> Result<Option<(ObjectId, u32)>, HistoryError> {
+    let mut current = tree;
+    let mut components = path.split('/').peekable();
+    while let Some(name) = components.next() {
+        let raw = repo
+            .odb()
+            .read(&current)
+            .map_err(|e| HistoryError::WorktreeApply {
+                message: e.to_string(),
+            })?;
+        let entries = parse_tree(&raw.data).map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+        let Some(entry) = entries
+            .iter()
+            .find(|e| e.name.as_slice() == name.as_bytes())
+        else {
+            return Ok(None);
+        };
+        if components.peek().is_some() {
+            if entry.mode != crate::index::MODE_TREE {
+                return Ok(None);
+            }
+            current = entry.oid;
+        } else {
+            return Ok(Some((entry.oid, entry.mode)));
+        }
+    }
+    Ok(None)
+}
+
+fn commit_tree_for_apply(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
+    let raw = repo
+        .odb()
+        .read(&commit)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+    if raw.kind != ObjectKind::Commit {
+        return Err(HistoryError::WorktreeApply {
+            message: format!("{commit} is not a commit"),
+        });
+    }
+    Ok(parse_commit(&raw.data)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?
+        .tree)
+}
 
 /// Commit ref movements from `plan`, then align index and worktree with the new `HEAD` tree when needed.
 ///
@@ -43,11 +331,20 @@ pub fn apply_rewrite(
     plan: &RewritePlan,
     opts: &ApplyOptions,
 ) -> Result<AppliedRewrite, HistoryError> {
+    apply_rewrite_inner(repo, plan, opts, false)
+}
+
+fn apply_rewrite_inner(
+    repo: &Repository,
+    plan: &RewritePlan,
+    opts: &ApplyOptions,
+    skip_worktree_verify: bool,
+) -> Result<AppliedRewrite, HistoryError> {
     let (old_tree, new_tree) = head_tree_transition(plan);
     let needs_worktree = !repo.is_bare() && head_tree_changes(&old_tree, &new_tree);
 
     if let (Some(old), Some(new)) = (old_tree.as_ref(), new_tree.as_ref()) {
-        if !repo.is_bare() {
+        if !repo.is_bare() && !skip_worktree_verify {
             verify_worktree_ready_for_head_tree_change(repo, Some(old), new)?;
         }
     }
@@ -267,11 +564,7 @@ fn restore_worktree_after_failed_apply(
             if change.status == DiffStatus::Deleted {
                 continue;
             }
-            let Some(path) = change
-                .new_path
-                .as_deref()
-                .or(change.old_path.as_deref())
-            else {
+            let Some(path) = change.new_path.as_deref().or(change.old_path.as_deref()) else {
                 continue;
             };
             if index.get(path.as_bytes(), 0).is_some() {
@@ -283,11 +576,10 @@ fn restore_worktree_after_failed_apply(
             }
         }
     }
-    let index_tree = write_tree_from_index(repo.odb(), &index, "").map_err(|e| {
-        HistoryError::WorktreeApply {
+    let index_tree =
+        write_tree_from_index(repo.odb(), &index, "").map_err(|e| HistoryError::WorktreeApply {
             message: e.to_string(),
-        }
-    })?;
+        })?;
     checkout_hard_to_tree_from_head_tree(repo, old, &index_tree).map_err(|e| {
         HistoryError::WorktreeApply {
             message: format!("failed to restore worktree after apply error: {e}"),

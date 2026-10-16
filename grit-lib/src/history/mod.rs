@@ -40,12 +40,14 @@
 
 mod apply;
 mod error;
+mod fixup;
 mod plan;
 mod reword;
 mod types;
 
-pub use apply::apply_rewrite;
+pub use apply::{apply_fixup_rewrite, apply_rewrite};
 pub use error::HistoryError;
+pub use fixup::{fixup, staged_fixup_paths, FixupOptions};
 pub use plan::{plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use reword::{normalize_rewrite_message, reword};
 pub use types::{
