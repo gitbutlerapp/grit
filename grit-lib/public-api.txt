@@ -2021,7 +2021,10 @@ pub fn grit_lib::config::global_config_paths_pub(&grit_lib::config::environment:
 pub fn grit_lib::config::parse_bool(&str) -> core::result::Result<bool, alloc::string::String>
 pub fn grit_lib::config::parse_color(&str) -> core::result::Result<alloc::string::String, alloc::string::String>
 pub fn grit_lib::config::parse_config_parameters(&str) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::config::parse_git_config_int(&str) -> core::result::Result<i32, grit_lib::config::GitConfigIntStrictError>
 pub fn grit_lib::config::parse_git_config_int_strict(&str) -> core::result::Result<i64, grit_lib::config::GitConfigIntStrictError>
+pub fn grit_lib::config::parse_git_config_maybe_bool(&str) -> core::option::Option<bool>
+pub fn grit_lib::config::parse_git_signed_config(&str, i64) -> core::result::Result<i64, grit_lib::config::GitConfigIntStrictError>
 pub fn grit_lib::config::parse_i64(&str) -> core::result::Result<i64, alloc::string::String>
 pub fn grit_lib::config::parse_path(&grit_lib::config::environment::Environment, &str) -> alloc::string::String
 pub fn grit_lib::config::parse_path_optional(&grit_lib::config::environment::Environment, &str) -> core::option::Option<alloc::string::String>

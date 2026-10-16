@@ -2898,11 +2898,7 @@ pub fn parse_bool(s: &str) -> std::result::Result<bool, String> {
         "" => Ok(false),
         "false" | "no" | "off" => Ok(false),
         _ => {
-            // Try parsing as Git's config integer syntax: 0 -> false, non-zero -> true.
-            if let Ok(n) = parse_i64(s) {
-                return Ok(n != 0);
-            }
-            Err(format!("bad boolean config value '{s}'"))
+            parse_git_config_maybe_bool(s).ok_or_else(|| format!("bad boolean config value '{s}'"))
         }
     }
 }
@@ -2982,6 +2978,128 @@ pub fn parse_git_config_int_strict(raw: &str) -> std::result::Result<i64, GitCon
         .map_err(|_| GitConfigIntStrictError::InvalidUnit)?;
     val.checked_mul(mult)
         .ok_or(GitConfigIntStrictError::OutOfRange)
+}
+
+fn git_unit_factor(suffix: &str) -> std::result::Result<i64, GitConfigIntStrictError> {
+    match suffix {
+        "" => Ok(1),
+        "k" | "K" => Ok(1024),
+        "m" | "M" => Ok(1024 * 1024),
+        "g" | "G" => Ok(1024_i64 * 1024 * 1024),
+        _ => Err(GitConfigIntStrictError::InvalidUnit),
+    }
+}
+
+/// Parse a base-0 signed integer prefix (Git `strtoimax(..., 0)`), returning unconsumed suffix.
+fn parse_base0_signed_prefix(
+    s: &str,
+) -> std::result::Result<(i64, &str), GitConfigIntStrictError> {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return Err(GitConfigIntStrictError::InvalidUnit);
+    }
+    let mut i = 0usize;
+    let mut sign: i64 = 1;
+    if bytes[i] == b'+' {
+        i += 1;
+    } else if bytes[i] == b'-' {
+        sign = -1;
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return Err(GitConfigIntStrictError::InvalidUnit);
+    }
+
+    let base = if bytes[i] == b'0' {
+        if i + 1 < bytes.len() && matches!(bytes[i + 1], b'x' | b'X') {
+            i += 2;
+            if i >= bytes.len() {
+                return Err(GitConfigIntStrictError::InvalidUnit);
+            }
+            16
+        } else {
+            8
+        }
+    } else {
+        10
+    };
+
+    let digit_start = i;
+    let mut acc: i128 = 0;
+    while i < bytes.len() {
+        let ch = char::from(bytes[i]);
+        let digit = match base {
+            10 => ch.to_digit(10),
+            8 => ch.to_digit(8),
+            16 => ch.to_digit(16),
+            _ => None,
+        };
+        let Some(d) = digit else {
+            break;
+        };
+        acc = acc
+            .checked_mul(base as i128)
+            .and_then(|v| v.checked_add(i128::from(d)))
+            .ok_or(GitConfigIntStrictError::OutOfRange)?;
+        i += 1;
+    }
+    if i == digit_start {
+        return Err(GitConfigIntStrictError::InvalidUnit);
+    }
+
+    let signed = if sign < 0 { -acc } else { acc };
+    let val = i64::try_from(signed).map_err(|_| GitConfigIntStrictError::OutOfRange)?;
+    Ok((val, &s[i..]))
+}
+
+/// Parse a signed integer with optional `k`/`m`/`g` scaling using Git base-0 rules (`git_parse_signed`).
+pub fn parse_git_signed_config(
+    raw: &str,
+    max: i64,
+) -> std::result::Result<i64, GitConfigIntStrictError> {
+    if max < 0 {
+        return Err(GitConfigIntStrictError::InvalidUnit);
+    }
+    let s = raw.trim();
+    if s.is_empty() {
+        return Err(GitConfigIntStrictError::InvalidUnit);
+    }
+
+    let (val, rest) = parse_base0_signed_prefix(s)?;
+    let factor = git_unit_factor(rest)?;
+
+    if val < 0 {
+        let min = -max - 1;
+        if min / factor > val {
+            return Err(GitConfigIntStrictError::OutOfRange);
+        }
+    } else if val > 0 && max / factor < val {
+        return Err(GitConfigIntStrictError::OutOfRange);
+    }
+
+    val.checked_mul(factor)
+        .ok_or(GitConfigIntStrictError::OutOfRange)
+}
+
+/// Parse a signed 32-bit config integer (`git_parse_int`).
+pub fn parse_git_config_int(raw: &str) -> std::result::Result<i32, GitConfigIntStrictError> {
+    let max = i32::MAX as i64;
+    let n = parse_git_signed_config(raw, max)?;
+    i32::try_from(n).map_err(|_| GitConfigIntStrictError::OutOfRange)
+}
+
+/// Parse Git `git_parse_maybe_bool`: `Some(true/false)` or `None` if unrecognized.
+pub fn parse_git_config_maybe_bool(raw: &str) -> Option<bool> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Some(false);
+    }
+    let lower = s.to_ascii_lowercase();
+    match lower.as_str() {
+        "true" | "yes" | "on" => Some(true),
+        "false" | "no" | "off" => Some(false),
+        _ => parse_git_config_int(s).ok().map(|n| n != 0),
+    }
 }
 
 const DIFF_CONTEXT_KEY: &str = "diff.context";

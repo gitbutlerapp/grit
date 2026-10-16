@@ -242,7 +242,7 @@ fn status_rejects_invalid_show_untracked_files_config_like_git() -> TestResult {
         .current_dir(repo)
         .status()
         .expect("grit init");
-    grit_ok(repo, &["config", "status.showUntrackedFiles", "false"]);
+    grit_ok(repo, &["config", "status.showUntrackedFiles", "bogus"]);
 
     let grit = grit_cmd()
         .args(["status", "--json"])
@@ -259,7 +259,7 @@ fn status_rejects_invalid_show_untracked_files_config_like_git() -> TestResult {
     assert_eq!(
         grit.status.success(),
         git.status.success(),
-        "grit and git must agree on invalid showUntrackedFiles=false (grit stdout: {}, git stderr: {})",
+        "grit and git must agree on invalid showUntrackedFiles=bogus (grit stdout: {}, git stderr: {})",
         String::from_utf8_lossy(&grit.stdout),
         String::from_utf8_lossy(&git.stderr)
     );

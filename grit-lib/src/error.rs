@@ -160,9 +160,9 @@ pub enum ConfigError {
     #[error("no multi-line comment allowed")]
     MultilineCommentNotAllowed,
 
-    /// `status.showUntrackedFiles` must be `no`, `normal`, or `all`.
+    /// `status.showUntrackedFiles` must be `no`, `normal`, `all`, or a Git boolean synonym.
     #[error(
-        "invalid value '{value}' for 'status.showUntrackedFiles' (expected no, normal, or all)"
+        "invalid value '{value}' for 'status.showUntrackedFiles' (expected no, normal, all, boolean words, or integer 0 vs nonzero)"
     )]
     InvalidUntrackedFilesMode {
         /// Raw config value that could not be parsed.

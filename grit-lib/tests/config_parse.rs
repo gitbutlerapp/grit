@@ -9,8 +9,9 @@ use std::process::Command;
 use grit_lib::config::environment::Environment;
 use grit_lib::config::{
     canonical_key, git_config_parameters_last_value, parse_bool, parse_color,
-    parse_config_parameters, parse_git_config_int_strict, parse_i64, parse_path, ConfigFile,
-    ConfigScope, ConfigSet, GitConfigIntStrictError,
+    parse_config_parameters, parse_git_config_int, parse_git_config_int_strict,
+    parse_git_config_maybe_bool, parse_i64, parse_path, ConfigFile, ConfigScope, ConfigSet,
+    GitConfigIntStrictError,
 };
 use support::{
     assert_bad_line_error, assert_canonical_key_err, assert_file_get_matches_git,
@@ -370,6 +371,15 @@ fn extra_parse_color_and_int_coverage() {
     assert!(parse_color("reset").is_ok());
     assert!(parse_i64("1g").is_ok());
     assert!(parse_git_config_int_strict("-1").is_ok());
+    assert_eq!(parse_git_config_int("2k").unwrap(), 2048);
+    assert_eq!(parse_git_config_int("0x2").unwrap(), 2);
+    assert_eq!(parse_git_config_int("01").unwrap(), 1);
+    assert!(parse_git_config_int("08").is_err());
+    assert!(parse_git_config_int("2147483648").is_err());
+    assert!(parse_git_config_int("-2147483649").is_err());
+    assert_eq!(parse_git_config_maybe_bool("2k"), Some(true));
+    assert_eq!(parse_git_config_maybe_bool("0x2"), Some(true));
+    assert_eq!(parse_git_config_maybe_bool("08"), None);
     let mut set = ConfigSet::new();
     set.add_command_override("test.flag", "true").expect("ov");
     assert!(set.get_bool("test.flag").unwrap().unwrap());
