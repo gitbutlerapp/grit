@@ -43,7 +43,10 @@ use crate::odb::Odb;
 use crate::odb::UnreachablePackRetention;
 use crate::pack_bitmap::{PackBitmapWriteOptions, PackBitmapWriter};
 use crate::pack_object_select::{enumerate_pack_objects, PackEnumerateOptions};
-use crate::pack_objects::{build_pack, build_pack_from_send_list, PackBuildOptions};
+use crate::pack_objects::{
+    build_pack_from_send_list_with_parallel_threads, build_pack_with_write_threads,
+    PackBuildOptions,
+};
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
 use crate::progress::{NeverCancel, NullProgress};
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
@@ -84,6 +87,8 @@ pub struct RepackOptions {
     /// When [`Self::write_bitmap`] is true and the repository already has pack files, bitmaps are
     /// written via a multi-pack-index sidecar instead of a per-pack `.bitmap` on the new pack alone.
     pub incremental: bool,
+    /// When true, skip rebuilding packs when Git `gc` would not (`gc.auto` / `gc.autoPackLimit`).
+    pub auto_skip: bool,
 }
 
 impl Default for RepackOptions {
@@ -100,6 +105,7 @@ impl Default for RepackOptions {
             merged_config: None,
             environment: Environment::empty(),
             incremental: false,
+            auto_skip: false,
         }
     }
 }
@@ -338,7 +344,10 @@ pub struct GcOptions {
 impl Default for GcOptions {
     fn default() -> Self {
         Self {
-            repack: RepackOptions::default(),
+            repack: RepackOptions {
+                auto_skip: true,
+                ..RepackOptions::default()
+            },
             expire_reflog: true,
             now_unix: 0,
             pack_refs: true,
@@ -352,7 +361,11 @@ impl GcOptions {
     #[must_use]
     pub fn with_repack_dry_run(dry_run: bool, now_unix: i64) -> Self {
         Self {
-            repack: RepackOptions::with_dry_run(dry_run),
+            repack: RepackOptions {
+                dry_run,
+                auto_skip: true,
+                ..RepackOptions::default()
+            },
             expire_reflog: true,
             now_unix,
             ..Self::default()
@@ -363,7 +376,10 @@ impl GcOptions {
     #[must_use]
     pub fn with_reflog_policy(now_unix: i64, expire_reflog: bool) -> Self {
         Self {
-            repack: RepackOptions::default(),
+            repack: RepackOptions {
+                auto_skip: true,
+                ..RepackOptions::default()
+            },
             expire_reflog,
             now_unix,
             ..Self::default()
@@ -374,7 +390,11 @@ impl GcOptions {
     #[must_use]
     pub fn full_run(dry_run: bool, now_unix: i64) -> Self {
         Self {
-            repack: RepackOptions::with_dry_run(dry_run),
+            repack: RepackOptions {
+                dry_run,
+                auto_skip: true,
+                ..RepackOptions::default()
+            },
             expire_reflog: true,
             now_unix,
             pack_refs: true,
@@ -673,12 +693,32 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         .merged_config
         .clone()
         .or_else(|| repo.config().ok().map(|c| (*c).clone()));
-    let pack_opts = opts
-        .pack_build
-        .unwrap_or_else(|| PackBuildOptions::for_local_copy(cfg.as_ref()));
+    let pack_opts = opts.pack_build.unwrap_or_else(|| {
+        if opts.incremental {
+            PackBuildOptions::for_local_copy(cfg.as_ref())
+        } else if opts.auto_skip {
+            // `grit gc`: fast on-disk reuse when a repack is actually required.
+            PackBuildOptions::for_repack_rewrite(cfg.as_ref())
+        } else {
+            // Explicit `grit repack`: match Git repack delta consolidation quality.
+            PackBuildOptions::for_local_copy(cfg.as_ref())
+        }
+    });
+
+    let run_incremental = opts.incremental;
+
+    let skip_repack = should_auto_skip_repack(
+        loose_before,
+        packs_before,
+        run_incremental,
+        opts.auto_skip,
+        cfg.as_ref(),
+    );
 
     if opts.dry_run {
-        report.objects = if opts.incremental {
+        report.objects = if skip_repack {
+            0
+        } else if run_incremental {
             odb.enumerate_local_loose_objects()?.len()
         } else {
             estimate_repack_object_count(odb, &roots, opts.keep_unreachable, &pack_opts)?
@@ -692,10 +732,12 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         });
     }
 
-    let pack_bytes = if opts.incremental {
-        pack_loose_objects_incremental(odb, repo, &pack_opts, &cfg)?
+    let pack_bytes = if skip_repack {
+        Vec::new()
+    } else if run_incremental {
+        pack_loose_objects_incremental(odb, &pack_opts, opts.threads)?
     } else {
-        build_repack_pack(odb, &roots, opts.keep_unreachable, &pack_opts)?
+        build_repack_pack(odb, &roots, opts.keep_unreachable, &pack_opts, opts.threads)?
     };
     if pack_bytes.is_empty() {
         return Ok(RepackDetail {
@@ -904,9 +946,8 @@ fn gc_repack_writes_bitmap(repo: &Repository, config: &ConfigSet) -> bool {
 
 fn pack_loose_objects_incremental(
     odb: &Odb,
-    _repo: &Repository,
     pack_opts: &PackBuildOptions,
-    _config: &Option<ConfigSet>,
+    threads: Option<usize>,
 ) -> Result<Vec<u8>> {
     let loose: Vec<ObjectId> = odb
         .enumerate_local_loose_objects()?
@@ -920,13 +961,45 @@ fn pack_loose_objects_incremental(
     incremental_opts.delta = false;
     incremental_opts.reuse_deltas = false;
     incremental_opts.use_bitmaps = false;
-    build_pack_from_send_list(
+    build_pack_from_send_list_with_parallel_threads(
         odb,
         &loose,
         &HashSet::new(),
         &incremental_opts,
         &HashMap::new(),
+        None,
+        threads,
     )
+}
+
+/// Whether maintenance should skip rebuilding packs (Git `gc --auto` heuristics).
+///
+/// Unreachable or grace-protected objects in an existing pack do **not** trigger repack; only
+/// `gc.auto` (loose count) and `gc.autoPackLimit` (pack count) do, matching Git.
+fn should_auto_skip_repack(
+    loose_objects: usize,
+    pack_count: usize,
+    incremental: bool,
+    auto_skip: bool,
+    config: Option<&ConfigSet>,
+) -> bool {
+    if !auto_skip || incremental {
+        return false;
+    }
+    if !config.is_some_and(ConfigSet::gc_auto_loose_disabled) {
+        let loose_auto = config.map(ConfigSet::gc_auto_loose_limit).unwrap_or(6700);
+        if loose_objects >= loose_auto {
+            return false;
+        }
+    }
+    if pack_count == 0 {
+        return loose_objects == 0;
+    }
+    if config.is_some_and(ConfigSet::gc_auto_pack_limit_disabled) {
+        return true;
+    }
+    let pack_limit = config.map(ConfigSet::gc_auto_pack_limit).unwrap_or(50);
+    pack_count <= pack_limit
 }
 
 /// Delete unreachable loose objects using `gc.pruneExpire` or an explicit cutoff.
@@ -999,15 +1072,23 @@ pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
         return Ok(stats);
     }
 
-    stats.prune = if repack_opts.keep_unreachable {
-        PruneStats::default()
-    } else {
-        PruneStats {
+    if repack_opts.keep_unreachable {
+        stats.prune = PruneStats::default();
+        stats.prune_ran = false;
+    } else if stats.repack.unreachable_prune_ran {
+        stats.prune = PruneStats {
             pruned: stats.repack.unreachable_loose_pruned,
             kept: stats.repack.unreachable_loose_kept,
-        }
-    };
-    stats.prune_ran = stats.repack.unreachable_prune_ran;
+        };
+        stats.prune_ran = true;
+    } else {
+        let roots = collect_maintenance_object_roots(repo)?;
+        let keep_newer_than = repack_opts.prune_older_than.map(offset_to_system_time);
+        let prune_start = Instant::now();
+        stats.prune = prune_loose_unreachable(odb, &roots, keep_newer_than)?;
+        stats.phase_timings.prune_ms = duration_ms(prune_start.elapsed());
+        stats.prune_ran = true;
+    }
 
     if opts.write_commit_graph {
         let start = Instant::now();
@@ -1168,9 +1249,10 @@ fn build_repack_pack(
     roots: &[ObjectId],
     keep_unreachable: bool,
     opts: &PackBuildOptions,
+    threads: Option<usize>,
 ) -> Result<Vec<u8>> {
     if !keep_unreachable {
-        return build_pack(odb, roots, &[], opts);
+        return build_pack_with_write_threads(odb, roots, &[], opts, threads);
     }
     let empty_shallow = HashSet::new();
     let selection = enumerate_pack_objects(
@@ -1187,12 +1269,14 @@ fn build_repack_pack(
     )?;
     let mut send = selection.send;
     append_repack_unreachable_retention(odb, &mut send)?;
-    build_pack_from_send_list(
+    build_pack_from_send_list_with_parallel_threads(
         odb,
         &send,
         &selection.have_closure,
         opts,
         &selection.blob_name_hashes,
+        threads,
+        threads,
     )
 }
 
@@ -1250,7 +1334,11 @@ fn count_pack_files(pack_dir: &Path) -> usize {
         .ok()
         .map(|rd| {
             rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+                .filter(|e| {
+                    let path = e.path();
+                    path.extension().is_some_and(|ext| ext == "pack")
+                        && !pack_has_keep_marker(pack_dir, &path)
+                })
                 .count()
         })
         .unwrap_or(0)
@@ -1391,11 +1479,71 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::InitOptions;
     use tempfile::TempDir;
+
+    #[test]
+    fn auto_skip_repack_matches_gc_auto_heuristics() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
+        stage_for_commit(&repo, &mut NullProgress).expect("stage");
+        let ident = "Test <t@example.com> 1 +0000".to_string();
+        create_commit(
+            &repo,
+            &CommitRequest {
+                message: "init".into(),
+                author: ident.clone(),
+                committer: ident,
+                allow_empty: false,
+                sign_override: None,
+                amend: false,
+                assume_worktree_synced: false,
+            },
+            &mut NullProgress,
+        )
+        .expect("commit");
+        git_cmd(dir.path(), &["repack", "-a", "-d"]);
+        assert!(should_auto_skip_repack(0, 1, false, true, None));
+        assert!(should_auto_skip_repack(3, 1, false, true, None));
+        assert!(!should_auto_skip_repack(6700, 1, false, true, None));
+        assert!(!should_auto_skip_repack(0, 51, false, true, None));
+        let mut disabled = ConfigSet::new();
+        let file = ConfigFile::parse(
+            Path::new(".git/config"),
+            "[gc]\n\tautoPackLimit = 0\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        disabled.merge(&file);
+        assert!(should_auto_skip_repack(0, 2, false, true, Some(&disabled)));
+    }
+
+    #[test]
+    fn count_pack_files_ignores_keep_markers() {
+        let dir = TempDir::new().unwrap();
+        let pack_dir = dir.path().join("pack");
+        fs::create_dir_all(&pack_dir).unwrap();
+        fs::write(pack_dir.join("pack-aaa.pack"), b"PACK").unwrap();
+        fs::write(pack_dir.join("pack-bbb.pack"), b"PACK").unwrap();
+        fs::write(pack_dir.join("pack-bbb.keep"), b"").unwrap();
+        assert_eq!(count_pack_files(&pack_dir), 1);
+    }
+
+    fn git_cmd(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?}");
+    }
 
     #[test]
     fn fsck_clean_repo_ok() {

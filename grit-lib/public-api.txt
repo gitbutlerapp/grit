@@ -1863,6 +1863,10 @@ pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Optio
 pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
 pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
+pub fn grit_lib::config::ConfigSet::gc_auto_loose_disabled(&self) -> bool
+pub fn grit_lib::config::ConfigSet::gc_auto_loose_limit(&self) -> usize
+pub fn grit_lib::config::ConfigSet::gc_auto_pack_limit(&self) -> usize
+pub fn grit_lib::config::ConfigSet::gc_auto_pack_limit_disabled(&self) -> bool
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
 pub fn grit_lib::config::ConfigSet::load(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::config::ConfigSet::load_protected(&grit_lib::config::environment::Environment, bool) -> grit_lib::error::Result<Self>
@@ -4727,6 +4731,7 @@ impl core::marker::UnsafeUnpin for grit_lib::maintenance::PruneOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::PruneOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::PruneOptions
 #[non_exhaustive] pub struct grit_lib::maintenance::RepackOptions
+pub grit_lib::maintenance::RepackOptions::auto_skip: bool
 pub grit_lib::maintenance::RepackOptions::dry_run: bool
 pub grit_lib::maintenance::RepackOptions::environment: grit_lib::config::environment::Environment
 pub grit_lib::maintenance::RepackOptions::incremental: bool
@@ -7158,6 +7163,7 @@ pub grit_lib::objects::pack_objects::PackBuildOptions::window: usize
 impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
+pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_for_upload_pack(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::window_and_depth_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> (usize, usize)
@@ -9317,6 +9323,10 @@ pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Optio
 pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
 pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
+pub fn grit_lib::config::ConfigSet::gc_auto_loose_disabled(&self) -> bool
+pub fn grit_lib::config::ConfigSet::gc_auto_loose_limit(&self) -> usize
+pub fn grit_lib::config::ConfigSet::gc_auto_pack_limit(&self) -> usize
+pub fn grit_lib::config::ConfigSet::gc_auto_pack_limit_disabled(&self) -> bool
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
 pub fn grit_lib::config::ConfigSet::load(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::config::ConfigSet::load_protected(&grit_lib::config::environment::Environment, bool) -> grit_lib::error::Result<Self>
@@ -12068,6 +12078,7 @@ pub grit_lib::remote::transfer::PackBuildOptions::window: usize
 impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
+pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_for_upload_pack(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::window_and_depth_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> (usize, usize)

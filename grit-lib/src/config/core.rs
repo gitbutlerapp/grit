@@ -2020,6 +2020,41 @@ impl ConfigSet {
         }
     }
 
+    /// Loose-object count at or above which `git gc --auto` may repack (`gc.auto`, Git default 6700).
+    #[must_use]
+    pub fn gc_auto_loose_limit(&self) -> usize {
+        match self.get_i64("gc.auto") {
+            None => 6700,
+            Some(Ok(0)) => 6700,
+            Some(Ok(n)) if n > 0 => usize::try_from(n).unwrap_or(6700),
+            Some(Ok(_)) | Some(Err(_)) => 6700,
+        }
+    }
+
+    /// Whether `gc.auto=0` disables automatic loose-object repack triggers.
+    #[must_use]
+    pub fn gc_auto_loose_disabled(&self) -> bool {
+        matches!(self.get_i64("gc.auto"), Some(Ok(0)))
+    }
+
+    /// Pack count above which `git gc --auto` repacks all packs (`gc.autoPackLimit`, Git default 50).
+    ///
+    /// An explicit **`0`** disables automatic pack consolidation (never treated as “limit exceeded”).
+    #[must_use]
+    pub fn gc_auto_pack_limit(&self) -> usize {
+        match self.get_i64("gc.autoPackLimit") {
+            None => 50,
+            Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(50),
+            Some(Ok(_)) | Some(Err(_)) => 50,
+        }
+    }
+
+    /// Whether [`Self::gc_auto_pack_limit`] disables automatic pack consolidation.
+    #[must_use]
+    pub fn gc_auto_pack_limit_disabled(&self) -> bool {
+        matches!(self.get_i64("gc.autoPackLimit"), Some(Ok(0)))
+    }
+
     /// Whether pack-objects may use reachability bitmaps (`pack.useBitmaps`, default true).
     #[must_use]
     pub fn pack_use_bitmaps(&self) -> bool {
@@ -4312,6 +4347,19 @@ mod pack_object_config_tests {
         let set = set_from_snippet("[pack]\n\twindow = 0\n\tdepth = 0\n");
         assert_eq!(set.pack_object_window(), 0);
         assert_eq!(set.pack_object_depth(), 0);
+    }
+
+    #[test]
+    fn gc_auto_limits_from_config() {
+        let set = set_from_snippet("[gc]\n\tauto = 100\n\tautoPackLimit = 3\n");
+        assert_eq!(set.gc_auto_loose_limit(), 100);
+        assert_eq!(set.gc_auto_pack_limit(), 3);
+        assert!(!set.gc_auto_pack_limit_disabled());
+        let disabled = set_from_snippet("[gc]\n\tautoPackLimit = 0\n");
+        assert_eq!(disabled.gc_auto_pack_limit(), 0);
+        assert!(disabled.gc_auto_pack_limit_disabled());
+        let auto_off = set_from_snippet("[gc]\n\tauto = 0\n");
+        assert!(auto_off.gc_auto_loose_disabled());
     }
 }
 

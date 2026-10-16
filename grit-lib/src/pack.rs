@@ -3906,7 +3906,7 @@ pub fn collect_packed_delta_reuse_for_send(
 
     let mut results = HashMap::new();
     for (oid, slot) in on_disk {
-        if !chain_ok.get(&oid).copied().unwrap_or(false) || !resolved.contains_key(&oid) {
+        if !chain_ok.get(&oid).copied().unwrap_or(false) {
             continue;
         }
         results.insert(
