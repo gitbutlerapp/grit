@@ -10,7 +10,7 @@ use crate::refs::SYMREF_MAXDEPTH;
 use super::error::RefStoreError;
 use super::semantics::format_reflog_identity;
 use super::transaction::expected_matches;
-use super::types::{RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
+use super::types::{Expected, RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -34,16 +34,26 @@ impl RefBatchState {
     }
 }
 
+/// Whether `update.expected` is satisfied given current batch state (including symref peel for CAS).
+pub fn expected_matches_for_update(state: &RefBatchState, update: &RefUpdate) -> bool {
+    if let Expected::Oid(want) = &update.expected {
+        if should_deref_symref_update(state, update) {
+            return reflog_old_oid_before(state, update) == *want;
+        }
+    }
+    let actual = state.refs.get(&update.name);
+    expected_matches(actual, &update.expected)
+}
+
 /// Verify CAS and apply every update to `trial`, returning the first error.
 pub fn simulate_batch_apply(state: &RefBatchState, updates: &[RefUpdate]) -> StoreResult<()> {
     let mut trial = state.snapshot();
     for update in updates {
-        let actual = trial.refs.get(&update.name);
-        if !expected_matches(actual, &update.expected) {
+        if !expected_matches_for_update(&trial, update) {
             return Err(RefStoreError::ExpectedMismatch {
                 name: update.name.clone(),
                 expected: update.expected.clone(),
-                actual: actual.cloned(),
+                actual: trial.refs.get(&update.name).cloned(),
             });
         }
         apply_update(&mut trial, update)?;
@@ -59,11 +69,20 @@ pub fn apply_update(state: &mut RefBatchState, update: &RefUpdate) -> StoreResul
             reflog_new_oid_before(state, update),
         )
     });
+    let deref_target_reflog = update.reflog.as_ref().and_then(|_| {
+        if !should_deref_symref_update(state, update) {
+            return None;
+        }
+        symref_peel_write_target(&state.refs, &update.name).ok()
+    });
 
     apply_ref_change(state, update)?;
 
     if let (Some(log), Some((old_oid, new_oid))) = (&update.reflog, reflog_oids) {
         append_reflog_entry(state, &update.name, old_oid, new_oid, log);
+        if let Some(target) = deref_target_reflog {
+            append_reflog_entry(state, &target, old_oid, new_oid, log);
+        }
     }
     Ok(())
 }
@@ -156,6 +175,33 @@ fn append_reflog_entry(
         .entry(name.to_owned())
         .or_default()
         .push(entry);
+}
+
+/// Peel targets whose stored value changes when `update` is a symbolic-ref delete with deref.
+pub(crate) fn symref_deref_delete_changed_targets(
+    before: &RefBatchState,
+    after: &RefBatchState,
+    update: &RefUpdate,
+) -> Vec<String> {
+    if update.new_value.is_some() || update.flags.log_only || update.flags.no_deref {
+        return Vec::new();
+    }
+    if !matches!(before.refs.get(&update.name), Some(RawRef::Symbolic(_))) {
+        return Vec::new();
+    }
+    let Ok(target) = symref_peel_write_target(&before.refs, &update.name) else {
+        return Vec::new();
+    };
+    if !before.refs.contains_key(&target) {
+        return Vec::new();
+    }
+    if after.refs.get(&target).is_some() {
+        return Vec::new();
+    }
+    if before.refs.get(&target) == after.refs.get(&target) {
+        return Vec::new();
+    }
+    vec![target]
 }
 
 /// Ref names that must be locked for a batch (update targets plus symref peel targets).

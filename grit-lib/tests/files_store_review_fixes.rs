@@ -5,11 +5,13 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::objects::ObjectId;
+use grit_lib::reflog::ReflogEntry;
 use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefStore, RefStoreError, RefTransaction,
     RefUpdate, ReflogUpdate,
 };
 use grit_lib::refs::LogRefsConfig;
+use std::ops::ControlFlow;
 use time::OffsetDateTime;
 
 const TRAVERSAL_REF: &str = "refs/heads/../../config";
@@ -343,6 +345,163 @@ fn files_store_reflog_identity_with_digits_in_name_gets_timestamp() {
         })
         .expect("read reflog via store");
     assert_eq!(count, 1, "expected one reflog entry");
+}
+
+#[test]
+fn files_store_symref_expected_oid_update_reflog_old_oid() {
+    let (_dir, git_dir) = bare_git_dir();
+    let oid_old = sample_oid();
+    let oid_new = other_oid();
+
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
+    for (name, value) in [
+        ("refs/heads/target", RawRef::Direct(oid_old)),
+        (
+            "refs/heads/sym",
+            RawRef::Symbolic("refs/heads/target".to_owned()),
+        ),
+    ] {
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: name.to_owned(),
+                new_value: Some(value),
+                expected: Expected::Missing,
+                reflog: None,
+                flags: Default::default(),
+            })
+            .expect("seed");
+        store
+            .prepare(txn)
+            .expect("prepare seed")
+            .commit()
+            .expect("commit seed");
+    }
+
+    let time =
+        OffsetDateTime::from_unix_timestamp(1_700_000_002).expect("valid unix time for test");
+    let txn = RefTransaction::new()
+        .update(RefUpdate {
+            name: "refs/heads/sym".to_owned(),
+            new_value: Some(RawRef::Direct(oid_new)),
+            expected: Expected::Oid(oid_old),
+            reflog: Some(ReflogUpdate {
+                identity: "Tester <t@example.com>".to_owned(),
+                message: "update through symref".to_owned(),
+                time,
+            }),
+            flags: Default::default(),
+        })
+        .expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare partial batch")
+        .commit()
+        .expect("commit");
+
+    let mut last: Option<ReflogEntry> = None;
+    store
+        .for_each_reflog_entry("refs/heads/sym", true, &mut |e| {
+            last = Some(e.clone());
+            ControlFlow::Break(())
+        })
+        .expect("sym reflog");
+    let entry = last.expect("sym reflog entry");
+    assert_eq!(
+        entry.old_oid, oid_old,
+        "symref reflog old OID must be the peeled target's previous OID"
+    );
+    assert_eq!(entry.new_oid, oid_new);
+}
+
+#[test]
+fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let git_dir = dir.path().to_path_buf();
+    let init = Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(&git_dir)
+        .status()
+        .expect("git init");
+    assert!(init.success(), "git init --bare failed");
+
+    let oid_main = sample_oid();
+    let oid_next = other_oid();
+
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
+    let seed = RefTransaction::new()
+        .update(RefUpdate {
+            name: "refs/heads/main".to_owned(),
+            new_value: Some(RawRef::Direct(oid_main)),
+            expected: Expected::Missing,
+            reflog: None,
+            flags: Default::default(),
+        })
+        .expect("seed txn");
+    store
+        .prepare(seed)
+        .expect("seed prepare")
+        .commit()
+        .expect("seed commit");
+
+    fs::remove_file(git_dir.join("refs/heads/main")).expect("remove loose main");
+    let mut packed = String::from("# pack-refs with: peeled fully-peeled sorted \n");
+    packed.push_str(&format!("{oid_main} refs/heads/main\n"));
+    fs::write(git_dir.join("packed-refs"), packed).expect("packed-refs");
+    assert!(
+        !git_dir.join("refs/heads/main").exists(),
+        "main should be packed-only"
+    );
+
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD symref");
+
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store after pack");
+    let time =
+        OffsetDateTime::from_unix_timestamp(1_700_000_001).expect("valid unix time for test");
+    let txn = RefTransaction::new()
+        .update(RefUpdate {
+            name: "HEAD".to_owned(),
+            new_value: Some(RawRef::Direct(oid_next)),
+            expected: Expected::Any,
+            reflog: Some(ReflogUpdate {
+                identity: "Tester <t@example.com>".to_owned(),
+                message: "move head".to_owned(),
+                time,
+            }),
+            flags: Default::default(),
+        })
+        .expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare with partial batch state")
+        .commit()
+        .expect("commit");
+
+    let mut head_entry: Option<ReflogEntry> = None;
+    store
+        .for_each_reflog_entry("HEAD", true, &mut |e| {
+            head_entry = Some(e.clone());
+            ControlFlow::Break(())
+        })
+        .expect("HEAD reflog");
+    let head_entry = head_entry.expect("HEAD reflog entry");
+    assert_eq!(
+        head_entry.old_oid, oid_main,
+        "HEAD reflog old OID must peel packed main"
+    );
+    assert_eq!(head_entry.new_oid, oid_next);
+
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("main"),
+        Some(RawRef::Direct(oid_next)),
+        "deref update must move packed main to the new oid"
+    );
+
+    let main_log = fs::read_to_string(git_dir.join("logs/refs/heads/main")).expect("main reflog");
+    let line = main_log.lines().next().expect("main reflog line");
+    assert!(
+        line.starts_with(&format!("{oid_main} {oid_next}")),
+        "main reflog must record peeled old and new oids: {line}"
+    );
 }
 
 #[test]
