@@ -1205,6 +1205,51 @@ fn prospective_index_entry(path: &str, oid: ObjectId, mode: u32) -> IndexEntry {
 /// Symlink targets are returned unchanged. When a process filter returns `status=delayed`,
 /// returns `Ok(None)` and records the path in `delayed_checkout`; the checkout driver completes
 /// those paths via [`DelayedProcessCheckout::finish`].
+/// Smudge index-format blob bytes for a worktree path (EOL, filters, ident).
+///
+/// Returns symlink targets unchanged. Used when writing merge/stash conflict markers
+/// and other blobs that are stored LF-normalized in the object database.
+pub(crate) fn smudge_bytes_for_worktree_path(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    rel_path: &str,
+    mode: u32,
+    blob: &[u8],
+    oid: &ObjectId,
+) -> Result<Vec<u8>> {
+    if mode == MODE_SYMLINK {
+        return Ok(blob.to_vec());
+    }
+    match worktree_bytes_from_index_blob(repo, rules, rel_path, mode, blob, oid, None)? {
+        Some(bytes) => Ok(bytes),
+        None => Err(Error::PathError(format!(
+            "delayed filter checkout is not supported for '{rel_path}'"
+        ))),
+    }
+}
+
+/// Write a blob from the object database to the worktree with checkout smudge rules.
+pub(crate) fn write_smudged_blob_to_worktree(
+    repo: &Repository,
+    work_tree: &Path,
+    rules: &WorktreeRules,
+    rel_path: &str,
+    oid: &ObjectId,
+    mode: u32,
+) -> Result<()> {
+    let blob = repo.odb().read(oid)?;
+    let worktree_bytes =
+        smudge_bytes_for_worktree_path(repo, rules, rel_path, mode, &blob.data, oid)?;
+    write_to_worktree_cached(
+        work_tree,
+        rel_path,
+        &worktree_bytes,
+        mode,
+        &mut LeadingDirCache::new(),
+    )?;
+    Ok(())
+}
+
 pub(crate) fn worktree_bytes_from_index_blob(
     repo: &Repository,
     rules: &WorktreeRules,

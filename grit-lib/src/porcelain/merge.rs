@@ -511,15 +511,15 @@ fn apply_conflict_merge_worktree(
         .collect();
     checkout::checkout_tree_changes(repo, &filtered)?;
 
+    let rules = WorktreeRules::from_repository(repo, &index)?;
     for (path, oid) in &merged.conflict_content {
         let mode = index
             .get(path, 2)
             .or_else(|| index.get(path, 3))
             .map(|e| e.mode)
             .unwrap_or(0o100644);
-        let blob = repo.odb().read(oid)?;
         let rel = String::from_utf8_lossy(path);
-        checkout::write_to_worktree(work_tree, rel.as_ref(), &blob.data, mode)?;
+        checkout::write_smudged_blob_to_worktree(repo, work_tree, &rules, rel.as_ref(), oid, mode)?;
     }
     refresh_stage0_index_stats_from_worktree(repo, work_tree, &mut index)?;
     repo.write_index(&mut index)?;

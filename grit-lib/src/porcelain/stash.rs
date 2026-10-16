@@ -29,6 +29,7 @@ use crate::index::MODE_EXECUTABLE;
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::porcelain::checkout::checkout_between_trees;
+use crate::porcelain::checkout::smudge_bytes_for_worktree_path;
 use crate::porcelain::clean::{is_nested_git_worktree, path_in_nested_git_worktree};
 use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::merge::tree_to_index_entries;
@@ -41,6 +42,7 @@ use crate::reflog::{delete_reflog_entries_rechain, read_reflog, truncate_last_re
 use crate::refs::{self, append_reflog, delete_ref, write_ref};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
+use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
 
 /// A single blob entry from a recursively flattened tree.
@@ -1144,6 +1146,7 @@ pub fn apply_stash(
 
     let mut has_conflicts = false;
     let mut new_index = current_index.clone();
+    let worktree_rules = WorktreeRules::from_repository(repo, &new_index)?;
 
     // First pass: process deletions (None entries) before additions to avoid
     // type conflicts (e.g., trying to write a file where a directory exists).
@@ -1253,7 +1256,16 @@ pub fn apply_stash(
                             ignore_cr_at_eol: false,
                         };
                         let output = merge(&input)?;
-                        write_regular_file_replacing_symlink(&file_path, &output.content)?;
+                        let marker_oid = repo.odb().hash(ObjectKind::Blob, &output.content);
+                        let worktree_bytes = smudge_bytes_for_worktree_path(
+                            repo,
+                            &worktree_rules,
+                            path,
+                            entry.mode,
+                            &output.content,
+                            &marker_oid,
+                        )?;
+                        write_regular_file_replacing_symlink(&file_path, &worktree_bytes)?;
                         if output.conflicts > 0 {
                             has_conflicts = true;
                             // Write conflict stages to index
