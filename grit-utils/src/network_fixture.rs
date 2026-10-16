@@ -149,6 +149,27 @@ fn rev_parse(git: &Path, dir: &Path, rev: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+fn object_kind(git: &Path, repo: &Path, oid: &str) -> Result<String> {
+    let mut cmd = Command::new(git);
+    cmd.args(["cat-file", "-t", oid]).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git cat-file -t")?;
+    if !out.status.success() {
+        bail!(
+            "cat-file -t {oid} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn campaign_cached_meta_valid(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Result<bool> {
+    if meta.kind != "CampaignRealRepo" {
+        return Ok(false);
+    }
+    Ok(object_kind(git, bare, &meta.fetch_base_oid)? == "commit")
+}
+
 /// Root directory for cached network fixtures (`GRIT_BENCH_NETWORK_CACHE`).
 pub fn network_cache_root() -> PathBuf {
     std::env::var("GRIT_BENCH_NETWORK_CACHE")
@@ -436,7 +457,14 @@ pub fn ensure_campaign_bare_network_meta(
     smoke: bool,
 ) -> Result<NetworkBenchMeta> {
     if meta_path(bare).is_file() {
-        return load_meta(bare);
+        let meta = load_meta(bare)?;
+        if campaign_cached_meta_valid(git, bare, &meta)? {
+            return Ok(meta);
+        }
+        fs::remove_file(meta_path(bare)).ok();
+        if meta.client_repo.exists() {
+            remove_dir_robust(&meta.client_repo);
+        }
     }
     let profile = if smoke {
         NetworkProfile::Smoke
