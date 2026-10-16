@@ -443,16 +443,29 @@ pub fn ensure_campaign_bare_network_meta(
     } else {
         NetworkProfile::Production
     };
-    let default_branch = default_branch_on_bare(git, bare)?;
-    let fetch_base = rev_parse(
-        git,
-        bare,
-        &format!(
-            "refs/heads/{default_branch}~{}",
-            profile.incremental_fetch_commits()
-        ),
-    )
-    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
+    let tag_only = crate::real_repo_fixture::list_branch_head_refs(bare)?.is_empty();
+    let default_branch = if tag_only {
+        // Tag-pinned git.git bare remotes expose no `refs/heads/*`; use a stable label for client config.
+        "master".into()
+    } else {
+        default_branch_on_bare(git, bare)?
+    };
+    let fetch_base = if tag_only {
+        let tag = std::env::var("GRIT_BENCH_GIT_GIT_TAG").unwrap_or_else(|_| {
+            crate::real_repo_fixture::DEFAULT_GIT_GIT_TAG.to_owned()
+        });
+        rev_parse(git, bare, &tag)?
+    } else {
+        rev_parse(
+            git,
+            bare,
+            &format!(
+                "refs/heads/{default_branch}~{}",
+                profile.incremental_fetch_commits()
+            ),
+        )
+        .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?
+    };
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: "CampaignRealRepo".into(),
