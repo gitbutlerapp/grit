@@ -935,6 +935,8 @@ pub fn check_stash_apply_would_overwrite_local_changes(
         Err(e) => return Err(e),
     };
 
+    let config = repo.config()?;
+
     for path in stash_worktree_change_paths(repo, stash_commit)? {
         let Some(idx_entry) = current_index.get(path.as_bytes(), 0) else {
             continue;
@@ -948,6 +950,7 @@ pub fn check_stash_apply_would_overwrite_local_changes(
             work_tree,
             idx_entry,
             true,
+            Some(config.as_ref()),
             None,
         )? {
             return Err(Error::StashWouldOverwriteLocalChanges {

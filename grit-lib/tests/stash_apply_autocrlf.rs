@@ -1,9 +1,10 @@
 //! Stash apply/pop with `core.autocrlf=true` and CRLF worktree bytes (issue #958).
+//! Issue #1111: inherited system `core.autocrlf` without a repo-local override.
 
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::stash::{apply_stash, pop_stash, push_stash, StashCreateOptions};
 use grit_lib::repo::Repository;
-use grit_test_support::git;
+use grit_test_support::{git, git_cmd as git_shell};
 
 fn git_cmd(repo: &std::path::Path, args: &[&str]) -> String {
     git(repo, args)
@@ -30,6 +31,56 @@ fn open_grit(root: &std::path::Path) -> Repository {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open grit repo")
+}
+
+fn write_system_autocrlf_config(dir: &std::path::Path) -> std::path::PathBuf {
+    let path = dir.join("system.gitconfig");
+    std::fs::write(&path, "[core]\n\tautocrlf = true\n").expect("system config");
+    path
+}
+
+fn git_with_system_config(
+    repo: &std::path::Path,
+    system_cfg: &std::path::Path,
+    args: &[&str],
+) -> String {
+    git_shell(args)
+        .in_dir(repo)
+        .env("GIT_CONFIG_SYSTEM", system_cfg)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .suc()
+        .stdout
+}
+
+fn init_repo_inherited_autocrlf(root: &std::path::Path, system_cfg: &std::path::Path) {
+    git_with_system_config(root, system_cfg, &["init", "-q", "-b", "main", "."]);
+    git_with_system_config(root, system_cfg, &["config", "user.email", "t@e.com"]);
+    git_with_system_config(root, system_cfg, &["config", "user.name", "T"]);
+}
+
+fn open_grit_inherited_autocrlf(
+    root: &std::path::Path,
+    system_cfg: &std::path::Path,
+) -> Repository {
+    let mut env = Environment::empty();
+    env.git_config_system = Some(system_cfg.display().to_string());
+    env.git_config_global = Some("/dev/null".into());
+    Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::with_environment(env).with_work_tree(root),
+    )
+    .expect("open grit repo")
+}
+
+fn ensure_crlf_worktree_lf_index_with_system(root: &std::path::Path, system_cfg: &std::path::Path) {
+    let path = root.join("a.txt");
+    let crlf = b"one\r\ntwo\r\nthree\r\n";
+    std::fs::write(&path, crlf).expect("crlf worktree");
+    let porcelain = git_with_system_config(root, system_cfg, &["status", "--porcelain"]);
+    assert!(
+        porcelain.trim().is_empty(),
+        "git must treat CRLF worktree as clean with inherited system autocrlf, got:\n{porcelain}"
+    );
 }
 
 /// After stash reset, simulate Git for Windows: LF blob in the index, CRLF on disk, clean status.
@@ -137,5 +188,64 @@ fn pop_stash_succeeds_on_clean_tree_with_autocrlf() {
     assert!(
         porcelain.contains("a.txt"),
         "pop must restore stashed change, got:\n{porcelain}"
+    );
+}
+
+#[test]
+fn apply_stash_succeeds_with_system_inherited_autocrlf_only() {
+    let cfg_dir = tempfile::tempdir().expect("cfg tempdir");
+    let system_cfg = write_system_autocrlf_config(cfg_dir.path());
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo_inherited_autocrlf(dir.path(), &system_cfg);
+    std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\n").expect("write");
+    git_with_system_config(dir.path(), &system_cfg, &["add", "a.txt"]);
+    git_with_system_config(dir.path(), &system_cfg, &["commit", "-qm", "init"]);
+
+    std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\nfour\n").expect("modify");
+    let repo = open_grit_inherited_autocrlf(dir.path(), &system_cfg);
+    push_stash(&repo, &stash_options())
+        .expect("push")
+        .expect("had changes");
+
+    ensure_crlf_worktree_lf_index_with_system(dir.path(), &system_cfg);
+
+    let stash_oid = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/stash").expect("stash ref");
+    apply_stash(&repo, dir.path(), &stash_oid, false, "T <t@e.com> 0 +0000")
+        .expect("apply must honor inherited system autocrlf when comparing worktree to index");
+
+    let porcelain = git_with_system_config(dir.path(), &system_cfg, &["status", "--porcelain"]);
+    assert!(
+        porcelain.contains("a.txt"),
+        "expected modified a.txt after apply, got:\n{porcelain}"
+    );
+}
+
+#[test]
+fn pop_stash_succeeds_with_system_inherited_autocrlf_only() {
+    let cfg_dir = tempfile::tempdir().expect("cfg tempdir");
+    let system_cfg = write_system_autocrlf_config(cfg_dir.path());
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo_inherited_autocrlf(dir.path(), &system_cfg);
+    std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\n").expect("write");
+    git_with_system_config(dir.path(), &system_cfg, &["add", "a.txt"]);
+    git_with_system_config(dir.path(), &system_cfg, &["commit", "-qm", "init"]);
+
+    std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\nfour\n").expect("modify");
+    let repo = open_grit_inherited_autocrlf(dir.path(), &system_cfg);
+    push_stash(&repo, &stash_options())
+        .expect("push")
+        .expect("had changes");
+
+    ensure_crlf_worktree_lf_index_with_system(dir.path(), &system_cfg);
+
+    pop_stash(&repo, dir.path(), 0, false, "T <t@e.com> 0 +0000")
+        .expect("pop must honor inherited system autocrlf when comparing worktree to index");
+
+    let list = git_with_system_config(dir.path(), &system_cfg, &["stash", "list"]);
+    assert!(
+        list.trim().is_empty(),
+        "pop must drop stash entry, got:\n{list}"
     );
 }

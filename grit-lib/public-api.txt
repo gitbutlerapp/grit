@@ -8497,7 +8497,7 @@ pub fn grit_lib::diff::userdiff::matcher_for_path(&grit_lib::config::ConfigSet, 
 pub fn grit_lib::diff::userdiff::matcher_for_path_parsed(&grit_lib::config::ConfigSet, &[grit_lib::worktree::attributes::AttrRule], &grit_lib::worktree::attributes::MacroTable, &str, bool) -> core::result::Result<core::option::Option<grit_lib::diff::userdiff::FuncnameMatcher>, alloc::string::String>
 pub fn grit_lib::diff::userdiff::word_regex_pattern_for_path_parsed(&grit_lib::config::ConfigSet, &[grit_lib::worktree::attributes::AttrRule], &grit_lib::worktree::attributes::MacroTable, &str, bool) -> core::option::Option<(alloc::string::String, bool)>
 pub fn grit_lib::diff::word_diff_ops_imara(&[&str], &[&str]) -> alloc::vec::Vec<similar::types::DiffOp>
-pub fn grit_lib::diff::worktree_differs_from_index_entry(&grit_lib::objects::odb::Odb, &std::path::Path, &std::path::Path, &grit_lib::index::IndexEntry, bool, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<bool>
+pub fn grit_lib::diff::worktree_differs_from_index_entry(&grit_lib::objects::odb::Odb, &std::path::Path, &std::path::Path, &grit_lib::index::IndexEntry, bool, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::diff::ws::WhitespaceGitAttr::clone(&self) -> Self
 pub fn grit_lib::diff::ws::WhitespaceGitAttr::default() -> Self
 pub fn grit_lib::diff::ws::WhitespaceGitAttr::eq(&self, &Self) -> bool

@@ -4119,18 +4119,21 @@ pub fn worktree_differs_from_index_entry(
     work_tree: &Path,
     ie: &IndexEntry,
     ignore_submodule_untracked: bool,
+    config: Option<&ConfigSet>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<bool> {
     use crate::config::ConfigSet;
     use crate::crlf;
 
     let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
-    let config = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(repository_git_dir),
-        true,
-    )
-    .unwrap_or_else(|_| ConfigSet::new());
+    let config = config.cloned().unwrap_or_else(|| {
+        ConfigSet::load(
+            &crate::environment::Environment::empty(),
+            Some(repository_git_dir),
+            true,
+        )
+        .unwrap_or_else(|_| ConfigSet::new())
+    });
     let trust_filemode = config
         .get_bool("core.filemode")
         .and_then(|r| r.ok())
@@ -11021,6 +11024,7 @@ mod line_coverage_tests {
             wt,
             &index.entries()[0],
             false,
+            None,
             None,
         )?;
         let conv = ConversionConfig::from_config(&cfg);
