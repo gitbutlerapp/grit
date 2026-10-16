@@ -676,27 +676,31 @@ fn append_fsck_gc_repack(
             &fixture.worktree,
         )?);
     }
-    let gc_allows_grit_failure = fixture.id == "git-dot-git";
-
-    out.push(run_matrix_scenario(
+    let repack = Scenario {
+        id: sid(fixture.id, "repack"),
+        group: "maintenance".into(),
+        fixture: fixture.label.clone(),
+        description: "repack on bare remote (git: -adf; grit skipped on bare)".into(),
+        grit_argv: vec!["repack".into()],
+        git_argv: vec!["repack".into(), "-adf".into()],
+        driver: Driver::Cli,
+        prepare_kind: None,
+        grit_via_shell: false,
+        git_via_shell: false,
+    };
+    out.push(run_scenario_git_only_with_grit_failure(
         hyperfine,
         git,
         grit,
         cfg,
-        &Scenario {
-            id: sid(fixture.id, "repack"),
-            group: "maintenance".into(),
-            fixture: fixture.label.clone(),
-            description: "repack -adf on bare remote".into(),
-            grit_argv: vec!["repack".into(), "-adf".into()],
-            git_argv: vec!["repack".into(), "-adf".into()],
-            driver: Driver::Cli,
-            prepare_kind: None,
-            grit_via_shell: false,
-            git_via_shell: false,
-        },
+        &repack,
         &fixture.bare,
-        gc_allows_grit_failure,
+        BenchFailure {
+            kind: "unsupported".into(),
+            message:
+                "grit repack requires a worktree; bare remotes are measured with git repack only"
+                    .into(),
+        },
     )?);
     Ok(())
 }
@@ -759,25 +763,13 @@ fn append_file_transport(
         return Ok(());
     }
 
-    let fetch_dest = fixture.worktree.clone();
-    let grit_fetch = shell_command(
-        grit,
-        &[
-            "fetch".to_string(),
-            "origin".to_string(),
-            "HEAD".to_string(),
-        ],
-    );
-    let git_fetch = shell_command(
-        git,
-        &[
-            "fetch".to_string(),
-            "-q".to_string(),
-            "origin".to_string(),
-            "HEAD".to_string(),
-        ],
-    );
-    out.push(run_scenario(
+    let push_meta = ensure_campaign_bare_network_meta(git, &fixture.bare, smoke)?;
+    let fetch_client = ensure_network_client_repo(git, &fixture.bare)?;
+    let push_url = file_url(&fixture.bare)?;
+    configure_push_remote(git, &fetch_client, &push_url, &push_meta.default_branch)?;
+    let fetch_prepare =
+        prepare_network_command(cfg, git, &fixture.bare, "prepare-network-fetch-incr");
+    out.push(run_scenario_prepared(
         hyperfine,
         git,
         grit,
@@ -786,20 +778,22 @@ fn append_file_transport(
             id: sid(fixture.id, "fetch-incr-file"),
             group: "network".into(),
             fixture: fixture.label.clone(),
-            description: "incremental fetch over file://".into(),
-            grit_argv: sh_script(grit_fetch),
-            git_argv: sh_script(git_fetch),
+            description: format!(
+                "incremental fetch of {} commits over file://",
+                push_meta.incremental_fetch_commits
+            ),
+            grit_argv: vec!["fetch".into(), "origin".into()],
+            git_argv: vec!["fetch".into(), "-q".into(), "origin".into()],
             driver: Driver::Cli,
             prepare_kind: None,
-            grit_via_shell: true,
-            git_via_shell: true,
+            grit_via_shell: false,
+            git_via_shell: false,
         },
-        &fetch_dest,
+        &fetch_client,
+        &fetch_prepare,
     )?);
 
-    let push_meta = ensure_campaign_bare_network_meta(git, &fixture.bare, smoke)?;
-    let push_client = ensure_network_client_repo(git, &fixture.bare)?;
-    let push_url = file_url(&fixture.bare)?;
+    let push_client = fetch_client;
     configure_push_remote(git, &push_client, &push_url, &push_meta.default_branch)?;
     let prepare = prepare_network_command(cfg, git, &fixture.bare, "prepare-network-push");
     out.push(run_scenario_prepared(
