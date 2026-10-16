@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::commit_encoding::identity_raw_for_serialized_commit;
 use crate::error::Error;
 use crate::merge_base::is_ancestor;
 use crate::merge_file::MergeFavor;
@@ -89,6 +90,7 @@ pub fn plan_rewrite(
         ancestry_path: true,
         ancestry_path_bottoms: vec![oldest],
         ordering: OrderingMode::Topo,
+        reverse: true,
         use_commit_graph: true,
         full_history: true,
         ..RevListOptions::default()
@@ -147,11 +149,15 @@ pub fn plan_rewrite(
         }
 
         let insert_parent = if let Some(CommitEdit::InsertBefore(insert)) = edit {
-            let parent = mapped_first_parent(repo, &mapping, &old)?;
-            Some(write_fresh_commit_with_parents(
+            let parents = if old.parents.is_empty() {
+                Vec::new()
+            } else {
+                vec![mapped_first_parent(repo, &mapping, &old)?]
+            };
+            Some(write_new_commit(
                 repo,
                 insert.tree,
-                &[parent],
+                &parents,
                 &insert.author,
                 &opts.committer,
                 &insert.message,
@@ -182,17 +188,24 @@ pub fn plan_rewrite(
                     vec![inserted]
                 } else if old.parents.is_empty() {
                     Vec::new()
+                } else if old.parents.len() > 1 {
+                    old.parents
+                        .iter()
+                        .map(|p| mapping.get(p).copied().unwrap_or(*p))
+                        .collect()
                 } else {
                     vec![mapped_first_parent(repo, &mapping, &old)?]
                 };
-                let oid = write_fresh_commit_with_parents(
+                let author = author.as_deref().unwrap_or(&old.author);
+                let message = message.as_deref().unwrap_or(&old.message);
+                let oid = write_rewritten_commit(
                     repo,
+                    &old,
                     tree.unwrap_or(old.tree),
                     &parent_list,
-                    author.as_deref().unwrap_or(&old.author),
+                    author,
                     &opts.committer,
-                    message.as_deref().unwrap_or(&old.message),
-                    &old.extra_headers,
+                    message,
                 )?;
                 (oid, Some(oid))
             }
@@ -401,26 +414,26 @@ fn replay_descendant(
         return match opts.empty {
             EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
             EmptyPolicy::Drop => Ok(new_parent),
-            EmptyPolicy::Keep => write_fresh_commit_with_parents(
+            EmptyPolicy::Keep => write_rewritten_commit(
                 repo,
+                old,
                 result_tree,
                 &[new_parent],
                 &old.author,
                 &opts.committer,
                 &old.message,
-                &old.extra_headers,
             ),
         };
     }
 
-    write_fresh_commit_with_parents(
+    write_rewritten_commit(
         repo,
+        old,
         result_tree,
         &[new_parent],
         &old.author,
         &opts.committer,
         &old.message,
-        &old.extra_headers,
     )
 }
 
@@ -441,7 +454,7 @@ fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryE
     Ok(load_commit(repo, commit)?.tree)
 }
 
-fn write_fresh_commit_with_parents(
+fn write_new_commit(
     repo: &Repository,
     tree: ObjectId,
     parents: &[ObjectId],
@@ -462,10 +475,96 @@ fn write_fresh_commit_with_parents(
         raw_message: None,
         extra_headers: extra_headers.to_vec(),
     };
-    let bytes = serialize_commit(&data);
+    write_commit_data(repo, &data)
+}
+
+/// Write a replacement commit, preserving encoding and raw author/message bytes from `template`
+/// when those fields are unchanged while always applying the new committer.
+fn write_rewritten_commit(
+    repo: &Repository,
+    template: &CommitData,
+    tree: ObjectId,
+    parents: &[ObjectId],
+    author: &str,
+    committer: &str,
+    message: &str,
+) -> Result<ObjectId, HistoryError> {
+    let author_unchanged = author == template.author;
+    let message_unchanged = message == template.message;
+    let encoding = if message_unchanged {
+        template.encoding.clone()
+    } else {
+        None
+    };
+    let raw_message = if message_unchanged {
+        template.raw_message.clone()
+    } else {
+        None
+    };
+    let (author_raw, committer_raw) = if author_unchanged && !template.author_raw.is_empty() {
+        let (_, committer_raw) = identity_raw_for_serialized_commit(&encoding, author, committer);
+        (template.author_raw.clone(), committer_raw)
+    } else {
+        identity_raw_for_serialized_commit(&encoding, author, committer)
+    };
+    let data = CommitData {
+        tree,
+        parents: parents.to_vec(),
+        author: author.to_owned(),
+        committer: committer.to_owned(),
+        author_raw,
+        committer_raw,
+        encoding,
+        message: message.to_owned(),
+        raw_message,
+        extra_headers: strip_gpgsig(&template.extra_headers),
+    };
+    write_commit_data(repo, &data)
+}
+
+fn write_commit_data(repo: &Repository, data: &CommitData) -> Result<ObjectId, HistoryError> {
+    let bytes = serialize_commit(data);
     repo.odb()
         .write(ObjectKind::Commit, &bytes)
         .map_err(library_err)
+}
+
+/// Drop OpenPGP signature headers; they are invalid after any rewrite.
+fn strip_gpgsig(extra_headers: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < extra_headers.len() {
+        let line_start = i;
+        while i < extra_headers.len() && extra_headers[i] != b'\n' {
+            i += 1;
+        }
+        let line_end = i;
+        if i < extra_headers.len() {
+            i += 1;
+        }
+        let line = &extra_headers[line_start..line_end];
+        if line.starts_with(b"gpgsig ") {
+            while i < extra_headers.len() {
+                if extra_headers[i] == b'\n' {
+                    i += 1;
+                    if i >= extra_headers.len() || extra_headers[i] != b' ' {
+                        break;
+                    }
+                } else {
+                    while i < extra_headers.len() && extra_headers[i] != b'\n' {
+                        i += 1;
+                    }
+                    if i < extra_headers.len() {
+                        i += 1;
+                    }
+                }
+            }
+            continue;
+        }
+        out.extend_from_slice(&extra_headers[line_start..line_end]);
+        out.push(b'\n');
+    }
+    out
 }
 
 fn plan_ref_updates(

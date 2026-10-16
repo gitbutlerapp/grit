@@ -7,11 +7,12 @@ mod support;
 use std::collections::BTreeMap;
 use std::process::Command;
 
+use grit_lib::commit::encoding;
 use grit_lib::history::{
     plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count, CommitEdit,
     EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
 };
-use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
+use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
@@ -134,6 +135,73 @@ fn plan_rewrite_rewords_and_replays_linear_descendants() {
     let parsed = parse_commit(&grit.odb().read(&new_b).expect("read").data).expect("parse");
     assert_eq!(parsed.message, "second reworded\n");
 
+    git_fsck_strict(wt);
+}
+
+#[test]
+fn plan_rewrite_preserves_encoding_when_message_unchanged() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let old_b = oids["b"];
+    let parent_tree = parse_commit(&grit.odb().read(&old_b).expect("read").data)
+        .expect("parse")
+        .tree;
+    let parent = oids["a"];
+    let (message, enc_label, raw_body) =
+        encoding::finalize_stored_commit_message("caf\u{00e9}\n".to_owned(), Some("ISO-8859-1"));
+    let ident = "Enc <enc@grit.test> 1700000000 +0000";
+    let encoded_b = grit
+        .odb()
+        .write(
+            ObjectKind::Commit,
+            &serialize_commit(&CommitData {
+                tree: parent_tree,
+                parents: vec![parent],
+                author: ident.to_owned(),
+                committer: ident.to_owned(),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: enc_label.clone(),
+                message: message.clone(),
+                raw_message: raw_body.clone(),
+                extra_headers: Vec::new(),
+            }),
+        )
+        .expect("write encoded commit");
+    git(wt, &["update-ref", "refs/heads/main", &encoded_b.to_hex()]);
+
+    let mut edits = HistoryEdits::new();
+    edits.insert(
+        encoded_b,
+        CommitEdit::Rewrite {
+            tree: None,
+            message: None,
+            author: None,
+            parents: None,
+        },
+    );
+    let plan = plan_rewrite(
+        &grit,
+        &edits,
+        &RewriteOptions {
+            scope: RefScope::Branches,
+            empty: EmptyPolicy::Drop,
+            committer: committer(9),
+        },
+    )
+    .expect("plan");
+    let row = plan
+        .commits
+        .iter()
+        .find(|r| r.old == encoded_b)
+        .expect("encoded commit row");
+    let new_oid = row.new.expect("rewritten");
+    let parsed = parse_commit(&grit.odb().read(&new_oid).expect("read").data).expect("parse");
+    assert_eq!(parsed.encoding.as_deref(), Some("ISO-8859-1"));
+    assert_eq!(parsed.raw_message, raw_body);
+    assert_eq!(parsed.committer, committer(9));
     git_fsck_strict(wt);
 }
 
