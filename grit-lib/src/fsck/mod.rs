@@ -453,6 +453,11 @@ fn push_bad_object(
     }
 }
 
+/// True when object-buffer fsck failed only with diagnostics that still allow link extraction.
+fn object_fsck_allows_link_cache(err: &FsckError, config: &ConfigSet, strict: bool) -> bool {
+    object_buffer_fsck_severity(err.id, config, strict) == FsckSeverity::Warning
+}
+
 fn push_corrupt_parse(
     issues: &mut Vec<FsckIssue>,
     config: &ConfigSet,
@@ -674,6 +679,21 @@ fn verify_loose_objects(
             LooseCheckOutcome::Issue(issue) => match &issue {
                 FsckIssue::BadObject { oid, error } => {
                     push_bad_object(issues, config, strict, *oid, error.clone());
+                    if object_fsck_allows_link_cache(error, config, strict) {
+                        if let Ok(obj) = Odb::read_loose_verify_oid(&item.1, &item.0) {
+                            record_validated_object(
+                                &mut validated,
+                                &mut links,
+                                item.0,
+                                obj.kind,
+                                &obj.data,
+                                algo,
+                            );
+                            apply_dot_checks(
+                                &mut dot, issues, config, strict, &item.0, obj.kind, &obj.data,
+                            );
+                        }
+                    }
                 }
                 other => {
                     if should_emit(config, strict, issue_msg_id(other)) {
@@ -864,7 +884,17 @@ fn verify_pack_objects(
                     let kind = item.kind;
                     let data = item.data;
                     if let Err(err) = fsck_object(kind, &data, fsck_opts) {
-                        push_bad_object(issues, config, strict, oid, err);
+                        push_bad_object(issues, config, strict, oid, err.clone());
+                        if object_fsck_allows_link_cache(&err, config, strict) {
+                            record_validated_object(
+                                &mut validated,
+                                &mut links,
+                                oid,
+                                kind,
+                                &data,
+                                algo,
+                            );
+                        }
                         continue;
                     }
                     record_validated_object(&mut validated, &mut links, oid, kind, &data, algo);
@@ -1294,7 +1324,8 @@ fn follow_typed_link(
 fn kind_for_tree_mode(mode: u32) -> Option<ObjectKind> {
     match mode {
         0o040000 => Some(ObjectKind::Tree),
-        0o100644 | 0o100755 | 0o120000 => Some(ObjectKind::Blob),
+        // Legacy non-executable file mode; Git still follows the link while reporting badFilemode.
+        0o100644 | 0o100664 | 0o100755 | 0o120000 => Some(ObjectKind::Blob),
         0o160000 => Some(ObjectKind::Commit),
         _ => None,
     }

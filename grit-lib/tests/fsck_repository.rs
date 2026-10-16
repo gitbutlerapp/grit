@@ -186,6 +186,88 @@ fn clean_repo_has_no_issues_and_git_agrees() {
 }
 
 #[test]
+fn legacy_tree_mode_100664_blob_still_reachable_like_git() {
+    let (dir, repo) = init_repo();
+    let mut child = Command::new("git")
+        .current_dir(dir.path())
+        .args(["hash-object", "-w", "--stdin"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("hash-object");
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(b"hello");
+    }
+    let out = child.wait_with_output().expect("hash-object wait");
+    assert!(out.status.success());
+    let blob_hex = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let blob = ObjectId::from_hex(&blob_hex).expect("blob oid");
+    let blob_bytes = blob.as_bytes();
+    let mut tree_body = b"100664 a.txt\0".to_vec();
+    tree_body.extend_from_slice(blob_bytes);
+    let tree_hex = git_hash_object_literally(dir.path(), FixtureAlgo::Sha1, "tree", &tree_body)
+        .expect("tree literally");
+    let tree = ObjectId::from_hex(tree_hex.trim()).expect("tree oid");
+    let commit_hex = git(
+        dir.path(),
+        &["commit-tree", tree_hex.trim(), "-m", "legacy"],
+    )
+    .trim()
+    .to_string();
+    git(dir.path(), &["update-ref", "refs/heads/main", &commit_hex]);
+    git(dir.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let git_fsck = Command::new("git")
+        .current_dir(dir.path())
+        .args(["fsck", "--full"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git fsck")
+        .code()
+        .unwrap_or(1);
+    assert_eq!(
+        git_fsck, 0,
+        "git fsck --full should accept legacy 100664 trees"
+    );
+
+    let config = repo.config().expect("config");
+    let opts = FsckOptions::full_repository(false);
+    let report = grit_fsck(&repo, &opts);
+    assert!(
+        report.ok(&config, &opts),
+        "legacy 100664 must not fail fsck: {:?}",
+        report.issues
+    );
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::BrokenLink { .. })),
+        "must follow legacy mode links: {:?}",
+        report.issues
+    );
+    assert!(
+        has_msg_id(&report, "badFilemode"),
+        "object fsck should still report badFilemode: {:?}",
+        report.issues
+    );
+    let report_dangling = grit_fsck(
+        &repo,
+        &FsckOptions::full_repository(false).with_check_dangling(true),
+    );
+    assert!(
+        !report_dangling.dangling.iter().any(|(_, oid)| *oid == blob),
+        "reachable blob must not be dangling: {:?}",
+        report_dangling.dangling
+    );
+    let _ = tree;
+}
+
+#[test]
 fn fsck_passes_on_deltified_pack_after_many_commits() {
     let (dir, repo) = init_repo();
     for i in 0..50 {

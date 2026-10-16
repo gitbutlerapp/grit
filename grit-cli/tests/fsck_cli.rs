@@ -7,6 +7,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
+use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -70,6 +71,75 @@ fn fsck_cli_exit_codes() {
         grit_fsck(&corrupt, &[]),
         1,
         "missing index blob should exit 1"
+    );
+}
+
+#[test]
+fn fsck_legacy_tree_mode_100664_exits_zero_like_git() {
+    let fix = CliFixture::empty();
+    let wt = fix.path();
+    let mut blob = Command::new("git")
+        .current_dir(wt)
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .spawn()
+        .expect("hash-object");
+    if let Some(mut stdin) = blob.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(b"hello").expect("write");
+    }
+    let blob_out = blob.wait_with_output().expect("hash-object wait");
+    assert!(blob_out.status.success());
+    let blob_hex = String::from_utf8_lossy(&blob_out.stdout).trim().to_owned();
+    let tree_hex = git_hash_object_literally(wt, HashAlgo::Sha1, "tree", &{
+        let mut body = b"100664 a.txt\0".to_vec();
+        body.extend_from_slice(ObjectId::from_hex(&blob_hex).expect("blob oid").as_bytes());
+        body
+    })
+    .expect("write tree");
+    let commit = Command::new("git")
+        .current_dir(wt)
+        .args(["commit-tree", tree_hex.trim(), "-m", "legacy"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("commit-tree");
+    assert!(commit.status.success());
+    let commit_hex = String::from_utf8_lossy(&commit.stdout).trim().to_owned();
+    assert!(Command::new("git")
+        .current_dir(wt)
+        .args(["update-ref", "refs/heads/main", &commit_hex])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("update-ref")
+        .success());
+    assert!(Command::new("git")
+        .current_dir(wt)
+        .args(["symbolic-ref", "HEAD", "refs/heads/main"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("symbolic-ref")
+        .success());
+
+    let git_fsck = Command::new("git")
+        .current_dir(wt)
+        .args(["fsck", "--full"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git fsck")
+        .code()
+        .unwrap_or(1);
+    assert_eq!(git_fsck, 0);
+    assert_eq!(
+        grit_fsck(&fix, &[]),
+        0,
+        "legacy 100664 tree entry must not fail grit fsck"
     );
 }
 
