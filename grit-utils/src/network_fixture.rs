@@ -451,10 +451,9 @@ pub fn ensure_campaign_bare_network_meta(
         default_branch_on_bare(git, bare)?
     };
     let fetch_base = if tag_only {
-        let tag = std::env::var("GRIT_BENCH_GIT_GIT_TAG").unwrap_or_else(|_| {
-            crate::real_repo_fixture::DEFAULT_GIT_GIT_TAG.to_owned()
-        });
-        rev_parse(git, bare, &tag)?
+        let tag = std::env::var("GRIT_BENCH_GIT_GIT_TAG")
+            .unwrap_or_else(|_| crate::real_repo_fixture::DEFAULT_GIT_GIT_TAG.to_owned());
+        rev_parse(git, bare, &tag).or_else(|_| rev_parse(git, bare, "HEAD"))?
     } else {
         rev_parse(
             git,
@@ -551,4 +550,77 @@ pub fn install_http_repo(git: &Path, source_bare: &Path, http_root: &Path) -> Re
         ],
     )?;
     Ok(dest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn git_init_bare(dir: &std::path::Path) -> Result<()> {
+        Command::new("git")
+            .args(["init", "--bare", "-b", "master"])
+            .current_dir(dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+        Ok(())
+    }
+
+    #[test]
+    fn campaign_bare_network_meta_tag_pinned_without_branch_refs() -> Result<()> {
+        let git = crate::binary::resolve_binary("git", None).expect("git");
+        let origin = TempDir::new()?;
+        git_init_bare(origin.path())?;
+        let source = TempDir::new()?;
+        Command::new("git")
+            .args(["clone", origin.path().to_str().unwrap(), "work"])
+            .current_dir(source.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+        let work = source.path().join("work");
+        fs::write(work.join("f.txt"), b"x")?;
+        let run = |args: &[&str]| -> Result<()> {
+            let mut c = Command::new("git");
+            c.args(args).current_dir(&work);
+            c.env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t");
+            assert!(c.status()?.success());
+            Ok(())
+        };
+        run(&["add", "f.txt"])?;
+        run(&["commit", "-m", "c"])?;
+        run(&["tag", "v1.0"])?;
+        run(&["push", "origin", "master", "v1.0"])?;
+
+        let clone_parent = TempDir::new()?;
+        let bare = clone_parent.path().join("dest.git");
+        Command::new("git")
+            .args([
+                "clone",
+                "--bare",
+                "--single-branch",
+                "--branch",
+                "v1.0",
+                origin.path().to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ])
+            .current_dir(clone_parent.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+
+        std::env::set_var("GRIT_BENCH_GIT_GIT_TAG", "v1.0");
+        let meta = ensure_campaign_bare_network_meta(&git, &bare, false)?;
+        assert!(meta_path(&bare).is_file());
+        assert!(!meta.fetch_base_oid.is_empty());
+        Ok(())
+    }
 }
