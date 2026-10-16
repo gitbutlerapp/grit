@@ -3,6 +3,13 @@
 //! Used by embedders and tooling that build pack bytes in memory (for example
 //! [`crate::transfer::build_pack`]) and need a Git-compatible `.pack`/`.idx` pair
 //! on disk without shelling out to `git index-pack`.
+//!
+//! ```rust
+//! use grit_lib::pack_write::InstallPackOptions;
+//! # fn main() {
+//! let _ = InstallPackOptions::default();
+//! # }
+//! ```
 
 use std::fs;
 use std::io::Read;
