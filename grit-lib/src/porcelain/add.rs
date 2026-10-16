@@ -93,7 +93,7 @@ impl StageOutcome {
 
 /// Stage every tracked and untracked change for [`crate::porcelain::commit`].
 ///
-/// Uses the stat-trust tracked scan from [`stage_tracked_modifications_in_index_with_rules`] instead of
+/// Uses the stat-trust tracked scan from `stage_tracked_modifications_in_index_with_rules` instead of
 /// the diff-for-staging pipeline, then stages untracked paths the same way as [`stage`] with
 /// [`StageMode::All`].
 ///
