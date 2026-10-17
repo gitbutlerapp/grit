@@ -250,13 +250,8 @@ pub fn plan_rewrite(
 }
 
 fn library_err(err: Error) -> HistoryError {
-<<<<<<< HEAD
     if let Error::History(inner) = err {
         return inner;
-=======
-    HistoryError::Planning {
-        message: err.to_string(),
->>>>>>> e18bb341e (fix: address round-2 history rewrite review blockers)
     }
     HistoryError::Library(Box::new(err))
 }
@@ -372,16 +367,10 @@ fn commit_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>, His
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
     let raw = repo.odb().read(&oid).map_err(library_err)?;
     if raw.kind != ObjectKind::Commit {
-<<<<<<< HEAD
         return Err(library_err(Error::CorruptObject(format!(
             "expected commit, got {}",
             raw.kind.as_str()
         ))));
-=======
-        return Err(HistoryError::Planning {
-            message: format!("{oid} is not a commit object"),
-        });
->>>>>>> e18bb341e (fix: address round-2 history rewrite review blockers)
     }
     parse_commit(&raw.data).map_err(library_err)
 }

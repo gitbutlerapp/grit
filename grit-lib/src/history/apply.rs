@@ -875,6 +875,23 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
+            mode: crate::index::MODE_EXECUTABLE,
+            uid: 0,
+            gid: 0,
+            size: 5,
+            oid: blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"file.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        idx2.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
             mode: crate::index::MODE_REGULAR,
             uid: 0,
             gid: 0,
@@ -909,6 +926,20 @@ mod inject_and_apply_tests {
         .expect("plan");
 
         let before_index = fs::read(repo.index_path()).expect("index");
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+        #[cfg(unix)]
+        let before_file_mode = fs::metadata(dir.path().join("file.txt"))
+            .expect("file meta")
+            .permissions()
+            .mode()
+            & 0o7777;
+        #[cfg(unix)]
+        assert_eq!(
+            before_file_mode & 0o111,
+            0,
+            "precondition: file.txt is not executable"
+        );
         set_test_inject_index_write_fail_remaining(1);
         let err = apply_rewrite(
             &repo,
@@ -940,6 +971,23 @@ mod inject_and_apply_tests {
             !dir.path().join("two.txt").exists(),
             "partial checkout must be rolled back"
         );
+        #[cfg(unix)]
+        {
+            let after_file_mode = fs::metadata(dir.path().join("file.txt"))
+                .expect("file meta")
+                .permissions()
+                .mode()
+                & 0o7777;
+            assert_eq!(
+                after_file_mode, before_file_mode,
+                "rollback must restore pre-apply permission bits"
+            );
+            assert_eq!(
+                after_file_mode & 0o111,
+                0,
+                "partial 100644→100755 checkout must not survive rollback"
+            );
+        }
     }
 }
 

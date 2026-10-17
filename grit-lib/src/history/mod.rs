@@ -10,13 +10,8 @@
 //!
 //! Library guide: history rewrite planning (see [`plan_rewrite`]).
 //!
-<<<<<<< HEAD
-//! ```no_run
-//! use grit_lib::revwalk::history::{
-=======
 //! ```rust
-//! use grit_lib::history::{
->>>>>>> 2bd4bcabd (fix: add rust doctest to history module docs for gate)
+//! use grit_lib::revwalk::history::{
 //!     plan_rewrite, CommitEdit, HistoryEdits, RefScope, RewriteOptions, EmptyPolicy,
 //! };
 //! use grit_lib::objects::ObjectId;
