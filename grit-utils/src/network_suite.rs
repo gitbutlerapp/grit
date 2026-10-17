@@ -619,12 +619,12 @@ fn ensure_client_repo(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Resul
     run_git_cmd(
         git,
         Some(&meta.client_repo),
-        &["checkout", "-q", &meta.default_branch],
-    )?;
-    run_git_cmd(
-        git,
-        Some(&meta.client_repo),
-        &["reset", "--hard", &meta.fetch_base_oid],
+        &[
+            "checkout",
+            "-B",
+            &meta.default_branch,
+            &meta.fetch_base_oid,
+        ],
     )?;
     Ok(())
 }
