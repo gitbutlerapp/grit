@@ -349,5 +349,4 @@ mod tests {
         assert!(heads.is_empty(), "unexpected heads: {heads:?}");
         Ok(())
     }
-
 }

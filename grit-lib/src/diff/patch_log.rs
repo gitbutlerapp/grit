@@ -214,6 +214,7 @@ fn abbrev_for_index_line(
     cache.abbrev(odb, oid)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_parsed_commit_log_patch<W: Write>(
     out: &mut W,
     repo: &Repository,
