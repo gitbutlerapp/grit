@@ -42,7 +42,8 @@ use grit_utils::scenarios::{
     run_dense_leaf_worktree_suite, run_diff_suite, run_hot_path_suite, run_log_suite,
     run_merge_only_suite, run_prepare_add, run_prepare_commit, run_prepare_dense_leaf_add,
     run_prepare_merge, run_prepare_pick, run_prepare_pick_series, run_prepare_restore,
-    run_prepare_revert, run_prepare_stash, run_prepare_switch, run_restore_suite, run_stash_suite,
+    run_prepare_revert, run_prepare_stash, run_prepare_switch, run_prepare_switch_wide,
+    run_restore_suite, run_stash_suite,
     run_status_suite, RunConfig,
 };
 use grit_utils::schema::BenchReport;
@@ -328,6 +329,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareSwitch {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareSwitchWide {
         #[arg(long)]
         git: PathBuf,
     },
@@ -974,6 +980,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_switch(&git);
         }
+        Cmd::PrepareSwitchWide { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_switch_wide(&git);
+        }
         Cmd::PreparePick { git } => {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_pick(&git);
@@ -1453,6 +1463,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareAdd { .. }
         | Cmd::PrepareDenseLeafAdd { .. }
         | Cmd::PrepareSwitch { .. }
+        | Cmd::PrepareSwitchWide { .. }
         | Cmd::PreparePick { .. }
         | Cmd::PrepareMerge { .. }
         | Cmd::PreparePickSeries { .. }

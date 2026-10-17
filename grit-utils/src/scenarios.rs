@@ -16,6 +16,7 @@ use crate::fixture::{
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
+    prepare_switch_wide,
     setup_pick_merge_fixture, setup_pick_series_fixture, setup_switch_fixture,
     touch_paths_for_size, HotPathMeta, HotPathRepoSpec,
 };
@@ -65,6 +66,7 @@ pub enum PrepareKind {
     AddIteration,
     DenseLeafAddIteration,
     SwitchReset,
+    SwitchWideReset,
     PickReset,
     MergeReset,
     PickSeriesReset,
@@ -125,6 +127,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::AddIteration => "prepare-add",
         PrepareKind::DenseLeafAddIteration => "prepare-dense-leaf-add",
         PrepareKind::SwitchReset => "prepare-switch",
+        PrepareKind::SwitchWideReset => "prepare-switch-wide",
         PrepareKind::PickReset => "prepare-pick",
         PrepareKind::MergeReset => "prepare-merge",
         PrepareKind::PickSeriesReset => "prepare-pick-series",
@@ -783,7 +786,7 @@ for _ in $(seq 1 {pages}); do
     page=$({grit_q} log --before="$before") || exit $?
   fi
   printf '%s\n' "$page" | awk '!/^→/ && !/^$/ {{print}}'
-  before=$(printf '%s\n' "$page" | sed -n 's/^→ more: grit log --before=//p')
+  before=$(printf '%s\n' "$page" | sed -n 's|^→ more: grit log --before=||p')
   if [ -z "$before" ]; then break; fi
 done"#
     )
@@ -1077,6 +1080,10 @@ pub fn run_prepare_diff_dirty(git: &Path) -> Result<()> {
 
 pub fn run_prepare_switch(git: &Path) -> Result<()> {
     prepare_switch(git, &bench_work_dir())
+}
+
+pub fn run_prepare_switch_wide(git: &Path) -> Result<()> {
+    prepare_switch_wide(git, &bench_work_dir())
 }
 
 pub fn run_prepare_pick(git: &Path) -> Result<()> {

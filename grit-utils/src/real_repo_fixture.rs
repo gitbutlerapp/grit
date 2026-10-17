@@ -245,7 +245,7 @@ pub fn ensure_worktree_clone(
     run_git(
         git,
         parent,
-        &["clone", "-q", "--single-branch", bare_str, name],
+        &["clone", "-q", "--no-local", "--single-branch", bare_str, name],
     )?;
     run_git(git, &dest, &["checkout", "-B", "campaign-main"])?;
     fs::write(&marker, tag.as_bytes()).context("write worktree marker")?;
