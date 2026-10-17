@@ -192,15 +192,6 @@ pub(crate) fn local_change_diffs_for_tree_changes(
                     stat_policy,
                 )
             })
-            .filter(|path| {
-                !index_matches_head_without_worktree_stat(
-                    index,
-                    &head_by_path,
-                    path,
-                    index_mtime,
-                    stat_policy,
-                )
-            })
             .filter(|path| !added_tree_path_missing_on_disk(work_tree, &added_tree_paths, path))
             .collect()
     };
