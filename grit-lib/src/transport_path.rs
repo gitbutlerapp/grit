@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use url::Url;
 
 use crate::error::Error;
 
@@ -75,6 +76,58 @@ pub fn url_is_local_not_ssh(url: &str) -> bool {
 #[must_use]
 pub fn strip_verbatim_path_prefix(path: &str) -> &str {
     path.strip_prefix(r"\\?\").unwrap_or(path)
+}
+
+/// Returns a copy of `url` with embedded username and password removed, safe for logs and errors.
+///
+/// Remote URLs may carry credentials in configuration or on the command line; user-facing output
+/// must never echo them. Well-formed `http(s)://`, `git://`, and `ssh://` URLs are parsed with
+/// the `url` crate (including percent-encoded userinfo). SCP-style `user:pass@host:path` strings
+/// and other non-URL forms fall back to Git-style scanning for the last `@` before the path.
+#[must_use]
+pub fn redact_url_for_display(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if let Ok(mut parsed) = Url::parse(trimmed) {
+        let scheme = parsed.scheme();
+        if matches!(scheme, "http" | "https" | "git" | "ssh" | "file" | "ftp")
+            && parsed.has_authority()
+        {
+            let _ = parsed.set_username("");
+            let _ = parsed.set_password(None);
+            return parsed.to_string();
+        }
+    }
+    redact_userinfo_fallback(trimmed)
+}
+
+fn redact_userinfo_fallback(url: &str) -> String {
+    if let Some((scheme, rest)) = url.split_once("://") {
+        let host_start = userinfo_host_start(rest);
+        return format!("{scheme}://{}", &rest[host_start..]);
+    }
+    let host_start = userinfo_host_start(url);
+    url[host_start..].to_string()
+}
+
+/// Index in `authority_or_url` where the host begins after optional `user:pass@` userinfo.
+fn userinfo_host_start(authority_or_url: &str) -> usize {
+    let bytes = authority_or_url.as_bytes();
+    let mut host_start = 0usize;
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        let b = bytes[idx];
+        if b == b'/' || b == b'?' || b == b'#' {
+            break;
+        }
+        if b == b'@' {
+            host_start = idx + 1;
+        }
+        idx += 1;
+    }
+    host_start
 }
 
 /// Normalize a local path for storage in `remote.*.url` (Git-style forward slashes, no `\\?\`).
@@ -616,5 +669,51 @@ mod tests {
         assert_eq!(normalize_local_path_for_config(path), "C:/tmp/t/src");
         #[cfg(not(windows))]
         assert_eq!(normalize_local_path_for_config(path), r"C:\tmp\t\src");
+    }
+
+    #[test]
+    fn redact_url_for_display_strips_http_userinfo() {
+        assert_eq!(
+            redact_url_for_display(
+                "http://bob:wrongpass@127.0.0.1:18082/priv.git/info/refs?service=git-upload-pack"
+            ),
+            "http://127.0.0.1:18082/priv.git/info/refs?service=git-upload-pack"
+        );
+        assert_eq!(
+            redact_url_for_display("https://user:secret@example.com/repo.git"),
+            "https://example.com/repo.git"
+        );
+    }
+
+    #[test]
+    fn redact_url_for_display_percent_encoded_userinfo() {
+        assert_eq!(
+            redact_url_for_display("http://alice:pa%24%24w%30rd@host.example/repo.git"),
+            "http://host.example/repo.git"
+        );
+        assert_eq!(
+            redact_url_for_display("http://user:pass%40word@host.example/r.git"),
+            "http://host.example/r.git"
+        );
+    }
+
+    #[test]
+    fn redact_url_for_display_scp_and_at_in_password() {
+        assert_eq!(
+            redact_url_for_display("user:password@host.example:repo.git"),
+            "host.example:repo.git"
+        );
+        assert_eq!(
+            redact_url_for_display("http://user:passw@rd@host.example/repo.git"),
+            "http://host.example/repo.git"
+        );
+    }
+
+    #[test]
+    fn redact_url_for_display_leaves_path_at_signs() {
+        assert_eq!(
+            redact_url_for_display("https://host.example/foo@bar.git"),
+            "https://host.example/foo@bar.git"
+        );
     }
 }

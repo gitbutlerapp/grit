@@ -13157,6 +13157,7 @@ pub fn grit_lib::remote::transport_path::git_url_basename(&str, bool, bool) -> c
 pub fn grit_lib::remote::transport_path::is_local_path_remote_url(&str) -> bool
 pub fn grit_lib::remote::transport_path::looks_like_command_line_option(&str) -> bool
 pub fn grit_lib::remote::transport_path::normalize_local_path_for_config(&std::path::Path) -> alloc::string::String
+pub fn grit_lib::remote::transport_path::redact_url_for_display(&str) -> alloc::string::String
 pub fn grit_lib::remote::transport_path::resolve_local_remote_git_dir(&str, &std::path::Path, core::option::Option<&std::path::Path>) -> std::path::PathBuf
 pub fn grit_lib::remote::transport_path::should_store_absolute_local_clone_url(&str) -> bool
 pub fn grit_lib::remote::transport_path::strip_verbatim_path_prefix(&str) -> &str
