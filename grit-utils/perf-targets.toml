@@ -46,6 +46,14 @@ followup = "ROADMAP item 7"
 documented = "grit gc on git.git exceeds factory VM memory; git side timed for ratio ledger"
 followup = "ROADMAP item 21"
 
+[scenario."chromium-synth/gc"]
+documented = "grit gc on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
+followup = "ROADMAP item 21"
+
+[scenario."linux/gc"]
+documented = "grit gc on linux kernel clone exceeds factory campaign time budget; git side timed for ratio ledger"
+followup = "ROADMAP item 21"
+
 [scenario."git-dot-git/repack"]
 documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
 followup = "ROADMAP item 19"

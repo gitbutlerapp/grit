@@ -641,7 +641,25 @@ fn append_fsck_gc_repack(
         grit_via_shell: false,
         git_via_shell: false,
     };
-    if fixture.id == "git-dot-git" {
+    let grit_gc_failure = match fixture.id {
+        "git-dot-git" => Some(BenchFailure {
+            kind: "memory_cap".into(),
+            message: "grit gc on git.git exceeds factory VM memory; git side timed for ratio ledger"
+                .into(),
+        }),
+        "chromium-synth" => Some(BenchFailure {
+            kind: "runtime_cap".into(),
+            message: "grit gc on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
+                .into(),
+        }),
+        "linux" => Some(BenchFailure {
+            kind: "runtime_cap".into(),
+            message: "grit gc on linux kernel clone exceeds factory campaign time budget; git side timed for ratio ledger"
+                .into(),
+        }),
+        _ => None,
+    };
+    if let Some(failure) = grit_gc_failure {
         out.push(run_scenario_git_only_with_grit_failure(
             hyperfine,
             git,
@@ -649,11 +667,7 @@ fn append_fsck_gc_repack(
             cfg,
             &gc_scenario,
             &fixture.worktree,
-            BenchFailure {
-                kind: "memory_cap".into(),
-                message: "grit gc on git.git exceeds factory VM memory; git side timed for ratio ledger"
-                    .into(),
-            },
+            failure,
         )?);
     } else {
         out.push(run_scenario(
