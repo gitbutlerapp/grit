@@ -9,7 +9,8 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::history::{
     apply_fixup_rewrite, apply_rewrite, fixup, reword, staged_fixup_paths, ApplyOptions,
-    EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions, RewritePlan,
+    EmptyPolicy, FixupOptions, HistoryError, PlannedRefUpdate, RefScope, RewriteOptions,
+    RewritePlan,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
@@ -77,7 +78,7 @@ pub struct HistoryRewriteArgs {
 /// Result of `grit history reword` or `grit history fixup`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct HistoryRewordOutcome {
-    /// Operation name (`reword`).
+    /// Operation name (`reword` or `fixup`).
     pub operation: String,
     /// Original and replacement commit OIDs for every rewritten commit.
     pub rewritten: Vec<RewrittenPair>,
@@ -94,8 +95,8 @@ pub struct HistoryRewordOutcome {
 pub struct RewrittenPair {
     /// Commit OID before rewrite (full hex).
     pub old: String,
-    /// Replacement commit OID (full hex).
-    pub new: String,
+    /// Replacement commit OID (full hex), or JSON `null` when the commit was dropped.
+    pub new: Option<String>,
 }
 
 /// One ref tip before and after rewrite.
@@ -132,8 +133,13 @@ impl HumanRender for HistoryRewordOutcome {
         }
         for pair in &self.rewritten {
             let old_short = pair.old.get(..7).unwrap_or(&pair.old);
-            let new_short = pair.new.get(..7).unwrap_or(&pair.new);
-            outln!(w, "  commit {old_short} → {new_short}");
+            match &pair.new {
+                Some(new) => {
+                    let new_short = new.get(..7).unwrap_or(new);
+                    outln!(w, "  commit {old_short} → {new_short}");
+                }
+                None => outln!(w, "  commit {old_short} → (dropped)"),
+            }
         }
         for update in &self.refs {
             let old_short = update.old.get(..7).unwrap_or(&update.old);
@@ -349,11 +355,9 @@ fn outcome_from_plan(
     let rewritten = plan
         .commits
         .iter()
-        .filter_map(|row| {
-            row.new.map(|new| RewrittenPair {
-                old: row.old.to_hex(),
-                new: new.to_hex(),
-            })
+        .map(|row| RewrittenPair {
+            old: row.old.to_hex(),
+            new: row.new.map(|new| new.to_hex()),
         })
         .collect();
     let refs = plan
@@ -375,6 +379,18 @@ fn outcome_from_plan(
     })
 }
 
+fn head_branch_ref_update<'a>(
+    repo: &grit_lib::repo::Repository,
+    plan: &'a RewritePlan,
+) -> Option<&'a PlannedRefUpdate> {
+    let head = resolve_head(repo.git_dir()).ok()?;
+    let refname = match head {
+        HeadState::Branch { refname, .. } => refname,
+        HeadState::Detached { .. } | HeadState::Invalid => return None,
+    };
+    plan.ref_updates.iter().find(|u| u.name == refname)
+}
+
 fn head_pair(repo: &grit_lib::repo::Repository, plan: &RewritePlan) -> Result<Option<HeadPair>> {
     if !plan.head.commit_changes {
         return Ok(None);
@@ -385,7 +401,11 @@ fn head_pair(repo: &grit_lib::repo::Repository, plan: &RewritePlan) -> Result<Op
         .iter()
         .filter_map(|r| r.new.map(|n| (r.old, n)))
         .collect();
-    let new_oid = mapping.get(&old_oid).copied().unwrap_or(old_oid);
+    let new_oid = mapping
+        .get(&old_oid)
+        .copied()
+        .or_else(|| head_branch_ref_update(repo, plan).map(|u| u.new))
+        .unwrap_or(old_oid);
     Ok(Some(HeadPair {
         old: old_oid.to_hex(),
         new: new_oid.to_hex(),
@@ -434,9 +454,7 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         }
         HistoryError::MergeCommitInReplay { commit } => {
             let short = &commit.to_hex()[..7];
-            anyhow::anyhow!(
-                "{short} is a merge commit — grit history reword cannot replay merges yet"
-            )
+            anyhow::anyhow!("{short} is a merge commit — {operation} cannot replay merges yet")
         }
         HistoryError::RootCommit { commit } => {
             let short = &commit.to_hex()[..7];

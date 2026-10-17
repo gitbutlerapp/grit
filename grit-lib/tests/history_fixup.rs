@@ -232,6 +232,55 @@ fn fixup_conflict_changes_nothing() {
 }
 
 #[test]
+fn fixup_preserves_unstaged_insertion_on_partially_staged_path() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    fs::write(wt.join("file.txt"), "one\nbase\nthree\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    git(wt, &["commit", "-m", "base"]);
+    fs::write(wt.join("file.txt"), "one\nstaged B\nthree\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    fs::write(wt.join("file.txt"), "one\nstaged B\nunstaged C\nthree\n").expect("write");
+    let grit = open_grit(wt);
+    plan_and_apply(
+        &grit,
+        wt,
+        git_rev_parse(wt, "HEAD").expect("head"),
+        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+    );
+    assert_eq!(
+        fs::read_to_string(wt.join("file.txt")).expect("read"),
+        "one\nstaged B\nunstaged C\nthree\n"
+    );
+    let st = status(&grit, &StatusOptions::default(), &mut NullProgress).expect("status");
+    assert_eq!(st.staged.len(), 0);
+    assert_eq!(st.unstaged.len(), 1);
+}
+
+#[test]
+fn fixup_preserves_unstaged_suffix_on_partially_staged_path() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    fs::write(wt.join("file.txt"), "base\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    git(wt, &["commit", "-m", "base"]);
+    fs::write(wt.join("file.txt"), "base\nstaged B\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    fs::write(wt.join("file.txt"), "base\nstaged B\nunstaged C\n").expect("write");
+    let grit = open_grit(wt);
+    plan_and_apply(
+        &grit,
+        wt,
+        git_rev_parse(wt, "HEAD").expect("head"),
+        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+    );
+    assert_eq!(
+        fs::read_to_string(wt.join("file.txt")).expect("read"),
+        "base\nstaged B\nunstaged C\n"
+    );
+}
+
+#[test]
 fn fixup_preserves_unstaged_changes() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
