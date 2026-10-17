@@ -88,7 +88,7 @@ fn bench_apply_stash_group(c: &mut Criterion) {
     let mut group = c.benchmark_group("apply_stash");
     group.bench_function("apply_stash_L", |b| {
         b.iter_batched(
-            || fx.reset_worktree_to_head(),
+            || fx.ensure_clean_stat_cache(),
             |_| bench_apply_stash(fx, &stash_oid),
             BatchSize::SmallInput,
         );

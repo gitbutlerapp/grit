@@ -482,6 +482,7 @@ pub fn bench_push_stash(fx: &HotPathsFixture) {
 }
 
 pub fn bench_apply_stash(fx: &HotPathsFixture, stash_oid: &ObjectId) {
+    fx.reset_worktree_to_head();
     let wt = fx.repo.work_tree().expect("work tree");
     let _ = apply_stash(
         &fx.repo,
