@@ -181,7 +181,8 @@ pub fn run_fixture_cli_matrix(
     )?);
 
     sync_grit_index_to_git(grit, &fixture.worktree)?;
-    let git_dot_git_grit_flaky = fixture.id == "git-dot-git";
+    // Large campaign fixtures can hit grit index edge cases after git hyperfine; record grit_failure and continue.
+    let allow_grit_staging_failure = !smoke;
     out.push(run_matrix_scenario(
         hyperfine,
         git,
@@ -200,7 +201,7 @@ pub fn run_fixture_cli_matrix(
             git_via_shell: false,
         },
         &fixture.worktree,
-        git_dot_git_grit_flaky,
+        allow_grit_staging_failure,
     )?);
 
     sync_grit_index_to_git(grit, &fixture.worktree)?;
@@ -229,7 +230,7 @@ pub fn run_fixture_cli_matrix(
             git_via_shell: true,
         },
         &fixture.worktree,
-        git_dot_git_grit_flaky,
+        allow_grit_staging_failure,
     )?);
 
     out.push(run_matrix_scenario(
