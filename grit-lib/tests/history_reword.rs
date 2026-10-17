@@ -1,14 +1,14 @@
-//! Tests for [`grit_lib::history::reword`].
+//! Tests for [`grit_lib::revwalk::history::reword`].
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
 
-use grit_lib::history::{
-    normalize_rewrite_message, reword, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    normalize_rewrite_message, reword, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
+};
 
 use support::{build_commit_dag, git, git_fsck_strict, HistoryRepo};
 

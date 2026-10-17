@@ -53,6 +53,12 @@ fn canonical_layout_script_covers_workspace_imports() {
     assert!(status.success(), "canonical layout map is incomplete");
 }
 
+/// Maximum root-level `pub mod` declarations in `grit-lib/src/lib.rs` (excluding `prelude`).
+///
+/// Raise only when adding a new top-level domain module. `origin/main` before the history
+/// rewrite API landed: 30; `history` as a dedicated rewrite surface: 31.
+const ROOT_PUB_MOD_BUDGET: usize = 31;
+
 #[test]
 fn root_public_module_count_within_budget() {
     let lib_rs = include_str!("../src/lib.rs");
@@ -64,8 +70,8 @@ fn root_public_module_count_within_budget() {
         })
         .count();
     assert!(
-        count <= 27,
-        "expected at most 27 root pub mod declarations, found {count}"
+        count <= ROOT_PUB_MOD_BUDGET,
+        "expected at most {ROOT_PUB_MOD_BUDGET} root pub mod declarations, found {count}"
     );
 }
 

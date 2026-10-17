@@ -11,7 +11,7 @@
 //! Library guide: history rewrite planning (see [`plan_rewrite`]).
 //!
 //! ```rust
-//! use grit_lib::history::{
+//! use grit_lib::revwalk::history::{
 //!     plan_rewrite, CommitEdit, HistoryEdits, RefScope, RewriteOptions, EmptyPolicy,
 //! };
 //! use grit_lib::objects::ObjectId;
@@ -39,6 +39,7 @@
 //! ```
 
 mod apply;
+mod drop;
 mod error;
 mod plan;
 mod reword;
@@ -46,6 +47,7 @@ mod squash;
 mod types;
 
 pub use apply::apply_rewrite;
+pub use drop::drop;
 pub use error::HistoryError;
 pub use plan::{plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use reword::{normalize_rewrite_message, reword};

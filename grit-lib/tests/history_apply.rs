@@ -1,4 +1,4 @@
-//! Integration tests for [`grit_lib::history::apply_rewrite`].
+//! Integration tests for [`grit_lib::revwalk::history::apply_rewrite`].
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -7,15 +7,15 @@ mod support;
 use std::fs;
 use std::process::Command;
 
-use grit_lib::history::{
-    apply_rewrite, plan_rewrite, ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope,
-    RewriteOptions,
-};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    apply_rewrite, plan_rewrite, ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope,
+    RewriteOptions,
+};
 
 use support::{
     build_commit_dag, commit_file, git, git_init_reftable_repo, git_rev_parse,
@@ -95,7 +95,7 @@ fn plan_reword(
     wt: &std::path::Path,
     target: grit_lib::objects::ObjectId,
     message: &str,
-) -> grit_lib::history::RewritePlan {
+) -> grit_lib::revwalk::history::RewritePlan {
     let grit = open_grit(wt);
     let mut edits = HistoryEdits::new();
     edits.insert(
@@ -125,7 +125,7 @@ fn plan_reword_with_tree(
     path: &str,
     content: &[u8],
     message: &str,
-) -> grit_lib::history::RewritePlan {
+) -> grit_lib::revwalk::history::RewritePlan {
     let grit = open_grit(wt);
     let parent_tree = parse_commit(&grit.odb().read(&target).expect("read").data)
         .expect("parse")
@@ -223,7 +223,7 @@ fn apply_rewrite_cas_mismatch_changes_nothing() {
     let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("cas");
     assert!(matches!(
         err,
-        grit_lib::history::HistoryError::RefCasMismatch { .. }
+        grit_lib::revwalk::history::HistoryError::RefCasMismatch { .. }
     ));
     assert_eq!(git_rev_parse(wt, "refs/heads/main"), Some(tip_after_move));
 }
@@ -238,7 +238,7 @@ fn apply_rewrite_refuses_when_local_changes_would_be_overwritten() {
     let grit = open_grit(wt);
     let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("blocked");
     match err {
-        grit_lib::history::HistoryError::LocalChangesWouldBeOverwritten { paths } => {
+        grit_lib::revwalk::history::HistoryError::LocalChangesWouldBeOverwritten { paths } => {
             assert!(paths.iter().any(|p| p.contains("clash")));
         }
         other => panic!("unexpected error: {other:?}"),

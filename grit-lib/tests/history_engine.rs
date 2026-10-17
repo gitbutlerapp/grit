@@ -8,10 +8,6 @@ use std::collections::BTreeMap;
 use std::process::Command;
 
 use grit_lib::commit::encoding;
-use grit_lib::history::{
-    plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count, CommitEdit,
-    EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
-};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{
@@ -19,6 +15,10 @@ use grit_lib::objects::{
 };
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count, CommitEdit,
+    EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
+};
 use grit_lib::state::resolve_head;
 
 use support::{build_commit_dag, commit_file, git, git_rev_parse, HistoryRepo};
@@ -336,7 +336,7 @@ fn plan_rewrite_insert_before_root_succeeds() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["r"],
-        CommitEdit::InsertBefore(grit_lib::history::NewCommit {
+        CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit {
             tree: insert_tree,
             author: "Insert <i@grit.test> 1 +0000".into(),
             message: "inserted root parent\n".into(),
@@ -375,7 +375,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         merge,
-        CommitEdit::InsertBefore(grit_lib::history::NewCommit {
+        CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit {
             tree: insert_tree,
             author: "Insert <i@grit.test> 1 +0000".into(),
             message: "inserted parent\n".into(),
@@ -393,7 +393,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
     .expect_err("insert before merge");
     assert_eq!(
         err,
-        grit_lib::history::HistoryError::InsertBeforeOnMerge { commit: merge }
+        grit_lib::revwalk::history::HistoryError::InsertBeforeOnMerge { commit: merge }
     );
 }
 
@@ -434,7 +434,10 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
     )
     .expect_err("blob tip is not a commit");
     assert!(
-        matches!(err, grit_lib::history::HistoryError::Planning { .. }),
+        matches!(
+            err,
+            grit_lib::revwalk::history::HistoryError::Planning { .. }
+        ),
         "expected planning error, got {err:?}"
     );
 }
@@ -702,7 +705,7 @@ fn plan_rewrite_rejects_merge_commit_in_replay() {
     .expect_err("merge in replay");
     assert!(matches!(
         err,
-        grit_lib::history::HistoryError::MergeCommitInReplay { .. }
+        grit_lib::revwalk::history::HistoryError::MergeCommitInReplay { .. }
     ));
 }
 
@@ -750,7 +753,7 @@ fn plan_rewrite_reports_conflict_with_paths() {
     )
     .expect_err("conflict");
     match err {
-        grit_lib::history::HistoryError::Conflict { paths, .. } => {
+        grit_lib::revwalk::history::HistoryError::Conflict { paths, .. } => {
             assert!(paths.iter().any(|p| p.contains("conflict.txt")));
         }
         other => panic!("expected conflict, got {other:?}"),
@@ -830,7 +833,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
     .expect_err("abort");
     assert!(matches!(
         abort_err,
-        grit_lib::history::HistoryError::BecameEmpty { .. }
+        grit_lib::revwalk::history::HistoryError::BecameEmpty { .. }
     ));
 
     let keep_plan = plan_rewrite(
@@ -888,7 +891,7 @@ fn plan_rewrite_rejects_branch_checked_out_in_other_worktree() {
     .expect_err("worktree");
     assert!(matches!(
         err,
-        grit_lib::history::HistoryError::BranchCheckedOutElsewhere { .. }
+        grit_lib::revwalk::history::HistoryError::BranchCheckedOutElsewhere { .. }
     ));
     let _ = feature_tip;
 }
@@ -959,7 +962,7 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
 
 #[test]
 fn plan_rewrite_rejects_divergent_branch() {
-    let err = grit_lib::history::HistoryError::DivergentBranch {
+    let err = grit_lib::revwalk::history::HistoryError::DivergentBranch {
         name: "refs/heads/feature".into(),
     };
     assert!(err.to_string().contains("feature"));
@@ -1034,7 +1037,7 @@ fn plan_rewrite_parent_only_replay_matches_git_commit_tree() {
 
 #[test]
 fn history_public_api_coverage_smoke() {
-    use grit_lib::history::{
+    use grit_lib::revwalk::history::{
         CommitEdit, EmptyPolicy, HeadEffect, HistoryError, NewCommit, PlannedRefUpdate, RefScope,
         RewriteOptions, RewritePlan, RewrittenCommit,
     };

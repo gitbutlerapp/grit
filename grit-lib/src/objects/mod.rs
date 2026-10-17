@@ -32,7 +32,20 @@ pub mod odb {
 pub mod pack {
     //! Pack files, indexes, and packfile I/O.
     pub use crate::pack::*;
-    pub use crate::pack_reuse::*;
+    pub use crate::pack_reuse_root::*;
+}
+
+pub mod bench_fixture {
+    //! Synthetic repository fixtures for benchmarks and tests.
+    pub use crate::bench_fixture_root::*;
+}
+pub mod pack_reuse {
+    //! Verbatim pack reuse for upload-pack.
+    pub use crate::pack_reuse_root::*;
+}
+pub mod pack_write {
+    //! Pack and index installation helpers.
+    pub use crate::pack_write_root::*;
 }
 
 pub mod midx {

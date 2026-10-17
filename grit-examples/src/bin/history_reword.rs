@@ -3,11 +3,11 @@
 //! Source for the library guide "History rewrite" page.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
-};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
+};
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use std::path::{Path, PathBuf};
 

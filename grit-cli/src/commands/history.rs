@@ -7,11 +7,11 @@ use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
-use grit_lib::history::{
+use grit_lib::objects::ObjectId;
+use grit_lib::revwalk::history::{
     apply_rewrite, reword, squash, ApplyOptions, EmptyPolicy, HistoryError, RefScope,
     RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
 };
-use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;

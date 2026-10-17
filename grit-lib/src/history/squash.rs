@@ -138,11 +138,9 @@ fn resolve_squash_range(
     }
     validate_connected_range(repo, &commits)?;
     let oldest = commits[0];
-    let tip = *commits
-        .last()
-        .ok_or_else(|| HistoryError::Planning {
-            message: "the revision range is empty".into(),
-        })?;
+    let tip = *commits.last().ok_or_else(|| HistoryError::Planning {
+        message: "the revision range is empty".into(),
+    })?;
     if oldest == tip {
         return Err(HistoryError::Planning {
             message: "the revision range holds a single commit; nothing to squash".into(),

@@ -1,16 +1,16 @@
-//! Tests for [`grit_lib::history::squash`].
+//! Tests for [`grit_lib::revwalk::history::squash`].
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
 
-use grit_lib::history::{
-    apply_rewrite, squash, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-    SquashMessage, SquashOptions,
-};
 use grit_lib::objects::parse_commit;
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    apply_rewrite, squash, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
+    SquashMessage, SquashOptions,
+};
 
 use support::{
     build_commit_dag, commit_file, git, git_fsck_strict, git_rev_parse_verify, HistoryRepo,
@@ -39,7 +39,7 @@ fn squash_opts(scope: RefScope) -> SquashOptions {
     }
 }
 
-fn apply_plan(repo: &Repository, plan: &grit_lib::history::RewritePlan) {
+fn apply_plan(repo: &Repository, plan: &grit_lib::revwalk::history::RewritePlan) {
     apply_rewrite(
         repo,
         plan,

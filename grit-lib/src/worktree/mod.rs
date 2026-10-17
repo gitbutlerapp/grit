@@ -30,7 +30,7 @@ pub mod ignore {
 }
 pub mod fsmonitor {
     //! fsmonitor API (re-exported at this path).
-    pub use crate::fsmonitor::*;
+    pub use crate::fsmonitor_root::*;
 }
 pub mod worktree_cwd {
     //! worktree_cwd API (re-exported at this path).
