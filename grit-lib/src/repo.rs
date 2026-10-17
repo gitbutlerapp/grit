@@ -3601,24 +3601,43 @@ mod index_write_fail_inject {
 
     thread_local! {
         pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
+        pub static INJECT_REMAINING: RefCell<Option<usize>> = const { RefCell::new(None) };
     }
 }
 
-/// Debug-only: fail the next [`Repository::write_index`] call.
+/// Debug-only: fail every [`Repository::write_index`] / index lock path while enabled.
 #[cfg(test)]
 pub(crate) fn set_test_inject_index_write_fail(enabled: bool) {
     index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
+    if !enabled {
+        index_write_fail_inject::INJECT_REMAINING.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+/// Debug-only: fail the next `remaining` index write attempts, then allow writes.
+#[cfg(test)]
+pub(crate) fn set_test_inject_index_write_fail_remaining(remaining: usize) {
+    index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = true);
+    index_write_fail_inject::INJECT_REMAINING.with(|c| *c.borrow_mut() = Some(remaining));
 }
 
 #[cfg(test)]
 fn test_inject_index_write_fail() -> Result<()> {
-    index_write_fail_inject::INJECT.with(|c| {
-        if *c.borrow() {
-            return Err(Error::Io(std::io::Error::other(
-                "injected index write failure",
-            )));
+    index_write_fail_inject::INJECT.with(|enabled| {
+        if !*enabled.borrow() {
+            return Ok(());
         }
-        Ok(())
+        index_write_fail_inject::INJECT_REMAINING.with(|remaining| {
+            if let Some(left) = remaining.borrow_mut().as_mut() {
+                if *left == 0 {
+                    return Ok(());
+                }
+                *left -= 1;
+            }
+            Err(Error::Io(std::io::Error::other(
+                "injected index write failure",
+            )))
+        })
     })
 }
 
