@@ -282,16 +282,6 @@ pub fn run_scenario_allow_grit_failure(
         grit.to_path_buf()
     };
 
-    let git_stats = bench_tool(
-        hyperfine,
-        &git_prog,
-        &scenario.git_argv,
-        repo,
-        cfg,
-        prepare.as_deref(),
-        "git",
-    )?;
-
     let grit_outcome = bench_tool(
         hyperfine,
         &grit_prog,
@@ -301,6 +291,16 @@ pub fn run_scenario_allow_grit_failure(
         prepare.as_deref(),
         "grit",
     );
+
+    let git_stats = bench_tool(
+        hyperfine,
+        &git_prog,
+        &scenario.git_argv,
+        repo,
+        cfg,
+        prepare.as_deref(),
+        "git",
+    )?;
 
     let (grit_stats, ratio, grit_failure) = match grit_outcome {
         Ok(stats) => {

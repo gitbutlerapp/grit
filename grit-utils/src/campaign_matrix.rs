@@ -181,7 +181,8 @@ pub fn run_fixture_cli_matrix(
     )?);
 
     sync_grit_index_to_git(grit, &fixture.worktree)?;
-    out.push(run_scenario(
+    let git_dot_git_grit_flaky = fixture.id == "git-dot-git";
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -199,6 +200,7 @@ pub fn run_fixture_cli_matrix(
             git_via_shell: false,
         },
         &fixture.worktree,
+        git_dot_git_grit_flaky,
     )?);
 
     sync_grit_index_to_git(grit, &fixture.worktree)?;
@@ -209,7 +211,7 @@ pub fn run_fixture_cli_matrix(
             vec!["commit".into(), "-q".into(), "-m".into(), "bench".into()],
         ],
     );
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -227,6 +229,7 @@ pub fn run_fixture_cli_matrix(
             git_via_shell: true,
         },
         &fixture.worktree,
+        git_dot_git_grit_flaky,
     )?);
 
     out.push(run_matrix_scenario(
