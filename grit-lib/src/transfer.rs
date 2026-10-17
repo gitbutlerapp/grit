@@ -754,7 +754,22 @@ fn copy_objects_for_local_push(
     have_shallow: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
 ) -> Result<()> {
-    use crate::local_object_copy::{link_loose_objects_for_oids, refresh_local_odb_after_link};
+    use crate::local_object_copy::{
+        link_loose_objects_for_oids, refresh_local_odb_after_link, source_objects_fully_packed,
+        try_satisfy_via_object_link,
+    };
+
+    let local_objects = local_git_dir.join("objects");
+    let remote_objects = remote_git_dir.join("objects");
+
+    if !opts.thin
+        && haves.is_empty()
+        && !wants.is_empty()
+        && source_objects_fully_packed(&local_objects)?
+        && try_satisfy_via_object_link(&local_objects, &remote_objects, remote_odb, wants, false)?
+    {
+        return Ok(());
+    }
 
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
     let send = collect_reachable_excluding_peer(
@@ -766,8 +781,11 @@ fn copy_objects_for_local_push(
         source_shallow,
     )?;
 
-    let local_objects = local_git_dir.join("objects");
-    let remote_objects = remote_git_dir.join("objects");
+    if !opts.thin
+        && try_satisfy_via_object_link(&local_objects, &remote_objects, remote_odb, &send, false)?
+    {
+        return Ok(());
+    }
 
     let mut still_missing: Vec<ObjectId> = send
         .iter()
@@ -804,7 +822,7 @@ fn copy_objects_for_local_push(
         pack,
         remote_odb,
         &crate::index_pack::IngestPackOptions {
-            fix_thin: true,
+            fix_thin: pack_opts.thin,
             ..Default::default()
         },
     )?;
@@ -1527,7 +1545,11 @@ pub fn push_local(
         .collect();
     if !push_wants.is_empty() && !opts.dry_run {
         let local_cfg = config_for_git_dir(local_git_dir);
-        let pack_opts = PackBuildOptions::for_local_push(local_cfg.as_ref());
+        let pack_opts = if remote_have_tips.is_empty() {
+            PackBuildOptions::for_local_copy(local_cfg.as_ref())
+        } else {
+            PackBuildOptions::for_local_push(local_cfg.as_ref())
+        };
         let empty_shallow = HashSet::new();
         let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
         copy_objects_for_local_push(

@@ -84,7 +84,10 @@ impl PackBuildOptions {
         }
     }
 
-    /// Production pack settings for an in-process local push (thin delta pack).
+    /// Production pack settings for an incremental in-process local push.
+    ///
+    /// Uses a thin pack when the remote already has objects to delta against.
+    /// Initial pushes into an empty bare repo should use [`Self::for_local_copy`].
     #[must_use]
     pub fn for_local_push(cfg: Option<&crate::config::ConfigSet>) -> Self {
         let (window, max_depth) = Self::window_and_depth_from_config(cfg);
