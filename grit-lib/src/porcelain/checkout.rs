@@ -867,6 +867,21 @@ fn remove_wholesale_directories_on_disk(
     Ok(wholesale_dirs_removed)
 }
 
+fn checkout_touched_entry_mtime_max(entries: &[IndexEntry]) -> (u32, u32) {
+    let mut max_sec = 0u32;
+    let mut max_nsec = 0u32;
+    for ie in entries {
+        if ie.stage() != 0 {
+            continue;
+        }
+        if ie.mtime_sec > max_sec || (ie.mtime_sec == max_sec && ie.mtime_nsec > max_nsec) {
+            max_sec = ie.mtime_sec;
+            max_nsec = ie.mtime_nsec;
+        }
+    }
+    (max_sec, max_nsec)
+}
+
 fn checkout_commit_index_update(
     repo: &Repository,
     index_mut: &mut Index,
@@ -884,6 +899,8 @@ fn checkout_commit_index_update(
             index_mut.drop_derived_index_extensions();
         }
     }
+    let touched_mtime = (bulk_index_rewrite && !new_entries.is_empty())
+        .then(|| checkout_touched_entry_mtime_max(&new_entries));
     index_mut.remove_prefixes_paths_and_insert(
         wholesale_dirs_removed,
         paths_to_remove.iter().map(|p| p.as_slice()),
@@ -897,7 +914,11 @@ fn checkout_commit_index_update(
     index_mut.suppress_pre_write_index_housekeeping = false;
     result?;
     let index_path = repo.index_path_for_env()?;
-    crate::index::advance_index_file_mtime_past_entries(index_mut, &index_path)?;
+    crate::index::advance_index_file_mtime_past_entries_with_touch_hint(
+        index_mut,
+        &index_path,
+        touched_mtime,
+    )?;
     index_mut.source_mtime = crate::index::index_file_mtime(&index_path);
     Ok(())
 }
@@ -1039,20 +1060,18 @@ fn checkout_bulk_added_tree_changes(
         write_outcomes,
         progress,
     )?;
-    let wholesale_dirs_removed = if apply.wholesale_safety_precomputed {
-        remove_wholesale_directories_on_disk(
+    if apply.wholesale_safety_precomputed {
+        let _ = remove_wholesale_directories_on_disk(
             repo,
             work_tree,
             &apply.preverified_wholesale_dirs,
             config,
-        )?
-    } else {
-        BTreeSet::new()
-    };
+        )?;
+    }
     checkout_commit_index_update(
         repo,
         index_mut,
-        &wholesale_dirs_removed,
+        &apply.preverified_wholesale_dirs,
         &[],
         new_entries,
         true,
@@ -3178,6 +3197,86 @@ mod tests {
         );
         for i in 0..40 {
             assert!(wt.join(format!("new/f{i:02}.txt")).is_file());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bulk_added_checkout_drops_index_when_wholesale_removal_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        std::fs::create_dir_all(wt.join("old")).expect("mkdir old");
+        std::fs::create_dir_all(wt.join("new")).expect("mkdir new");
+        let mut index = repo.load_index().expect("index");
+        let mut changes = Vec::new();
+        for i in 0..40 {
+            let old_rel = format!("old/f{i:02}.txt");
+            let new_rel = format!("new/f{i:02}.txt");
+            let old_abs = wt.join(&old_rel);
+            let new_abs = wt.join(&new_rel);
+            std::fs::write(&old_abs, format!("old {i}\n")).expect("write old");
+            let old_data = fs::read(&old_abs).expect("read old");
+            let old_oid = repo.odb().write(ObjectKind::Blob, &old_data).expect("blob");
+            index.add_or_replace(
+                entry_from_stat(&old_abs, old_rel.as_bytes(), old_oid, MODE_REGULAR)
+                    .expect("old entry"),
+            );
+            std::fs::write(&new_abs, format!("new {i}\n")).expect("write new");
+            let new_data = fs::read(&new_abs).expect("read new");
+            let new_oid = repo.odb().write(ObjectKind::Blob, &new_data).expect("blob");
+            changes.push(DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some(new_rel),
+                old_mode: String::new(),
+                new_mode: "100644".into(),
+                old_oid: ObjectId::zero(),
+                new_oid,
+                score: None,
+            });
+        }
+        index.sort();
+        let mut perms = std::fs::metadata(wt.join("old"))
+            .expect("meta")
+            .permissions();
+        perms.set_mode(0o555);
+        std::fs::set_permissions(wt.join("old"), perms).expect("chmod old");
+
+        let mut preverified = BTreeSet::new();
+        preverified.insert("old".into());
+        checkout_tree_changes_with_index_opts(
+            &repo,
+            &changes,
+            &mut index,
+            CheckoutApplyOptions {
+                parallel_prepare_blobs: true,
+                checkout_parallel_threshold: Some(0),
+                trust_wholesale_dir_removal: true,
+                preverified_wholesale_dirs: preverified,
+                wholesale_safety_precomputed: true,
+                skip_bulk_checkout_fast_path: false,
+            },
+            None,
+        )
+        .expect("checkout");
+        assert!(
+            index.get(b"old/f00.txt", 0).is_none(),
+            "index must drop wholesale-deleted paths even when directory removal fails"
+        );
+        for i in 0..40 {
+            assert!(index
+                .get(format!("new/f{i:02}.txt").as_bytes(), 0)
+                .is_some());
         }
     }
 }
