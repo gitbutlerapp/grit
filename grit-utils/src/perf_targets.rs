@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::schema::ScenarioResult;
+use crate::schema::{BenchReport, ScenarioResult};
 
 /// Default grit/git ratio target when a scenario has no explicit entry.
 pub const DEFAULT_TARGET_RATIO: f64 = 1.1;
@@ -156,11 +156,20 @@ pub fn is_owned_by_item_14(scenario_id: &str) -> bool {
         || scenario_id.contains("revs-count-deep")
 }
 
+/// Load a saved campaign JSON report and render the 1.1× ledger markdown.
+pub fn render_ledger_markdown_from_json_report(
+    report_path: &Path,
+    targets_path: &Path,
+) -> Result<String> {
+    let raw = std::fs::read_to_string(report_path)
+        .with_context(|| format!("read campaign report {}", report_path.display()))?;
+    let report: BenchReport = serde_json::from_str(&raw).context("parse campaign report JSON")?;
+    let targets = load_perf_targets(targets_path)?;
+    Ok(render_ledger_markdown(&report, &targets))
+}
+
 /// Render a markdown scorecard table for `report` using `targets`.
-pub fn render_ledger_markdown(
-    report: &crate::schema::BenchReport,
-    targets: &PerfTargets,
-) -> String {
+pub fn render_ledger_markdown(report: &BenchReport, targets: &PerfTargets) -> String {
     let mut out = String::from("| scenario | git ms | grit ms | ratio | status |\n");
     out.push_str("| --- | ---: | ---: | ---: | --- |\n");
     for scenario in &report.scenarios {
@@ -286,6 +295,53 @@ ratio = 1.1
             )),
             LedgerStatus::Fail
         );
+        Ok(())
+    }
+
+    #[test]
+    fn render_ledger_from_json_report_file() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let targets_path = dir.path().join("perf-targets.toml");
+        std::fs::write(
+            &targets_path,
+            r#"
+[default]
+ratio = 1.1
+"#,
+        )?;
+        let report_path = dir.path().join("campaign.json");
+        std::fs::write(
+            &report_path,
+            r#"{
+  "schema_version": 1,
+  "timestamp": "2026-01-01T00:00:00Z",
+  "machine": {
+    "cpu_model": "test",
+    "physical_cores": 1,
+    "logical_cores": 1,
+    "ram_bytes": 1,
+    "os": "linux",
+    "kernel": "test",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "test",
+    "cargo_profile": "release"
+  },
+  "tools": { "git": "git", "grit": "grit", "grit_commit": "abc" },
+  "scenarios": [{
+    "id": "git-dot-git/status-clean",
+    "group": "status",
+    "fixture": "git-dot-git",
+    "description": "d",
+    "driver": "cli",
+    "git": { "mean_ms": 10.0, "median_ms": 10.0, "stddev_ms": 0.0, "min_ms": 10.0, "max_ms": 10.0, "runs_ms": [10.0] },
+    "grit": { "mean_ms": 10.0, "median_ms": 10.0, "stddev_ms": 0.0, "min_ms": 10.0, "max_ms": 10.0, "runs_ms": [10.0] },
+    "ratio": 1.0
+  }]
+}"#,
+        )?;
+        let md = render_ledger_markdown_from_json_report(&report_path, &targets_path)?;
+        assert!(md.contains("git-dot-git/status-clean"));
+        assert!(md.contains("pass"));
         Ok(())
     }
 

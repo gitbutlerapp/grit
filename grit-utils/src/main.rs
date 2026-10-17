@@ -24,7 +24,9 @@ use grit_utils::parallel_suite::{
     prepare_parallel_checkout, prepare_parallel_clone, prepare_parallel_index_pack,
     run_parallel_suite,
 };
-use grit_utils::perf_targets::{load_perf_targets, render_ledger_markdown};
+use grit_utils::perf_targets::{
+    load_perf_targets, render_ledger_markdown, render_ledger_markdown_from_json_report,
+};
 use grit_utils::refs_driver;
 use grit_utils::refs_fixture::{run_prepare_refs, RefsWorkMode};
 use grit_utils::refs_suite::{run_refs_suite, RefsRunConfig};
@@ -221,6 +223,11 @@ enum Cmd {
         candidate: PathBuf,
         #[arg(long, default_value = "0.10")]
         tolerance: f64,
+    },
+    /// Render the 1.1× ledger markdown from a saved campaign JSON report (no re-benchmark).
+    Ledger {
+        /// Campaign report produced by `grit-bench campaign --format json`.
+        report: PathBuf,
     },
     /// Internal: hyperfine `--prepare` hook for add benchmarks
     #[command(hide = true)]
@@ -697,6 +704,13 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    if let Cmd::Ledger { report } = &cli.command {
+        let targets_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("perf-targets.toml");
+        let ledger_md = render_ledger_markdown_from_json_report(report, &targets_path)?;
+        write_output(&cli, &ledger_md)?;
+        return Ok(());
+    }
+
     let git = resolve_binary("git", cli.git.as_deref())?;
     let grit = resolve_binary("grit", cli.grit.as_deref())?;
     let hyperfine = require_hyperfine()?;
@@ -940,6 +954,7 @@ fn main() -> Result<()> {
             status
         }
         Cmd::Compare { .. }
+        | Cmd::Ledger { .. }
         | Cmd::MeasureRss { .. }
         | Cmd::RunLimited { .. }
         | Cmd::Drive { .. }

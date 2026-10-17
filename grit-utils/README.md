@@ -40,7 +40,10 @@ cargo build --release -p grit-cli -p grit-utils
 # Campaign scorecard on real fixtures (git.git + chromium-class synthetic; optional linux)
 ./target/release/grit-bench campaign --format json --output baselines/campaign-before.json
 
-# 1.1× ledger table: writes markdown to `--output` (JSON is omitted for that combination)
+# 1.1× ledger table from a saved JSON report (no re-benchmark)
+./target/release/grit-bench ledger --format markdown --output baselines/campaign-before.ledger.md baselines/campaign-before.json
+
+# Or emit ledger alongside a fresh capture (`--ledger` on `campaign`)
 ./target/release/grit-bench campaign --ledger --format markdown --output baselines/campaign-before.ledger.md
 
 # Ledger plus JSON: write ledger next to the JSON path

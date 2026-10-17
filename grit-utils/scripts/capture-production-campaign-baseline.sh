@@ -22,6 +22,10 @@ echo "Compare consecutive runs (±10% tolerance)"
 
 cp "$RUN1" "${BASELINE_DIR}/campaign-before.json"
 cp "$RUN2" "${BASELINE_DIR}/campaign-after.json"
-cp "${RUN1%.json}.ledger.md" "${BASELINE_DIR}/campaign-before.ledger.md" 2>/dev/null || true
+if [ -f "${RUN1%.json}.ledger.md" ]; then
+  cp "${RUN1%.json}.ledger.md" "${BASELINE_DIR}/campaign-before.ledger.md"
+else
+  "$BENCH" ledger --format markdown --output "${BASELINE_DIR}/campaign-before.ledger.md" "$RUN1"
+fi
 
 echo "Committed baselines updated under ${BASELINE_DIR}/"
