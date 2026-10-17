@@ -61,7 +61,8 @@ fn record_merge_call() {
 /// # Errors
 ///
 /// Returns [`HistoryError`] for conflicts, unsupported merges, scope violations, empty-policy
-/// aborts, and [`HistoryError::Library`] for object/revwalk/ref failures.
+/// aborts, [`HistoryError::Planning`] for invalid planning inputs, and [`HistoryError::Library`]
+/// for object/revwalk/ref failures.
 pub fn plan_rewrite(
     repo: &Repository,
     edits: &HistoryEdits,
@@ -136,6 +137,10 @@ pub fn plan_rewrite(
 
         if old.parents.len() > 1 && edit.is_none() {
             return Err(HistoryError::MergeCommitInReplay { commit: old_oid });
+        }
+
+        if matches!(edit, Some(CommitEdit::InsertBefore(_))) && old.parents.len() > 1 {
+            return Err(HistoryError::InsertBeforeOnMerge { commit: old_oid });
         }
 
         if matches!(edit, Some(CommitEdit::Drop)) {

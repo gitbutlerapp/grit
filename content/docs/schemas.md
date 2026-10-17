@@ -36,6 +36,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `notes.remove` | [v1](/schemas/notes.remove/v1.json) |
 | `notes.show` | [v1](/schemas/notes.show/v1.json) |
 | `pick` | [v1](/schemas/pick/v1.json) |
+| `history.reword` | [v1](/schemas/history.reword/v1.json) |
 | `pull` | [v1](/schemas/pull/v1.json) |
 | `push` | [v1](/schemas/push/v1.json) |
 | `remote` | [v1](/schemas/remote/v1.json) |

@@ -53,6 +53,7 @@ use crate::porcelain::index_from_tree::{
 };
 use crate::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
 use crate::refs;
+use crate::worktree_rules::WorktreeRules;
 use crate::repo::Repository;
 use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
 use crate::write_tree::write_tree_from_index;

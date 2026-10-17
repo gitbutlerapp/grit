@@ -184,6 +184,28 @@ enum StashAction {
     },
 }
 
+/// Subcommands of `grit history`.
+#[derive(Debug, Subcommand)]
+enum HistoryAction {
+    /// Replace a commit message and replay descendants onto the new history.
+    Reword {
+        /// Commit to reword (revision spec).
+        commit: String,
+        /// New commit message.
+        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        message: Option<String>,
+        /// Read the new message from a file (`-` for stdin).
+        #[arg(
+            long = "message-file",
+            value_name = "PATH|-",
+            conflicts_with = "message"
+        )]
+        message_file: Option<String>,
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
+}
+
 /// Subcommands of `grit notes`.
 #[derive(Debug, Subcommand)]
 enum NotesAction {
@@ -632,6 +654,11 @@ enum Command {
     Revert {
         /// Commit to revert (any revision spec — full / short oid, branch, HEAD~2, …).
         commit: String,
+    },
+    /// Rewrite commits without a sequencer (plan, then apply refs atomically).
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
     },
     /// Save or restore shelved work.
     Stash {
@@ -1255,6 +1282,18 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         }
         Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts, ctx),
         Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts, ctx),
+        Command::History { action } => match action {
+            HistoryAction::Reword {
+                commit,
+                message,
+                message_file,
+                shared,
+            } => emit(
+                &commands::history::run_reword(&commit, message, message_file, &shared)?,
+                opts,
+                ctx,
+            ),
+        },
         Command::Stash {
             action,
             message,

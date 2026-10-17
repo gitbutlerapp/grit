@@ -229,6 +229,15 @@ fn snapshot_pick() {
 }
 
 #[test]
+fn snapshot_history_reword() {
+    snapshot_fresh(
+        "history_reword",
+        &["history", "reword", "HEAD~1", "-m", "reworded subject"],
+        |_| {},
+    );
+}
+
+#[test]
 fn snapshot_revert() {
     snapshot_fresh("revert", &["revert", "HEAD"], |fixture| {
         fixture

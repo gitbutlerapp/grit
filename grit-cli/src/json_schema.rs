@@ -70,6 +70,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         fetch::FetchOutcome,
         fsck::FsckOutcome,
         gc::GcOutcome,
+        history::HistoryRewordOutcome,
         hooks::HooksOutcome,
         ignore::IgnoreCheckOutcome,
         init::InitOutcome,
@@ -151,6 +152,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<NotesOutcome>("notes.add"),
         entry::<NotesOutcome>("notes.remove"),
         entry::<PickOutcome>("pick"),
+        entry::<HistoryRewordOutcome>("history.reword"),
         entry::<RevertOutcome>("revert"),
         entry::<StashPushOutcome>("stash"),
         entry::<StashPushOutcome>("stash.push"),
@@ -274,6 +276,10 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("prune") => "gc.prune",
             _ => return None,
         },
+        "history" => match positional.get(1).copied() {
+            Some("reword") => "history.reword",
+            _ => return None,
+        },
         cmd if NO_JSON_COMMANDS.contains(&cmd) => return None,
         cmd => cmd,
     };
@@ -319,8 +325,34 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
         );
         obj.insert("$id".into(), schema_id(command).into());
     }
+    if command == "history.reword" {
+        ensure_required_nullable_head(&mut value);
+    }
     canonicalize_json(&mut value);
     value
+}
+
+/// `schemars` omits `Option` fields from `required`; stable `--json` always emits `head`.
+fn ensure_required_nullable_head(schema: &mut serde_json::Value) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+    let Some(props) = obj.get("properties").and_then(|p| p.as_object()) else {
+        return;
+    };
+    if !props.contains_key("head") {
+        return;
+    }
+    let required = obj
+        .entry("required")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    let Some(arr) = required.as_array_mut() else {
+        return;
+    };
+    if !arr.iter().any(|v| v.as_str() == Some("head")) {
+        arr.push(serde_json::Value::String("head".into()));
+        arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
 }
 
 fn canonicalize_json(value: &mut serde_json::Value) {
@@ -496,6 +528,10 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("merge_ff", &["merge", "main"]),
         ("merge_conflict", &["merge", "side"]),
         ("pick", &["pick", "topic"]),
+        (
+            "history_reword",
+            &["history", "reword", "HEAD~1", "-m", "reworded subject"],
+        ),
         ("revert", &["revert", "HEAD"]),
         ("shortlog", &["shortlog"]),
         ("revs_head", &["revs", "HEAD"]),

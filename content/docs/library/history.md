@@ -12,6 +12,8 @@ The [`history`](rustdoc:grit_lib::revwalk::history) module supports stateless hi
 
 [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) describes per-commit rewrites, drops, and insert-before commits. [`RewriteOptions`](rustdoc:grit_lib::revwalk::history::RewriteOptions) controls scope, empty-commit policy, and the committer ident used for new objects.
 
+For a single message change, [`reword`](rustdoc:grit_lib::revwalk::history::reword) builds the [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) and runs [`plan_rewrite`](rustdoc:grit_lib::revwalk::history::plan_rewrite) after [`normalize_rewrite_message`](rustdoc:grit_lib::revwalk::history::normalize_rewrite_message) (stripspace, trailing newline, reject empty).
+
 ## Apply options and result
 
 [`ApplyOptions`](rustdoc:grit_lib::revwalk::history::ApplyOptions) supplies the reflog identity and message written for every ref update in the batch.
@@ -20,17 +22,18 @@ The [`history`](rustdoc:grit_lib::revwalk::history) module supports stateless hi
 
 ## Dry-run ref lines
 
-[`RewritePlan::ref_update_lines`](rustdoc:grit_lib::revwalk::history::RewritePlan) returns `update <ref> <new> <old>` lines suitable for `git update-ref --stdin`, so callers can preview ref motion without applying.
+[`RewritePlan::ref_update_lines`](rustdoc:grit_lib::revwalk::history::RewritePlan::ref_update_lines) returns `update <ref> <new> <old>` lines suitable for `git update-ref --stdin`, so callers can preview ref motion without applying.
 
 ## Errors
 
 [`HistoryError`](rustdoc:grit_lib::revwalk::history::HistoryError) covers planning failures (conflicts, out-of-scope commits, branch checked out elsewhere) and apply failures:
 
-- `LocalChangesWouldBeOverwritten` — staged, unstaged, or untracked paths would be clobbered by the planned tree checkout.
-- `RefCasMismatch` — a ref tip changed after planning; nothing is written.
-- `HeadMovedSincePlan` — `HEAD` no longer points at the ref or commit recorded when the plan was built; nothing is written.
-- `RefApply` / `WorktreeApply` — ref batch or post-ref checkout failed (apply rolls back ref updates when checkout fails).
-- `ApplyRollbackIncomplete` — checkout failed after refs moved and ref rollback or worktree restore also failed.
+- [`LocalChangesWouldBeOverwritten`](rustdoc:grit_lib::revwalk::history::HistoryError::LocalChangesWouldBeOverwritten) — staged, unstaged, or untracked paths would be clobbered by the planned tree checkout.
+- [`RefCasMismatch`](rustdoc:grit_lib::revwalk::history::HistoryError::RefCasMismatch) — a ref tip changed after planning; nothing is written.
+- [`HeadMovedSincePlan`](rustdoc:grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan) — `HEAD` no longer points at the ref or commit recorded when the plan was built; nothing is written.
+- [`RefApply`](rustdoc:grit_lib::revwalk::history::HistoryError::RefApply) / [`WorktreeApply`](rustdoc:grit_lib::revwalk::history::HistoryError::WorktreeApply) — ref batch or post-ref checkout failed (apply rolls back ref updates when checkout fails).
+- [`ApplyRollbackIncomplete`](rustdoc:grit_lib::revwalk::history::HistoryError::ApplyRollbackIncomplete) — checkout failed after refs moved and ref rollback or worktree restore also failed.
+- [`EmptyMessage`](rustdoc:grit_lib::revwalk::history::HistoryError::EmptyMessage) — reword message cleanup left an empty body.
 
 ## Example
 
