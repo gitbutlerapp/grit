@@ -248,10 +248,19 @@ pub fn check_local_url_path_not_option_like(url: &str) -> Result<(), TransportPa
 #[error("No directory name could be guessed.\nPlease specify a directory on the command line")]
 pub struct NoDirectoryName;
 
-/// POSIX directory separator test, matching Git's `is_dir_sep` on non-Windows builds.
+/// Directory separator test for [`git_url_basename`], matching Git's `is_dir_sep`.
+///
+/// Both `/` and `\` are treated as separators so Windows-style local clone sources
+/// (`..\..\origin.git`, `C:\scratch\a\origin.git`) derive the same default directory
+/// name as `git clone`.
 #[inline]
 fn is_dir_sep(b: u8) -> bool {
-    b == b'/'
+    b == b'/' || b == b'\\'
+}
+
+#[inline]
+fn bytes_have_dir_sep(bytes: &[u8]) -> bool {
+    bytes.iter().any(|&b| is_dir_sep(b))
 }
 
 /// Derive the "humanish" directory name Git would use for `git clone <repo>` when no explicit
@@ -312,7 +321,7 @@ pub fn git_url_basename(
     // This must NOT strip URIs like '/foo/bar:2222.git', which should guess dir '2222' for
     // backwards compatibility.
     let slice = &bytes[start..end];
-    if !slice.contains(&b'/') && slice.contains(&b':') {
+    if !bytes_have_dir_sep(slice) && slice.contains(&b':') {
         let mut p = end;
         while start < p && bytes[p - 1].is_ascii_digit() && bytes[p - 1] != b':' {
             p -= 1;
@@ -471,6 +480,15 @@ mod tests {
     fn empty_name_is_error() {
         assert_eq!(git_url_basename("/", false, false), Err(NoDirectoryName));
         assert_eq!(git_url_basename("", false, false), Err(NoDirectoryName));
+    }
+
+    #[test]
+    fn windows_style_local_path_components() {
+        assert_eq!(basename(r"..\..\origin.git"), "origin");
+        assert_eq!(basename(r"..\..\\origin.git"), "origin");
+        assert_eq!(basename(r"C:\scratch\a\origin.git"), "origin");
+        assert_eq!(basename(r"C:/scratch/a/origin.git"), "origin");
+        assert_eq!(basename(r"foo\bar\repo"), "repo");
     }
 
     #[test]

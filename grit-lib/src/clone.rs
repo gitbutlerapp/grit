@@ -19,8 +19,8 @@ use crate::remote::{HttpClientFactory, Remote, DEFAULT_REMOTE};
 use crate::repo::{init_repository, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode, TransferStats};
 use crate::transport_path::{
-    absolute_local_clone_source_url, resolve_local_remote_git_dir,
-    should_store_absolute_local_clone_url, url_is_local_not_ssh,
+    absolute_local_clone_source_url, git_url_basename, resolve_local_remote_git_dir,
+    should_store_absolute_local_clone_url, url_is_local_not_ssh, NoDirectoryName,
 };
 
 /// Errors during [`clone`].
@@ -133,12 +133,14 @@ pub struct CloneOutcome {
     pub tags: u64,
 }
 
-/// Derive a destination directory from a clone URL (last path component, minus `.git`).
-#[must_use]
-pub fn derive_clone_dir(url: &str) -> String {
-    let trimmed = url.trim_end_matches('/');
-    let last = trimmed.rsplit(['/', ':']).next().unwrap_or(trimmed);
-    last.strip_suffix(".git").unwrap_or(last).to_owned()
+/// Derive a destination directory from a clone URL (Git [`git_url_basename`]).
+///
+/// # Errors
+///
+/// Returns [`NoDirectoryName`] when no directory name can be guessed (same as `git clone`
+/// without `<dir>`).
+pub fn derive_clone_dir(url: &str) -> std::result::Result<String, NoDirectoryName> {
+    git_url_basename(url, false, false)
 }
 
 /// Whether `path` is an existing empty directory (used for failed-clone cleanup policy).
@@ -722,6 +724,18 @@ mod tests {
             outcome.branches_with_commits
         );
         assert!(outcome.transfer.objects > 0);
+    }
+
+    #[test]
+    fn derive_clone_dir_windows_style_paths() {
+        assert_eq!(
+            derive_clone_dir(r"..\..\origin.git").expect("name"),
+            "origin"
+        );
+        assert_eq!(
+            derive_clone_dir(r"C:\scratch\a\origin.git").expect("name"),
+            "origin"
+        );
     }
 
     #[test]

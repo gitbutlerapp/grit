@@ -406,7 +406,10 @@ fn emit_no_checkout_note(mode: OutputMode, outcome: &LibCloneOutcome) {
 }
 
 pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutcome> {
-    let dir = dir.unwrap_or_else(|| derive_clone_dir(url));
+    let dir = match dir {
+        Some(d) => d,
+        None => derive_clone_dir(url).map_err(|e| anyhow::anyhow!("{e}"))?,
+    };
     let path = PathBuf::from(&dir);
     let dest_preexisted_empty = dest_preexisted_empty(&path);
     let started = Instant::now();

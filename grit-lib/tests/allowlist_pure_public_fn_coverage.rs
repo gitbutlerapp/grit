@@ -130,7 +130,9 @@ author A <a@b> 0 +0000\ncommitter C <c@d> 0 +0000\n\nm\n";
 
 #[test]
 fn clone_config_command_runner_and_cwd_helpers() {
-    assert!(!derive_clone_dir("https://example.com/foo.git").is_empty());
+    assert!(!derive_clone_dir("https://example.com/foo.git")
+        .expect("dir name")
+        .is_empty());
     let dir = tempdir().expect("tempdir");
     let nested = dir.path().join("clone-fail");
     std::fs::create_dir_all(&nested).expect("mkdir");

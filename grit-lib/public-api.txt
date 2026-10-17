@@ -11798,7 +11798,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::Clone
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::cleanup_failed_clone(&std::path::Path, bool)
 pub fn grit_lib::remote::clone::clone(grit_lib::remote::clone::CloneOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneOutcome, grit_lib::remote::clone::CloneError>
-pub fn grit_lib::remote::clone::derive_clone_dir(&str) -> alloc::string::String
+pub fn grit_lib::remote::clone::derive_clone_dir(&str) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
 pub fn grit_lib::remote::clone::dest_preexisted_empty(&std::path::Path) -> bool
 pub mod grit_lib::remote::credentials
 pub struct grit_lib::remote::credentials::Credential
