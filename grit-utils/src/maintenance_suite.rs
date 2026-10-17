@@ -90,10 +90,7 @@ pub fn write_gc_base_marker(git: &Path, repo: &Path) -> Result<()> {
     git_env(&mut cmd);
     let out = cmd.output().context("git rev-parse HEAD for gc base")?;
     if !out.status.success() {
-        anyhow::bail!(
-            "rev-parse failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("rev-parse failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     let oid = String::from_utf8(out.stdout).context("rev-parse stdout")?;
     fs::write(repo.join(GC_BASE_MARKER), oid.trim().as_bytes()).context("write gc base marker")?;
@@ -109,48 +106,18 @@ fn restore_gc_worktree(git: &Path, worktree: &Path) -> Result<()> {
     git_env(&mut reset);
     let out = reset.output().context("git reset --hard gc base")?;
     if !out.status.success() {
-        anyhow::bail!(
-            "reset failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("reset failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     let mut clean = Command::new(git);
     clean.args(["clean", "-fdx"]).current_dir(worktree);
     git_env(&mut clean);
     let out = clean.output().context("git clean")?;
     if !out.status.success() {
-        anyhow::bail!(
-            "clean failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("clean failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     seed_loose_objects(git, worktree)?;
     fs::write(worktree.join(GC_BASE_MARKER), base.trim().as_bytes())
         .context("restore gc base marker after clean")?;
-    Ok(())
-}
-
-fn reset_worktree_from_bare(git: &Path, bare: &Path, worktree: &Path) -> Result<()> {
-    if let Some(parent) = worktree.parent() {
-        fs::create_dir_all(parent).context("create worktree parent")?;
-    }
-    if std::env::var("GRIT_BENCH_CAMPAIGN_CWD").is_ok() {
-        remove_dir_robust(worktree);
-        fs::create_dir_all(worktree).context("recreate campaign worktree")?;
-    } else {
-        clear_dir_contents(worktree)?;
-    }
-    let mut cmd = Command::new(git);
-    cmd.args(["clone", bare.to_str().context("bare path utf-8")?, "."])
-        .current_dir(worktree);
-    git_env(&mut cmd);
-    let out = cmd.output().context("git clone into campaign worktree")?;
-    if !out.status.success() {
-        anyhow::bail!(
-            "prepare clone failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
     Ok(())
 }
 
@@ -159,9 +126,11 @@ pub fn run_prepare_maintenance(git: &Path, worktree: Option<&Path>) -> Result<()
     let bare = std::env::var("GRIT_BENCH_MAINTENANCE_BARE")
         .map(PathBuf::from)
         .context("GRIT_BENCH_MAINTENANCE_BARE must be set for prepare-maintenance")?;
-    let campaign_worktree = worktree
-        .map(PathBuf::from)
-        .or_else(|| std::env::var("GRIT_BENCH_CAMPAIGN_CWD").ok().map(PathBuf::from));
+    let campaign_worktree = worktree.map(PathBuf::from).or_else(|| {
+        std::env::var("GRIT_BENCH_CAMPAIGN_CWD")
+            .ok()
+            .map(PathBuf::from)
+    });
     if let Some(worktree) = campaign_worktree {
         if !worktree.join(GC_BASE_MARKER).is_file() {
             anyhow::bail!(
