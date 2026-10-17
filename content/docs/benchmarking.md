@@ -66,6 +66,7 @@ Groups included in the merged report:
 | --- | --- |
 | `worktree` | status / add / commit / diff on the tier fixture |
 | `history` | log, show, rev-list, blame, cat-file batch |
+| `rewrite-history` | `grit history` reword/drop/fixup/squash vs git history / git rebase |
 | `network` | clone, fetch, push, ls-remote (file + smart HTTP) |
 | `parallel` | threads=1 vs auto on the 100k-class fixture |
 | `revwalk`, `fsck`, `maintenance` | porcelain vs git |

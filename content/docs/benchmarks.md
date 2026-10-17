@@ -424,6 +424,20 @@ Acceptance bars for the network performance pass are **≤1.2×** git wall time 
 
 Regenerate release binaries with **`cargo build --release -p grit-lib`** before **`grit-bench network`** so the timed **`grit`** binary includes library changes.
 
+## grit-bench: history rewrite (`rewrite-history`)
+
+The **`grit-bench rewrite-history`** suite times **`grit history`** reword, drop, fixup, and squash against system **`git history`** when the installed git is **≥2.54**, and always against a scripted **`git rebase`** / **`git rebase --onto`** / **`git reset --soft`** baseline on the same synthetic fixture. The fixture is generated once under **`GRIT_BENCH_SCRATCH`** (default `/tmp/grit-bench-scratch`): **~10 000** tracked files, **5 000** linear commits on `main`, and **50** local branches at varied depths (`bench/branch-*`). Each hyperfine iteration resets the worktree from a bare snapshot so refs stay isolated between runs.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench rewrite-history --format json --output grit-utils/baselines/history.json
+./target/release/grit-bench rewrite-history --smoke   # CI-sized fixture, one run per scenario
+```
+
+**Acceptance bars (factory VM, committed `history.json`):** deep **reword** ≤**1.0×** `git history reword` and ≥**5×** faster than the **`git rebase -i`** equivalent; other scenarios ≤**1.1×** `git history` when available. The baseline records the system **`git`** version string in `tools.git`.
+
+**2026-10-17 status:** On **git 2.43.0** (no `git history` subcommand), git-side timings use the rebase/reset scripts above. **Reword**, **drop**, and **squash** meet the bars (reword ≈**0.03×** vs rebase, well above the **5×** grit-faster-than-rebase bar). **`history-fixup-500`** remains ≈**3.4×** git (`git commit --fixup` + **`rebase --autosquash`**) because grit performs a full three-way replay for every descendant commit while Git’s autosquash path stays on the C merge fast paths on this fixture. **Follow-up:** factory performance work on **`grit-lib` history fixup** replay (merge reuse / commit-graph scoped walks) — tracked as a separate factory item; do not weaken merge semantics to green the ratio.
+
 ## grit-bench: repository fsck (`fsck-medium`)
 
 Scenario **`fsck-medium`** (`grit-bench fsck`) runs **`grit fsck --no-dangling`** and **`git fsck --no-dangling`** on a cloned deep-history worktree (same fixture as other network-cache scenarios). Baseline: **`grit-utils/baselines/fsck-medium.json`**.
