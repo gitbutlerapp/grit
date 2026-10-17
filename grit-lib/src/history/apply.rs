@@ -1,10 +1,14 @@
 //! Apply a [`RewritePlan`] atomically: refs, then index and worktree.
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::path::PathBuf;
 
 use crate::config::ConfigSet;
+use crate::diff::{diff_trees, DiffStatus};
+use crate::index::write_tree::write_tree_from_index;
 use crate::objects::ObjectId;
-use crate::porcelain::checkout::checkout_between_trees;
+use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local, verify_tree_transition_allow_local,
 };
@@ -56,6 +60,11 @@ pub fn apply_rewrite(
     } else {
         None
     };
+    let worktree_snapshot = if needs_worktree {
+        Some(snapshot_tracked_worktree_files(repo)?)
+    } else {
+        None
+    };
 
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
@@ -74,6 +83,7 @@ pub fn apply_rewrite(
                 Some(&old),
                 &new,
                 index_snapshot.as_deref(),
+                worktree_snapshot.as_ref(),
             )
             .err();
             return Err(apply_failure_after_ref_update(
@@ -299,23 +309,218 @@ fn apply_failure_after_ref_update(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorktreePathSnapshot {
+    /// Path was absent from the worktree when the snapshot was taken.
+    Absent,
+    /// Regular file contents and relevant permission bits from the worktree.
+    RegularFile {
+        bytes: Vec<u8>,
+        #[cfg(unix)]
+        mode: u32,
+    },
+    /// Symlink target (including dangling links).
+    Symlink(String),
+}
+
+type WorktreeFileSnapshot = BTreeMap<PathBuf, WorktreePathSnapshot>;
+
+fn snapshot_tracked_worktree_files(
+    repo: &Repository,
+) -> Result<WorktreeFileSnapshot, HistoryError> {
+    let index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    let Some(work_tree) = repo.work_tree() else {
+        return Ok(BTreeMap::new());
+    };
+    let mut snap = BTreeMap::new();
+    for entry in index.entries() {
+        if entry.stage() != 0 {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        let abs = work_tree.join(&path);
+        let state = match fs::symlink_metadata(&abs) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let target = fs::read_link(&abs).map_err(|e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                })?;
+                WorktreePathSnapshot::Symlink(target.into_os_string().into_string().map_err(
+                    |_| HistoryError::WorktreeApply {
+                        message: format!("non-utf8 symlink target at {path}"),
+                    },
+                )?)
+            }
+            Ok(meta) if meta.is_file() => {
+                let bytes = fs::read(&abs).map_err(|e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                })?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = meta.permissions().mode() & 0o7777;
+                    WorktreePathSnapshot::RegularFile { bytes, mode }
+                }
+                #[cfg(not(unix))]
+                {
+                    WorktreePathSnapshot::RegularFile { bytes }
+                }
+            }
+            Ok(_) => WorktreePathSnapshot::Absent,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => WorktreePathSnapshot::Absent,
+            Err(err) => {
+                return Err(HistoryError::WorktreeApply {
+                    message: err.to_string(),
+                });
+            }
+        };
+        snap.insert(PathBuf::from(path), state);
+    }
+    Ok(snap)
+}
+
+fn remove_worktree_path(abs: &std::path::Path) -> Result<(), HistoryError> {
+    if !abs.exists() && !abs.is_symlink() {
+        return Ok(());
+    }
+    if abs.is_dir() && !abs.is_symlink() {
+        fs::remove_dir_all(abs).map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })
+    } else {
+        fs::remove_file(abs).map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })
+    }
+}
+
+fn write_symlink(target: &str, abs: &std::path::Path) -> Result<(), HistoryError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(target, abs).map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::symlink_file;
+        symlink_file(target, abs).map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, abs);
+        Err(HistoryError::WorktreeApply {
+            message: "symlink restore is not supported on this platform".into(),
+        })
+    }
+}
+
+fn restore_tracked_worktree_files(
+    repo: &Repository,
+    snap: &WorktreeFileSnapshot,
+) -> Result<(), HistoryError> {
+    let Some(work_tree) = repo.work_tree() else {
+        return Ok(());
+    };
+    for (path, state) in snap {
+        let abs = work_tree.join(path);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent).map_err(|e| HistoryError::WorktreeApply {
+                message: e.to_string(),
+            })?;
+        }
+        match state {
+            WorktreePathSnapshot::RegularFile {
+                bytes,
+                #[cfg(unix)]
+                mode,
+            } => {
+                remove_worktree_path(&abs)?;
+                fs::write(&abs, bytes).map_err(|e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                })?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = fs::metadata(&abs)
+                        .map_err(|e| HistoryError::WorktreeApply {
+                            message: e.to_string(),
+                        })?
+                        .permissions();
+                    perms.set_mode(*mode);
+                    fs::set_permissions(&abs, perms).map_err(|e| HistoryError::WorktreeApply {
+                        message: e.to_string(),
+                    })?;
+                }
+            }
+            WorktreePathSnapshot::Symlink(target) => {
+                remove_worktree_path(&abs)?;
+                write_symlink(target, &abs)?;
+            }
+            WorktreePathSnapshot::Absent => {
+                remove_worktree_path(&abs)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn restore_worktree_after_failed_apply(
     repo: &Repository,
     old_tree: Option<&ObjectId>,
     new_tree: &ObjectId,
     index_snapshot: Option<&[u8]>,
+    worktree_snapshot: Option<&WorktreeFileSnapshot>,
 ) -> Result<(), HistoryError> {
-    checkout_between_trees(repo, Some(new_tree), old_tree.unwrap_or(new_tree)).map_err(|e| {
-        HistoryError::WorktreeApply {
-            message: e.to_string(),
-        }
-    })?;
     if let Some(bytes) = index_snapshot {
         fs::write(repo.index_path(), bytes).map_err(|e| HistoryError::WorktreeApply {
             message: e.to_string(),
         })?;
     }
-    Ok(())
+    let Some(old) = old_tree else {
+        return Ok(());
+    };
+    let index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    if let Some(work_tree) = repo.work_tree() {
+        let forward = diff_trees(repo.odb(), Some(old), Some(new_tree), "").map_err(|e| {
+            HistoryError::WorktreeApply {
+                message: e.to_string(),
+            }
+        })?;
+        for change in forward {
+            if change.status == DiffStatus::Deleted {
+                continue;
+            }
+            let Some(path) = change.new_path.as_deref().or(change.old_path.as_deref()) else {
+                continue;
+            };
+            if index.get(path.as_bytes(), 0).is_some() {
+                continue;
+            }
+            let abs = work_tree.join(path);
+            if abs.is_file() {
+                let _ = fs::remove_file(abs);
+            }
+        }
+    }
+    if let Some(snap) = worktree_snapshot {
+        return restore_tracked_worktree_files(repo, snap);
+    }
+    let index_tree =
+        write_tree_from_index(repo.odb(), &index, "").map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+    checkout_hard_to_tree_from_head_tree(repo, old, &index_tree).map_err(|e| {
+        HistoryError::WorktreeApply {
+            message: format!("failed to restore worktree after apply error: {e}"),
+        }
+    })
 }
 
 #[cfg(test)]
@@ -324,7 +529,6 @@ mod inject_and_apply_tests {
     use std::ops::ControlFlow;
     use std::sync::Arc;
 
-    use crate::config::environment::RepositoryOptions;
     use crate::history::{
         plan_rewrite, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
     };
@@ -333,7 +537,7 @@ mod inject_and_apply_tests {
     use crate::refs::store::{
         MemoryRefStore, PreparedRefTransaction, RawRef, RefStore, RefStoreError, RefTransaction,
     };
-    use crate::repo::{init_repository, Repository};
+    use crate::repo::init_repository;
     use crate::RefStorageFormat;
 
     use super::*;
@@ -527,7 +731,6 @@ mod inject_and_apply_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
-        let empty = repo.odb().write(ObjectKind::Tree, &[]).expect("tree");
         let blob = repo.odb().write(ObjectKind::Blob, b"file\n").expect("blob");
         let mut index = crate::index::Index::new();
         index.hash_algo = repo.odb().hash_algo();
@@ -663,6 +866,222 @@ mod inject_and_apply_tests {
             .expect("parse")
             .tree,
             head_tree
+        );
+    }
+
+    #[test]
+    fn worktree_snapshot_restore_preserves_executable_mode() {
+        #[cfg(not(unix))]
+        return;
+
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        let script_path = dir.path().join("script.sh");
+        fs::write(&script_path, b"#!/bin/sh\n").expect("write");
+        let mut perms = fs::metadata(&script_path).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).expect("chmod");
+
+        let blob = repo
+            .odb()
+            .write(ObjectKind::Blob, b"#!/bin/sh\n")
+            .expect("blob");
+        let mut index = crate::index::Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        index.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_EXECUTABLE,
+            uid: 0,
+            gid: 0,
+            size: 11,
+            oid: blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"script.sh".to_vec(),
+            base_index_pos: 0,
+        });
+        repo.write_index(&mut index).expect("write index");
+
+        let snap = snapshot_tracked_worktree_files(&repo).expect("snapshot");
+        fs::write(&script_path, b"replaced\n").expect("clobber");
+        let mut perms = fs::metadata(&script_path).expect("meta").permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&script_path, perms).expect("chmod");
+
+        restore_tracked_worktree_files(&repo, &snap).expect("restore");
+        let mode = fs::metadata(&script_path)
+            .expect("meta")
+            .permissions()
+            .mode()
+            & 0o111;
+        assert_ne!(
+            mode, 0,
+            "executable bit must be restored after rollback snapshot"
+        );
+    }
+
+    #[test]
+    fn apply_rewrite_checkout_failure_preserves_unrelated_unstaged_edits() {
+        use crate::repo::set_test_inject_index_write_fail_remaining;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        let blob = repo.odb().write(ObjectKind::Blob, b"file\n").expect("blob");
+        let mut index = crate::index::Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        index.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 5,
+            oid: blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"file.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        let tree =
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &index, "").expect("tree");
+        repo.write_index(&mut index).expect("write index");
+        fs::write(dir.path().join("file.txt"), "file\n").expect("write");
+        let commit = crate::objects::serialize_commit(&crate::objects::CommitData {
+            tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "root\n".into(),
+            raw_message: None,
+            extra_headers: vec![],
+        });
+        let root = repo
+            .odb()
+            .write(ObjectKind::Commit, &commit)
+            .expect("commit");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &root).expect("ref");
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("head");
+
+        let blob2 = repo.odb().write(ObjectKind::Blob, b"two\n").expect("blob");
+        let mut idx2 = index.clone();
+        idx2.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 4,
+            oid: blob2,
+            flags: 8,
+            flags_extended: None,
+            path: b"two.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        let child_tree =
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &idx2, "").expect("tree");
+        let mut edits = HistoryEdits::new();
+        edits.insert(
+            root,
+            CommitEdit::Rewrite {
+                tree: Some(child_tree),
+                message: Some("rewritten\n".into()),
+                author: None,
+                parents: None,
+            },
+        );
+        let plan = plan_rewrite(
+            &repo,
+            &edits,
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: "T <t@t> 1 +0000".into(),
+            },
+        )
+        .expect("plan");
+
+        fs::write(dir.path().join("file.txt"), "local edit\n").expect("local edit");
+        let before_index = fs::read(repo.index_path()).expect("index");
+        set_test_inject_index_write_fail_remaining(1);
+        let _err = apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity: "T <t@t>".into(),
+                reflog_message: "rewrite".into(),
+            },
+        )
+        .expect_err("inject checkout failure");
+        crate::repo::set_test_inject_index_write_fail(false);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("file.txt")).expect("read file"),
+            "local edit\n"
+        );
+        assert_eq!(fs::read(repo.index_path()).expect("index"), before_index);
+    }
+
+    #[test]
+    fn worktree_snapshot_restore_preserves_dangling_symlink() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        let target = "missing-target";
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, dir.path().join("link.txt")).expect("symlink");
+        #[cfg(not(unix))]
+        return;
+
+        let blob = repo
+            .odb()
+            .write(ObjectKind::Blob, target.as_bytes())
+            .expect("blob");
+        let mut index = crate::index::Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        index.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_SYMLINK,
+            uid: 0,
+            gid: 0,
+            size: target.len() as u32,
+            oid: blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"link.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        repo.write_index(&mut index).expect("write index");
+
+        let snap = snapshot_tracked_worktree_files(&repo).expect("snapshot");
+        fs::write(dir.path().join("link.txt"), "replaced regular file\n").expect("clobber");
+        restore_tracked_worktree_files(&repo, &snap).expect("restore");
+        assert_eq!(
+            fs::read_link(dir.path().join("link.txt")).expect("read link"),
+            std::path::Path::new(target)
         );
     }
 }
