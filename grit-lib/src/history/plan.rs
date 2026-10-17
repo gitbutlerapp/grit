@@ -253,7 +253,12 @@ fn library_err(err: Error) -> HistoryError {
     if let Error::History(inner) = err {
         return inner;
     }
-    HistoryError::Library(Box::new(err))
+    if matches!(err, Error::ObjectNotFound(_)) {
+        return HistoryError::Library(Box::new(err));
+    }
+    HistoryError::Planning {
+        message: err.to_string(),
+    }
 }
 
 fn oldest_edited_commit(repo: &Repository, edits: &HistoryEdits) -> Result<ObjectId, HistoryError> {

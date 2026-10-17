@@ -452,6 +452,9 @@ fn restore_worktree_path(abs: &Path, saved: &WorktreePathSnapshot) -> std::io::R
         }
         return Ok(());
     }
+    if abs.is_symlink() || abs.is_file() {
+        fs::remove_file(abs)?;
+    }
     if let Some(parent) = abs.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -988,6 +991,154 @@ mod inject_and_apply_tests {
                 "partial 100644→100755 checkout must not survive rollback"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_worktree_path_replaces_symlink_with_saved_regular_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let link_target = dir.path().join("link-target.txt");
+        fs::write(&link_target, "target content\n").expect("target");
+        let tracked = dir.path().join("tracked.txt");
+        std::os::unix::fs::symlink("link-target.txt", &tracked).expect("symlink");
+        let saved = WorktreePathSnapshot {
+            bytes: Some(b"original file\n".to_vec()),
+            symlink: false,
+            mode: 0o100644,
+        };
+        restore_worktree_path(&tracked, &saved).expect("restore");
+        assert!(tracked.is_file());
+        assert!(!tracked.is_symlink());
+        assert_eq!(
+            fs::read_to_string(tracked).expect("read"),
+            "original file\n"
+        );
+        assert_eq!(
+            fs::read_to_string(link_target).expect("read target"),
+            "target content\n",
+            "must not follow symlink and overwrite the external target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_rewrite_injected_checkout_failure_restores_regular_file_after_symlink_transition() {
+        use crate::repo::set_test_inject_index_write_fail_remaining;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        let blob = repo.odb().write(ObjectKind::Blob, b"file\n").expect("blob");
+        let mut index = crate::index::Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        index.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 5,
+            oid: blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"file.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        let tree =
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &index, "").expect("tree");
+        repo.write_index(&mut index).expect("write index");
+        fs::write(dir.path().join("file.txt"), "file\n").expect("write");
+        let link_target_path = dir.path().join("link-target.txt");
+        fs::write(&link_target_path, "target content\n").expect("link target");
+        let commit = crate::objects::serialize_commit(&crate::objects::CommitData {
+            tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "root\n".into(),
+            raw_message: None,
+            extra_headers: vec![],
+        });
+        let root = repo
+            .odb()
+            .write(ObjectKind::Commit, &commit)
+            .expect("commit");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &root).expect("ref");
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("head");
+
+        let link_blob = repo
+            .odb()
+            .write(ObjectKind::Blob, b"link-target.txt")
+            .expect("link blob");
+        let mut idx2 = index.clone();
+        idx2.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_SYMLINK,
+            uid: 0,
+            gid: 0,
+            size: 14,
+            oid: link_blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"file.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        let child_tree =
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &idx2, "").expect("tree");
+        let mut edits = HistoryEdits::new();
+        edits.insert(
+            root,
+            CommitEdit::Rewrite {
+                tree: Some(child_tree),
+                message: Some("rewritten\n".into()),
+                author: None,
+                parents: None,
+            },
+        );
+        let plan = plan_rewrite(
+            &repo,
+            &edits,
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: "T <t@t> 1 +0000".into(),
+            },
+        )
+        .expect("plan");
+
+        set_test_inject_index_write_fail_remaining(1);
+        let err = apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity: "T <t@t>".into(),
+                reflog_message: "rewrite".into(),
+            },
+        )
+        .expect_err("inject checkout failure");
+        crate::repo::set_test_inject_index_write_fail(false);
+        assert!(matches!(err, HistoryError::WorktreeApply { .. }));
+
+        let file_path = dir.path().join("file.txt");
+        assert!(file_path.is_file());
+        assert!(!file_path.is_symlink());
+        assert_eq!(fs::read_to_string(&file_path).expect("read file"), "file\n");
+        assert_eq!(
+            fs::read_to_string(&link_target_path).expect("read target"),
+            "target content\n"
+        );
     }
 }
 
