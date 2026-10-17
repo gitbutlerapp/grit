@@ -103,7 +103,7 @@ Integration coverage uses a **≥ 50 000** object fixture built with `git fa
 
 ## Hashing
 
-Raw digest throughput uses [`grit_lib::hash::ObjectHasher`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) (release build, Criterion). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
+Raw digest throughput uses [`grit_lib::objects::hash::ObjectHasher`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) (release build, Criterion). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
 
 **Environment (2026-10-07):** Intel Xeon (SHA-NI present), Linux, `git` 2.43.0, OpenSSL 3.0.13, Rust stable. `hash-info --json` reports `{"sha1":"x86_sha_ni","sha256":"x86_sha_ni"}`.
 
@@ -366,6 +366,49 @@ Acceptance bars for the network performance pass are **≤1.2×** git wall time 
 **Server-side clone (`server-clone-http-compare-*`):** system **`git clone`** against **grit-http-server** is expected to stay above **1.2×** until the upload-pack path uses **reachability bitmaps** during negotiation (same dependency as Git’s `upload-pack` on large, pack-served repos). Client-side grit and git both pay similar pack transfer cost; the gap is dominated by grit’s in-process upload-pack enumeration without bitmaps, not HTTP keep-alive or side-band framing. Track under the MIDX/bitmap roadmap item rather than masking with compatibility shortcuts.
 
 Regenerate release binaries with **`cargo build --release -p grit-lib`** before **`grit-bench network`** so the timed **`grit`** binary includes library changes.
+
+## Real-world campaign
+
+The **campaign** scorecard runs a shared CLI matrix on real-shaped fixtures: upstream **git.git** (pinned tag, repacked with bitmaps), a **chromium-class synthetic** repo (`400 000` files, `40 000` dirs, `100 000` commits, `50 000` refs, single pack + commit-graph), and optionally **linux** (`--with-linux` or `GRIT_BENCH_LINUX=1`). Scenario ids look like `git-dot-git/status-dirty` and `chromium-synth/switch`; reachability **rev-list** / **serve-clone** rows are owned by **ROADMAP item 14** (reachability bitmaps) and are not scored in this pass.
+
+**Methodology.** Each scenario uses **hyperfine** (3 warmup, ≥5 timed runs) on the system **`git`** binary and a release **`grit`** build with hermetic git config. Ratios are **grit_median_ms / git_median_ms**; the bar is **≤1.1×** unless documented in [`grit-utils/perf-targets.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/perf-targets.toml). Grit-side OOM or unsupported commands are recorded once (git timing still captured) so the suite can finish on the factory VM.
+
+**Reproduce on the factory VM** (reuse `GRIT_BENCH_ODB_CACHE` after the first run):
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+export GRIT_BENCH_ODB_CACHE=/tmp/grit-bench-odb-cache
+./target/release/grit-bench campaign --no-network --format json --output grit-utils/baselines/campaign-after.json
+./target/release/grit-bench campaign --ledger --from grit-utils/baselines/campaign-after.json
+```
+
+Committed baselines: **`campaign-before.json`** (2026-10-14, pre-campaign stack; chromium smoke-sized fixture) and **`campaign-after.json`** (2026-10-17, post-campaign stack on production synthetic). Both are listed under `[benchmarks].baseline` in `content/docs/site.toml`; the site merges duplicate scenario ids with **after** winning for campaign files.
+
+**Before / after (overlapping scenario ids).** Values compare grit/git ratios from the two JSON reports (not absolute wall times). Ratios **below 1×** mean grit improved relative to git; ratios **above 1×** mean the gap widened (the after capture uses the production synthetic worktree while the before capture used a smaller smoke fixture for chromium-class scenarios).
+
+| Scenario | Before ratio | After ratio | After / before |
+| --- | ---: | ---: | ---: |
+| `git-dot-git/clone-file` | 3.17× | 0.05× | 0.02× |
+| `git-dot-git/diff-clean` | 7.76× | 2.46× | 0.32× |
+| `git-dot-git/merge` | 14.66× | 6.55× | 0.45× |
+| `git-dot-git/resolve` | 18.38× | 15.99× | 0.87× |
+| `git-dot-git/status-clean` | 4.15× | 4.15× | 1.00× |
+| `chromium-synth/status-dirty` | 1.87× | 2.10× | 1.13× |
+| `git-dot-git/commit` | 1.84× | 2.42× | 1.32× |
+| `git-dot-git/switch` | 4.37× | 5.89× | 1.35× |
+| `git-dot-git/add` | 2.32× | 4.48× | 1.93× |
+| `chromium-synth/add` | 2.07× | 2.88× | 1.39× |
+| `chromium-synth/switch` | 5.16× | 13.43× | 2.60× |
+| `chromium-synth/diff-clean` | 2.45× | 7.82× | 3.18× |
+| `git-dot-git/cat` | 12.56× | 63.36× | 5.04× |
+| `chromium-synth/merge` | 2.47× | 17.95× | 7.26× |
+| `chromium-synth/commit` | 0.90× | 11.84× | 13.15× |
+
+Full ledger (51 scenarios): `grit-bench campaign --ledger --from grit-utils/baselines/campaign-after.json` or see **`campaign-after.ledger.md`** in `grit-utils/baselines/`.
+
+**Gap ledger.** Every scenario above **1.1×** (or grit-side skip) has a `documented` entry in `perf-targets.toml` pointing at **ROADMAP items 7, 11, 14, 19, and 21–30**. Item 14 rows remain `owned-by-item-14`.
+
+**Superseded micro-baselines.** Per-command JSON files (`hot-paths-after.json`, `commit-after-LH.json`, etc.) remain for focused regressions; the **campaign** pair is the authoritative before/after scorecard for real-repository CLI work. Prefer updating campaign baselines when a change targets end-to-end porcelain on git.git or large synthetic worktrees.
 
 ## grit-bench: repository fsck (`fsck-medium`)
 

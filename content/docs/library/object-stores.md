@@ -3,23 +3,23 @@ title: Object stores
 summary: Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.
 ---
 
-By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::odb::Odb) (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with [`OdbBuilder`](rustdoc:grit_lib::odb::OdbBuilder) and [`RepositoryBuilder`](rustdoc:grit_lib::repo::RepositoryBuilder).
+By default `Repository` opens a files-backed `Odb` (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with `OdbBuilder` and `RepositoryBuilder`.
 
 ## Traits
 
 | Trait | Role |
 | ----- | ---- |
-| [`ObjectStore`](rustdoc:grit_lib::odb::store::ObjectStore) | Read, metadata, streaming, enumeration |
-| [`WritableObjectStore`](rustdoc:grit_lib::odb::store::WritableObjectStore) | Insert objects (idempotent writes) |
+| `ObjectStore` | Read, metadata, streaming, enumeration |
+| `WritableObjectStore` | Insert objects (idempotent writes) |
 
-Built-in backends live under [`grit_lib::odb::store`](rustdoc:grit_lib::odb::store) (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others).
+Built-in backends live under `grit_lib::objects::odb::store` (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others).
 
 ## Lookup order
 
-For a given [`Odb`](rustdoc:grit_lib::odb::Odb) handle:
+For a given `Odb` handle:
 
 1. In-memory overlay (when enabled for merge-tree-style operations)
-2. **Primary** store — files source by default, or your custom [`WritableObjectStore`](rustdoc:grit_lib::odb::store::WritableObjectStore)
+2. **Primary** store — files source by default, or your custom `WritableObjectStore`
 3. Extra read sources from `OdbBuilder::push_read_source`
 4. Alternate object directories when `OdbBuilder::alternates` is true (`info/alternates`, environment alternates, submodule object dirs)
 
@@ -28,10 +28,10 @@ For a given [`Odb`](rustdoc:grit_lib::odb::Odb) handle:
 ```rust
 use std::sync::Arc;
 
-use grit_lib::environment::RepositoryOptions;
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{HashAlgo, ObjectKind};
-use grit_lib::odb::store::MemoryStore;
-use grit_lib::odb::OdbBuilder;
+use grit_lib::objects::odb::store::MemoryStore;
+use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 
 let dir = tempfile::tempdir()?;
@@ -49,11 +49,11 @@ let _blob = repo.odb.write(ObjectKind::Blob, b"hello")?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
-Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) returns [`Error::UnsupportedObjectStore`](rustdoc:grit_lib::error::Error) when the primary is not the default files backend. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
+Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) returns `Error::UnsupportedObjectStore` when the primary is not the default files backend. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
 
 ## Conformance tests
 
-The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites. Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](rustdoc:grit_lib::odb::OdbBuilder).
+The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites. Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through `OdbBuilder`.
 
 ## Example: append-only packfile KV store
 

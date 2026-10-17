@@ -82,7 +82,7 @@ There is **no global thread pool** and **no environment reads** inside `grit_lib
 
 ## Ordered parallel maps
 
-[`try_par_map_force`](https://docs.rs/grit-lib/latest/grit_lib/parallel/fn.try_par_map_force.html) skips batch thresholds (used for index-pack). Hash-specific helpers in [`grit_lib::hash`](https://docs.rs/grit-lib/latest/grit_lib/hash/index.html) remain thin wrappers over these APIs.
+[`try_par_map_force`](https://docs.rs/grit-lib/latest/grit_lib/parallel/fn.try_par_map_force.html) skips batch thresholds (used for index-pack). Hash-specific helpers in [`grit_lib::objects::hash`](https://docs.rs/grit-lib/latest/grit_lib/hash/index.html) remain thin wrappers over these APIs.
 
 ## Tests
 
