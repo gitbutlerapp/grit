@@ -1395,7 +1395,10 @@ fn main() -> Result<()> {
             no_network,
         } => {
             eprintln!("Running campaign benchmarks...");
-            let cfg = run_config(&cli, true);
+            let mut cfg = run_config(&cli, true);
+            if cli.warmup == 0 && cli.min_runs == 1 {
+                cfg.exact_runs = Some(1);
+            }
             let bench_exe = std::env::current_exe().context("current exe")?;
             let report = run_campaign_suite(
                 &hyperfine,
