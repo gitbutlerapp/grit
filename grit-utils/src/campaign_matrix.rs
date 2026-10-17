@@ -19,8 +19,9 @@ use crate::real_repo_fixture::run_git;
 use crate::real_repo_fixture::scratch_root;
 use crate::scenarios::{
     chain_shell_public, grit_log_pages_shell, run_scenario, run_scenario_allow_grit_failure,
-    run_scenario_git_only_with_grit_failure, run_scenario_prepared, Driver, PrepareKind, RunConfig,
-    Scenario, LOG_BENCH_GRIT_PAGE_COUNT,
+    run_scenario_git_only_with_grit_failure, run_scenario_prepared,
+    run_scenario_prepared_allow_grit_failure, Driver, PrepareKind, RunConfig, Scenario,
+    LOG_BENCH_GRIT_PAGE_COUNT,
 };
 use crate::schema::{BenchFailure, ScenarioResult};
 use crate::shell::{shell_command, shell_quote};
@@ -772,6 +773,7 @@ fn append_file_transport(
     smoke: bool,
     out: &mut Vec<ScenarioResult>,
 ) -> Result<()> {
+    let file_transport_allows_grit_failure = fixture.id == "git-dot-git";
     let url = file_url(&fixture.bare)?;
     let clone_dest = scratch_root().join(format!("{}-campaign-clone", fixture.id));
     let grit_clone = shell_command(
@@ -791,7 +793,7 @@ fn append_file_transport(
             clone_dest.display().to_string(),
         ],
     );
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -815,6 +817,7 @@ fn append_file_transport(
             git_via_shell: true,
         },
         &fixture.bare,
+        file_transport_allows_grit_failure,
     )?);
 
     if smoke {
@@ -839,7 +842,7 @@ fn append_file_transport(
             "HEAD".to_string(),
         ],
     );
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -857,6 +860,7 @@ fn append_file_transport(
             git_via_shell: true,
         },
         &fetch_dest,
+        file_transport_allows_grit_failure,
     )?);
 
     let push_meta = ensure_campaign_bare_network_meta(git, &fixture.bare, smoke)?;
@@ -864,31 +868,44 @@ fn append_file_transport(
     let push_url = file_url(&fixture.bare)?;
     configure_push_remote(git, &push_client, &push_url, &push_meta.default_branch)?;
     let prepare = prepare_network_command(cfg, git, &fixture.bare, "prepare-network-push");
-    out.push(run_scenario_prepared(
-        hyperfine,
-        git,
-        grit,
-        cfg,
-        &Scenario {
-            id: sid(fixture.id, "push-file"),
-            group: "network".into(),
-            fixture: fixture.label.clone(),
-            description: format!("push {} commits over file://", push_meta.push_commits),
-            grit_argv: vec!["push".into()],
-            git_argv: vec![
-                "push".into(),
-                "-q".into(),
-                "origin".into(),
-                push_meta.default_branch.clone(),
-            ],
-            driver: Driver::Cli,
-            prepare_kind: None,
-            grit_via_shell: false,
-            git_via_shell: false,
-        },
-        &push_client,
-        &prepare,
-    )?);
+    let push_scenario = Scenario {
+        id: sid(fixture.id, "push-file"),
+        group: "network".into(),
+        fixture: fixture.label.clone(),
+        description: format!("push {} commits over file://", push_meta.push_commits),
+        grit_argv: vec!["push".into()],
+        git_argv: vec![
+            "push".into(),
+            "-q".into(),
+            "origin".into(),
+            push_meta.default_branch.clone(),
+        ],
+        driver: Driver::Cli,
+        prepare_kind: None,
+        grit_via_shell: false,
+        git_via_shell: false,
+    };
+    if file_transport_allows_grit_failure {
+        out.push(run_scenario_prepared_allow_grit_failure(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &push_scenario,
+            &push_client,
+            &prepare,
+        )?);
+    } else {
+        out.push(run_scenario_prepared(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &push_scenario,
+            &push_client,
+            &prepare,
+        )?);
+    }
     Ok(())
 }
 
