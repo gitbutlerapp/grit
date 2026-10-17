@@ -17,6 +17,14 @@ pub fn maintenance_bare_marker_path() -> PathBuf {
 
 /// Re-clone the deep-history bare fixture and re-seed loose objects before each benchmark run.
 pub fn run_prepare_maintenance(git: &Path) -> Result<()> {
+    if let Ok(campaign_cwd) = std::env::var("GRIT_BENCH_CAMPAIGN_CWD") {
+        let worktree = PathBuf::from(campaign_cwd);
+        seed_loose_objects(git, &worktree)?;
+        return Ok(());
+    }
+    if std::env::var("GRIT_BENCH_MAINTENANCE_BARE").is_ok() {
+        return crate::maintenance_suite::run_prepare_maintenance(git);
+    }
     let bare = std::fs::read_to_string(maintenance_bare_marker_path())
         .context("read maintenance bare marker (run maintenance suite first)")?;
     let bare = PathBuf::from(bare.trim());

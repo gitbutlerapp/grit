@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run two consecutive production campaign captures and verify ±10% ratio stability.
 set -euo pipefail
+set -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
