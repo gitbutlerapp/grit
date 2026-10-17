@@ -293,85 +293,118 @@ fn worktree_clean_for_switch_paths(
         .as_ref()
         .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
-    let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
-    if blob_dirs.is_empty() {
-        return Ok(true);
-    }
     let needs_racy_content = paths.iter().any(|path| {
         index.get(path.as_bytes(), 0).is_some_and(|ie| {
             indexed_path_needs_worktree_stat_check(ie)
                 && entry_is_racy_with_policy(ie, index_mtime, stat_policy)
         })
     });
-    let preload_index = config
-        .as_ref()
-        .and_then(|c| c.get_bool("core.preloadIndex").and_then(|r| r.ok()))
-        .unwrap_or(true);
-    let stat_parallel_threads = (paths.len() >= 16).then(|| {
-        repo.thread_policy()
-            .resolve(
-                ParallelOp::IndexRefresh,
-                config.as_deref().unwrap_or(&ConfigSet::new()),
-            )
-            .threads
-            .get()
-    });
-    let blob_scan = WorktreeBlobScanOptions {
-        preload_index,
-        stat_parallel_threads,
-    };
-    let work_tree_owned = work_tree.to_path_buf();
-    let dir_abs = move |dir: &str| {
-        if dir.is_empty() {
-            work_tree_owned.clone()
-        } else {
-            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
-        }
-    };
-    let work_tree_for_files = work_tree.to_path_buf();
-    let file_abs = move |rel: &str| {
-        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
-    };
-    let matches = AtomicBool::new(true);
-    for_each_blob_by_directory_parallel(
-        &blob_dirs,
-        blob_scan,
-        &Default::default(),
-        config.as_deref().unwrap_or(&ConfigSet::new()),
-        false,
-        dir_abs,
-        file_abs,
-        |_| false,
-        |entry_index, _path, lookup| {
-            if !matches.load(Ordering::Relaxed) {
-                return Ok(());
-            }
-            let ie = &index.entries[entry_index];
+    const SWITCH_STAT_PARALLEL_MIN: usize = 128;
+    let mut stat_clean = true;
+    if paths.len() < SWITCH_STAT_PARALLEL_MIN {
+        for path in paths {
+            let Some(ie) = index.get(path.as_bytes(), 0) else {
+                continue;
+            };
             if !indexed_path_needs_worktree_stat_check(ie) {
-                return Ok(());
+                continue;
             }
-            match lookup {
-                BlobDiskLookup::Missing => {
-                    matches.store(false, Ordering::Relaxed);
+            let abs = index_entry_worktree_abs(work_tree, path, precompose_unicode, ignorecase);
+            let meta = match fs::symlink_metadata(&abs) {
+                Ok(m) => m,
+                Err(_) => {
+                    stat_clean = false;
+                    break;
                 }
-                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                BlobDiskLookup::Present(meta) => {
-                    let mismatch = if ie.mode == MODE_GITLINK {
-                        !meta.is_dir()
-                    } else if !meta.is_file() && !meta.is_symlink() {
-                        true
-                    } else {
-                        !stat_matches_with_policy(ie, &meta, stat_policy)
-                    };
-                    if mismatch {
+            };
+            let mismatch = if ie.mode == MODE_GITLINK {
+                !meta.is_dir()
+            } else if !meta.is_file() && !meta.is_symlink() {
+                true
+            } else {
+                !stat_matches_with_policy(ie, &meta, stat_policy)
+            };
+            if mismatch {
+                stat_clean = false;
+                break;
+            }
+        }
+    } else {
+        let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
+        if blob_dirs.is_empty() {
+            return Ok(true);
+        }
+        let preload_index = config
+            .as_ref()
+            .and_then(|c| c.get_bool("core.preloadIndex").and_then(|r| r.ok()))
+            .unwrap_or(true);
+        let stat_parallel_threads = Some(
+            repo.thread_policy()
+                .resolve(
+                    ParallelOp::IndexRefresh,
+                    config.as_deref().unwrap_or(&ConfigSet::new()),
+                )
+                .threads
+                .get(),
+        );
+        let blob_scan = WorktreeBlobScanOptions {
+            preload_index,
+            stat_parallel_threads,
+        };
+        let work_tree_owned = work_tree.to_path_buf();
+        let dir_abs = move |dir: &str| {
+            if dir.is_empty() {
+                work_tree_owned.clone()
+            } else {
+                index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+            }
+        };
+        let work_tree_for_files = work_tree.to_path_buf();
+        let file_abs = move |rel: &str| {
+            index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+        };
+        let matches = AtomicBool::new(true);
+        for_each_blob_by_directory_parallel(
+            &blob_dirs,
+            blob_scan,
+            &Default::default(),
+            config.as_deref().unwrap_or(&ConfigSet::new()),
+            false,
+            dir_abs,
+            file_abs,
+            |_| false,
+            |entry_index, _path, lookup| {
+                if !matches.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
+                let ie = &index.entries[entry_index];
+                if !indexed_path_needs_worktree_stat_check(ie) {
+                    return Ok(());
+                }
+                match lookup {
+                    BlobDiskLookup::Missing => {
                         matches.store(false, Ordering::Relaxed);
                     }
+                    BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+                    BlobDiskLookup::Present(meta) => {
+                        let mismatch = if ie.mode == MODE_GITLINK {
+                            !meta.is_dir()
+                        } else if !meta.is_file() && !meta.is_symlink() {
+                            true
+                        } else {
+                            !stat_matches_with_policy(ie, &meta, stat_policy)
+                        };
+                        if mismatch {
+                            matches.store(false, Ordering::Relaxed);
+                        }
+                    }
                 }
-            }
-            Ok(())
-        },
-    )?;
-    if !matches.load(Ordering::Relaxed) {
+                Ok(())
+            },
+        )?;
+        stat_clean = matches.load(Ordering::Relaxed);
+    }
+    if !stat_clean {
         return Ok(false);
     }
     if !needs_racy_content {
@@ -660,13 +693,33 @@ struct WholesaleDeleteRootScan {
     needs_ignore_rules: Vec<String>,
 }
 
+fn index_entry_under_root(path: &[u8], root: &[u8]) -> bool {
+    path == root || path.get(root.len()).is_some_and(|b| *b == b'/') && path.starts_with(root)
+}
+
 fn count_indexed_paths_under_root(index: &Index, root: &str) -> usize {
+    let root_bytes = root.as_bytes();
+    if index.entries_sorted {
+        let start = index
+            .entries
+            .partition_point(|e| e.path.as_slice() < root_bytes);
+        let mut count = 0usize;
+        for entry in &index.entries[start..] {
+            if !index_entry_under_root(&entry.path, root_bytes) {
+                break;
+            }
+            if entry.stage() == 0 {
+                count += 1;
+            }
+        }
+        return count;
+    }
     let prefix = format!("{root}/");
     index
         .entries
         .iter()
         .filter(|e| e.stage() == 0)
-        .filter(|e| e.path.starts_with(prefix.as_bytes()) || e.path.as_slice() == root.as_bytes())
+        .filter(|e| e.path.starts_with(prefix.as_bytes()) || e.path.as_slice() == root_bytes)
         .count()
 }
 
@@ -711,28 +764,36 @@ fn precompute_wholesale_root_index_delete_counts(
         .iter()
         .map(|root| (root.clone(), (0usize, 0usize)))
         .collect();
-    for entry in index.entries.iter().filter(|e| e.stage() == 0) {
-        let Ok(path) = std::str::from_utf8(&entry.path) else {
-            continue;
-        };
-        let root = path.split('/').next().unwrap_or(path);
-        if let Some(slot) = counts.get_mut(root) {
-            if path == root || path.as_bytes().get(root.len()).is_some_and(|b| *b == b'/') {
-                slot.0 += 1;
+    if !ignorecase && index.entries_sorted {
+        for root in delete_roots {
+            if let Some(slot) = counts.get_mut(root) {
+                slot.0 = count_indexed_paths_under_root(index, root);
             }
-        } else if ignorecase {
-            if let Some(key) = counts
-                .keys()
-                .find(|candidate| candidate.eq_ignore_ascii_case(root))
-                .cloned()
-            {
-                if path.eq_ignore_ascii_case(&key)
-                    || path
-                        .strip_prefix(key.as_str())
-                        .is_some_and(|rest| rest.starts_with('/'))
+        }
+    } else {
+        for entry in index.entries.iter().filter(|e| e.stage() == 0) {
+            let Ok(path) = std::str::from_utf8(&entry.path) else {
+                continue;
+            };
+            let root = path.split('/').next().unwrap_or(path);
+            if let Some(slot) = counts.get_mut(root) {
+                if index_entry_under_root(path.as_bytes(), root.as_bytes()) {
+                    slot.0 += 1;
+                }
+            } else if ignorecase {
+                if let Some(key) = counts
+                    .keys()
+                    .find(|candidate| candidate.eq_ignore_ascii_case(root))
+                    .cloned()
                 {
-                    if let Some(slot) = counts.get_mut(&key) {
-                        slot.0 += 1;
+                    if path.eq_ignore_ascii_case(&key)
+                        || path
+                            .strip_prefix(key.as_str())
+                            .is_some_and(|rest| rest.starts_with('/'))
+                    {
+                        if let Some(slot) = counts.get_mut(&key) {
+                            slot.0 += 1;
+                        }
                     }
                 }
             }
@@ -889,7 +950,8 @@ fn collect_untracked_for_wholesale_delete_roots(
     let roots: Vec<String> = delete_roots.iter().cloned().collect();
     let work_tree_owned = work_tree.to_path_buf();
     let delete_paths_shared = Arc::new(delete_paths.clone());
-    let scans: Vec<WholesaleDeleteRootScan> = if roots.len() >= 8 {
+    const PARALLEL_WHOLESALE_ROOT_SCAN_MIN: usize = 16;
+    let scans: Vec<WholesaleDeleteRootScan> = if roots.len() >= PARALLEL_WHOLESALE_ROOT_SCAN_MIN {
         let config = repo.config().ok();
         let default_cfg = ConfigSet::new();
         let cfg = config.as_deref().unwrap_or(&default_cfg);
