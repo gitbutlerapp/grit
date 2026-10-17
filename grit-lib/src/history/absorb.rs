@@ -195,21 +195,36 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
         .into_iter()
         .collect();
     targets.sort_by_key(|commit| stack.iter().position(|c| c == commit).unwrap_or(usize::MAX));
-    targets.reverse();
 
-    for target in targets {
-        let merge_head = if edits.is_empty() {
-            head_tree
+    let mut working_index = index.clone();
+    for (idx, target) in targets.iter().copied().enumerate() {
+        let (merge_head, target_tree) = if edits.is_empty() {
+            (head_tree, commit_tree(repo, target)?)
         } else {
             let prefix = plan_rewrite(repo, &edits, &rewrite_opts)?;
-            prefix
+            let merge_head = prefix
                 .head
                 .new_tree
                 .or(prefix.head.old_tree)
-                .unwrap_or(head_tree)
+                .unwrap_or(head_tree);
+            let target_tree = prefix
+                .commits
+                .iter()
+                .find(|row| row.old == target)
+                .and_then(|row| row.new)
+                .and_then(|oid| commit_tree(repo, oid).ok())
+                .unwrap_or_else(|| commit_tree(repo, target).unwrap_or(head_tree));
+            (merge_head, target_tree)
         };
-        let merged_tree =
-            merged_tree_for_target(repo, merge_head, &index, target, &assignments, &unassigned)?;
+        let merged_tree = merged_tree_for_target_with_trees(
+            repo,
+            merge_head,
+            target_tree,
+            &working_index,
+            target,
+            &assignments,
+            &unassigned,
+        )?;
         edits.insert(
             target,
             CommitEdit::Rewrite {
@@ -219,6 +234,23 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
                 parents: None,
             },
         );
+        let prefix = plan_rewrite(repo, &edits, &rewrite_opts)?;
+        let post_head_tree = prefix
+            .head
+            .new_tree
+            .or(prefix.head.old_tree)
+            .unwrap_or(head_tree);
+        advance_working_index_after_target(
+            repo,
+            &mut working_index,
+            merge_head,
+            post_head_tree,
+            &index,
+            target,
+            &assignments,
+            &unassigned,
+            &targets[idx + 1..],
+        )?;
     }
 
     let plan = plan_rewrite(repo, &edits, &rewrite_opts)?;
@@ -700,15 +732,69 @@ pub(crate) fn remaining_index_blob_for_path(
     Ok(result)
 }
 
-fn merged_tree_for_target(
+fn index_blob_at_path(repo: &Repository, index: &crate::index::Index, path: &str) -> Vec<u8> {
+    index
+        .get(path.as_bytes(), 0)
+        .and_then(|entry| repo.odb().read(&entry.oid).ok().map(|raw| raw.data))
+        .unwrap_or_default()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn advance_working_index_after_target(
+    repo: &Repository,
+    working_index: &mut crate::index::Index,
+    pre_head_tree: ObjectId,
+    post_head_tree: ObjectId,
+    original_index: &crate::index::Index,
+    target: ObjectId,
+    assignments: &[HunkAssignment],
+    unassigned: &[UnassignedHunk],
+    targets_after: &[ObjectId],
+) -> Result<(), HistoryError> {
+    let later_targets: HashSet<ObjectId> = targets_after.iter().copied().collect();
+    let paths: HashSet<&str> = assignments
+        .iter()
+        .filter(|a| a.commit == target)
+        .map(|a| a.path.as_str())
+        .collect();
+    for path in paths {
+        let pending = unassigned.iter().any(|u| u.path == path)
+            || assignments
+                .iter()
+                .any(|a| a.path == path && later_targets.contains(&a.commit));
+        if pending {
+            let pre_blob = index_blob_at_path(repo, original_index, path);
+            let target_assignments: Vec<HunkAssignment> = assignments
+                .iter()
+                .filter(|a| a.path == path && a.commit == target)
+                .cloned()
+                .collect();
+            let blob = remaining_index_blob_for_path(
+                repo,
+                pre_head_tree,
+                post_head_tree,
+                &pre_blob,
+                path,
+                &target_assignments,
+            )?;
+            write_index_blob(repo, working_index, path, &blob)?;
+        } else {
+            restore_index_path_from_tree(repo, working_index, post_head_tree, path)?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merged_tree_for_target_with_trees(
     repo: &Repository,
     head_tree: ObjectId,
+    target_tree: ObjectId,
     index: &crate::index::Index,
     target: ObjectId,
     assignments: &[HunkAssignment],
     unassigned: &[UnassignedHunk],
 ) -> Result<ObjectId, HistoryError> {
-    let target_tree = commit_tree(repo, target)?;
     let partial_index =
         partial_index_for_target(repo, head_tree, index, target, assignments, unassigned)?;
     let index_tree = write_tree_from_index(repo.odb(), &partial_index, "").map_err(library_err)?;

@@ -232,60 +232,79 @@ fn absorb_result_equals_manual_fixups() {
     commit_file(wt, "b.txt", "b\n", "b");
     let c2 = git_rev_parse(wt, "HEAD").expect("c2");
     commit_file(wt, "tail.txt", "t\n", "tail");
-    fs::write(wt.join("a.txt"), "a\nfix-a\n").expect("write");
-    fs::write(wt.join("b.txt"), "b\nfix-b\n").expect("write");
-    git(wt, &["add", "a.txt", "b.txt"]);
-    let grit = open_grit(wt);
-    plan_and_apply_absorb(
-        &grit,
-        wt,
-        &AbsorbOptions {
-            base: Some(base),
-            rewrite: rewrite_opts(),
-        },
-    );
-    let absorb_tip = git_rev_parse(wt, "HEAD").expect("absorb tip");
+    let pre_rewrite = git_rev_parse(wt, "HEAD").expect("pre");
 
-    let repo2 = HistoryRepo::init();
-    let wt2 = repo2.worktree();
-    commit_file(wt2, "root.txt", "r\n", "root");
-    commit_file(wt2, "a.txt", "a\n", "a");
-    let c1b = git_rev_parse(wt2, "HEAD").expect("c1");
-    commit_file(wt2, "b.txt", "b\n", "b");
-    let c2b = git_rev_parse(wt2, "HEAD").expect("c2");
-    commit_file(wt2, "tail.txt", "t\n", "tail");
-    fs::write(wt2.join("a.txt"), "a\nfix-a\n").expect("write");
-    git(wt2, &["add", "a.txt"]);
-    let grit2 = open_grit(wt2);
-    let staged = staged_fixup_paths(&grit2).expect("staged");
-    let plan1 = fixup(&grit2, c1b, &fixup_opts()).expect("fixup1");
-    apply_fixup_rewrite(&grit2, &plan1, &apply_opts(), &staged).expect("apply1");
-    fs::write(wt2.join("b.txt"), "b\nfix-b\n").expect("write");
-    git(wt2, &["add", "b.txt"]);
-    let staged2 = staged_fixup_paths(&grit2).expect("staged2");
+    fn stage_absorb_hunks(wt: &std::path::Path) {
+        fs::write(wt.join("a.txt"), "a\nfix-a\n").expect("write");
+        fs::write(wt.join("b.txt"), "b\nfix-b\n").expect("write");
+        git(wt, &["add", "a.txt", "b.txt"]);
+    }
+
+    fs::write(wt.join("a.txt"), "a\nfix-a\n").expect("write");
+    git(wt, &["add", "a.txt"]);
+    let grit = open_grit(wt);
+    let staged = staged_fixup_paths(&grit).expect("staged");
+    let plan1 = fixup(&grit, c1, &fixup_opts()).expect("fixup1");
+    apply_fixup_rewrite(&grit, &plan1, &apply_opts(), &staged).expect("apply1");
+    fs::write(wt.join("b.txt"), "b\nfix-b\n").expect("write");
+    git(wt, &["add", "b.txt"]);
+    let grit = open_grit(wt);
+    let staged2 = staged_fixup_paths(&grit).expect("staged2");
     let c2_target = plan1
         .commits
         .iter()
-        .find(|row| row.old == c2b)
+        .find(|row| row.old == c2)
         .and_then(|row| row.new)
-        .unwrap_or(c2b);
-    let plan2 = fixup(&grit2, c2_target, &fixup_opts()).expect("fixup2");
-    apply_fixup_rewrite(&grit2, &plan2, &apply_opts(), &staged2).expect("apply2");
-    git_fsck_strict(wt2);
-    let manual_tip = git_rev_parse(wt2, "HEAD").expect("manual tip");
+        .unwrap_or(c2);
+    let plan2 = fixup(&grit, c2_target, &fixup_opts()).expect("fixup2");
+    apply_fixup_rewrite(&grit, &plan2, &apply_opts(), &staged2).expect("apply2");
+    git_fsck_strict(wt);
+    let manual_tip = git_rev_parse(wt, "HEAD").expect("manual tip");
+    let manual_c1_new = plan1
+        .commits
+        .iter()
+        .find(|row| row.old == c1)
+        .and_then(|row| row.new)
+        .expect("manual c1");
+    let manual_c2_new = plan2
+        .commits
+        .iter()
+        .find(|row| row.old == c2_target)
+        .and_then(|row| row.new)
+        .expect("manual c2");
+
+    git(wt, &["reset", "--hard", &pre_rewrite.to_hex()]);
+    stage_absorb_hunks(wt);
+    let grit = open_grit(wt);
+    let absorb_opts = AbsorbOptions {
+        base: Some(base),
+        rewrite: rewrite_opts(),
+    };
+    let absorb_plan = absorb(&grit, &absorb_opts).expect("plan");
+    apply_absorb_rewrite(&grit, &absorb_plan, &apply_opts()).expect("apply");
+    git_fsck_strict(wt);
+    let absorb_tip = git_rev_parse(wt, "HEAD").expect("absorb tip");
+    let c1_new = absorb_plan
+        .plan
+        .commits
+        .iter()
+        .find(|row| row.old == c1)
+        .and_then(|row| row.new)
+        .expect("c1 rewritten");
+    let c2_new = absorb_plan
+        .plan
+        .commits
+        .iter()
+        .find(|row| row.old == c2)
+        .and_then(|row| row.new)
+        .expect("c2 rewritten");
+
+    assert_eq!(c1_new, manual_c1_new, "c1 rewrite OID");
+    assert_eq!(c2_new, manual_c2_new, "c2 rewrite OID");
     assert_eq!(
-        fs::read_to_string(wt.join("a.txt")).expect("a"),
-        fs::read_to_string(wt2.join("a.txt")).expect("a2")
+        absorb_tip, manual_tip,
+        "tip commit OID must match sequential fixups"
     );
-    assert_eq!(
-        fs::read_to_string(wt.join("b.txt")).expect("b"),
-        fs::read_to_string(wt2.join("b.txt")).expect("b2")
-    );
-    fn tip_tree(repo: &Repository, tip: ObjectId) -> ObjectId {
-        parse_commit(&repo.odb().read(&tip).expect("read").data)
-            .expect("parse")
-            .tree
-    }
 }
 
 #[test]
