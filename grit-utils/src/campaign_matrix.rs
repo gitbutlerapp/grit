@@ -663,6 +663,25 @@ fn append_fsck_gc_repack(
     smoke: bool,
     out: &mut Vec<ScenarioResult>,
 ) -> Result<()> {
+    if let Ok(meta) = load_campaign_hot_path_meta(&fixture.worktree) {
+        restore_campaign_worktree_to_main(git, &fixture.worktree, &meta)?;
+    } else {
+        run_git(git, &fixture.worktree, &["reset", "--hard", "HEAD"])?;
+        run_git(
+            git,
+            &fixture.worktree,
+            &[
+                "clean",
+                "-fd",
+                "-q",
+                "-e",
+                ".grit-bench-worktree-ready",
+                "-e",
+                ".grit-bench-hot-path.json",
+            ],
+        )?;
+    }
+    sync_grit_index_to_git(grit, &fixture.worktree)?;
     let fsck_allows_grit_failure = fixture.id == "git-dot-git";
     out.push(run_matrix_scenario(
         hyperfine,
