@@ -129,7 +129,19 @@ pub fn run_fixture_cli_matrix(
     )?);
 
     run_git(git, &fixture.worktree, &["reset", "--hard", "HEAD"])?;
-    run_git(git, &fixture.worktree, &["clean", "-fd", "-q"])?;
+    run_git(
+        git,
+        &fixture.worktree,
+        &[
+            "clean",
+            "-fd",
+            "-q",
+            "-e",
+            ".grit-bench-worktree-ready",
+            "-e",
+            ".grit-bench-hot-path.json",
+        ],
+    )?;
     out.push(run_scenario(
         hyperfine,
         git,
@@ -150,7 +162,8 @@ pub fn run_fixture_cli_matrix(
         &fixture.worktree,
     )?);
 
-    out.push(run_scenario(
+    let git_dot_git_stage_allows_grit_failure = fixture.id == "git-dot-git";
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -168,6 +181,7 @@ pub fn run_fixture_cli_matrix(
             git_via_shell: false,
         },
         &fixture.worktree,
+        git_dot_git_stage_allows_grit_failure,
     )?);
 
     let git_commit = chain_shell_public(
@@ -177,7 +191,7 @@ pub fn run_fixture_cli_matrix(
             vec!["commit".into(), "-q".into(), "-m".into(), "bench".into()],
         ],
     );
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -195,6 +209,7 @@ pub fn run_fixture_cli_matrix(
             git_via_shell: true,
         },
         &fixture.worktree,
+        git_dot_git_stage_allows_grit_failure,
     )?);
 
     out.push(run_matrix_scenario(

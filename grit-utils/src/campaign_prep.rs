@@ -199,26 +199,7 @@ fn ensure_campaign_wide_branch_b(
 ) -> Result<String> {
     let change_count = (files.len() / 10).max(1);
     run_git_auth(git, repo, &["checkout", "-B", WIDE_BRANCH_B, base_commit])?;
-    let mut targets: Vec<std::path::PathBuf> = files.iter().take(change_count).cloned().collect();
-    let dir_cap = (change_count / 10).max(1);
-    let dirs: std::collections::BTreeSet<std::path::PathBuf> = targets
-        .iter()
-        .filter_map(|p| {
-            p.parent()
-                .filter(|d| !d.as_os_str().is_empty())
-                .map(|d| d.to_path_buf())
-        })
-        .collect();
-    for d in dirs.iter().take(dir_cap) {
-        let abs = repo.join(d);
-        if abs.join(".git").exists() || abs == repo {
-            continue;
-        }
-        if abs.is_dir() {
-            fs::remove_dir_all(&abs).ok();
-        }
-    }
-    targets.retain(|p| !dirs.iter().any(|d| p.starts_with(d)));
+    let targets: Vec<std::path::PathBuf> = files.iter().take(change_count).cloned().collect();
     for rel in &targets {
         if rel.to_string_lossy().eq(".gitmodules") {
             continue;

@@ -228,6 +228,21 @@ pub fn ensure_worktree_clone(
     if marker.is_file() {
         let stored = fs::read_to_string(&marker).context("read worktree marker")?;
         if stored.trim() == tag && dest.join(".git").exists() {
+            run_git(git, &dest, &["checkout", "-f", "campaign-main"])?;
+            run_git(git, &dest, &["reset", "--hard", "HEAD"])?;
+            run_git(
+                git,
+                &dest,
+                &[
+                    "clean",
+                    "-fd",
+                    "-q",
+                    "-e",
+                    ".grit-bench-worktree-ready",
+                    "-e",
+                    ".grit-bench-hot-path.json",
+                ],
+            )?;
             return Ok(dest);
         }
     }
