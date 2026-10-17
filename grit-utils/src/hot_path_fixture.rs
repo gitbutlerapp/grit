@@ -68,6 +68,9 @@ pub struct HotPathMeta {
     pub pick_commit: String,
     pub pick_series_commits: Vec<String>,
     pub wide: bool,
+    /// When set, `switch-wide` switches through this branch (~10% path delta).
+    #[serde(default)]
+    pub wide_branch_b: Option<String>,
 }
 
 pub fn meta_path(repo: &Path) -> PathBuf {
@@ -293,6 +296,7 @@ pub fn setup_switch_fixture_in(
         pick_commit: String::new(),
         pick_series_commits: Vec::new(),
         wide,
+        wide_branch_b: None,
     };
     fs::write(meta_path(dir), serde_json::to_string_pretty(&meta)?)?;
     Ok((dir.to_path_buf(), meta))
@@ -421,6 +425,7 @@ pub fn setup_pick_merge_fixture_in(
         pick_commit,
         pick_series_commits: Vec::new(),
         wide: false,
+        wide_branch_b: None,
     };
     assert_pick_merge_sibling_topology(git, dir, &meta)?;
     fs::write(meta_path(dir), serde_json::to_string_pretty(&meta)?)?;
@@ -480,6 +485,7 @@ pub fn setup_pick_series_fixture(
         pick_commit,
         pick_series_commits: series,
         wide: false,
+        wide_branch_b: None,
     };
     assert_pick_merge_sibling_topology(git, &dir, &meta)?;
     fs::write(meta_path(&dir), serde_json::to_string_pretty(&meta)?)?;
@@ -490,6 +496,11 @@ pub fn prepare_switch(git: &Path, repo: &Path) -> Result<()> {
     let meta = load_meta(repo)?;
     run_git(git, repo, &["checkout", "-q", &meta.branch_a])?;
     Ok(())
+}
+
+/// Same reset as [`prepare_switch`]; used for campaign `switch-wide` rows.
+pub fn prepare_switch_wide(git: &Path, repo: &Path) -> Result<()> {
+    prepare_switch(git, repo)
 }
 
 pub fn prepare_pick(git: &Path, repo: &Path) -> Result<()> {

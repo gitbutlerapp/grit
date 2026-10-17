@@ -149,6 +149,27 @@ fn rev_parse(git: &Path, dir: &Path, rev: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+fn object_kind(git: &Path, repo: &Path, oid: &str) -> Result<String> {
+    let mut cmd = Command::new(git);
+    cmd.args(["cat-file", "-t", oid]).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git cat-file -t")?;
+    if !out.status.success() {
+        bail!(
+            "cat-file -t {oid} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn campaign_cached_meta_valid(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Result<bool> {
+    if meta.kind != "CampaignRealRepo" {
+        return Ok(false);
+    }
+    Ok(object_kind(git, bare, &meta.fetch_base_oid)? == "commit")
+}
+
 /// Root directory for cached network fixtures (`GRIT_BENCH_NETWORK_CACHE`).
 pub fn network_cache_root() -> PathBuf {
     std::env::var("GRIT_BENCH_NETWORK_CACHE")
@@ -421,6 +442,11 @@ fn default_branch_on_bare(git: &Path, bare: &Path) -> Result<String> {
             return Ok(short);
         }
     }
+    for candidate in ["master", "main"] {
+        if rev_parse(git, bare, &format!("refs/heads/{candidate}")).is_ok() {
+            return Ok(candidate.into());
+        }
+    }
     Ok("main".into())
 }
 
@@ -431,23 +457,44 @@ pub fn ensure_campaign_bare_network_meta(
     smoke: bool,
 ) -> Result<NetworkBenchMeta> {
     if meta_path(bare).is_file() {
-        return load_meta(bare);
+        let meta = load_meta(bare)?;
+        if campaign_cached_meta_valid(git, bare, &meta)? {
+            return Ok(meta);
+        }
+        fs::remove_file(meta_path(bare)).ok();
+        if meta.client_repo.exists() {
+            remove_dir_robust(&meta.client_repo);
+        }
     }
     let profile = if smoke {
         NetworkProfile::Smoke
     } else {
         NetworkProfile::Production
     };
-    let default_branch = default_branch_on_bare(git, bare)?;
-    let fetch_base = rev_parse(
-        git,
-        bare,
-        &format!(
-            "refs/heads/{default_branch}~{}",
-            profile.incremental_fetch_commits()
-        ),
-    )
-    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
+    let tag_only = crate::real_repo_fixture::list_branch_head_refs(bare)?.is_empty();
+    let default_branch = if tag_only {
+        // Tag-pinned git.git bare remotes expose no `refs/heads/*`; use a stable label for client config.
+        "master".into()
+    } else {
+        default_branch_on_bare(git, bare)?
+    };
+    let fetch_base = if tag_only {
+        let tag = std::env::var("GRIT_BENCH_GIT_GIT_TAG")
+            .unwrap_or_else(|_| crate::real_repo_fixture::DEFAULT_GIT_GIT_TAG.to_owned());
+        rev_parse(git, bare, &format!("{tag}^{{commit}}"))
+            .or_else(|_| rev_parse(git, bare, &format!("refs/tags/{tag}^{{commit}}")))
+            .or_else(|_| rev_parse(git, bare, "HEAD^{commit}"))?
+    } else {
+        rev_parse(
+            git,
+            bare,
+            &format!(
+                "refs/heads/{default_branch}~{}",
+                profile.incremental_fetch_commits()
+            ),
+        )
+        .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?
+    };
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: "CampaignRealRepo".into(),
@@ -461,6 +508,16 @@ pub fn ensure_campaign_bare_network_meta(
         fetch_base_oid: fetch_base,
         default_branch,
     };
+    if tag_only {
+        let branch_ref = format!("refs/heads/{}", meta.default_branch);
+        if rev_parse(git, bare, &branch_ref).is_err() {
+            run_git(
+                git,
+                Some(bare),
+                &["update-ref", &branch_ref, &meta.fetch_base_oid],
+            )?;
+        }
+    }
     fs::write(meta_path(bare), serde_json::to_string_pretty(&meta)?)?;
     Ok(meta)
 }
@@ -533,4 +590,82 @@ pub fn install_http_repo(git: &Path, source_bare: &Path, http_root: &Path) -> Re
         ],
     )?;
     Ok(dest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn git_init_bare(dir: &std::path::Path) -> Result<()> {
+        Command::new("git")
+            .args(["init", "--bare", "-b", "master"])
+            .current_dir(dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+        Ok(())
+    }
+
+    #[test]
+    fn campaign_bare_network_meta_tag_pinned_without_branch_refs() -> Result<()> {
+        let git = crate::binary::resolve_binary("git", None).expect("git");
+        let origin = TempDir::new()?;
+        git_init_bare(origin.path())?;
+        let source = TempDir::new()?;
+        Command::new("git")
+            .args(["clone", origin.path().to_str().unwrap(), "work"])
+            .current_dir(source.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+        let work = source.path().join("work");
+        fs::write(work.join("f.txt"), b"x")?;
+        let run = |args: &[&str]| -> Result<()> {
+            let mut c = Command::new("git");
+            c.args(args).current_dir(&work);
+            c.env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t");
+            assert!(c.status()?.success());
+            Ok(())
+        };
+        run(&["add", "f.txt"])?;
+        run(&["commit", "-m", "c"])?;
+        run(&["tag", "v1.0"])?;
+        run(&["push", "origin", "master", "v1.0"])?;
+
+        let clone_parent = TempDir::new()?;
+        let bare = clone_parent.path().join("dest.git");
+        Command::new("git")
+            .args([
+                "clone",
+                "--bare",
+                "--single-branch",
+                "--branch",
+                "v1.0",
+                origin.path().to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ])
+            .current_dir(clone_parent.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+
+        std::env::set_var("GRIT_BENCH_GIT_GIT_TAG", "v1.0");
+        let meta = ensure_campaign_bare_network_meta(&git, &bare, false)?;
+        assert!(meta_path(&bare).is_file());
+        assert!(!meta.fetch_base_oid.is_empty());
+
+        let client = crate::network_suite::ensure_network_client_repo(&git, &bare)?;
+        assert!(client.join(".git").exists());
+        crate::network_suite::prepare_network_fetch_incr(&git, &bare)?;
+        crate::network_suite::prepare_network_push(&git, &bare)?;
+        Ok(())
+    }
 }

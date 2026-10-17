@@ -122,6 +122,9 @@ impl PerfTargets {
         {
             return LedgerStatus::Documented;
         }
+        if scenario.grit_failure.is_some() {
+            return LedgerStatus::Fail;
+        }
         let target = self.target_ratio(&scenario.id);
         if scenario.ratio <= target {
             LedgerStatus::Pass
@@ -192,6 +195,14 @@ mod tests {
     }
 
     fn scenario(id: &str, ratio: f64) -> ScenarioResult {
+        scenario_with_failure(id, ratio, None)
+    }
+
+    fn scenario_with_failure(
+        id: &str,
+        ratio: f64,
+        grit_failure: Option<crate::schema::BenchFailure>,
+    ) -> ScenarioResult {
         ScenarioResult {
             id: id.into(),
             group: "g".into(),
@@ -201,7 +212,7 @@ mod tests {
             git: stats(100.0),
             grit: stats(ratio * 100.0),
             ratio,
-            grit_failure: None,
+            grit_failure,
         }
     }
 
@@ -249,5 +260,58 @@ owned_by_item_14 = true
         assert!(is_owned_by_item_14("git-dot-git/rev-list-count"));
         assert!(is_owned_by_item_14("serve-clone-git.git"));
         assert!(!is_owned_by_item_14("git-dot-git/status-clean"));
+    }
+
+    #[test]
+    fn grit_failure_without_documentation_is_fail() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("perf-targets.toml");
+        std::fs::write(
+            &path,
+            r#"
+[default]
+ratio = 1.1
+"#,
+        )?;
+        let targets = load_perf_targets(&path)?;
+        let failure = Some(crate::schema::BenchFailure {
+            kind: "command_failed".into(),
+            message: "hyperfine grit run failed".into(),
+        });
+        assert_eq!(
+            targets.classify(&scenario_with_failure(
+                "git-dot-git/log",
+                0.0,
+                failure.clone()
+            )),
+            LedgerStatus::Fail
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn grit_failure_with_documentation_stays_documented() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("perf-targets.toml");
+        std::fs::write(
+            &path,
+            r#"
+[default]
+ratio = 1.1
+
+[scenario."git-dot-git/fsck"]
+documented = "known fsck gap"
+"#,
+        )?;
+        let targets = load_perf_targets(&path)?;
+        let failure = Some(crate::schema::BenchFailure {
+            kind: "command_failed".into(),
+            message: "fsck exited non-zero".into(),
+        });
+        assert_eq!(
+            targets.classify(&scenario_with_failure("git-dot-git/fsck", 0.0, failure)),
+            LedgerStatus::Documented
+        );
+        Ok(())
     }
 }
