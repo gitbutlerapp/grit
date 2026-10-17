@@ -722,7 +722,7 @@ fn append_fsck_gc_repack(
     if !smoke {
         seed_loose_objects(git, &fixture.worktree)?;
     }
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -740,6 +740,7 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.worktree,
+        fsck_allows_grit_failure,
     )?);
 
     // Grit repack currently requires a worktree; still measure git on the bare remote.
