@@ -51,7 +51,7 @@ $ echo $?
 
 ## JSON output
 
-Schema: [v1](/schemas/hooks/v1.json) (`hooks.list` and `hooks.run` subcommand schemas are also published under `/schemas/`).
+Schema: [v1](/schemas/hooks/v1.json); subcommands: [hooks.list v1](/schemas/hooks.list/v1.json), [hooks.run v1](/schemas/hooks.run/v1.json).
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |

@@ -322,7 +322,7 @@
 - Every library area in the Direction document has a grit-cli entry point.
 - Docs pages exist and benchmarks cover the new commands where relevant.
 
-## 20. Real-world performance campaign
+## 20. Real-world performance campaign — **Done**
 *Workstream: Performance*
 
 **Goal.** Close the remaining gaps on real repositories.
@@ -334,3 +334,95 @@
 
 **Acceptance.**
 - Every scenario is within 1.1× of git or faster, or has a documented reason and a follow-up roadmap item.
+
+**Status (2026-10-17).** Committed `grit-utils/baselines/campaign-before.json` and `campaign-after.json` on the factory VM (git 2.43.0). The gap ledger in `grit-utils/perf-targets.toml` closes the scorecard: `grit-bench campaign --ledger --from grit-utils/baselines/campaign-after.json` reports only `pass`, `documented`, or `owned-by-item-14`. Remaining gaps are tracked under items 21–30 below.
+
+## 21. Campaign: gc and maintenance at repository scale
+*Workstream: Performance*
+
+**Goal.** Make `grit gc` and maintenance commands usable on git.git, chromium-class synthetic, and optional linux without OOM or multi-hour hyperfine runs.
+
+**Scope.** Reduce memory and wall time for gc/repack paths; keep git-compatible on-disk output.
+
+**Acceptance.** Campaign `gc` rows measure grit without documented skip; median ratio ≤1.1× git on git-dot-git and chromium-synth fixtures.
+
+## 22. Campaign: status and diff on real fixtures
+*Workstream: Performance*
+
+**Goal.** Bring `grit status` and `grit diff` within 1.1× git on git.git and chromium-class synthetic worktrees.
+
+**Scope.** Index stat cache, untracked/ignore walks, diff generation on dirty and clean trees.
+
+**Acceptance.** Campaign `status-*` and `diff-*` scenarios pass the 1.1× ledger on both fixtures.
+
+## 23. Campaign: add and commit at scale
+*Workstream: Performance*
+
+**Goal.** Match git for `add` and `commit` on large indexes (campaign fixtures).
+
+**Scope.** Staging, index write, commit object creation, hook/index integration.
+
+**Acceptance.** Campaign `add` and `commit` scenarios ≤1.1× git on git-dot-git and chromium-synth.
+
+## 24. Campaign: switch and wide worktree updates
+*Workstream: Performance*
+
+**Goal.** Tree-diff-driven `switch` and `switch-wide` within 1.1× git on campaign fixtures.
+
+**Scope.** Checkout/switch worktree updates, wide dirty trees.
+
+**Acceptance.** Campaign `switch` and `switch-wide` scenarios pass the ledger on both fixtures.
+
+## 25. Campaign: pick, merge, revert, and stash on large trees
+*Workstream: Performance*
+
+**Goal.** In-memory tree merge and stash paths within 1.1× git on git.git and chromium-class synthetic.
+
+**Scope.** Pick/merge/revert/stash porcelain on 400k-file synthetic and git.git worktrees.
+
+**Acceptance.** Campaign `pick`, `merge`, `revert`, and `stash-push-pop` scenarios ≤1.1× git.
+
+## 26. Campaign: log and log -p throughput
+*Workstream: Performance*
+
+**Goal.** Paginated `log` and `log -p` (log-patch driver) within 1.1× git on campaign fixtures.
+
+**Scope.** Revwalk formatting, patch streaming, pagination limits on large histories.
+
+**Acceptance.** Campaign `log` and `log-patch` scenarios pass without grit-side hyperfine failure.
+
+## 27. Campaign: blame on git.git
+*Workstream: Performance*
+
+**Goal.** `grit blame --porcelain` within 1.1× git on git.git at campaign depth.
+
+**Scope.** Blame walk, commit-graph/Bloom fast paths (see also blame perf workstreams).
+
+**Acceptance.** Campaign `git-dot-git/blame` ≤1.1× git.
+
+## 28. Campaign: rev-parse and cat-file on real repos
+*Workstream: Performance*
+
+**Goal.** `resolve` and `cat` within 1.1× git on campaign fixtures.
+
+**Scope.** Rev-parse, batch cat-file, ODB read hot paths on real repo shapes.
+
+**Acceptance.** Campaign `resolve` and `cat` scenarios ≤1.1× on git-dot-git and chromium-synth.
+
+## 29. Campaign: file:// fetch, push, and clone
+*Workstream: Performance*
+
+**Goal.** File transport scenarios within 1.1× git on git.git and chromium bare repos.
+
+**Scope.** Incremental fetch, push, and full clone over `file://` on large packs.
+
+**Acceptance.** Campaign `fetch-incr-file`, `push-file`, and chromium `clone-file` ≤1.1× git.
+
+## 30. Campaign: fsck on chromium-class synthetic
+*Workstream: Performance*
+
+**Goal.** `grit fsck --no-dangling` within 1.1× git on the production chromium synthetic worktree.
+
+**Scope.** Parallel verification without weakening checks (see item 11 for git.git semantics).
+
+**Acceptance.** Campaign `chromium-synth/fsck` ≤1.1× git.

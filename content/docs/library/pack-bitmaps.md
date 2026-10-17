@@ -7,14 +7,14 @@ Git can attach a **reachability bitmap** to a pack (or multi-pack-index) so rev-
 
 ## Reading
 
-[`BitmapIndex`](rustdoc:grit_lib::pack_bitmap::BitmapIndex) on a [`Repository`](rustdoc:grit_lib::repo::Repository) loads the preferred bitmap (MIDX over pack when both exist). Decoded commit reachability sets, per-kind type filters, and optional name-hash cache entries are available on the opened index (see rustdoc on [`BitmapIndex`](rustdoc:grit_lib::pack_bitmap::BitmapIndex)).
+`BitmapIndex` on a `Repository` loads the preferred bitmap (MIDX over pack when both exist). Decoded commit reachability sets, per-kind type filters, and optional name-hash cache entries are available on the opened index (see rustdoc on `BitmapIndex`).
 
 ## Writing
 
-[`PackBitmapWriter`](rustdoc:grit_lib::pack_bitmap::PackBitmapWriter) and [`Repository::write_pack_bitmap`](rustdoc:grit_lib::repo::Repository) build a `.bitmap` for an **existing** pack index whose objects are closed under reachability from the repository’s refs—the shape produced by an all-into-one repack. Options are passed explicitly as [`PackBitmapWriteOptions`](rustdoc:grit_lib::pack_bitmap::PackBitmapWriteOptions); [`ConfigSet::pack_bitmap_write_options`](rustdoc:grit_lib::config::ConfigSet) maps Git’s `pack.writeBitmapHashCache`, `pack.writeBitmapLookupTable`, and `pack.preferBitmapTips` when you want config-driven defaults.
+`PackBitmapWriter` and `Repository::write_pack_bitmap` build a `.bitmap` for an **existing** pack index whose objects are closed under reachability from the repository’s refs—the shape produced by an all-into-one repack. Options are passed explicitly as `PackBitmapWriteOptions`; `ConfigSet::pack_bitmap_write_options` maps Git’s `pack.writeBitmapHashCache`, `pack.writeBitmapLookupTable`, and `pack.preferBitmapTips` when you want config-driven defaults.
 
-If no `.rev` sidecar exists, the writer creates one first so object order matches Git’s pack-offset order. Output is deterministic for identical inputs. A pack that is not closed under reachability returns [`PackBitmapWriteError::NotClosed`](rustdoc:grit_lib::pack_bitmap::PackBitmapWriteError).
+If no `.rev` sidecar exists, the writer creates one first so object order matches Git’s pack-offset order. Output is deterministic for identical inputs. A pack that is not closed under reachability returns `PackBitmapWriteError::NotClosed`.
 
 ## Compatibility
 
-Integration tests in `grit-lib` round-trip against the system `git` binary (`rev-list --test-bitmap`, `--use-bitmap-index` counts). Name hashes use [`pack_name_hash`](rustdoc:grit_lib::pack_name_hash::pack_name_hash) (v1) recorded during tree walks.
+Integration tests in `grit-lib` round-trip against the system `git` binary (`rev-list --test-bitmap`, `--use-bitmap-index` counts). Name hashes use `pack_name_hash` (v1) recorded during tree walks.

@@ -79,7 +79,7 @@ function loadBundle(baselines: string[]): Bundle {
         const prev = seen.get(id)!;
         if (isCampaignBaseline(rel) && isCampaignBaseline(prev.rel)) {
           scenarios[prev.index] = row;
-          continue;
+          return;
         }
         fail(`duplicate scenario id ${id}`);
       }

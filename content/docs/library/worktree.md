@@ -3,11 +3,11 @@ title: Worktree
 summary: Linked worktrees, ignore rules, attributes, and pathspec helpers under the worktree domain.
 ---
 
-Working-tree behavior lives under [`worktree`](rustdoc:grit_lib::worktree): ignore/attributes ([`worktree::ignore`](rustdoc:grit_lib::worktree::ignore), [`worktree::attributes`](rustdoc:grit_lib::worktree::attributes)), pathspecs ([`worktree::pathspec`](rustdoc:grit_lib::worktree::pathspec)), and checkout helpers. Porcelain commands (`status`, `add`, `checkout`, …) compose these modules with the index and ODB.
+Working-tree behavior lives under [`worktree`](rustdoc:grit_lib::worktree): ignore/attributes (`worktree::ignore`, `worktree::attributes`), pathspecs (`worktree::pathspec`), and checkout helpers. Porcelain commands (`status`, `add`, `checkout`, …) compose these modules with the index and ODB.
 
 ## Linked worktrees (handle)
 
-[`Repository::worktrees`](rustdoc:grit_lib::repo::Repository) returns [`RepositoryWorktrees`](rustdoc:grit_lib::repo_handles::RepositoryWorktrees): list main and linked checkouts, add/remove/lock linked worktrees with the same on-disk layout Git uses (`worktrees/` admin files, `gitdir` links). Options such as [`AddLinkedWorktreeOptions`](rustdoc:grit_lib::worktree::AddLinkedWorktreeOptions) mirror the fields the CLI exposes.
+`Repository::worktrees` returns `RepositoryWorktrees`: list main and linked checkouts, add/remove/lock linked worktrees with the same on-disk layout Git uses (`worktrees/` admin files, `gitdir` links). Options such as `AddLinkedWorktreeOptions` mirror the fields the CLI exposes.
 
 ## Example
 

@@ -106,7 +106,7 @@ error: --filter requires --json
 
 ## Color and terminal detection
 
-Human output uses ANSI color only when **stdout is a terminal**, the environment supports ANSI (`grit_lib::terminal::ansi_supported()`), and **`NO_COLOR` is unset** ([no-color.org](https://no-color.org)). Piped or redirected stdout is plain text; set `NO_COLOR=1` to force plain text on a TTY.
+Human output uses ANSI color only when **stdout is a terminal**, the environment supports ANSI (`grit_lib::porcelain::terminal::ansi_supported()`), and **`NO_COLOR` is unset** ([no-color.org](https://no-color.org)). Piped or redirected stdout is plain text; set `NO_COLOR=1` to force plain text on a TTY.
 
 JSON mode never depends on color; always pass `--json` for machines.
 
