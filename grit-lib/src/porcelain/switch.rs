@@ -24,7 +24,6 @@ use crate::refs;
 use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
 
-const BULK_SWITCH_PARALLEL_MIN: usize = 32;
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::state::resolve_head;
 
@@ -754,14 +753,13 @@ fn checkout_prepared_tree_transition(
             tree_changes.push(change.clone());
         }
     }
-    let checkout_parallel_threshold = (tree_changes.len() >= BULK_SWITCH_PARALLEL_MIN).then_some(0);
     checkout_tree_changes_with_index_opts(
         repo,
         &tree_changes,
         &mut prepared.index,
         CheckoutApplyOptions {
             parallel_prepare_blobs: true,
-            checkout_parallel_threshold,
+            checkout_parallel_threshold: None,
             trust_wholesale_dir_removal: prepared.trust_wholesale_dir_removal,
             preverified_wholesale_dirs: prepared.preverified_wholesale_dirs,
             wholesale_safety_precomputed: prepared.wholesale_safety_precomputed,

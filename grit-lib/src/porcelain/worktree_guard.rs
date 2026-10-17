@@ -513,17 +513,13 @@ fn added_tree_path_missing_on_disk(
     !work_tree.join(path).exists()
 }
 
-fn delete_path_trusted_without_worktree_stat(
+fn index_matches_head_without_worktree_stat(
     index: &Index,
     head_by_path: &HashMap<String, HeadTreeSide>,
-    scheduled_delete_paths: &HashSet<String>,
     path: &str,
     index_mtime: Option<(u32, u32)>,
     stat_policy: StatMatchPolicy,
 ) -> bool {
-    if !path_is_tree_scheduled_delete(scheduled_delete_paths, path) {
-        return false;
-    }
     let HeadTreeSide::Present { oid, mode } = head_by_path
         .get(path)
         .copied()
@@ -543,6 +539,24 @@ fn delete_path_trusted_without_worktree_stat(
         return false;
     }
     true
+}
+
+fn delete_path_trusted_without_worktree_stat(
+    index: &Index,
+    head_by_path: &HashMap<String, HeadTreeSide>,
+    scheduled_delete_paths: &HashSet<String>,
+    path: &str,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: StatMatchPolicy,
+) -> bool {
+    path_is_tree_scheduled_delete(scheduled_delete_paths, path)
+        && index_matches_head_without_worktree_stat(
+            index,
+            head_by_path,
+            path,
+            index_mtime,
+            stat_policy,
+        )
 }
 
 fn staged_diff_for_tree_switch_paths(
@@ -699,27 +713,16 @@ fn index_entry_under_root(path: &[u8], root: &[u8]) -> bool {
 
 fn count_indexed_paths_under_root(index: &Index, root: &str) -> usize {
     let root_bytes = root.as_bytes();
-    if index.entries_sorted {
-        let start = index
-            .entries
-            .partition_point(|e| e.path.as_slice() < root_bytes);
-        let mut count = 0usize;
-        for entry in &index.entries[start..] {
-            if !index_entry_under_root(&entry.path, root_bytes) {
-                break;
-            }
-            if entry.stage() == 0 {
-                count += 1;
-            }
-        }
-        return count;
-    }
     let prefix = format!("{root}/");
+    let prefix_bytes = prefix.as_bytes();
     index
         .entries
         .iter()
         .filter(|e| e.stage() == 0)
-        .filter(|e| e.path.starts_with(prefix.as_bytes()) || e.path.as_slice() == root_bytes)
+        .filter(|e| {
+            let p = e.path.as_slice();
+            p == root_bytes || p.starts_with(prefix_bytes)
+        })
         .count()
 }
 
@@ -1884,7 +1887,7 @@ mod tests {
                 .expect("head tree");
         repo.write_index(&mut index).expect("write index");
         let index_path = repo.index_path_for_env().expect("index path");
-        crate::index::advance_index_file_mtime_past_entries(&index, &index_path)
+        crate::index::advance_index_file_mtime_past_entries(&index, &index_path, None)
             .expect("advance index mtime");
         let commit = CommitData {
             tree: head_tree,
@@ -2184,6 +2187,34 @@ mod tests {
             .expect("commit");
         crate::refs::write_ref(&repo.git_dir(), "HEAD", &co).expect("head");
         ensure_worktree_clean_for_pick(&repo).expect("clean");
+    }
+
+    #[test]
+    fn count_indexed_paths_under_root_ignores_lexicographic_sibling_prefixes() {
+        use crate::index::{Index, IndexEntry, MODE_REGULAR};
+        let mut index = Index::new();
+        for path in ["dir-old/f.txt", "dir/f.txt", "dir/nested/g.txt"] {
+            index.add_or_replace(IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: MODE_REGULAR,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                oid: ObjectId::zero(),
+                flags: path.len().min(0xFFF) as u16,
+                flags_extended: None,
+                path: path.as_bytes().to_vec(),
+                base_index_pos: 0,
+            });
+        }
+        index.sort();
+        assert_eq!(count_indexed_paths_under_root(&index, "dir"), 2);
+        assert_eq!(count_indexed_paths_under_root(&index, "dir-old"), 1);
     }
 
     #[test]

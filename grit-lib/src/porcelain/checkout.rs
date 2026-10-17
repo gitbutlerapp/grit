@@ -867,21 +867,6 @@ fn remove_wholesale_directories_on_disk(
     Ok(wholesale_dirs_removed)
 }
 
-fn checkout_touched_entry_mtime_max(entries: &[IndexEntry]) -> (u32, u32) {
-    let mut max_sec = 0u32;
-    let mut max_nsec = 0u32;
-    for ie in entries {
-        if ie.stage() != 0 {
-            continue;
-        }
-        if ie.mtime_sec > max_sec || (ie.mtime_sec == max_sec && ie.mtime_nsec > max_nsec) {
-            max_sec = ie.mtime_sec;
-            max_nsec = ie.mtime_nsec;
-        }
-    }
-    (max_sec, max_nsec)
-}
-
 fn checkout_commit_index_update(
     repo: &Repository,
     index_mut: &mut Index,
@@ -899,8 +884,6 @@ fn checkout_commit_index_update(
             index_mut.drop_derived_index_extensions();
         }
     }
-    let touched_mtime = (bulk_index_rewrite && !new_entries.is_empty())
-        .then(|| checkout_touched_entry_mtime_max(&new_entries));
     index_mut.remove_prefixes_paths_and_insert(
         wholesale_dirs_removed,
         paths_to_remove.iter().map(|p| p.as_slice()),
@@ -914,11 +897,7 @@ fn checkout_commit_index_update(
     index_mut.suppress_pre_write_index_housekeeping = false;
     result?;
     let index_path = repo.index_path_for_env()?;
-    crate::index::advance_index_file_mtime_past_entries_with_touch_hint(
-        index_mut,
-        &index_path,
-        touched_mtime,
-    )?;
+    crate::index::advance_index_file_mtime_past_entries(index_mut, &index_path, None)?;
     index_mut.source_mtime = crate::index::index_file_mtime(&index_path);
     Ok(())
 }

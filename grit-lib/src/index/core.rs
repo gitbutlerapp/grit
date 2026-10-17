@@ -3917,17 +3917,27 @@ fn max_stage0_entry_mtime(entries: &[IndexEntry]) -> (u32, u32) {
     (max_sec, max_nsec)
 }
 
-/// Advance the on-disk index mtime using a precomputed max from checkout-touched entries when provided.
+/// Advance the on-disk index mtime to be strictly newer than every stage-0 entry mtime.
 ///
-/// Bulk checkout passes the max stage-0 mtime of entries it just wrote so we avoid scanning the full index.
-pub(crate) fn advance_index_file_mtime_past_entries_with_touch_hint(
+/// Checkout writes blob timestamps first, then the index in the same second; without this bump the
+/// next switch would treat every touched path as racy. Git usually ends up with a newer index second.
+///
+/// When `touched_only_max` is set, it must be the true maximum stage-0 mtime in the index after
+/// checkout (not just the touched entries), or later switch prepare may treat paths as racy.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the index timestamp cannot be updated.
+pub(crate) fn advance_index_file_mtime_past_entries(
     index: &Index,
     index_path: &Path,
     touched_only_max: Option<(u32, u32)>,
 ) -> Result<()> {
     use filetime::FileTime;
-    let (max_sec, max_nsec) =
-        touched_only_max.unwrap_or_else(|| max_stage0_entry_mtime(&index.entries));
+    let (max_sec, max_nsec) = match touched_only_max {
+        Some(pair) => pair,
+        None => max_stage0_entry_mtime(&index.entries),
+    };
     if max_sec == 0 && max_nsec == 0 {
         return Ok(());
     }
@@ -3942,21 +3952,6 @@ pub(crate) fn advance_index_file_mtime_past_entries_with_touch_hint(
         FileTime::from_unix_time(i64::from(max_sec) + 1, 0)
     };
     filetime::set_file_mtime(index_path, ft).map_err(Error::Io)
-}
-
-/// Advance the on-disk index mtime to be strictly newer than every stage-0 entry mtime.
-///
-/// Checkout writes blob timestamps first, then the index in the same second; without this bump the
-/// next switch would treat every touched path as racy. Git usually ends up with a newer index second.
-///
-/// # Errors
-///
-/// Returns [`Error::Io`] when the index timestamp cannot be updated.
-pub(crate) fn advance_index_file_mtime_past_entries(
-    index: &Index,
-    index_path: &Path,
-) -> Result<()> {
-    advance_index_file_mtime_past_entries_with_touch_hint(index, index_path, None)
 }
 
 /// Join a repository work tree root with an index-relative path stored as raw bytes.
