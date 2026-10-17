@@ -276,6 +276,8 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         return;
     };
     let url = format!("http://127.0.0.1:{port}/repo.git");
+    let url_with_embedded_creds =
+        format!("http://{USER}:wrong-embedded-pass@127.0.0.1:{port}/repo.git");
 
     let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
@@ -299,6 +301,33 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         );
     }
 
+    // --- 0b. Embedded URL credentials must not appear in auth error text ---------
+    {
+        let local = tmp.path().join("embedded-creds-url");
+        std::fs::create_dir_all(&local).unwrap();
+        git(&local, &["init", "-q", "-b", "main", "."]);
+        let local_git = local.join(".git");
+        let client = http_client_arc(UreqHttpClient::new().with_git_protocol("version=2"));
+        let err = http_fetch(
+            client,
+            &local_git,
+            &url_with_embedded_creds,
+            &mut opts,
+            &mut NoProgress,
+        )
+        .expect_err("fetch with embedded wrong creds in URL must fail");
+        assert!(matches!(err, Error::Auth(_)));
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("wrong-embedded-pass"),
+            "auth error must redact password embedded in remote URL: {msg}"
+        );
+        assert!(
+            !msg.contains(&format!("{USER}:wrong-embedded-pass")),
+            "auth error must redact userinfo embedded in remote URL: {msg}"
+        );
+    }
+
     // --- 1. WRONG credentials → typed auth error, reject() fired ----------------
     {
         let local = tmp.path().join("wrong");
@@ -316,6 +345,11 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         assert!(
             matches!(err, Error::Auth(_)),
             "expected a typed Error::Auth for wrong credentials, got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("wrong-pass"),
+            "auth error must not echo credentials: {msg}"
         );
         // We filled once and, on the 401 retry, rejected the bad credential.
         assert_eq!(
