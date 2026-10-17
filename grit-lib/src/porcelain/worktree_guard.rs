@@ -192,6 +192,15 @@ pub(crate) fn local_change_diffs_for_tree_changes(
                     stat_policy,
                 )
             })
+            .filter(|path| {
+                !index_matches_head_without_worktree_stat(
+                    index,
+                    &head_by_path,
+                    path,
+                    index_mtime,
+                    stat_policy,
+                )
+            })
             .filter(|path| !added_tree_path_missing_on_disk(work_tree, &added_tree_paths, path))
             .collect()
     };
@@ -715,14 +724,34 @@ fn count_indexed_paths_under_root(index: &Index, root: &str) -> usize {
     let root_bytes = root.as_bytes();
     let prefix = format!("{root}/");
     let prefix_bytes = prefix.as_bytes();
+    if index.entries_sorted {
+        let mut count = 0usize;
+        let start = index
+            .entries
+            .partition_point(|e| e.path.as_slice() < prefix_bytes);
+        for entry in &index.entries[start..] {
+            if !entry.path.starts_with(prefix_bytes) {
+                break;
+            }
+            if entry.stage() == 0 {
+                count += 1;
+            }
+        }
+        if let Ok(pos) = index
+            .entries
+            .binary_search_by(|e| e.path.as_slice().cmp(root_bytes))
+        {
+            if index.entries[pos].stage() == 0 {
+                count += 1;
+            }
+        }
+        return count;
+    }
     index
         .entries
         .iter()
         .filter(|e| e.stage() == 0)
-        .filter(|e| {
-            let p = e.path.as_slice();
-            p == root_bytes || p.starts_with(prefix_bytes)
-        })
+        .filter(|e| index_entry_under_root(&e.path, root_bytes))
         .count()
 }
 

@@ -11,6 +11,7 @@ use crate::crlf::{self, ConversionConfig};
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedProcessCheckout, FilterSmudgeMeta};
 use crate::index::{IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+use crate::objects::pack_store::PackReadContextGuard;
 use crate::objects::ObjectId;
 use crate::parallel::{try_par_map_with_local, ParallelHashError, ParallelOp, ParallelOptions};
 use crate::repo::Repository;
@@ -347,6 +348,7 @@ fn flush_parallel_batch(
         options.signed_entry_threshold = Some(threshold);
     }
     let use_parallel = options.threads.get() > 1 && checkout_pool_worthwhile(batch.len(), options);
+    let pack_store = repo.odb().pack_store_for(repo.odb().objects_dir());
 
     let prepared: Vec<PreparedWrite> = if parallel_prepare_blobs
         && options.threads.get() > 1
@@ -356,7 +358,7 @@ fn flush_parallel_batch(
             batch,
             options,
             0,
-            || (),
+            || PackReadContextGuard::install(Arc::clone(&pack_store)),
             |_, &idx| {
                 prepare_write_job(repo, conv, &jobs[idx]).map(|bytes| PreparedWrite { idx, bytes })
             },
@@ -366,14 +368,18 @@ fn flush_parallel_batch(
         })?
     } else {
         let mut prepared = Vec::with_capacity(batch.len());
-        for &idx in batch {
-            match prepare_write_job(repo, conv, &jobs[idx]) {
-                Ok(bytes) => prepared.push(PreparedWrite { idx, bytes }),
-                Err(err) => {
-                    flush_prepared_writes_serial(work_tree, jobs, &prepared, dir_cache, outcomes)?;
-                    return Err(err);
+        let prepare_result = repo.odb().with_pack_read_context(|| {
+            for &idx in batch {
+                match prepare_write_job(repo, conv, &jobs[idx]) {
+                    Ok(bytes) => prepared.push(PreparedWrite { idx, bytes }),
+                    Err(err) => return Err(err),
                 }
             }
+            Ok(())
+        });
+        if let Err(err) = prepare_result {
+            flush_prepared_writes_serial(work_tree, jobs, &prepared, dir_cache, outcomes)?;
+            return Err(err);
         }
         prepared
     };

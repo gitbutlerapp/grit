@@ -3917,6 +3917,21 @@ fn max_stage0_entry_mtime(entries: &[IndexEntry]) -> (u32, u32) {
     (max_sec, max_nsec)
 }
 
+/// Maximum stage-0 mtime across two `(sec, nsec)` pairs.
+#[must_use]
+pub(crate) fn max_stage0_mtime_pair(a: (u32, u32), b: (u32, u32)) -> (u32, u32) {
+    if a.0 > b.0 || (a.0 == b.0 && a.1 > b.1) {
+        a
+    } else {
+        b
+    }
+}
+
+/// Stage-0 mtime maximum in `entries`.
+pub(crate) fn stage0_mtime_max(entries: &[IndexEntry]) -> (u32, u32) {
+    max_stage0_entry_mtime(entries)
+}
+
 /// Advance the on-disk index mtime to be strictly newer than every stage-0 entry mtime.
 ///
 /// Checkout writes blob timestamps first, then the index in the same second; without this bump the
