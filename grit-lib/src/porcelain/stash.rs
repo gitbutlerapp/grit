@@ -35,7 +35,7 @@ use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::index_from_tree::{index_from_tree, index_from_tree_with_worktree_stats};
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
-    UntrackedScan,
+    UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes;
 use crate::reflog::{delete_reflog_entries_rechain, read_reflog, truncate_last_reflog_line};
@@ -310,6 +310,7 @@ fn has_stashable_changes(
             show_all: false,
             sort_paths: true,
             use_untracked_cache: false,
+            cache_miss: UntrackedCacheMissAction::RefreshFull,
         },
         &worktree_rules,
     )?;
@@ -329,6 +330,7 @@ fn collect_untracked_paths(repo: &Repository, work_tree: &Path) -> Result<Vec<St
             show_all: true,
             sort_paths: true,
             use_untracked_cache: false,
+            cache_miss: UntrackedCacheMissAction::RefreshFull,
         },
         &worktree_rules,
     )?;
@@ -980,6 +982,7 @@ fn collect_worktree_paths_blocking_stash_untracked_restore(
             show_all: true,
             sort_paths: true,
             use_untracked_cache: false,
+            cache_miss: UntrackedCacheMissAction::RefreshFull,
         },
         &worktree_rules,
     )?;

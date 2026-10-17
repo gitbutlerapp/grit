@@ -50,6 +50,7 @@ impl<'repo> RevWalk<'repo> {
     ///     sign_override: None,
     ///     amend: false,
     ///     assume_worktree_synced: false,
+    ///     skip_pre_commit_tree_match: false,
     /// };
     /// let _ = create_commit(&repo, &req, &mut NullProgress)?;
     /// let _ = repo.rev_walk().resolve("refs/heads/main")?;

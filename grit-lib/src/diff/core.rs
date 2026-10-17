@@ -1582,6 +1582,35 @@ struct DiffTreesIndexHint<'a> {
     index: &'a Index,
 }
 
+/// Count path-level differences between two trees without building a [`DiffEntry`] list.
+///
+/// Same semantics as [`diff_trees`], but avoids allocating diff records (issue #1064 commit hot path).
+///
+/// # Errors
+///
+/// Returns errors from object database reads.
+pub fn diff_tree_path_change_count(
+    odb: &Odb,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+    prefix: &str,
+) -> Result<usize> {
+    if old_tree_oid == new_tree_oid {
+        return Ok(0);
+    }
+    let old_entries = match old_tree_oid {
+        Some(oid) => read_tree(odb, oid)?,
+        None => Vec::new(),
+    };
+    let new_entries = match new_tree_oid {
+        Some(oid) => read_tree(odb, oid)?,
+        None => Vec::new(),
+    };
+    let mut count = 0usize;
+    diff_tree_entries_count(odb, &old_entries, &new_entries, prefix, false, &mut count)?;
+    Ok(count)
+}
+
 /// Diff two trees and pair deleted/added paths as renames when content is similar enough.
 ///
 /// `rename_threshold` is Git's `-M` percentage (default 50). Use `100` to skip rename detection.
@@ -1776,6 +1805,119 @@ fn read_tree(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
         )));
     }
     parse_tree(&obj.data)
+}
+
+fn diff_tree_entries_count(
+    odb: &Odb,
+    old: &[TreeEntry],
+    new: &[TreeEntry],
+    prefix: &str,
+    show_trees: bool,
+    count: &mut usize,
+) -> Result<()> {
+    let mut oi = 0;
+    let mut ni = 0;
+
+    while oi < old.len() || ni < new.len() {
+        match (old.get(oi), new.get(ni)) {
+            (Some(o), Some(n)) => {
+                let cmp = crate::objects::tree_entry_cmp(
+                    &o.name,
+                    is_tree_mode(o.mode),
+                    &n.name,
+                    is_tree_mode(n.mode),
+                );
+                match cmp {
+                    std::cmp::Ordering::Less => {
+                        emit_deleted_count(odb, o, prefix, show_trees, count)?;
+                        oi += 1;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        emit_added_count(odb, n, prefix, show_trees, count)?;
+                        ni += 1;
+                    }
+                    std::cmp::Ordering::Equal => {
+                        if o.oid != n.oid || o.mode != n.mode {
+                            let name_str = String::from_utf8_lossy(&o.name);
+                            let path = format_path(prefix, &name_str);
+                            if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
+                                if show_trees {
+                                    *count += 1;
+                                }
+                                *count += diff_tree_path_change_count(
+                                    odb,
+                                    Some(&o.oid),
+                                    Some(&n.oid),
+                                    &path,
+                                )?;
+                            } else if is_tree_mode(o.mode) && !is_tree_mode(n.mode) {
+                                emit_deleted_count(odb, o, prefix, show_trees, count)?;
+                                emit_added_count(odb, n, prefix, show_trees, count)?;
+                            } else if !is_tree_mode(o.mode) && is_tree_mode(n.mode) {
+                                emit_deleted_count(odb, o, prefix, show_trees, count)?;
+                                emit_added_count(odb, n, prefix, show_trees, count)?;
+                            } else {
+                                *count += 1;
+                            }
+                        }
+                        oi += 1;
+                        ni += 1;
+                    }
+                }
+            }
+            (Some(o), None) => {
+                emit_deleted_count(odb, o, prefix, show_trees, count)?;
+                oi += 1;
+            }
+            (None, Some(n)) => {
+                emit_added_count(odb, n, prefix, show_trees, count)?;
+                ni += 1;
+            }
+            (None, None) => break,
+        }
+    }
+
+    Ok(())
+}
+
+fn emit_deleted_count(
+    odb: &Odb,
+    entry: &TreeEntry,
+    prefix: &str,
+    show_trees: bool,
+    count: &mut usize,
+) -> Result<()> {
+    let name_str = String::from_utf8_lossy(&entry.name);
+    let path = format_path(prefix, &name_str);
+    if is_tree_mode(entry.mode) {
+        if show_trees {
+            *count += 1;
+        }
+        *count += diff_tree_path_change_count(odb, Some(&entry.oid), None, &path)?;
+    } else {
+        *count += 1;
+    }
+    Ok(())
+}
+
+fn emit_added_count(
+    odb: &Odb,
+    entry: &TreeEntry,
+    prefix: &str,
+    show_trees: bool,
+    count: &mut usize,
+) -> Result<()> {
+    let name_str = String::from_utf8_lossy(&entry.name);
+    let path = format_path(prefix, &name_str);
+    if is_tree_mode(entry.mode) {
+        if show_trees {
+            *count += 1;
+        }
+        *count += diff_tree_path_change_count(odb, None, Some(&entry.oid), &path)?;
+    } else {
+        *count += 1;
+    }
+    Ok(())
 }
 
 /// Compare two sorted lists of tree entries, recursing into subtrees.
@@ -9859,6 +10001,26 @@ mod diff_index_to_tree_cache_tree_tests {
             2,
             "identical trees should read each root once and skip shared subtrees"
         );
+    }
+
+    #[test]
+    fn diff_tree_path_change_count_matches_diff_trees() {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let a = odb.write(ObjectKind::Blob, b"a").expect("blob");
+        let b = odb.write(ObjectKind::Blob, b"b").expect("blob");
+        let mut left = Index::new();
+        left.add_or_replace(index_entry("f.txt", MODE_REGULAR, a));
+        let mut right = Index::new();
+        right.add_or_replace(index_entry("f.txt", MODE_REGULAR, b));
+        right.add_or_replace(index_entry("g.txt", MODE_REGULAR, a));
+        let old_tree = write_tree_from_index(&odb, &left, "").expect("old");
+        let new_tree = write_tree_from_index(&odb, &right, "").expect("new");
+        let entries = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "").expect("diff");
+        let count =
+            diff_tree_path_change_count(&odb, Some(&old_tree), Some(&new_tree), "").expect("count");
+        assert_eq!(count, entries.len());
+        assert_eq!(count, 2);
     }
 }
 

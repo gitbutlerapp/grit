@@ -3241,6 +3241,7 @@ pub fn grit_lib::diff::diff_slice_ops_compacted(&[&str], &[&str], similar::types
 pub fn grit_lib::diff::diff_tree_to_worktree(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &std::path::Path, &grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir_and_rules(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &std::path::Path, &grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::diff_tree_path_change_count(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<usize>
 pub fn grit_lib::diff::diff_trees(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees_show_tree_entries(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees_with_renames(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str, u32) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -8476,6 +8477,7 @@ pub struct grit_lib::porcelain::commit::CommitRequest
 pub grit_lib::porcelain::commit::CommitRequest::allow_empty: bool
 pub grit_lib::porcelain::commit::CommitRequest::amend: bool
 pub grit_lib::porcelain::commit::CommitRequest::assume_worktree_synced: bool
+pub grit_lib::porcelain::commit::CommitRequest::skip_pre_commit_tree_match: bool
 pub grit_lib::porcelain::commit::CommitRequest::author: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::committer: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::message: alloc::string::String
@@ -8491,6 +8493,7 @@ impl core::marker::Unpin for grit_lib::porcelain::commit::CommitRequest
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitRequest
+pub fn grit_lib::porcelain::commit::commit_worktree(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
 pub fn grit_lib::porcelain::commit::create_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
 pub fn grit_lib::porcelain::commit::prepare_commit_bytes(&grit_lib::repo::Repository, &grit_lib::config::ConfigSet, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::porcelain::commit::write_commit_object(&grit_lib::repo::Repository, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>

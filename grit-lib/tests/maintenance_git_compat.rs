@@ -96,6 +96,7 @@ fn many_grit_commits(repo: &Repository, n: usize) {
                 sign_override: None,
                 amend: false,
                 assume_worktree_synced: false,
+                skip_pre_commit_tree_match: false,
             },
             &mut NullProgress,
         )
@@ -948,6 +949,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
+            skip_pre_commit_tree_match: false,
         },
         &mut NullProgress,
     )
@@ -968,6 +970,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             sign_override: None,
             amend: false,
             assume_worktree_synced: false,
+            skip_pre_commit_tree_match: false,
         },
         &mut NullProgress,
     )

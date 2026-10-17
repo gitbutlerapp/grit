@@ -35,7 +35,7 @@ When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new
 
 `grit commit` fails when there's nothing to commit (except when amending with an unchanged tree, or when you pass `--allow-empty`), when HEAD is detached rather than on a branch, and when the index still has **unmerged** paths after staging (for example when a merge conflict is not fully resolved in the working tree). Fix conflicts in your files, then run `grit commit` again — staging runs automatically, the same as for other changes. Refusal for a detached HEAD does not stage your working tree (unlike a missing message, which intentionally stages first so you can add a message and run `grit commit` again).
 
-With `--allow-empty`, grit records a new commit whose tree matches the parent even when the working tree is clean. Use this to mark a point in history (for example to trigger CI) without changing files. The resulting commit is valid for Git the same way as `git commit --allow-empty`.
+With `--allow-empty`, grit records a new commit whose tree matches the parent even when the working tree is clean (staging still runs first, the same as any other commit). Use this to mark a point in history (for example to trigger CI) without changing files. The resulting commit is valid for Git the same way as `git commit --allow-empty`.
 
 When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.
 
