@@ -384,7 +384,7 @@ export GRIT_BENCH_ODB_CACHE=/tmp/grit-bench-odb-cache
 
 Committed baselines: **`campaign-before.json`** (2026-10-14, pre-campaign stack; chromium smoke-sized fixture) and **`campaign-after.json`** (2026-10-17, post-campaign stack on production synthetic). Both are listed under `[benchmarks].baseline` in `content/docs/site.toml`; the site merges duplicate scenario ids with **after** winning for campaign files.
 
-**Before / after (overlapping scenario ids).** Values compare grit/git ratios from the two JSON reports (not absolute wall times). Ratios **below 1×** mean grit improved relative to git; ratios **above 1×** mean the gap widened (the after capture uses the production synthetic worktree while the before capture used a smaller smoke fixture for chromium-class scenarios).
+**Before / after (representative sample — 15 of 30 overlapping scenario ids).** Values compare grit/git ratios from the two JSON reports (not absolute wall times). The full overlap set is in the committed JSON baselines and the generated campaign rows below. Ratios **below 1×** mean grit improved relative to git; ratios **above 1×** mean the gap widened (the after capture uses the production synthetic worktree while the before capture used a smaller smoke fixture for chromium-class scenarios).
 
 | Scenario | Before ratio | After ratio | After / before |
 | --- | ---: | ---: | ---: |

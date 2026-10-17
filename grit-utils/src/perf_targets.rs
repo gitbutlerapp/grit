@@ -287,4 +287,44 @@ owned_by_item_14 = true
         assert!(!report.scenarios.is_empty());
         Ok(())
     }
+
+    #[test]
+    fn committed_campaign_after_closes_ledger() -> Result<()> {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let report_path = manifest.join("baselines/campaign-after.json");
+        let targets_path = manifest.join("perf-targets.toml");
+        if !report_path.is_file() {
+            return Ok(());
+        }
+        let targets = load_perf_targets(&targets_path)?;
+        let report = load_bench_report(&report_path)?;
+        assert!(!report.scenarios.is_empty());
+        let fails = ledger_failures(&report, &targets);
+        assert!(
+            fails.is_empty(),
+            "campaign-after ledger has undocumented failures: {:?}",
+            fails
+        );
+        for scenario in &report.scenarios {
+            let status = targets.classify(scenario);
+            assert_ne!(
+                status,
+                LedgerStatus::Fail,
+                "scenario {} classified as fail",
+                scenario.id
+            );
+            if status == LedgerStatus::Documented {
+                let followup = targets
+                    .followup(&scenario.id)
+                    .expect("documented row must have followup");
+                assert!(
+                    followup.contains("ROADMAP item"),
+                    "followup for {} must reference ROADMAP: {}",
+                    scenario.id,
+                    followup
+                );
+            }
+        }
+        Ok(())
+    }
 }

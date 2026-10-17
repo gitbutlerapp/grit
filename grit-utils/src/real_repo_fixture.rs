@@ -349,4 +349,77 @@ mod tests {
         assert!(heads.is_empty(), "unexpected heads: {heads:?}");
         Ok(())
     }
+
+    #[test]
+    fn assert_tag_pinned_fails_on_campaign_branch_pollution_before_clear() -> Result<()> {
+        let origin = TempDir::new()?;
+        git_init_bare_with_branches(origin.path())?;
+        let source = TempDir::new()?;
+        Command::new("git")
+            .args(["clone", origin.path().to_str().unwrap(), "work"])
+            .current_dir(source.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+        let work = source.path().join("work");
+        fs::write(work.join("file.txt"), b"v1")?;
+        Command::new("git")
+            .args(["add", "file.txt"])
+            .current_dir(&work)
+            .status()?;
+        Command::new("git")
+            .args(["commit", "-m", "one"])
+            .current_dir(&work)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .status()?;
+        Command::new("git")
+            .args(["tag", "v1.0"])
+            .current_dir(&work)
+            .status()?;
+        Command::new("git")
+            .args(["push", "origin", "master", "v1.0"])
+            .current_dir(&work)
+            .status()?;
+
+        let clone_parent = TempDir::new()?;
+        let bare = clone_parent.path().join("bare.git");
+        Command::new("git")
+            .args([
+                "clone",
+                "--bare",
+                "--single-branch",
+                "--branch",
+                "v1.0",
+                origin.path().to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ])
+            .current_dir(clone_parent.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()?;
+        assert_tag_pinned_fixture_refs(&bare)?;
+
+        let git = Path::new("git");
+        let oid = Command::new("git")
+            .args(["rev-parse", "v1.0"])
+            .current_dir(&bare)
+            .output()?;
+        assert!(oid.status.success());
+        let oid = String::from_utf8_lossy(&oid.stdout).trim().to_string();
+        run_git(
+            git,
+            &bare,
+            &["update-ref", "refs/heads/campaign-main", &oid],
+        )?;
+        assert!(
+            assert_tag_pinned_fixture_refs(&bare).is_err(),
+            "bitmap --repo must reject branch pollution before mutating refs"
+        );
+        clear_branch_head_refs(git, &bare)?;
+        assert_tag_pinned_fixture_refs(&bare)?;
+        Ok(())
+    }
 }
