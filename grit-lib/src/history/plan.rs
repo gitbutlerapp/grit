@@ -139,7 +139,11 @@ pub fn plan_rewrite(
             return Err(HistoryError::MergeCommitInReplay { commit: old_oid });
         }
 
-        if matches!(edit, Some(CommitEdit::InsertBefore(_))) && old.parents.len() > 1 {
+        if matches!(
+            edit,
+            Some(CommitEdit::InsertBefore(_)) | Some(CommitEdit::SplitBefore { .. })
+        ) && old.parents.len() > 1
+        {
             return Err(HistoryError::InsertBeforeOnMerge { commit: old_oid });
         }
 
@@ -156,23 +160,25 @@ pub fn plan_rewrite(
             continue;
         }
 
-        let insert_parent = if let Some(CommitEdit::InsertBefore(insert)) = edit {
-            let parents = if old.parents.is_empty() {
-                Vec::new()
-            } else {
-                vec![mapped_first_parent(&mapping, &old, old_oid)?]
-            };
-            Some(write_new_commit(
-                repo,
-                insert.tree,
-                &parents,
-                &insert.author,
-                &opts.committer,
-                &insert.message,
-                &[],
-            )?)
-        } else {
-            None
+        let insert_parent = match edit {
+            Some(CommitEdit::InsertBefore(insert))
+            | Some(CommitEdit::SplitBefore { insert, .. }) => {
+                let parents = if old.parents.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![mapped_first_parent(&mapping, &old, old_oid)?]
+                };
+                Some(write_new_commit(
+                    repo,
+                    insert.tree,
+                    &parents,
+                    &insert.author,
+                    &opts.committer,
+                    &insert.message,
+                    &[],
+                )?)
+            }
+            _ => None,
         };
 
         let (new_oid, new_field) = match edit {
@@ -182,6 +188,26 @@ pub fn plan_rewrite(
             }
             Some(CommitEdit::InsertBefore(_)) => {
                 let oid = replay_descendant(repo, &mapping, &old, old_oid, insert_parent, opts)?;
+                (oid, Some(oid))
+            }
+            Some(CommitEdit::SplitBefore { rest_message, .. }) => {
+                let parent_list = if let Some(inserted) = insert_parent {
+                    vec![inserted]
+                } else if old.parents.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![mapped_first_parent(&mapping, &old, old_oid)?]
+                };
+                let message = rest_message.as_deref().unwrap_or(&old.message);
+                let oid = write_rewritten_commit(
+                    repo,
+                    &old,
+                    old.tree,
+                    &parent_list,
+                    &old.author,
+                    &opts.committer,
+                    message,
+                )?;
                 (oid, Some(oid))
             }
             Some(CommitEdit::Rewrite {

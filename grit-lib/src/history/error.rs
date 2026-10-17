@@ -16,6 +16,14 @@ pub enum HistoryError {
     #[error("commit message cannot be empty")]
     EmptyMessage,
 
+    /// A pathspec split selected no changes from the target commit.
+    #[error("pathspec did not select any changes from the commit")]
+    SplitSelectsNothing,
+
+    /// A pathspec split selected every change in the target commit.
+    #[error("pathspec selected every change in the commit")]
+    SplitSelectsEverything,
+
     /// Object database, revwalk, or other repository read failed during planning.
     #[error("history rewrite planning failed: {message}")]
     Planning {

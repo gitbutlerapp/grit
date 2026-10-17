@@ -187,6 +187,36 @@ enum StashAction {
 /// Subcommands of `grit history`.
 #[derive(Debug, Subcommand)]
 enum HistoryAction {
+    /// Peel pathspec-selected changes into a new parent commit and replay descendants.
+    Split {
+        /// Commit to split (revision spec).
+        commit: String,
+        /// Message for the new parent commit (conflicts with `--message-file`).
+        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        message: Option<String>,
+        /// Read the split commit message from a file (`-` for stdin).
+        #[arg(
+            long = "message-file",
+            value_name = "PATH|-",
+            conflicts_with = "message"
+        )]
+        message_file: Option<String>,
+        /// Replace the remaining commit's message (conflicts with `--message-rest-file`).
+        #[arg(long = "message-rest", conflicts_with = "message_rest_file")]
+        message_rest: Option<String>,
+        /// Read the remaining commit message from a file (`-` for stdin).
+        #[arg(
+            long = "message-rest-file",
+            value_name = "PATH|-",
+            conflicts_with = "message_rest"
+        )]
+        message_rest_file: Option<String>,
+        /// Limit the split to paths matching these pathspecs (at least one required).
+        #[arg(value_name = "PATHSPEC", required = true)]
+        pathspec: Vec<String>,
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
     /// Replace a commit message and replay descendants onto the new history.
     Reword {
         /// Commit to reword (revision spec).
@@ -1283,6 +1313,27 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts, ctx),
         Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts, ctx),
         Command::History { action } => match action {
+            HistoryAction::Split {
+                commit,
+                message,
+                message_file,
+                message_rest,
+                message_rest_file,
+                pathspec,
+                shared,
+            } => emit(
+                &commands::history::run_split(
+                    &commit,
+                    message,
+                    message_file,
+                    message_rest,
+                    message_rest_file,
+                    pathspec,
+                    &shared,
+                )?,
+                opts,
+                ctx,
+            ),
             HistoryAction::Reword {
                 commit,
                 message,

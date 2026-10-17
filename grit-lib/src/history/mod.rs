@@ -42,6 +42,7 @@ mod apply;
 mod error;
 mod plan;
 mod reword;
+mod split;
 mod types;
 
 pub use apply::apply_rewrite;
@@ -50,7 +51,9 @@ pub use plan::plan_rewrite;
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 pub use plan::{test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use reword::{normalize_rewrite_message, reword};
+pub use split::split;
 pub use types::{
     AppliedRewrite, ApplyOptions, CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, NewCommit,
-    PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,
+    Pathspec, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,
+    SplitOptions,
 };

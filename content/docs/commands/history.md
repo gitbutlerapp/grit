@@ -11,6 +11,11 @@ order: 6
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
 grit history reword <commit> [--dry-run] [--update-refs=(branches|head)]
+
+grit history split <commit> -m <message> [--] <pathspec>...
+grit history split <commit> --message-file <path|-> [--] <pathspec>...
+grit history split <commit> ... [--message-rest <message>|--message-rest-file <path|->]
+grit history split <commit> ... [--dry-run] [--update-refs=(branches|head)]
 ```
 
 ## Description
@@ -31,23 +36,49 @@ Provide exactly one of `-m` / `--message` or `--message-file` (use `-` to read f
 
 If any descendant commit is a **merge**, planning refuses with an error (merge replay is not supported yet). Use a linear range or wait for later `grit history` subcommands that handle merges.
 
+### `split`
+
+Move changes that match at least one **pathspec** into a new parent commit, then replay descendants. The edited commit keeps its tree (and author); only its first parent becomes the new commit. The split commit uses the original author and your `-m` / `--message-file` message. Use `--message-rest` when the remaining commit should get a new message.
+
+At least one pathspec is required (pass `--` before pathspecs when they might look like flags). Interactive hunk selection is **not** supported — pathspecs only.
+
+Splitting **merge commits** is refused. Selecting no changes (`SplitSelectsNothing`) or every change in the commit (`SplitSelectsEverything`) is an error.
+
 ## Options
+
+Shared (`reword` and `split`):
+
+| Option | Description |
+| --- | --- |
+| `--dry-run` | List ref updates without moving refs. |
+| `--update-refs` | `branches` (default) or `head`. |
+
+### `reword`
 
 | Option | Description |
 | --- | --- |
 | `<commit>` | Commit to reword (revision spec). |
 | `-m`, `--message` | New commit message (conflicts with `--message-file`). |
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
-| `--dry-run` | List ref updates without moving refs. |
-| `--update-refs` | `branches` (default) or `head`. |
 
-## Examples
+### `split`
+
+| Option | Description |
+| --- | --- |
+| `<commit>` | Commit to split (revision spec). |
+| `-m`, `--message` | Message for the new parent commit (conflicts with `--message-file`). |
+| `--message-file` | Read the split message from a file, or `-` for stdin. |
+| `--message-rest` | New message for the remaining commit (conflicts with `--message-rest-file`). |
+| `--message-rest-file` | Read the remaining message from a file, or `-` for stdin. |
+| `<pathspec>…` | One or more pathspecs (required). |
+
+## Examples (reword)
 
 Reword the parent of `HEAD` on a linear branch:
 
 ```console
 $ grit history reword HEAD~1 -m " clearer subject line "
-Rewrote 2 commit(s)
+History reword: 2 commit(s) rewritten
   commit a1b2c3d → d4e5f60
   refs/heads/main d4e5f60 → f6a7b89
 ```
@@ -61,7 +92,18 @@ Dry run — refs would change:
   refs/heads/main f6a7b89 → c0ffee0
 ```
 
-## JSON output
+## Examples (split)
+
+Split one file out of the tip commit:
+
+```console
+$ grit history split HEAD -m "add foo only" -- foo
+History split: 1 commit(s) rewritten
+  commit a1b2c3d → d4e5f60
+  refs/heads/main a1b2c3d → d4e5f60
+```
+
+## JSON output (reword)
 
 Schema: [v1](/schemas/history.reword/v1.json)
 
@@ -101,13 +143,19 @@ Example:
 }
 ```
 
-On replay conflicts, stdout is a single JSON object (exit code 1) with `error`, `kind` (`conflict`), and `conflicts` (sorted paths), same shape as [`grit pick`](pick.md).
+## JSON output (split)
+
+Schema: [v1](/schemas/history.split/v1.json)
+
+Same fields as reword; `operation` is `"split"`.
 
 ## Markdown output
 
-Schema: [v1](/schemas/history.reword/v1.json)
+Schemas: [reword v1](/schemas/history.reword/v1.json), [split v1](/schemas/history.split/v1.json)
 
-Pass [`--markdown`](../global-options/) for a `History reword` heading, rewritten commits, ref updates, and optional `HEAD` movement.
+Pass [`--markdown`](../global-options/) for a `History <operation>` heading, rewritten commits, ref updates, and optional `HEAD` movement.
+
+On replay conflicts, stdout is a single JSON object (exit code 1) with `error`, `kind` (`conflict`), and `conflicts` (sorted paths), same shape as [`grit pick`](pick.md).
 
 ## See also
 

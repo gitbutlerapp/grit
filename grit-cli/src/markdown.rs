@@ -490,7 +490,7 @@ pub fn print_history_reword_outcome(
     w: &mut dyn Write,
     outcome: &HistoryRewordOutcome,
 ) -> anyhow::Result<()> {
-    outln!(w, "## History reword");
+    outln!(w, "## History {}", outcome.operation);
     outln!(w);
     if outcome.dry_run {
         outln!(w, "- Dry run (refs unchanged)");

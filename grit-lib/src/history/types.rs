@@ -33,6 +33,24 @@ pub enum CommitEdit {
     Drop,
     /// Insert `commit` before the mapped original, which becomes the insert's child.
     InsertBefore(NewCommit),
+    /// Insert `insert` before the commit; the mapped original keeps its tree and uses the insert
+    /// as its parent, optionally with a new message.
+    SplitBefore {
+        /// New parent commit to insert.
+        insert: NewCommit,
+        /// When set, replaces the remaining commit's message.
+        rest_message: Option<String>,
+    },
+}
+
+/// Pathspec strings passed to history helpers (see [`crate::pathspec`]).
+pub type Pathspec<'a> = &'a [String];
+
+/// Options for [`super::split`](crate::history::split).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SplitOptions {
+    /// When set, replaces the remaining commit's message after the split.
+    pub rest_message: Option<String>,
 }
 
 /// Map from original commit OID to the edit applied at that commit.
