@@ -224,6 +224,14 @@ enum HistoryAction {
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
+    /// Assign staged hunks into recent commits and replay descendants once.
+    Absorb {
+        /// Oldest commit boundary (exclusive) for candidate commits.
+        #[arg(long = "base")]
+        base: Option<String>,
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
 }
 
 /// Subcommands of `grit notes`.
@@ -1316,6 +1324,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 shared,
             } => emit(
                 &commands::history::run_fixup(&commit, message, message_file, empty, &shared)?,
+                opts,
+                ctx,
+            ),
+            HistoryAction::Absorb { base, shared } => emit(
+                &commands::history::run_absorb(base.as_deref(), &shared)?,
                 opts,
                 ctx,
             ),

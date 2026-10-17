@@ -8,9 +8,10 @@ use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::history::{
-    apply_fixup_rewrite, apply_rewrite, fixup, reword, staged_fixup_paths, ApplyOptions,
-    EmptyPolicy, FixupOptions, HistoryError, PlannedRefUpdate, RefScope, RewriteOptions,
-    RewritePlan,
+    absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, fixup, reword,
+    staged_fixup_paths, AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError,
+    HunkAssignment, HunkRange, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan,
+    UnassignedHunk,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
@@ -76,7 +77,7 @@ pub struct HistoryRewriteArgs {
 }
 
 /// Result of `grit history reword` or `grit history fixup`.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HistoryRewordOutcome {
     /// Operation name (`reword` or `fixup`).
     pub operation: String,
@@ -91,7 +92,7 @@ pub struct HistoryRewordOutcome {
 }
 
 /// One commit OID before and after rewrite.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct RewrittenPair {
     /// Commit OID before rewrite (full hex).
     pub old: String,
@@ -100,7 +101,7 @@ pub struct RewrittenPair {
 }
 
 /// One ref tip before and after rewrite.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct RefPair {
     /// Full ref name.
     pub name: String,
@@ -111,7 +112,7 @@ pub struct RefPair {
 }
 
 /// `HEAD` commit before and after rewrite.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HeadPair {
     /// Commit OID at `HEAD` before rewrite (full hex).
     pub old: String,
@@ -261,6 +262,203 @@ pub fn run_fixup(
     }
     outcome.dry_run = shared.dry_run;
     Ok(outcome)
+}
+
+/// JSON/markdown assignment row for `grit history absorb`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AbsorbAssignmentOut {
+    /// Repository-relative path.
+    pub path: String,
+    /// Staged hunk range in the index↔`HEAD` diff.
+    pub hunk_range: HunkRangeOut,
+    /// Target commit (full hex).
+    pub commit: String,
+}
+
+/// Hunk coordinates for JSON output.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HunkRangeOut {
+    /// Old side start line (1-based).
+    pub old_start: usize,
+    /// Old side line count.
+    pub old_lines: usize,
+    /// New side start line (1-based).
+    pub new_start: usize,
+    /// New side line count.
+    pub new_lines: usize,
+}
+
+/// JSON/markdown unassigned hunk row.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct UnassignedHunkOut {
+    /// Repository-relative path.
+    pub path: String,
+    /// Staged hunk range.
+    pub hunk_range: HunkRangeOut,
+    /// Stable reason code.
+    pub reason: String,
+}
+
+/// Result of `grit history absorb`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HistoryAbsorbOutcome {
+    /// Operation name (`absorb`).
+    pub operation: String,
+    /// Assigned hunks.
+    pub assignments: Vec<AbsorbAssignmentOut>,
+    /// Hunks left staged.
+    pub unassigned: Vec<UnassignedHunkOut>,
+    /// Original and replacement commit OIDs for every rewritten commit.
+    pub rewritten: Vec<RewrittenPair>,
+    /// Planned or applied ref tip updates.
+    pub refs: Vec<RefPair>,
+    /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged.
+    pub head: Option<HeadPair>,
+    /// Whether refs were left unchanged (`true` for `--dry-run`).
+    pub dry_run: bool,
+}
+
+impl HumanRender for HistoryAbsorbOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.dry_run {
+            outln!(
+                w,
+                "Dry run — absorb would change {} commit(s)",
+                self.rewritten.len()
+            );
+        } else {
+            outln!(
+                w,
+                "Absorbed {} hunk(s) into {} commit(s)",
+                self.assignments.len(),
+                self.rewritten.len()
+            );
+        }
+        for row in &self.assignments {
+            let short = row.commit.get(..7).unwrap_or(&row.commit);
+            outln!(w, "  {} → commit {short}", row.path);
+        }
+        for row in &self.unassigned {
+            outln!(w, "  {} stays staged ({})", row.path, row.reason);
+        }
+        for pair in &self.rewritten {
+            let old_short = pair.old.get(..7).unwrap_or(&pair.old);
+            match &pair.new {
+                Some(new) => {
+                    let new_short = new.get(..7).unwrap_or(new);
+                    outln!(w, "  commit {old_short} → {new_short}");
+                }
+                None => outln!(w, "  commit {old_short} → (dropped)"),
+            }
+        }
+        for update in &self.refs {
+            let old_short = update.old.get(..7).unwrap_or(&update.old);
+            let new_short = update.new.get(..7).unwrap_or(&update.new);
+            outln!(w, "  {} {old_short} → {new_short}", update.name);
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for HistoryAbsorbOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_history_absorb_outcome(w, self)
+    }
+}
+
+/// Assign staged hunks into history and replay descendants once.
+pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<HistoryAbsorbOutcome> {
+    let repo = context::discover()?;
+    let base_oid = match base {
+        Some(rev) => Some(
+            resolve_revision_as_commit(&repo, rev)
+                .with_context(|| format!("could not resolve base commit '{rev}'"))?,
+        ),
+        None => None,
+    };
+    let env = repo.environment();
+    let config =
+        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+    let committer = context::identity(
+        env,
+        &config,
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        context::wall_clock_now(env),
+    )?;
+    let absorb_plan = absorb(
+        &repo,
+        &AbsorbOptions {
+            base: base_oid,
+            rewrite: RewriteOptions {
+                scope: shared.update_refs.into(),
+                empty: EmptyPolicy::Drop,
+                committer,
+            },
+        },
+    )
+    .map_err(map_history_error_absorb)?;
+    let mut outcome = outcome_from_absorb_plan(&repo, &absorb_plan, shared.dry_run)?;
+    if !shared.dry_run && !absorb_plan.plan.commits.is_empty() {
+        let identity = context::committer_reflog_identity(env, &config)?;
+        apply_absorb_rewrite(
+            &repo,
+            &absorb_plan,
+            &ApplyOptions {
+                identity,
+                reflog_message: "history absorb".into(),
+            },
+        )
+        .map_err(map_history_error_absorb)?;
+    }
+    outcome.dry_run = shared.dry_run;
+    Ok(outcome)
+}
+
+fn outcome_from_absorb_plan(
+    repo: &grit_lib::repo::Repository,
+    plan: &grit_lib::history::AbsorbPlan,
+    dry_run: bool,
+) -> Result<HistoryAbsorbOutcome> {
+    let base = outcome_from_plan(repo, &plan.plan, dry_run)?;
+    Ok(HistoryAbsorbOutcome {
+        operation: "absorb".into(),
+        assignments: plan.assignments.iter().map(map_assignment_out).collect(),
+        unassigned: plan.unassigned.iter().map(map_unassigned_out).collect(),
+        rewritten: base.rewritten,
+        refs: base.refs,
+        head: base.head,
+        dry_run: base.dry_run,
+    })
+}
+
+fn map_assignment_out(row: &HunkAssignment) -> AbsorbAssignmentOut {
+    AbsorbAssignmentOut {
+        path: row.path.clone(),
+        hunk_range: map_hunk_range(&row.hunk_range),
+        commit: row.commit.to_hex(),
+    }
+}
+
+fn map_unassigned_out(row: &UnassignedHunk) -> UnassignedHunkOut {
+    UnassignedHunkOut {
+        path: row.path.clone(),
+        hunk_range: map_hunk_range(&row.hunk_range),
+        reason: row.reason.as_str().into(),
+    }
+}
+
+fn map_hunk_range(range: &HunkRange) -> HunkRangeOut {
+    HunkRangeOut {
+        old_start: range.old_start,
+        old_lines: range.old_lines,
+        new_start: range.new_start,
+        new_lines: range.new_lines,
+    }
+}
+
+fn map_history_error_absorb(err: HistoryError) -> anyhow::Error {
+    map_history_error(err, "history absorb")
 }
 
 fn read_optional_message(

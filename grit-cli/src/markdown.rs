@@ -8,7 +8,7 @@ use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment};
-use crate::commands::history::HistoryRewordOutcome;
+use crate::commands::history::{HistoryAbsorbOutcome, HistoryRewordOutcome};
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
 use crate::commands::revert::RevertOutcome;
@@ -524,6 +524,40 @@ pub fn print_history_reword_outcome(
         );
     }
     Ok(())
+}
+
+/// Result of `grit history absorb`.
+pub fn print_history_absorb_outcome(
+    w: &mut dyn Write,
+    outcome: &HistoryAbsorbOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## History absorb");
+    outln!(w);
+    if outcome.dry_run {
+        outln!(w, "- Dry run (refs unchanged)");
+    }
+    for row in &outcome.assignments {
+        outln!(
+            w,
+            "- assign `{}` hunk @{} → commit `{}`",
+            row.path,
+            row.hunk_range.old_start,
+            short_hex(&row.commit)
+        );
+    }
+    for row in &outcome.unassigned {
+        outln!(w, "- unassigned `{}` ({})", row.path, row.reason);
+    }
+    print_history_reword_outcome(
+        w,
+        &HistoryRewordOutcome {
+            operation: outcome.operation.clone(),
+            rewritten: outcome.rewritten.clone(),
+            refs: outcome.refs.clone(),
+            head: outcome.head.clone(),
+            dry_run: outcome.dry_run,
+        },
+    )
 }
 
 /// Result of `grit switch`.
