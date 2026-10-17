@@ -16,7 +16,17 @@ use crate::synth::SynthTier;
 
 /// Target grit `log` page passes per hyperfine sample (~512 keeps ratios stable without extreme runtime).
 const TARGET_LOG_PAGE_PASSES: usize = 512;
+/// Cap grit `log` pagination loops so hyperfine shell commands stay under `ARG_MAX` on tier L.
+const MAX_HISTORY_LOG_PAGES: usize = 512;
 pub const HISTORY_SHOW_SAMPLE_BATCH: usize = 128;
+
+fn history_grit_log_pages(commit_count: usize, limit: Option<usize>) -> usize {
+    let pages = match limit {
+        Some(n) => n.div_ceil(LOG_BENCH_GRIT_PAGE_COUNT),
+        None => commit_count.div_ceil(LOG_BENCH_GRIT_PAGE_COUNT),
+    };
+    pages.min(MAX_HISTORY_LOG_PAGES)
+}
 
 /// Batched repetitions for a log workload with `pages` grit log invocations per repetition.
 #[must_use]
@@ -56,10 +66,17 @@ fn log_first_n_git_shell(git: &Path, n: usize, batch: usize) -> String {
     )
 }
 
-fn log_all_git_shell(git: &Path, batch: usize) -> String {
+fn log_all_git_shell(git: &Path, batch: usize, max_commits: usize) -> String {
     let git_q = shell_quote(&git.to_string_lossy());
     format!(
-        "set -eu; for _ in $(seq 1 {batch}); do {git_q} log --oneline >/dev/null || exit $?; done"
+        "set -eu; for _ in $(seq 1 {batch}); do {git_q} log --oneline -{max_commits} >/dev/null || exit $?; done"
+    )
+}
+
+fn log_limit_grit_shell(grit: &Path, batch: usize, max_commits: usize) -> String {
+    let grit_q = shell_quote(&grit.to_string_lossy());
+    format!(
+        "set -eu; for _ in $(seq 1 {batch}); do {grit_q} log --limit {max_commits} >/dev/null || exit $?; done"
     )
 }
 
@@ -84,10 +101,7 @@ fn grit_log_pages_oneline(grit: &Path, pages: usize) -> String {
 }
 
 fn log_grit_shell_batched(grit: &Path, commit_count: usize, limit: Option<usize>) -> String {
-    let pages = match limit {
-        Some(n) => n.div_ceil(LOG_BENCH_GRIT_PAGE_COUNT),
-        None => commit_count.div_ceil(LOG_BENCH_GRIT_PAGE_COUNT),
-    };
+    let pages = history_grit_log_pages(commit_count, limit);
     let batch = log_sample_batch(pages);
     let inner = grit_log_pages_oneline(grit, pages);
     format!("set -eu; for _ in $(seq 1 {batch}); do {inner}; done")
@@ -144,10 +158,11 @@ pub fn run_history_suite(
         &repo,
     )?);
 
-    let log_all_pages = spec.commit_count.div_ceil(LOG_BENCH_GRIT_PAGE_COUNT);
+    let log_all_pages = history_grit_log_pages(spec.commit_count, None);
+    let log_all_commits = log_all_pages * LOG_BENCH_GRIT_PAGE_COUNT;
     let log_all_batch = log_sample_batch(log_all_pages);
-    let grit_log_all = log_grit_shell_batched(grit_cli, spec.commit_count, None);
-    let git_log_all = log_all_git_shell(git, log_all_batch);
+    let grit_log_all = log_limit_grit_shell(grit_cli, log_all_batch, log_all_commits);
+    let git_log_all = log_all_git_shell(git, log_all_batch, log_all_commits);
     scenarios.push(run_scenario(
         hyperfine,
         git,
@@ -158,7 +173,7 @@ pub fn run_history_suite(
             group: "history".into(),
             fixture: fixture.clone(),
             description: format!(
-                "full main history ({log_all_batch}× batched, {} commits: git log --oneline, grit log pages)",
+                "main history ({log_all_batch}× batched, {log_all_commits} commits capped from {}: git log --oneline, grit log pages)",
                 spec.commit_count
             ),
             grit_argv: sh_script(grit_log_all),

@@ -51,10 +51,31 @@ pub fn history_cache_root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-scratch"))
 }
 
+fn path_exists_at_head(git: &Path, repo: &Path, path: &str) -> bool {
+    git_output(
+        git,
+        repo,
+        &["rev-parse", "--verify", &format!("HEAD:{path}")],
+    )
+    .is_ok()
+}
+
 /// Cached worktree clone of a synthetic tier for history scenarios.
 pub fn ensure_synth_history_repo(git: &Path, tier: SynthTier) -> Result<PathBuf> {
     let dest = history_cache_root().join(format!("synth-history-{}", tier_label(tier)));
     if dest.join(READY_MARKER).is_file() {
+        let meta_ok = load_history_meta(&dest)
+            .ok()
+            .is_some_and(|meta| path_exists_at_head(git, &dest, &meta.blame_path));
+        if meta_ok {
+            return Ok(dest);
+        }
+        eprintln!(
+            "Refreshing history metadata for {} (stale or missing blame path) …",
+            dest.display()
+        );
+        write_history_meta(git, &dest)?;
+        fs::write(dest.join(READY_MARKER), b"ok").context("write history ready marker")?;
         return Ok(dest);
     }
     if dest.exists() {
@@ -112,11 +133,20 @@ fn pick_high_churn_path(git: &Path, repo: &Path) -> Result<String> {
         }
         *counts.entry(line.to_string()).or_default() += 1;
     }
-    counts
-        .into_iter()
-        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-        .map(|(path, _)| path)
-        .ok_or_else(|| anyhow::anyhow!("no tracked paths in synth repo"))
+    let mut ranked: Vec<_> = counts.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+    for (path, _) in ranked {
+        if path_exists_at_head(git, repo, &path) {
+            return Ok(path);
+        }
+    }
+    let tracked = git_output(git, repo, &["ls-tree", "-r", "--name-only", "HEAD"])?;
+    tracked
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("no tracked paths at HEAD in synth repo"))
 }
 
 /// Sorted hex object ids reachable from `HEAD` (one per line).
