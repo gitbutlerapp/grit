@@ -11,6 +11,8 @@ use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::fixture::{DeepLeafDogfoodSpec, DenseLeafDogfoodSpec};
 use grit_utils::fixture_registry::{self, FixtureKind};
 use grit_utils::fsck_suite::run_fsck_suite;
+use grit_utils::history_rewrite_prepare::run_prepare_history_rewrite;
+use grit_utils::history_rewrite_suite::run_history_rewrite_suite;
 use grit_utils::history_suite::run_history_suite;
 use grit_utils::ignore_suite::run_ignore_suite;
 use grit_utils::local_clone_suite::run_local_clone_suite;
@@ -131,6 +133,12 @@ enum Cmd {
     /// Log, show, rev-list count, blame, and cat-file batch on synthetic fixtures
     History {
         /// Tier S fixture and fewer timed runs (CI integration tests).
+        #[arg(long)]
+        smoke: bool,
+    },
+    /// History rewrite ops (reword, drop, fixup, squash) vs git history / git rebase
+    RewriteHistory {
+        /// Smaller fixture and fewer timed runs (CI integration tests).
         #[arg(long)]
         smoke: bool,
     },
@@ -350,6 +358,10 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareMaintenance {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    PrepareHistoryRewrite {
         #[arg(long)]
         git: PathBuf,
     },
@@ -986,6 +998,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_maintenance(&git);
         }
+        Cmd::PrepareHistoryRewrite { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_history_rewrite(&git);
+        }
         Cmd::ServeGitHttp { root, bind } => {
             let git = resolve_binary("git", cli.git.as_deref())?;
             let listener = TcpListener::bind(bind).context("bind")?;
@@ -1173,6 +1189,15 @@ fn main() -> Result<()> {
             run_history_suite(
                 &hyperfine, &git, &grit, &bench_exe, &cfg, &odb_cfg, tier, *smoke, timestamp,
             )?
+        }
+        Cmd::RewriteHistory { smoke } => {
+            eprintln!("Running history rewrite benchmarks…");
+            let mut cfg = run_config(&cli, true);
+            if *smoke {
+                cfg.warmup = 0;
+                cfg.exact_runs = Some(1);
+            }
+            run_history_rewrite_suite(&hyperfine, &git, &grit, &cfg, *smoke, timestamp)?
         }
         Cmd::Run {
             group,
@@ -1434,6 +1459,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareRevert { .. }
         | Cmd::PrepareCommit { .. }
         | Cmd::PrepareMaintenance { .. }
+        | Cmd::PrepareHistoryRewrite { .. }
         | Cmd::PrepareRefs { .. }
         | Cmd::PrepareNetworkClone { .. }
         | Cmd::PrepareNetworkFetchIncr { .. }

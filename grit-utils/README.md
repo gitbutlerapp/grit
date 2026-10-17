@@ -47,6 +47,10 @@ cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench history --format json --output baselines/history-synth-L.json
 ./target/release/grit-bench history --smoke --format json --output /tmp/history-smoke.json
 
+# History rewrite (reword, drop, fixup, squash) vs git history / git rebase
+./target/release/grit-bench rewrite-history --format json --output baselines/history.json
+./target/release/grit-bench rewrite-history --smoke --format json --output /tmp/history-rewrite-smoke.json
+
 # Worktree scenarios on a cached registry fixture (status / add / commit / diff)
 ./target/release/grit-bench fixtures prepare --only synth-s
 ./target/release/grit-bench run --group worktree --fixture synth-s --format json --output /tmp/worktree-synth-s.json

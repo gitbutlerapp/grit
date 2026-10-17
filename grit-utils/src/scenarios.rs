@@ -79,6 +79,7 @@ pub enum PrepareKind {
     WorktreeAdd,
     WorktreeCommit,
     WorktreeDiff,
+    HistoryRewriteReset,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -138,6 +139,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::WorktreeAdd => "prepare-worktree-add",
         PrepareKind::WorktreeCommit => "prepare-worktree-commit",
         PrepareKind::WorktreeDiff => "prepare-worktree-diff",
+        PrepareKind::HistoryRewriteReset => "prepare-history-rewrite",
     };
     shell_command(
         &cfg.prepare_bin,
