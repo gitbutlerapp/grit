@@ -147,9 +147,28 @@ impl DetRng {
     }
 }
 
+/// Fixed parameters for history-rewrite grit-bench scenarios (~10k files, 5k commits, 50 branches).
+#[must_use]
+pub fn history_rewrite_bench_spec() -> TierSpec {
+    TierSpec {
+        tier: SynthTier::M,
+        file_count: 10_000,
+        commit_count: 5_000,
+        ref_count: 51,
+        edits_per_commit: 1,
+        blob_body_bytes: 64,
+        loose_after_pack: 16,
+        seed: 0x319_3100,
+    }
+}
+
 /// Generate a deterministic synthetic repository at `out`.
 pub fn generate_synth_repo(out: &Path, tier: SynthTier) -> Result<SynthReport> {
-    let spec = tier.spec();
+    generate_synth_repo_with_spec(out, tier.spec())
+}
+
+/// Generate a repository using explicit [`TierSpec`] numbers (for custom bench fixtures).
+pub fn generate_synth_repo_with_spec(out: &Path, spec: TierSpec) -> Result<SynthReport> {
     let started = Instant::now();
     if out.exists() {
         fs::remove_dir_all(out).map_err(Error::Io)?;
@@ -187,7 +206,7 @@ pub fn generate_synth_repo(out: &Path, tier: SynthTier) -> Result<SynthReport> {
     checkout_between_trees(&repo, None, &head_tree)?;
     let elapsed = started.elapsed();
     Ok(SynthReport {
-        tier,
+        tier: spec.tier,
         head: head.to_string(),
         commit_count: spec.commit_count,
         ref_count: spec.ref_count,

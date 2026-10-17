@@ -694,6 +694,65 @@ fn head_effect(
     })
 }
 
+/// Fast path: fold a contiguous range whose tip is `HEAD` into one commit (no descendant replay).
+///
+/// Used by [`super::squash::squash`](crate::history::squash::squash) when the range sits at the
+/// branch tip and only `HEAD` moves.
+pub fn plan_fold_range_at_head(
+    repo: &Repository,
+    commits: &[ObjectId],
+    oldest: ObjectId,
+    tip: ObjectId,
+    tip_tree: ObjectId,
+    message: &str,
+    opts: &RewriteOptions,
+) -> Result<RewritePlan, HistoryError> {
+    if !matches!(opts.scope, RefScope::Head) {
+        return Err(HistoryError::Planning {
+            message: "head-only fold requires RefScope::Head".into(),
+        });
+    }
+    let head = head_oid(repo)?;
+    if tip != head {
+        return Err(HistoryError::Planning {
+            message: "fold fast path requires the range tip to be HEAD".into(),
+        });
+    }
+    let oldest_commit = load_commit(repo, oldest)?;
+    let parent = *oldest_commit
+        .parents
+        .first()
+        .ok_or(HistoryError::RootCommit { commit: oldest })?;
+    let new_oid = write_rewritten_commit(
+        repo,
+        &oldest_commit,
+        tip_tree,
+        &[parent],
+        &oldest_commit.author,
+        &opts.committer,
+        message,
+    )?;
+    let mut mapping = HashMap::with_capacity(commits.len());
+    for &oid in commits {
+        mapping.insert(oid, new_oid);
+    }
+    let rewritten: Vec<RewrittenCommit> = commits
+        .iter()
+        .map(|&old| RewrittenCommit {
+            old,
+            new: Some(new_oid),
+        })
+        .collect();
+    let scoped_refs = collect_scoped_refs(repo, opts, oldest)?;
+    let ref_updates = plan_ref_updates(&scoped_refs, &mapping);
+    let head = head_effect(repo, &mapping)?;
+    Ok(RewritePlan {
+        commits: rewritten,
+        ref_updates,
+        head,
+    })
+}
+
 #[cfg(test)]
 mod merge_call_tests {
     use super::*;

@@ -16,8 +16,9 @@ use crate::revwalk::{parse_rev_walk_tokens, RevWalkParsedSpecs};
 use crate::state::resolve_head;
 
 use super::error::HistoryError;
-use super::plan::plan_rewrite;
+use super::plan::{plan_fold_range_at_head, plan_rewrite};
 use super::reword::normalize_rewrite_message;
+use super::types::RefScope;
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 
 /// How to choose the message on the squashed commit.
@@ -74,6 +75,20 @@ pub fn squash(
     )?;
     let tip_commit = load_commit(repo, resolved.tip)?;
     let message = choose_squash_message(repo, &resolved, opts)?;
+    if matches!(opts.rewrite.scope, RefScope::Head)
+        && !matches!(opts.message, SquashMessage::Combine)
+        && resolved.tip == squash_head_oid(repo)?
+    {
+        return plan_fold_range_at_head(
+            repo,
+            &resolved.commits,
+            resolved.oldest,
+            resolved.tip,
+            tip_commit.tree,
+            &message,
+            &opts.rewrite,
+        );
+    }
     let mut edits = HistoryEdits::new();
     for &oid in &resolved.commits {
         if oid == resolved.oldest {
@@ -91,6 +106,13 @@ pub fn squash(
         }
     }
     plan_rewrite(repo, &edits, &opts.rewrite)
+}
+
+fn squash_head_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
+    let head = resolve_head(repo.git_dir()).map_err(planning_err)?;
+    head.oid().copied().ok_or_else(|| HistoryError::Planning {
+        message: "HEAD does not resolve to a commit".into(),
+    })
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
