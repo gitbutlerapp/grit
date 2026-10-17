@@ -468,8 +468,8 @@ pub fn ensure_campaign_bare_network_meta(
     };
     let tag_only = crate::real_repo_fixture::list_branch_head_refs(bare)?.is_empty();
     let default_branch = if tag_only {
-        // Tag-pinned git.git bare remotes expose no `refs/heads/*`; use a stable label for client config.
-        "master".into()
+        // Tag-pinned git.git bare remotes expose no `refs/heads/*`; client repos use `main`.
+        "main".into()
     } else {
         default_branch_on_bare(git, bare)?
     };
