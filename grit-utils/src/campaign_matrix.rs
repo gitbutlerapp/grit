@@ -428,6 +428,8 @@ pub fn run_fixture_cli_matrix(
             )?);
         }
     } else {
+        // Chromium-class synth can OOM grit during timed merge-base; record grit_failure and continue.
+        let merge_allows_grit_failure = fixture.id == "chromium-synth";
         out.push(run_matrix_scenario(
             hyperfine,
             git,
@@ -435,7 +437,7 @@ pub fn run_fixture_cli_matrix(
             cfg,
             &merge_base,
             &fixture.worktree,
-            false,
+            merge_allows_grit_failure,
         )?);
     }
 
