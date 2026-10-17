@@ -315,24 +315,27 @@ pub fn run_fixture_cli_matrix(
 
     if !smoke {
         let blame_path = blame_target_path(git, &fixture.worktree)?;
-        out.push(run_scenario(
+        let blame_scenario = Scenario {
+            id: sid(fixture.id, "blame"),
+            group: "blame".into(),
+            fixture: fixture.label.clone(),
+            description: format!("blame {blame_path}"),
+            grit_argv: vec!["blame".into(), blame_path.clone()],
+            git_argv: vec!["blame".into(), "--porcelain".into(), blame_path],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        };
+        let blame_allows_grit_failure = fixture.id == "git-dot-git";
+        out.push(run_matrix_scenario(
             hyperfine,
             git,
             grit,
             cfg,
-            &Scenario {
-                id: sid(fixture.id, "blame"),
-                group: "blame".into(),
-                fixture: fixture.label.clone(),
-                description: format!("blame {blame_path}"),
-                grit_argv: vec!["blame".into(), blame_path.clone()],
-                git_argv: vec!["blame".into(), "--porcelain".into(), blame_path],
-                driver: Driver::Cli,
-                prepare_kind: None,
-                grit_via_shell: false,
-                git_via_shell: false,
-            },
+            &blame_scenario,
             &fixture.worktree,
+            blame_allows_grit_failure,
         )?);
     }
 
@@ -354,27 +357,29 @@ pub fn run_fixture_cli_matrix(
             }
             grit_argv.push(path.into());
             git_argv.push(path.into());
-            out.push(run_scenario(
+            let blame_scenario = Scenario {
+                id: sid(fixture.id, name),
+                group: "blame".into(),
+                fixture: fixture.label.clone(),
+                description: format!(
+                    "blame {path}{}",
+                    line_range.map_or(String::new(), |r| format!(" lines {r}"))
+                ),
+                grit_argv,
+                git_argv,
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            };
+            out.push(run_matrix_scenario(
                 hyperfine,
                 git,
                 grit,
                 cfg,
-                &Scenario {
-                    id: sid(fixture.id, name),
-                    group: "blame".into(),
-                    fixture: fixture.label.clone(),
-                    description: format!(
-                        "blame {path}{}",
-                        line_range.map_or(String::new(), |r| format!(" lines {r}"))
-                    ),
-                    grit_argv,
-                    git_argv,
-                    driver: Driver::Cli,
-                    prepare_kind: None,
-                    grit_via_shell: false,
-                    git_via_shell: false,
-                },
+                &blame_scenario,
                 &fixture.worktree,
+                true,
             )?);
         }
     }
