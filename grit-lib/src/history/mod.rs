@@ -38,6 +38,7 @@
 //! # }
 //! ```
 
+mod absorb;
 mod apply;
 mod error;
 mod fixup;
@@ -45,7 +46,11 @@ mod plan;
 mod reword;
 mod types;
 
-pub use apply::{apply_fixup_rewrite, apply_rewrite};
+pub use absorb::{
+    absorb, default_absorb_base, staged_absorb_paths, AbsorbOptions, AbsorbPlan, HunkAssignment,
+    HunkRange, UnassignedHunk, UnassignedReason, DEFAULT_ABSORB_STACK_LIMIT,
+};
+pub use apply::{apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite};
 pub use error::HistoryError;
 pub use fixup::{fixup, staged_fixup_paths, FixupOptions};
 pub use plan::{plan_rewrite, test_merge_tree_call_count, test_reset_merge_tree_call_count};

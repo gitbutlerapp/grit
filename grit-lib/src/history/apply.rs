@@ -23,6 +23,7 @@ use crate::state::resolve_head;
 
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 
+use super::absorb::{remaining_index_blob_for_path, staged_absorb_paths, AbsorbPlan};
 use super::error::HistoryError;
 use super::types::{AppliedRewrite, ApplyOptions, PlannedRefUpdate, RewritePlan};
 
@@ -147,6 +148,164 @@ fn apply_index_to_worktree_delta(
     }
 
     join_blob_lines(&out)
+}
+
+/// Apply an absorb [`AbsorbPlan`] and leave unassigned hunks staged.
+///
+/// # Errors
+///
+/// Same as [`apply_fixup_rewrite`].
+pub fn apply_absorb_rewrite(
+    repo: &Repository,
+    absorb: &AbsorbPlan,
+    opts: &ApplyOptions,
+) -> Result<AppliedRewrite, HistoryError> {
+    let staged_paths = staged_absorb_paths(repo)?;
+    let prestate = if !repo.is_bare() && !staged_paths.is_empty() {
+        Some(FixupApplyPrestate::capture(repo, &staged_paths)?)
+    } else {
+        None
+    };
+    apply_absorb_refs_and_worktree(repo, absorb, opts, &staged_paths, prestate.as_ref()).or_else(
+        |err| {
+            if let Some(pre) = prestate {
+                pre.restore(repo)?;
+            }
+            Err(err)
+        },
+    )
+}
+
+fn apply_absorb_refs_and_worktree(
+    repo: &Repository,
+    absorb: &AbsorbPlan,
+    opts: &ApplyOptions,
+    staged_paths: &[String],
+    prestate: Option<&FixupApplyPrestate>,
+) -> Result<AppliedRewrite, HistoryError> {
+    let plan = &absorb.plan;
+    let (old_tree, new_tree) = head_tree_transition(plan);
+    let needs_worktree = !repo.is_bare() && head_tree_changes(&old_tree, &new_tree);
+    let index_snapshot_owned = prestate.map(|p| p.index_bytes.clone()).or_else(|| {
+        if needs_worktree {
+            fs::read(repo.index_path()).ok()
+        } else {
+            None
+        }
+    });
+    let old_head_commit = if needs_worktree {
+        Some(resolve_head_commit(repo)?)
+    } else {
+        None
+    };
+
+    if !plan.ref_updates.is_empty() {
+        commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
+    }
+
+    if needs_worktree {
+        let (Some(old), Some(new)) = (old_tree, new_tree) else {
+            return Err(HistoryError::WorktreeApply {
+                message: "missing head tree for absorb apply".into(),
+            });
+        };
+        let old_head_commit = old_head_commit.ok_or_else(|| HistoryError::WorktreeApply {
+            message: "missing old HEAD commit for absorb apply".into(),
+        })?;
+        if let Err(apply_err) = apply_absorb_worktree_after_refs(
+            repo,
+            Some(&old),
+            &new,
+            old_head_commit,
+            absorb,
+            staged_paths,
+            prestate,
+        ) {
+            let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts);
+            let restore = restore_worktree_after_failed_apply(
+                repo,
+                Some(&old),
+                &new,
+                index_snapshot_owned.as_deref(),
+            );
+            if let Some(pre) = prestate {
+                let _ = pre.restore(repo);
+            }
+            return Err(match (restore, ref_rollback) {
+                (Err(restore_err), _) => restore_err,
+                (Ok(()), Err(ref_err)) => ref_err,
+                (Ok(()), Ok(())) => apply_err,
+            });
+        }
+    }
+
+    let head = resolve_head_commit(repo)?;
+    Ok(AppliedRewrite {
+        ref_updates: plan.ref_updates.clone(),
+        head,
+    })
+}
+
+fn apply_absorb_worktree_after_refs(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+    old_head_commit: ObjectId,
+    absorb: &AbsorbPlan,
+    staged_paths: &[String],
+    prestate: Option<&FixupApplyPrestate>,
+) -> Result<(), HistoryError> {
+    checkout_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|e| {
+        HistoryError::WorktreeApply {
+            message: e.to_string(),
+        }
+    })?;
+    if staged_paths.is_empty() {
+        return Ok(());
+    }
+    let new_head = resolve_head_commit(repo)?;
+    let new_head_tree = commit_tree_for_apply(repo, new_head)?;
+    let old_head_tree = commit_tree_for_apply(repo, old_head_commit)?;
+    let mut index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    for path in staged_paths {
+        let pre_index_blob = prestate
+            .and_then(|p| {
+                p.paths
+                    .iter()
+                    .find(|entry| entry.path == *path)
+                    .and_then(|entry| entry.index_blob.clone())
+            })
+            .unwrap_or_default();
+        let blob = remaining_index_blob_for_path(
+            repo,
+            old_head_tree,
+            new_head_tree,
+            &pre_index_blob,
+            path,
+            &absorb.assignments,
+        )?;
+        let oid =
+            repo.odb()
+                .write(ObjectKind::Blob, &blob)
+                .map_err(|e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                })?;
+        if let Some(entry) = index.get_mut(path.as_bytes(), 0) {
+            entry.oid = oid;
+            entry.size = blob.len() as u32;
+        }
+    }
+    index.sort();
+    repo.write_index(&mut index)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+    if let Some(pre) = prestate {
+        pre.reapply_unstaged_worktree_deltas(repo)?;
+    }
+    Ok(())
 }
 
 /// Apply a fixup [`RewritePlan`] and align the index with the new `HEAD` on paths that were staged.
