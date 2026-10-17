@@ -759,24 +759,39 @@ pub(crate) fn find_tree_entry_by_name_in_data(
         }
         return Ok(None);
     }
-    let name_is_tree = name.ends_with(b"/");
-    let idx = spans.binary_search_by(|span| {
-        let entry_name = &data[span.name_off..span.name_off + span.name_len];
-        tree_entry_cmp(entry_name, span.mode == 0o040000, name, name_is_tree)
-    });
-    if let Ok(i) = idx {
-        let span = &spans[i];
-        let entry_name = &data[span.name_off..span.name_off + span.name_len];
-        if entry_name == name {
-            let oid = ObjectId::from_bytes(&data[span.oid_off..span.oid_off + oid_len])?;
-            return Ok(Some(TreeEntry {
-                mode: span.mode,
-                name: entry_name.to_vec(),
-                oid,
-            }));
+    let lookup = |name_is_tree: bool| -> Result<Option<TreeEntry>> {
+        let idx = spans.binary_search_by(|span| {
+            let entry_name = &data[span.name_off..span.name_off + span.name_len];
+            tree_entry_cmp(
+                entry_name,
+                span.mode == 0o040000,
+                name,
+                name_is_tree,
+            )
+        });
+        if let Ok(i) = idx {
+            let span = &spans[i];
+            let entry_name = &data[span.name_off..span.name_off + span.name_len];
+            if entry_name == name {
+                let oid = ObjectId::from_bytes(&data[span.oid_off..span.oid_off + oid_len])?;
+                return Ok(Some(TreeEntry {
+                    mode: span.mode,
+                    name: entry_name.to_vec(),
+                    oid,
+                }));
+            }
+        }
+        Ok(None)
+    };
+    if name.ends_with(b"/") {
+        return lookup(true);
+    }
+    if let Some(entry) = lookup(true)? {
+        if entry.mode == 0o040000 {
+            return Ok(Some(entry));
         }
     }
-    Ok(None)
+    lookup(false)
 }
 
 /// Parsed representation of a commit object.
@@ -1460,5 +1475,105 @@ mod commit_parse_tests {
         assert_eq!(oid.loose_suffix().len(), 38);
         assert!(ObjectId::is_hex_len(40));
         assert!(ObjectId::is_loose_suffix_len(38));
+    }
+
+    #[test]
+    fn find_tree_entry_by_name_in_data_finds_directory_in_large_tree() {
+        use std::process::Command;
+        let repo_path = std::path::Path::new("/home/ubuntu/.cache/grit-bench/synth-l");
+        if !repo_path.join(".git").is_dir() {
+            return;
+        }
+        let wide_oid = String::from_utf8_lossy(
+            &Command::new("git")
+                .args(["-C", repo_path.to_str().expect("utf8"), "rev-parse", "HEAD:wide"])
+                .output()
+                .expect("rev-parse")
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        let wide_tree = Command::new("git")
+            .args([
+                "-C",
+                repo_path.to_str().expect("utf8"),
+                "cat-file",
+                "tree",
+                &wide_oid,
+            ])
+            .output()
+            .expect("cat-file wide tree")
+            .stdout;
+        let w15 = find_tree_entry_by_name_in_data(&wide_tree, 20, b"w00015")
+            .expect("lookup")
+            .expect("w00015 directory");
+        assert_eq!(w15.mode, 0o040000);
+    }
+
+    #[test]
+    fn find_tree_entry_by_name_in_data_finds_synth_l_wide_file() {
+        use std::process::Command;
+        let repo_path = std::path::Path::new("/home/ubuntu/.cache/grit-bench/synth-l");
+        if !repo_path.join(".git").is_dir() {
+            return;
+        }
+        let tree_hex = String::from_utf8(
+            Command::new("git")
+                .args(["-C", repo_path.to_str().expect("utf8"), "rev-parse", "HEAD:wide/w00015"])
+                .output()
+                .expect("rev-parse")
+                .stdout,
+        )
+        .expect("utf8");
+        let git_body = Command::new("git")
+            .args([
+                "-C",
+                repo_path.to_str().expect("utf8"),
+                "cat-file",
+                "tree",
+                tree_hex.trim(),
+            ])
+            .output()
+            .expect("cat-file tree")
+            .stdout;
+        let found = find_tree_entry_by_name_in_data(&git_body, 20, b"f0958.txt")
+            .expect("lookup")
+            .expect("f0958.txt");
+        assert_eq!(found.name, b"f0958.txt");
+    }
+
+    #[test]
+    fn grit_odb_tree_walk_finds_synth_l_blame_path() {
+        use crate::environment::RepositoryOptions;
+        use crate::repo::Repository;
+        let repo_path = std::path::Path::new("/home/ubuntu/.cache/grit-bench/synth-l");
+        if !repo_path.join(".git").is_dir() {
+            return;
+        }
+        let repo = Repository::discover(Some(repo_path), &RepositoryOptions::default()).expect("open");
+        let head_ref = std::fs::read_to_string(repo_path.join(".git/HEAD")).expect("HEAD");
+        let head_hex = if let Some(rest) = head_ref.strip_prefix("ref: ") {
+            std::fs::read_to_string(repo_path.join(".git").join(rest.trim()))
+                .expect("ref")
+                .trim()
+                .to_string()
+        } else {
+            head_ref.trim().to_string()
+        };
+        let head = ObjectId::from_hex(&head_hex).expect("head oid");
+        let commit = parse_commit(&repo.odb().read(&head).expect("commit").data).expect("parse");
+        let root = repo.odb().read(&commit.tree).expect("root tree");
+        let wide = find_tree_entry_by_name_in_data(&root.data, 20, b"wide")
+            .expect("wide lookup")
+            .expect("wide entry");
+        let wide_tree = repo.odb().read(&wide.oid).expect("wide tree");
+        let w15 = find_tree_entry_by_name_in_data(&wide_tree.data, 20, b"w00015")
+            .expect("w15 lookup")
+            .expect("w00015 entry");
+        let dir = repo.odb().read(&w15.oid).expect("w00015 tree");
+        let file = find_tree_entry_by_name_in_data(&dir.data, 20, b"f0958.txt")
+            .expect("file lookup")
+            .expect("f0958.txt");
+        assert_eq!(file.mode, 0o100644);
     }
 }
