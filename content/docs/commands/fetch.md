@@ -17,7 +17,9 @@ Downloads everything new from a remote and updates your remote-tracking branches
 
 `<remote>` may be a configured remote name or a path to a [git bundle](https://git-scm.com/docs/git-bundle) file (detected by the bundle signature, not the file extension). Bundle fetches verify that prerequisite commits are already in your repository before applying the pack.
 
-Each updated ref is listed with its old and new commit. Removed remote-tracking refs (after `--prune`) show `deleted` on the human line and `new_oid: null` in JSON.
+Each ref that actually changed locally is listed with its old and new commit. Removed remote-tracking refs (after `--prune`) show `deleted` on the human line and `new_oid: null` in JSON.
+
+Existing tags are not overwritten when the same tag name moves on the remote (Git-compatible behavior). A fetch in that situation downloads any new objects but leaves `refs/tags/*` alone; the command reports no tag update, and a repeat fetch stays up to date.
 
 When `fetch.prune` or `remote.<name>.prune` is true, stale remote-tracking refs under `refs/remotes/<remote>/` are removed automatically. Per-remote `remote.<name>.prune` overrides the global `fetch.prune` value. `--prune` and `--no-prune` override config for this invocation.
 

@@ -104,7 +104,7 @@ pub fn run(
     let updates: Vec<FetchUpdate> = result
         .updates
         .iter()
-        .filter(|update| update.old_oid != update.new_oid)
+        .filter(|update| update.mode.modified_repo())
         .filter_map(|update| {
             let ref_name = update.local_ref.clone()?;
             Some(FetchUpdate {

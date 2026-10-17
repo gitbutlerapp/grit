@@ -12465,6 +12465,8 @@ pub grit_lib::remote::transfer::UpdateMode::SourceObjectNotFound
 pub grit_lib::remote::transfer::UpdateMode::TagUpdateRejected
 pub grit_lib::remote::transfer::UpdateMode::Unborn
 pub grit_lib::remote::transfer::UpdateMode::UpToDate
+impl grit_lib::remote::transfer::UpdateMode
+pub fn grit_lib::remote::transfer::UpdateMode::modified_repo(self) -> bool
 impl core::clone::Clone for grit_lib::remote::transfer::UpdateMode
 pub fn grit_lib::remote::transfer::UpdateMode::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::transfer::UpdateMode

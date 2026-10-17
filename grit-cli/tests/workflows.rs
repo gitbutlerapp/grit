@@ -1449,3 +1449,83 @@ fn fetch_prunes_stale_remote_tracking_refs() -> TestResult {
     );
     Ok(())
 }
+
+/// GitHub issue #1136: moved remote tags must not appear as applied fetch updates.
+#[test]
+fn fetch_moved_tag_reports_no_phantom_update() -> TestResult {
+    let scratch = Scratch::new("fetch-moved-tag-1136")?;
+    let bare = scratch.child("fo.git");
+    let f1 = scratch.child("f1");
+    let f2 = scratch.child("f2");
+    let bare_s = path_arg(&bare)?;
+    let f1_s = path_arg(&f1)?;
+    let f2_s = path_arg(&f2)?;
+
+    git_ok(
+        scratch.path(),
+        &["init", "-q", "--bare", "-b", "main", bare_s.as_str()],
+    )?;
+    git_ok(
+        scratch.path(),
+        &["clone", "-q", bare_s.as_str(), f1_s.as_str()],
+    )?;
+    git_ok(
+        scratch.path(),
+        &["clone", "-q", bare_s.as_str(), f2_s.as_str()],
+    )?;
+
+    std::fs::write(f1.join("a.txt"), b"a\n")?;
+    git_ok(&f1, &["add", "."])?;
+    git_ok(&f1, &["commit", "-q", "-m", "a"])?;
+    git_ok(&f1, &["branch", "-M", "main"])?;
+    git_ok(&f1, &["push", "-u", "origin", "main"])?;
+    git_ok(&f1, &["tag", "newtag"])?;
+    git_ok(&f1, &["push", "origin", "newtag"])?;
+
+    gs_ok(&f2, ["fetch"])?;
+
+    std::fs::write(f1.join("b.txt"), b"b\n")?;
+    git_ok(&f1, &["add", "."])?;
+    git_ok(&f1, &["commit", "-q", "-m", "b"])?;
+    git_ok(&f1, &["push", "origin", "main"])?;
+    git_ok(&f1, &["tag", "-f", "newtag"])?;
+    git_ok(&f1, &["push", "-f", "origin", "newtag"])?;
+
+    let tag_before = git_in(&f2, &["rev-parse", "newtag"])?
+        .stdout
+        .trim()
+        .to_owned();
+
+    let moved = gs_ok(&f2, ["fetch", "--json"])?;
+    let parsed: serde_json::Value = serde_json::from_str(&moved.stdout)?;
+    let updates = parsed
+        .get("updates")
+        .and_then(|v| v.as_array())
+        .expect("updates array");
+    assert!(
+        !updates
+            .iter()
+            .any(|u| u.get("ref").and_then(|r| r.as_str()) == Some("refs/tags/newtag")),
+        "fetch after remote tag move must not list a phantom tag update: {}",
+        moved.stdout
+    );
+
+    let tag_after = git_in(&f2, &["rev-parse", "newtag"])?
+        .stdout
+        .trim()
+        .to_owned();
+    assert_eq!(
+        tag_after, tag_before,
+        "local tag must stay on the pre-move commit"
+    );
+
+    let repeat = gs_ok(&f2, ["fetch", "--json"])?;
+    let parsed: serde_json::Value = serde_json::from_str(&repeat.stdout)?;
+    assert_eq!(
+        parsed.get("updated").and_then(|v| v.as_u64()),
+        Some(0),
+        "repeat fetch must stay up to date: {}",
+        repeat.stdout
+    );
+    Ok(())
+}

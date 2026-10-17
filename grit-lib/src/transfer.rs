@@ -58,6 +58,20 @@ pub enum UpdateMode {
     DeletedMissing,
 }
 
+impl UpdateMode {
+    /// Returns whether fetch applied this update to the local repository.
+    ///
+    /// Rejected or no-op outcomes (for example an existing tag that moved on the
+    /// remote) are excluded so callers can report only refs that actually changed.
+    #[must_use]
+    pub fn modified_repo(self) -> bool {
+        matches!(
+            self,
+            Self::New | Self::FastForward | Self::Forced | Self::DeletedMissing
+        )
+    }
+}
+
 /// The resolved outcome of one reference during a fetch.
 #[derive(Clone, Debug)]
 pub struct RefUpdate {
@@ -2397,5 +2411,13 @@ mod tests {
             u64::try_from(index.len()).expect("count"),
             "object count must match the on-disk index entry count"
         );
+    }
+
+    #[test]
+    fn update_mode_modified_repo_excludes_rejected_tag_updates() {
+        assert!(UpdateMode::New.modified_repo());
+        assert!(UpdateMode::DeletedMissing.modified_repo());
+        assert!(!UpdateMode::TagUpdateRejected.modified_repo());
+        assert!(!UpdateMode::UpToDate.modified_repo());
     }
 }
