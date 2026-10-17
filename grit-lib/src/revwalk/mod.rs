@@ -49,11 +49,7 @@ pub mod rev_parse_error {
 }
 pub mod object_inspect {
     //! Typed revision resolution and object display payloads.
-    pub use crate::object_inspect_root::*;
-}
-pub mod history {
-    //! History rewrite planning and apply.
-    pub use crate::history_root::*;
+    pub use crate::object_inspect::*;
 }
 pub mod history {
     //! In-memory history rewrite planning and apply.

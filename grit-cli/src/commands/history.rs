@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
-use grit_lib::history::{
+use grit_lib::revwalk::history::{
     apply_rewrite, reword, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
     RewritePlan,
 };

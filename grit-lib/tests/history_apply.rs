@@ -477,7 +477,7 @@ fn apply_rewrite_failed_checkout_restores_refs_and_preserves_dirty_worktree() {
     grit_lib::repo::set_test_inject_index_write_fail(false);
     assert!(matches!(
         err,
-        grit_lib::history::HistoryError::WorktreeApply { .. }
+        grit_lib::revwalk::history::HistoryError::WorktreeApply { .. }
     ));
     assert_eq!(git_rev_parse(wt, "refs/heads/main"), Some(tip_before));
     assert_eq!(

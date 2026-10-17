@@ -229,8 +229,7 @@ pub(crate) mod midx;
 pub(crate) mod midx_error;
 pub(crate) mod net_trace;
 pub mod notes;
-#[path = "object_inspect.rs"]
-mod object_inspect_root;
+pub mod object_inspect;
 pub mod objects;
 pub(crate) mod odb;
 pub(crate) mod pack;
@@ -327,16 +326,10 @@ pub(crate) mod zlib_inflate;
 
 pub use ref_storage::RefStorageFormat;
 
-/// History rewrite planning and apply.
-pub mod history {
-    pub use crate::history_root::*;
-}
-
 pub use objects::bench_fixture;
 pub use objects::pack_reuse;
 pub use objects::pack_write;
 pub use porcelain::quote_path;
-pub use revwalk::object_inspect;
 pub use worktree::fsmonitor;
 
 #[cfg(test)]

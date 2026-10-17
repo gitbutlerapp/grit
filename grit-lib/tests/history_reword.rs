@@ -1,14 +1,14 @@
-//! Tests for [`grit_lib::history::reword`].
+//! Tests for [`grit_lib::revwalk::history::reword`].
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
 
-use grit_lib::history::{
-    normalize_rewrite_message, reword, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    normalize_rewrite_message, reword, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
+};
 
 use support::{build_commit_dag, git, git_fsck_strict, HistoryRepo};
 
@@ -69,7 +69,7 @@ fn reword_changes_only_message_and_replays_descendants() {
 #[test]
 fn reword_rejects_empty_message() {
     let err = normalize_rewrite_message("   \n\n  ").unwrap_err();
-    assert_eq!(err, HistoryError::EmptyMessage);
+    assert!(matches!(err, HistoryError::EmptyMessage));
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
@@ -85,7 +85,7 @@ fn reword_rejects_empty_message() {
         },
     )
     .unwrap_err();
-    assert_eq!(err, HistoryError::EmptyMessage);
+    assert!(matches!(err, HistoryError::EmptyMessage));
 }
 
 #[test]

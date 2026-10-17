@@ -374,7 +374,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         merge,
-        CommitEdit::InsertBefore(grit_lib::history::NewCommit {
+        CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit {
             tree: insert_tree,
             author: "Insert <i@grit.test> 1 +0000".into(),
             message: "inserted parent\n".into(),
@@ -390,10 +390,10 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
         },
     )
     .expect_err("insert before merge");
-    assert_eq!(
+    assert!(matches!(
         err,
-        grit_lib::history::HistoryError::InsertBeforeOnMerge { commit: merge }
-    );
+        grit_lib::revwalk::history::HistoryError::InsertBeforeOnMerge { commit: m } if m == merge
+    ));
 }
 
 #[test]
@@ -433,7 +433,7 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
     )
     .expect_err("blob tip is not a commit");
     assert!(
-        matches!(err, grit_lib::history::HistoryError::Planning { .. }),
+        matches!(err, grit_lib::revwalk::history::HistoryError::Planning { .. }),
         "expected planning error, got {err:?}"
     );
 }
