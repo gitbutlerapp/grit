@@ -382,11 +382,11 @@ impl FixupApplyPrestate {
                         })?;
                     let abs = worktree.join(path);
                     let mode = if abs.is_file() {
-                        mode_from_metadata(
-                            &fs::metadata(&abs).map_err(|e| HistoryError::WorktreeApply {
+                        mode_from_metadata(&fs::metadata(&abs).map_err(|e| {
+                            HistoryError::WorktreeApply {
                                 message: e.to_string(),
-                            })?,
-                        )
+                            }
+                        })?)
                     } else {
                         MODE_REGULAR
                     };
@@ -567,15 +567,10 @@ fn apply_fixup_worktree_after_refs(
     let force_preserve = prestate
         .map(|pre| pre.force_preserve_worktree_paths(staged_paths))
         .unwrap_or_default();
-    checkout_tree_transition_allow_local_with_preserved(
-        repo,
-        from_tree,
-        to_tree,
-        &force_preserve,
-    )
-    .map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
+    checkout_tree_transition_allow_local_with_preserved(repo, from_tree, to_tree, &force_preserve)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
     if !staged_paths.is_empty() {
         let head = resolve_head_commit(repo)?;
         clear_fixup_staging_after_apply(repo, head, staged_paths)?;
@@ -736,7 +731,11 @@ fn commit_tree_for_apply(repo: &Repository, commit: ObjectId) -> Result<ObjectId
         .tree)
 }
 
-
+/// Runs the same worktree safety checks as [`apply_rewrite`] without moving refs.
+///
+/// # Errors
+///
+/// Returns [`HistoryError::LocalChangesWouldBeOverwritten`] or [`HistoryError::WorktreeApply`].
 pub fn verify_rewrite_plan(repo: &Repository, plan: &RewritePlan) -> Result<(), HistoryError> {
     let (old_tree, new_tree) = head_tree_transition(plan);
     if repo.is_bare() {

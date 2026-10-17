@@ -1,4 +1,4 @@
-//! Tests for [`grit_lib::history::fixup`].
+//! Tests for [`grit_lib::revwalk::history::fixup`].
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -7,14 +7,15 @@ mod support;
 use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::history::{
-    apply_fixup_rewrite, fixup, staged_fixup_paths, ApplyOptions, EmptyPolicy, FixupOptions,
-    HistoryError, RefScope, RewriteOptions,
-};
+use grit_lib::diff::DiffStatus;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    apply_fixup_rewrite, fixup, staged_fixup_paths, ApplyOptions, EmptyPolicy, FixupOptions,
+    HistoryError, RefScope, RewriteOptions,
+};
 
 use support::{commit_file, git, git_fsck_strict, git_rev_parse, HistoryRepo};
 
@@ -231,6 +232,160 @@ fn fixup_conflict_changes_nothing() {
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(before));
 }
 
+fn git_fixup_autosquash_from_head_minus_two(wt: &std::path::Path) {
+    git(wt, &["commit", "--fixup", "HEAD~1"]);
+    git(
+        wt,
+        &[
+            "-c",
+            "sequence.editor=true",
+            "rebase",
+            "-i",
+            "--autosquash",
+            "HEAD~2",
+        ],
+    );
+}
+
+#[test]
+fn fixup_preserves_unstaged_deletion_after_partial_staging() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    fs::write(wt.join("file.txt"), "committed\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    git(wt, &["commit", "-m", "base"]);
+    fs::write(wt.join("file.txt"), "staged\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    fs::remove_file(wt.join("file.txt")).expect("remove");
+    let grit = open_grit(wt);
+    plan_and_apply(
+        &grit,
+        wt,
+        git_rev_parse(wt, "HEAD").expect("head"),
+        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+    );
+    assert!(
+        !wt.join("file.txt").exists(),
+        "worktree file must stay deleted"
+    );
+    let st = status(&grit, &StatusOptions::default(), &mut NullProgress).expect("status");
+    assert_eq!(st.staged.len(), 0, "staging consumed by fixup");
+    assert_eq!(st.unstaged.len(), 1);
+    assert_eq!(st.unstaged[0].status, DiffStatus::Deleted);
+}
+
+#[test]
+fn fixup_preserves_unstaged_deletion_matches_git_fixup_autosquash() {
+    if !support::skip_unless_git_at_least(2, 45) {
+        return;
+    }
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    fs::write(wt.join("file.txt"), "committed\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    git(wt, &["commit", "-m", "base"]);
+    fs::write(wt.join("file.txt"), "staged\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    fs::remove_file(wt.join("file.txt")).expect("remove");
+    let grit = open_grit(wt);
+    plan_and_apply(
+        &grit,
+        wt,
+        git_rev_parse(wt, "HEAD").expect("head"),
+        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+    );
+    let grit_tip = git_rev_parse(wt, "HEAD").expect("grit tip");
+    assert!(!wt.join("file.txt").exists());
+
+    let repo2 = HistoryRepo::init();
+    let wt2 = repo2.worktree();
+    fs::write(wt2.join("file.txt"), "committed\n").expect("write");
+    git(wt2, &["add", "file.txt"]);
+    git(wt2, &["commit", "-m", "base"]);
+    fs::write(wt2.join("file.txt"), "staged\n").expect("write");
+    git(wt2, &["add", "file.txt"]);
+    fs::remove_file(wt2.join("file.txt")).expect("remove");
+    git_fixup_autosquash_from_head_minus_two(wt2);
+    let git_tip = git_rev_parse(wt2, "HEAD").expect("git tip");
+    assert!(!wt2.join("file.txt").exists());
+    assert_eq!(grit_tip, git_tip);
+}
+
+#[test]
+fn fixup_preserves_unstaged_modification_after_partial_staging() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    fs::write(wt.join("file.txt"), "one\nbase\nthree\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    git(wt, &["commit", "-m", "base"]);
+    fs::write(wt.join("file.txt"), "one\nstaged B\nthree\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    fs::write(wt.join("file.txt"), "one\nunstaged edit\nthree\n").expect("write");
+    let grit = open_grit(wt);
+    plan_and_apply(
+        &grit,
+        wt,
+        git_rev_parse(wt, "HEAD").expect("head"),
+        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+    );
+    assert_eq!(
+        fs::read_to_string(wt.join("file.txt")).expect("read"),
+        "one\nunstaged edit\nthree\n"
+    );
+    let st = status(&grit, &StatusOptions::default(), &mut NullProgress).expect("status");
+    assert_eq!(st.staged.len(), 0);
+    assert_eq!(st.unstaged.len(), 1);
+}
+
+#[test]
+fn fixup_preserves_unstaged_insertion_on_partially_staged_path() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    fs::write(wt.join("file.txt"), "one\nbase\nthree\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    git(wt, &["commit", "-m", "base"]);
+    fs::write(wt.join("file.txt"), "one\nstaged B\nthree\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    fs::write(wt.join("file.txt"), "one\nstaged B\nunstaged C\nthree\n").expect("write");
+    let grit = open_grit(wt);
+    plan_and_apply(
+        &grit,
+        wt,
+        git_rev_parse(wt, "HEAD").expect("head"),
+        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+    );
+    assert_eq!(
+        fs::read_to_string(wt.join("file.txt")).expect("read"),
+        "one\nstaged B\nunstaged C\nthree\n"
+    );
+    let st = status(&grit, &StatusOptions::default(), &mut NullProgress).expect("status");
+    assert_eq!(st.staged.len(), 0);
+    assert_eq!(st.unstaged.len(), 1);
+}
+
+#[test]
+fn fixup_preserves_unstaged_suffix_on_partially_staged_path() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    fs::write(wt.join("file.txt"), "base\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    git(wt, &["commit", "-m", "base"]);
+    fs::write(wt.join("file.txt"), "base\nstaged B\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    fs::write(wt.join("file.txt"), "base\nstaged B\nunstaged C\n").expect("write");
+    let grit = open_grit(wt);
+    plan_and_apply(
+        &grit,
+        wt,
+        git_rev_parse(wt, "HEAD").expect("head"),
+        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+    );
+    assert_eq!(
+        fs::read_to_string(wt.join("file.txt")).expect("read"),
+        "base\nstaged B\nunstaged C\n"
+    );
+}
+
 #[test]
 fn fixup_preserves_unstaged_changes() {
     let repo = HistoryRepo::init();
@@ -270,7 +425,7 @@ fn fixup_nothing_staged_errors() {
         &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
     )
     .unwrap_err();
-    assert_eq!(err, HistoryError::NothingStaged);
+    assert!(matches!(err, HistoryError::NothingStaged));
 }
 
 #[test]
@@ -287,7 +442,7 @@ fn fixup_rejects_bare_repository() {
         &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
     )
     .unwrap_err();
-    assert_eq!(err, HistoryError::BareRepository);
+    assert!(matches!(err, HistoryError::BareRepository));
 }
 
 #[test]

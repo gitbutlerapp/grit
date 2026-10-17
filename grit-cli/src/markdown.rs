@@ -502,12 +502,15 @@ pub fn print_history_rewrite_outcome(
         outln!(w, "- Dry run (refs unchanged)");
     }
     for pair in &outcome.rewritten {
-        outln!(
-            w,
-            "- commit `{}` → `{}`",
-            short_hex(&pair.old),
-            short_hex(&pair.new)
-        );
+        match &pair.new {
+            Some(new) => outln!(
+                w,
+                "- commit `{}` → `{}`",
+                short_hex(&pair.old),
+                short_hex(new)
+            ),
+            None => outln!(w, "- commit `{}` → (dropped)", short_hex(&pair.old)),
+        }
     }
     for update in &outcome.refs {
         outln!(

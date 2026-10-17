@@ -7,15 +7,15 @@ mod support;
 use std::fs;
 use std::process::Command;
 
-use grit_lib::revwalk::history::{
-    apply_rewrite, drop as history_drop, ApplyOptions, EmptyPolicy, HistoryError, RefScope,
-    RewriteOptions,
-};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::history::{
+    apply_rewrite, drop as history_drop, ApplyOptions, EmptyPolicy, HistoryError, RefScope,
+    RewriteOptions,
+};
 
 use support::{build_commit_dag, commit_file, git, git_fsck_strict, git_rev_parse, HistoryRepo};
 

@@ -331,6 +331,39 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
     if command == "history.reword" || command == "history.drop" || command == "history.fixup" {
         ensure_required_nullable_head(&mut value);
     }
+    if command == "history.fixup" {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(
+                "description".into(),
+                "Result of `grit history fixup`. The `operation` field is always `fixup`. JSON shape matches `grit history reword`.".into(),
+            );
+            obj.insert("title".into(), "HistoryFixupOutcome".into());
+            if let Some(props) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
+                if let Some(op) = props.get_mut("operation").and_then(|o| o.as_object_mut()) {
+                    op.insert(
+                        "description".into(),
+                        "Operation name (always `fixup` for this command).".into(),
+                    );
+                }
+            }
+        }
+    }
+    if command == "history.reword" {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(
+                "description".into(),
+                "Result of `grit history reword`. The `operation` field is always `reword`.".into(),
+            );
+            if let Some(props) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
+                if let Some(op) = props.get_mut("operation").and_then(|o| o.as_object_mut()) {
+                    op.insert(
+                        "description".into(),
+                        "Operation name (always `reword` for this command).".into(),
+                    );
+                }
+            }
+        }
+    }
     canonicalize_json(&mut value);
     value
 }

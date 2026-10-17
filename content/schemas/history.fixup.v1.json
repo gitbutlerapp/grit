@@ -47,8 +47,11 @@
       "description": "One commit OID before and after rewrite.",
       "properties": {
         "new": {
-          "description": "Replacement commit OID (full hex).",
-          "type": "string"
+          "description": "Replacement commit OID (full hex), or JSON `null` when the commit was dropped.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "old": {
           "description": "Commit OID before rewrite (full hex).",
@@ -56,13 +59,12 @@
         }
       },
       "required": [
-        "new",
         "old"
       ],
       "type": "object"
     }
   },
-  "description": "Result of `grit history.fixup`.",
+  "description": "Result of `grit history fixup`. The `operation` field is always `fixup`. JSON shape matches `grit history reword`.",
   "properties": {
     "dry_run": {
       "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
@@ -80,7 +82,7 @@
       "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
     },
     "operation": {
-      "description": "Operation name (`reword`).",
+      "description": "Operation name (always `fixup` for this command).",
       "type": "string"
     },
     "refs": {
@@ -105,6 +107,6 @@
     "refs",
     "rewritten"
   ],
-  "title": "HistoryRewordOutcome",
+  "title": "HistoryFixupOutcome",
   "type": "object"
 }

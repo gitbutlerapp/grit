@@ -396,7 +396,7 @@ fn prepare_tree_switch_allow_local(
     to_tree: &ObjectId,
 ) -> Result<PreparedSwitch> {
     let snapshot = load_worktree_snapshot(repo)?;
-    prepare_tree_transition_allow_local(repo, snapshot.head_tree.as_ref(), to_tree)
+    prepare_tree_transition_allow_local(repo, snapshot.head_tree.as_ref(), to_tree, &HashSet::new())
         .map_err(tree_transition_prepare_to_error)
 }
 
@@ -428,6 +428,7 @@ pub(crate) fn prepare_tree_transition_allow_local(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
+    force_preserve_worktree: &HashSet<String>,
 ) -> std::result::Result<PreparedSwitch, TreeTransitionPrepareError> {
     let mut snapshot = load_worktree_snapshot(repo)?;
     snapshot.head_tree = from_tree.copied();
@@ -460,6 +461,7 @@ pub(crate) fn prepare_tree_transition_allow_local(
         &staged,
         &unstaged,
         &tree_changes,
+        force_preserve_worktree,
     )
     .map_err(TreeTransitionPrepareError::OverwritePaths)?;
 
@@ -591,12 +593,14 @@ pub(crate) fn verify_tree_transition_allow_local(
     to_tree: &ObjectId,
 ) -> std::result::Result<(), TreeTransitionVerifyError> {
     let mut prepared =
-        prepare_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|err| match err {
-            TreeTransitionPrepareError::OverwritePaths(paths) => {
-                TreeTransitionVerifyError::WouldOverwrite(paths)
-            }
-            TreeTransitionPrepareError::Failed(e) => TreeTransitionVerifyError::Failed(e),
-        })?;
+        prepare_tree_transition_allow_local(repo, from_tree, to_tree, &HashSet::new()).map_err(
+            |err| match err {
+                TreeTransitionPrepareError::OverwritePaths(paths) => {
+                    TreeTransitionVerifyError::WouldOverwrite(paths)
+                }
+                TreeTransitionPrepareError::Failed(e) => TreeTransitionVerifyError::Failed(e),
+            },
+        )?;
     let tree_changes = prepared.plan.tree_changes.clone();
     let untracked =
         crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes(
@@ -615,8 +619,14 @@ pub(crate) fn verify_tree_transition_allow_local(
             None,
         )
         .map_err(TreeTransitionVerifyError::Failed)?;
-    ensure_local_changes_compatible_with_switch(&prepared.index, &staged, &unstaged, &tree_changes)
-        .map_err(TreeTransitionVerifyError::WouldOverwrite)?;
+    ensure_local_changes_compatible_with_switch(
+        &prepared.index,
+        &staged,
+        &unstaged,
+        &tree_changes,
+        &HashSet::new(),
+    )
+    .map_err(TreeTransitionVerifyError::WouldOverwrite)?;
     Ok(())
 }
 
@@ -626,8 +636,19 @@ pub(crate) fn checkout_tree_transition_allow_local(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> Result<()> {
-    let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree)
-        .map_err(tree_transition_prepare_to_error)?;
+    checkout_tree_transition_allow_local_with_preserved(repo, from_tree, to_tree, &HashSet::new())
+}
+
+/// Like [`checkout_tree_transition_allow_local`], but always keeps worktree bytes on `force_preserve_worktree`.
+pub(crate) fn checkout_tree_transition_allow_local_with_preserved(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+    force_preserve_worktree: &HashSet<String>,
+) -> Result<()> {
+    let prepared =
+        prepare_tree_transition_allow_local(repo, from_tree, to_tree, force_preserve_worktree)
+            .map_err(tree_transition_prepare_to_error)?;
     checkout_prepared_tree_transition(repo, prepared)
 }
 
@@ -671,6 +692,7 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
     staged: &[DiffEntry],
     unstaged: &[DiffEntry],
     tree_changes: &[DiffEntry],
+    force_preserve_worktree: &HashSet<String>,
 ) -> std::result::Result<HashSet<String>, Vec<String>> {
     let mut target_by_path: HashMap<&str, TargetTreeEntry> = HashMap::new();
     for change in tree_changes {
@@ -690,6 +712,10 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
         if !tree_changed_paths.contains(path) {
             continue;
         }
+        if force_preserve_worktree.contains(path) {
+            preserve_worktree_paths.insert(path.to_owned());
+            continue;
+        }
         if target_by_path
             .get(path)
             .is_some_and(|target| index_matches_target_tree_entry(index, path, *target))
@@ -704,6 +730,10 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
             continue;
         };
         if !tree_changed_paths.contains(path) {
+            continue;
+        }
+        if force_preserve_worktree.contains(path) {
+            preserve_worktree_paths.insert(path.to_owned());
             continue;
         }
         if let Some(target) = target_by_path.get(path) {

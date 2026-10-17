@@ -14000,6 +14000,7 @@ pub grit_lib::revwalk::history::HistoryError::ApplyRollbackIncomplete
 pub grit_lib::revwalk::history::HistoryError::ApplyRollbackIncomplete::checkout: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::ApplyRollbackIncomplete::ref_rollback: core::option::Option<alloc::string::String>
 pub grit_lib::revwalk::history::HistoryError::ApplyRollbackIncomplete::worktree_restore: core::option::Option<alloc::string::String>
+pub grit_lib::revwalk::history::HistoryError::BareRepository
 pub grit_lib::revwalk::history::HistoryError::BecameEmpty
 pub grit_lib::revwalk::history::HistoryError::BecameEmpty::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::BranchCheckedOutElsewhere
@@ -14011,6 +14012,8 @@ pub grit_lib::revwalk::history::HistoryError::Conflict::paths: alloc::vec::Vec<a
 pub grit_lib::revwalk::history::HistoryError::DivergentBranch
 pub grit_lib::revwalk::history::HistoryError::DivergentBranch::name: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::EmptyMessage
+pub grit_lib::revwalk::history::HistoryError::FixupMakesTargetEmpty
+pub grit_lib::revwalk::history::HistoryError::FixupMakesTargetEmpty::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan
 pub grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan::planned_commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan::planned_ref: core::option::Option<alloc::string::String>
@@ -14023,6 +14026,7 @@ pub grit_lib::revwalk::history::HistoryError::MergeCommitInReplay
 pub grit_lib::revwalk::history::HistoryError::MergeCommitInReplay::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::NotInHistory
 pub grit_lib::revwalk::history::HistoryError::NotInHistory::commit: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::history::HistoryError::NothingStaged
 pub grit_lib::revwalk::history::HistoryError::Planning
 pub grit_lib::revwalk::history::HistoryError::Planning::message: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::RefApply
@@ -14105,6 +14109,25 @@ impl core::marker::Unpin for grit_lib::revwalk::history::ApplyOptions
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::ApplyOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::ApplyOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::ApplyOptions
+pub struct grit_lib::revwalk::history::FixupOptions
+pub grit_lib::revwalk::history::FixupOptions::empty: grit_lib::revwalk::history::EmptyPolicy
+pub grit_lib::revwalk::history::FixupOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::revwalk::history::FixupOptions::rewrite: grit_lib::revwalk::history::RewriteOptions
+impl core::clone::Clone for grit_lib::revwalk::history::FixupOptions
+pub fn grit_lib::revwalk::history::FixupOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::history::FixupOptions
+impl core::cmp::PartialEq for grit_lib::revwalk::history::FixupOptions
+pub fn grit_lib::revwalk::history::FixupOptions::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::revwalk::history::FixupOptions
+pub fn grit_lib::revwalk::history::FixupOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::history::FixupOptions
+impl core::marker::Freeze for grit_lib::revwalk::history::FixupOptions
+impl core::marker::Send for grit_lib::revwalk::history::FixupOptions
+impl core::marker::Sync for grit_lib::revwalk::history::FixupOptions
+impl core::marker::Unpin for grit_lib::revwalk::history::FixupOptions
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::FixupOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::FixupOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::FixupOptions
 pub struct grit_lib::revwalk::history::HeadEffect
 pub grit_lib::revwalk::history::HeadEffect::commit_changes: bool
 pub grit_lib::revwalk::history::HeadEffect::head_ref: core::option::Option<alloc::string::String>
@@ -14225,11 +14248,14 @@ impl core::marker::Unpin for grit_lib::revwalk::history::RewrittenCommit
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RewrittenCommit
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RewrittenCommit
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RewrittenCommit
+pub fn grit_lib::revwalk::history::apply_fixup_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::drop(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::fixup(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::FixupOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::normalize_rewrite_message(&str) -> core::result::Result<alloc::string::String, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::plan_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::HistoryEdits, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::reword(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, alloc::string::String, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::staged_fixup_paths(&grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::verify_rewrite_plan(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan) -> core::result::Result<(), grit_lib::revwalk::history::HistoryError>
 pub type grit_lib::revwalk::history::HistoryEdits = alloc::collections::btree::map::BTreeMap<grit_lib::objects::ObjectId, grit_lib::revwalk::history::CommitEdit>
 pub mod grit_lib::revwalk::log_walk

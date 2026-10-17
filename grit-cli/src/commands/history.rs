@@ -8,9 +8,9 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::history::{
-    apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup, reword,
-    staged_fixup_paths, verify_rewrite_plan, ApplyOptions, EmptyPolicy, FixupOptions,
-    HistoryError, RefScope, RewriteOptions, RewritePlan,
+    apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup, reword, staged_fixup_paths,
+    verify_rewrite_plan, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RefScope,
+    RewriteOptions, RewritePlan,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
@@ -40,7 +40,6 @@ impl From<UpdateRefs> for RefScope {
         }
     }
 }
-
 
 /// How empty commits are handled during history rewrite.
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
@@ -95,8 +94,8 @@ pub struct HistoryRewriteOutcome {
 pub struct RewrittenPair {
     /// Commit OID before rewrite (full hex).
     pub old: String,
-    /// Replacement commit OID (full hex).
-    pub new: String,
+    /// Replacement commit OID (full hex), or JSON `null` when the commit was dropped.
+    pub new: Option<String>,
 }
 
 /// One ref tip before and after rewrite.
@@ -139,8 +138,13 @@ impl HumanRender for HistoryRewriteOutcome {
         }
         for pair in &self.rewritten {
             let old_short = pair.old.get(..7).unwrap_or(&pair.old);
-            let new_short = pair.new.get(..7).unwrap_or(&pair.new);
-            outln!(w, "  commit {old_short} → {new_short}");
+            match &pair.new {
+                Some(new) => {
+                    let new_short = new.get(..7).unwrap_or(new);
+                    outln!(w, "  commit {old_short} → {new_short}");
+                }
+                None => outln!(w, "  commit {old_short} → (dropped)"),
+            }
         }
         for update in &self.refs {
             let old_short = update.old.get(..7).unwrap_or(&update.old);
@@ -254,7 +258,6 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
     Ok(outcome)
 }
 
-
 /// Apply staged changes onto `commit` and replay descendants.
 pub fn run_fixup(
     commit: &str,
@@ -267,7 +270,8 @@ pub fn run_fixup(
     let repo = context::discover()?;
     let commit_oid = resolve_revision_as_commit(&repo, commit)
         .with_context(|| format!("could not resolve commit '{commit}'"))?;
-    let staged_paths = staged_fixup_paths(&repo).map_err(|e| map_history_error(e, "fixup", None))?;
+    let staged_paths =
+        staged_fixup_paths(&repo).map_err(|e| map_history_error(e, "fixup", None))?;
     let env = repo.environment();
     let config =
         ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
@@ -293,7 +297,7 @@ pub fn run_fixup(
     )
     .map_err(|e| map_history_error(e, "fixup", None))?;
     let subject = fixup_reflog_subject(&repo, &plan, commit_oid, commit)?;
-    let mut outcome = outcome_from_plan(&repo, &plan, "fixup", shared.dry_run)?;
+    let mut outcome = outcome_from_plan_fixup(&repo, &plan, shared.dry_run)?;
     if !shared.dry_run {
         let identity = context::committer_reflog_identity(env, &config)?;
         apply_fixup_rewrite(
@@ -350,6 +354,14 @@ fn fixup_reflog_subject(
     Ok(rev.to_owned())
 }
 
+fn outcome_from_plan_fixup(
+    repo: &grit_lib::repo::Repository,
+    plan: &RewritePlan,
+    dry_run: bool,
+) -> Result<HistoryRewriteOutcome> {
+    outcome_from_plan(repo, plan, "fixup", dry_run)
+}
+
 fn read_message(message: Option<String>, message_file: Option<String>) -> Result<String> {
     match (message, message_file) {
         (Some(_), Some(_)) => bail!("use either -m/--message or --message-file, not both"),
@@ -399,11 +411,9 @@ fn outcome_from_plan(
     let rewritten = plan
         .commits
         .iter()
-        .filter_map(|row| {
-            row.new.map(|new| RewrittenPair {
-                old: row.old.to_hex(),
-                new: new.to_hex(),
-            })
+        .map(|row| RewrittenPair {
+            old: row.old.to_hex(),
+            new: row.new.map(|new| new.to_hex()),
         })
         .collect();
     let refs = plan
