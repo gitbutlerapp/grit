@@ -26,9 +26,10 @@
 //! `/dev/tty`. Interactive prompting is an explicitly opt-in concern an
 //! embedder can layer on top.
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::command_runner::{
     system_command_runner, CommandEnvironment, CommandRunner, CommandSpec, CommandStdin,
@@ -275,7 +276,6 @@ pub trait CredentialProvider {
 pub struct HelperCredentialProvider {
     config: ConfigSet,
     command_runner: Arc<dyn CommandRunner>,
-    current_exe: Option<PathBuf>,
 }
 
 impl HelperCredentialProvider {
@@ -284,7 +284,6 @@ impl HelperCredentialProvider {
         Self {
             config,
             command_runner: system_command_runner(),
-            current_exe: std::env::current_exe().ok(),
         }
     }
 
@@ -310,13 +309,7 @@ impl CredentialProvider for HelperCredentialProvider {
         let target_url = filled.target_url();
         let helper_list = self.helpers(target_url.as_deref());
         for helper in helper_list {
-            let response = invoke_helper(
-                self.command_runner.as_ref(),
-                self.current_exe.as_deref(),
-                &helper,
-                "get",
-                &filled,
-            )?;
+            let response = invoke_helper(self.command_runner.as_ref(), &helper, "get", &filled)?;
             if response.wants_quit() {
                 return Err(Error::Message(format!(
                     "credential helper '{helper}' told us to quit"
@@ -335,13 +328,7 @@ impl CredentialProvider for HelperCredentialProvider {
     fn approve(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
         for helper in self.helpers(target_url.as_deref()) {
-            invoke_helper(
-                self.command_runner.as_ref(),
-                self.current_exe.as_deref(),
-                &helper,
-                "store",
-                cred,
-            )?;
+            invoke_helper(self.command_runner.as_ref(), &helper, "store", cred)?;
         }
         Ok(())
     }
@@ -349,13 +336,7 @@ impl CredentialProvider for HelperCredentialProvider {
     fn reject(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
         for helper in self.helpers(target_url.as_deref()) {
-            invoke_helper(
-                self.command_runner.as_ref(),
-                self.current_exe.as_deref(),
-                &helper,
-                "erase",
-                cred,
-            )?;
+            invoke_helper(self.command_runner.as_ref(), &helper, "erase", cred)?;
         }
         Ok(())
     }
@@ -520,16 +501,33 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
+static PROBED_GIT_EXEC_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+
+fn push_exec_path_candidate(out: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, dir: PathBuf) {
+    if !dir.is_dir() || !seen.insert(dir.clone()) {
+        return;
+    }
+    out.push(dir.clone());
+    // Git for Windows ships Git Credential Manager next to mingw64/bin, sibling to libexec/git-core.
+    if let Some(parent) = dir.parent() {
+        let bin = parent.join("bin");
+        if bin.is_dir() && seen.insert(bin.clone()) {
+            out.push(bin);
+        }
+    }
+}
+
 /// Directories to search for `git-credential-*` the way Git does
 /// (exec-path before `PATH`). Git installs helpers under e.g.
 /// `/usr/libexec/git-core`, which is not on `PATH`.
 fn credential_helper_exec_path_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
+    let mut seen = HashSet::new();
     if let Some(ep) = crate::environment::Environment::empty().var("GIT_EXEC_PATH") {
-        let p = PathBuf::from(ep.trim());
-        if p.is_dir() {
-            v.push(p);
-        }
+        push_exec_path_candidate(&mut v, &mut seen, PathBuf::from(ep.trim()));
+    }
+    for dir in probed_git_exec_path_dirs() {
+        push_exec_path_candidate(&mut v, &mut seen, dir);
     }
     for candidate in [
         "/usr/libexec/git-core",
@@ -539,12 +537,45 @@ fn credential_helper_exec_path_candidates() -> Vec<PathBuf> {
         "/usr/lib/git-core",
         "/usr/local/libexec/git-core",
     ] {
-        let p = PathBuf::from(candidate);
-        if p.is_dir() {
-            v.push(p);
-        }
+        push_exec_path_candidate(&mut v, &mut seen, PathBuf::from(candidate));
     }
     v
+}
+
+fn probed_git_exec_path_dirs() -> Vec<PathBuf> {
+    PROBED_GIT_EXEC_PATHS
+        .get_or_init(|| {
+            let Ok(output) = std::process::Command::new("git")
+                .arg("--exec-path")
+                .output()
+            else {
+                return Vec::new();
+            };
+            if !output.status.success() {
+                return Vec::new();
+            }
+            let dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+            if dir.is_dir() {
+                vec![dir]
+            } else {
+                Vec::new()
+            }
+        })
+        .clone()
+}
+
+fn credential_helper_executable_at(path: &Path) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path.to_path_buf());
+    }
+    #[cfg(windows)]
+    {
+        let with_exe = path.with_extension("exe");
+        if with_exe.is_file() {
+            return Some(with_exe);
+        }
+    }
+    None
 }
 
 /// Resolve a helper program name to an executable path. A bare
@@ -558,8 +589,8 @@ fn resolve_credential_helper_executable(helper_program: &str) -> PathBuf {
         let exe_name = format!("git-credential-{suffix}");
         for ep in credential_helper_exec_path_candidates() {
             let candidate = ep.join(&exe_name);
-            if candidate.is_file() {
-                return candidate;
+            if let Some(resolved) = credential_helper_executable_at(&candidate) {
+                return resolved;
             }
         }
     }
@@ -574,9 +605,8 @@ fn resolve_credential_helper_executable(helper_program: &str) -> PathBuf {
 /// - bare helper name (expanded to `git-credential-<name>`)
 /// - already-expanded binary (`git-credential-...`)
 ///
-/// The built-in `store`/`cache` helpers are re-dispatched through the current
-/// executable's `credential-store`/`credential-cache` subcommands, matching the
-/// CLI's behavior.
+/// Bare helper names such as `store` and `cache` expand to `git-credential-*`
+/// and are resolved via Git's exec-path (and `PATH`) like other helpers.
 ///
 /// The helper is invoked with one action argument (`get`, `store`, `erase`)
 /// after any arguments from the configured helper string. Credential fields are
@@ -584,7 +614,6 @@ fn resolve_credential_helper_executable(helper_program: &str) -> PathBuf {
 /// parsed back into a [`Credential`].
 fn invoke_helper(
     runner: &dyn CommandRunner,
-    current_exe: Option<&Path>,
     helper: &str,
     action: &str,
     creds: &Credential,
@@ -612,33 +641,6 @@ fn invoke_helper(
             cwd: None,
             env: CommandEnvironment::inherit_process_only(),
             stdin: CommandStdin::Pipe(stdin_bytes),
-            stdout: CommandStdio::Pipe,
-            stderr: CommandStdio::Inherit,
-        }
-    } else if matches!(
-        first_word,
-        "store" | "cache" | "git-credential-store" | "git-credential-cache"
-    ) {
-        let subcmd = if first_word.ends_with("store") {
-            "credential-store"
-        } else {
-            "credential-cache"
-        };
-        let exe = current_exe.ok_or_else(|| {
-            Error::Message("resolve current executable for built-in credential helper".into())
-        })?;
-        let mut args: Vec<OsString> = vec![OsString::from(subcmd)];
-        for arg in extra_args {
-            args.push(OsString::from(arg));
-        }
-        args.push(OsString::from(action));
-        CommandSpec {
-            program: exe.to_path_buf(),
-            args,
-            shell: None,
-            cwd: None,
-            env: CommandEnvironment::inherit_process_only(),
-            stdin: CommandStdin::Pipe(stdin_bytes.clone()),
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
         }
@@ -912,7 +914,6 @@ mod tests {
         };
         let response = invoke_helper(
             system_command_runner().as_ref(),
-            None,
             "!echo quit=1; exit 0; :",
             "get",
             &creds,

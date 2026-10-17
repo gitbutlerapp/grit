@@ -524,6 +524,42 @@ fn external_credential_store_helper_full_lifecycle_cross_checked_with_git() {
     assert!(err2.to_string().contains(NON_INTERACTIVE_MESSAGE));
 }
 
+/// Git accepts `credential.helper = store --file=…` (expands to git-credential-store).
+#[test]
+fn store_shorthand_helper_resolves_via_git_exec_path() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    if !init_repo(dir) {
+        eprintln!("SKIP: system git unavailable");
+        return;
+    }
+    if find_git_credential_store().is_none() {
+        eprintln!("SKIP: git-credential-store binary not found");
+        return;
+    }
+
+    let store_file = dir.join("store.txt");
+    let helper_value = format!("store --file={}", store_file.display());
+    let cfg = build_config(dir, &[("credential.helper", &helper_value)]);
+    let provider = HelperCredentialProvider::new(cfg);
+
+    let target = Credential {
+        protocol: Some("https".into()),
+        host: Some("shorthand.example.com".into()),
+        ..Default::default()
+    };
+    let full = Credential {
+        username: Some("bob".into()),
+        password: Some("secret".into()),
+        ..target.clone()
+    };
+
+    provider.approve(&full).expect("store shorthand approve");
+    let filled = provider.fill(&target).expect("store shorthand fill");
+    assert_eq!(filled.username.as_deref(), Some("bob"));
+    assert_eq!(filled.password.as_deref(), Some("secret"));
+}
+
 // ---------------------------------------------------------------------------
 // 5. URL-scoped credential.<url>.helper matching: match / wildcard / reset.
 // ---------------------------------------------------------------------------
