@@ -67,6 +67,24 @@ pub enum HistoryError {
         commit: ObjectId,
     },
 
+    /// A move anchor is not on the first-parent chain of `HEAD`.
+    #[error("commit {commit} is not on the linear first-parent history of HEAD")]
+    MoveTargetNotInHistory {
+        /// Anchor commit that is missing from the chain.
+        commit: ObjectId,
+    },
+
+    /// The move would leave commit order unchanged.
+    #[error("commit {commit} is already at the requested position")]
+    NoOp {
+        /// Commit that would not move.
+        commit: ObjectId,
+    },
+
+    /// Commits are not on the same first-parent chain or a merge sits in the segment.
+    #[error("history move requires a linear first-parent range without merge commits")]
+    NotLinear,
+
     /// A scoped branch tip is not on the ancestry path being rewritten.
     #[error("branch {name} diverged before the rewritten commits and cannot be updated")]
     DivergentBranch {

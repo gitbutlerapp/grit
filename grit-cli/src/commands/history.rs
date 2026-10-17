@@ -7,11 +7,11 @@ use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
-use grit_lib::revwalk::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-    RewritePlan,
-};
 use grit_lib::objects::ObjectId;
+use grit_lib::revwalk::history::{
+    apply_rewrite, move_commit, reword, ApplyOptions, EmptyPolicy, HistoryError, Placement,
+    RefScope, RewriteOptions, RewritePlan,
+};
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -122,6 +122,70 @@ impl MarkdownRender for HistoryRewordOutcome {
         markdown::print_history_reword_outcome(w, self)?;
         Ok(())
     }
+}
+
+/// Reorder `commit` relative to `--before` or `--after` on the first-parent chain of `HEAD`.
+pub fn run_move(
+    commit: &str,
+    before: Option<String>,
+    after: Option<String>,
+    shared: &HistoryRewriteArgs,
+) -> Result<HistoryRewordOutcome> {
+    if before.is_some() && after.is_some() {
+        bail!("use either --before or --after, not both");
+    }
+    let use_before = before.is_some();
+    let anchor = before
+        .or(after)
+        .ok_or_else(|| anyhow::anyhow!("--before or --after is required"))?;
+    let repo = context::discover()?;
+    let commit_oid = resolve_revision_as_commit(&repo, commit)
+        .with_context(|| format!("could not resolve commit '{commit}'"))?;
+    let anchor_oid = resolve_revision_as_commit(&repo, &anchor)
+        .with_context(|| format!("could not resolve anchor commit '{anchor}'"))?;
+    let placement = if use_before {
+        Placement::Before(anchor_oid)
+    } else {
+        Placement::After(anchor_oid)
+    };
+    let env = repo.environment();
+    let config =
+        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+    let committer = context::identity(
+        env,
+        &config,
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        context::wall_clock_now(env),
+    )?;
+    let plan = move_commit(
+        &repo,
+        commit_oid,
+        placement,
+        &RewriteOptions {
+            scope: shared.update_refs.into(),
+            empty: EmptyPolicy::Drop,
+            committer,
+        },
+    )
+    .map_err(map_move_error)?;
+    let short = &commit_oid.to_hex()[..7];
+    let mut outcome = outcome_from_plan(&repo, &plan, shared.dry_run)?;
+    outcome.operation = "move".into();
+    if !shared.dry_run {
+        let identity = context::committer_reflog_identity(env, &config)?;
+        apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity,
+                reflog_message: format!("history move: {short}"),
+            },
+        )
+        .map_err(map_move_error)?;
+    }
+    outcome.dry_run = shared.dry_run;
+    Ok(outcome)
 }
 
 /// Rewrite `commit`'s message to `message` and replay descendants.
@@ -269,13 +333,21 @@ fn head_commit_oid(repo: &grit_lib::repo::Repository) -> Result<ObjectId> {
     }
 }
 
+fn map_move_error(err: HistoryError) -> anyhow::Error {
+    map_history_error_inner(err, "history move")
+}
+
 fn map_history_error(err: HistoryError) -> anyhow::Error {
+    map_history_error_inner(err, "history reword")
+}
+
+fn map_history_error_inner(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
         HistoryError::EmptyMessage => anyhow::anyhow!("commit message cannot be empty"),
         HistoryError::Conflict { mut paths, .. } => {
             paths.sort();
             paths.dedup();
-            json_error::operation_conflict("history reword", paths)
+            json_error::operation_conflict(operation, paths)
         }
         HistoryError::Planning { message } => {
             anyhow::anyhow!("history rewrite planning failed: {message}")
@@ -304,6 +376,17 @@ fn map_history_error(err: HistoryError) -> anyhow::Error {
             let short = &commit.to_hex()[..7];
             anyhow::anyhow!("{short} is not reachable from HEAD for this rewrite scope")
         }
+        HistoryError::MoveTargetNotInHistory { commit } => {
+            let short = &commit.to_hex()[..7];
+            anyhow::anyhow!("{short} is not on the linear first-parent history of HEAD")
+        }
+        HistoryError::NoOp { commit } => {
+            let short = &commit.to_hex()[..7];
+            anyhow::anyhow!("{short} is already at the requested position")
+        }
+        HistoryError::NotLinear => anyhow::anyhow!(
+            "history move requires a linear first-parent range without merge commits"
+        ),
         HistoryError::DivergentBranch { name } => anyhow::anyhow!(
             "branch {name} diverged before the rewritten commits and cannot be updated"
         ),

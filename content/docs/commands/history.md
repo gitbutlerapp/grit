@@ -8,9 +8,10 @@ order: 6
 ## Synopsis
 
 ```text
+grit history move <commit> (--before <anchor> | --after <anchor>)
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
-grit history reword <commit> [--dry-run] [--update-refs=(branches|head)]
+grit history move|reword … [--dry-run] [--update-refs=(branches|head)]
 ```
 
 ## Description
@@ -22,6 +23,12 @@ Shared behavior for every subcommand:
 - **Conflicts abort** — if replaying a descendant would conflict, nothing is applied (planned objects may already exist in the ODB from planning).
 - **`--dry-run`** — print which refs would move; refs, the index, and the worktree stay unchanged. New commit objects are still written during planning, matching Git’s `git history --dry-run` model.
 - **`--update-refs`** — `branches` (default) updates every local branch whose tip descends from the edited commit; `head` updates only the commit `HEAD` points at.
+
+### `move`
+
+Reorder one commit on the **first-parent chain** of `HEAD` (no merge commits in the affected range). Grit replays the segment in the new order with the same cherry-pick semantics as other history helpers; branches pointing at commits in the segment move to the rewritten tips.
+
+Provide exactly one of `--before` or `--after` naming another commit on that chain. Moving a commit to its current position is an error.
 
 ### `reword`
 
@@ -35,13 +42,24 @@ If any descendant commit is a **merge**, planning refuses with an error (merge r
 
 | Option | Description |
 | --- | --- |
-| `<commit>` | Commit to reword (revision spec). |
+| `<commit>` | Commit to move or reword (revision spec). |
+| `--before` | Place `<commit>` immediately before this revision (`move` only). |
+| `--after` | Place `<commit>` immediately after this revision (`move` only). |
 | `-m`, `--message` | New commit message (conflicts with `--message-file`). |
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |
 
 ## Examples
+
+Move a commit before its parent on a linear branch:
+
+```console
+$ grit history move HEAD~1 --before HEAD~3
+Rewrote 3 commit(s)
+  commit a1b2c3d → d4e5f60
+  refs/heads/main f6a7b89 → c0ffee0
+```
 
 Reword the parent of `HEAD` on a linear branch:
 
@@ -63,13 +81,13 @@ Dry run — refs would change:
 
 ## JSON output
 
-Schema: [v1](/schemas/history.reword/v1.json)
+Schemas: [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json)
 
-Pass `--json` on `grit history reword`:
+Pass `--json` on `grit history move` or `grit history reword`:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | Always `"reword"`. |
+| `operation` | string | `"move"` or `"reword"`. |
 | `rewritten` | array | `{old,new}` full hex OIDs for each rewritten commit. |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |

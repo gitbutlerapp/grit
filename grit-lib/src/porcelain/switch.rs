@@ -590,14 +590,13 @@ pub(crate) fn verify_tree_transition_allow_local(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> std::result::Result<(), TreeTransitionVerifyError> {
-    let mut prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree).map_err(
-        |err| match err {
+    let mut prepared =
+        prepare_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|err| match err {
             TreeTransitionPrepareError::OverwritePaths(paths) => {
                 TreeTransitionVerifyError::WouldOverwrite(paths)
             }
             TreeTransitionPrepareError::Failed(e) => TreeTransitionVerifyError::Failed(e),
-        },
-    )?;
+        })?;
     let tree_changes = prepared.plan.tree_changes.clone();
     let untracked =
         crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes(

@@ -14,6 +14,8 @@ The [`history`](rustdoc:grit_lib::revwalk::history) module supports stateless hi
 
 For a single message change, [`reword`](rustdoc:grit_lib::revwalk::history::reword) builds the [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) and runs [`plan_rewrite`](rustdoc:grit_lib::revwalk::history::plan_rewrite) after [`normalize_rewrite_message`](rustdoc:grit_lib::revwalk::history::normalize_rewrite_message) (stripspace, trailing newline, reject empty).
 
+To reorder one commit on the linear first-parent chain of `HEAD`, [`move_commit`](rustdoc:grit_lib::revwalk::history::move_commit) takes a [`Placement`](rustdoc:grit_lib::revwalk::history::Placement) (`Before` / `After` another commit), replays the affected segment in the new order, and returns a [`RewritePlan`](rustdoc:grit_lib::revwalk::history::RewritePlan). Commits must sit on the same first-parent chain with no merge commits in the segment; conflicts and no-op moves surface as [`HistoryError`](rustdoc:grit_lib::revwalk::history::HistoryError) variants.
+
 ## Apply options and result
 
 [`ApplyOptions`](rustdoc:grit_lib::revwalk::history::ApplyOptions) supplies the reflog identity and message written for every ref update in the batch.

@@ -4,11 +4,11 @@
 
 mod support;
 
+use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     normalize_rewrite_message, reword, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
 };
-use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::repo::Repository;
 
 use support::{build_commit_dag, git, git_fsck_strict, HistoryRepo};
 

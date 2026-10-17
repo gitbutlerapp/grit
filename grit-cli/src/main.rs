@@ -187,6 +187,19 @@ enum StashAction {
 /// Subcommands of `grit history`.
 #[derive(Debug, Subcommand)]
 enum HistoryAction {
+    /// Reorder a commit on the first-parent chain of `HEAD`.
+    Move {
+        /// Commit to move (revision spec).
+        commit: String,
+        /// Place the commit immediately before this revision.
+        #[arg(long = "before", conflicts_with = "after")]
+        before: Option<String>,
+        /// Place the commit immediately after this revision.
+        #[arg(long = "after", conflicts_with = "before")]
+        after: Option<String>,
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
     /// Replace a commit message and replay descendants onto the new history.
     Reword {
         /// Commit to reword (revision spec).
@@ -1283,6 +1296,16 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts, ctx),
         Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts, ctx),
         Command::History { action } => match action {
+            HistoryAction::Move {
+                commit,
+                before,
+                after,
+                shared,
+            } => emit(
+                &commands::history::run_move(&commit, before, after, &shared)?,
+                opts,
+                ctx,
+            ),
             HistoryAction::Reword {
                 commit,
                 message,

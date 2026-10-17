@@ -250,6 +250,171 @@ pub fn plan_rewrite(
     })
 }
 
+/// Replay a contiguous first-parent segment in a custom order (each commit onto the previous).
+///
+/// `oldest` must be the first commit in the segment on the original first-parent chain;
+/// `replay_order` lists the same commits in the desired new order.
+///
+/// # Errors
+///
+/// Same as [`plan_rewrite`], including [`HistoryError::MergeCommitInReplay`] when the segment
+/// contains a merge commit.
+pub fn plan_replay_linear_segment(
+    repo: &Repository,
+    oldest: ObjectId,
+    replay_order: &[ObjectId],
+    opts: &RewriteOptions,
+) -> Result<RewritePlan, HistoryError> {
+    if replay_order.is_empty() {
+        return Ok(RewritePlan {
+            commits: Vec::new(),
+            ref_updates: Vec::new(),
+            head: HeadEffect::default(),
+        });
+    }
+
+    let scoped_refs = collect_scoped_refs(repo, opts, oldest)?;
+    ensure_branches_not_checked_out_elsewhere(repo, &scoped_refs)?;
+
+    let parents_of_oldest = commit_parents(repo, oldest)?;
+    let tips: Vec<String> = scoped_refs
+        .iter()
+        .map(|(_, oid)| oid.to_hex())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let negative: Vec<String> = parents_of_oldest.iter().map(ObjectId::to_hex).collect();
+
+    let walk_opts = RevListOptions {
+        ancestry_path: true,
+        ancestry_path_bottoms: vec![oldest],
+        ordering: OrderingMode::Topo,
+        reverse: true,
+        use_commit_graph: true,
+        full_history: true,
+        ..RevListOptions::default()
+    };
+
+    let walk = rev_list(repo, &tips, &negative, &walk_opts).map_err(library_err)?;
+    let mut commits_to_replay: Vec<ObjectId> = walk.commits;
+    if !commits_to_replay.contains(&oldest) {
+        commits_to_replay.insert(0, oldest);
+    }
+
+    if replay_order.len() != commits_to_replay.len() {
+        return Err(HistoryError::Planning {
+            message: "replay order length does not match rewrite segment".into(),
+        });
+    }
+    let expected: HashSet<ObjectId> = commits_to_replay.iter().copied().collect();
+    if replay_order.iter().copied().collect::<HashSet<_>>() != expected {
+        return Err(HistoryError::Planning {
+            message: "replay order must be a permutation of the rewrite segment".into(),
+        });
+    }
+
+    if matches!(opts.scope, RefScope::Head) {
+        let head_oid = head_oid(repo)?;
+        if !is_ancestor(repo, oldest, head_oid).map_err(library_err)? {
+            return Err(HistoryError::NotInHistory { commit: oldest });
+        }
+    }
+
+    for (name, tip) in &scoped_refs {
+        if is_ancestor(repo, oldest, *tip).map_err(library_err)? && !commits_to_replay.contains(tip)
+        {
+            return Err(HistoryError::DivergentBranch { name: name.clone() });
+        }
+    }
+
+    for &oid in &commits_to_replay {
+        let old = load_commit(repo, oid)?;
+        if old.parents.len() > 1 {
+            return Err(HistoryError::MergeCommitInReplay { commit: oid });
+        }
+    }
+
+    let mut mapping: HashMap<ObjectId, ObjectId> = HashMap::new();
+    let mut parent: Option<ObjectId> = parents_of_oldest.first().copied();
+
+    for &old_oid in replay_order {
+        let old = load_commit(repo, old_oid)?;
+        let parent_list: Vec<ObjectId> = parent.into_iter().collect();
+        let new_oid = replay_edited_commit(
+            repo,
+            &old,
+            old_oid,
+            &parent_list,
+            &old.author,
+            &old.committer,
+            &old.message,
+            opts,
+        )?;
+        mapping.insert(old_oid, new_oid);
+        parent = Some(new_oid);
+    }
+
+    let rewritten = commits_to_replay
+        .iter()
+        .map(|&old| RewrittenCommit {
+            old,
+            new: Some(mapping.get(&old).copied().unwrap_or(old)),
+        })
+        .collect();
+
+    let segment_tip_old = *commits_to_replay.last().ok_or(HistoryError::Planning {
+        message: "empty rewrite segment".into(),
+    })?;
+    let replay_tip = *replay_order.last().ok_or(HistoryError::Planning {
+        message: "empty replay order".into(),
+    })?;
+    let segment_tip_new = mapping.get(&replay_tip).copied().ok_or(
+        HistoryError::Planning {
+            message: "replay tip missing from mapping".into(),
+        },
+    )?;
+    let ref_updates =
+        plan_ref_updates_reordered(&scoped_refs, &mapping, segment_tip_old, segment_tip_new);
+    let mut head_mapping = mapping.clone();
+    if let Ok(head_oid) = head_oid(repo) {
+        if head_oid == segment_tip_old {
+            head_mapping.insert(segment_tip_old, segment_tip_new);
+        }
+    }
+    let head = head_effect(repo, &head_mapping)?;
+
+    Ok(RewritePlan {
+        commits: rewritten,
+        ref_updates,
+        head,
+    })
+}
+
+fn plan_ref_updates_reordered(
+    scoped_refs: &[(String, ObjectId)],
+    mapping: &HashMap<ObjectId, ObjectId>,
+    segment_tip_old: ObjectId,
+    segment_tip_new: ObjectId,
+) -> Vec<PlannedRefUpdate> {
+    let mut updates = Vec::new();
+    for (name, old_tip) in scoped_refs {
+        let new_tip = if *old_tip == segment_tip_old {
+            segment_tip_new
+        } else {
+            resolve_mapped_tip(*old_tip, mapping)
+        };
+        if new_tip != *old_tip {
+            updates.push(PlannedRefUpdate {
+                name: name.clone(),
+                old: *old_tip,
+                new: new_tip,
+            });
+        }
+    }
+    updates.sort_by(|a, b| a.name.cmp(&b.name));
+    updates
+}
+
 fn library_err(err: Error) -> HistoryError {
     if let Error::History(inner) = err {
         return inner;
@@ -570,6 +735,7 @@ fn write_rewritten_commit(
     message: &str,
 ) -> Result<ObjectId, HistoryError> {
     let author_unchanged = author == template.author;
+    let committer_unchanged = committer == template.committer;
     let message_unchanged = message == template.message;
     let encoding = if message_unchanged {
         template.encoding.clone()
@@ -581,7 +747,13 @@ fn write_rewritten_commit(
     } else {
         None
     };
-    let (author_raw, committer_raw) = if author_unchanged && !template.author_raw.is_empty() {
+    let (author_raw, committer_raw) = if author_unchanged
+        && committer_unchanged
+        && !template.author_raw.is_empty()
+        && !template.committer_raw.is_empty()
+    {
+        (template.author_raw.clone(), template.committer_raw.clone())
+    } else if author_unchanged && !template.author_raw.is_empty() {
         let (_, committer_raw) = identity_raw_for_serialized_commit(&encoding, author, committer);
         (template.author_raw.clone(), committer_raw)
     } else {
