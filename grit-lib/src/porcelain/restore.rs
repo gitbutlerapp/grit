@@ -540,7 +540,7 @@ fn restore_worktree_blob_from_index(
     }
     let object = repo.odb().read(&oid)?;
     let worktree_bytes =
-        worktree_bytes_from_index_blob(repo, rules, path, mode, &object.data, &oid, None)?;
+        worktree_bytes_from_index_blob(repo, rules, path, mode, &object.data, &oid, None, None)?;
     let Some(bytes) = worktree_bytes else {
         return Err(Error::Message(format!(
             "filter delayed checkout for '{path}' is not supported by grit restore"
@@ -581,6 +581,7 @@ fn restore_worktree_entry(
         entry.mode,
         &object.data,
         &entry.oid,
+        None,
         None,
     )?;
     let Some(bytes) = worktree_bytes else {

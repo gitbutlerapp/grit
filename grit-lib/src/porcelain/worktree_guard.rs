@@ -156,6 +156,16 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_mtime_for_diff(index, index_file_mtime(&index_path));
     let stat_policy = StatMatchPolicy::from_config(repo.config().ok().as_deref());
+    let added_tree_paths: HashSet<String> = tree_changes
+        .iter()
+        .filter(|change| change.status == DiffStatus::Added)
+        .filter_map(|change| change.new_path.clone())
+        .collect();
+    let scheduled_delete_paths: HashSet<String> = tree_changes
+        .iter()
+        .filter(|change| change.status == DiffStatus::Deleted)
+        .filter_map(|change| change.old_path.clone())
+        .collect();
     let paths_for_stat: BTreeSet<String> = {
         let base: BTreeSet<String> = skip_worktree_stat_paths.map_or_else(
             || path_filter.as_ref().clone(),
@@ -169,23 +179,19 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         );
         base.into_iter()
             .filter(|path| {
-                index.get(path.as_bytes(), 0).is_some()
-                    || tree_changes.iter().any(|change| {
-                        change.status != DiffStatus::Deleted
-                            && change.new_path.as_deref() == Some(path.as_str())
-                    })
+                index.get(path.as_bytes(), 0).is_some() || added_tree_paths.contains(path)
             })
             .filter(|path| {
                 !delete_path_trusted_without_worktree_stat(
                     index,
                     &head_by_path,
-                    tree_changes,
+                    &scheduled_delete_paths,
                     path,
                     index_mtime,
                     stat_policy,
                 )
             })
-            .filter(|path| !added_tree_path_missing_on_disk(work_tree, tree_changes, path))
+            .filter(|path| !added_tree_path_missing_on_disk(work_tree, &added_tree_paths, path))
             .collect()
     };
     if staged.is_empty()
@@ -455,10 +461,8 @@ fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String>
     paths
 }
 
-fn path_is_tree_scheduled_delete(tree_changes: &[DiffEntry], path: &str) -> bool {
-    tree_changes.iter().any(|change| {
-        change.status == DiffStatus::Deleted && change.old_path.as_deref() == Some(path)
-    })
+fn path_is_tree_scheduled_delete(scheduled_delete_paths: &HashSet<String>, path: &str) -> bool {
+    scheduled_delete_paths.contains(path)
 }
 
 /// Delete-only tree-diff paths whose index already matches HEAD and are not racy need no stat
@@ -466,13 +470,10 @@ fn path_is_tree_scheduled_delete(tree_changes: &[DiffEntry], path: &str) -> bool
 /// Added tree-diff paths with no worktree file yet cannot have local edits to preserve.
 fn added_tree_path_missing_on_disk(
     work_tree: &Path,
-    tree_changes: &[DiffEntry],
+    added_tree_paths: &HashSet<String>,
     path: &str,
 ) -> bool {
-    let is_added = tree_changes.iter().any(|change| {
-        change.status == DiffStatus::Added && change.new_path.as_deref() == Some(path)
-    });
-    if !is_added {
+    if !added_tree_paths.contains(path) {
         return false;
     }
     !work_tree.join(path).exists()
@@ -481,12 +482,12 @@ fn added_tree_path_missing_on_disk(
 fn delete_path_trusted_without_worktree_stat(
     index: &Index,
     head_by_path: &HashMap<String, HeadTreeSide>,
-    tree_changes: &[DiffEntry],
+    scheduled_delete_paths: &HashSet<String>,
     path: &str,
     index_mtime: Option<(u32, u32)>,
     stat_policy: StatMatchPolicy,
 ) -> bool {
-    if !path_is_tree_scheduled_delete(tree_changes, path) {
+    if !path_is_tree_scheduled_delete(scheduled_delete_paths, path) {
         return false;
     }
     let HeadTreeSide::Present { oid, mode } = head_by_path
@@ -726,6 +727,10 @@ fn scan_wholesale_delete_root(
             }
             rel_buf.push_str(&name);
             let rel = rel_buf.as_str();
+            if index_aligned && delete_path_scheduled_for_removal(rel, delete_paths, ignorecase) {
+                rel_buf.truncate(rel_start);
+                continue;
+            }
             let file_type = match entry.file_type() {
                 Ok(t) => t,
                 Err(_) => {

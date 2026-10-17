@@ -143,6 +143,7 @@ fn checkout_populated_tree(
                 mode,
                 &object.data,
                 &entry.oid,
+                None,
                 Some(&mut delayed),
             )?;
             let Some(worktree_bytes) = worktree_bytes else {
@@ -386,6 +387,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
             mode,
             &object.data,
             &te.oid,
+            None,
             Some(&mut delayed),
         )?;
         let Some(worktree_bytes) = worktree_bytes else {
@@ -1842,7 +1844,7 @@ pub(crate) fn smudge_bytes_for_worktree_path(
     if mode == MODE_SYMLINK {
         return Ok(blob.to_vec());
     }
-    match worktree_bytes_from_index_blob(repo, rules, rel_path, mode, blob, oid, None)? {
+    match worktree_bytes_from_index_blob(repo, rules, rel_path, mode, blob, oid, None, None)? {
         Some(bytes) => Ok(bytes),
         None => Err(Error::PathError(format!(
             "delayed filter checkout is not supported for '{rel_path}'"
@@ -1872,6 +1874,7 @@ pub(crate) fn write_smudged_blob_to_worktree(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn worktree_bytes_from_index_blob(
     repo: &Repository,
     rules: &WorktreeRules,
@@ -1879,13 +1882,20 @@ pub(crate) fn worktree_bytes_from_index_blob(
     mode: u32,
     blob: &[u8],
     oid: &ObjectId,
+    smudge_meta: Option<&crate::filter_process::FilterSmudgeMeta>,
     delayed_checkout: Option<&mut DelayedProcessCheckout>,
 ) -> Result<Option<Vec<u8>>> {
     if mode == MODE_SYMLINK {
         return Ok(Some(blob.to_vec()));
     }
     let oid_hex = oid.to_string();
-    let smudge_meta = crate::filter_process::smudge_meta_for_checkout(repo, &oid_hex);
+    let smudge_meta_owned;
+    let smudge_meta = if let Some(meta) = smudge_meta {
+        meta
+    } else {
+        smudge_meta_owned = crate::filter_process::smudge_meta_for_checkout(repo, &oid_hex);
+        &smudge_meta_owned
+    };
     let conv = rules.conversion();
     let file_attrs = rules.file_attrs(rel_path, false);
     crlf::convert_to_worktree(
@@ -1894,7 +1904,7 @@ pub(crate) fn worktree_bytes_from_index_blob(
         conv,
         &file_attrs,
         Some(&oid_hex),
-        Some(&smudge_meta),
+        Some(smudge_meta),
         delayed_checkout,
         Some(rules.filter_process()),
     )

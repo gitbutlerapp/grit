@@ -707,14 +707,28 @@ fn checkout_prepared_tree_transition(
         &[][..]
     };
     ensure_no_untracked_overwrite(overwrite_untracked, &prepared.plan.tree_changes)?;
-    let tree_changes: Vec<DiffEntry> = prepared
+    let attribute_tree_changes: Vec<DiffEntry> = prepared
         .plan
         .tree_changes
-        .into_iter()
+        .iter()
         .filter(|change| {
             path_from_diff(change)
                 .is_none_or(|path| !prepared.preserve_worktree_paths.contains(path))
         })
+        .cloned()
+        .collect();
+    let tree_changes: Vec<DiffEntry> = attribute_tree_changes
+        .iter()
+        .filter(|change| {
+            change.status != DiffStatus::Deleted
+                || change.old_path.as_ref().is_none_or(|path| {
+                    !crate::porcelain::checkout::path_under_wholesale_directory(
+                        path,
+                        &prepared.preverified_wholesale_dirs,
+                    )
+                })
+        })
+        .cloned()
         .collect();
     let checkout_parallel_threshold = (tree_changes.len() >= BULK_SWITCH_PARALLEL_MIN).then_some(0);
     checkout_tree_changes_with_index_opts(
@@ -729,7 +743,7 @@ fn checkout_prepared_tree_transition(
             wholesale_safety_precomputed: prepared.wholesale_safety_precomputed,
             skip_bulk_checkout_fast_path: false,
         },
-        Some(&tree_changes),
+        Some(&attribute_tree_changes),
     )
 }
 

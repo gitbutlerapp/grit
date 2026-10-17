@@ -2098,6 +2098,7 @@ impl Index {
 
         let mut invalidated_paths: Vec<Vec<u8>> = Vec::new();
         let mut kept = Vec::with_capacity(self.entries.len());
+        let skip_per_path_extension_inval = self.defer_untracked_cache_invalidation;
 
         if self.entries_sorted {
             let mut path_idx = 0usize;
@@ -2113,20 +2114,30 @@ impl Index {
                     if entry.stage() != 0 {
                         resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
                     }
-                    if invalidated_paths.last().is_none_or(|p| p.as_slice() != ep) {
+                    if !skip_per_path_extension_inval
+                        && invalidated_paths.last().is_none_or(|p| p.as_slice() != ep)
+                    {
                         invalidated_paths.push(entry.path.clone());
                     }
                 } else {
                     kept.push(entry);
                 }
             }
-            let repl_for_inval = replacements
-                .iter()
-                .filter(|e| e.stage() == 0)
-                .map(|e| e.path.clone())
-                .collect::<Vec<_>>();
+            let repl_for_inval: Vec<Vec<u8>> = if skip_per_path_extension_inval {
+                Vec::new()
+            } else {
+                replacements
+                    .iter()
+                    .filter(|e| e.stage() == 0)
+                    .map(|e| e.path.clone())
+                    .collect()
+            };
             self.entries = merge_sorted_index_entries(kept, replacements);
             self.entries_sorted = true;
+            if skip_per_path_extension_inval {
+                self.touch_fsmonitor_after_entry_change();
+                return;
+            }
             const BULK_INDEX_EXTENSION_INVALIDATE_MIN: usize = 64;
             let mut invalidations = dir_prefixes.len();
             for path in &invalidated_paths {

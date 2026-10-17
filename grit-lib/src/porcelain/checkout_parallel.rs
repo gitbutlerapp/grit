@@ -302,6 +302,7 @@ fn materialize_write_job_serial(
         job.mode,
         &object.data,
         &job.oid,
+        Some(&job.smudge_meta),
         Some(delayed),
     )?;
     let Some(worktree_bytes) = worktree_bytes else {
