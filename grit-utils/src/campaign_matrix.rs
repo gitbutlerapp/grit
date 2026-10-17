@@ -78,6 +78,39 @@ fn run_matrix_scenario(
     }
 }
 
+fn push_blame_scenario(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    out: &mut Vec<ScenarioResult>,
+    scenario: Scenario,
+) -> Result<()> {
+    let grit_args: Vec<&str> = scenario.grit_argv.iter().map(String::as_str).collect();
+    if let Some(failure) = probe_grit_cli(grit, &fixture.worktree, &grit_args) {
+        out.push(run_scenario_git_only_with_grit_failure(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &scenario,
+            &fixture.worktree,
+            failure,
+        )?);
+    } else {
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &scenario,
+            &fixture.worktree,
+        )?);
+    }
+    Ok(())
+}
+
 /// Run the core CLI matrix for `fixture`.
 #[allow(clippy::too_many_arguments)]
 pub fn run_fixture_cli_matrix(
@@ -301,12 +334,14 @@ pub fn run_fixture_cli_matrix(
 
     if !smoke {
         let blame_path = blame_target_path(git, &fixture.worktree)?;
-        out.push(run_scenario(
+        push_blame_scenario(
             hyperfine,
             git,
             grit,
             cfg,
-            &Scenario {
+            fixture,
+            &mut out,
+            Scenario {
                 id: sid(fixture.id, "blame"),
                 group: "blame".into(),
                 fixture: fixture.label.clone(),
@@ -318,8 +353,7 @@ pub fn run_fixture_cli_matrix(
                 grit_via_shell: false,
                 git_via_shell: false,
             },
-            &fixture.worktree,
-        )?);
+        )?;
     }
 
     if !smoke && fixture.id == "git-dot-git" {
@@ -340,12 +374,14 @@ pub fn run_fixture_cli_matrix(
             }
             grit_argv.push(path.into());
             git_argv.push(path.into());
-            out.push(run_scenario(
+            push_blame_scenario(
                 hyperfine,
                 git,
                 grit,
                 cfg,
-                &Scenario {
+                fixture,
+                &mut out,
+                Scenario {
                     id: sid(fixture.id, name),
                     group: "blame".into(),
                     fixture: fixture.label.clone(),
@@ -360,8 +396,7 @@ pub fn run_fixture_cli_matrix(
                     grit_via_shell: false,
                     git_via_shell: false,
                 },
-                &fixture.worktree,
-            )?);
+            )?;
         }
     }
 

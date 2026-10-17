@@ -28,7 +28,8 @@ pub fn list_tracked_files(git: &Path, repo: &Path) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
-fn is_safe_to_modify(rel: &Path) -> bool {
+/// Paths safe to touch in campaign prepare hooks (skip gitlinks / `.gitmodules`).
+pub(crate) fn is_safe_to_modify(rel: &Path) -> bool {
     let s = rel.to_string_lossy();
     if s == ".gitmodules" || s.starts_with(".git/") {
         return false;

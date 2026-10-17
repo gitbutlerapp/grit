@@ -77,8 +77,42 @@ fn prepare_gc_fixture(git: &Path, bare: &Path) -> Result<PathBuf> {
     Ok(work)
 }
 
+fn run_git_in_repo(git: &Path, repo: &Path, args: &[&str]) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(args).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 /// Hyperfine prepare hook: restore the deep-history worktree with fresh loose objects.
 pub fn run_prepare_maintenance(git: &Path) -> Result<()> {
+    if let Ok(campaign_cwd) = std::env::var("GRIT_BENCH_CAMPAIGN_CWD") {
+        let worktree = PathBuf::from(campaign_cwd);
+        run_git_in_repo(git, &worktree, &["reset", "--hard", "HEAD"])?;
+        run_git_in_repo(
+            git,
+            &worktree,
+            &[
+                "clean",
+                "-fd",
+                "-q",
+                "-e",
+                ".grit-bench-hot-path.json",
+                "-e",
+                ".grit-bench-worktree-ready",
+            ],
+        )?;
+        seed_loose_objects(git, &worktree)?;
+        return Ok(());
+    }
     let bare = std::env::var("GRIT_BENCH_MAINTENANCE_BARE")
         .map(PathBuf::from)
         .context("GRIT_BENCH_MAINTENANCE_BARE must be set for prepare-maintenance")?;
