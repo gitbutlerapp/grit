@@ -380,6 +380,75 @@ pub fn run_scenario_prepared(
     })
 }
 
+/// Like [`run_scenario_prepared`], but records grit hyperfine failures instead of aborting.
+pub fn run_scenario_prepared_allow_grit_failure(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    scenario: &Scenario,
+    repo: &Path,
+    prepare: &str,
+) -> Result<ScenarioResult> {
+    let git_prog = if scenario.git_via_shell {
+        PathBuf::from("/bin/sh")
+    } else {
+        git.to_path_buf()
+    };
+    let grit_prog = if scenario.grit_via_shell {
+        PathBuf::from("/bin/sh")
+    } else {
+        grit.to_path_buf()
+    };
+
+    let git_stats = bench_tool(
+        hyperfine,
+        &git_prog,
+        &scenario.git_argv,
+        repo,
+        cfg,
+        Some(prepare),
+        "git",
+    )?;
+
+    let grit_outcome = bench_tool(
+        hyperfine,
+        &grit_prog,
+        &scenario.grit_argv,
+        repo,
+        cfg,
+        Some(prepare),
+        "grit",
+    );
+
+    let (grit_stats, ratio, grit_failure) = match grit_outcome {
+        Ok(stats) => {
+            let ratio = median_ratio(git_stats.median_ms, stats.median_ms);
+            (stats, ratio, None)
+        }
+        Err(err) => (
+            failed_timing_stats(),
+            0.0,
+            Some(BenchFailure {
+                kind: "command_failed".into(),
+                message: err.to_string(),
+            }),
+        ),
+    };
+
+    Ok(ScenarioResult {
+        id: scenario.id.clone(),
+        group: scenario.group.clone(),
+        fixture: scenario.fixture.clone(),
+        description: scenario.description.clone(),
+        driver: scenario.driver.into(),
+        git: git_stats,
+        grit: grit_stats,
+        ratio,
+        grit_failure,
+    })
+}
+
 /// Status benchmarks (dirty + clean) for each file count.
 pub fn run_status_suite(
     hyperfine: &Path,
