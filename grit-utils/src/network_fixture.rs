@@ -502,6 +502,14 @@ pub fn ensure_campaign_bare_network_meta(
         default_branch,
     };
     fs::write(meta_path(bare), serde_json::to_string_pretty(&meta)?)?;
+    if tag_only {
+        let branch_ref = format!("refs/heads/{}", meta.default_branch);
+        run_git(
+            git,
+            Some(bare),
+            &["update-ref", &branch_ref, &meta.fetch_base_oid],
+        )?;
+    }
     Ok(meta)
 }
 
