@@ -307,11 +307,24 @@ fn apply_failure_after_ref_update(
     }
 }
 
-/// Pre-checkout state for one path in the forward tree transition (missing = absent).
+/// Worktree presence captured before a tree transition checkout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorktreePathKind {
+    /// Path did not exist in the worktree.
+    Absent,
+    /// Path was a directory (possibly implicit via tracked children).
+    Directory,
+    /// Path was a regular file (`bytes` holds contents).
+    Regular,
+    /// Path was a symlink (`bytes` holds the link target).
+    Symlink,
+}
+
+/// Pre-checkout state for one path in the forward tree transition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorktreePathSnapshot {
+    kind: WorktreePathKind,
     bytes: Option<Vec<u8>>,
-    symlink: bool,
     #[cfg(unix)]
     mode: u32,
 }
@@ -354,8 +367,8 @@ fn read_worktree_path_snapshot(work_tree: &Path, path: &str) -> WorktreePathSnap
         Ok(m) => m,
         Err(_) => {
             return WorktreePathSnapshot {
+                kind: WorktreePathKind::Absent,
                 bytes: None,
-                symlink: false,
                 #[cfg(unix)]
                 mode: 0o644,
             };
@@ -364,8 +377,8 @@ fn read_worktree_path_snapshot(work_tree: &Path, path: &str) -> WorktreePathSnap
     if meta.file_type().is_symlink() {
         let target = fs::read_link(&abs).ok();
         return WorktreePathSnapshot {
+            kind: WorktreePathKind::Symlink,
             bytes: target.map(|p| p.as_os_str().as_encoded_bytes().to_vec()),
-            symlink: true,
             #[cfg(unix)]
             mode: 0,
         };
@@ -376,24 +389,24 @@ fn read_worktree_path_snapshot(work_tree: &Path, path: &str) -> WorktreePathSnap
             use std::os::unix::fs::PermissionsExt;
             let mode = meta.permissions().mode() & 0o7777;
             return WorktreePathSnapshot {
+                kind: WorktreePathKind::Regular,
                 bytes: fs::read(&abs).ok(),
-                symlink: false,
                 mode,
             };
         }
         #[cfg(not(unix))]
         {
             return WorktreePathSnapshot {
+                kind: WorktreePathKind::Regular,
                 bytes: fs::read(&abs).ok(),
-                symlink: false,
             };
         }
     }
     WorktreePathSnapshot {
+        kind: WorktreePathKind::Directory,
         bytes: None,
-        symlink: false,
         #[cfg(unix)]
-        mode: 0o644,
+        mode: 0o755,
     }
 }
 
@@ -413,8 +426,21 @@ fn restore_worktree_after_failed_apply(
     let Some(snapshot) = worktree_snapshot else {
         return Ok(());
     };
-    for (path, saved) in snapshot {
-        let abs = work_tree.join(path);
+    let mut paths: Vec<&String> = snapshot.keys().collect();
+    paths.sort_by(|a, b| path_depth_cmp(a, b).reverse());
+    for path in &paths {
+        let saved = &snapshot[*path];
+        let abs = work_tree.join(path.as_str());
+        clear_worktree_path_before_restore(&abs, saved).map_err(|e| {
+            HistoryError::WorktreeApply {
+                message: format!("failed to clear '{path}' before restore: {e}"),
+            }
+        })?;
+    }
+    paths.sort_by(|a, b| path_depth_cmp(a, b));
+    for path in &paths {
+        let saved = &snapshot[*path];
+        let abs = work_tree.join(path.as_str());
         restore_worktree_path(&abs, saved).map_err(|e| HistoryError::WorktreeApply {
             message: format!("failed to restore '{path}': {e}"),
         })?;
@@ -422,53 +448,92 @@ fn restore_worktree_after_failed_apply(
     Ok(())
 }
 
-fn restore_worktree_path(abs: &Path, saved: &WorktreePathSnapshot) -> std::io::Result<()> {
-    if saved.bytes.is_none() {
-        if abs.is_symlink() || abs.is_file() {
-            fs::remove_file(abs)?;
-        }
-        return Ok(());
-    }
-    let Some(bytes) = saved.bytes.as_ref() else {
-        return Ok(());
-    };
-    if saved.symlink {
-        let _ = fs::remove_file(abs);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            let target = String::from_utf8_lossy(bytes);
-            if let Some(parent) = abs.parent() {
-                fs::create_dir_all(parent)?;
+fn path_depth_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let depth = |p: &str| p.split('/').filter(|s| !s.is_empty()).count();
+    depth(a).cmp(&depth(b)).then_with(|| a.cmp(b))
+}
+
+fn clear_worktree_path_before_restore(
+    abs: &Path,
+    saved: &WorktreePathSnapshot,
+) -> std::io::Result<()> {
+    match saved.kind {
+        WorktreePathKind::Absent => {
+            if abs.is_symlink() || abs.is_file() {
+                fs::remove_file(abs)?;
+            } else if abs.is_dir() {
+                fs::remove_dir_all(abs)?;
             }
-            symlink(target.as_ref(), abs)?;
         }
-        #[cfg(not(unix))]
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "symlink restore requires unix",
-            ));
+        WorktreePathKind::Directory => {
+            if abs.is_symlink() || abs.is_file() {
+                fs::remove_file(abs)?;
+            }
         }
-        return Ok(());
-    }
-    if abs.is_symlink() || abs.is_file() {
-        fs::remove_file(abs)?;
-    }
-    if let Some(parent) = abs.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(abs, bytes)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if saved.mode != 0 {
-            let mut perms = fs::metadata(abs)?.permissions();
-            perms.set_mode(saved.mode);
-            fs::set_permissions(abs, perms)?;
+        WorktreePathKind::Regular | WorktreePathKind::Symlink => {
+            if abs.is_dir() {
+                fs::remove_dir_all(abs)?;
+            }
         }
     }
     Ok(())
+}
+
+fn restore_worktree_path(abs: &Path, saved: &WorktreePathSnapshot) -> std::io::Result<()> {
+    match saved.kind {
+        WorktreePathKind::Absent => Ok(()),
+        WorktreePathKind::Directory => {
+            fs::create_dir_all(abs)?;
+            Ok(())
+        }
+        WorktreePathKind::Symlink => {
+            let Some(bytes) = saved.bytes.as_ref() else {
+                return Ok(());
+            };
+            if abs.is_symlink() || abs.is_file() {
+                fs::remove_file(abs)?;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+                let target = String::from_utf8_lossy(bytes);
+                if let Some(parent) = abs.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                symlink(target.as_ref(), abs)?;
+            }
+            #[cfg(not(unix))]
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "symlink restore requires unix",
+                ));
+            }
+            Ok(())
+        }
+        WorktreePathKind::Regular => {
+            let Some(bytes) = saved.bytes.as_ref() else {
+                return Ok(());
+            };
+            if abs.is_symlink() || abs.is_file() {
+                fs::remove_file(abs)?;
+            }
+            if let Some(parent) = abs.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(abs, bytes)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if saved.mode != 0 {
+                    let mut perms = fs::metadata(abs)?.permissions();
+                    perms.set_mode(saved.mode);
+                    fs::set_permissions(abs, perms)?;
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1002,8 +1067,8 @@ mod inject_and_apply_tests {
         let tracked = dir.path().join("tracked.txt");
         std::os::unix::fs::symlink("link-target.txt", &tracked).expect("symlink");
         let saved = WorktreePathSnapshot {
+            kind: WorktreePathKind::Regular,
             bytes: Some(b"original file\n".to_vec()),
-            symlink: false,
             mode: 0o100644,
         };
         restore_worktree_path(&tracked, &saved).expect("restore");
@@ -1139,6 +1204,181 @@ mod inject_and_apply_tests {
             fs::read_to_string(&link_target_path).expect("read target"),
             "target content\n"
         );
+    }
+
+    #[test]
+    fn restore_worktree_after_failed_apply_directory_to_file_partial_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        fs::write(dir.path().join("tracked"), "partial file\n").expect("partial file");
+
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            "tracked".into(),
+            WorktreePathSnapshot {
+                kind: WorktreePathKind::Directory,
+                bytes: None,
+                #[cfg(unix)]
+                mode: 0o755,
+            },
+        );
+        snapshot.insert(
+            "tracked/child".into(),
+            WorktreePathSnapshot {
+                kind: WorktreePathKind::Regular,
+                bytes: Some(b"child\n".to_vec()),
+                #[cfg(unix)]
+                mode: 0o644,
+            },
+        );
+
+        restore_worktree_after_failed_apply(&repo, None, Some(&snapshot)).expect("restore");
+
+        let tracked = dir.path().join("tracked");
+        let child = dir.path().join("tracked/child");
+        assert!(tracked.is_dir());
+        assert!(child.is_file());
+        assert_eq!(fs::read_to_string(child).expect("read child"), "child\n");
+        assert!(!tracked.is_file());
+    }
+
+    #[test]
+    fn apply_rewrite_injected_checkout_failure_restores_directory_after_file_transition() {
+        use crate::repo::set_test_inject_index_write_fail_remaining;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
+            .expect("init");
+        let child_blob = repo
+            .odb()
+            .write(ObjectKind::Blob, b"child\n")
+            .expect("blob");
+        let mut index = crate::index::Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        index.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 6,
+            oid: child_blob,
+            flags: 14,
+            flags_extended: None,
+            path: b"tracked/child".to_vec(),
+            base_index_pos: 0,
+        });
+        let tree =
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &index, "").expect("tree");
+        repo.write_index(&mut index).expect("write index");
+        fs::create_dir_all(dir.path().join("tracked")).expect("mkdir");
+        fs::write(dir.path().join("tracked/child"), "child\n").expect("write child");
+
+        let commit = crate::objects::serialize_commit(&crate::objects::CommitData {
+            tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "root\n".into(),
+            raw_message: None,
+            extra_headers: vec![],
+        });
+        let root = repo
+            .odb()
+            .write(ObjectKind::Commit, &commit)
+            .expect("commit");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &root).expect("ref");
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("head");
+
+        let tracked_blob = repo
+            .odb()
+            .write(ObjectKind::Blob, b"replacement\n")
+            .expect("tracked blob");
+        let mut idx2 = crate::index::Index::new();
+        idx2.hash_algo = repo.odb().hash_algo();
+        idx2.add_or_replace(crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 12,
+            oid: tracked_blob,
+            flags: 8,
+            flags_extended: None,
+            path: b"tracked".to_vec(),
+            base_index_pos: 0,
+        });
+        let child_tree =
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &idx2, "").expect("tree");
+        let mut edits = HistoryEdits::new();
+        edits.insert(
+            root,
+            CommitEdit::Rewrite {
+                tree: Some(child_tree),
+                message: Some("rewritten\n".into()),
+                author: None,
+                parents: None,
+            },
+        );
+        let plan = plan_rewrite(
+            &repo,
+            &edits,
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: "T <t@t> 1 +0000".into(),
+            },
+        )
+        .expect("plan");
+
+        let before_index = fs::read(repo.index_path()).expect("index");
+        set_test_inject_index_write_fail_remaining(1);
+        let err = apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity: "T <t@t>".into(),
+                reflog_message: "rewrite".into(),
+            },
+        )
+        .expect_err("inject checkout failure");
+        crate::repo::set_test_inject_index_write_fail(false);
+        assert!(matches!(err, HistoryError::WorktreeApply { .. }));
+
+        let tree_from_index_path = |path: &std::path::Path| {
+            let index = crate::index::Index::load(path).expect("index");
+            crate::index::write_tree::write_tree_from_index(repo.odb(), &index, "").expect("tree")
+        };
+        let before_index_path = dir.path().join(".git/index.before");
+        fs::write(&before_index_path, &before_index).expect("snapshot");
+        assert_eq!(
+            tree_from_index_path(repo.index_path().as_path()),
+            tree_from_index_path(&before_index_path)
+        );
+        assert_eq!(
+            crate::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main"),
+            root
+        );
+
+        let tracked = dir.path().join("tracked");
+        let child = dir.path().join("tracked/child");
+        assert!(tracked.is_dir(), "rollback must restore directory tracked/");
+        assert!(!tracked.is_file());
+        assert!(child.is_file());
+        assert_eq!(fs::read_to_string(child).expect("read child"), "child\n");
     }
 }
 
