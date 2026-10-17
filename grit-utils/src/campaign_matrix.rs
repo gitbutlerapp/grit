@@ -7,6 +7,7 @@ use anyhow::Result;
 
 use crate::campaign_prep::{
     ensure_campaign_hot_path, load_campaign_hot_path_meta, restore_campaign_worktree_to_main,
+    switch_wide_meta,
 };
 use crate::campaign_worktree::{blame_target_path, dirty_tracked_worktree, list_tracked_files};
 use crate::fixture::prepare_commit_iteration;
@@ -88,6 +89,7 @@ pub fn run_fixture_cli_matrix(
     cfg: &RunConfig,
     fixture: &CampaignFixture,
     smoke: bool,
+    include_file_transport: bool,
 ) -> Result<Vec<ScenarioResult>> {
     std::env::set_var(
         "GRIT_BENCH_CAMPAIGN_CWD",
@@ -414,6 +416,8 @@ pub fn run_fixture_cli_matrix(
             )?);
         }
     } else {
+        // Chromium-class synth can OOM grit during timed merge-base; record grit_failure and continue.
+        let merge_allows_grit_failure = fixture.id == "chromium-synth";
         out.push(run_matrix_scenario(
             hyperfine,
             git,
@@ -421,7 +425,7 @@ pub fn run_fixture_cli_matrix(
             cfg,
             &merge_base,
             &fixture.worktree,
-            false,
+            merge_allows_grit_failure,
         )?);
     }
 
@@ -468,8 +472,24 @@ pub fn run_fixture_cli_matrix(
     append_hot_path_scenarios(hyperfine, git, grit, cfg, fixture, &meta, smoke, &mut out)?;
     append_stash_scenario(hyperfine, git, grit, cfg, fixture, &mut out)?;
     append_fsck_gc_repack(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
-    append_file_transport(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
+    if include_file_transport {
+        append_file_transport(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
+    }
 
+    Ok(out)
+}
+
+/// File:// clone/fetch/push rows (run after bitmap scenarios on tag-pinned git.git).
+pub fn run_fixture_file_transport_matrix(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    smoke: bool,
+) -> Result<Vec<ScenarioResult>> {
+    let mut out = Vec::new();
+    append_file_transport(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
     Ok(out)
 }
 
@@ -569,7 +589,8 @@ fn append_hot_path_scenarios(
     )?);
 
     if !smoke {
-        let (grit_wide, git_wide) = switch_argv(grit, git, meta);
+        let wide_meta = switch_wide_meta(meta)?;
+        let (grit_wide, git_wide) = switch_argv(grit, git, &wide_meta);
         out.push(run_scenario(
             hyperfine,
             git,
@@ -703,7 +724,8 @@ fn append_fsck_gc_repack(
         &fixture.worktree,
     )?);
 
-    out.push(run_scenario(
+    // Grit repack currently requires a worktree; still measure git on the bare remote.
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -712,8 +734,8 @@ fn append_fsck_gc_repack(
             id: sid(fixture.id, "repack"),
             group: "maintenance".into(),
             fixture: fixture.label.clone(),
-            description: "repack -adf on bare remote".into(),
-            grit_argv: vec!["repack".into(), "-adf".into()],
+            description: "repack on bare remote (git: -adf; grit: modern repack)".into(),
+            grit_argv: vec!["repack".into()],
             git_argv: vec!["repack".into(), "-adf".into()],
             driver: Driver::Cli,
             prepare_kind: None,
@@ -721,6 +743,7 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.bare,
+        true,
     )?);
     Ok(())
 }
@@ -784,14 +807,7 @@ fn append_file_transport(
     }
 
     let fetch_dest = fixture.worktree.clone();
-    let grit_fetch = shell_command(
-        grit,
-        &[
-            "fetch".to_string(),
-            "origin".to_string(),
-            "HEAD".to_string(),
-        ],
-    );
+    let grit_fetch = shell_command(grit, &["fetch".to_string(), "origin".to_string()]);
     let git_fetch = shell_command(
         git,
         &[

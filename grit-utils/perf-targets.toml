@@ -45,3 +45,11 @@ followup = "ROADMAP item 7"
 [scenario."git-dot-git/fsck"]
 documented = "git.git tagger/mode deltas fail grit fsck while git fsck warns only"
 followup = "ROADMAP item 11"
+
+[scenario."git-dot-git/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP maintenance API"
+
+[scenario."chromium-synth/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP maintenance API"
