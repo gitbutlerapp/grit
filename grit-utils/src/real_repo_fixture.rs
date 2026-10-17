@@ -228,6 +228,9 @@ pub fn ensure_worktree_clone(
     if marker.is_file() {
         let stored = fs::read_to_string(&marker).context("read worktree marker")?;
         if stored.trim() == tag && dest.join(".git").exists() {
+            // Reuse cached worktrees but always return a named branch: prior campaign
+            // scenarios may leave detached HEAD or topic branches behind.
+            run_git(git, &dest, &["checkout", "-f", "-B", "campaign-main"])?;
             return Ok(dest);
         }
     }

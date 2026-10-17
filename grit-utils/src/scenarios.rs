@@ -177,15 +177,9 @@ pub fn run_scenario(
         grit.to_path_buf()
     };
 
-    let git_stats = bench_tool(
-        hyperfine,
-        &git_prog,
-        &scenario.git_argv,
-        repo,
-        cfg,
-        prepare.as_deref(),
-        "git",
-    )?;
+    // Measure grit before git so a preceding `git` hyperfine run cannot leave the
+    // worktree/index in a state grit's next prepare+command pair cannot handle
+    // (campaign git.git commit rows hit this when git commits first).
     let grit_stats = bench_tool(
         hyperfine,
         &grit_prog,
@@ -194,6 +188,15 @@ pub fn run_scenario(
         cfg,
         prepare.as_deref(),
         "grit",
+    )?;
+    let git_stats = bench_tool(
+        hyperfine,
+        &git_prog,
+        &scenario.git_argv,
+        repo,
+        cfg,
+        prepare.as_deref(),
+        "git",
     )?;
 
     let ratio = median_ratio(git_stats.median_ms, grit_stats.median_ms);
