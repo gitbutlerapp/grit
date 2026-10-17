@@ -135,6 +135,7 @@ pub fn run_hyperfine(hyperfine: &Path, run: &HyperfineRun) -> Result<HyperfineRe
     }
     // hyperfine 2.x requires an explicit shell when the command uses `&&` (our `cd … && …` wrapper).
     cmd.arg("--shell=default");
+    let command_label = command.clone();
     cmd.arg(command);
 
     let output = cmd
@@ -142,7 +143,11 @@ pub fn run_hyperfine(hyperfine: &Path, run: &HyperfineRun) -> Result<HyperfineRe
         .with_context(|| format!("failed to execute {}", hyperfine.display()))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("hyperfine failed: {}", stderr.trim());
+        let prepare_note = run.prepare.as_deref().unwrap_or("<none>");
+        anyhow::bail!(
+            "hyperfine failed (cmd={command_label}, prepare={prepare_note}): {}",
+            stderr.trim()
+        );
     }
 
     let json = fs::read_to_string(&export_path).context("read hyperfine export")?;

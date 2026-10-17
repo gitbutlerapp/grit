@@ -157,17 +157,38 @@ fn tracked_worktree_files(git: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
 pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
     use std::io::Write as _;
 
+    if std::env::var_os("GRIT_BENCH_CAMPAIGN_CWD").is_some() {
+        for args in [["reset", "--hard", "HEAD"], ["clean", "-fd", "-q"]] {
+            let mut cmd = Command::new(git);
+            cmd.args(args).current_dir(dir);
+            crate::real_repo_fixture::git_env(&mut cmd);
+            let out = cmd.output().context("campaign prepare hard reset")?;
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                anyhow::bail!(
+                    "git {} failed in {}: {}",
+                    args.join(" "),
+                    dir.display(),
+                    stderr.trim()
+                );
+            }
+        }
+    }
+
     let files = tracked_worktree_files(git, dir)?;
     let modify_count = (files.len() / 5).max(1);
     for f in files.iter().take(modify_count) {
         let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
         writeln!(file, "commit bench change")?;
     }
-    let out = Command::new(git)
-        .args(["reset", "-q", "HEAD"])
-        .current_dir(dir)
-        .output()
-        .context("run git reset")?;
+    git_reset_head_unstaged(git, dir)
+}
+
+fn git_reset_head_unstaged(git: &Path, dir: &Path) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(["reset", "-q", "HEAD"]).current_dir(dir);
+    crate::real_repo_fixture::git_env(&mut cmd);
+    let out = cmd.output().context("run git reset")?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         anyhow::bail!(
@@ -219,20 +240,7 @@ pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     for f in files.iter().take(modify_count) {
         fs::write(f, "modified for add bench\n")?;
     }
-    let out = Command::new(git)
-        .args(["reset", "-q", "HEAD"])
-        .current_dir(dir)
-        .output()
-        .context("run git reset")?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        anyhow::bail!(
-            "git reset -q HEAD failed in {}: {}",
-            dir.display(),
-            stderr.trim()
-        );
-    }
-    Ok(())
+    git_reset_head_unstaged(git, dir)
 }
 
 /// Dogfood-style deep leaf worktree (issue #1017): CRLF `*.txt`, a large `.bin`, and tracked `.rs` files.
