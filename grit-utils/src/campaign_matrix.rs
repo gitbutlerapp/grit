@@ -695,27 +695,56 @@ fn append_fsck_gc_repack(
     if !smoke {
         seed_loose_objects(git, &fixture.worktree)?;
     }
-    let gc_allows_grit_failure = fixture.id == "git-dot-git";
-    out.push(run_matrix_scenario(
-        hyperfine,
-        git,
-        grit,
-        cfg,
-        &Scenario {
-            id: sid(fixture.id, "gc"),
-            group: "maintenance".into(),
-            fixture: fixture.label.clone(),
-            description: "grit gc vs git gc".into(),
-            grit_argv: vec!["gc".into()],
-            git_argv: vec!["gc".into()],
-            driver: Driver::Cli,
-            prepare_kind: Some(PrepareKind::MaintenanceReset),
-            grit_via_shell: false,
-            git_via_shell: false,
-        },
-        &fixture.worktree,
-        gc_allows_grit_failure,
-    )?);
+    let gc_scenario = Scenario {
+        id: sid(fixture.id, "gc"),
+        group: "maintenance".into(),
+        fixture: fixture.label.clone(),
+        description: "grit gc vs git gc".into(),
+        grit_argv: vec!["gc".into()],
+        git_argv: vec!["gc".into()],
+        driver: Driver::Cli,
+        prepare_kind: Some(PrepareKind::MaintenanceReset),
+        grit_via_shell: false,
+        git_via_shell: false,
+    };
+    let grit_gc_failure = match fixture.id {
+        "git-dot-git" => Some(BenchFailure {
+            kind: "memory_cap".into(),
+            message: "grit gc on git.git exceeds factory VM memory; git side timed for ratio ledger"
+                .into(),
+        }),
+        "chromium-synth" => Some(BenchFailure {
+            kind: "runtime_cap".into(),
+            message: "grit gc on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
+                .into(),
+        }),
+        "linux" => Some(BenchFailure {
+            kind: "runtime_cap".into(),
+            message: "grit gc on linux kernel clone exceeds factory campaign time budget; git side timed for ratio ledger"
+                .into(),
+        }),
+        _ => None,
+    };
+    if let Some(failure) = grit_gc_failure {
+        out.push(run_scenario_git_only_with_grit_failure(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &gc_scenario,
+            &fixture.worktree,
+            failure,
+        )?);
+    } else {
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &gc_scenario,
+            &fixture.worktree,
+        )?);
+    }
 
     let repack = Scenario {
         id: sid(fixture.id, "repack"),
