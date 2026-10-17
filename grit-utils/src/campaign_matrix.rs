@@ -740,7 +740,7 @@ fn append_fsck_gc_repack(
         gc_allows_grit_failure,
     )?);
 
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -758,6 +758,7 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.bare,
+        gc_allows_grit_failure,
     )?);
     Ok(())
 }
