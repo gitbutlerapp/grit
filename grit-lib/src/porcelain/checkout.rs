@@ -498,6 +498,17 @@ pub(crate) fn checkout_tree_changes_with_index_opts(
     )
 }
 
+/// Wholesale delete directories for a trusted switch prepare pass (index-only + gitlink safety).
+pub(crate) fn trusted_wholesale_remove_dirs(
+    index: &Index,
+    delete_paths: &[String],
+    work_tree: &Path,
+    gitlink_deletes: &HashSet<String>,
+) -> BTreeSet<String> {
+    let candidates = wholesale_deleted_directories(index, delete_paths);
+    filter_wholesale_dirs_with_populated_gitlinks(work_tree, candidates, gitlink_deletes)
+}
+
 /// Top-level directories whose tracked files are entirely removed by `delete_paths`.
 pub(crate) fn wholesale_deleted_directories(
     index: &Index,
