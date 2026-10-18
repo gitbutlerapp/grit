@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::filesystem_path_for_user;
 
 /// Result of `grit repack`.
 #[derive(Serialize, JsonSchema)]
@@ -34,7 +35,7 @@ impl From<(RepackStats, bool, bool)> for RepackOutcome {
             packs_before: stats.packs_before,
             objects_packed: stats.objects_packed,
             pack_bytes: stats.pack_bytes,
-            pack_path: stats.pack_path.map(|p| p.display().to_string()),
+            pack_path: stats.pack_path.as_deref().map(filesystem_path_for_user),
             removed_pack_files: stats.removed_pack_files,
             pruned_loose: stats.pruned_loose,
         }
@@ -98,4 +99,41 @@ pub fn run(dry_run: bool, quiet: bool) -> Result<RepackOutcome> {
     let stats = repack_all(&repo, &RepackOptions::with_dry_run(dry_run))
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok((stats, dry_run, quiet).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use time::OffsetDateTime;
+
+    use super::*;
+    use crate::output::RenderContext;
+
+    fn sample_ctx() -> RenderContext {
+        RenderContext {
+            now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
+        }
+    }
+
+    #[test]
+    fn repack_outcome_strips_verbatim_pack_path() {
+        let mut stats = RepackStats::default();
+        stats.pack_path = Some(PathBuf::from(
+            r"\\?\C:\repo\.git\objects\pack\pack-abc.pack",
+        ));
+        stats.objects_packed = Some(96);
+        let outcome: RepackOutcome = (stats, false, false).into();
+        let path = outcome.pack_path.as_ref().expect("pack_path");
+        assert!(!path.contains(r"\\?\"));
+        assert_eq!(path, "C:/repo/.git/objects/pack/pack-abc.pack");
+
+        let mut buf = Vec::new();
+        outcome
+            .render_human(&mut buf, &sample_ctx())
+            .expect("render human");
+        let line = String::from_utf8(buf).expect("utf8");
+        assert!(!line.contains(r"\\?\"));
+        assert!(line.contains("C:/repo/.git/objects/pack/pack-abc.pack"));
+    }
 }

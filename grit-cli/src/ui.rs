@@ -2,19 +2,25 @@
 
 use std::borrow::Cow;
 use std::io::{IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
 use crate::output::outln;
 
-use grit_lib::config::git_path::relative_path_for_display;
+use grit_lib::config::git_path::{relative_path_for_display, user_display_path};
 use grit_lib::diff::{DiffEntry, DiffStatus};
 use grit_lib::quote_path::quote_path_for_display;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::pathdiff;
 
 use crate::context::{self, CommitSummary};
+
+/// Normalize a filesystem path for human and JSON output (forward slashes, no `\\?\` prefix).
+#[must_use]
+pub fn filesystem_path_for_user(path: &Path) -> String {
+    user_display_path(path)
+}
 
 /// Terminal width in columns for diffstat layout (`terminal_size`, then `COLUMNS`, then 80).
 #[must_use]

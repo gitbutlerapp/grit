@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 
 use crate::context;
 use crate::output::{outln, progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::ui::filesystem_path_for_user;
 
 /// Result of `grit gc` and its task subcommands.
 #[derive(Serialize, JsonSchema)]
@@ -84,7 +85,7 @@ impl From<grit_lib::maintenance::RepackStats> for RepackSummary {
             packs_before: stats.packs_before,
             objects_packed: stats.objects_packed,
             pack_bytes: stats.pack_bytes,
-            pack_path: stats.pack_path.map(|p| p.display().to_string()),
+            pack_path: stats.pack_path.as_deref().map(filesystem_path_for_user),
             removed_pack_files: stats.removed_pack_files,
             pruned_loose: stats.pruned_loose,
             unreachable_loose_pruned: stats.unreachable_loose_pruned,
@@ -213,7 +214,7 @@ fn tasks_from_gc_stats(stats: GcStats, timings: GcPhaseTimings) -> Vec<GcTaskRep
             duration_ms: timings.pack_refs_ms,
             refs_packed: pack.refs_packed,
             refs_pruned: pack.refs_pruned,
-            path: pack.path.display().to_string(),
+            path: filesystem_path_for_user(&pack.path),
         });
     }
     tasks.push(GcTaskReport::ReflogExpire {
@@ -235,7 +236,7 @@ fn tasks_from_gc_stats(stats: GcStats, timings: GcPhaseTimings) -> Vec<GcTaskRep
         tasks.push(GcTaskReport::CommitGraph {
             duration_ms: timings.commit_graph_ms,
             commit_count: graph.commit_count,
-            path: graph.path.display().to_string(),
+            path: filesystem_path_for_user(&graph.path),
             removed_chain: graph.removed_chain,
         });
     }
@@ -291,7 +292,7 @@ pub fn run_commit_graph(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
         tasks: vec![GcTaskReport::CommitGraph {
             duration_ms: elapsed.as_millis() as u64,
             commit_count: report.commit_count,
-            path: report.path.display().to_string(),
+            path: filesystem_path_for_user(&report.path),
             removed_chain: report.removed_chain,
         }],
     })
@@ -308,7 +309,7 @@ pub fn run_midx(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
         tasks: vec![GcTaskReport::Midx {
             duration_ms: elapsed.as_millis() as u64,
             pack_count: report.pack_count,
-            path: report.path.display().to_string(),
+            path: filesystem_path_for_user(&report.path),
             bitmap: midx_bitmap_label(report.bitmap).to_owned(),
         }],
     })
@@ -326,7 +327,7 @@ pub fn run_pack_refs(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
             duration_ms: elapsed.as_millis() as u64,
             refs_packed: report.refs_packed,
             refs_pruned: report.refs_pruned,
-            path: report.path.display().to_string(),
+            path: filesystem_path_for_user(&report.path),
         }],
     })
 }
@@ -362,4 +363,39 @@ fn parse_older_than(spec: &str) -> Result<Option<SystemTime>> {
 /// Legacy entry: full gc with dry-run / quiet flags.
 pub fn run(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     run_full(dry_run, quiet, mode)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn gc_paths_strip_verbatim_prefix_for_user_output() {
+        let mut stats = grit_lib::maintenance::RepackStats::default();
+        stats.pack_path = Some(PathBuf::from(
+            r"\\?\C:\repo\.git\objects\pack\pack-abc.pack",
+        ));
+        let summary = RepackSummary::from(stats);
+        let pack_path = summary.pack_path.expect("pack_path");
+        assert!(!pack_path.contains(r"\\?\"));
+        assert_eq!(pack_path, "C:/repo/.git/objects/pack/pack-abc.pack");
+
+        let packed_refs =
+            filesystem_path_for_user(std::path::Path::new(r"\\?\C:\repo\.git\packed-refs"));
+        assert_eq!(packed_refs, "C:/repo/.git/packed-refs");
+
+        let task = GcTaskReport::PackRefs {
+            duration_ms: 4,
+            refs_packed: 2,
+            refs_pruned: 2,
+            path: packed_refs,
+        };
+        let mut buf = Vec::new();
+        task.render_human_line(&mut buf).expect("render");
+        let line = String::from_utf8(buf).expect("utf8");
+        assert!(!line.contains(r"\\?\"));
+        assert!(line.contains("C:/repo/.git/packed-refs"));
+    }
 }
