@@ -427,10 +427,10 @@ fn credential_url_matches(pattern: &str, target: &str) -> bool {
         return false;
     }
     let pattern = pattern.trim_end_matches('/');
-    let pattern_no_user = strip_url_userinfo(pattern);
+    let pattern_no_user = url_without_userinfo(pattern);
     let pattern_after_user = pattern.rsplit_once('@').map(|(_, host)| host);
     let target = target.trim_end_matches('/');
-    let target_no_user = strip_url_userinfo(target);
+    let target_no_user = url_without_userinfo(target);
     let target_no_scheme = strip_url_scheme(target);
     let target_no_scheme_no_user = strip_url_scheme(&target_no_user);
     let target_path = target_path_component(target);
@@ -481,7 +481,11 @@ fn strip_url_scheme(url: &str) -> &str {
     url.split_once("://").map_or(url, |(_, rest)| rest)
 }
 
-fn strip_url_userinfo(url: &str) -> String {
+/// Return `url` with any `user:pass@` userinfo removed.
+///
+/// Handles `scheme://user:pass@host/...` and scp-style `user:pass@host:path`
+/// (no scheme). The result is safe to show in errors and logs.
+pub fn url_without_userinfo(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url
             .rsplit_once('@')
@@ -490,6 +494,30 @@ fn strip_url_userinfo(url: &str) -> String {
     };
     rest.rsplit_once('@')
         .map_or_else(|| url.to_string(), |(_, host)| format!("{scheme}://{host}"))
+}
+
+/// Redact credentials from URL-like `http://` / `https://` substrings in `message`.
+pub fn redact_embedded_url_credentials(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut rest = message;
+    while let Some(scheme_sep) = rest.find("://") {
+        let before = &rest[..scheme_sep];
+        let scheme_start = before
+            .char_indices()
+            .rfind(|(_, c)| !c.is_ascii_alphanumeric() && *c != '-' && *c != '+' && *c != '.')
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        out.push_str(&rest[..scheme_start]);
+        let url_part = &rest[scheme_start..];
+        let url_end = url_part
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ')' | ']' | ','))
+            .unwrap_or(url_part.len());
+        let url = &url_part[..url_end];
+        out.push_str(&url_without_userinfo(url));
+        rest = &url_part[url_end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn target_path_component(url: &str) -> &str {
@@ -986,6 +1014,26 @@ mod tests {
         )
         .expect("helper");
         assert!(response.wants_quit());
+    }
+
+    #[test]
+    fn url_without_userinfo_strips_https_credentials() {
+        let raw = "https://x-access-token:SECRETTOKEN@github.com/octocat/repo.git/info/refs?service=git-upload-pack";
+        let redacted = url_without_userinfo(raw);
+        assert_eq!(
+            redacted,
+            "https://github.com/octocat/repo.git/info/refs?service=git-upload-pack"
+        );
+        assert!(!redacted.contains("SECRETTOKEN"));
+        assert!(!redacted.contains("x-access-token"));
+    }
+
+    #[test]
+    fn redact_embedded_url_credentials_in_message() {
+        let msg = "GET failed: https://user:pass@example.com/repo.git (timeout)";
+        let out = redact_embedded_url_credentials(msg);
+        assert!(out.contains("https://example.com/repo.git"));
+        assert!(!out.contains("user:pass"));
     }
 
     #[test]

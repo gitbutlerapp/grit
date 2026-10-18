@@ -11848,6 +11848,8 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::credentials::HelperCredenti
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::credentials::HelperCredentialProvider
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::credentials::HelperCredentialProvider
 pub const grit_lib::remote::credentials::NON_INTERACTIVE_MESSAGE: &str
+pub fn grit_lib::remote::credentials::redact_embedded_url_credentials(&str) -> alloc::string::String
+pub fn grit_lib::remote::credentials::url_without_userinfo(&str) -> alloc::string::String
 pub trait grit_lib::remote::credentials::CredentialProvider
 pub fn grit_lib::remote::credentials::CredentialProvider::approve(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::credentials::CredentialProvider::fill(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<grit_lib::remote::credentials::Credential>

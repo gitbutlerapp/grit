@@ -678,7 +678,7 @@ impl UreqHttpClient {
         });
         match result {
             Ok(resp) => open_response_body(resp, &self.transport_timeouts),
-            Err(e) => Err(Error::Message(format!("http transport error: {e}"))),
+            Err(e) => Err(http_transport_error(&e)),
         }
     }
 
@@ -749,27 +749,34 @@ impl UreqHttpClient {
         let Some(provider) = self.credentials.as_ref() else {
             self.clear_auth_header();
             return Err(Error::Auth(format!(
-                "{url}: server requires authentication (401) but no credential provider is configured"
+                "{}: server requires authentication (401) but no credential provider is configured",
+                display_url(url)
             )));
         };
         if !offers_basic(&head.www_authenticate) {
             return Err(Error::Auth(format!(
-                "{url}: server requires an unsupported auth scheme: {:?}",
+                "{}: server requires an unsupported auth scheme: {:?}",
+                display_url(url),
                 head.www_authenticate
             )));
         }
         let auth_url = effective_info_refs_url_after_redirect(url, Some(head.final_url.as_str()));
         let Some(input) = credential_for_url(&auth_url, &self.credential_config) else {
             return Err(Error::Auth(format!(
-                "{auth_url}: server requires authentication (401) but the URL could not be decomposed into credential fields"
+                "{}: server requires authentication (401) but the URL could not be decomposed into credential fields",
+                display_url(&auth_url)
             )));
         };
-        let cred = provider
-            .fill(&input)
-            .map_err(|e| Error::Auth(format!("{auth_url}: could not obtain credentials: {e}")))?;
+        let cred = provider.fill(&input).map_err(|e| {
+            Error::Auth(format!(
+                "{}: could not obtain credentials: {e}",
+                display_url(&auth_url)
+            ))
+        })?;
         let Some(header) = basic_auth_header(&cred) else {
             return Err(Error::Auth(format!(
-                "{auth_url}: credential helper returned no usable username/password"
+                "{}: credential helper returned no usable username/password",
+                display_url(&auth_url)
             )));
         };
         let (retry_head, retry_reader) =
@@ -779,7 +786,8 @@ impl UreqHttpClient {
             self.clear_auth_header();
             drain_response_body(retry_reader);
             return Err(Error::Auth(format!(
-                "{url}: supplied credentials were rejected (401)"
+                "{}: supplied credentials were rejected (401)",
+                display_url(url)
             )));
         }
         if retry_head.status >= 400 {
@@ -817,30 +825,37 @@ impl UreqHttpClient {
         let Some(provider) = self.credentials.as_ref() else {
             self.clear_auth_header();
             return Err(Error::Auth(format!(
-                "{url}: server requires authentication (401) but no credential provider is configured"
+                "{}: server requires authentication (401) but no credential provider is configured",
+                display_url(url)
             )));
         };
         if !offers_basic(&first.www_authenticate) {
             return Err(Error::Auth(format!(
-                "{url}: server requires an unsupported auth scheme: {:?}",
+                "{}: server requires an unsupported auth scheme: {:?}",
+                display_url(url),
                 first.www_authenticate
             )));
         }
         let auth_url = effective_info_refs_url_after_redirect(url, Some(first.final_url.as_str()));
         let Some(input) = credential_for_url(&auth_url, &self.credential_config) else {
             return Err(Error::Auth(format!(
-                "{auth_url}: server requires authentication (401) but the URL could not be decomposed into credential fields"
+                "{}: server requires authentication (401) but the URL could not be decomposed into credential fields",
+                display_url(&auth_url)
             )));
         };
         // A provider that cannot supply a credential (no configured helper, or a
         // non-interactive failure) reports it as a typed auth error rather than a
         // generic message, and crucially never blocks on a TTY.
-        let cred = provider
-            .fill(&input)
-            .map_err(|e| Error::Auth(format!("{auth_url}: could not obtain credentials: {e}")))?;
+        let cred = provider.fill(&input).map_err(|e| {
+            Error::Auth(format!(
+                "{}: could not obtain credentials: {e}",
+                display_url(&auth_url)
+            ))
+        })?;
         let Some(header) = basic_auth_header(&cred) else {
             return Err(Error::Auth(format!(
-                "{auth_url}: credential helper returned no usable username/password"
+                "{}: credential helper returned no usable username/password",
+                display_url(&auth_url)
             )));
         };
         let retry = attempt(&auth_url, Some(&header))?;
@@ -850,7 +865,8 @@ impl UreqHttpClient {
             let _ = provider.reject(&cred);
             self.clear_auth_header();
             return Err(Error::Auth(format!(
-                "{url}: supplied credentials were rejected (401)"
+                "{}: supplied credentials were rejected (401)",
+                display_url(url)
             )));
         }
         if retry.status >= 400 {
@@ -968,7 +984,7 @@ fn finish(
 ) -> Result<RawResponse> {
     match result {
         Ok(resp) => read_response(resp, timeouts),
-        Err(e) => Err(Error::Message(format!("http transport error: {e}"))),
+        Err(e) => Err(http_transport_error(&e)),
     }
 }
 
@@ -1045,8 +1061,17 @@ fn finalize_status(
     Ok((body, final_url))
 }
 
+fn display_url(url: &str) -> String {
+    credentials::url_without_userinfo(url)
+}
+
+fn http_transport_error(err: impl std::fmt::Display) -> Error {
+    let msg = credentials::redact_embedded_url_credentials(&err.to_string());
+    Error::Message(format!("http transport error: {msg}"))
+}
+
 fn http_status_error(url: &str, status: u16) -> Error {
-    Error::Message(format!("HTTP {status} from {url}"))
+    Error::Message(format!("HTTP {status} from {}", display_url(url)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1597,5 +1622,16 @@ mod tests {
             .read_to_end(&mut sink)
             .expect_err("slow read should abort");
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn http_status_error_omits_url_credentials() {
+        let url =
+            "https://x-access-token:SECRET@github.com/o/r.git/info/refs?service=git-upload-pack";
+        let err = super::http_status_error(url, 404);
+        let msg = format!("{err}");
+        assert!(msg.contains("HTTP 404 from https://github.com/o/r.git"));
+        assert!(!msg.contains("SECRET"));
+        assert!(!msg.contains("x-access-token"));
     }
 }
