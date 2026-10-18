@@ -93,6 +93,10 @@ pub fn run_fixture_cli_matrix(
         "GRIT_BENCH_CAMPAIGN_CWD",
         fixture.worktree.display().to_string(),
     );
+    if let Some(s) = grit.to_str() {
+        std::env::set_var("GRIT_BENCH_GRIT", s);
+    }
+    let _ = crate::worktree_fixture::set_worktree_bench_cwd(&fixture.worktree);
     let _guard = CampaignCwdGuard;
 
     let mut out = Vec::new();

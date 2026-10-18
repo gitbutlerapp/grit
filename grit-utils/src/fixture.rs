@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 
+use crate::real_repo_fixture::git_env;
+
 /// Default scratch directory for benchmark repos.
 pub fn scratch_dir() -> PathBuf {
     std::env::var("GRIT_BENCH_SCRATCH")
@@ -153,16 +155,63 @@ fn tracked_worktree_files(git: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
-/// Modify ~20% of tracked files for a `commit` iteration (append line), then reset index with **git**.
-pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
-    use std::io::Write as _;
-
-    let files = tracked_worktree_files(git, dir)?;
-    let modify_count = (files.len() / 5).max(1);
-    for f in files.iter().take(modify_count) {
-        let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
-        writeln!(file, "commit bench change")?;
+fn resolve_grit_for_prepare() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("GRIT_BENCH_GRIT") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
     }
+    let exe = std::env::current_exe().ok()?;
+    let candidate = exe.parent()?.join("grit");
+    candidate.is_file().then_some(candidate)
+}
+
+/// Align grit's index and worktree with `HEAD` before mutating the worktree for a timed run.
+fn sync_grit_to_head(dir: &Path) -> Result<()> {
+    let Some(grit) = resolve_grit_for_prepare() else {
+        return Ok(());
+    };
+    let mut cmd = Command::new(&grit);
+    cmd.args(["restore", "-S", "-W", "."]).current_dir(dir);
+    git_env(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("run {}", grit.display()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    anyhow::bail!(
+        "grit restore -S -W . failed in {}: {}",
+        dir.display(),
+        stderr.trim()
+    );
+}
+
+/// After `git reset` in a prepare hook, align grit's index with `HEAD` (worktree already dirty).
+fn sync_grit_index_to_head(dir: &Path) -> Result<()> {
+    let Some(grit) = resolve_grit_for_prepare() else {
+        return Ok(());
+    };
+    let mut cmd = Command::new(&grit);
+    cmd.args(["restore", "-S", "."]).current_dir(dir);
+    git_env(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("run {}", grit.display()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    anyhow::bail!(
+        "grit restore -S . failed in {}: {}",
+        dir.display(),
+        stderr.trim()
+    );
+}
+
+fn git_reset_index_to_head(dir: &Path, git: &Path) -> Result<()> {
     let out = Command::new(git)
         .args(["reset", "-q", "HEAD"])
         .current_dir(dir)
@@ -176,7 +225,21 @@ pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
             stderr.trim()
         );
     }
-    Ok(())
+    sync_grit_index_to_head(dir)
+}
+
+/// Modify ~20% of tracked files for a `commit` iteration (append line), then reset index with **git**.
+pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
+    use std::io::Write as _;
+
+    sync_grit_to_head(dir)?;
+    let files = tracked_worktree_files(git, dir)?;
+    let modify_count = (files.len() / 5).max(1);
+    for f in files.iter().take(modify_count) {
+        let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
+        writeln!(file, "commit bench change")?;
+    }
+    git_reset_index_to_head(dir, git)
 }
 
 /// Modify ~20% of tracked files in the worktree only (for `restore` benchmarks).
@@ -214,25 +277,13 @@ pub fn prepare_diff_dirty_iteration(dir: &Path, git: &Path) -> Result<()> {
 }
 
 pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
+    sync_grit_to_head(dir)?;
     let files = tracked_worktree_files(git, dir)?;
     let modify_count = (files.len() / 5).max(1);
     for f in files.iter().take(modify_count) {
         fs::write(f, "modified for add bench\n")?;
     }
-    let out = Command::new(git)
-        .args(["reset", "-q", "HEAD"])
-        .current_dir(dir)
-        .output()
-        .context("run git reset")?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        anyhow::bail!(
-            "git reset -q HEAD failed in {}: {}",
-            dir.display(),
-            stderr.trim()
-        );
-    }
-    Ok(())
+    git_reset_index_to_head(dir, git)
 }
 
 /// Dogfood-style deep leaf worktree (issue #1017): CRLF `*.txt`, a large `.bin`, and tracked `.rs` files.
