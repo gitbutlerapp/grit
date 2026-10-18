@@ -102,7 +102,11 @@ fn campaign_hot_path_meta_stale(git: &Path, repo: &Path, meta: &HotPathMeta) -> 
 pub fn ensure_campaign_hot_path(git: &Path, repo: &Path) -> Result<HotPathMeta> {
     if meta_path(repo).is_file() {
         let meta = load_campaign_hot_path_meta(repo)?;
-        if !campaign_hot_path_meta_stale(git, repo, &meta)? {
+        let wide_ready = meta
+            .wide_branch_b
+            .as_ref()
+            .is_some_and(|b| rev_parse(git, repo, b).is_ok());
+        if !campaign_hot_path_meta_stale(git, repo, &meta)? && wide_ready {
             restore_campaign_worktree_to_main(git, repo, &meta)?;
             return Ok(meta);
         }
@@ -165,6 +169,8 @@ pub fn ensure_campaign_hot_path(git: &Path, repo: &Path) -> Result<HotPathMeta> 
     anyhow::ensure!(tip_a != base_commit && tip_b != base_commit && pick_commit != base_commit);
     anyhow::ensure!(tip_a != tip_b && tip_a != pick_commit && tip_b != pick_commit);
 
+    let wide_branch_b =
+        ensure_campaign_wide_branch_b(git, repo, &main_branch, &base_commit, &files)?;
     let meta = HotPathMeta {
         branch_a: "campaign-a".into(),
         branch_b: "campaign-b".into(),
@@ -175,10 +181,74 @@ pub fn ensure_campaign_hot_path(git: &Path, repo: &Path) -> Result<HotPathMeta> 
         pick_commit,
         pick_series_commits: Vec::new(),
         wide: false,
+        wide_branch_b: Some(wide_branch_b),
     };
     restore_campaign_worktree_to_main(git, repo, &meta)?;
     fs::write(meta_path(repo), serde_json::to_string_pretty(&meta)?)?;
     Ok(meta)
+}
+
+const WIDE_BRANCH_B: &str = "campaign-b-wide";
+
+fn ensure_campaign_wide_branch_b(
+    git: &Path,
+    repo: &Path,
+    main_branch: &str,
+    base_commit: &str,
+    files: &[std::path::PathBuf],
+) -> Result<String> {
+    let change_count = (files.len() / 10).max(1);
+    run_git_auth(git, repo, &["checkout", "-B", WIDE_BRANCH_B, base_commit])?;
+    let mut targets: Vec<std::path::PathBuf> = files.iter().take(change_count).cloned().collect();
+    let dir_cap = (change_count / 10).max(1);
+    let dirs: std::collections::BTreeSet<std::path::PathBuf> = targets
+        .iter()
+        .filter_map(|p| {
+            p.parent()
+                .filter(|d| !d.as_os_str().is_empty())
+                .map(|d| d.to_path_buf())
+        })
+        .collect();
+    for d in dirs.iter().take(dir_cap) {
+        let abs = repo.join(d);
+        if abs.join(".git").exists() || abs == repo {
+            continue;
+        }
+        if abs.is_dir() {
+            fs::remove_dir_all(&abs).ok();
+        }
+    }
+    targets.retain(|p| !dirs.iter().any(|d| p.starts_with(d)));
+    for rel in &targets {
+        if rel.to_string_lossy().eq(".gitmodules") {
+            continue;
+        }
+        fs::write(repo.join(rel), b"wide-b\n")?;
+    }
+    run_git_auth(git, repo, &["add", "-A"])?;
+    run_git_auth(git, repo, &["commit", "-qm", "campaign-b-wide"])?;
+    let wide_tip = rev_parse(git, repo, "HEAD")?;
+    anyhow::ensure!(
+        wide_tip != base_commit,
+        "wide branch must diverge from base"
+    );
+    run_git_auth(git, repo, &["checkout", "-f", main_branch])?;
+    run_git_auth(git, repo, &["reset", "--hard", base_commit])?;
+    Ok(WIDE_BRANCH_B.into())
+}
+
+/// Metadata for the campaign `switch-wide` row (~10% path delta on `wide_branch_b`).
+pub fn switch_wide_meta(base: &HotPathMeta) -> Result<HotPathMeta> {
+    let branch_b = base
+        .wide_branch_b
+        .clone()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("campaign hot-path meta missing wide_branch_b"))?;
+    Ok(HotPathMeta {
+        branch_b,
+        wide: true,
+        ..base.clone()
+    })
 }
 
 #[cfg(test)]
@@ -223,6 +293,40 @@ mod tests {
         assert_ne!(tip_b, topic);
         assert_eq!(rev_parse(&git, &dir, "HEAD")?, base);
         Ok(())
+    }
+
+    #[test]
+    fn wide_branch_has_larger_diff_than_narrow_b() -> Result<()> {
+        let git = resolve_binary("git", None)?;
+        let tmp = TempDir::new()?;
+        let dir = tmp.path().join("repo");
+        init_repo_with_files(&git, &dir, 200)?;
+        let meta = ensure_campaign_hot_path(&git, &dir)?;
+        let wide = meta.wide_branch_b.as_deref().expect("wide branch name");
+        let narrow = &meta.branch_b;
+        let diff_wide = diff_name_only_count(&git, &dir, &meta.branch_a, wide)?;
+        let diff_narrow = diff_name_only_count(&git, &dir, &meta.branch_a, narrow)?;
+        assert!(
+            diff_wide > diff_narrow,
+            "wide diff {diff_wide} should exceed narrow {diff_narrow}"
+        );
+        assert!(diff_wide >= 20, "expected ~10% delta, got {diff_wide}");
+        Ok(())
+    }
+
+    fn diff_name_only_count(git: &Path, repo: &Path, left: &str, right: &str) -> Result<usize> {
+        let mut cmd = Command::new(git);
+        cmd.args(["diff", "--name-only", left, right])
+            .current_dir(repo);
+        git_env(&mut cmd);
+        let out = cmd.output()?;
+        if !out.status.success() {
+            bail!("git diff --name-only failed");
+        }
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .count())
     }
 
     #[test]

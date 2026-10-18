@@ -600,6 +600,7 @@ pub fn ensure_network_client_repo(git: &Path, bare: &Path) -> Result<PathBuf> {
 
 fn ensure_client_repo(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Result<()> {
     if meta.client_repo.join(".git").is_dir() || meta.client_repo.join("HEAD").is_file() {
+        bootstrap_client_branch(git, &meta.client_repo, meta)?;
         return Ok(());
     }
     if meta.client_repo.exists() {
@@ -616,15 +617,16 @@ fn ensure_client_repo(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Resul
             meta.client_repo.to_str().context("client")?,
         ],
     )?;
+    bootstrap_client_branch(git, &meta.client_repo, meta)?;
+    Ok(())
+}
+
+/// Tag-pinned bare remotes may ship with no `refs/heads/*`; create the local tracking branch at `fetch_base_oid`.
+pub fn bootstrap_client_branch(git: &Path, client: &Path, meta: &NetworkBenchMeta) -> Result<()> {
     run_git_cmd(
         git,
-        Some(&meta.client_repo),
-        &["checkout", "-q", &meta.default_branch],
-    )?;
-    run_git_cmd(
-        git,
-        Some(&meta.client_repo),
-        &["reset", "--hard", &meta.fetch_base_oid],
+        Some(client),
+        &["checkout", "-B", &meta.default_branch, &meta.fetch_base_oid],
     )?;
     Ok(())
 }

@@ -1,5 +1,6 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
+assertion_line: 420
 expression: payload
 ---
 {
@@ -10,12 +11,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"updated\": true,\n  \"version\": \"[VERSION]\"\n}\n",
+    "stdout": "{\n  \"updated\": true,\n  \"version\": \"0.5.9\"\n}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Update\n\n- Updated grit (ran installer; previous version **[VERSION]**)\n",
+    "stdout": "## Update\n\n- Updated grit (ran installer; previous version **0.5.9**)\n",
     "stderr": ""
   }
 }

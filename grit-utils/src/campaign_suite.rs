@@ -6,7 +6,9 @@ use anyhow::Result;
 use time::OffsetDateTime;
 
 use crate::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
-use crate::campaign_matrix::{run_fixture_cli_matrix, CampaignFixture};
+use crate::campaign_matrix::{
+    run_fixture_cli_matrix, run_fixture_file_transport_matrix, CampaignFixture,
+};
 use crate::chromium_synth::{ensure_chromium_synthetic, ChromiumSynthSpec};
 use crate::network_fixture::NetworkProfile;
 use crate::network_suite::run_network_suite;
@@ -45,19 +47,21 @@ pub fn run_campaign_suite(
 
     let git_bare = ensure_git_git_bitmaps(git)?;
     let git_worktree = ensure_worktree_clone(git, &git_bare, "git-dot-git-worktree", &git_tag)?;
+    let git_fixture = CampaignFixture {
+        id: "git-dot-git",
+        label: "git-dot-git".into(),
+        bare: git_bare.clone(),
+        worktree: git_worktree,
+    };
     scenarios.extend(run_fixture_cli_matrix(
         hyperfine,
         git,
         grit,
         bench_exe,
         cfg,
-        &CampaignFixture {
-            id: "git-dot-git",
-            label: "git-dot-git".into(),
-            bare: git_bare.clone(),
-            worktree: git_worktree,
-        },
+        &git_fixture,
         opts.smoke,
+        false,
     )?);
     scenarios.extend(prefix_bitmap_report(
         run_bitmaps_suite(
@@ -76,6 +80,16 @@ pub fn run_campaign_suite(
         )?,
         "git-dot-git",
     ));
+    if !opts.smoke {
+        scenarios.extend(run_fixture_file_transport_matrix(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &git_fixture,
+            opts.smoke,
+        )?);
+    }
 
     let synth_spec = if opts.smoke {
         ChromiumSynthSpec::smoke()
@@ -103,6 +117,7 @@ pub fn run_campaign_suite(
             worktree: synth_worktree,
         },
         opts.smoke,
+        true,
     )?);
     if linux_fixture_enabled(opts.with_linux) {
         let linux_tag =
@@ -122,6 +137,7 @@ pub fn run_campaign_suite(
                 worktree: linux_worktree,
             },
             opts.smoke,
+            true,
         )?);
     }
 

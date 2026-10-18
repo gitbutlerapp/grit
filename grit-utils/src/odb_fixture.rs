@@ -38,7 +38,6 @@ fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
 /// Root directory for cached benchmark clones (override with `GRIT_BENCH_ODB_CACHE`).
 pub fn odb_scratch_root() -> PathBuf {
     std::env::var("GRIT_BENCH_ODB_CACHE")
-        .or_else(|_| std::env::var("GRIT_BENCH_SCRATCH"))
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-odb-cache"))
 }
