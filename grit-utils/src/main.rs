@@ -1067,10 +1067,10 @@ fn main() -> Result<()> {
     {
         let mismatches = compare_files(baseline, candidate, *tolerance)?;
         if mismatches.is_empty() {
-            eprintln!("All scenario ratios within tolerance {tolerance}");
+            eprintln!("All scenarios within tolerance {tolerance}");
             return Ok(());
         }
-        eprintln!("Ratio drift exceeds tolerance {tolerance}:");
+        eprintln!("Drift exceeds tolerance {tolerance}:");
         for m in &mismatches {
             eprintln!(
                 "  {}: {:.4} vs {:.4} (delta {:.4})",

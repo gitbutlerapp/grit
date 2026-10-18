@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
+use crate::criterion_summary::CriterionSummaryReport;
 use crate::schema::BenchReport;
 
 /// Outcome of comparing scenario ratios between two reports.
@@ -57,14 +58,64 @@ fn relative_ratio_drift(a: f64, b: f64) -> f64 {
     (a - b).abs() / base
 }
 
+/// Compare Criterion summary rows by grit median wall time (milliseconds).
+pub fn compare_criterion_reports(
+    a: &CriterionSummaryReport,
+    b: &CriterionSummaryReport,
+    tolerance: f64,
+) -> Vec<CompareMismatch> {
+    let map_b: HashMap<&str, f64> = b
+        .scenarios
+        .iter()
+        .map(|s| (s.id.as_str(), s.grit.median_ms))
+        .collect();
+
+    let mut mismatches = Vec::new();
+    for scenario in &a.scenarios {
+        let Some(&median_b) = map_b.get(scenario.id.as_str()) else {
+            mismatches.push(CompareMismatch {
+                scenario_id: scenario.id.clone(),
+                ratio_a: scenario.grit.median_ms,
+                ratio_b: f64::NAN,
+                delta: f64::INFINITY,
+            });
+            continue;
+        };
+        let delta = relative_ratio_drift(scenario.grit.median_ms, median_b);
+        if delta > tolerance {
+            mismatches.push(CompareMismatch {
+                scenario_id: scenario.id.clone(),
+                ratio_a: scenario.grit.median_ms,
+                ratio_b: median_b,
+                delta,
+            });
+        }
+    }
+    mismatches
+}
+
+fn looks_like_criterion_summary(json: &str) -> bool {
+    json.contains("\"driver\":\"criterion\"")
+        || json.contains("\"driver\": \"criterion\"")
+}
+
 /// Load two JSON files and compare; errors if schema is invalid.
 pub fn compare_files(
     path_a: &std::path::Path,
     path_b: &std::path::Path,
     tolerance: f64,
 ) -> Result<Vec<CompareMismatch>> {
-    let a = BenchReport::from_json_str(&std::fs::read_to_string(path_a)?)?;
-    let b = BenchReport::from_json_str(&std::fs::read_to_string(path_b)?)?;
+    let text_a = std::fs::read_to_string(path_a).with_context(|| path_a.display().to_string())?;
+    let text_b = std::fs::read_to_string(path_b).with_context(|| path_b.display().to_string())?;
+    if looks_like_criterion_summary(&text_a) || looks_like_criterion_summary(&text_b) {
+        let a: CriterionSummaryReport =
+            serde_json::from_str(&text_a).context("parse criterion summary baseline")?;
+        let b: CriterionSummaryReport =
+            serde_json::from_str(&text_b).context("parse criterion summary candidate")?;
+        return Ok(compare_criterion_reports(&a, &b, tolerance));
+    }
+    let a = BenchReport::from_json_str(&text_a)?;
+    let b = BenchReport::from_json_str(&text_b)?;
     Ok(compare_reports(&a, &b, tolerance))
 }
 
@@ -143,5 +194,34 @@ mod tests {
         let a = sample_report("rev-list", 523.82);
         let b = sample_report("rev-list", 530.26);
         assert!(compare_reports(&a, &b, 0.10).is_empty());
+    }
+
+    #[test]
+    fn compare_criterion_medians_within_tolerance() {
+        use crate::criterion_summary::CriterionScenarioResult;
+        use crate::schema::TimingStats;
+
+        fn row(id: &str, median: f64) -> CriterionScenarioResult {
+            CriterionScenarioResult {
+                id: id.into(),
+                group: "g".into(),
+                fixture: "criterion-fixture".into(),
+                description: "d".into(),
+                driver: "criterion".into(),
+                grit: dummy_stats(median),
+            }
+        }
+        let a = CriterionSummaryReport {
+            schema_version: 1,
+            timestamp: "t".into(),
+            machine: sample_report("x", 1.0).machine,
+            tools: sample_report("x", 1.0).tools,
+            scenarios: vec![row("criterion-hash", 100.0)],
+        };
+        let b = CriterionSummaryReport {
+            scenarios: vec![row("criterion-hash", 105.0)],
+            ..a.clone()
+        };
+        assert!(compare_criterion_reports(&a, &b, 0.10).is_empty());
     }
 }
