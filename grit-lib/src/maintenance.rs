@@ -281,6 +281,8 @@ pub enum FsckSeverity {
     Error,
     /// Problem that may be acceptable depending on policy.
     Warning,
+    /// Informational object-buffer diagnostic.
+    Info,
 }
 
 /// One fsck diagnostic (refs, objects, or MIDX).
@@ -312,6 +314,7 @@ pub fn format_fsck_line(issue: &FsckIssue) -> String {
     let level = match issue.severity {
         FsckSeverity::Error => "error",
         FsckSeverity::Warning => "warning",
+        FsckSeverity::Info => "info",
     };
     format!(
         "{}: {}: {}: {}",
@@ -1131,7 +1134,11 @@ fn fsck_issue_from_repo(issue: RepoFsckIssue, config: &ConfigSet, strict: bool) 
         ),
         RepoFsckIssue::MissingObject { oid, referenced_by } => (
             oid.to_hex(),
-            format!("referenced by {}", referenced_by.to_hex()),
+            if referenced_by.is_zero() {
+                "missing (staged in index)".to_owned()
+            } else {
+                format!("referenced by {}", referenced_by.to_hex())
+            },
         ),
         RepoFsckIssue::BrokenLink {
             tree,
@@ -1152,6 +1159,7 @@ fn fsck_issue_from_repo(issue: RepoFsckIssue, config: &ConfigSet, strict: bool) 
         severity: match severity {
             repo_fsck::FsckSeverity::Error => FsckSeverity::Error,
             repo_fsck::FsckSeverity::Warning => FsckSeverity::Warning,
+            repo_fsck::FsckSeverity::Info => FsckSeverity::Info,
         },
         path,
         msg_id,

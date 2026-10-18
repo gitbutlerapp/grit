@@ -179,6 +179,8 @@ pub enum FsckSeverity {
     Error,
     /// Acceptable depending on `fsck.<msg-id>` policy.
     Warning,
+    /// Informational object-buffer diagnostics (hidden in default human output).
+    Info,
 }
 
 /// Aggregate fsck outcome.
@@ -241,8 +243,8 @@ fn object_fsck_default_level(msg_id: &str) -> ObjectFsckDefaultLevel {
         | "gitignoreSymlink"
         | "gitattributesSymlink"
         | "mailmapSymlink"
-        | "badTagName"
-        | "missingTaggerEntry" => ObjectFsckDefaultLevel::Info,
+        | "badTagName" => ObjectFsckDefaultLevel::Info,
+        "missingTaggerEntry" => ObjectFsckDefaultLevel::Warn,
         "extraHeaderEntry" => ObjectFsckDefaultLevel::Ignore,
         _ => ObjectFsckDefaultLevel::Error,
     }
@@ -265,10 +267,15 @@ fn object_buffer_fsck_severity(msg_id: &str, config: &ConfigSet, strict: bool) -
     match object_fsck_default_level(msg_id) {
         ObjectFsckDefaultLevel::Fatal | ObjectFsckDefaultLevel::Error => FsckSeverity::Error,
         ObjectFsckDefaultLevel::Warn if strict => FsckSeverity::Error,
-        ObjectFsckDefaultLevel::Warn
-        | ObjectFsckDefaultLevel::Info
-        | ObjectFsckDefaultLevel::Ignore => FsckSeverity::Warning,
+        ObjectFsckDefaultLevel::Warn => FsckSeverity::Warning,
+        ObjectFsckDefaultLevel::Info | ObjectFsckDefaultLevel::Ignore => FsckSeverity::Info,
     }
+}
+
+/// Whether default human fsck output should list this issue (matches Git omitting INFO by default).
+#[must_use]
+pub fn issue_visible_by_default(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> bool {
+    issue_severity(issue, config, strict) != FsckSeverity::Info
 }
 
 /// Resolve severity using `fsck.<msg-id>` and `strict`.
@@ -297,6 +304,7 @@ pub fn format_fsck_line(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> 
     let level = match issue_severity(issue, config, strict) {
         FsckSeverity::Error => "error",
         FsckSeverity::Warning => "warning",
+        FsckSeverity::Info => "info",
     };
     let (path, detail) = issue_display_paths(issue);
     format!("{level}: {path}: {}: {detail}", issue_msg_id(issue))
@@ -455,7 +463,10 @@ fn push_bad_object(
 
 /// True when object-buffer fsck failed only with diagnostics that still allow link extraction.
 fn object_fsck_allows_link_cache(err: &FsckError, config: &ConfigSet, strict: bool) -> bool {
-    object_buffer_fsck_severity(err.id, config, strict) == FsckSeverity::Warning
+    matches!(
+        object_buffer_fsck_severity(err.id, config, strict),
+        FsckSeverity::Warning | FsckSeverity::Info
+    )
 }
 
 fn push_corrupt_parse(
@@ -570,8 +581,25 @@ fn commit_link_targets(data: &[u8], algo: HashAlgo) -> Option<(ObjectId, Vec<Obj
 }
 
 fn dedupe_issues(issues: &mut Vec<FsckIssue>) {
+    let mut corrupt_or_bad = HashSet::new();
+    for issue in issues.iter() {
+        match issue {
+            FsckIssue::CorruptLoose { oid, .. } | FsckIssue::HashMismatch { oid, .. } => {
+                corrupt_or_bad.insert(*oid);
+            }
+            FsckIssue::BadObject { oid, error } if error.id == "corruptObject" => {
+                corrupt_or_bad.insert(*oid);
+            }
+            _ => {}
+        }
+    }
     let mut seen = HashSet::new();
     issues.retain(|issue| {
+        if let FsckIssue::MissingObject { oid, .. } = issue {
+            if corrupt_or_bad.contains(oid) {
+                return false;
+            }
+        }
         let key = match issue {
             FsckIssue::BadObject { oid, error } => format!("bad:{}:{}", oid, error.id),
             FsckIssue::MissingObject { oid, referenced_by } => {
@@ -1332,6 +1360,23 @@ fn kind_for_tree_mode(mode: u32) -> Option<ObjectKind> {
     }
 }
 
+fn issue_oids(issues: &[FsckIssue]) -> HashSet<ObjectId> {
+    let mut oids = HashSet::new();
+    for issue in issues {
+        if let Some(oid) = match issue {
+            FsckIssue::CorruptLoose { oid, .. }
+            | FsckIssue::HashMismatch { oid, .. }
+            | FsckIssue::BadObject { oid, .. }
+            | FsckIssue::MissingObject { oid, .. } => Some(*oid),
+            FsckIssue::BrokenLink { tree, .. } => Some(*tree),
+            _ => None,
+        } {
+            oids.insert(oid);
+        }
+    }
+    oids
+}
+
 fn fsck_index_missing_blobs(
     repo: &Repository,
     config: &ConfigSet,
@@ -1340,11 +1385,16 @@ fn fsck_index_missing_blobs(
 ) -> Result<()> {
     let index = repo.load_index()?;
     let odb = repo.odb();
+    let mut already_reported = issue_oids(issues);
     for entry in index.entries() {
         if entry.mode == MODE_GITLINK || entry.oid.is_zero() {
             continue;
         }
+        if already_reported.contains(&entry.oid) {
+            continue;
+        }
         if odb.read(&entry.oid).is_err() && should_emit(config, strict, "missingObject") {
+            already_reported.insert(entry.oid);
             issues.push(FsckIssue::MissingObject {
                 oid: entry.oid,
                 referenced_by: ObjectId::zero(),
@@ -1359,11 +1409,31 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use std::path::PathBuf;
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::InitOptions;
     use tempfile::TempDir;
+
+    #[test]
+    fn dedupe_drops_missing_when_corrupt_reported() {
+        let oid = ObjectId::from_hex("1212121212121212121212121212121212121212").unwrap();
+        let mut issues = vec![
+            FsckIssue::CorruptLoose {
+                oid,
+                path: PathBuf::from("/tmp/obj"),
+            },
+            FsckIssue::MissingObject {
+                oid,
+                referenced_by: ObjectId::from_hex("abababababababababababababababababababab")
+                    .unwrap(),
+            },
+        ];
+        dedupe_issues(&mut issues);
+        assert_eq!(issues.len(), 1);
+        assert!(matches!(issues[0], FsckIssue::CorruptLoose { .. }));
+    }
 
     #[test]
     fn clean_repo_fsck_ok() {

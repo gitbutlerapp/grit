@@ -591,6 +591,9 @@ enum Command {
         /// Treat ref warnings as errors.
         #[arg(long)]
         strict: bool,
+        /// Include info-level object diagnostics in human output (matches Git `--verbose`).
+        #[arg(short, long)]
+        verbose: bool,
     },
     /// Query exclude (gitignore) rules.
     Ignore {
@@ -1154,12 +1157,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             dangling,
             no_dangling,
             strict,
+            verbose,
         } => {
             let outcome = commands::fsck::run(commands::fsck::FsckRunOptions {
                 connectivity_only,
                 dangling,
                 no_dangling,
                 strict,
+                verbose,
                 mode: opts.mode,
             })?;
             let code = commands::fsck::exit_code(&outcome);

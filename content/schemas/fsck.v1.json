@@ -36,11 +36,15 @@
             "string",
             "null"
           ]
+        },
+        "severity": {
+          "type": "string"
         }
       },
       "required": [
         "detail",
-        "kind"
+        "kind",
+        "severity"
       ],
       "type": "object"
     }
@@ -63,12 +67,17 @@
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"
+    },
+    "ok": {
+      "description": "True when no error-severity issues were found.",
+      "type": "boolean"
     }
   },
   "required": [
     "dangling",
     "issues",
-    "objects_checked"
+    "objects_checked",
+    "ok"
   ],
   "title": "FsckOutcome",
   "type": "object"

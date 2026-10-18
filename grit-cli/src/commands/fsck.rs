@@ -28,6 +28,8 @@ pub struct FsckRunOptions {
     pub no_dangling: bool,
     /// Treat ref-fsck warnings as errors.
     pub strict: bool,
+    /// Include info-level object diagnostics in human output (matches Git `--verbose`).
+    pub verbose: bool,
     /// Output mode (controls stderr progress).
     pub mode: OutputMode,
 }
@@ -35,17 +37,23 @@ pub struct FsckRunOptions {
 /// Result of `grit fsck` / `grit verify`.
 #[derive(Serialize, JsonSchema)]
 pub struct FsckOutcome {
+    /// True when no error-severity issues were found.
+    pub ok: bool,
     pub objects_checked: usize,
     pub issues: Vec<FsckIssueJson>,
     pub dangling: Vec<DanglingJson>,
     /// True when at least one issue has error severity (not serialized).
     #[serde(skip)]
     pub has_errors: bool,
+    /// Include info-level issues in human listing (not serialized).
+    #[serde(skip)]
+    pub verbose: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
 pub struct FsckIssueJson {
     pub kind: String,
+    pub severity: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,12 +68,18 @@ pub struct DanglingJson {
 }
 
 impl FsckOutcome {
-    fn from_report(report: &FsckReport, config: &ConfigSet, options: &FsckOptions) -> Self {
+    fn from_report(
+        report: &FsckReport,
+        config: &ConfigSet,
+        options: &FsckOptions,
+        verbose: bool,
+    ) -> Self {
         let has_errors = report
             .issues
             .iter()
             .any(|issue| issue_severity(issue, config, options.strict) == FsckSeverity::Error);
         Self {
+            ok: !has_errors,
             objects_checked: report.objects_checked,
             issues: report
                 .issues
@@ -81,7 +95,18 @@ impl FsckOutcome {
                 })
                 .collect(),
             has_errors,
+            verbose,
         }
+    }
+
+    fn issues_for_human(&self) -> Vec<&FsckIssueJson> {
+        if self.verbose {
+            return self.issues.iter().collect();
+        }
+        self.issues
+            .iter()
+            .filter(|issue| issue.severity != "info")
+            .collect()
     }
 }
 
@@ -136,11 +161,15 @@ fn issue_detail(issue: &FsckIssue) -> String {
             format!("index checksum mismatch for {}", pack.display())
         }
         FsckIssue::MissingObject { oid, referenced_by } => {
-            format!(
-                "object {} referenced by {}",
-                oid.to_hex(),
-                referenced_by.to_hex()
-            )
+            if referenced_by.is_zero() {
+                format!("object {} missing (staged in index)", oid.to_hex())
+            } else {
+                format!(
+                    "object {} referenced by {}",
+                    oid.to_hex(),
+                    referenced_by.to_hex()
+                )
+            }
         }
         FsckIssue::BrokenLink {
             tree,
@@ -159,11 +188,19 @@ fn issue_detail(issue: &FsckIssue) -> String {
     }
 }
 
+fn severity_label(severity: FsckSeverity) -> &'static str {
+    match severity {
+        FsckSeverity::Error => "error",
+        FsckSeverity::Warning => "warning",
+        FsckSeverity::Info => "info",
+    }
+}
+
 fn issue_to_json(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> FsckIssueJson {
-    let kind = issue_msg_id(issue).to_owned();
-    let _ = issue_severity(issue, config, strict);
+    let severity = issue_severity(issue, config, strict);
     FsckIssueJson {
-        kind,
+        kind: issue_msg_id(issue).to_owned(),
+        severity: severity_label(severity).to_owned(),
         oid: issue_oid(issue).map(|o| o.to_hex()),
         path: issue_path(issue),
         detail: issue_detail(issue),
@@ -172,6 +209,8 @@ fn issue_to_json(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> FsckIss
 
 impl HumanRender for FsckOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        let visible = self.issues_for_human();
+
         outln!(
             w,
             "Checked {} object{}.",
@@ -179,14 +218,14 @@ impl HumanRender for FsckOutcome {
             if self.objects_checked == 1 { "" } else { "s" }
         );
 
-        if self.issues.is_empty() && self.dangling.is_empty() {
+        if visible.is_empty() && self.dangling.is_empty() {
             outln!(w, "No integrity problems found.");
             return Ok(());
         }
 
-        if !self.issues.is_empty() {
-            let mut by_kind: BTreeMap<&str, Vec<&FsckIssueJson>> = BTreeMap::new();
-            for issue in &self.issues {
+        if !visible.is_empty() {
+            let mut by_kind: BTreeMap<&str, Vec<&&FsckIssueJson>> = BTreeMap::new();
+            for issue in &visible {
                 by_kind.entry(&issue.kind).or_default().push(issue);
             }
             outln!(w, "\nIssues:");
@@ -212,7 +251,7 @@ impl HumanRender for FsckOutcome {
 
         if self.has_errors {
             outln!(w, "\nIntegrity check failed.");
-        } else if !self.issues.is_empty() {
+        } else if !visible.is_empty() {
             outln!(w, "\nCompleted with warnings only.");
         }
 
@@ -223,6 +262,7 @@ impl HumanRender for FsckOutcome {
 impl MarkdownRender for FsckOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Fsck\n");
+        outln!(w, "- **ok:** {}", self.ok);
         outln!(w, "- **objects_checked:** {}", self.objects_checked);
         if self.issues.is_empty() && self.dangling.is_empty() {
             outln!(w, "\nNo issues reported.");
@@ -230,13 +270,14 @@ impl MarkdownRender for FsckOutcome {
         }
         if !self.issues.is_empty() {
             outln!(w, "\n### Issues\n");
-            outln!(w, "| Kind | OID | Path | Detail |");
-            outln!(w, "| --- | --- | --- | --- |");
+            outln!(w, "| Kind | Severity | OID | Path | Detail |");
+            outln!(w, "| --- | --- | --- | --- | --- |");
             for issue in &self.issues {
                 outln!(
                     w,
-                    "| `{}` | {} | {} | {} |",
+                    "| `{}` | {} | {} | {} | {} |",
                     issue.kind,
+                    issue.severity,
                     issue.oid.as_deref().unwrap_or("—"),
                     issue
                         .path
@@ -252,6 +293,15 @@ impl MarkdownRender for FsckOutcome {
             for d in &self.dangling {
                 outln!(w, "- `{}` `{}`", d.kind, d.oid);
             }
+        }
+        let has_visible_warnings = self
+            .issues
+            .iter()
+            .any(|i| i.severity == "warning" || i.severity == "error");
+        if self.has_errors {
+            outln!(w, "\n**Integrity check failed.**");
+        } else if has_visible_warnings {
+            outln!(w, "\n**Completed with warnings only.**");
         }
         Ok(())
     }
@@ -276,7 +326,12 @@ pub fn run(options: FsckRunOptions) -> Result<FsckOutcome> {
     let report = repo.fsck(&fsck_opts, &mut progress, &NeverCancel)?;
     progress.finish();
 
-    Ok(FsckOutcome::from_report(&report, &config, &fsck_opts))
+    Ok(FsckOutcome::from_report(
+        &report,
+        &config,
+        &fsck_opts,
+        options.verbose,
+    ))
 }
 
 /// Exit code helper: non-zero when error-severity issues were found.
@@ -302,6 +357,7 @@ mod tests {
         let config = ConfigSet::default();
         let json = issue_to_json(&issue, &config, false);
         assert_eq!(json.kind, "missingObject");
+        assert_eq!(json.severity, "error");
         assert!(json.oid.is_some());
     }
 
@@ -313,5 +369,16 @@ mod tests {
                 .expect("oid"),
         };
         assert_eq!(issue_msg_id(&issue), "missingObject");
+    }
+
+    #[test]
+    fn index_missing_object_detail_omits_zero_referrer() {
+        let issue = FsckIssue::MissingObject {
+            oid: ObjectId::from_hex("abcd1234abcd1234abcd1234abcd1234abcd1234").expect("oid"),
+            referenced_by: ObjectId::zero(),
+        };
+        let detail = issue_detail(&issue);
+        assert!(detail.contains("staged in index"));
+        assert!(!detail.contains("0000000"));
     }
 }

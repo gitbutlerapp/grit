@@ -13,6 +13,7 @@ grit fsck --connectivity-only
 grit fsck --dangling
 grit fsck --no-dangling
 grit fsck --strict
+grit fsck --verbose
 grit verify
 ```
 
@@ -36,6 +37,7 @@ Progress during long checks is written to **stderr** in human mode (suppressed f
 | `--dangling` | With `--connectivity-only`, also compute and list unreachable objects (full fsck always includes dangling). |
 | `--no-dangling` | Skip unreachable-object listing (matches Git `--no-dangling`). |
 | `--strict` | Treat ref-fsck warnings as errors. |
+| `-v`, `--verbose` | Include info-level object diagnostics in human output (Git hides these by default). |
 
 ## Examples
 
@@ -68,14 +70,16 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
+| `ok` | boolean | `true` when no error-severity issues were found (warnings and info alone still yield `true`). |
 | `objects_checked` | integer | Loose and packed objects examined during store validation (0 with `--connectivity-only`). |
-| `issues` | array | Each entry has `kind` (camelCase msg-id), optional `oid` and `path`, and `detail`. |
+| `issues` | array | Each entry has `kind` (camelCase msg-id), `severity` (`error`, `warning`, or `info`), optional `oid` and `path`, and `detail`. |
 | `dangling` | array | Unreachable objects as `{kind, oid}` (`kind` is `commit`, `tree`, `blob`, or `tag`). |
 
 Example:
 
 ```json
 {
+  "ok": true,
   "objects_checked": 12,
   "issues": [],
   "dangling": []
@@ -86,10 +90,12 @@ Example with a problem:
 
 ```json
 {
+  "ok": false,
   "objects_checked": 8,
   "issues": [
     {
       "kind": "missingObject",
+      "severity": "error",
       "oid": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
       "detail": "object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef referenced by abcd1234abcd1234abcd1234abcd1234abcd1234"
     }
@@ -100,7 +106,7 @@ Example with a problem:
 
 ## Markdown output
 
-Pass `--markdown` for a summary table of issues and dangling objects.
+Pass `--markdown` for a summary with `ok`, a table of issues (including severity), and dangling objects. Info-level issues appear in `--json` and `--markdown` but are omitted from default human output unless `--verbose` is set.
 
 Schema: [v1](/schemas/fsck/v1.json)
 

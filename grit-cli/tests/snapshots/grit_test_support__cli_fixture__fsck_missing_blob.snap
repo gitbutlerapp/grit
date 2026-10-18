@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 1,
-    "stdout": "Checked 10 objects.\n\nIssues:\n  missingObject (1):\n    1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219: object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 referenced by 0000000000000000000000000000000000000000\n\nIntegrity check failed.\n",
+    "stdout": "Checked 10 objects.\n\nIssues:\n  missingObject (1):\n    1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219: object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 missing (staged in index)\n\nIntegrity check failed.\n",
     "stderr": ""
   },
   "json": {
     "exit": 1,
-    "stdout": "{\n  \"objects_checked\": 10,\n  \"issues\": [\n    {\n      \"kind\": \"missingObject\",\n      \"oid\": \"1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219\",\n      \"detail\": \"object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 referenced by 0000000000000000000000000000000000000000\"\n    }\n  ],\n  \"dangling\": []\n}\n",
+    "stdout": "{\n  \"ok\": false,\n  \"objects_checked\": 10,\n  \"issues\": [\n    {\n      \"kind\": \"missingObject\",\n      \"severity\": \"error\",\n      \"oid\": \"1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219\",\n      \"detail\": \"object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 missing (staged in index)\"\n    }\n  ],\n  \"dangling\": []\n}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 1,
-    "stdout": "## Fsck\n\n- **objects_checked:** 10\n\n### Issues\n\n| Kind | OID | Path | Detail |\n| --- | --- | --- | --- |\n| `missingObject` | 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 | — | object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 referenced by 0000000000000000000000000000000000000000 |\n",
+    "stdout": "## Fsck\n\n- **ok:** false\n- **objects_checked:** 10\n\n### Issues\n\n| Kind | Severity | OID | Path | Detail |\n| --- | --- | --- | --- | --- |\n| `missingObject` | error | 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 | — | object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 missing (staged in index) |\n\n**Integrity check failed.**\n",
     "stderr": ""
   }
 }

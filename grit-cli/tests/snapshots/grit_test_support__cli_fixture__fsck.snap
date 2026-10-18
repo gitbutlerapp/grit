@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"objects_checked\": 9,\n  \"issues\": [],\n  \"dangling\": [\n    {\n      \"kind\": \"blob\",\n      \"oid\": \"cc7c1250b368e807ba98143f3b0b47c3cd8b74fe\"\n    }\n  ]\n}\n",
+    "stdout": "{\n  \"ok\": true,\n  \"objects_checked\": 9,\n  \"issues\": [],\n  \"dangling\": [\n    {\n      \"kind\": \"blob\",\n      \"oid\": \"cc7c1250b368e807ba98143f3b0b47c3cd8b74fe\"\n    }\n  ]\n}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Fsck\n\n- **objects_checked:** 9\n\n### Dangling\n\n- `blob` `cc7c1250b368e807ba98143f3b0b47c3cd8b74fe`\n",
+    "stdout": "## Fsck\n\n- **ok:** true\n- **objects_checked:** 9\n\n### Dangling\n\n- `blob` `cc7c1250b368e807ba98143f3b0b47c3cd8b74fe`\n",
     "stderr": ""
   }
 }

@@ -5,7 +5,8 @@
 use grit_lib::config::ConfigSet;
 use grit_lib::maintenance::fsck::FsckError;
 use grit_lib::maintenance::repository_fsck::{
-    format_fsck_line, issue_msg_id, issue_severity, FsckIssue, FsckOptions, FsckSeverity,
+    format_fsck_line, issue_msg_id, issue_severity, issue_visible_by_default, FsckIssue,
+    FsckOptions, FsckSeverity,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::refs_fsck::RefsFsckIssue;
@@ -79,7 +80,20 @@ fn issue_msg_id_and_severity_and_format() {
     );
     assert_eq!(
         issue_severity(&missing_tagger, &config, true),
-        FsckSeverity::Warning
+        FsckSeverity::Error
+    );
+
+    let bad_mode = FsckIssue::BadObject {
+        oid,
+        error: FsckError::new("badFilemode", "legacy mode"),
+    };
+    assert_eq!(
+        issue_severity(&bad_mode, &config, false),
+        FsckSeverity::Info
+    );
+    assert!(
+        !issue_visible_by_default(&bad_mode, &config, false),
+        "badFilemode is info-level and hidden by default"
     );
 
     let has_dot = FsckIssue::BadObject {

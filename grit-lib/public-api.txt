@@ -4539,6 +4539,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::repository_
 pub enum grit_lib::maintenance::repository_fsck::FsckSeverity
 pub grit_lib::maintenance::repository_fsck::FsckSeverity::Error
 pub grit_lib::maintenance::repository_fsck::FsckSeverity::Warning
+pub grit_lib::maintenance::repository_fsck::FsckSeverity::Info
 impl core::clone::Clone for grit_lib::maintenance::repository_fsck::FsckSeverity
 pub fn grit_lib::maintenance::repository_fsck::FsckSeverity::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::maintenance::repository_fsck::FsckSeverity
@@ -4604,10 +4605,12 @@ pub fn grit_lib::maintenance::repository_fsck::fsck(&grit_lib::repo::Repository,
 pub fn grit_lib::maintenance::repository_fsck::index_object_roots(&grit_lib::repo::Repository) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::maintenance::repository_fsck::issue_msg_id(&grit_lib::maintenance::repository_fsck::FsckIssue) -> &'static str
 pub fn grit_lib::maintenance::repository_fsck::issue_severity(&grit_lib::maintenance::repository_fsck::FsckIssue, &grit_lib::config::ConfigSet, bool) -> grit_lib::maintenance::repository_fsck::FsckSeverity
+pub fn grit_lib::maintenance::repository_fsck::issue_visible_by_default(&grit_lib::maintenance::repository_fsck::FsckIssue, &grit_lib::config::ConfigSet, bool) -> bool
 pub fn grit_lib::maintenance::repository_fsck::reachability_roots(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub enum grit_lib::maintenance::FsckSeverity
 pub grit_lib::maintenance::FsckSeverity::Error
 pub grit_lib::maintenance::FsckSeverity::Warning
+pub grit_lib::maintenance::FsckSeverity::Info
 impl core::clone::Clone for grit_lib::maintenance::FsckSeverity
 pub fn grit_lib::maintenance::FsckSeverity::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::maintenance::FsckSeverity

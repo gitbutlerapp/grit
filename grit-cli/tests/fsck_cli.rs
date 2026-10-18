@@ -201,9 +201,18 @@ fn fsck_missing_tagger_warning_exits_zero_like_git() {
     );
     assert_eq!(
         grit_fsck(&fix, &["--strict"]),
-        0,
-        "strict should not promote INFO-level missingTaggerEntry to a failing exit"
+        1,
+        "strict promotes warning-level missingTaggerEntry to a failing exit"
     );
+}
+
+#[test]
+fn fsck_json_includes_ok_and_severity() {
+    let fix = CliFixture::new();
+    let out = fix.run(&["--json", "fsck"]).stdout;
+    let parsed: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(parsed.get("ok"), Some(&serde_json::Value::Bool(true)));
+    assert!(parsed.get("issues").and_then(|v| v.as_array()).is_some());
 }
 
 fn one_commit_with_staged_blob(fixture: &CliFixture) {
