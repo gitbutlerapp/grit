@@ -3503,6 +3503,8 @@ pub grit_lib::error::Error::PathError(alloc::string::String)
 pub grit_lib::error::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
 pub grit_lib::error::Error::PathsHaveLocalModifications
 pub grit_lib::error::Error::PathsHaveLocalModifications::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::Error::PathspecIgnored
+pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecNoMatch
 pub grit_lib::error::Error::PathspecNoMatch::spec: alloc::string::String
 pub grit_lib::error::Error::PushOptionsUnsupported
@@ -9444,6 +9446,8 @@ pub grit_lib::prelude::Error::PathError(alloc::string::String)
 pub grit_lib::prelude::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
 pub grit_lib::prelude::Error::PathsHaveLocalModifications
 pub grit_lib::prelude::Error::PathsHaveLocalModifications::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::prelude::Error::PathspecIgnored
+pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
 pub grit_lib::prelude::Error::PushOptionsUnsupported

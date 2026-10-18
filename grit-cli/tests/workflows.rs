@@ -158,6 +158,44 @@ fn init_checked_out_submodule(parent: &Path, name: &str) -> Result<String, Box<d
 }
 
 #[test]
+fn add_explicit_ignored_path_errors_and_stages_nothing() -> TestResult {
+    let scratch = Scratch::new("add-ignored-explicit")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    gs_ok(&repo, ["config", "user.name", "T"])?;
+    gs_ok(&repo, ["config", "user.email", "t@x.test"])?;
+    write_file(&repo.join(".gitignore"), "*.log\nbuild/\n")?;
+    write_file(&repo.join("a.log"), "x\n")?;
+    fs::create_dir_all(repo.join("build"))?;
+    write_file(&repo.join("build/out.bin"), "y\n")?;
+
+    let ignored_file = gs(&repo, ["add", "a.log"])?;
+    assert_ne!(ignored_file.status, Some(0), "{}", ignored_file.dump());
+    assert!(
+        ignored_file.stderr.contains("ignored"),
+        "expected ignored-path feedback:\n{}",
+        ignored_file.dump()
+    );
+
+    let ignored_dir = gs(&repo, ["add", "build"])?;
+    assert_ne!(ignored_dir.status, Some(0), "{}", ignored_dir.dump());
+    assert!(
+        ignored_dir.stderr.contains("build"),
+        "expected build in ignored-path feedback:\n{}",
+        ignored_dir.dump()
+    );
+
+    let listed = git_in(&repo, &["ls-files"])?;
+    assert!(
+        listed.stdout.trim().is_empty(),
+        "ignored paths must not be staged:\n{}",
+        listed.dump()
+    );
+    Ok(())
+}
+
+#[test]
 fn add_pathless_does_not_stage_ignored_files_in_new_directory() -> TestResult {
     let scratch = Scratch::new("add-ignore-dir")?;
     let repo = scratch.child("repo");

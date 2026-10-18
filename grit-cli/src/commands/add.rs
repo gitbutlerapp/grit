@@ -4,6 +4,7 @@
 //! a thin wrapper over the library.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions};
 use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::NullProgress;
@@ -108,7 +109,23 @@ fn stage_with_hint(
         executable_hint,
         staging_thresholds: None,
     };
-    let outcome =
-        stage_paths(repo, &opts, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let outcome = stage_paths(repo, &opts, &mut NullProgress).map_err(map_add_error)?;
     Ok(outcome.total())
+}
+
+fn map_add_error(err: LibError) -> anyhow::Error {
+    match err {
+        LibError::PathspecIgnored { paths } => {
+            let mut msg =
+                String::from("the following paths are ignored by one of your ignore files:\n");
+            for path in paths {
+                msg.push_str("    ");
+                msg.push_str(&path);
+                msg.push('\n');
+            }
+            msg.push_str("(ignored paths cannot be staged; adjust ignore rules or use a future force option)");
+            anyhow::anyhow!(msg)
+        }
+        other => anyhow::anyhow!("{other}"),
+    }
 }

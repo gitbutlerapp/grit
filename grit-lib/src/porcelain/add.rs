@@ -14,13 +14,14 @@ use crate::diff::{
 };
 use crate::error::{Error, Result};
 use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
+use crate::ignore::IgnoreMatcher;
 use crate::index::{
     entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
 };
 use crate::objects::{parse_commit, parse_tree, ObjectId};
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
-use crate::pathspec::pathspec_is_exclude;
+use crate::pathspec::{has_glob_chars, pathspec_is_exclude};
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
     apply_executable_hint_to_index, staged_mode_with_hint, StageExecutableHint,
@@ -134,8 +135,9 @@ pub(crate) fn stage_for_commit_on_index(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when an explicit pathspec matches nothing, or I/O /
-/// object-store failures while reading the work tree.
+/// Returns [`Error::Message`] when an explicit pathspec matches nothing,
+/// [`Error::PathspecIgnored`] when a path exists but is excluded by ignore rules,
+/// or I/O / object-store failures while reading the work tree.
 pub fn stage(
     repo: &Repository,
     opts: &StageOptions,
@@ -306,7 +308,7 @@ fn stage_inner_on_index(
     };
 
     if !opts.pathspecs.is_empty() {
-        validate_pathspecs(repo, index, work_tree, &unstaged, &untracked, opts)?;
+        validate_pathspecs(repo, index, work_tree, &unstaged, &untracked, opts, &rules)?;
     }
 
     let matches =
@@ -905,6 +907,7 @@ fn validate_pathspecs(
     unstaged: &[DiffEntry],
     untracked: &[String],
     opts: &StageOptions,
+    rules: &WorktreeRules,
 ) -> Result<()> {
     let sources = pathspec_sources(opts);
     let positive = sources
@@ -916,14 +919,90 @@ fn validate_pathspecs(
         return Ok(());
     }
     let known = known_paths(repo, index, unstaged, untracked)?;
+    let mut ignored_paths = Vec::new();
     for (label, resolved) in positive {
-        if !selector_matches_known(repo, resolved, &known, work_tree)? {
+        let spec = [(*resolved).to_owned()];
+        let stageable = known.iter().any(|p| repo.paths_match_pathspecs(p, &spec));
+        if stageable {
+            continue;
+        }
+        if !pathspec_matches_known_in_repository(repo, resolved)? {
             return Err(Error::Message(format!(
                 "pathspec '{label}' did not match any files"
             )));
         }
+        if let Some(display) =
+            ignored_display_for_explicit_add(repo, index, rules, work_tree, label, resolved)?
+        {
+            ignored_paths.push(display);
+        }
+    }
+    if !ignored_paths.is_empty() {
+        ignored_paths.sort_unstable();
+        ignored_paths.dedup();
+        return Err(Error::PathspecIgnored {
+            paths: ignored_paths,
+        });
     }
     Ok(())
+}
+
+fn ignored_display_for_explicit_add(
+    repo: &Repository,
+    index: &Index,
+    rules: &WorktreeRules,
+    work_tree: &Path,
+    label: &str,
+    resolved: &str,
+) -> Result<Option<String>> {
+    if pathspec_is_exclude(resolved)
+        || has_glob_chars(resolved)
+        || resolved.starts_with(":(")
+        || resolved.starts_with(':')
+    {
+        return Ok(None);
+    }
+    let precompose = repo.pathspec_precompose_enabled();
+    let staged = resolve_worktree_path_for_staging(work_tree, resolved, precompose);
+    if !staged.abs.exists() {
+        return Ok(None);
+    }
+    let rel = staged.index_relpath;
+    let is_dir = staged.abs.is_dir();
+    let mut ignore = rules.ignore_mut();
+    if is_dir {
+        let (ignored, _) = ignore.check_path(repo, Some(index), &rel, true)?;
+        return Ok(ignored.then(|| label.to_owned()));
+    }
+    let (ignored, _) = ignore.check_path(repo, Some(index), &rel, false)?;
+    if !ignored {
+        return Ok(None);
+    }
+    if let Some(parent) = first_ignored_parent_directory(repo, index, &mut ignore, &rel)? {
+        return Ok(Some(parent));
+    }
+    Ok(Some(label.to_owned()))
+}
+
+fn first_ignored_parent_directory(
+    repo: &Repository,
+    index: &Index,
+    ignore: &mut IgnoreMatcher,
+    rel: &str,
+) -> Result<Option<String>> {
+    let mut parts: Vec<&str> = rel.split('/').collect();
+    if parts.len() <= 1 {
+        return Ok(None);
+    }
+    while parts.len() > 1 {
+        parts.pop();
+        let prefix = parts.join("/");
+        let (ignored, _) = ignore.check_path(repo, Some(index), &prefix, true)?;
+        if ignored {
+            return Ok(Some(prefix));
+        }
+    }
+    Ok(None)
 }
 
 fn pathspec_sources(opts: &StageOptions) -> Vec<String> {
@@ -989,19 +1068,6 @@ fn collect_tree_paths(
         }
     }
     Ok(())
-}
-
-fn selector_matches_known(
-    repo: &Repository,
-    resolved: &str,
-    known: &[String],
-    _work_tree: &Path,
-) -> Result<bool> {
-    let spec = [resolved.to_owned()];
-    if known.iter().any(|p| repo.paths_match_pathspecs(p, &spec)) {
-        return Ok(true);
-    }
-    pathspec_matches_known_in_repository(repo, resolved)
 }
 
 fn stage_gitlink_at(
@@ -1197,6 +1263,52 @@ mod tests {
         let b_blob = repo.odb().read(&b_oid).unwrap();
         assert_eq!(a_blob.data, b"a2\n");
         assert_eq!(b_blob.data, b"b\n");
+    }
+
+    #[test]
+    fn stage_errors_on_explicit_ignored_file() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        fs::write(root.join("a.log"), b"x\n").unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["a.log".to_owned()],
+                pathspec_sources: vec!["a.log".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::PathspecIgnored { .. }));
+    }
+
+    #[test]
+    fn stage_errors_on_explicit_ignored_directory() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join(".gitignore"), "build/\n").unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("build/out.bin"), b"y\n").unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["build".to_owned()],
+                pathspec_sources: vec!["build".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        match err {
+            Error::PathspecIgnored { paths } => assert_eq!(paths, vec!["build".to_owned()]),
+            other => panic!("expected PathspecIgnored, got {other:?}"),
+        }
     }
 
     #[test]

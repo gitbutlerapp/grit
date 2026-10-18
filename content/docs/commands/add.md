@@ -15,7 +15,7 @@ grit add [--executable | --non-executable] [<path>...]
 
 Stages changes so they show up under **Staged** in [`grit status`](../status/). With no paths, `grit add` stages everything `grit status` reports: modified files, deleted files and untracked files. With paths, it stages only those files, or everything under those directories.
 
-Paths are relative to your current directory, so from inside `src/`, `grit add main.rs` stages `src/main.rs`. Paths like `../README.md` and absolute paths inside the repository work too. A path that matches nothing is an error, and nothing is staged.
+Paths are relative to your current directory, so from inside `src/`, `grit add main.rs` stages `src/main.rs`. Paths like `../README.md` and absolute paths inside the repository work too. A path that matches nothing is an error, and nothing is staged. Naming a path that exists but is excluded by `.gitignore`, `.git/info/exclude`, or `core.excludesfile` is also an error: nothing is staged and the command lists the ignored paths (pathless `grit add` still skips ignored files silently, like Git).
 
 On filesystems where Grit sets `core.filemode=false` (typical on Windows), every new file is staged as non-executable (`100644`) even when it is a script. Use `--executable` on the paths you ship as runnable scripts so the index and commits record mode `100755`. Use `--non-executable` to clear an explicit executable bit in the index. These flags require at least one path argument.
 

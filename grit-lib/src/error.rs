@@ -589,6 +589,13 @@ pub enum Error {
         spec: String,
     },
 
+    /// Explicit [`crate::porcelain::add::stage`] pathspecs name paths excluded by ignore rules.
+    #[error("the following paths are ignored:\n{}", paths.join("\n"))]
+    PathspecIgnored {
+        /// Repository-relative paths (or user labels) that cannot be staged while ignored.
+        paths: Vec<String>,
+    },
+
     /// `remove_paths` refused because tracked paths have local modifications without `--force`.
     #[error("the following files have local changes:\n{}", paths.join("\n"))]
     PathsHaveLocalModifications {
