@@ -13,8 +13,8 @@ use crate::chromium_synth::{ensure_chromium_synthetic, ChromiumSynthSpec};
 use crate::network_fixture::NetworkProfile;
 use crate::network_suite::run_network_suite;
 use crate::real_repo_fixture::{
-    ensure_git_git_bitmaps, ensure_linux_bare, ensure_worktree_clone, linux_fixture_enabled,
-    scratch_root, DEFAULT_GIT_GIT_TAG, DEFAULT_LINUX_TAG,
+    clear_branch_head_refs, ensure_git_git_bitmaps, ensure_linux_bare, ensure_worktree_clone,
+    linux_fixture_enabled, scratch_root, DEFAULT_GIT_GIT_TAG, DEFAULT_LINUX_TAG,
 };
 use crate::scenarios::{build_report, RunConfig};
 use crate::schema::{BenchReport, ScenarioResult, SCHEMA_VERSION};
@@ -63,6 +63,7 @@ pub fn run_campaign_suite(
         opts.smoke,
         false,
     )?);
+    clear_branch_head_refs(git, &git_bare)?;
     scenarios.extend(prefix_bitmap_report(
         run_bitmaps_suite(
             hyperfine,

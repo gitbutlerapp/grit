@@ -94,6 +94,14 @@ pub fn list_branch_head_refs(repo: &Path) -> Result<Vec<String>> {
     Ok(refs.into_iter().map(|(name, _)| name).collect())
 }
 
+/// Remove `refs/heads/*` from a tag-pinned bare fixture (file transport may add a synthetic branch).
+pub fn clear_branch_head_refs(git: &Path, bare: &Path) -> Result<()> {
+    for head in list_branch_head_refs(bare)? {
+        run_git(git, bare, &["update-ref", "-d", &format!("refs/heads/{head}")])?;
+    }
+    Ok(())
+}
+
 /// A tag-only bitmap fixture must not retain upstream branch tips.
 pub fn assert_tag_pinned_fixture_refs(repo: &Path) -> Result<()> {
     let heads = list_branch_head_refs(repo)?;
@@ -124,6 +132,12 @@ pub fn ensure_git_git_bitmaps(git: &Path) -> Result<PathBuf> {
         return Ok(dest);
     }
     if dest.exists() {
+        if stored_marker(&dest, BITMAP_READY)?.as_deref() == Some(tag.as_str()) {
+            clear_branch_head_refs(git, &dest).ok();
+            if git_git_bitmaps_current(&dest, &tag)? {
+                return Ok(dest);
+            }
+        }
         remove_dir_robust(&dest);
     }
     let parent = dest.parent().unwrap_or(Path::new("/tmp"));
