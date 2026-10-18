@@ -750,6 +750,11 @@ pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
         Some(&meta.client_repo),
         &["reset", "--hard", &meta.fetch_base_oid],
     )?;
+    run_git_cmd(
+        git,
+        Some(&meta.client_repo),
+        &["checkout", "-B", &meta.default_branch],
+    )?;
     for i in 0..meta.push_commits {
         run_git_cmd(
             git,

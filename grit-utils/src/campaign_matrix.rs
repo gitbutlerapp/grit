@@ -10,6 +10,7 @@ use crate::campaign_prep::{
 };
 use crate::campaign_worktree::{blame_target_path, dirty_tracked_worktree, list_tracked_files};
 use crate::fixture::prepare_commit_iteration;
+use crate::fixture::remove_dir_robust;
 use crate::hot_path_fixture::HotPathMeta;
 use crate::maintenance_suite::seed_loose_objects;
 use crate::network_fixture::{ensure_campaign_bare_network_meta, file_url};
@@ -19,8 +20,9 @@ use crate::real_repo_fixture::run_git;
 use crate::real_repo_fixture::scratch_root;
 use crate::scenarios::{
     chain_shell_public, grit_log_pages_shell, run_scenario, run_scenario_allow_grit_failure,
-    run_scenario_git_only_with_grit_failure, run_scenario_prepared, Driver, PrepareKind, RunConfig,
-    Scenario, LOG_BENCH_GRIT_PAGE_COUNT,
+    run_scenario_git_only_with_grit_failure, run_scenario_prepared,
+    run_scenario_prepared_allow_grit_failure, Driver, PrepareKind, RunConfig, Scenario,
+    LOG_BENCH_GRIT_PAGE_COUNT,
 };
 use crate::schema::{BenchFailure, ScenarioResult};
 use crate::shell::{shell_command, shell_quote};
@@ -76,6 +78,39 @@ fn run_matrix_scenario(
     } else {
         run_scenario(hyperfine, git, grit, cfg, scenario, repo)
     }
+}
+
+fn push_blame_scenario(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    out: &mut Vec<ScenarioResult>,
+    scenario: Scenario,
+) -> Result<()> {
+    let grit_args: Vec<&str> = scenario.grit_argv.iter().map(String::as_str).collect();
+    if let Some(failure) = probe_grit_cli(grit, &fixture.worktree, &grit_args) {
+        out.push(run_scenario_git_only_with_grit_failure(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &scenario,
+            &fixture.worktree,
+            failure,
+        )?);
+    } else {
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &scenario,
+            &fixture.worktree,
+        )?);
+    }
+    Ok(())
 }
 
 /// Run the core CLI matrix for `fixture`.
@@ -301,12 +336,14 @@ pub fn run_fixture_cli_matrix(
 
     if !smoke {
         let blame_path = blame_target_path(git, &fixture.worktree)?;
-        out.push(run_scenario(
+        push_blame_scenario(
             hyperfine,
             git,
             grit,
             cfg,
-            &Scenario {
+            fixture,
+            &mut out,
+            Scenario {
                 id: sid(fixture.id, "blame"),
                 group: "blame".into(),
                 fixture: fixture.label.clone(),
@@ -318,8 +355,7 @@ pub fn run_fixture_cli_matrix(
                 grit_via_shell: false,
                 git_via_shell: false,
             },
-            &fixture.worktree,
-        )?);
+        )?;
     }
 
     if !smoke && fixture.id == "git-dot-git" {
@@ -340,12 +376,14 @@ pub fn run_fixture_cli_matrix(
             }
             grit_argv.push(path.into());
             git_argv.push(path.into());
-            out.push(run_scenario(
+            push_blame_scenario(
                 hyperfine,
                 git,
                 grit,
                 cfg,
-                &Scenario {
+                fixture,
+                &mut out,
+                Scenario {
                     id: sid(fixture.id, name),
                     group: "blame".into(),
                     fixture: fixture.label.clone(),
@@ -360,8 +398,7 @@ pub fn run_fixture_cli_matrix(
                     grit_via_shell: false,
                     git_via_shell: false,
                 },
-                &fixture.worktree,
-            )?);
+            )?;
         }
     }
 
@@ -683,7 +720,8 @@ fn append_fsck_gc_repack(
     if !smoke {
         seed_loose_objects(git, &fixture.worktree)?;
     }
-    out.push(run_scenario(
+    let gc_allows_grit_failure = fixture.id == "git-dot-git";
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -701,9 +739,10 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.worktree,
+        gc_allows_grit_failure,
     )?);
 
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -721,6 +760,7 @@ fn append_fsck_gc_repack(
             git_via_shell: false,
         },
         &fixture.bare,
+        gc_allows_grit_failure,
     )?);
     Ok(())
 }
@@ -734,6 +774,7 @@ fn append_file_transport(
     smoke: bool,
     out: &mut Vec<ScenarioResult>,
 ) -> Result<()> {
+    let file_transport_allows_grit_failure = fixture.id == "git-dot-git";
     let url = file_url(&fixture.bare)?;
     let clone_dest = scratch_root().join(format!("{}-campaign-clone", fixture.id));
     let grit_clone = shell_command(
@@ -753,7 +794,7 @@ fn append_file_transport(
             clone_dest.display().to_string(),
         ],
     );
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -777,6 +818,7 @@ fn append_file_transport(
             git_via_shell: true,
         },
         &fixture.bare,
+        file_transport_allows_grit_failure,
     )?);
 
     if smoke {
@@ -801,7 +843,7 @@ fn append_file_transport(
             "HEAD".to_string(),
         ],
     );
-    out.push(run_scenario(
+    out.push(run_matrix_scenario(
         hyperfine,
         git,
         grit,
@@ -819,38 +861,53 @@ fn append_file_transport(
             git_via_shell: true,
         },
         &fetch_dest,
+        file_transport_allows_grit_failure,
     )?);
 
     let push_meta = ensure_campaign_bare_network_meta(git, &fixture.bare, smoke)?;
+    remove_dir_robust(&push_meta.client_repo);
     let push_client = ensure_network_client_repo(git, &fixture.bare)?;
     let push_url = file_url(&fixture.bare)?;
     configure_push_remote(git, &push_client, &push_url, &push_meta.default_branch)?;
     let prepare = prepare_network_command(cfg, git, &fixture.bare, "prepare-network-push");
-    out.push(run_scenario_prepared(
-        hyperfine,
-        git,
-        grit,
-        cfg,
-        &Scenario {
-            id: sid(fixture.id, "push-file"),
-            group: "network".into(),
-            fixture: fixture.label.clone(),
-            description: format!("push {} commits over file://", push_meta.push_commits),
-            grit_argv: vec!["push".into()],
-            git_argv: vec![
-                "push".into(),
-                "-q".into(),
-                "origin".into(),
-                push_meta.default_branch.clone(),
-            ],
-            driver: Driver::Cli,
-            prepare_kind: None,
-            grit_via_shell: false,
-            git_via_shell: false,
-        },
-        &push_client,
-        &prepare,
-    )?);
+    let push_scenario = Scenario {
+        id: sid(fixture.id, "push-file"),
+        group: "network".into(),
+        fixture: fixture.label.clone(),
+        description: format!("push {} commits over file://", push_meta.push_commits),
+        grit_argv: vec!["push".into()],
+        git_argv: vec![
+            "push".into(),
+            "-q".into(),
+            "origin".into(),
+            push_meta.default_branch.clone(),
+        ],
+        driver: Driver::Cli,
+        prepare_kind: None,
+        grit_via_shell: false,
+        git_via_shell: false,
+    };
+    if file_transport_allows_grit_failure {
+        out.push(run_scenario_prepared_allow_grit_failure(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &push_scenario,
+            &push_client,
+            &prepare,
+        )?);
+    } else {
+        out.push(run_scenario_prepared(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &push_scenario,
+            &push_client,
+            &prepare,
+        )?);
+    }
     Ok(())
 }
 

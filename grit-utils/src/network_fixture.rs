@@ -138,6 +138,21 @@ fn run_git(git: &Path, dir: Option<&Path>, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn run_git_on_bare(git: &Path, bare: &Path, args: &[&str]) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(args).current_dir(bare);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git on bare")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 fn rev_parse(git: &Path, dir: &Path, rev: &str) -> Result<String> {
     let mut cmd = Command::new(git);
     cmd.args(["rev-parse", rev]).current_dir(dir);
@@ -421,7 +436,34 @@ fn default_branch_on_bare(git: &Path, bare: &Path) -> Result<String> {
             return Ok(short);
         }
     }
-    Ok("main".into())
+    for branch in ["main", "master"] {
+        if rev_parse(git, bare, &format!("refs/heads/{branch}")).is_ok() {
+            return Ok(branch.to_string());
+        }
+    }
+    Ok("HEAD".into())
+}
+
+fn fetch_base_oid_for_bare(
+    git: &Path,
+    bare: &Path,
+    default_branch: &str,
+    incremental_commits: usize,
+) -> Result<String> {
+    if default_branch != "HEAD" {
+        if let Ok(oid) = rev_parse(
+            git,
+            bare,
+            &format!("refs/heads/{default_branch}~{incremental_commits}"),
+        ) {
+            return Ok(oid);
+        }
+        if let Ok(oid) = rev_parse(git, bare, &format!("refs/heads/{default_branch}")) {
+            return Ok(oid);
+        }
+    }
+    rev_parse(git, bare, &format!("HEAD~{incremental_commits}"))
+        .or_else(|_| rev_parse(git, bare, "HEAD"))
 }
 
 /// Network bench metadata for a real-repo campaign bare remote (file:// push/fetch matrix).
@@ -438,16 +480,19 @@ pub fn ensure_campaign_bare_network_meta(
     } else {
         NetworkProfile::Production
     };
-    let default_branch = default_branch_on_bare(git, bare)?;
-    let fetch_base = rev_parse(
+    let mut default_branch = default_branch_on_bare(git, bare)?;
+    if default_branch == "HEAD" {
+        let tip = rev_parse(git, bare, "HEAD")?;
+        run_git_on_bare(git, bare, &["update-ref", "refs/heads/main", &tip])?;
+        run_git_on_bare(git, bare, &["symbolic-ref", "HEAD", "refs/heads/main"])?;
+        default_branch = "main".into();
+    }
+    let fetch_base = fetch_base_oid_for_bare(
         git,
         bare,
-        &format!(
-            "refs/heads/{default_branch}~{}",
-            profile.incremental_fetch_commits()
-        ),
-    )
-    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
+        &default_branch,
+        profile.incremental_fetch_commits(),
+    )?;
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: "CampaignRealRepo".into(),
@@ -473,17 +518,12 @@ fn write_meta(
     many_refs: usize,
 ) -> Result<()> {
     let default_branch = default_branch_on_bare(git, bare)?;
-    let fetch_base = rev_parse(
+    let fetch_base = fetch_base_oid_for_bare(
         git,
         bare,
-        &format!(
-            "refs/heads/{default_branch}~{}",
-            profile.incremental_fetch_commits()
-        ),
-    )
-    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
-
-    let default_branch = default_branch_on_bare(git, bare)?;
+        &default_branch,
+        profile.incremental_fetch_commits(),
+    )?;
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: format!("{kind:?}"),

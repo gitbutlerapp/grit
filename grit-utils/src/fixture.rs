@@ -145,24 +145,48 @@ pub fn dirty_repo(dir: &Path, count: usize) -> Result<()> {
     Ok(())
 }
 
-fn tracked_worktree_files(git: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
-    Ok(crate::campaign_worktree::list_tracked_files(git, dir)?
+fn bench_modify_count(tracked_len: usize) -> usize {
+    std::env::var("GRIT_BENCH_DIFF_DIRTY_COUNT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|n| n.max(1).min(tracked_len.max(1)))
+        .unwrap_or_else(|| (tracked_len / 5).max(1))
+}
+
+fn reset_worktree_for_prepare(git: &Path, dir: &Path) -> Result<()> {
+    run_git(git, dir, &["reset", "--hard", "HEAD"])?;
+    run_git(
+        git,
+        dir,
+        &[
+            "clean",
+            "-fd",
+            "-q",
+            "-e",
+            ".grit-bench-hot-path.json",
+            "-e",
+            ".grit-bench-worktree-ready",
+        ],
+    )?;
+    Ok(())
+}
+
+fn safe_tracked_relpaths(git: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut rel = crate::campaign_worktree::list_tracked_files(git, dir)?
         .into_iter()
-        .filter(|rel| rel.to_string_lossy() != ".gitmodules")
-        .map(|rel| dir.join(rel))
-        .collect())
+        .filter(|p| crate::campaign_worktree::is_safe_to_modify(p))
+        .filter(|p| dir.join(p).is_file())
+        .collect::<Vec<_>>();
+    rel.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+    Ok(rel)
 }
 
 /// Modify ~20% of tracked files for a `commit` iteration (append line), then reset index with **git**.
 pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
-    use std::io::Write as _;
-
-    let files = tracked_worktree_files(git, dir)?;
-    let modify_count = (files.len() / 5).max(1);
-    for f in files.iter().take(modify_count) {
-        let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
-        writeln!(file, "commit bench change")?;
-    }
+    reset_worktree_for_prepare(git, dir)?;
+    let rel = safe_tracked_relpaths(git, dir)?;
+    let modify_count = bench_modify_count(rel.len());
+    crate::campaign_worktree::modify_tracked_files(dir, &rel, modify_count)?;
     let out = Command::new(git)
         .args(["reset", "-q", "HEAD"])
         .current_dir(dir)
@@ -214,10 +238,11 @@ pub fn prepare_diff_dirty_iteration(dir: &Path, git: &Path) -> Result<()> {
 }
 
 pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
-    let files = tracked_worktree_files(git, dir)?;
-    let modify_count = (files.len() / 5).max(1);
-    for f in files.iter().take(modify_count) {
-        fs::write(f, "modified for add bench\n")?;
+    reset_worktree_for_prepare(git, dir)?;
+    let rel = safe_tracked_relpaths(git, dir)?;
+    let modify_count = bench_modify_count(rel.len());
+    for path in rel.iter().take(modify_count) {
+        fs::write(dir.join(path), "modified for add bench\n")?;
     }
     let out = Command::new(git)
         .args(["reset", "-q", "HEAD"])
@@ -527,13 +552,12 @@ mod tests {
         let git = which_git();
         create_min_repo(&git, dir.path()).unwrap();
         prepare_add_iteration(dir.path(), &git).unwrap();
-        let grit = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit");
-        if !grit.is_file() {
-            return;
-        }
-        let err = prepare_add_iteration(dir.path(), &grit).unwrap_err();
+        let err = prepare_add_iteration(dir.path(), Path::new("/nonexistent/git")).unwrap_err();
+        let msg = err.to_string();
         assert!(
-            err.to_string().contains("git reset") || err.to_string().contains("ls-files"),
+            msg.contains("git reset")
+                || msg.contains("ls-files")
+                || msg.contains("No such file"),
             "unexpected error: {err}"
         );
     }
