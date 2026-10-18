@@ -424,6 +424,15 @@ fn parse_low_speed(config: &ConfigSet) -> Option<LowSpeedSettings> {
     }
 }
 
+/// Capacity for [`HttpResponseReader`]: side-band demux uses many small `read_exact`
+/// calls; the outer `BufReader` must sit above [`LowSpeedReader`] so refills pull
+/// large chunks from the socket instead of one pkt-line at a time.
+const HTTP_RESPONSE_READ_BUF: usize = 1024 * 1024;
+
+/// Streaming HTTP response body: large read-ahead, then low-speed abort checks on
+/// actual I/O to the transport.
+type HttpResponseReader = BufReader<LowSpeedReader<Box<dyn Read + Send>>>;
+
 /// Wraps a reader to abort when average throughput stays below the configured bytes/sec
 /// for the configured window, mirroring curl `LOW_SPEED_LIMIT` / `LOW_SPEED_TIME`.
 struct LowSpeedReader<R> {
@@ -661,7 +670,7 @@ impl UreqHttpClient {
         body: &[u8],
         git_protocol: Option<&str>,
         auth: Option<&str>,
-    ) -> Result<(RawResponseHead, LowSpeedReader<Box<dyn Read + Send>>)> {
+    ) -> Result<(RawResponseHead, HttpResponseReader)> {
         let idempotent = content_type == "application/x-git-upload-pack-request";
         let result = retry_interrupted(idempotent, || {
             let mut req = self
@@ -735,7 +744,7 @@ impl UreqHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<LowSpeedReader<Box<dyn Read + Send>>> {
+    ) -> Result<HttpResponseReader> {
         let initial_auth = self.cached_auth_header_for_url(url);
         let (head, reader) = self.do_post_open(
             url,
@@ -1016,14 +1025,15 @@ struct RawResponseHead {
 fn open_response_body(
     resp: ureq::http::Response<ureq::Body>,
     timeouts: &HttpTransportTimeouts,
-) -> Result<(RawResponseHead, LowSpeedReader<Box<dyn Read + Send>>)> {
+) -> Result<(RawResponseHead, HttpResponseReader)> {
     use ureq::ResponseExt as _;
     let status = resp.status().as_u16();
     let final_url = resp.get_uri().to_string();
     let www_authenticate = header_values(resp.headers(), "WWW-Authenticate");
     let set_cookie = header_values(resp.headers(), "Set-Cookie");
     let reader = resp.into_body().into_reader();
-    let buffered = BufReader::with_capacity(1024 * 1024, reader);
+    let timed = LowSpeedReader::new(Box::new(reader) as Box<dyn Read + Send>, timeouts);
+    let buffered = BufReader::with_capacity(HTTP_RESPONSE_READ_BUF, timed);
     Ok((
         RawResponseHead {
             status,
@@ -1031,12 +1041,12 @@ fn open_response_body(
             set_cookie,
             final_url,
         },
-        LowSpeedReader::new(Box::new(buffered) as Box<dyn Read + Send>, timeouts),
+        buffered,
     ))
 }
 
-fn drain_response_body(mut reader: LowSpeedReader<Box<dyn Read + Send>>) {
-    let _ = std::io::copy(&mut reader, &mut std::io::sink());
+fn drain_response_body(mut reader: HttpResponseReader) {
+    let _ = crate::pack_receive::copy_reader_to_writer(&mut reader, &mut io::sink());
 }
 
 /// Collect all values for a header as owned UTF-8 strings (skipping any that
@@ -1587,6 +1597,57 @@ mod tests {
             .read_to_end(&mut Vec::new())
             .expect_err("unexpected eof");
         assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn http_response_reader_coalesces_small_read_exact_calls() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct CountingRead {
+            sizes: Rc<RefCell<Vec<usize>>>,
+            left: usize,
+        }
+
+        impl Read for CountingRead {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.sizes.borrow_mut().push(buf.len());
+                if self.left == 0 {
+                    return Ok(0);
+                }
+                let n = buf.len().min(self.left);
+                buf[..n].fill(0xab);
+                self.left -= n;
+                Ok(n)
+            }
+        }
+
+        let sizes = Rc::new(RefCell::new(Vec::new()));
+        let inner = CountingRead {
+            sizes: Rc::clone(&sizes),
+            left: 600 * 1024,
+        };
+        let timed = LowSpeedReader::new(inner, &HttpTransportTimeouts::default());
+        let mut reader = BufReader::with_capacity(HTTP_RESPONSE_READ_BUF, timed);
+
+        // Side-band demux issues many 4-byte length reads plus large payloads.
+        for _ in 0..64 {
+            let mut hdr = [0u8; 4];
+            reader.read_exact(&mut hdr).expect("hdr");
+            let mut payload = [0u8; 8192];
+            reader.read_exact(&mut payload).expect("payload");
+        }
+
+        let observed = sizes.borrow().clone();
+        assert!(
+            observed.iter().any(|&n| n >= 64 * 1024),
+            "expected large socket reads, got sizes {observed:?}"
+        );
+        assert!(
+            observed.len() < 64,
+            "expected read coalescing, got {} socket reads",
+            observed.len()
+        );
     }
 
     #[test]

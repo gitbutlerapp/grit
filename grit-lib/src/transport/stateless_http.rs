@@ -106,7 +106,7 @@ impl<C: HttpClient> StatelessHttpConnection<C> {
 
     fn drain_response(&mut self) {
         if let Some(mut r) = self.response.take() {
-            let _ = io::copy(&mut r, &mut io::sink());
+            let _ = crate::pack_receive::copy_reader_to_writer(&mut r, &mut io::sink());
         }
     }
 

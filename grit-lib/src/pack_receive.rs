@@ -5,7 +5,7 @@
 //! a `Vec` when the caller writes to disk instead.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -127,6 +127,25 @@ pub fn copy_reader_to_writer(reader: &mut dyn Read, writer: &mut dyn Write) -> R
 /// `read_sideband_pack_tail` function.
 pub fn read_sideband_pack_tail(
     r: &mut dyn Read,
+    target: &mut PackReceiveTarget<'_>,
+    progress: &mut dyn Progress,
+    pending: &mut Vec<u8>,
+    seen_pack: &mut bool,
+    payload_buf: &mut Vec<u8>,
+) -> Result<()> {
+    let mut buffered = BufReader::with_capacity(1024 * 1024, r);
+    read_sideband_pack_tail_buffered(
+        &mut buffered,
+        target,
+        progress,
+        pending,
+        seen_pack,
+        payload_buf,
+    )
+}
+
+fn read_sideband_pack_tail_buffered(
+    r: &mut impl Read,
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
     pending: &mut Vec<u8>,
