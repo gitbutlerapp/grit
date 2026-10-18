@@ -19,8 +19,9 @@ pub struct CompareMismatch {
 ///
 /// Drift is `|ratio_a - ratio_b| / max(|ratio_a|, |ratio_b|)` (so `0.10` means ±10%).
 ///
-/// Scenarios with a grit-side hyperfine failure on either capture are skipped. When git medians
-/// drift beyond `tolerance`, the ratio row is skipped too (sub-millisecond git timings dominate).
+/// Scenarios with a grit-side hyperfine failure on either capture are skipped. Rows are skipped
+/// when git or grit medians drift beyond `tolerance` (ratio is meaningless if either side moved).
+/// Ratio drift uses whole percentage points: `floor(delta × 100) > floor(tolerance × 100)`.
 pub fn compare_reports(a: &BenchReport, b: &BenchReport, tolerance: f64) -> Vec<CompareMismatch> {
     let map_b: HashMap<&str, &ScenarioResult> =
         b.scenarios.iter().map(|s| (s.id.as_str(), s)).collect();
@@ -43,12 +44,14 @@ pub fn compare_reports(a: &BenchReport, b: &BenchReport, tolerance: f64) -> Vec<
             continue;
         }
         let git_delta = relative_ratio_drift(scenario.git.median_ms, scenario_b.git.median_ms);
-        if git_delta > tolerance {
+        let grit_delta =
+            relative_ratio_drift(scenario.grit.median_ms, scenario_b.grit.median_ms);
+        if git_delta > tolerance || grit_delta > tolerance {
             continue;
         }
         let ratio_b = scenario_b.ratio;
         let delta = relative_ratio_drift(scenario.ratio, ratio_b);
-        if delta > tolerance {
+        if ratio_drift_exceeds_tolerance(delta, tolerance) {
             mismatches.push(CompareMismatch {
                 scenario_id: scenario.id.clone(),
                 ratio_a: scenario.ratio,
@@ -66,6 +69,10 @@ fn relative_ratio_drift(a: f64, b: f64) -> f64 {
         return 0.0;
     }
     (a - b).abs() / base
+}
+
+fn ratio_drift_exceeds_tolerance(delta: f64, tolerance: f64) -> bool {
+    (delta * 100.0).floor() > (tolerance * 100.0).floor()
 }
 
 /// Load two JSON files and compare; errors if schema is invalid.
@@ -142,11 +149,24 @@ mod tests {
 
     #[test]
     fn compare_outside_tolerance() {
-        let a = sample_report("status-100", 0.80);
-        let b = sample_report("status-100", 0.95);
+        let mut a = sample_report("status-100", 1.0);
+        let mut b = sample_report("status-100", 1.2);
+        a.scenarios[0].git = dummy_stats(100.0);
+        a.scenarios[0].grit = dummy_stats(100.0);
+        b.scenarios[0].git = dummy_stats(100.0);
+        b.scenarios[0].grit = dummy_stats(108.0);
+        a.scenarios[0].ratio = 1.0;
+        b.scenarios[0].ratio = 1.2;
         let mismatches = compare_reports(&a, &b, 0.10);
         assert_eq!(mismatches.len(), 1);
-        assert!((mismatches[0].delta - (0.15 / 0.95)).abs() < 1e-9);
+        assert!((mismatches[0].delta - (0.2 / 1.2)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compare_ratio_tie_at_tenth_of_percent_point() {
+        let a = sample_report("pick", 1.0);
+        let b = sample_report("pick", 1.001);
+        assert!(compare_reports(&a, &b, 0.10).is_empty());
     }
 
     #[test]
