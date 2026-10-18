@@ -486,6 +486,7 @@ pub(crate) fn prepare_tree_transition_allow_local_with_snapshot(
 ) -> std::result::Result<PreparedSwitch, TreeTransitionPrepareError> {
     let from_tree_oid = from_tree.copied().or(snapshot.head_tree);
     snapshot.head_tree = from_tree_oid;
+    snapshot.index.ensure_canonical_order();
     let trust_index_for_old_tree =
         from_tree_oid.is_some() && !snapshot.index.entries.iter().any(|e| e.stage() != 0);
     let from_tree_ref = from_tree_oid.as_ref();

@@ -889,10 +889,8 @@ fn checkout_commit_index_update(
         bulk_index_rewrite || !wholesale_dirs_removed.is_empty();
     if bulk_index_rewrite || !wholesale_dirs_removed.is_empty() {
         if index_mut.defer_untracked_cache_invalidation {
-            const CACHE_TREE_PARTIAL_INVALIDATE_MAX: usize = 128;
-            if wholesale_dirs_removed.is_empty()
-                && change_count <= CACHE_TREE_PARTIAL_INVALIDATE_MAX
-            {
+            const CACHE_TREE_PARTIAL_INVALIDATE_MAX: usize = 4096;
+            if change_count <= CACHE_TREE_PARTIAL_INVALIDATE_MAX {
                 index_mut.invalidate_cache_tree_for_bulk_checkout(
                     wholesale_dirs_removed,
                     paths_to_remove.iter().map(|p| p.as_slice()),
@@ -911,6 +909,7 @@ fn checkout_commit_index_update(
         paths_to_remove.iter().map(|p| p.as_slice()),
         new_entries,
     );
+    index_mut.ensure_canonical_order();
     if let Some(tree) = checkout_result_tree {
         if index_mut.cache_tree.is_some() {
             index_mut.cache_tree_root = Some(tree);
