@@ -941,11 +941,14 @@ fn tree_changes_are_all_deletions(changes: &[DiffEntry]) -> bool {
     !changes.is_empty() && changes.iter().all(|c| c.status == DiffStatus::Deleted)
 }
 
-fn tree_changes_are_modifications_and_deletions(changes: &[DiffEntry]) -> bool {
+fn tree_changes_are_bulk_mod_add_delete(changes: &[DiffEntry]) -> bool {
     !changes.is_empty()
-        && changes
-            .iter()
-            .all(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Deleted))
+        && changes.iter().all(|c| {
+            matches!(
+                c.status,
+                DiffStatus::Modified | DiffStatus::Deleted | DiffStatus::Added
+            )
+        })
 }
 
 fn bulk_write_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRules) -> bool {
@@ -966,17 +969,17 @@ fn bulk_write_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRules) ->
 
 fn bulk_mod_delete_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRules) -> bool {
     if changes.len() < BULK_ADD_CHECKOUT_MIN
-        || !tree_changes_are_modifications_and_deletions(changes)
+        || !tree_changes_are_bulk_mod_add_delete(changes)
         || tree_changes_touch_gitattributes(changes)
     {
         return false;
     }
-    let mut saw_mod = false;
+    let mut saw_write = false;
     for change in changes {
-        if change.status != DiffStatus::Modified {
+        if !matches!(change.status, DiffStatus::Modified | DiffStatus::Added) {
             continue;
         }
-        saw_mod = true;
+        saw_write = true;
         let Some(path) = change.new_path.as_deref() else {
             return false;
         };
@@ -987,7 +990,7 @@ fn bulk_mod_delete_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRule
             return false;
         }
     }
-    saw_mod
+    saw_write
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1106,9 +1109,9 @@ fn checkout_bulk_mod_delete_tree_changes(
         .iter()
         .filter(|c| c.status == DiffStatus::Deleted)
         .collect();
-    let mod_changes: Vec<DiffEntry> = changes
+    let write_changes: Vec<DiffEntry> = changes
         .iter()
-        .filter(|c| c.status == DiffStatus::Modified)
+        .filter(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Added))
         .cloned()
         .collect();
     let delete_paths: Vec<String> = delete_changes
@@ -1140,8 +1143,8 @@ fn checkout_bulk_mod_delete_tree_changes(
 
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
     let mut dir_cache = LeadingDirCache::new();
-    let mut write_jobs: Vec<CheckoutWriteJob> = Vec::with_capacity(mod_changes.len());
-    for change in &mod_changes {
+    let mut write_jobs: Vec<CheckoutWriteJob> = Vec::with_capacity(write_changes.len());
+    for change in &write_changes {
         let Some(path) = change.new_path.as_deref() else {
             continue;
         };
@@ -2893,6 +2896,61 @@ mod tests {
             });
         }
         for i in 0..40 {
+            changes.push(DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some(format!("gone{i:03}.txt")),
+                new_path: None,
+                old_mode: "100644".into(),
+                new_mode: String::new(),
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            });
+        }
+        assert!(bulk_mod_delete_checkout_eligible(&changes, &rules));
+    }
+
+    #[test]
+    fn bulk_mod_delete_checkout_eligible_accepts_mixed_add_mod_and_delete() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let config = repo.config().expect("config");
+        let index = repo.load_index().expect("index");
+        let rules = WorktreeRules::from_parts_index_attributes_only(&repo, &index, config.clone())
+            .expect("rules");
+        let mut changes = Vec::new();
+        for i in 0..20 {
+            changes.push(DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some(format!("new{i:03}.txt")),
+                old_mode: String::new(),
+                new_mode: "100644".into(),
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            });
+        }
+        for i in 0..20 {
+            changes.push(DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some(format!("f{i:03}.txt")),
+                new_path: Some(format!("f{i:03}.txt")),
+                old_mode: "100644".into(),
+                new_mode: "100644".into(),
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            });
+        }
+        for i in 0..20 {
             changes.push(DiffEntry {
                 status: DiffStatus::Deleted,
                 old_path: Some(format!("gone{i:03}.txt")),

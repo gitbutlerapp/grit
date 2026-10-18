@@ -4785,6 +4785,28 @@ fn refresh_index_blob_stat_from_metadata(
         };
     }
     if !stat_matches_with_policy(ie, meta, stat_policy) {
+        if stat_refresh_trusts_size_and_mtime_sec(ie, meta, index_mtime, stat_policy) {
+            let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
+            if !index_entry_stat_matches(ie, &refreshed, stat_policy) {
+                ie.ctime_sec = refreshed.ctime_sec;
+                ie.ctime_nsec = refreshed.ctime_nsec;
+                ie.mtime_sec = refreshed.mtime_sec;
+                ie.mtime_nsec = refreshed.mtime_nsec;
+                ie.dev = refreshed.dev;
+                ie.ino = refreshed.ino;
+                ie.uid = refreshed.uid;
+                ie.gid = refreshed.gid;
+                ie.size = refreshed.size;
+                return BlobStatRefreshOutcome {
+                    index_changed: true,
+                    content_verified: true,
+                };
+            }
+            return BlobStatRefreshOutcome {
+                index_changed: false,
+                content_verified: true,
+            };
+        }
         let file_attrs = file_attrs_for(path);
         let content_matches = hash_worktree_file(
             odb,
@@ -4894,6 +4916,32 @@ fn index_entry_stat_matches(
     policy: crate::index::StatMatchPolicy,
 ) -> bool {
     crate::index::index_entries_stat_equivalent(a, b, policy)
+}
+
+/// When size and whole-second mtime agree and the entry is not racy, adopt worktree stat without
+/// re-hashing (covers foreign index writes that differ only in nsec/ino/ctime fields).
+fn stat_refresh_trusts_size_and_mtime_sec(
+    ie: &IndexEntry,
+    meta: &fs::Metadata,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: crate::index::StatMatchPolicy,
+) -> bool {
+    if entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
+        return false;
+    }
+    if crate::index::munge_index_size(meta.len()) != ie.size {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.mtime() as u32 == ie.mtime_sec
+    }
+    #[cfg(not(unix))]
+    {
+        let (_, (mtime_sec, _)) = crate::index::metadata_times(meta);
+        mtime_sec == ie.mtime_sec
+    }
 }
 
 /// Whether path-only checkout can skip writing a blob because the worktree is up to date.
