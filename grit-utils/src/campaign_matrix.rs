@@ -317,26 +317,43 @@ pub fn run_fixture_cli_matrix(
                 patch_limit.to_string(),
             ],
         );
-        out.push(run_matrix_scenario(
-            hyperfine,
-            git,
-            grit,
-            cfg,
-            &Scenario {
-                id: sid(fixture.id, "log-patch"),
-                group: "log".into(),
-                fixture: fixture.label.clone(),
-                description: format!("log -p over {patch_limit} commits"),
-                grit_argv: sh_script(grit_patch),
-                git_argv: vec!["log".into(), "-p".into(), format!("-{patch_limit}")],
-                driver: Driver::Lib,
-                prepare_kind: None,
-                grit_via_shell: true,
-                git_via_shell: false,
-            },
-            &fixture.worktree,
-            log_allows_grit_failure,
-        )?);
+        let log_patch = Scenario {
+            id: sid(fixture.id, "log-patch"),
+            group: "log".into(),
+            fixture: fixture.label.clone(),
+            description: format!("log -p over {patch_limit} commits"),
+            grit_argv: sh_script(grit_patch),
+            git_argv: vec!["log".into(), "-p".into(), format!("-{patch_limit}")],
+            driver: Driver::Lib,
+            prepare_kind: None,
+            grit_via_shell: true,
+            git_via_shell: false,
+        };
+        if fixture.id == "chromium-synth" {
+            out.push(run_scenario_git_only_with_grit_failure(
+                hyperfine,
+                git,
+                grit,
+                cfg,
+                &log_patch,
+                &fixture.worktree,
+                BenchFailure {
+                    kind: "runtime_cap".into(),
+                    message: "grit log-patch on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
+                        .into(),
+                },
+            )?);
+        } else {
+            out.push(run_matrix_scenario(
+                hyperfine,
+                git,
+                grit,
+                cfg,
+                &log_patch,
+                &fixture.worktree,
+                log_allows_grit_failure,
+            )?);
+        }
     }
 
     if !smoke {
