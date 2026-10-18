@@ -3836,6 +3836,7 @@ impl core::marker::UnsafeUnpin for grit_lib::worktree::fsmonitor::FsmonitorRefre
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::fsmonitor::FsmonitorRefreshResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::fsmonitor::FsmonitorRefreshResult
 pub fn grit_lib::fsmonitor::entry_skips_worktree_stat(&grit_lib::index::IndexEntry, &grit_lib::index::Index) -> bool
+pub fn grit_lib::fsmonitor::fsmonitor_enabled(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::fsmonitor::git_style_windows_pipe_name_from_absolute_ipc(&str) -> alloc::string::String
 pub fn grit_lib::fsmonitor::refresh_index(&mut grit_lib::index::Index, &std::path::Path, &std::path::Path, &grit_lib::config::ConfigSet, core::option::Option<&dyn grit_lib::command_runner::CommandRunner>, &grit_lib::worktree::fsmonitor::FsmonitorRefreshOptions) -> grit_lib::error::Result<grit_lib::worktree::fsmonitor::FsmonitorRefreshResult>
 pub fn grit_lib::fsmonitor::v1_hook_token(grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary) -> alloc::string::String
@@ -16011,6 +16012,7 @@ impl core::marker::UnsafeUnpin for grit_lib::worktree::fsmonitor::FsmonitorRefre
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::fsmonitor::FsmonitorRefreshResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::fsmonitor::FsmonitorRefreshResult
 pub fn grit_lib::worktree::fsmonitor::entry_skips_worktree_stat(&grit_lib::index::IndexEntry, &grit_lib::index::Index) -> bool
+pub fn grit_lib::worktree::fsmonitor::fsmonitor_enabled(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::worktree::fsmonitor::git_style_windows_pipe_name_from_absolute_ipc(&str) -> alloc::string::String
 pub fn grit_lib::worktree::fsmonitor::refresh_index(&mut grit_lib::index::Index, &std::path::Path, &std::path::Path, &grit_lib::config::ConfigSet, core::option::Option<&dyn grit_lib::command_runner::CommandRunner>, &grit_lib::worktree::fsmonitor::FsmonitorRefreshOptions) -> grit_lib::error::Result<grit_lib::worktree::fsmonitor::FsmonitorRefreshResult>
 pub fn grit_lib::worktree::fsmonitor::v1_hook_token(grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary) -> alloc::string::String

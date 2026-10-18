@@ -56,7 +56,10 @@ enum FsmonitorMode {
     Ipc,
 }
 
-/// Whether `core.fsmonitor` is configured (hook path, `true`, or IPC mode).
+/// Returns whether [`ConfigSet`] enables fsmonitor via `core.fsmonitor`.
+///
+/// `true` when the value is a hook executable path, the literal `true` (built-in IPC), or any
+/// other non-empty string; `false` when unset, empty, or `false`.
 #[must_use]
 pub fn fsmonitor_enabled(config: &ConfigSet) -> bool {
     !matches!(fsmonitor_mode(config), FsmonitorMode::Disabled)
