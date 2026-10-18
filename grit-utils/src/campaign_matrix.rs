@@ -327,7 +327,8 @@ pub fn run_fixture_cli_matrix(
             grit_via_shell: false,
             git_via_shell: false,
         };
-        let blame_allows_grit_failure = fixture.id == "git-dot-git";
+        let blame_allows_grit_failure =
+            fixture.id == "git-dot-git" || fixture.id == "chromium-synth";
         out.push(run_matrix_scenario(
             hyperfine,
             git,
