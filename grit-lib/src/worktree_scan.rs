@@ -943,6 +943,56 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn parallel_unstaged_diff_detects_directory_replaced_by_symlink() {
+        use crate::diff::{
+            diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus,
+        };
+        use crate::parallel::ThreadPolicy;
+
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path();
+        fs::create_dir_all(wt.join(".git/objects")).unwrap();
+        let mut index = Index::new();
+        let tracked_oid = write_blob_file(wt, "d/file.txt", b"same\n");
+        index.add_or_replace(
+            entry_from_stat(&wt.join("d/file.txt"), b"d/file.txt", tracked_oid, 0o100644).unwrap(),
+        );
+        const PADDING: usize = 1000;
+        for i in 0..PADDING {
+            let rel = format!("bulk/f{i:04}.txt");
+            let oid = write_blob_file(wt, &rel, b"z\n");
+            index.add_or_replace(
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+            );
+        }
+        fs::remove_dir_all(wt.join("d")).unwrap();
+        let target = wt.join("target");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("file.txt"), b"same\n").unwrap();
+        std::os::unix::fs::symlink(&target, wt.join("d")).unwrap();
+
+        let odb = Odb::new(&wt.join(".git/objects"));
+        let (diffs, _) = diff_index_to_worktree_with_options(
+            &odb,
+            &mut index,
+            wt,
+            DiffIndexToWorktreeOptions {
+                thread_policy: Some(ThreadPolicy::default()),
+                ..DiffIndexToWorktreeOptions::default()
+            },
+        )
+        .expect("diff");
+        assert_eq!(
+            diffs.len(),
+            1,
+            "unstaged parallel diff must report deletion at indexed path"
+        );
+        assert_eq!(diffs[0].status, DiffStatus::Deleted);
+        assert_eq!(diffs[0].old_path.as_deref(), Some("d/file.txt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn directory_scan_symlink_to_unreadable_target_reports_missing() {
         use crate::diff::{
             diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus,

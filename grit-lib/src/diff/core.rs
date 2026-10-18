@@ -3843,14 +3843,16 @@ fn diff_index_to_worktree_inner(
     let mut stat_refresh_verified = vec![false; index.entries.len()];
     let paths_by_entry_index =
         crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
-    let scan_symlink_ancestors = refresh_index_stat_in_pass || materialize_dirty_blobs;
+    // Parallel preload must lstat ancestor directories without following symlinks. When a
+    // tracked directory is replaced by a symlink, indexed paths under it are deletions even if
+    // the link target still holds a file at the same relative path with an unchanged stat.
     for_each_blob_by_directory_parallel(
         &paths_by_entry_index,
         &blob_dirs,
         blob_scan,
         &thread_policy,
         &config,
-        scan_symlink_ancestors,
+        true,
         dir_abs,
         file_abs,
         |rel_path| {
