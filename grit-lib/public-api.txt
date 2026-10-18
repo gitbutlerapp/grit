@@ -8492,6 +8492,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitRequest
 pub fn grit_lib::porcelain::commit::create_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
+pub fn grit_lib::porcelain::commit::index_matches_head_tree(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::commit::prepare_commit_bytes(&grit_lib::repo::Repository, &grit_lib::config::ConfigSet, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::porcelain::commit::write_commit_object(&grit_lib::repo::Repository, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub mod grit_lib::porcelain::index_mode
