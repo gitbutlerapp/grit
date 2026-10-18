@@ -582,6 +582,16 @@ pub enum Error {
     #[error("repository lacks these prerequisite commits")]
     BundleMissingPrerequisites,
 
+    /// Streaming fetch/clone temp pack disappeared before index-pack (often real-time antivirus).
+    #[error(
+        "received pack file missing: {}. If this persists, check real-time antivirus or disk cleanup for quarantined pack temp files.",
+        path.display()
+    )]
+    ReceivedPackTempMissing {
+        /// Path to the temp pack that was expected on disk.
+        path: std::path::PathBuf,
+    },
+
     /// A pathspec did not match any file known to Git (index or HEAD tree).
     #[error("pathspec '{spec}' did not match any file(s) known to git")]
     PathspecNoMatch {

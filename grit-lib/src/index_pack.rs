@@ -203,6 +203,26 @@ pub fn ingest_received_pack_path(
     ingest_received_pack_path_with_progress(pack_path, odb, opts, None)
 }
 
+fn wait_for_received_pack_path(path: PathBuf) -> Result<PathBuf> {
+    use std::io::ErrorKind;
+    use std::thread;
+    use std::time::Duration;
+
+    const MAX_ATTEMPTS: u32 = if cfg!(windows) { 12 } else { 4 };
+    for attempt in 0..MAX_ATTEMPTS {
+        if attempt > 0 {
+            thread::sleep(Duration::from_millis(25_u64.saturating_mul(attempt as u64)));
+        }
+        match std::fs::metadata(&path) {
+            Ok(meta) if meta.is_file() => return Ok(path),
+            Ok(_) => break,
+            Err(e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) => return Err(Error::Io(e)),
+        }
+    }
+    Err(Error::ReceivedPackTempMissing { path })
+}
+
 /// Like [`ingest_received_pack_path`], reporting pack indexing progress on `progress` when set.
 pub fn ingest_received_pack_path_with_progress(
     pack_path: PathBuf,
@@ -210,12 +230,7 @@ pub fn ingest_received_pack_path_with_progress(
     opts: &IngestPackOptions,
     progress: Option<&mut dyn ProgressSink>,
 ) -> Result<IngestedPack> {
-    if !pack_path.is_file() {
-        return Err(Error::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("received pack file missing: {}", pack_path.display()),
-        )));
-    }
+    let pack_path = wait_for_received_pack_path(pack_path)?;
     install_pack_path_with_progress(&pack_path, odb, opts, progress)
 }
 
@@ -1008,5 +1023,18 @@ mod tests {
                 "must not publish partial .pack/.idx, got {entries:?}"
             );
         }
+    }
+
+    #[test]
+    fn ingest_missing_received_pack_path_is_typed() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+        let missing = tmp.path().join("no-such-pack");
+        let err = ingest_received_pack_path(missing.clone(), &odb, &IngestPackOptions::default())
+            .expect_err("missing spool");
+        assert!(
+            matches!(err, Error::ReceivedPackTempMissing { .. }),
+            "expected typed missing-pack error, got {err:?}"
+        );
     }
 }

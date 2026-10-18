@@ -1695,8 +1695,8 @@ fn http_clone_peak_rss_bounded_for_large_pack() {
     );
     let git_dir = work.join(".git");
     assert!(git_dir.is_dir(), "fetch must create a git dir");
-    let pack_dir = git_dir.join("objects/pack");
-    let spooled = std::fs::read_dir(&pack_dir)
+    let spool_dir = std::env::temp_dir();
+    let spooled = std::fs::read_dir(&spool_dir)
         .ok()
         .into_iter()
         .flatten()
@@ -1705,11 +1705,11 @@ fn http_clone_peak_rss_bounded_for_large_pack() {
             e.path()
                 .file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("tmp_pack_"))
+                .is_some_and(|n| n.starts_with("grit_tmp_pack_"))
         });
     assert!(
         spooled,
-        "pack_spool_only fetch must leave a tmp_pack under objects/pack"
+        "pack_spool_only fetch must leave a grit_tmp_pack spool file in the system temp dir"
     );
 }
 
