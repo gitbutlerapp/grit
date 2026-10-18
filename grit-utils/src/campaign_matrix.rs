@@ -329,7 +329,18 @@ pub fn run_fixture_cli_matrix(
             grit_via_shell: true,
             git_via_shell: false,
         };
-        if fixture.id == "chromium-synth" {
+        if matches!(fixture.id, "git-dot-git" | "chromium-synth" | "linux") {
+            let message = match fixture.id {
+                "git-dot-git" => {
+                    "grit log-patch on git.git exceeds factory campaign time budget; git side timed for ratio ledger"
+                }
+                "chromium-synth" => {
+                    "grit log-patch on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
+                }
+                _ => {
+                    "grit log-patch on linux exceeds factory campaign time budget; git side timed for ratio ledger"
+                }
+            };
             out.push(run_scenario_git_only_with_grit_failure(
                 hyperfine,
                 git,
@@ -339,8 +350,7 @@ pub fn run_fixture_cli_matrix(
                 &fixture.worktree,
                 BenchFailure {
                     kind: "runtime_cap".into(),
-                    message: "grit log-patch on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
-                        .into(),
+                    message: message.into(),
                 },
             )?);
         } else {
