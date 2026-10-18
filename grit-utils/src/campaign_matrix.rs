@@ -368,7 +368,7 @@ pub fn run_fixture_cli_matrix(
 
     if !smoke {
         let blame_path = blame_target_path(git, &fixture.worktree)?;
-        out.push(run_scenario(
+        out.push(run_matrix_scenario(
             hyperfine,
             git,
             grit,
@@ -386,6 +386,7 @@ pub fn run_fixture_cli_matrix(
                 git_via_shell: false,
             },
             &fixture.worktree,
+            !smoke,
         )?);
     }
 
