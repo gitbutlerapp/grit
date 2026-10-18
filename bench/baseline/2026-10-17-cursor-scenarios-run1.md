@@ -1,0 +1,90 @@
+# grit-bench results
+
+- **timestamp:** 2026-10-17T06:03:01.869390109Z
+- **tools:** grit `grit 0.5.10` vs git `git version 2.43.0`
+- **grit commit:** `a415eaaddcb67e35c4d3cf07bde2c19a597cb260`
+
+| scenario | git median (ms) | grit median (ms) | ratio |
+| --- | ---: | ---: | ---: |
+| worktree-status-clean-synth-l | 1030.1 | 2613.9 | 2.538 |
+| worktree-status-dirty-synth-l | 1581.3 | 2605.8 | 1.648 |
+| worktree-add-synth-l | 667.2 | 36638.2 | 54.914 |
+| worktree-commit-synth-l | 867.2 | 4368.9 | 5.038 |
+| worktree-diff-synth-l | 234.6 | 735.5 | 3.135 |
+| history-log-first-100 | 397.3 | 24109.6 | 60.683 |
+| history-log-all | 471.8 | 5193.9 | 11.009 |
+| history-rev-list-count | 318.9 | 956.7 | 2.999 |
+| history-blame | 2220.9 | 2219.2 | 0.999 |
+| history-show | 382.7 | 32515.7 | 84.969 |
+| history-cat-file-batch | 23252.0 | 13093.9 | 0.563 |
+| clone-file-prod | 491.2 | 481.9 | 0.981 |
+| clone-git-http-prod | 530.7 | 862.8 | 1.626 |
+| clone-grit-http-prod | 145264.8 | 144835.8 | 0.997 |
+| fetch-incr-file-prod | 33.4 | 20.8 | 0.624 |
+| fetch-noop-file-prod | 7.8 | 2.6 | 0.333 |
+| fetch-incr-git-http-prod | 52.4 | 62.0 | 1.185 |
+| fetch-noop-git-http-prod | 15.8 | 11.9 | 0.754 |
+| fetch-incr-grit-http-prod | 246.9 | 581.3 | 2.355 |
+| fetch-noop-grit-http-prod | 12.6 | 8.8 | 0.695 |
+| push-file-prod | 26.9 | 16.6 | 0.618 |
+| push-grit-http-prod | 29.7 | 276089.0 | 9303.600 |
+| ls-remote-file-prod | 10.5 | 18.4 | 1.746 |
+| ls-remote-git-http-prod | 19.7 | 20.1 | 1.020 |
+| ls-remote-grit-http-prod | 53.7 | 53.8 | 1.002 |
+| server-clone-http-compare-prod | 554.8 | 143581.8 | 258.797 |
+| parallel-status-dirty-100000-t1 | 78.5 | 175.8 | 2.239 |
+| parallel-status-clean-100000-t1 | 59.9 | 156.5 | 2.612 |
+| parallel-status-dirty-100000-tauto | 81.3 | 120.1 | 1.476 |
+| parallel-status-clean-100000-tauto | 63.5 | 108.6 | 1.711 |
+| parallel-checkout-fresh-100000-t1 | 1203.8 | 2369.5 | 1.968 |
+| parallel-clone-file-100000-t1 | 1528.8 | 2447.9 | 1.601 |
+| parallel-checkout-fresh-100000-tauto | 1226.2 | 2395.5 | 1.954 |
+| parallel-clone-file-100000-tauto | 1518.5 | 2367.8 | 1.559 |
+| parallel-switch-wide-100000-t1 | 362.9 | 617.1 | 1.700 |
+| parallel-switch-wide-100000-tauto | 367.2 | 617.3 | 1.681 |
+| parallel-index-pack-100000-t1 | 139.0 | 213.1 | 1.533 |
+| parallel-index-pack-100000-tauto | 166.1 | 123.8 | 0.745 |
+| parallel-pack-write-100000-t1 | 117.6 | 27376.9 | 232.712 |
+| parallel-pack-write-100000-tauto | 115.7 | 7609.8 | 65.756 |
+| parallel-diff-rename-100000-t1 | 12.7 | 12.7 | 0.996 |
+| parallel-diff-rename-100000-tauto | 12.5 | 12.8 | 1.021 |
+| revs-count-deep-no-graph | 83.2 | 8.7 | 0.104 |
+| revs-count-deep-commit-graph | 19.5 | 8.8 | 0.450 |
+| merge-base-pick-fixture | 1.1 | 34.8 | 32.709 |
+| fsck-medium | 244.2 | 403.0 | 1.650 |
+| gc-medium | 662.4 | 25289.4 | 38.181 |
+| repack-medium | 320.8 | 22459.7 | 70.005 |
+| commit-graph-write | 2696.4 | 3178.6 | 1.179 |
+| resolve-HEAD~20 | 1.3 | 2.8 | 2.230 |
+| cat-blob | 1.1 | 2.6 | 2.410 |
+| ignore-check-1000 | 1.9 | 5.5 | 2.871 |
+| local-clone-file-5000-packed-t1 | 84.1 | 125.6 | 1.494 |
+| switch-10000 | 22.0 | 27.6 | 1.254 |
+| switch-wide-10000 | 41.9 | 64.6 | 1.540 |
+| pick-10000 | 112.4 | 682.1 | 6.070 |
+| revert-10000 | 107.2 | 660.7 | 6.163 |
+| merge-10000 | 18.6 | 78.0 | 4.201 |
+| pick-series-10000 | 116.4 | 510.8 | 4.389 |
+| switch-100000 | 134.6 | 107.1 | 0.796 |
+| switch-wide-100000 | 373.3 | 607.8 | 1.628 |
+| pick-100000 | 186.0 | 3293.3 | 17.709 |
+| revert-100000 | 183.0 | 3235.6 | 17.679 |
+| merge-100000 | 146.7 | 360.9 | 2.460 |
+| pick-series-100000 | 859.3 | 4738.8 | 5.515 |
+| cat-file-batch-hot-path-100k | 118.4 | 74.4 | 0.628 |
+| cat-file-batch-check-hot-path-100k | 39.0 | 35.0 | 0.897 |
+| rev-list-objects-odb-backend-hot-path-100k | 55.3 | 555.1 | 10.044 |
+| rev-list-count-git.git | 57.3 | 868.7 | 15.174 |
+| rev-list-count-objects-git.git | 16.8 | 834.4 | 49.597 |
+| serve-clone-git.git | 604.5 | 0.0 | 0.000 |
+| for-each-ref-all-refs-100k-packed | 857.6 | 126.7 | 0.148 |
+| for-each-ref-prefix-b05-refs-100k-packed | 9.6 | 5.8 | 0.601 |
+| update-ref-create-100k-refs-100k-packed | 3489.1 | 2417022.6 | 692.726 |
+| update-ref-update-1k-refs-100k-packed | 40.7 | 343.2 | 8.429 |
+| update-ref-delete-1k-refs-100k-packed | 49.0 | 123568.9 | 2520.616 |
+| for-each-ref-all-refs-100k-loose | 1201.5 | 1008.1 | 0.839 |
+| for-each-ref-prefix-b05-refs-100k-loose | 360.5 | 934.3 | 2.592 |
+| update-ref-create-100k-refs-100k-loose | 3219.3 | 2388430.6 | 741.919 |
+| update-ref-update-1k-refs-100k-loose | 60.6 | 39854.5 | 657.241 |
+| update-ref-delete-1k-refs-100k-loose | 42.7 | 40245.8 | 941.514 |
+

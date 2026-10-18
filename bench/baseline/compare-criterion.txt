@@ -1,0 +1,10 @@
+Drift exceeds tolerance 0.1:
+  criterion-checkout_between_trees-L_0.01: 3.8616 vs 3.3523 (delta 0.1319)
+  criterion-checkout_between_trees-L_0.1: 9.6090 vs 11.3013 (delta 0.1497)
+  criterion-commit_range_structured_diff-line_level-auto: 1.1846 vs 0.9670 (delta 0.1837)
+  criterion-fsck_pack_100k-full_repository: 4590.8037 vs 11260.2273 (delta 0.5923)
+  criterion-index_mutate_batch_10pct_fsmn-H: 3781.2307 vs 3335.8439 (delta 0.1178)
+  criterion-index_write-v2_10000: 1.6510 vs 1.8626 (delta 0.1136)
+  criterion-index_write_100k-v2: 17.0958 vs 19.0472 (delta 0.1025)
+  criterion-refs_reftable_for_each_ref_100k: 887.2246 vs 1012.5434 (delta 0.1238)
+  criterion-repack_medium-all_into_one: 1965.2036 vs 2214.7505 (delta 0.1127)

@@ -437,6 +437,56 @@ cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench fsck --format json --output grit-utils/baselines/fsck-medium.json
 ```
 
+## L-tier unified scenario suite (`make bench-scenarios TIER=L`)
+
+Production capture on mesh machine **`grit-plan-step-321`** (short hostname **`cursor`**, idle factory VM). **CPU:** Intel Xeon, **4** logical CPUs (no cpufreq governor exposed in this environment). **RAM:** 16 GiB plus **8 GiB** swap (added for L-tier fixture generation). **OS:** Linux **6.12.94+**, scratch **ext4**. **Tools:** `git` **2.43.0**, release `grit` **0.5.10**, **hyperfine** **2.0.0**, `rustc` **1.99.0**. Hyperfine defaults: **`--warmup 3`**, **`--min-runs 5`**.
+
+Committed artifacts (run 1 of 2 for reproducibility):
+
+| Artifact | Path |
+| --- | --- |
+| Full merged report | `bench/baseline/2026-10-17-cursor-scenarios-run1.json` |
+| Worktree / history / network + git.git rows | `bench/baseline/2026-10-17-cursor-L-worktree-history-network-git.json` |
+| Criterion summary (run 1) | `bench/baseline/2026-10-17-cursor-criterion-summary.json` |
+
+Re-run check: `./target/release/grit-bench compare bench/baseline/2026-10-17-cursor-scenarios-run1.json bench/baseline/2026-10-17-cursor-scenarios-run2.json --tolerance 0.10` (output in `bench/baseline/compare-scenarios.txt`). The first back-to-back pair (pre–warmup/min-runs bump, with concurrent **`make bench-lib`**) drifted on fast network rows; tier **L** now enforces **`--warmup 5`** / **`--min-runs 10`**, and **`bench/baseline/compare-scenarios-repro.txt`** captures a clean idle pair when **`bench-scenarios-repro`** finishes.
+
+**git.git** rows below come from the same capture (bitmap reachability group). **`serve-clone-git.git`** recorded a grit-side failure (0 ms); treat as a known harness/server gap, not a timing ratio.
+
+| scenario | git median (ms) | grit median (ms) | ratio |
+| --- | ---: | ---: | ---: |
+| worktree-status-clean-synth-l | 1030.1 | 2613.9 | 2.538 |
+| worktree-status-dirty-synth-l | 1581.3 | 2605.8 | 1.648 |
+| worktree-add-synth-l | 667.2 | 36638.2 | 54.914 |
+| worktree-commit-synth-l | 867.2 | 4368.9 | 5.038 |
+| worktree-diff-synth-l | 234.6 | 735.5 | 3.135 |
+| history-log-first-100 | 397.3 | 24109.6 | 60.683 |
+| history-log-all | 471.8 | 5193.9 | 11.009 |
+| history-rev-list-count | 318.9 | 956.7 | 2.999 |
+| history-blame | 2220.9 | 2219.2 | 0.999 |
+| history-show | 382.7 | 32515.7 | 84.969 |
+| history-cat-file-batch | 23252.0 | 13093.9 | 0.563 |
+| clone-file-prod | 491.2 | 481.9 | 0.981 |
+| clone-git-http-prod | 530.7 | 862.8 | 1.626 |
+| clone-grit-http-prod | 145264.8 | 144835.8 | 0.997 |
+| fetch-incr-file-prod | 33.4 | 20.8 | 0.624 |
+| fetch-noop-file-prod | 7.8 | 2.6 | 0.333 |
+| fetch-incr-git-http-prod | 52.4 | 62.0 | 1.185 |
+| fetch-noop-git-http-prod | 15.8 | 11.9 | 0.754 |
+| fetch-incr-grit-http-prod | 246.9 | 581.3 | 2.355 |
+| fetch-noop-grit-http-prod | 12.6 | 8.8 | 0.695 |
+| push-file-prod | 26.9 | 16.6 | 0.618 |
+| push-grit-http-prod | 29.7 | 276089.0 | 9303.600 |
+| ls-remote-file-prod | 10.5 | 18.4 | 1.746 |
+| ls-remote-git-http-prod | 19.7 | 20.1 | 1.020 |
+| ls-remote-grit-http-prod | 53.7 | 53.8 | 1.002 |
+| server-clone-http-compare-prod | 554.8 | 143581.8 | 258.797 |
+| rev-list-count-git.git | 57.3 | 868.7 | 15.174 |
+| rev-list-count-objects-git.git | 16.8 | 834.4 | 49.597 |
+| serve-clone-git.git | 604.5 | 0.0 | 0.000 |
+
+**Ten largest Grit / Git ratios in the full L-tier capture (inputs for super-linear hot-path work):** `push-grit-http-prod` (**9304×**), `update-ref-delete-1k-refs-100k-packed` (**2521×**), `update-ref-delete-1k-refs-100k-loose` (**942×**), `update-ref-create-100k-refs-100k-loose` (**742×**), `update-ref-create-100k-refs-100k-packed` (**693×**), `update-ref-update-1k-refs-100k-loose` (**657×**), `server-clone-http-compare-prod` (**259×**), `parallel-pack-write-100000-t1` (**233×**), `history-show` (**85×**), `repack-medium` (**70×**).
+
 ### Results
 
 <!-- grit:benchmark-tables -->
