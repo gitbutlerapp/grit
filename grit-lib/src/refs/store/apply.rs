@@ -247,6 +247,9 @@ fn reflog_old_oid_before(state: &RefBatchState, update: &RefUpdate) -> ObjectId 
 
 fn reflog_new_oid_before(state: &RefBatchState, update: &RefUpdate) -> ObjectId {
     if update.flags.log_only {
+        if let Some(RawRef::Direct(oid)) = &update.new_value {
+            return *oid;
+        }
         return reflog_old_oid_before(state, update);
     }
     match &update.new_value {
@@ -374,5 +377,46 @@ mod tests {
             },
         ];
         simulate_batch_apply(&state, &updates).expect("delete-then-create on peeled target");
+    }
+
+    #[test]
+    fn log_only_direct_new_value_sets_reflog_new_oid() {
+        let mut state = RefBatchState::default();
+        state
+            .refs
+            .insert("refs/heads/main".to_owned(), RawRef::Direct(oid(1)));
+        state.refs.insert(
+            "HEAD".to_owned(),
+            RawRef::Symbolic("refs/heads/main".to_owned()),
+        );
+        let updates = vec![
+            RefUpdate {
+                name: "HEAD".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Any,
+                reflog: Some(ReflogUpdate {
+                    identity: "T <t@t>".into(),
+                    message: "mirror".into(),
+                    time: time::OffsetDateTime::UNIX_EPOCH,
+                }),
+                flags: RefUpdateFlags {
+                    log_only: true,
+                    ..Default::default()
+                },
+            },
+            RefUpdate {
+                name: "refs/heads/main".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Oid(oid(1)),
+                reflog: None,
+                flags: RefUpdateFlags::default(),
+            },
+        ];
+        for update in &updates {
+            apply_update(&mut state, update).expect("apply");
+        }
+        let head_log = state.reflogs.get("HEAD").expect("head log");
+        assert_eq!(head_log[0].old_oid, oid(1));
+        assert_eq!(head_log[0].new_oid, oid(2));
     }
 }

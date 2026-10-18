@@ -14,8 +14,10 @@ use crate::porcelain::switch::{
     verify_tree_transition_allow_local, TreeTransitionVerifyError,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
+use crate::refs::read_head;
 use crate::refs::ref_update_flags;
 use crate::refs::should_autocreate_reflog_with_config;
+use crate::refs::store::RefUpdateFlags;
 use crate::refs::store::{
     Expected, RawRef, RefStoreError, RefTransaction, RefUpdate, ReflogUpdate,
 };
@@ -1080,6 +1082,9 @@ fn commit_planned_ref_updates(
     let store = repo.refs();
     let git_dir = repo.git_dir();
     let config = repo.config().ok();
+    let head_target = read_head(git_dir).map_err(|e| HistoryError::RefApply {
+        message: e.to_string(),
+    })?;
     let mut txn = RefTransaction::new();
     for planned in updates {
         let reflog = reflog_for_update(
@@ -1088,6 +1093,25 @@ fn commit_planned_ref_updates(
             &planned.name,
             opts,
         );
+        if head_target.as_deref() == Some(planned.name.as_str()) {
+            if let Some(head_reflog) =
+                reflog_for_update(config.as_ref().map(|c| c.as_ref()), git_dir, "HEAD", opts)
+            {
+                let head_update = RefUpdate {
+                    name: "HEAD".into(),
+                    new_value: Some(RawRef::Direct(planned.new)),
+                    expected: Expected::Any,
+                    reflog: Some(head_reflog),
+                    flags: RefUpdateFlags {
+                        log_only: true,
+                        no_deref: false,
+                    },
+                };
+                txn = txn
+                    .update(head_update)
+                    .map_err(|e| map_ref_store_error(e, "HEAD"))?;
+            }
+        }
         let update = RefUpdate {
             name: planned.name.clone(),
             new_value: Some(RawRef::Direct(planned.new)),

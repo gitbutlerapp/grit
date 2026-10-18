@@ -10,6 +10,7 @@ use std::process::Command;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
+use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -385,11 +386,73 @@ fn apply_rewrite_writes_reflog_entries() {
     let plan = plan_reword(wt, oids["b"], "reworded");
     let grit = open_grit(wt);
     apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
-    let reflog = git(wt, &["reflog", "show", "-1", "main"]);
+    let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
+    let branch_reflog = git(wt, &["reflog", "show", "-1", "main"]);
     assert!(
-        reflog.contains("history rewrite"),
-        "reflog must record apply message: {reflog}"
+        branch_reflog.contains("history rewrite"),
+        "reflog must record apply message: {branch_reflog}"
     );
+    let head_reflog = git(wt, &["reflog", "show", "-1", "HEAD"]);
+    assert!(
+        head_reflog.contains("history rewrite"),
+        "HEAD reflog must record apply message: {head_reflog}"
+    );
+    let head_log = read_reflog(grit.git_dir(), "HEAD").expect("parse HEAD reflog");
+    let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("parse branch reflog");
+    let head_entry = head_log.last().expect("HEAD reflog entry");
+    let branch_entry = branch_log.last().expect("branch reflog entry");
+    assert_eq!(head_entry.new_oid, tip);
+    assert_eq!(head_entry.new_oid, branch_entry.new_oid);
+    assert_eq!(head_entry.old_oid, branch_entry.old_oid);
+}
+
+#[test]
+fn apply_rewrite_head_reflog_matches_git_update_ref_on_checked_out_branch() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(
+        wt,
+        &[("b", "a"), ("c", "b"), ("d", "c")],
+        &[("d", "refs/heads/main")],
+    );
+    let plan = plan_reword(wt, oids["b"], "reworded");
+    let grit = open_grit(wt);
+    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
+    let head_gs = git(wt, &["reflog", "show", "-1", "--format=%gs", "HEAD"]);
+    let branch_gs = git(
+        wt,
+        &["reflog", "show", "-1", "--format=%gs", "refs/heads/main"],
+    );
+    assert_eq!(
+        head_gs, branch_gs,
+        "HEAD and branch reflog messages must match"
+    );
+    let head_old_new = git(wt, &["reflog", "show", "-1", "--format=%H %gs", "HEAD"]);
+    assert!(
+        head_old_new.contains(&tip.to_hex()),
+        "HEAD tip reflog entry must point at rewritten tip: {head_old_new}"
+    );
+}
+
+#[test]
+fn apply_rewrite_head_reflog_reftable_backend() {
+    if !require_reftable_git() {
+        return;
+    }
+    let root = git_init_reftable_repo("main");
+    let wt = root.path();
+    let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
+    let plan = plan_reword(wt, oids["b"], "reftable reword");
+    let grit = open_grit(wt);
+    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    let head_log = read_reflog(grit.git_dir(), "HEAD").expect("head log");
+    let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("branch log");
+    let head_entry = head_log.last().expect("HEAD reflog entry");
+    let branch_entry = branch_log.last().expect("branch reflog entry");
+    assert_eq!(head_entry.new_oid, branch_entry.new_oid);
+    assert_eq!(head_entry.old_oid, branch_entry.old_oid);
+    git_fsck_strict(wt);
 }
 
 #[test]

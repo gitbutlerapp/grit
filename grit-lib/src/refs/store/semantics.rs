@@ -143,6 +143,9 @@ pub(crate) fn reflog_new_oid_before(
     update: &RefUpdate,
 ) -> ObjectId {
     if update.flags.log_only {
+        if let Some(RawRef::Direct(oid)) = &update.new_value {
+            return *oid;
+        }
         return reflog_old_oid_before(trial, baseline, update);
     }
     match &update.new_value {
