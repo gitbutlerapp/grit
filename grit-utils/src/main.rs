@@ -1202,6 +1202,10 @@ fn main() -> Result<()> {
             if *smoke {
                 cfg.warmup = 0;
                 cfg.exact_runs = Some(1);
+            } else if *tier == SynthTierArg::L {
+                // L-tier captures are long; extra warmup/samples stabilize grit/git ratios.
+                cfg.warmup = cfg.warmup.max(5);
+                cfg.min_runs = cfg.min_runs.max(10);
             }
             let bench_exe = std::env::current_exe().context("current exe")?;
             scenario_suite::run_scenario_suite(

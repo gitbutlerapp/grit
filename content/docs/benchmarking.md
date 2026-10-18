@@ -56,6 +56,8 @@ make bench-scenarios TIER=S SMOKE=1
 
 `SMOKE=1` sets `--smoke` on `grit-bench scenarios`: warmup `0`, exactly **one** hyperfine run per scenario, tiny network/parallel fixtures, and skips heavy groups (ODB backend, bitmaps, refs). CI uses `TIER=S SMOKE=1`; **timings are not gated**—the job fails only if a scenario errors.
 
+Tier **L** (non-smoke) raises hyperfine to at least **`--warmup 5`** and **`--min-runs 10`** so back-to-back captures stay within **`grit-bench compare --tolerance 0.10`**. Do not run **`make bench-lib`** concurrently with **`make bench-scenarios TIER=L`** on the same host (ratio drift from shared CPU and I/O). Leave **`target/debug`** off disk during long captures (`cargo bench` defaults to the bench profile but lib tests can fill **`target/debug`**).
+
 ### Scenario report JSON (`scenarios-<host>.json`)
 
 Uses the same **grit-bench v1** schema as individual subcommands (`schema_version`, `machine`, `tools`, `fixtures`, `scenarios`). Each scenario includes `git` and `grit` timing blocks (milliseconds) and `ratio` (`grit_median_ms / git_median_ms`).
@@ -82,3 +84,5 @@ cargo build --release -p grit-cli -p grit-http-server -p grit-utils
 ```
 
 See also [Benchmarks](benchmarks.md) for committed baselines and acceptance ratios.
+
+**Production L-tier capture:** run `make bench-scenarios TIER=L` twice on an idle machine and commit run 1 under `bench/baseline/` (see [Benchmarks — L-tier unified scenario suite](benchmarks.md#l-tier-unified-scenario-suite-make-bench-scenarios-tierml)). Requires **hyperfine ≥ 2.0** (`--shell=default`) and enough RAM/swap for tier **L** fixture generation.
