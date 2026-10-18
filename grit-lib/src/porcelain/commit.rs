@@ -103,7 +103,7 @@ pub fn create_commit(
 ///
 /// # Errors
 ///
-/// Same as [`create_commit`], plus staging failures from [`crate::porcelain::add::stage_for_commit_on_index`].
+/// Same as [`create_commit`], plus staging failures from [`crate::porcelain::add::stage_for_commit`].
 pub fn commit_worktree(
     repo: &Repository,
     req: &CommitRequest,
