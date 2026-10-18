@@ -1,4 +1,4 @@
-//! Tests for [`grit_lib::history::absorb`].
+//! Tests for [`grit_lib::revwalk::history::absorb`].
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
