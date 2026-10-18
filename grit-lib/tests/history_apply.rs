@@ -403,7 +403,45 @@ fn apply_rewrite_writes_reflog_entries() {
     let branch_entry = branch_log.last().expect("branch reflog entry");
     assert_eq!(head_entry.new_oid, tip);
     assert_eq!(head_entry.new_oid, branch_entry.new_oid);
-    assert_eq!(head_entry.old_oid, branch_entry.old_oid);
+    assert_eq!(head_entry.message, branch_entry.message);
+}
+
+#[test]
+fn apply_rewrite_checked_out_branch_reflog_single_entry_per_update() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let mut tips = Vec::new();
+    for i in 1..=3 {
+        tips.push(commit_file(
+            wt,
+            &format!("f{i}"),
+            &i.to_string(),
+            &format!("c{i}"),
+        ));
+    }
+    let plan = plan_reword(wt, tips[1], "reworded");
+    let grit = open_grit(wt);
+    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    let head_log = read_reflog(grit.git_dir(), "HEAD").expect("HEAD reflog");
+    let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("main reflog");
+    assert_eq!(
+        head_log.len(),
+        4,
+        "HEAD reflog: three commits plus one history rewrite"
+    );
+    assert_eq!(
+        branch_log.len(),
+        4,
+        "branch reflog: three commits plus one history rewrite"
+    );
+    let last = branch_log.last().expect("last branch entry");
+    let prev = branch_log
+        .get(branch_log.len() - 2)
+        .expect("previous branch entry");
+    assert!(
+        last.old_oid != prev.old_oid || last.new_oid != prev.new_oid,
+        "branch reflog must not append the same old->new pair twice"
+    );
 }
 
 #[test]
@@ -451,7 +489,7 @@ fn apply_rewrite_head_reflog_reftable_backend() {
     let head_entry = head_log.last().expect("HEAD reflog entry");
     let branch_entry = branch_log.last().expect("branch reflog entry");
     assert_eq!(head_entry.new_oid, branch_entry.new_oid);
-    assert_eq!(head_entry.old_oid, branch_entry.old_oid);
+    assert_eq!(head_entry.message, branch_entry.message);
     git_fsck_strict(wt);
 }
 

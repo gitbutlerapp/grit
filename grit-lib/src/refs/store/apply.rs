@@ -465,4 +465,47 @@ mod tests {
         assert_eq!(head_log[0].old_oid, oid(1));
         assert_eq!(head_log[0].new_oid, oid(2));
     }
+
+    #[test]
+    fn log_only_head_no_deref_skips_branch_reflog_mirror() {
+        let mut state = RefBatchState::default();
+        state
+            .refs
+            .insert("refs/heads/main".to_owned(), RawRef::Direct(oid(1)));
+        state.refs.insert(
+            "HEAD".to_owned(),
+            RawRef::Symbolic("refs/heads/main".to_owned()),
+        );
+        let log = ReflogUpdate {
+            identity: "T <t@t>".into(),
+            message: "history rewrite".into(),
+            time: time::OffsetDateTime::UNIX_EPOCH,
+        };
+        let updates = vec![
+            RefUpdate {
+                name: "HEAD".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Any,
+                reflog: Some(log.clone()),
+                flags: RefUpdateFlags {
+                    log_only: true,
+                    no_deref: true,
+                },
+            },
+            RefUpdate {
+                name: "refs/heads/main".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Oid(oid(1)),
+                reflog: Some(log),
+                flags: RefUpdateFlags::default(),
+            },
+        ];
+        for update in &updates {
+            apply_update(&mut state, update).expect("apply");
+        }
+        let branch_log = state.reflogs.get("refs/heads/main").expect("branch log");
+        assert_eq!(branch_log.len(), 1);
+        let head_log = state.reflogs.get("HEAD").expect("head log");
+        assert_eq!(head_log.len(), 1);
+    }
 }

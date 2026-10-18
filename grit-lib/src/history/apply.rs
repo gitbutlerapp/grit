@@ -1104,7 +1104,7 @@ fn commit_planned_ref_updates(
                     reflog: Some(head_reflog),
                     flags: RefUpdateFlags {
                         log_only: true,
-                        no_deref: false,
+                        no_deref: true,
                     },
                 };
                 txn = txn
