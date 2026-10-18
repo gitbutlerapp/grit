@@ -552,11 +552,7 @@ mod tests {
         let git = which_git();
         create_min_repo(&git, dir.path()).unwrap();
         prepare_add_iteration(dir.path(), &git).unwrap();
-        let grit = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit");
-        if !grit.is_file() {
-            return;
-        }
-        let err = prepare_add_iteration(dir.path(), &grit).unwrap_err();
+        let err = prepare_add_iteration(dir.path(), Path::new("/nonexistent/git")).unwrap_err();
         assert!(
             err.to_string().contains("git reset") || err.to_string().contains("ls-files"),
             "unexpected error: {err}"
