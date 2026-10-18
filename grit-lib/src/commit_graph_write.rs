@@ -594,6 +594,48 @@ pub fn collect_reachable_commit_oids(
     walk_reachable_commits_from_tip_stack(odb, stack)
 }
 
+/// Clear the read-only attribute when present so replace/remove can succeed.
+///
+/// Git marks commit-graph (and pack) files read-only on Windows; same-directory
+/// rename over an existing read-only file fails with access denied until cleared.
+fn clear_readonly_attribute(path: &std::path::Path) -> crate::error::Result<()> {
+    use std::fs;
+    let meta = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(crate::error::Error::Io(e)),
+    };
+    let mut perms = meta.permissions();
+    if !perms.readonly() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    {
+        perms.set_readonly(false);
+        fs::set_permissions(path, perms).map_err(crate::error::Error::Io)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut mode = perms.mode();
+        mode |= 0o200;
+        perms.set_mode(mode);
+        fs::set_permissions(path, perms).map_err(crate::error::Error::Io)?;
+    }
+    Ok(())
+}
+
+fn clear_readonly_tree(path: &std::path::Path) -> crate::error::Result<()> {
+    use std::fs;
+    if path.is_dir() {
+        for entry in fs::read_dir(path).map_err(crate::error::Error::Io)? {
+            let entry = entry.map_err(crate::error::Error::Io)?;
+            clear_readonly_tree(&entry.path())?;
+        }
+    }
+    clear_readonly_attribute(path)
+}
+
 /// Replace `objects/info/commit-graph` atomically (lock + tempfile + rename).
 ///
 /// Does not remove a split `commit-graphs/` chain; callers use
@@ -646,6 +688,9 @@ pub fn atomic_replace_commit_graph(
                 "injected commit-graph rename failure".into(),
             ));
         }
+        if graph_path.exists() {
+            clear_readonly_attribute(&graph_path)?;
+        }
         // Same-directory rename over an existing file is atomic on POSIX; do not unlink first.
         fs::rename(&tmp, &graph_path).map_err(crate::error::Error::Io)?;
         created_tmp = false;
@@ -665,6 +710,7 @@ pub fn atomic_replace_commit_graph(
 pub fn remove_commit_graph_chain_dir(objects_dir: &std::path::Path) -> bool {
     let graphs = objects_dir.join("info").join("commit-graphs");
     if graphs.is_dir() {
+        let _ = clear_readonly_tree(&graphs);
         std::fs::remove_dir_all(&graphs).is_ok()
     } else {
         false
@@ -999,6 +1045,49 @@ mod tests {
         super::atomic_replace_commit_graph(objects_dir, replacement).expect("replace");
         let on_disk = std::fs::read(&graph_path).expect("graph");
         assert_eq!(on_disk, replacement);
+    }
+
+    #[test]
+    fn atomic_replace_over_readonly_existing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let objects_dir = repo.odb().objects_dir();
+        let graph_path = objects_dir.join("info").join("commit-graph");
+        std::fs::create_dir_all(graph_path.parent().unwrap()).expect("info");
+        std::fs::write(&graph_path, b"old").expect("seed");
+        let mut perms = std::fs::metadata(&graph_path).expect("meta").permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&graph_path, perms).expect("readonly");
+
+        let replacement = b"CGPH\x01\x00\x00\x00new-graph";
+        super::atomic_replace_commit_graph(objects_dir, replacement).expect("replace");
+        let on_disk = std::fs::read(&graph_path).expect("graph");
+        assert_eq!(on_disk, replacement);
+    }
+
+    #[test]
+    fn remove_commit_graph_chain_dir_clears_readonly_layers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let objects_dir = dir.path().join("objects");
+        let chain_root = objects_dir.join("info").join("commit-graphs");
+        let layer = chain_root.join("graph-chain-abc123");
+        std::fs::create_dir_all(&layer).expect("layer dir");
+        std::fs::write(layer.join("graph"), b"layer-bytes").expect("layer file");
+        for path in [&chain_root, &layer, &layer.join("graph")] {
+            let mut perms = std::fs::metadata(path).expect("meta").permissions();
+            perms.set_readonly(true);
+            std::fs::set_permissions(path, perms).expect("readonly");
+        }
+
+        assert!(super::remove_commit_graph_chain_dir(&objects_dir));
+        assert!(!chain_root.exists());
     }
 
     #[test]

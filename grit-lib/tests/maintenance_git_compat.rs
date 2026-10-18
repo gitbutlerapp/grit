@@ -1000,3 +1000,26 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
         "expected commits and tree/blob objects via bitmap-backed MIDX"
     );
 }
+
+#[test]
+fn gc_replaces_readonly_commit_graph_like_git_on_windows() {
+    let _pack_guard = test_pack_cache_guard();
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "one"]);
+    git(
+        dir.path(),
+        &["commit-graph", "write", "--reachable", "--changed-paths"],
+    );
+
+    let graph_path = dir.path().join(".git/objects/info/commit-graph");
+    assert!(graph_path.is_file(), "git must write commit-graph");
+    let mut perms = std::fs::metadata(&graph_path).expect("meta").permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&graph_path, perms).expect("readonly");
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false))
+        .expect("grit gc must replace read-only commit-graph");
+    git_fsck(dir.path(), true);
+}
