@@ -64,7 +64,7 @@
       "type": "object"
     }
   },
-  "description": "Result of `grit history reword`, `grit history drop`, `grit history rebase`, and related rewrite subcommands.",
+  "description": "Result of `grit history reword`.",
   "properties": {
     "dry_run": {
       "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
@@ -82,7 +82,7 @@
       "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
     },
     "operation": {
-      "description": "Operation name (for example `reword`, `drop`, `fixup`, or `squash`).",
+      "description": "Operation name (`reword`).",
       "type": "string"
     },
     "refs": {
@@ -107,6 +107,6 @@
     "refs",
     "rewritten"
   ],
-  "title": "HistoryRewriteOutcome",
+  "title": "HistoryRewordOutcome",
   "type": "object"
 }
