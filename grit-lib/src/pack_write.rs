@@ -16,8 +16,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use flate2::read::ZlibDecoder;
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
 
 use crate::error::{Error, Result};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
@@ -172,16 +170,8 @@ pub fn write_pack_index_v2(
     }
     buf.extend_from_slice(&pack_bytes[pack_bytes.len() - hash_bytes..]);
     let idx_hash = match hash_bytes {
-        20 => {
-            let mut hasher = Sha1::new();
-            Digest::update(&mut hasher, &buf);
-            hasher.finalize().to_vec()
-        }
-        32 => {
-            let mut hasher = Sha256::new();
-            hasher.update(&buf);
-            hasher.finalize().to_vec()
-        }
+        20 => HashAlgo::Sha1.digest(&buf).as_bytes().to_vec(),
+        32 => HashAlgo::Sha256.digest(&buf).as_bytes().to_vec(),
         _ => {
             return Err(Error::CorruptObject(format!(
                 "unsupported hash width {hash_bytes} for pack index"
