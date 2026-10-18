@@ -10,6 +10,7 @@ use crate::campaign_prep::{
 };
 use crate::campaign_worktree::{blame_target_path, dirty_tracked_worktree, list_tracked_files};
 use crate::fixture::prepare_commit_iteration;
+use crate::fixture::remove_dir_robust;
 use crate::hot_path_fixture::HotPathMeta;
 use crate::maintenance_suite::seed_loose_objects;
 use crate::network_fixture::{ensure_campaign_bare_network_meta, file_url};
@@ -864,6 +865,7 @@ fn append_file_transport(
     )?);
 
     let push_meta = ensure_campaign_bare_network_meta(git, &fixture.bare, smoke)?;
+    remove_dir_robust(&push_meta.client_repo);
     let push_client = ensure_network_client_repo(git, &fixture.bare)?;
     let push_url = file_url(&fixture.bare)?;
     configure_push_remote(git, &push_client, &push_url, &push_meta.default_branch)?;
