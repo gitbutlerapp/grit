@@ -333,6 +333,21 @@ pub fn write_commit_object(
     repo.odb().write(ObjectKind::Commit, &bytes)
 }
 
+/// True when the index tree matches the commit at `HEAD` (cache-tree fast path when valid).
+///
+/// # Errors
+///
+/// Returns errors from reading `HEAD` or the object database.
+pub fn index_matches_head_tree(repo: &Repository) -> Result<bool> {
+    let head = resolve_head(repo.git_dir())?;
+    let index = repo.load_index()?;
+    let Some(parent) = head.oid() else {
+        return Ok(index.entries.is_empty());
+    };
+    let parent_tree = commit_tree_oid(repo, parent)?;
+    Ok(index_staged_tree_matches(repo.odb(), &index, &parent_tree))
+}
+
 /// True when stage-0 index entries describe `tree_oid`, using a valid cache-tree when present.
 fn index_staged_tree_matches(
     odb: &crate::odb::Odb,

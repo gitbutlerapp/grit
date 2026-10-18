@@ -143,7 +143,7 @@ fn symlink_metadata_path(path: &Path) -> io::Result<fs::Metadata> {
 use std::collections::BTreeSet;
 
 use crate::error::{Error, Result};
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::{Index, IndexEntry, MODE_GITLINK};
 
 /// A tracked blob path grouped under its parent directory (repository-relative).
 #[derive(Debug, Clone)]
@@ -162,6 +162,26 @@ pub(crate) fn group_blob_entries_by_dir(
     index: &Index,
     honor_fsmonitor_valid: bool,
 ) -> HashMap<String, Vec<BlobInDir>> {
+    group_blob_entries_by_dir_filtered(
+        index,
+        honor_fsmonitor_valid,
+        None::<fn(&IndexEntry) -> bool>,
+    )
+}
+
+/// Like [`group_blob_entries_by_dir`], but omits entries for which `skip_worktree_stat` is true.
+///
+/// Used when index stat data is trustworthy and non-racy so diff/status can skip disk I/O
+/// (Git `diff-files` / `update-index --refresh` behavior).
+#[must_use]
+pub(crate) fn group_blob_entries_by_dir_filtered<F>(
+    index: &Index,
+    honor_fsmonitor_valid: bool,
+    skip_worktree_stat: Option<F>,
+) -> HashMap<String, Vec<BlobInDir>>
+where
+    F: Fn(&IndexEntry) -> bool,
+{
     let mut by_dir: HashMap<String, Vec<BlobInDir>> = HashMap::new();
     for (entry_index, ie) in index.entries.iter().enumerate() {
         if ie.stage() != 0 {
@@ -174,6 +194,9 @@ pub(crate) fn group_blob_entries_by_dir(
             continue;
         }
         if honor_fsmonitor_valid && index.fsmonitor_last_update.is_some() && ie.fsmonitor_valid() {
+            continue;
+        }
+        if skip_worktree_stat.as_ref().is_some_and(|skip| skip(ie)) {
             continue;
         }
         let Ok(rel_path) = std::str::from_utf8(&ie.path) else {

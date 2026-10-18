@@ -689,9 +689,14 @@ fn unstaged_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .config_arc();
+    let diff_index_mtime = grit_lib::diff::index_mtime_for_diff(&index, None);
     let diff_opts = DiffIndexToWorktreeOptions {
         repository_git_dir: Some(repo.git_dir().to_path_buf()),
+        index_mtime: diff_index_mtime,
         config: Some(config_arc),
+        thread_policy: Some(repo.thread_policy()),
+        refresh_index_stat_in_pass: false,
+        for_status: true,
         worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
         command_runner: Some(repo.command_runner()),
         ..DiffIndexToWorktreeOptions::default()
