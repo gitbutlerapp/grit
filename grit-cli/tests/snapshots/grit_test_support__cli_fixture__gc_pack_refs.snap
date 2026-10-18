@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n- `{\"duration_ms\": 0,\"path\":\"[REPO]/.git/packed-refs\",\"refs_packed\":0,\"refs_pruned\":0,\"task\":\"pack-refs\"}`\n",
+    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n#### pack-refs\n\n- **duration_ms:** 0\n- **refs_packed:** 0\n- **refs_pruned:** 0\n- **path:** `[REPO]/.git/packed-refs`\n",
     "stderr": ""
   }
 }

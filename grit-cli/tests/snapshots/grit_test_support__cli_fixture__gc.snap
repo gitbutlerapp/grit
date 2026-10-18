@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Garbage collection\n\n- **dry_run:** true\n\n### Tasks\n\n- `{\"duration_ms\": 0,\"entries_pruned\":4,\"task\":\"reflog-expire\"}`\n- `{\"duration_ms\": 0,\"loose_before\":9,\"objects_packed\":8,\"pack_bytes\":null,\"pack_path\":null,\"packs_before\":0,\"pruned_loose\":0,\"removed_pack_files\":0,\"task\":\"repack\",\"unreachable_loose_pruned\":0}`\n",
+    "stdout": "## Garbage collection\n\n- **dry_run:** true\n\n### Tasks\n\n#### reflog-expire\n\n- **duration_ms:** 0\n- **entries_pruned:** 4\n#### repack\n\n- **duration_ms:** 0\n- **loose_before:** 9\n- **packs_before:** 0\n- **objects_packed:** 8\n- **removed_pack_files:** 0\n- **pruned_loose:** 0\n- **unreachable_loose_pruned:** 0\n",
     "stderr": ""
   }
 }

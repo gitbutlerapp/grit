@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n- `{\"duration_ms\": 0,\"kept\":9,\"pruned\":0,\"task\":\"prune\"}`\n",
+    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n#### prune\n\n- **duration_ms:** 0\n- **pruned:** 0\n- **kept:** 9\n",
     "stderr": ""
   }
 }

@@ -92,6 +92,30 @@ impl From<grit_lib::maintenance::RepackStats> for RepackSummary {
     }
 }
 
+impl RepackSummary {
+    fn render_markdown_fields(&self, w: &mut dyn Write) -> Result<()> {
+        outln!(w, "- **loose_before:** {}", self.loose_before);
+        outln!(w, "- **packs_before:** {}", self.packs_before);
+        if let Some(n) = self.objects_packed {
+            outln!(w, "- **objects_packed:** {n}");
+        }
+        if let Some(bytes) = self.pack_bytes {
+            outln!(w, "- **pack_bytes:** {bytes}");
+        }
+        if let Some(path) = &self.pack_path {
+            outln!(w, "- **pack_path:** `{path}`");
+        }
+        outln!(w, "- **removed_pack_files:** {}", self.removed_pack_files);
+        outln!(w, "- **pruned_loose:** {}", self.pruned_loose);
+        outln!(
+            w,
+            "- **unreachable_loose_pruned:** {}",
+            self.unreachable_loose_pruned
+        );
+        Ok(())
+    }
+}
+
 impl HumanRender for GcOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.quiet {
@@ -181,8 +205,70 @@ impl GcTaskReport {
     }
 
     fn render_markdown(&self, w: &mut dyn Write) -> Result<()> {
-        let json = serde_json::to_value(self).unwrap_or_default();
-        outln!(w, "- `{json}`");
+        match self {
+            Self::PackRefs {
+                duration_ms,
+                refs_packed,
+                refs_pruned,
+                path,
+            } => {
+                outln!(w, "#### pack-refs\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                outln!(w, "- **refs_packed:** {refs_packed}");
+                outln!(w, "- **refs_pruned:** {refs_pruned}");
+                outln!(w, "- **path:** `{path}`");
+            }
+            Self::ReflogExpire {
+                duration_ms,
+                entries_pruned,
+            } => {
+                outln!(w, "#### reflog-expire\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                outln!(w, "- **entries_pruned:** {entries_pruned}");
+            }
+            Self::Repack {
+                duration_ms,
+                report,
+            } => {
+                outln!(w, "#### repack\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                report.render_markdown_fields(w)?;
+            }
+            Self::Prune {
+                duration_ms,
+                pruned,
+                kept,
+            } => {
+                outln!(w, "#### prune\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                outln!(w, "- **pruned:** {pruned}");
+                outln!(w, "- **kept:** {kept}");
+            }
+            Self::CommitGraph {
+                duration_ms,
+                commit_count,
+                path,
+                removed_chain,
+            } => {
+                outln!(w, "#### commit-graph\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                outln!(w, "- **commit_count:** {commit_count}");
+                outln!(w, "- **path:** `{path}`");
+                outln!(w, "- **removed_chain:** {removed_chain}");
+            }
+            Self::Midx {
+                duration_ms,
+                pack_count,
+                path,
+                bitmap,
+            } => {
+                outln!(w, "#### midx\n");
+                outln!(w, "- **duration_ms:** {duration_ms}");
+                outln!(w, "- **pack_count:** {pack_count}");
+                outln!(w, "- **path:** `{path}`");
+                outln!(w, "- **bitmap:** {bitmap}");
+            }
+        }
         Ok(())
     }
 }

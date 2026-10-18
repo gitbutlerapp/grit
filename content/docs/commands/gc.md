@@ -117,9 +117,43 @@ Example (abbreviated):
 
 ## Markdown output
 
-Pass `--markdown` for an agent-friendly report listing each task as a bullet.
+Pass `--markdown` for an agent-friendly report with the same fields as JSON as labelled bullets per task.
 
 Schema: [v1](/schemas/gc/v1.json)
+
+Example (abbreviated):
+
+```markdown
+## Garbage collection
+
+- **dry_run:** false
+
+### Tasks
+
+#### reflog-expire
+
+- **duration_ms:** 12
+- **entries_pruned:** 0
+
+#### repack
+
+- **duration_ms:** 842
+- **loose_before:** 380
+- **packs_before:** 0
+- **objects_packed:** 412
+- **pack_bytes:** 88234
+- **pack_path:** `.git/objects/pack/pack-abc123….pack`
+- **removed_pack_files:** 0
+- **pruned_loose:** 380
+- **unreachable_loose_pruned:** 0
+
+#### commit-graph
+
+- **duration_ms:** 120
+- **commit_count:** 87
+- **path:** `.git/objects/info/commit-graph`
+- **removed_chain:** false
+```
 
 ## See also
 
