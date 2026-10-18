@@ -5,6 +5,18 @@
 ratio = 1.1
 
 # Roadmap item 14 owns rev-list counting and serve-clone throughput work.
+[scenario."git-dot-git/revs-path-builtin-add-c"]
+documented = "path-limited rev walk on git.git (#1159); ratio tracked, no hard gate yet"
+followup = "GitHub issue #1159"
+
+[scenario."git-dot-git/log-path-doc-git-add-limit50"]
+documented = "bounded path-limited log on git.git (#1159); ratio tracked, no hard gate yet"
+followup = "GitHub issue #1159"
+
+[scenario."git-dot-git/revs-path-documentation"]
+documented = "directory pathspec rev walk on git.git (#1159); ratio tracked, no hard gate yet"
+followup = "GitHub issue #1159"
+
 [scenario."git-dot-git/rev-list-count"]
 owned_by_item_14 = true
 
