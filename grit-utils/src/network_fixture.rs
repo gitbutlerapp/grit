@@ -138,6 +138,21 @@ fn run_git(git: &Path, dir: Option<&Path>, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn run_git_on_bare(git: &Path, bare: &Path, args: &[&str]) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(args).current_dir(bare);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git on bare")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 fn rev_parse(git: &Path, dir: &Path, rev: &str) -> Result<String> {
     let mut cmd = Command::new(git);
     cmd.args(["rev-parse", rev]).current_dir(dir);
@@ -469,7 +484,13 @@ pub fn ensure_campaign_bare_network_meta(
     } else {
         NetworkProfile::Production
     };
-    let default_branch = default_branch_on_bare(git, bare)?;
+    let mut default_branch = default_branch_on_bare(git, bare)?;
+    if default_branch == "HEAD" {
+        let tip = rev_parse(git, bare, "HEAD")?;
+        run_git_on_bare(git, bare, &["update-ref", "refs/heads/main", &tip])?;
+        run_git_on_bare(git, bare, &["symbolic-ref", "HEAD", "refs/heads/main"])?;
+        default_branch = "main".into();
+    }
     let fetch_base = fetch_base_oid_for_bare(
         git,
         bare,
