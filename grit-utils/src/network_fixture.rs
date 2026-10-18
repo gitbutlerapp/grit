@@ -421,7 +421,38 @@ fn default_branch_on_bare(git: &Path, bare: &Path) -> Result<String> {
             return Ok(short);
         }
     }
-    Ok("main".into())
+    for branch in ["main", "master"] {
+        if rev_parse(git, bare, &format!("refs/heads/{branch}")).is_ok() {
+            return Ok(branch.to_string());
+        }
+    }
+    Ok("HEAD".into())
+}
+
+fn fetch_base_oid_for_bare(
+    git: &Path,
+    bare: &Path,
+    default_branch: &str,
+    incremental_commits: usize,
+) -> Result<String> {
+    if default_branch != "HEAD" {
+        if let Ok(oid) = rev_parse(
+            git,
+            bare,
+            &format!("refs/heads/{default_branch}~{incremental_commits}"),
+        ) {
+            return Ok(oid);
+        }
+        if let Ok(oid) = rev_parse(git, bare, &format!("refs/heads/{default_branch}")) {
+            return Ok(oid);
+        }
+    }
+    rev_parse(
+        git,
+        bare,
+        &format!("HEAD~{incremental_commits}"),
+    )
+    .or_else(|_| rev_parse(git, bare, "HEAD"))
 }
 
 /// Network bench metadata for a real-repo campaign bare remote (file:// push/fetch matrix).
@@ -439,15 +470,12 @@ pub fn ensure_campaign_bare_network_meta(
         NetworkProfile::Production
     };
     let default_branch = default_branch_on_bare(git, bare)?;
-    let fetch_base = rev_parse(
+    let fetch_base = fetch_base_oid_for_bare(
         git,
         bare,
-        &format!(
-            "refs/heads/{default_branch}~{}",
-            profile.incremental_fetch_commits()
-        ),
-    )
-    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
+        &default_branch,
+        profile.incremental_fetch_commits(),
+    )?;
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: "CampaignRealRepo".into(),
@@ -473,17 +501,12 @@ fn write_meta(
     many_refs: usize,
 ) -> Result<()> {
     let default_branch = default_branch_on_bare(git, bare)?;
-    let fetch_base = rev_parse(
+    let fetch_base = fetch_base_oid_for_bare(
         git,
         bare,
-        &format!(
-            "refs/heads/{default_branch}~{}",
-            profile.incremental_fetch_commits()
-        ),
-    )
-    .or_else(|_| rev_parse(git, bare, &format!("refs/heads/{default_branch}")))?;
-
-    let default_branch = default_branch_on_bare(git, bare)?;
+        &default_branch,
+        profile.incremental_fetch_commits(),
+    )?;
     let meta = NetworkBenchMeta {
         profile: profile.suffix().to_string(),
         kind: format!("{kind:?}"),
