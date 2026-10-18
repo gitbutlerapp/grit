@@ -858,7 +858,9 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         }
         HistoryError::MergeCommitInReplay { commit } => {
             let short = &commit.to_hex()[..7];
-            anyhow::anyhow!("{short} is a merge commit — {operation} cannot replay merges yet")
+            anyhow::anyhow!(
+                "{short} is a merge commit — {operation} cannot drop or reorder merge commits yet"
+            )
         }
         HistoryError::RootCommit { commit } => {
             let short = &commit.to_hex()[..7];

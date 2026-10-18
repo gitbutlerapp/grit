@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::commit::signing::extra_headers_without_commit_signatures;
 use crate::commit_encoding::identity_raw_for_serialized_commit;
 use crate::error::Error;
-use crate::merge_base::is_ancestor;
+use crate::merge_base::{is_ancestor, merge_bases_octopus};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
@@ -135,10 +135,6 @@ pub fn plan_rewrite(
         let old = load_commit(repo, old_oid)?;
         let edit = edits.get(&old_oid);
 
-        if old.parents.len() > 1 && edit.is_none() {
-            return Err(HistoryError::MergeCommitInReplay { commit: old_oid });
-        }
-
         if matches!(
             edit,
             Some(CommitEdit::InsertBefore(_)) | Some(CommitEdit::SplitBefore { .. })
@@ -192,11 +188,13 @@ pub fn plan_rewrite(
 
         let (new_oid, new_field) = match edit {
             None => {
-                let oid = replay_descendant(repo, &mapping, &old, old_oid, insert_parent, opts)?;
+                let oid =
+                    replay_commit_descendant(repo, &mapping, &old, old_oid, insert_parent, opts)?;
                 (oid, Some(oid))
             }
             Some(CommitEdit::InsertBefore(_)) => {
-                let oid = replay_descendant(repo, &mapping, &old, old_oid, insert_parent, opts)?;
+                let oid =
+                    replay_commit_descendant(repo, &mapping, &old, old_oid, insert_parent, opts)?;
                 (oid, Some(oid))
             }
             Some(CommitEdit::SplitBefore { rest_message, .. }) => {
@@ -665,6 +663,20 @@ fn mapped_first_parent(
     Ok(mapping.get(&parent).copied().unwrap_or(parent))
 }
 
+fn replay_commit_descendant(
+    repo: &Repository,
+    mapping: &HashMap<ObjectId, ObjectId>,
+    old: &CommitData,
+    old_oid: ObjectId,
+    extra_parent: Option<ObjectId>,
+    opts: &RewriteOptions,
+) -> Result<ObjectId, HistoryError> {
+    if old.parents.len() > 1 {
+        return replay_merge_descendant(repo, mapping, old, old_oid, extra_parent, opts);
+    }
+    replay_descendant(repo, mapping, old, old_oid, extra_parent, opts)
+}
+
 fn replay_descendant(
     repo: &Repository,
     mapping: &HashMap<ObjectId, ObjectId>,
@@ -684,6 +696,169 @@ fn replay_descendant(
         &old.message,
         opts,
     )
+}
+
+fn replay_merge_descendant(
+    repo: &Repository,
+    mapping: &HashMap<ObjectId, ObjectId>,
+    old: &CommitData,
+    old_oid: ObjectId,
+    extra_parent: Option<ObjectId>,
+    opts: &RewriteOptions,
+) -> Result<ObjectId, HistoryError> {
+    let parent_list = mapped_merge_parents(old, mapping, extra_parent);
+    let result_tree = replay_merge_tree(repo, old, old_oid, &parent_list, mapping)?;
+
+    let committer = if opts.preserve_committer {
+        old.committer.as_str()
+    } else {
+        opts.committer.as_str()
+    };
+
+    let empty = empty_tree_oid(repo)?;
+    let old_first_parent = old.parents.first().copied().unwrap_or(empty);
+    let new_first_parent = parent_list.first().copied().unwrap_or(empty);
+    let old_parent_tree = if old.parents.is_empty() {
+        empty
+    } else {
+        commit_tree(repo, old_first_parent)?
+    };
+    let new_parent_tree = if parent_list.is_empty() {
+        empty
+    } else {
+        commit_tree(repo, new_first_parent)?
+    };
+
+    if old.tree != old_parent_tree && result_tree == new_parent_tree {
+        return match opts.empty {
+            EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
+            EmptyPolicy::Drop => Ok(new_first_parent),
+            EmptyPolicy::Keep => write_rewritten_commit(
+                repo,
+                old,
+                result_tree,
+                &parent_list,
+                &old.author,
+                committer,
+                &old.message,
+            ),
+        };
+    }
+
+    write_rewritten_commit(
+        repo,
+        old,
+        result_tree,
+        &parent_list,
+        &old.author,
+        committer,
+        &old.message,
+    )
+}
+
+fn mapped_merge_parents(
+    old: &CommitData,
+    mapping: &HashMap<ObjectId, ObjectId>,
+    extra_first_parent: Option<ObjectId>,
+) -> Vec<ObjectId> {
+    old.parents
+        .iter()
+        .enumerate()
+        .map(|(i, parent)| {
+            if i == 0 {
+                extra_first_parent
+                    .unwrap_or_else(|| mapping.get(parent).copied().unwrap_or(*parent))
+            } else {
+                mapping.get(parent).copied().unwrap_or(*parent)
+            }
+        })
+        .collect()
+}
+
+fn merge_secondary_parents_unchanged(
+    old: &CommitData,
+    mapping: &HashMap<ObjectId, ObjectId>,
+) -> bool {
+    old.parents[1..]
+        .iter()
+        .all(|parent| mapping.get(parent).is_none_or(|mapped| mapped == parent))
+}
+
+fn replay_merge_tree(
+    repo: &Repository,
+    old: &CommitData,
+    old_oid: ObjectId,
+    new_parents: &[ObjectId],
+    mapping: &HashMap<ObjectId, ObjectId>,
+) -> Result<ObjectId, HistoryError> {
+    if merge_secondary_parents_unchanged(old, mapping) {
+        let empty = empty_tree_oid(repo)?;
+        let old_first = old.parents.first().copied().unwrap_or(empty);
+        let new_first = new_parents.first().copied().unwrap_or(empty);
+        let old_first_tree = if old.parents.is_empty() {
+            empty
+        } else {
+            commit_tree(repo, old_first)?
+        };
+        let new_first_tree = if new_parents.is_empty() {
+            empty
+        } else {
+            commit_tree(repo, new_first)?
+        };
+        return compute_replayed_tree(repo, old, old_oid, old_first_tree, new_first_tree);
+    }
+
+    merge_trees_for_replayed_parents(repo, old_oid, new_parents)
+}
+
+fn merge_trees_for_replayed_parents(
+    repo: &Repository,
+    commit: ObjectId,
+    parents: &[ObjectId],
+) -> Result<ObjectId, HistoryError> {
+    if parents.len() < 2 {
+        return Err(HistoryError::Planning {
+            message: "merge replay requires at least two parents".into(),
+        });
+    }
+
+    let bases = merge_bases_octopus(repo, parents).map_err(library_err)?;
+    let empty = empty_tree_oid(repo)?;
+    let base_tree = if bases.is_empty() {
+        empty
+    } else if bases.len() == 1 {
+        commit_tree(repo, bases[0])?
+    } else {
+        return Err(HistoryError::Conflict {
+            commit,
+            paths: vec!["<multiple merge bases>".into()],
+        });
+    };
+
+    let mut result_tree = commit_tree(repo, parents[0])?;
+    for &other in &parents[1..] {
+        let theirs_tree = commit_tree(repo, other)?;
+        record_merge_call();
+        let merge = merge_trees_three_way(
+            repo,
+            base_tree,
+            result_tree,
+            theirs_tree,
+            MergeFavor::default(),
+            WhitespaceMergeOptions::default(),
+            None,
+            TreeMergeConflictPresentation::default(),
+        )
+        .map_err(library_err)?;
+        if merge.index.has_unmerged_entries() || !merge.conflict_content.is_empty() {
+            return Err(HistoryError::Conflict {
+                commit,
+                paths: conflict_paths(&merge),
+            });
+        }
+        result_tree = merge.result_tree;
+    }
+    Ok(result_tree)
 }
 
 /// Replay with author/message overrides and an explicit parent list (implicit tree).

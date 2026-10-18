@@ -167,6 +167,29 @@ fn drop_rejects_root_commit() {
 }
 
 #[test]
+fn drop_before_merge_replays_merge_onto_parent() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(
+        wt,
+        &[("b", "a"), ("c", "a"), ("m", "b"), ("m", "c"), ("d", "m")],
+        &[("d", "refs/heads/main")],
+    );
+    let grit = open_grit(wt);
+    let plan = history_drop(&grit, oids["b"], &opts(7)).expect("drop before merge");
+    let merge_row = plan
+        .commits
+        .iter()
+        .find(|r| r.old == oids["m"])
+        .expect("merge row");
+    let new_merge = merge_row.new.expect("rewritten merge");
+    let parsed = parse_commit(&grit.odb().read(&new_merge).expect("read").data).expect("parse");
+    assert_eq!(parsed.parents.len(), 2);
+    assert_ne!(new_merge, oids["m"]);
+    git_fsck_strict(wt);
+}
+
+#[test]
 fn drop_rejects_merge_commit() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();

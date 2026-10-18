@@ -31,7 +31,7 @@ Shared behavior for every subcommand:
 
 Remove one commit from history and replay its descendants onto that commit’s first parent. The dropped commit’s tree changes are omitted; descendant commits are replayed with three-way merges like other history rewrites.
 
-You cannot drop a **root** commit (no parent) or a **merge** commit. If a descendant is a merge, planning refuses (merge replay is not supported yet).
+You cannot drop a **root** commit (no parent) or a **merge** commit itself. Descendant **merge** commits are replayed: mapped parents are updated and the merge tree is recomputed (first-parent transplant when side branches are unchanged, otherwise a fresh merge of the mapped parents).
 
 ### `move`
 
@@ -45,7 +45,7 @@ Replace one commit’s message and replay descendants onto the rewritten history
 
 Provide exactly one of `-m` / `--message` or `--message-file` (use `-` to read from stdin). Grit does not open an editor.
 
-If any descendant commit is a **merge**, planning refuses with an error (merge replay is not supported yet). Use a linear range or wait for later `grit history` subcommands that handle merges.
+Descendant **merge** commits are replayed the same way as for [`drop`](#drop): parents are remapped and the merge tree is updated to match the rewritten first-parent chain.
 
 ### `absorb`
 

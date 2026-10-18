@@ -34,12 +34,13 @@ impl RebaseOntoOptions {
 
 /// Plan replay of `upstream..tips` onto `onto` in topological order.
 ///
-/// Merge commits in the range are refused. Under [`RefScope::Branches`](super::RefScope::Branches),
+/// Merge commits in the range are replayed with updated parents and trees. Under
+/// [`RefScope::Branches`](super::RefScope::Branches),
 /// every local branch whose tip descends from the rewritten range is moved to its replayed tip.
 ///
 /// # Errors
 ///
-/// Returns [`HistoryError::MergeCommitInReplay`], [`HistoryError::Conflict`], and other planning
+/// Returns [`HistoryError::Conflict`] and other planning
 /// failures from [`plan_rewrite`].
 pub fn rebase_onto(
     repo: &Repository,

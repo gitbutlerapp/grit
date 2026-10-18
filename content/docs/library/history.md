@@ -12,6 +12,8 @@ The [`history`](rustdoc:grit_lib::revwalk::history) module supports stateless hi
 
 [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) describes per-commit rewrites, drops, and insert-before commits. [`RewriteOptions`](rustdoc:grit_lib::revwalk::history::RewriteOptions) controls scope, empty-commit policy, and the committer ident used for new objects.
 
+When a rewrite replays descendant **merge** commits, [`plan_rewrite`](rustdoc:grit_lib::revwalk::history::plan_rewrite) remaps every parent and recomputes the merge tree (first-parent transplant when side branches are unchanged, otherwise a fresh merge of the mapped parents). Dropping or reordering a merge commit itself is still rejected ([`HistoryError::MergeCommitInReplay`](rustdoc:grit_lib::revwalk::history::HistoryError::MergeCommitInReplay)).
+
 For a single message change, [`reword`](rustdoc:grit_lib::revwalk::history::reword) builds the [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) and runs [`plan_rewrite`](rustdoc:grit_lib::revwalk::history::plan_rewrite) after [`normalize_rewrite_message`](rustdoc:grit_lib::revwalk::history::normalize_rewrite_message) (stripspace, trailing newline, reject empty).
 
 To reorder one commit on the linear first-parent chain of `HEAD`, [`move_commit`](rustdoc:grit_lib::revwalk::history::move_commit) takes a [`Placement`](rustdoc:grit_lib::revwalk::history::Placement) (`Before` / `After` another commit), replays the affected segment in the new order, and returns a [`RewritePlan`](rustdoc:grit_lib::revwalk::history::RewritePlan). Commits must sit on the same first-parent chain with no merge commits in the segment; conflicts and no-op moves surface as [`HistoryError`](rustdoc:grit_lib::revwalk::history::HistoryError) variants.

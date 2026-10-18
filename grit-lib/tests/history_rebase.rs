@@ -6,7 +6,7 @@ mod support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
@@ -228,7 +228,7 @@ fn rebase_onto_keep_applied() {
 }
 
 #[test]
-fn rebase_onto_rejects_merge_in_range() {
+fn rebase_onto_replays_merge_in_range() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
     let oids = build_commit_dag(
@@ -246,18 +246,23 @@ fn rebase_onto_rejects_merge_in_range() {
     );
     let onto = commit_file(wt, "onto.txt", "x\n", "onto");
     let grit = open_grit(wt);
-    let err = rebase_onto(
+    let plan = rebase_onto(
         &grit,
         oids["u"],
         onto,
         &[oids["d"]],
         &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
     )
-    .expect_err("merge in range");
-    assert!(matches!(
-        err,
-        grit_lib::revwalk::history::HistoryError::MergeCommitInReplay { .. }
-    ));
+    .expect("rebase with merge");
+    let merge_row = plan
+        .commits
+        .iter()
+        .find(|r| r.old == oids["m"])
+        .expect("merge row");
+    let new_merge = merge_row.new.expect("rewritten merge");
+    let parsed = parse_commit(&grit.odb().read(&new_merge).expect("read").data).expect("parse");
+    assert_eq!(parsed.parents.len(), 2);
+    assert_git_fsck_strict(wt);
 }
 
 #[test]

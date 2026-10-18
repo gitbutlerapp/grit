@@ -62,8 +62,8 @@ pub enum HistoryError {
         paths: Vec<String>,
     },
 
-    /// A merge commit would have to be replayed onto a new parent.
-    #[error("replay of merge commit {commit} is not supported")]
+    /// A merge commit cannot be dropped, reordered, or otherwise edited in an unsupported way.
+    #[error("merge commit {commit} cannot be dropped or reordered in this rewrite")]
     MergeCommitInReplay {
         /// Merge commit that cannot be replayed.
         commit: ObjectId,

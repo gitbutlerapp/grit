@@ -678,7 +678,7 @@ fn plan_rewrite_head_scope_updates_only_head() {
 }
 
 #[test]
-fn plan_rewrite_rejects_merge_commit_in_replay() {
+fn plan_rewrite_replays_merge_descendants() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
     let oids = build_commit_dag(
@@ -697,7 +697,7 @@ fn plan_rewrite_rejects_merge_commit_in_replay() {
             parents: None,
         },
     );
-    let err = plan_rewrite(
+    let plan = plan_rewrite(
         &grit,
         &edits,
         &RewriteOptions {
@@ -707,11 +707,31 @@ fn plan_rewrite_rejects_merge_commit_in_replay() {
             preserve_committer: false,
         },
     )
-    .expect_err("merge in replay");
-    assert!(matches!(
-        err,
-        grit_lib::revwalk::history::HistoryError::MergeCommitInReplay { .. }
-    ));
+    .expect("merge replay");
+    let merge_row = plan
+        .commits
+        .iter()
+        .find(|r| r.old == oids["m"])
+        .expect("merge row");
+    let new_merge = merge_row.new.expect("rewritten merge");
+    assert_ne!(new_merge, oids["m"]);
+    let parsed = parse_commit(&grit.odb().read(&new_merge).expect("read").data).expect("parse");
+    assert_eq!(parsed.parents.len(), 2);
+    let new_b = plan
+        .commits
+        .iter()
+        .find(|r| r.old == oids["b"])
+        .and_then(|r| r.new)
+        .expect("mapped b");
+    let new_c = plan
+        .commits
+        .iter()
+        .find(|r| r.old == oids["c"])
+        .and_then(|r| r.new)
+        .expect("mapped c");
+    assert!(parsed.parents.contains(&new_b));
+    assert!(parsed.parents.contains(&new_c));
+    git_fsck_strict(wt);
 }
 
 #[test]
