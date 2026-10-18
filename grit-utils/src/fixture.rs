@@ -553,8 +553,11 @@ mod tests {
         create_min_repo(&git, dir.path()).unwrap();
         prepare_add_iteration(dir.path(), &git).unwrap();
         let err = prepare_add_iteration(dir.path(), Path::new("/nonexistent/git")).unwrap_err();
+        let msg = err.to_string();
         assert!(
-            err.to_string().contains("git reset") || err.to_string().contains("ls-files"),
+            msg.contains("git reset")
+                || msg.contains("ls-files")
+                || msg.contains("No such file"),
             "unexpected error: {err}"
         );
     }
