@@ -184,6 +184,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             })
             .filter(|path| {
                 !delete_path_trusted_without_worktree_stat(
+                    work_tree,
                     index,
                     &head_by_path,
                     &scheduled_delete_paths,
@@ -230,7 +231,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             .threads
             .get()
     });
-    let (unstaged, index_changed) = diff_index_to_worktree_with_options(
+    let (mut unstaged, index_changed) = diff_index_to_worktree_with_options(
         repo.odb(),
         index,
         work_tree,
@@ -249,6 +250,20 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             ..Default::default()
         },
     )?;
+    unstaged.retain(|entry| {
+        let Some(path) = entry.old_path.as_deref().or(entry.new_path.as_deref()) else {
+            return true;
+        };
+        !delete_path_trusted_without_worktree_stat(
+            work_tree,
+            index,
+            &head_by_path,
+            &scheduled_delete_paths,
+            path,
+            index_mtime,
+            stat_policy,
+        )
+    });
     Ok((staged, unstaged, index_changed))
 }
 
@@ -540,6 +555,7 @@ fn index_matches_head_without_worktree_stat(
 }
 
 fn delete_path_trusted_without_worktree_stat(
+    work_tree: &Path,
     index: &Index,
     head_by_path: &HashMap<String, HeadTreeSide>,
     scheduled_delete_paths: &HashSet<String>,
@@ -547,14 +563,26 @@ fn delete_path_trusted_without_worktree_stat(
     index_mtime: Option<(u32, u32)>,
     stat_policy: StatMatchPolicy,
 ) -> bool {
-    path_is_tree_scheduled_delete(scheduled_delete_paths, path)
-        && index_matches_head_without_worktree_stat(
-            index,
-            head_by_path,
-            path,
-            index_mtime,
-            stat_policy,
-        )
+    if !path_is_tree_scheduled_delete(scheduled_delete_paths, path) {
+        return false;
+    }
+    let HeadTreeSide::Present { oid, mode } = head_by_path
+        .get(path)
+        .copied()
+        .unwrap_or(HeadTreeSide::Absent)
+    else {
+        return false;
+    };
+    let Some(ie) = index.get(path.as_bytes(), 0) else {
+        return false;
+    };
+    if ie.oid != oid || ie.mode != mode {
+        return false;
+    }
+    if !work_tree.join(path).exists() {
+        return true;
+    }
+    index_matches_head_without_worktree_stat(index, head_by_path, path, index_mtime, stat_policy)
 }
 
 fn staged_diff_for_tree_switch_paths(

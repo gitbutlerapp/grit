@@ -829,6 +829,18 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
             preserve_worktree_paths.insert(path.to_owned());
             continue;
         }
+        if entry.status == DiffStatus::Deleted {
+            let scheduled = tree_changes.iter().find(|change| {
+                change.status == DiffStatus::Deleted && change.old_path.as_deref() == Some(path)
+            });
+            if scheduled.is_some_and(|change| {
+                index
+                    .get(path.as_bytes(), 0)
+                    .is_some_and(|ie| ie.oid == change.old_oid)
+            }) {
+                continue;
+            }
+        }
         if let Some(target) = target_by_path.get(path) {
             if index_matches_target_tree_entry(index, path, *target)
                 || gitlink_worktree_head_matches_target(entry, *target)

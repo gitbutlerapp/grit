@@ -1266,3 +1266,73 @@ fn switch_tracked_deletes_match_git_when_wholesale_dir_removal_fails() {
         "grit must leave the same tracked remnants as git when wholesale removal fails"
     );
 }
+
+/// Regression for <https://github.com/gitbutlerapp/grit/issues/1160>.
+#[test]
+fn issue_1160_unstaged_delete_with_staged_add_deleted_allows_switch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "t@t"]);
+    git(root, &["config", "user.name", "t"]);
+    std::fs::write(root.join("a.txt"), b"a\n").expect("a");
+    git(root, &["add", "a.txt"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-q", "-b", "side"]);
+    std::fs::write(root.join("extra.txt"), b"e\n").expect("extra");
+    git(root, &["add", "extra.txt"]);
+    git(root, &["commit", "-qm", "extra"]);
+
+    std::fs::remove_file(root.join("extra.txt")).expect("unstaged delete extra");
+    std::fs::write(root.join("new.txt"), b"n\n").expect("new");
+    git(root, &["add", "new.txt"]);
+    std::fs::remove_file(root.join("new.txt")).expect("staged add then delete new");
+
+    let porcelain_before = git_porcelain(root);
+    assert!(
+        porcelain_before.contains(" D extra.txt") && porcelain_before.contains("AD new.txt"),
+        "expected git status D extra + AD new, got:\n{porcelain_before}"
+    );
+
+    let git_switch = Command::new("git")
+        .current_dir(root)
+        .args(["switch", "main"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git switch");
+    assert!(git_switch.success(), "system git must allow switch to main");
+    let git_after = git_porcelain(root);
+    git(root, &["switch", "-q", "side"]);
+
+    let grit_repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open grit repo");
+    let main_oid = ObjectId::from_hex(git(root, &["rev-parse", "main"]).trim()).expect("main oid");
+
+    switch_repository(
+        &grit_repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            },
+        },
+    )
+    .expect("grit switch main with unstaged delete + AD path");
+
+    assert_eq!(
+        git_porcelain(root),
+        git_after,
+        "post-switch porcelain must match git"
+    );
+    assert_eq!(
+        git_diff_index_head(root),
+        git(root, &["diff-index", "HEAD"]),
+        "post-switch diff-index must match git"
+    );
+    git_fsck(root);
+}
