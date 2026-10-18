@@ -95,8 +95,7 @@ pub fn compare_criterion_reports(
 }
 
 fn looks_like_criterion_summary(json: &str) -> bool {
-    json.contains("\"driver\":\"criterion\"")
-        || json.contains("\"driver\": \"criterion\"")
+    json.contains("\"driver\":\"criterion\"") || json.contains("\"driver\": \"criterion\"")
 }
 
 /// Load two JSON files and compare; errors if schema is invalid.

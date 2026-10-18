@@ -471,7 +471,7 @@ fn parse_refs_work_mode(s: &str) -> Result<RefsWorkMode, String> {
     }
 }
 
-#[derive(Clone, Debug, ValueEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum SynthTierArg {
     S,
     M,

@@ -762,12 +762,7 @@ pub(crate) fn find_tree_entry_by_name_in_data(
     let lookup = |name_is_tree: bool| -> Result<Option<TreeEntry>> {
         let idx = spans.binary_search_by(|span| {
             let entry_name = &data[span.name_off..span.name_off + span.name_len];
-            tree_entry_cmp(
-                entry_name,
-                span.mode == 0o040000,
-                name,
-                name_is_tree,
-            )
+            tree_entry_cmp(entry_name, span.mode == 0o040000, name, name_is_tree)
         });
         if let Ok(i) = idx {
             let span = &spans[i];
@@ -1486,7 +1481,12 @@ mod commit_parse_tests {
         }
         let wide_oid = String::from_utf8_lossy(
             &Command::new("git")
-                .args(["-C", repo_path.to_str().expect("utf8"), "rev-parse", "HEAD:wide"])
+                .args([
+                    "-C",
+                    repo_path.to_str().expect("utf8"),
+                    "rev-parse",
+                    "HEAD:wide",
+                ])
                 .output()
                 .expect("rev-parse")
                 .stdout,
@@ -1519,7 +1519,12 @@ mod commit_parse_tests {
         }
         let tree_hex = String::from_utf8(
             Command::new("git")
-                .args(["-C", repo_path.to_str().expect("utf8"), "rev-parse", "HEAD:wide/w00015"])
+                .args([
+                    "-C",
+                    repo_path.to_str().expect("utf8"),
+                    "rev-parse",
+                    "HEAD:wide/w00015",
+                ])
                 .output()
                 .expect("rev-parse")
                 .stdout,
@@ -1550,7 +1555,8 @@ mod commit_parse_tests {
         if !repo_path.join(".git").is_dir() {
             return;
         }
-        let repo = Repository::discover(Some(repo_path), &RepositoryOptions::default()).expect("open");
+        let repo =
+            Repository::discover(Some(repo_path), &RepositoryOptions::default()).expect("open");
         let head_ref = std::fs::read_to_string(repo_path.join(".git/HEAD")).expect("HEAD");
         let head_hex = if let Some(rest) = head_ref.strip_prefix("ref: ") {
             std::fs::read_to_string(repo_path.join(".git").join(rest.trim()))
