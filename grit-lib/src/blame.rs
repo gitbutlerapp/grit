@@ -3160,7 +3160,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
 
 fn resolve_blame_start(repo: &Repository, start: Option<ObjectId>) -> Result<ObjectId> {
     if let Some(oid) = start {
-        return Ok(oid);
+        return crate::revwalk::rev_parse::peel_to_commit_for_merge_base(repo, oid);
     }
     use crate::state::{resolve_head, HeadState};
     match resolve_head(repo.git_dir())? {

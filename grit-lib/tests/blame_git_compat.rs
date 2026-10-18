@@ -822,3 +822,23 @@ fn blame_respects_graft_over_commit_graph_bloom() {
 
     assert_blame_matches(&repo, root, "f.txt", Some(&child), None);
 }
+
+#[test]
+fn blame_annotated_tag_start_matches_git_porcelain() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "a.txt";
+    std::fs::write(root.join(file), "hello\n").unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "one"]);
+    git_run(root, &["tag", "-a", "v1.1", "-m", "release"]);
+    git_run(root, &["tag", "v1"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    assert_blame_matches(&repo, root, file, Some("v1.1"), None);
+    assert_blame_matches(&repo, root, file, Some("v1"), None);
+}

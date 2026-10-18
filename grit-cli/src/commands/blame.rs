@@ -7,7 +7,7 @@ use std::ops::RangeInclusive;
 use anyhow::{Context, Result};
 use grit_lib::blame::{blame_file, BlameOptions, BlameResult};
 use grit_lib::objects::ObjectId;
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -115,7 +115,7 @@ pub fn run(
 ) -> Result<BlameOutcome> {
     let repo = context::discover()?;
     let rev_spec = rev.unwrap_or_else(|| "HEAD".to_owned());
-    let start = resolve_revision(&repo, &rev_spec)
+    let start = resolve_revision_as_commit(&repo, &rev_spec)
         .with_context(|| format!("could not resolve revision '{rev_spec}'"))?;
 
     let range = line_range
