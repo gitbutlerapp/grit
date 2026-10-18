@@ -1493,8 +1493,8 @@ pub(crate) fn prune_loose_ref_cas(
 /// [`resolve_ref_cached`] / [`write_ref_cached`] makes the apply linear.
 ///
 /// The snapshot reflects `packed-refs` at load time. [`write_ref_cached`] may
-/// update it via [`PackedRefs::record_loose_write`] so later namespace checks in
-/// the same apply batch see loose refs without reloading the file. Otherwise
+/// update the snapshot in place so later namespace checks in the same apply batch
+/// see loose refs without reloading the file. Otherwise
 /// treat it as read-only: stale packed data only omits refs that were loose on
 /// disk (resolved outside the snapshot) to begin with.
 pub struct PackedRefs {
