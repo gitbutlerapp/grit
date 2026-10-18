@@ -192,6 +192,16 @@ pub(crate) fn local_change_diffs_for_tree_changes(
                     stat_policy,
                 )
             })
+            .filter(|path| {
+                path_count < SWITCH_TREE_DIFF_STAT_SKIP_MIN
+                    || !modified_tree_diff_path_trusted_without_worktree_stat(
+                        index,
+                        &head_by_path,
+                        path,
+                        index_mtime,
+                        stat_policy,
+                    )
+            })
             .filter(|path| !added_tree_path_missing_on_disk(work_tree, &added_tree_paths, path))
             .collect()
     };
@@ -299,9 +309,8 @@ fn worktree_clean_for_switch_paths(
                 && entry_is_racy_with_policy(ie, index_mtime, stat_policy)
         })
     });
-    const SWITCH_STAT_PARALLEL_MIN: usize = 128;
     let mut stat_clean = true;
-    if paths.len() < SWITCH_STAT_PARALLEL_MIN {
+    if paths.len() < SWITCH_TREE_DIFF_STAT_SKIP_MIN {
         for path in paths {
             let Some(ie) = index.get(path.as_bytes(), 0) else {
                 continue;
@@ -329,7 +338,7 @@ fn worktree_clean_for_switch_paths(
                 break;
             }
         }
-    } else {
+    } else if paths.len() >= SWITCH_TREE_DIFF_STAT_SKIP_MIN {
         let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
         if blob_dirs.is_empty() {
             return Ok(true);
@@ -557,6 +566,24 @@ fn delete_path_trusted_without_worktree_stat(
         )
 }
 
+/// Tree-diff paths that stay in HEAD with a non-racy index entry need no worktree stat before switch.
+fn modified_tree_diff_path_trusted_without_worktree_stat(
+    index: &Index,
+    head_by_path: &HashMap<String, HeadTreeSide>,
+    path: &str,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: StatMatchPolicy,
+) -> bool {
+    matches!(head_by_path.get(path), Some(HeadTreeSide::Present { .. }))
+        && index_matches_head_without_worktree_stat(
+            index,
+            head_by_path,
+            path,
+            index_mtime,
+            stat_policy,
+        )
+}
+
 fn staged_diff_for_tree_switch_paths(
     index: &Index,
     head_by_path: &HashMap<String, HeadTreeSide>,
@@ -672,7 +699,38 @@ pub(crate) fn untracked_scan_pathspecs_for_deletes(tree_changes: &[DiffEntry]) -
     specs.into_iter().collect()
 }
 
+/// Exact added paths (and ancestor directories) for untracked overwrite checks during fast wholesale scan.
+///
+/// Top-level pathspec roots would walk entire trees under each root; this list stays proportional to
+/// the number of added paths in the tree diff.
+#[must_use]
+pub(crate) fn untracked_scan_paths_for_added_tree_changes(
+    tree_changes: &[DiffEntry],
+) -> Vec<String> {
+    let mut specs = BTreeSet::new();
+    for change in tree_changes {
+        if change.status != DiffStatus::Added {
+            continue;
+        }
+        let Some(added) = &change.new_path else {
+            continue;
+        };
+        let trimmed = added.trim_end_matches('/');
+        if trimmed.is_empty() {
+            continue;
+        }
+        specs.insert(trimmed.to_owned());
+        let mut rest = trimmed;
+        while let Some((prefix, _)) = rest.rsplit_once('/') {
+            specs.insert(prefix.to_owned());
+            rest = prefix;
+        }
+    }
+    specs.into_iter().collect()
+}
+
 const WHOLESALE_FAST_UNTRACKED_SCAN_MIN: usize = 32;
+const SWITCH_TREE_DIFF_STAT_SKIP_MIN: usize = 128;
 
 fn delete_paths_from_tree_changes(tree_changes: &[DiffEntry]) -> HashSet<String> {
     tree_changes
@@ -1125,7 +1183,7 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         ignored.extend(i);
     }
     let scan_specs: Vec<String> = if use_fast_wholesale_scan {
-        added_specs
+        untracked_scan_paths_for_added_tree_changes(tree_changes)
             .into_iter()
             .filter(|spec| work_tree.join(spec).exists())
             .collect()
@@ -1464,6 +1522,21 @@ mod tests {
         let specs = super::untracked_scan_pathspecs_for_tree_changes(&changes);
         assert!(specs.contains(&"dir".to_owned()));
         assert!(!specs.contains(&"dir/sub/new.txt".to_owned()));
+        assert!(specs.contains(&"top".to_owned()));
+        assert!(!specs.contains(&"tracked.txt".to_owned()));
+    }
+
+    #[test]
+    fn untracked_scan_paths_for_added_include_path_and_ancestors() {
+        let changes = vec![
+            added_entry("dir/sub/new.txt"),
+            modified_entry("tracked.txt"),
+            added_entry("top"),
+        ];
+        let specs = super::untracked_scan_paths_for_added_tree_changes(&changes);
+        assert!(specs.contains(&"dir/sub/new.txt".to_owned()));
+        assert!(specs.contains(&"dir/sub".to_owned()));
+        assert!(specs.contains(&"dir".to_owned()));
         assert!(specs.contains(&"top".to_owned()));
         assert!(!specs.contains(&"tracked.txt".to_owned()));
     }
@@ -2047,6 +2120,117 @@ mod tests {
         assert!(
             calls <= 8,
             "delete-only paths with matching index should not stat every file (probes {calls})"
+        );
+    }
+
+    #[test]
+    fn modified_tree_diff_paths_skip_worktree_stat_when_index_matches_head() {
+        use crate::objects::{serialize_commit, CommitData, ObjectKind};
+        use crate::refs;
+        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+        use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
+        use std::thread;
+        use std::time::Duration;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repository(root, false, "main", None, crate::RefStorageFormat::Files)
+            .expect("init");
+        const FILE_COUNT: usize = 160;
+        const MODIFY_COUNT: usize = 140;
+        for i in 0..FILE_COUNT {
+            let dir = format!("bulk/d{i:03}");
+            std::fs::create_dir_all(root.join(&dir)).expect("mkdir");
+            std::fs::write(root.join(&dir).join("f.txt"), format!("body {i}\n")).expect("write");
+        }
+        let mut index = repo.load_index().expect("index");
+        for i in 0..FILE_COUNT {
+            let rel = format!("bulk/d{i:03}/f.txt");
+            let abs = root.join(&rel);
+            let data = std::fs::read(&abs).expect("read");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            let entry = crate::index::entry_from_stat(
+                &abs,
+                rel.as_bytes(),
+                oid,
+                crate::index::MODE_REGULAR,
+            )
+            .expect("entry");
+            index.add_or_replace(entry);
+        }
+        index.sort();
+        let head_tree =
+            write_tree_update_index(&repo.odb(), &mut index, "", WriteTreeFlags::silent())
+                .expect("head tree");
+        repo.write_index(&mut index).expect("write index");
+        let commit = CommitData {
+            tree: head_tree,
+            parents: vec![],
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: "seed\n".into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        let co = repo
+            .odb()
+            .write(ObjectKind::Commit, &serialize_commit(&commit))
+            .expect("commit");
+        refs::write_ref(&repo.git_dir(), "HEAD", &co).expect("head");
+        thread::sleep(Duration::from_secs(2));
+        repo.write_index(&mut index).expect("refresh index mtime");
+
+        let mut target_index = index.clone();
+        for i in 0..MODIFY_COUNT {
+            let rel = format!("bulk/d{i:03}/f.txt");
+            let abs = root.join(&rel);
+            std::fs::write(&abs, format!("changed {i}\n")).expect("write touched");
+            let data = std::fs::read(&abs).expect("read touched");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            let entry = crate::index::entry_from_stat(
+                &abs,
+                rel.as_bytes(),
+                oid,
+                crate::index::MODE_REGULAR,
+            )
+            .expect("entry");
+            target_index.add_or_replace(entry);
+        }
+        target_index.sort();
+        let target_tree =
+            write_tree_update_index(&repo.odb(), &mut target_index, "", WriteTreeFlags::silent())
+                .expect("target tree");
+        for i in 0..FILE_COUNT {
+            let rel = format!("bulk/d{i:03}/f.txt");
+            std::fs::write(root.join(&rel), format!("body {i}\n")).expect("restore worktree");
+        }
+        let tree_changes =
+            diff_trees(repo.odb(), Some(&head_tree), Some(&target_tree), "").expect("diff");
+        assert!(
+            tree_changes.len() >= MODIFY_COUNT,
+            "expected at least {MODIFY_COUNT} tree changes, got {}",
+            tree_changes.len()
+        );
+
+        let _probe = reset_worktree_metadata_probe(root);
+        let mut index_probe = repo.load_index().expect("index");
+        let (staged, unstaged, _) = local_change_diffs_for_tree_changes(
+            &repo,
+            &mut index_probe,
+            Some(head_tree),
+            &tree_changes,
+            None,
+        )
+        .expect("scoped diffs");
+        assert!(staged.is_empty(), "expected no staged: {staged:?}");
+        assert!(unstaged.is_empty(), "clean tree: {unstaged:?}");
+        let calls = worktree_metadata_probe_count();
+        assert!(
+            calls <= 8,
+            "modified paths with matching index should not stat every file (probes {calls})"
         );
     }
 

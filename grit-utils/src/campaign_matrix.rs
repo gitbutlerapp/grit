@@ -8,6 +8,7 @@ use anyhow::Result;
 use crate::campaign_prep::{
     ensure_campaign_hot_path, load_campaign_hot_path_meta, reset_campaign_worktree_clean,
     restore_campaign_worktree_to_main, switch_wide_meta, sync_grit_index_to_git,
+    GIT_DOT_GIT_SWITCH_DETACH_TAG,
 };
 use crate::campaign_worktree::{blame_target_path, list_tracked_files};
 use crate::fixture::prepare_commit_iteration;
@@ -533,6 +534,30 @@ fn append_hot_path_scenarios(
         &fixture.worktree,
     )?);
 
+    if fixture.id == "git-dot-git" && !smoke {
+        let (grit_detach, git_detach) =
+            switch_detach_tag_argv(grit, git, GIT_DOT_GIT_SWITCH_DETACH_TAG, &meta.main_branch);
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "switch-detach-tag"),
+                group: "switch".into(),
+                fixture: fixture.label.clone(),
+                description: "alternate switch --detach tag and main branch (issue #1158)".into(),
+                grit_argv: grit_detach,
+                git_argv: git_detach,
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::SwitchDetachTagReset),
+                grit_via_shell: true,
+                git_via_shell: true,
+            },
+            &fixture.worktree,
+        )?);
+    }
+
     let (grit_pick, git_pick) = pick_argv(meta);
     out.push(run_scenario(
         hyperfine,
@@ -955,6 +980,34 @@ fn configure_push_remote(git: &Path, client: &Path, url: &str, default_branch: &
         ],
     )?;
     Ok(())
+}
+
+fn switch_detach_tag_argv(
+    grit: &Path,
+    git: &Path,
+    tag: &str,
+    main_branch: &str,
+) -> (Vec<String>, Vec<String>) {
+    let grit_cmd = chain_shell_public(
+        grit,
+        &[
+            vec!["switch".into(), "--detach".into(), tag.to_owned()],
+            vec!["switch".into(), main_branch.to_owned()],
+        ],
+    );
+    let git_cmd = chain_shell_public(
+        git,
+        &[
+            vec![
+                "switch".into(),
+                "-q".into(),
+                "--detach".into(),
+                tag.to_owned(),
+            ],
+            vec!["switch".into(), "-q".into(), main_branch.to_owned()],
+        ],
+    );
+    (sh_script(grit_cmd), sh_script(git_cmd))
 }
 
 fn switch_argv(grit: &Path, git: &Path, meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {

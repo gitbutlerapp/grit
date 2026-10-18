@@ -63,6 +63,38 @@ fn current_branch(git: &Path, repo: &Path) -> Result<String> {
     }
 }
 
+/// Tag used by the git-dot-git `switch-detach-tag` campaign row (issue #1158).
+pub const GIT_DOT_GIT_SWITCH_DETACH_TAG: &str = "v1.7.3";
+
+/// Hyperfine prepare: clean checkout of the main branch before alternating detach tag / main switch.
+pub fn prepare_switch_detach_tag(git: &Path, repo: &Path) -> Result<()> {
+    if meta_path(repo).is_file() {
+        let meta = load_campaign_hot_path_meta(repo)?;
+        restore_campaign_worktree_to_main(git, repo, &meta)?;
+    } else {
+        let main_branch = current_branch(git, repo).unwrap_or_else(|_| "master".into());
+        run_git_auth(git, repo, &["checkout", "-f", &main_branch])?;
+        run_git_auth(git, repo, &["reset", "--hard", "HEAD"])?;
+    }
+    run_git_auth(
+        git,
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("refs/tags/{GIT_DOT_GIT_SWITCH_DETACH_TAG}"),
+        ],
+    )
+    .or_else(|_| {
+        run_git_auth(
+            git,
+            repo,
+            &["rev-parse", "--verify", GIT_DOT_GIT_SWITCH_DETACH_TAG],
+        )
+    })?;
+    Ok(())
+}
+
 /// Reset the campaign worktree to a clean checkout of `main_branch` at `base_commit`.
 pub fn restore_campaign_worktree_to_main(
     git: &Path,

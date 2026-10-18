@@ -66,6 +66,7 @@ pub enum PrepareKind {
     DenseLeafAddIteration,
     SwitchReset,
     SwitchWideReset,
+    SwitchDetachTagReset,
     PickReset,
     MergeReset,
     PickSeriesReset,
@@ -128,6 +129,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::DenseLeafAddIteration => "prepare-dense-leaf-add",
         PrepareKind::SwitchReset => "prepare-switch",
         PrepareKind::SwitchWideReset => "prepare-switch-wide",
+        PrepareKind::SwitchDetachTagReset => "prepare-switch-detach-tag",
         PrepareKind::PickReset => "prepare-pick",
         PrepareKind::MergeReset => "prepare-merge",
         PrepareKind::PickSeriesReset => "prepare-pick-series",
@@ -1093,6 +1095,10 @@ pub fn run_prepare_switch(git: &Path) -> Result<()> {
 
 pub fn run_prepare_switch_wide(git: &Path) -> Result<()> {
     prepare_switch_wide(git, &bench_work_dir())
+}
+
+pub fn run_prepare_switch_detach_tag(git: &Path) -> Result<()> {
+    crate::campaign_prep::prepare_switch_detach_tag(git, &bench_work_dir())
 }
 
 pub fn run_prepare_pick(git: &Path) -> Result<()> {
