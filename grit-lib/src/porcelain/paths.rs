@@ -3,6 +3,7 @@
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus,
@@ -340,9 +341,15 @@ fn paths_with_local_modifications(
 ) -> Result<HashSet<String>> {
     let staged = diff_index_to_tree(repo.odb(), index, head_tree, false)?;
     let index_mtime = index_file_mtime(&repo.index_path());
+    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
+    let rules_arc = Arc::new(Mutex::new(worktree_rules));
     let diff_opts = DiffIndexToWorktreeOptions {
         index_mtime,
         repository_git_dir: Some(repo.git_dir().to_path_buf()),
+        refresh_index_stat_in_pass: true,
+        config: repo.config().ok(),
+        worktree_rules: Some(Arc::clone(&rules_arc)),
+        command_runner: Some(repo.command_runner()),
         ..Default::default()
     };
     let (unstaged, _) =
