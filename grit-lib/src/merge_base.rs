@@ -501,6 +501,8 @@ pub struct ReachableWalkState {
     seeded: HashSet<ObjectId>,
     seq: u64,
     hide: Vec<ObjectId>,
+    /// Commits excluded because they are a hide tip or an ancestor of one.
+    hide_set: HashSet<ObjectId>,
 }
 
 /// Serializable snapshot of [`ReachableWalkState`] for resuming a bounded walk.
@@ -531,6 +533,11 @@ impl ReachableWalkState {
     pub fn new(repo: &Repository, tips: &[ObjectId], hide: &[ObjectId]) -> Result<Self> {
         let hide_vec: Vec<ObjectId> = hide.to_vec();
         let mut cache = CommitGraphCache::new(repo);
+        let mut hide_set = HashSet::new();
+        for &hide_tip in hide {
+            hide_set.insert(hide_tip);
+            hide_set.extend(cache.ancestor_closure(hide_tip)?);
+        }
         let mut state = Self {
             heap: BinaryHeap::new(),
             done: HashSet::new(),
@@ -539,6 +546,7 @@ impl ReachableWalkState {
             seeded: HashSet::new(),
             seq: 0,
             hide: hide_vec,
+            hide_set,
         };
         for &tip in tips {
             if state.hide.contains(&tip) {
@@ -576,6 +584,7 @@ impl ReachableWalkState {
                 .collect(),
             seeded: seeded.into_iter().collect(),
             seq,
+            hide_set: HashSet::new(),
             hide,
         }
     }
@@ -608,13 +617,20 @@ impl ReachableWalkState {
         !self.heap.is_empty()
     }
 
-    fn is_hidden(&self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<bool> {
-        for &hide_tip in &self.hide {
-            if oid == hide_tip || cache.is_ancestor(oid, hide_tip)? {
-                return Ok(true);
-            }
+    fn ensure_hide_set(&mut self, cache: &mut CommitGraphCache<'_>) -> Result<()> {
+        if self.hide.is_empty() || !self.hide_set.is_empty() {
+            return Ok(());
         }
-        Ok(false)
+        for &hide_tip in &self.hide {
+            self.hide_set.insert(hide_tip);
+            self.hide_set.extend(cache.ancestor_closure(hide_tip)?);
+        }
+        Ok(())
+    }
+
+    fn is_hidden(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<bool> {
+        self.ensure_hide_set(cache)?;
+        Ok(self.hide_set.contains(&oid))
     }
 
     fn push_on_heap(

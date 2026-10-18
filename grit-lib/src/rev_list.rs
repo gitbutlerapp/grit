@@ -5684,10 +5684,7 @@ fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
         && options.until_cutoff.is_none()
         && options.since_cutoff.is_none()
         && !options.maximal_only
-        && options.skip == 0
-        && options.max_count.is_none()
         && options.ordering == OrderingMode::Default
-        && !options.reverse
         && !options.filter_print_omitted
         && !options.in_commit_order
         && !options.no_kept_objects
@@ -5700,6 +5697,7 @@ fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
         && !options.exclude_indexed_objects
         && options.output_mode == OutputMode::OidOnly
         && !options.no_object_names
+        && !(options.count && (options.max_count.is_some() || options.skip > 0))
 }
 
 fn wants_bitmap_rev_list(options: &RevListOptions) -> bool {
@@ -5732,6 +5730,22 @@ fn peeled_wants_from_rev_list_inputs(
     (peeled, filter_want_tips)
 }
 
+fn apply_rev_list_output_limits(
+    mut commits: Vec<ObjectId>,
+    options: &RevListOptions,
+) -> Vec<ObjectId> {
+    if options.skip > 0 {
+        commits = commits.into_iter().skip(options.skip).collect();
+    }
+    if let Some(max) = options.max_count {
+        commits.truncate(max);
+    }
+    if options.reverse {
+        commits.reverse();
+    }
+    commits
+}
+
 fn try_commit_graph_count_only(
     repo: &Repository,
     include: &[ObjectId],
@@ -5739,6 +5753,9 @@ fn try_commit_graph_count_only(
     options: &RevListOptions,
 ) -> Result<Option<RevListResult>> {
     if !options.count || options.objects || !options.use_commit_graph {
+        return Ok(None);
+    }
+    if options.max_count.is_some() || options.skip > 0 {
         return Ok(None);
     }
     if !crate::rev_parse::load_graft_parents(repo.git_dir()).is_empty() {
@@ -5853,10 +5870,13 @@ fn try_rev_list_accelerated(
     let (commits, objects) = if options.count {
         (Vec::new(), Vec::new())
     } else {
-        let commits: Vec<ObjectId> = reachable
-            .iter_by_kind(ObjectKind::Commit)
-            .filter(|oid| !excluded_object_ids.contains(oid))
-            .collect();
+        let commits: Vec<ObjectId> = apply_rev_list_output_limits(
+            reachable
+                .iter_by_kind(ObjectKind::Commit)
+                .filter(|oid| !excluded_object_ids.contains(oid))
+                .collect(),
+            options,
+        );
         let objects: Vec<(ObjectId, String)> =
             [ObjectKind::Tree, ObjectKind::Blob, ObjectKind::Tag]
                 .into_iter()
@@ -5894,8 +5914,19 @@ fn try_rev_list_accelerated(
     }))
 }
 
+/// When `--max-count` (plus `--skip`) is at least this large, prefer the commit-graph
+/// rev-list path and truncate after ordering instead of the per-commit bounded walk.
+const BOUNDED_LIMIT_LIST_EARLY_STOP_MAX: usize = 4096;
+
+fn bounded_limit_list_need(options: &RevListOptions) -> usize {
+    options
+        .skip
+        .saturating_add(options.max_count.unwrap_or(usize::MAX))
+}
+
 fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
     (options.max_count.is_some() || options.skip > 0)
+        && bounded_limit_list_need(options) < BOUNDED_LIMIT_LIST_EARLY_STOP_MAX
         && !options.all_refs
         && !options.first_parent
         && !options.objects

@@ -99,6 +99,41 @@ fn bench_revwalk_date(c: &mut Criterion) {
     revwalk_group(c, OrderingMode::DateOrderWalk, "date_order");
 }
 
+fn bench_revwalk_limit_near_full_history(c: &mut Criterion) {
+    let fx = HistoryBenchFixtures::global();
+    let full = fx.commit_count;
+    let mut group = c.benchmark_group("revwalk/limit_near_full_history");
+    group.throughput(Throughput::Elements(full as u64));
+    fx.ensure_commit_graph();
+    for (label, max_count) in [
+        ("limit_1000", 1000usize),
+        ("limit_full", full),
+        ("unlimited", usize::MAX),
+    ] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(label),
+            &max_count,
+            |b, &max_count| {
+                b.iter(|| {
+                    let opts = RevListOptions {
+                        max_count: if max_count == usize::MAX {
+                            None
+                        } else {
+                            Some(max_count)
+                        },
+                        use_commit_graph: true,
+                        ..Default::default()
+                    };
+                    let result =
+                        rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+                    black_box(result.commits.len())
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let mut group = c.benchmark_group("revwalk/log_first_1000_gitgit_like");
@@ -267,6 +302,7 @@ criterion_group!(
     bench_revwalk_date,
     bench_revwalk_path_limited,
     bench_log_first_1000_gitgit_like,
+    bench_revwalk_limit_near_full_history,
     bench_merge_base_deep,
     bench_rev_parse,
     bench_tree_diff,

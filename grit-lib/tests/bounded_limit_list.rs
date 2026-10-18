@@ -196,6 +196,31 @@ fn bounded_path_limit_zero_emits_nothing_at_matching_tip() {
 }
 
 #[test]
+fn large_max_count_without_paths_matches_git() {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    for i in 0..120 {
+        let content = format!("n{i}\n");
+        let msg = format!("noise {i}");
+        support::commit_file(wt, "noise.txt", &content, &msg);
+    }
+
+    let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+    let opts = RevListOptions {
+        max_count: Some(10_000),
+        ..Default::default()
+    };
+    support::assert_grit_commits_match_git(
+        wt,
+        &["-n", "10000", "HEAD"],
+        &[String::from("HEAD")],
+        &[],
+        &opts,
+    );
+    let result = rev_list(&grit_repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+    assert!(!result.commits.is_empty());
+}
+
 fn bounded_path_limit_extreme_max_count_does_not_panic() {
     let repo = support::HistoryRepo::init();
     let wt = repo.worktree();
