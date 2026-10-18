@@ -5,7 +5,7 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Dry run: no changes written.\nreflog-expire: removed 4 entries ([DURATION]).\nrepack: nothing to pack ([DURATION]).\n",
+    "stdout": "Dry run: no changes written.\nreflog-expire: removed 4 entries ([DURATION]).\nrepack: would pack 8 objects (9 loose, 0 pack files now) ([DURATION]).\n",
     "stderr": "Running garbage collection…\n"
   },
   "json": {

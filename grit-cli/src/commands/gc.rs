@@ -126,7 +126,7 @@ impl HumanRender for GcOutcome {
             outln!(w, "Dry run: no changes written.");
         }
         for task in &self.tasks {
-            task.render_human_line(w)?;
+            task.render_human_line(w, self.dry_run)?;
         }
         Ok(())
     }
@@ -145,7 +145,7 @@ impl MarkdownRender for GcOutcome {
 }
 
 impl GcTaskReport {
-    fn render_human_line(&self, w: &mut dyn Write) -> Result<()> {
+    fn render_human_line(&self, w: &mut dyn Write, dry_run: bool) -> Result<()> {
         match self {
             Self::PackRefs {
                 duration_ms,
@@ -164,7 +164,15 @@ impl GcTaskReport {
                 "reflog-expire: removed {entries_pruned} entries ({duration_ms} ms)."
             ),
             Self::Repack { duration_ms, report } => {
-                if let Some(path) = &report.pack_path {
+                if dry_run {
+                    outln!(
+                        w,
+                        "repack: would pack {} objects ({} loose, {} pack files now) ({duration_ms} ms).",
+                        report.objects_packed.unwrap_or(0),
+                        report.loose_before,
+                        report.packs_before
+                    );
+                } else if let Some(path) = &report.pack_path {
                     outln!(
                         w,
                         "repack: packed {} objects into {path} ({} ms).",
@@ -485,9 +493,32 @@ mod tests {
             path: packed_refs,
         };
         let mut buf = Vec::new();
-        task.render_human_line(&mut buf).expect("render");
+        task.render_human_line(&mut buf, false).expect("render");
         let line = String::from_utf8(buf).expect("utf8");
         assert!(!line.contains(r"\\?\"));
         assert!(line.contains("C:/repo/.git/packed-refs"));
+    }
+
+    #[test]
+    fn gc_repack_dry_run_human_line_matches_repack_command() {
+        let report = RepackSummary {
+            loose_before: 307,
+            packs_before: 0,
+            objects_packed: Some(307),
+            pack_bytes: None,
+            pack_path: None,
+            removed_pack_files: 0,
+            pruned_loose: 0,
+            unreachable_loose_pruned: 0,
+        };
+        let task = GcTaskReport::Repack {
+            duration_ms: 268,
+            report,
+        };
+        let mut buf = Vec::new();
+        task.render_human_line(&mut buf, true).expect("render");
+        let line = String::from_utf8(buf).expect("utf8");
+        assert!(line.contains("repack: would pack 307 objects (307 loose, 0 pack files now)"));
+        assert!(!line.contains("nothing to pack"));
     }
 }

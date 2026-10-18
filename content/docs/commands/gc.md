@@ -63,6 +63,15 @@ repack: packed 412 objects into .git/objects/pack/pack-….pack (842 ms).
 commit-graph: wrote 87 commits to .git/objects/info/commit-graph (120 ms).
 ```
 
+Dry run (reflog expiry and repack estimate only; JSON includes the same counters):
+
+```console
+$ grit gc --dry-run
+Dry run: no changes written.
+reflog-expire: removed 0 entries (11 ms).
+repack: would pack 412 objects (380 loose, 0 pack files now) (268 ms).
+```
+
 Single task:
 
 ```console
