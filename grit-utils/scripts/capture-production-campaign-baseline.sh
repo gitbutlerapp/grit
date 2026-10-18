@@ -12,10 +12,10 @@ RUN2="/tmp/campaign-production-run2.json"
 BASELINE_DIR="grit-utils/baselines"
 
 echo "Run 1 → ${RUN1}"
-"$BENCH" campaign --warmup 0 --min-runs 1 --no-network --format json --output "$RUN1" --ledger
+"$BENCH" campaign --warmup 0 --min-runs 5 --no-network --format json --output "$RUN1" --ledger
 
 echo "Run 2 → ${RUN2}"
-"$BENCH" campaign --warmup 0 --min-runs 1 --no-network --format json --output "$RUN2" --ledger
+"$BENCH" campaign --warmup 0 --min-runs 5 --no-network --format json --output "$RUN2" --ledger
 
 echo "Compare consecutive runs (±10% tolerance)"
 "$BENCH" compare "$RUN1" "$RUN2" --tolerance 0.10 | tee "${BASELINE_DIR}/campaign-consecutive-compare.txt"

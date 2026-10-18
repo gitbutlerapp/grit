@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
-use crate::schema::BenchReport;
+use crate::schema::{BenchReport, ScenarioResult};
 
 /// Outcome of comparing scenario ratios between two reports.
 #[derive(Debug, Clone, PartialEq)]
@@ -18,16 +18,19 @@ pub struct CompareMismatch {
 /// Compare per-scenario ratios; returns mismatches where relative drift exceeds `tolerance`.
 ///
 /// Drift is `|ratio_a - ratio_b| / max(|ratio_a|, |ratio_b|)` (so `0.10` means ±10%).
+///
+/// Scenarios with a grit-side hyperfine failure on either capture are skipped. When git medians
+/// drift beyond `tolerance`, the ratio row is skipped too (sub-millisecond git timings dominate).
 pub fn compare_reports(a: &BenchReport, b: &BenchReport, tolerance: f64) -> Vec<CompareMismatch> {
-    let map_b: HashMap<&str, f64> = b
-        .scenarios
-        .iter()
-        .map(|s| (s.id.as_str(), s.ratio))
-        .collect();
+    let map_b: HashMap<&str, &ScenarioResult> =
+        b.scenarios.iter().map(|s| (s.id.as_str(), s)).collect();
 
     let mut mismatches = Vec::new();
     for scenario in &a.scenarios {
-        let Some(&ratio_b) = map_b.get(scenario.id.as_str()) else {
+        if scenario.grit_failure.is_some() {
+            continue;
+        }
+        let Some(scenario_b) = map_b.get(scenario.id.as_str()) else {
             mismatches.push(CompareMismatch {
                 scenario_id: scenario.id.clone(),
                 ratio_a: scenario.ratio,
@@ -36,6 +39,14 @@ pub fn compare_reports(a: &BenchReport, b: &BenchReport, tolerance: f64) -> Vec<
             });
             continue;
         };
+        if scenario_b.grit_failure.is_some() {
+            continue;
+        }
+        let git_delta = relative_ratio_drift(scenario.git.median_ms, scenario_b.git.median_ms);
+        if git_delta > tolerance {
+            continue;
+        }
+        let ratio_b = scenario_b.ratio;
         let delta = relative_ratio_drift(scenario.ratio, ratio_b);
         if delta > tolerance {
             mismatches.push(CompareMismatch {
@@ -142,6 +153,15 @@ mod tests {
     fn compare_large_ratio_within_relative_tolerance() {
         let a = sample_report("rev-list", 523.82);
         let b = sample_report("rev-list", 530.26);
+        assert!(compare_reports(&a, &b, 0.10).is_empty());
+    }
+
+    #[test]
+    fn compare_skips_when_git_median_drifts() {
+        let mut a = sample_report("cat", 12.0);
+        let mut b = sample_report("cat", 14.0);
+        a.scenarios[0].git = dummy_stats(1.4);
+        b.scenarios[0].git = dummy_stats(1.6);
         assert!(compare_reports(&a, &b, 0.10).is_empty());
     }
 }

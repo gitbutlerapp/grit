@@ -43,8 +43,7 @@ use grit_utils::scenarios::{
     run_merge_only_suite, run_prepare_add, run_prepare_commit, run_prepare_dense_leaf_add,
     run_prepare_merge, run_prepare_pick, run_prepare_pick_series, run_prepare_restore,
     run_prepare_revert, run_prepare_stash, run_prepare_switch, run_prepare_switch_wide,
-    run_restore_suite, run_stash_suite,
-    run_status_suite, RunConfig,
+    run_restore_suite, run_stash_suite, run_status_suite, RunConfig,
 };
 use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
@@ -436,6 +435,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareWorktreeStatusDirty {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareCampaignStatusDirty {
         #[arg(long)]
         git: PathBuf,
     },
@@ -1064,6 +1068,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_status_dirty(&git);
         }
+        Cmd::PrepareCampaignStatusDirty { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return grit_utils::campaign_prep::run_prepare_campaign_status_dirty(&git);
+        }
         Cmd::PrepareWorktreeAdd { git } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_add(&git);
@@ -1482,6 +1490,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareDiffDirty { .. }
         | Cmd::PrepareWorktreeStatusClean { .. }
         | Cmd::PrepareWorktreeStatusDirty { .. }
+        | Cmd::PrepareCampaignStatusDirty { .. }
         | Cmd::PrepareWorktreeAdd { .. }
         | Cmd::PrepareWorktreeCommit { .. }
         | Cmd::PrepareWorktreeDiff { .. }

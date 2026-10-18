@@ -3,13 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::campaign_prep::{
-    ensure_campaign_hot_path, load_campaign_hot_path_meta, restore_campaign_worktree_to_main,
-    switch_wide_meta,
+    ensure_campaign_hot_path, load_campaign_hot_path_meta, reset_campaign_worktree_clean,
+    restore_campaign_worktree_to_main, switch_wide_meta, sync_grit_index_to_git,
 };
-use crate::campaign_worktree::{blame_target_path, dirty_tracked_worktree, list_tracked_files};
+use crate::campaign_worktree::{blame_target_path, list_tracked_files};
 use crate::fixture::prepare_commit_iteration;
 use crate::hot_path_fixture::HotPathMeta;
 use crate::maintenance_suite::seed_loose_objects;
@@ -41,22 +41,6 @@ fn sid(fixture_id: &str, name: &str) -> String {
 
 fn sh_script(script: String) -> Vec<String> {
     vec!["-c".into(), script]
-}
-
-fn sync_grit_index_to_git(grit: &Path, repo: &Path) -> Result<()> {
-    let mut cmd = Command::new(grit);
-    cmd.args(["reset", "--hard", "HEAD"]).current_dir(repo);
-    git_env(&mut cmd);
-    let out = cmd.output().context("grit reset --hard after git reset")?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        anyhow::bail!(
-            "grit reset --hard failed in {}: {}",
-            repo.display(),
-            stderr.trim()
-        );
-    }
-    Ok(())
 }
 
 fn probe_grit_cli(grit: &Path, repo: &Path, args: &[&str]) -> Option<BenchFailure> {
@@ -113,6 +97,9 @@ pub fn run_fixture_cli_matrix(
     );
     let _guard = CampaignCwdGuard;
 
+    reset_campaign_worktree_clean(git, &fixture.worktree)?;
+    sync_grit_index_to_git(grit, &fixture.worktree)?;
+
     let mut out = Vec::new();
     let mut tracked = list_tracked_files(git, &fixture.worktree)?;
     tracked.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
@@ -123,8 +110,6 @@ pub fn run_fixture_cli_matrix(
     };
     std::env::set_var("GRIT_BENCH_DIFF_DIRTY_COUNT", modify_count.to_string());
 
-    dirty_tracked_worktree(git, &fixture.worktree)?;
-    sync_grit_index_to_git(grit, &fixture.worktree)?;
     out.push(run_scenario(
         hyperfine,
         git,
@@ -138,7 +123,7 @@ pub fn run_fixture_cli_matrix(
             grit_argv: vec!["status".into()],
             git_argv: vec!["status".into(), "-s".into()],
             driver: Driver::Cli,
-            prepare_kind: None,
+            prepare_kind: Some(PrepareKind::CampaignStatusDirty),
             grit_via_shell: false,
             git_via_shell: false,
         },

@@ -1,12 +1,13 @@
 //! One-time campaign fixture preparation (hot-path branch topology).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
-use crate::campaign_worktree::list_tracked_files;
+use crate::binary::resolve_binary;
+use crate::campaign_worktree::{dirty_tracked_worktree, list_tracked_files};
 use crate::hot_path_fixture::{meta_path, HotPathMeta};
 use crate::real_repo_fixture::git_env;
 
@@ -83,6 +84,58 @@ pub fn restore_campaign_worktree_to_main(
             ".grit-bench-worktree-ready",
         ],
     )?;
+    Ok(())
+}
+
+/// Align grit's index and worktree with git after git-only hyperfine or reset hooks.
+pub fn sync_grit_index_to_git(grit: &Path, repo: &Path) -> Result<()> {
+    let mut cmd = Command::new(grit);
+    cmd.args(["reset", "--hard", "HEAD"]).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("grit reset --hard after git reset")?;
+    if !out.status.success() {
+        bail!(
+            "grit reset --hard failed in {}: {}",
+            repo.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+/// Hard-reset a campaign worktree to a known baseline before the scenario matrix runs.
+pub fn reset_campaign_worktree_clean(git: &Path, repo: &Path) -> Result<()> {
+    if meta_path(repo).is_file() {
+        if let Ok(meta) = load_campaign_hot_path_meta(repo) {
+            restore_campaign_worktree_to_main(git, repo, &meta)?;
+            return Ok(());
+        }
+    }
+    run_git_auth(git, repo, &["reset", "--hard", "HEAD"])?;
+    run_git_auth(
+        git,
+        repo,
+        &[
+            "clean",
+            "-fd",
+            "-q",
+            "-e",
+            ".grit-bench-hot-path.json",
+            "-e",
+            ".grit-bench-worktree-ready",
+        ],
+    )?;
+    Ok(())
+}
+
+/// Hyperfine prepare: reset, apply the campaign dirty worktree shape, sync grit.
+pub fn run_prepare_campaign_status_dirty(git: &Path) -> Result<()> {
+    let repo =
+        PathBuf::from(std::env::var("GRIT_BENCH_CAMPAIGN_CWD").context("GRIT_BENCH_CAMPAIGN_CWD")?);
+    let grit = resolve_binary("grit", None)?;
+    reset_campaign_worktree_clean(git, &repo)?;
+    dirty_tracked_worktree(git, &repo)?;
+    sync_grit_index_to_git(&grit, &repo)?;
     Ok(())
 }
 
