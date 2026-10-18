@@ -462,12 +462,8 @@ fn fetch_base_oid_for_bare(
             return Ok(oid);
         }
     }
-    rev_parse(
-        git,
-        bare,
-        &format!("HEAD~{incremental_commits}"),
-    )
-    .or_else(|_| rev_parse(git, bare, "HEAD"))
+    rev_parse(git, bare, &format!("HEAD~{incremental_commits}"))
+        .or_else(|_| rev_parse(git, bare, "HEAD"))
 }
 
 /// Network bench metadata for a real-repo campaign bare remote (file:// push/fetch matrix).
