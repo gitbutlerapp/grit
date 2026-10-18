@@ -252,6 +252,27 @@ enum HistoryAction {
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
+    /// Fold a revision range into the oldest commit and replay descendants.
+    Squash {
+        /// Revision range (same syntax as `git rev-list`, for example `base..tip`).
+        #[arg(required = true)]
+        range: Vec<String>,
+        /// Message for the squashed commit (default: keep the oldest commit's message).
+        #[arg(short = 'm', long = "message", conflicts_with_all = ["message_file", "combine"])]
+        message: Option<String>,
+        /// Read the squashed commit message from a file (`-` for stdin).
+        #[arg(
+            long = "message-file",
+            value_name = "PATH|-",
+            conflicts_with_all = ["message", "combine"]
+        )]
+        message_file: Option<String>,
+        /// Build a combined autosquash-style message from every commit in the range.
+        #[arg(long = "combine", conflicts_with_all = ["message", "message_file"])]
+        combine: bool,
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
 }
 
 /// Subcommands of `grit notes`.
@@ -1367,6 +1388,17 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ),
             HistoryAction::Absorb { base, shared } => emit(
                 &commands::history::run_absorb(base.as_deref(), &shared)?,
+                opts,
+                ctx,
+            ),
+            HistoryAction::Squash {
+                range,
+                message,
+                message_file,
+                combine,
+                shared,
+            } => emit(
+                &commands::history::run_squash(&range, message, message_file, combine, &shared)?,
                 opts,
                 ctx,
             ),

@@ -15,6 +15,7 @@ grit history reword <commit> --message-file <path|->
 grit history drop|move|reword|fixup|absorb … [--dry-run] [--update-refs=(branches|head)]
 grit history fixup <commit> [--empty=(drop|keep|abort)] [-m|--message-file]
 grit history absorb [--base <rev>]
+grit history squash <range> [-m|--message-file|--combine] [--dry-run] [--update-refs=(branches|head)]
 ```
 
 ## Description
@@ -52,6 +53,12 @@ Descendant **merge** commits are replayed the same way as for [`drop`](#drop): p
 Assign **staged** hunks into the commits that last touched overlapping lines (between `--base` and `HEAD`), then replay descendants in **one** rewrite. Grit uses blame line mapping to find candidate commits and checks that each hunk commutes with commits after its target. Assigned hunks are folded into target commits via the same three-way merge as [`fixup`](#fixup); unassigned hunks stay staged.
 
 `--base` is exclusive: commits at and before the base are not considered. When omitted, grit hides other local branch tips, applies an upstream fork-point when configured, and caps the stack at ten commits.
+
+### `squash`
+
+Fold every commit in a **connected** revision range into the **oldest** commit in that range, then replay descendants onto the new history. The squashed commit keeps the oldest commit's author and parents; its tree matches the range tip. By default the squashed commit keeps the oldest commit's message (including `amend!` handling inside the range). Use `-m` / `--message-file` for an explicit message, or `--combine` for an autosquash-style combined message from every commit in the range.
+
+The range uses the same revision syntax as `git rev-list` (for example `HEAD~3..HEAD` or full OIDs `abc..def`). With `--update-refs head`, grit may fold at `HEAD` without replaying when the range ends at the current tip and the message mode allows it.
 
 ## Options
 
@@ -123,13 +130,13 @@ Absorbed 1 hunk(s) into 2 commit(s)
 
 ## JSON output
 
-Schemas: [drop v1](/schemas/history.drop/v1.json), [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json), [absorb v1](/schemas/history.absorb/v1.json)
+Schemas: [drop v1](/schemas/history.drop/v1.json), [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json), [squash v1](/schemas/history.squash/v1.json), [absorb v1](/schemas/history.absorb/v1.json)
 
-Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`, `grit history fixup`, or `grit history absorb`:
+Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`, `grit history fixup`, `grit history squash`, or `grit history absorb`:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | `"drop"`, `"move"`, or `"reword"`. |
+| `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, or `"squash"`. |
 | `rewritten` | array | `{old,new}` full hex OIDs for each rewritten commit. |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |

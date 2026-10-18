@@ -10,9 +10,9 @@ use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, reword, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions, ApplyOptions,
-    EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement, RefScope,
-    RewriteOptions, RewritePlan, UnassignedHunk,
+    move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
+    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
+    RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
@@ -61,6 +61,37 @@ impl From<EmptyPolicyArg> for EmptyPolicy {
             EmptyPolicyArg::Drop => EmptyPolicy::Drop,
             EmptyPolicyArg::Keep => EmptyPolicy::Keep,
             EmptyPolicyArg::Abort => EmptyPolicy::Abort,
+        }
+    }
+}
+
+fn squash_message_from_cli(
+    message: Option<String>,
+    message_file: Option<String>,
+    combine: bool,
+) -> Result<SquashMessage> {
+    if combine && (message.is_some() || message_file.is_some()) {
+        bail!("use either -m/--message, --message-file, or --combine, not more than one");
+    }
+    if combine {
+        return Ok(SquashMessage::Combine);
+    }
+    match (message, message_file) {
+        (None, None) => Ok(SquashMessage::Oldest),
+        (Some(_), Some(_)) => bail!("use either -m/--message or --message-file, not both"),
+        (Some(m), None) => Ok(SquashMessage::Custom(m)),
+        (None, Some(path)) => {
+            let raw = if path == "-" {
+                let mut buf = String::new();
+                io::stdin()
+                    .read_to_string(&mut buf)
+                    .context("could not read message from stdin")?;
+                buf
+            } else {
+                std::fs::read_to_string(&path)
+                    .with_context(|| format!("could not read message file '{path}'"))?
+            };
+            Ok(SquashMessage::Custom(raw))
         }
     }
 }
@@ -146,10 +177,10 @@ impl HumanRender for HistoryRewordOutcome {
                 self.rewritten.len()
             );
         } else {
-            let verb = if self.operation == "fixup" {
-                "Fixed up"
-            } else {
-                "Rewrote"
+            let verb = match self.operation.as_str() {
+                "fixup" => "Fixed up",
+                "squash" => "Squashed",
+                _ => "Rewrote",
             };
             outln!(w, "{verb} {} commit(s)", self.rewritten.len());
         }
@@ -529,6 +560,63 @@ impl MarkdownRender for HistoryAbsorbOutcome {
     }
 }
 
+/// Squash a revision range into the oldest commit and replay descendants.
+pub fn run_squash(
+    range: &[String],
+    message: Option<String>,
+    message_file: Option<String>,
+    combine: bool,
+    shared: &HistoryRewriteArgs,
+) -> Result<HistoryRewordOutcome> {
+    if range.is_empty() {
+        bail!("revision range is required");
+    }
+    let message_policy = squash_message_from_cli(message, message_file, combine)?;
+    let range_refs: Vec<&str> = range.iter().map(String::as_str).collect();
+    let repo = context::discover()?;
+    let env = repo.environment();
+    let config =
+        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+    let committer = context::identity(
+        env,
+        &config,
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        context::wall_clock_now(env),
+    )?;
+    let plan = squash(
+        &repo,
+        &range_refs,
+        &SquashOptions {
+            message: message_policy,
+            rewrite: RewriteOptions {
+                scope: shared.update_refs.into(),
+                empty: EmptyPolicy::Drop,
+                committer,
+                preserve_committer: false,
+            },
+        },
+    )
+    .map_err(map_history_error_squash)?;
+    verify_rewrite_plan(&repo, &plan).map_err(map_history_error_squash)?;
+    let subject = squash_reflog_subject(&repo, &plan)?;
+    let mut outcome = outcome_from_plan_squash(&repo, &plan, shared.dry_run)?;
+    if !shared.dry_run {
+        let identity = context::committer_reflog_identity(env, &config)?;
+        apply_rewrite(
+            &repo,
+            &plan,
+            &ApplyOptions {
+                identity,
+                reflog_message: format!("history squash: {subject}"),
+            },
+        )
+        .map_err(map_history_error_squash)?;
+    }
+    outcome.dry_run = shared.dry_run;
+    Ok(outcome)
+}
+
 /// Assign staged hunks into history and replay descendants once.
 pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<HistoryAbsorbOutcome> {
     let repo = context::discover()?;
@@ -672,6 +760,28 @@ fn outcome_from_plan_fixup(
     let mut outcome = outcome_from_plan(repo, plan, dry_run)?;
     outcome.operation = "fixup".into();
     Ok(outcome)
+}
+
+fn outcome_from_plan_squash(
+    repo: &grit_lib::repo::Repository,
+    plan: &RewritePlan,
+    dry_run: bool,
+) -> Result<HistoryRewordOutcome> {
+    let mut outcome = outcome_from_plan(repo, plan, dry_run)?;
+    outcome.operation = "squash".into();
+    Ok(outcome)
+}
+
+fn squash_reflog_subject(repo: &grit_lib::repo::Repository, plan: &RewritePlan) -> Result<String> {
+    let Some(first) = plan.commits.first() else {
+        return Ok("squash".into());
+    };
+    if let Some(new) = first.new {
+        let commit = context::read_commit(repo, &new)?;
+        return Ok(context::subject_line(&commit.message));
+    }
+    let commit = context::read_commit(repo, &first.old)?;
+    Ok(context::subject_line(&commit.message))
 }
 
 fn read_message(message: Option<String>, message_file: Option<String>) -> Result<String> {
@@ -829,6 +939,10 @@ fn map_history_error_reword(err: HistoryError) -> anyhow::Error {
 
 fn map_history_error_fixup(err: HistoryError) -> anyhow::Error {
     map_history_error(err, "history fixup")
+}
+
+fn map_history_error_squash(err: HistoryError) -> anyhow::Error {
+    map_history_error(err, "history squash")
 }
 
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
