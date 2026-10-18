@@ -261,7 +261,7 @@ pub fn run_fixture_cli_matrix(
     } else {
         (sh_script(grit_log_pages_shell(grit, log_pages)), true)
     };
-    let log_allows_grit_failure = !smoke && fixture.id == "git-dot-git";
+    let log_allows_grit_failure = !smoke;
     out.push(run_matrix_scenario(
         hyperfine,
         git,
