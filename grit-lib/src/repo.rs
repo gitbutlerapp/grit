@@ -462,6 +462,34 @@ impl Repository {
         Arc::clone(&self.command_runner)
     }
 
+    /// [`RepositoryOptions`] for discovering a linked worktree of this repository.
+    ///
+    /// Inherits config discovery ([`Environment`], command runner, diagnostics, thread policy)
+    /// from the caller handle but clears worktree-specific discovery overrides so
+    /// [`Repository::discover`] resolves the linked tree's own `.git` gitfile and index.
+    #[must_use]
+    pub fn linked_worktree_discover_options(&self) -> RepositoryOptions {
+        let mut environment = (*self.environment).clone();
+        environment.git_dir = None;
+        environment.git_work_tree = None;
+        environment.git_index_file = None;
+        environment.git_prefix = None;
+        environment.git_object_directory = None;
+        RepositoryOptions {
+            environment,
+            command_runner: Arc::clone(&self.command_runner),
+            diagnostics: Arc::clone(&self.diagnostics),
+            network_trace: self.network_trace,
+            test_assume_different_owner: self.test_assume_different_owner,
+            force_split_index: self.force_split_index,
+            reference_unix_time: self.reference_unix_time,
+            thread_policy: self.thread_policy,
+            work_tree: None,
+            validate_repository_format: true,
+            open_for_serving: false,
+        }
+    }
+
     fn repo_cached_settings_from_config(
         cfg: &ConfigSet,
         environment: &Environment,

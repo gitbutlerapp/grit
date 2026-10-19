@@ -109,3 +109,92 @@ fn worktree_lock_git_sees_locked() {
         "git must see grit unlock:\n{porcelain}"
     );
 }
+
+fn write_system_autocrlf_config(dir: &Path) -> PathBuf {
+    let path = dir.join("system.gitconfig");
+    std::fs::write(&path, "[core]\n\tautocrlf = true\n").expect("system config");
+    path
+}
+
+fn git_with_system(dir: &Path, system_cfg: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", system_cfg)
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("spawn git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn grit_with_system(dir: &Path, system_cfg: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(GRIT)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", system_cfg)
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("spawn grit")
+}
+
+/// Issue #1232: remove must honor inherited system `core.autocrlf` when checking cleanliness.
+#[test]
+fn worktree_remove_clean_crlf_with_system_autocrlf() {
+    let cfg_dir = unique_tmp("sys-cfg");
+    let system_cfg = write_system_autocrlf_config(&cfg_dir);
+
+    let dir = unique_tmp("remove-autocrlf");
+    git_with_system(&dir, &system_cfg, &["init", "-q", "-b", "main", "."]);
+    git_with_system(&dir, &system_cfg, &["config", "user.email", "t@e.t"]);
+    git_with_system(&dir, &system_cfg, &["config", "user.name", "T"]);
+    std::fs::write(dir.join("a.txt"), b"a\n").unwrap();
+    git_with_system(&dir, &system_cfg, &["add", "a.txt"]);
+    git_with_system(&dir, &system_cfg, &["commit", "-qm", "one"]);
+
+    let wt = dir.join("w");
+    let out = grit_with_system(
+        &dir,
+        &system_cfg,
+        &["worktree", "add", wt.to_str().unwrap(), "-b", "f"],
+    );
+    assert!(
+        out.status.success(),
+        "worktree add: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    std::fs::write(wt.join("new.txt"), b"new\r\n").unwrap();
+    let out = grit_with_system(&wt, &system_cfg, &["commit", "-am", "two"]);
+    assert!(
+        out.status.success(),
+        "commit in linked wt: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let porcelain = git_with_system(&wt, &system_cfg, &["status", "--porcelain"]);
+    assert!(
+        porcelain.trim().is_empty(),
+        "git status must be clean: {porcelain}"
+    );
+
+    let out = grit_with_system(
+        &dir,
+        &system_cfg,
+        &["worktree", "remove", wt.to_str().unwrap()],
+    );
+    assert!(
+        out.status.success(),
+        "worktree remove must succeed on clean CRLF tree: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!wt.exists(), "linked worktree directory should be gone");
+}

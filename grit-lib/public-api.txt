@@ -10314,6 +10314,7 @@ pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::Repos
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
+pub fn grit_lib::repo::Repository::linked_worktree_discover_options(&self) -> grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
 pub fn grit_lib::repo::Repository::notes(&self) -> grit_lib::repo_handles::RepositoryNotes<'_>
 pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::handle::Objects<'_>
@@ -13527,6 +13528,7 @@ pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::Repos
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
+pub fn grit_lib::repo::Repository::linked_worktree_discover_options(&self) -> grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
 pub fn grit_lib::repo::Repository::notes(&self) -> grit_lib::repo_handles::RepositoryNotes<'_>
 pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::handle::Objects<'_>

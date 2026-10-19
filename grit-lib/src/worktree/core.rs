@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use crate::check_ref_format::validate_branch_short_name;
 use crate::config::ConfigSet;
-use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
+#[cfg(test)]
+use crate::environment::RepositoryOptions;
 use crate::git_path::{absolute_path_for_gitfile_stored_path, path_for_disk_compare};
 use crate::objects::{parse_commit, ObjectKind};
 use crate::porcelain::checkout::checkout_between_trees;
@@ -549,7 +550,10 @@ pub fn add_linked_worktree(
 
         copy_filtered_worktree_config(&common, &admin)?;
 
-        let linked = Repository::discover(Some(wt_path.as_path()), &RepositoryOptions::empty())?;
+        let linked = Repository::discover(
+            Some(wt_path.as_path()),
+            &repo.linked_worktree_discover_options(),
+        )?;
         checkout_between_trees(&linked, None, &tree_oid)?;
 
         linked_worktree_entry(&admin, &common)
@@ -822,7 +826,10 @@ pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Re
         ));
     }
 
-    let linked = Repository::discover(Some(entry.path.as_path()), &RepositoryOptions::empty())?;
+    let linked = Repository::discover(
+        Some(entry.path.as_path()),
+        &repo.linked_worktree_discover_options(),
+    )?;
     if !force && worktree_has_local_changes(&linked)? {
         return Err(Error::Message(
             "worktree contains modified or untracked files; use -f or --force to remove".into(),
