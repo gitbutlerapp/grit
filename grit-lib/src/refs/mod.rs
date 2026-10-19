@@ -1950,10 +1950,7 @@ fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: boo
 ///
 /// Returns [`Error::Io`] or [`Error::InvalidRef`] on failures.
 pub fn read_head(git_dir: &Path) -> Result<Option<String>> {
-    match read_ref_file(&git_dir.join("HEAD"))? {
-        Ref::Symbolic(target) => Ok(Some(target)),
-        Ref::Direct(_) => Ok(None),
-    }
+    read_symbolic_ref(git_dir, "HEAD")
 }
 
 /// Read symbolic target of any ref.

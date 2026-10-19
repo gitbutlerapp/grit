@@ -3072,10 +3072,10 @@ fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Re
             let content = fs::read_to_string(&head_path).map_err(Error::Io)?;
             let content = content.trim();
             if let Some(target) = content.strip_prefix("ref: ") {
-                if target.trim() == "refs/heads/.invalid" {
-                    return reftable_resolve_ref_depth(git_dir, "refs/worktree/HEAD", depth + 1);
+                if target.trim() != "refs/heads/.invalid" {
+                    return reftable_resolve_ref_depth(git_dir, target.trim(), depth + 1);
                 }
-                return reftable_resolve_ref_depth(git_dir, target.trim(), depth + 1);
+                // Git keeps a `.invalid` stub on disk; the symref lives in the reftable stack.
             }
             // Detached HEAD
             if content.len() == 40 && content.chars().all(|c| c.is_ascii_hexdigit()) {

@@ -149,7 +149,7 @@ impl ReftableRefStore {
 
     fn read_raw_at(&self, refname: &str) -> Result<Option<RawRef>> {
         if refname == "HEAD" {
-            return read_head_file_raw(&self.git_dir);
+            return read_head_raw(&self.git_dir);
         }
         let (store_git_dir, storage_refname) = reftable_storage_location(&self.git_dir, refname);
         let stack = ReftableStack::open(&store_git_dir)?;
@@ -168,7 +168,7 @@ impl ReftableRefStore {
                 map.insert(rec.name, raw);
             }
         }
-        if let Some(head) = read_head_file_raw(git_dir)? {
+        if let Some(head) = read_head_raw(git_dir)? {
             map.insert("HEAD".to_owned(), head);
         }
         Ok(map)
@@ -203,6 +203,37 @@ fn read_reflog_entries_from_stack(git_dir: &Path, refname: &str) -> Result<Vec<R
     }
     entries.reverse();
     Ok(entries)
+}
+
+fn head_file_is_reftable_invalid_stub(git_dir: &Path) -> Result<bool> {
+    let head_path = git_dir.join("HEAD");
+    let content = match fs::read_to_string(&head_path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    Ok(content
+        .trim()
+        .strip_prefix("ref: ")
+        .is_some_and(|target| target.trim() == "refs/heads/.invalid"))
+}
+
+fn read_head_from_reftable_stack(git_dir: &Path) -> Result<Option<RawRef>> {
+    let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, "HEAD");
+    let stack = ReftableStack::open(&store_git_dir)?;
+    Ok(stack
+        .lookup_ref(&storage_refname)?
+        .and_then(|rec| record_to_raw(&rec)))
+}
+
+/// Read HEAD for a reftable repo: on-disk stub may point at `.invalid` while the symref lives in the stack.
+fn read_head_raw(git_dir: &Path) -> Result<Option<RawRef>> {
+    if head_file_is_reftable_invalid_stub(git_dir)? {
+        if let Some(raw) = read_head_from_reftable_stack(git_dir)? {
+            return Ok(Some(raw));
+        }
+    }
+    read_head_file_raw(git_dir)
 }
 
 fn read_head_file_raw(git_dir: &Path) -> Result<Option<RawRef>> {
@@ -418,7 +449,7 @@ impl RefStore for ReftableRefStore {
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         if "HEAD".starts_with(prefix) {
-            if let Some(value) = read_head_file_raw(&self.git_dir)? {
+            if let Some(value) = read_head_raw(&self.git_dir)? {
                 let peeled = match &value {
                     RawRef::Direct(_) => None,
                     RawRef::Symbolic(_) => self.resolve("HEAD").ok(),
