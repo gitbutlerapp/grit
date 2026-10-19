@@ -496,6 +496,152 @@ fn clone_markdown_lists_stats() {
     }
 }
 
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    assert!(
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .unwrap()
+            .success(),
+        "git {:?} in {}",
+        args,
+        dir.display()
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn diff_markdown_mode_only_lists_status_and_modes_without_empty_fence() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f.txt"), "a\n").unwrap();
+    git_in(
+        dir.path(),
+        &["-c", "user.name=t", "-c", "user.email=t@x", "add", "-A"],
+    );
+    git_in(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@x",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    );
+    let mut perms = std::fs::metadata(dir.path().join("f.txt"))
+        .unwrap()
+        .permissions();
+    perms.set_mode(0o100755);
+    std::fs::set_permissions(dir.path().join("f.txt"), perms).unwrap();
+
+    let out = Command::new(GRIT)
+        .args(["diff", "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("diff");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("**status:** modified"), "stdout:\n{stdout}");
+    assert!(
+        stdout.contains("**old_mode:** `100644`"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("**new_mode:** `100755`"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("```diff"),
+        "mode-only change must omit empty diff fence:\n{stdout}"
+    );
+}
+
+#[test]
+fn diff_markdown_staged_rename_lists_status_without_empty_fence() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("g.txt"), "b\n").unwrap();
+    git_in(
+        dir.path(),
+        &["-c", "user.name=t", "-c", "user.email=t@x", "add", "-A"],
+    );
+    git_in(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@x",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    );
+    git_in(dir.path(), &["mv", "g.txt", "h.txt"]);
+
+    let out = Command::new(GRIT)
+        .args(["diff", "--staged", "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("diff");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("**status:** renamed"), "stdout:\n{stdout}");
+    assert!(
+        !stdout.contains("```diff"),
+        "rename without content change must omit empty fence:\n{stdout}"
+    );
+}
+
+#[test]
+fn diff_markdown_deletion_lists_status_and_old_mode() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("gone.txt"), "x\n").unwrap();
+    git_in(
+        dir.path(),
+        &["-c", "user.name=t", "-c", "user.email=t@x", "add", "-A"],
+    );
+    git_in(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@x",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    );
+    std::fs::remove_file(dir.path().join("gone.txt")).unwrap();
+
+    let out = Command::new(GRIT)
+        .args(["diff", "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("diff");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("**status:** deleted"), "stdout:\n{stdout}");
+    assert!(
+        stdout.contains("**old_mode:** `100644`"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("**new_mode:**"),
+        "deleted file should not show new_mode:\n{stdout}"
+    );
+}
+
 #[test]
 fn completions_rejects_json_and_markdown() {
     for flag in ["--json", "--markdown"] {

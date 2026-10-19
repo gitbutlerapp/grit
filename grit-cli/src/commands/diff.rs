@@ -1229,6 +1229,41 @@ fn paint(color: bool, code: &str, text: &str) -> String {
     }
 }
 
+/// Status word aligned with [`ChangeStatus`] JSON (`--json` / `--markdown` metadata).
+#[must_use]
+pub(crate) fn file_diff_status_label(status: ChangeStatus) -> &'static str {
+    match status {
+        ChangeStatus::Added => "added",
+        ChangeStatus::Deleted => "deleted",
+        ChangeStatus::Modified => "modified",
+        ChangeStatus::TypeChanged => "type_changed",
+        ChangeStatus::Renamed => "renamed",
+        ChangeStatus::Copied => "copied",
+        ChangeStatus::Unmerged => "unmerged",
+    }
+}
+
+pub(crate) fn write_file_diff_metadata_human(w: &mut dyn Write, file: &FileDiff) -> Result<()> {
+    match file.status {
+        ChangeStatus::Deleted => outln!(w, "deleted"),
+        ChangeStatus::Renamed => outln!(w, "renamed"),
+        _ => {}
+    }
+    write_file_diff_mode_lines_human(w, file)
+}
+
+fn write_file_diff_mode_lines_human(w: &mut dyn Write, file: &FileDiff) -> Result<()> {
+    if file.old_mode != file.new_mode {
+        if let Some(m) = &file.old_mode {
+            outln!(w, "old mode {m}");
+        }
+        if let Some(m) = &file.new_mode {
+            outln!(w, "new mode {m}");
+        }
+    }
+    Ok(())
+}
+
 fn render_file(
     w: &mut dyn Write,
     file: &FileDiff,
@@ -1239,14 +1274,7 @@ fn render_file(
     let header = ui::format_diff_file_header(file.old_path.as_deref(), &file.path, path_opts);
     outln!(w, "{}", paint(color, "1;4", &header)); // bold + underline
 
-    if file.old_mode != file.new_mode {
-        if let Some(m) = &file.old_mode {
-            outln!(w, "old mode {m}");
-        }
-        if let Some(m) = &file.new_mode {
-            outln!(w, "new mode {m}");
-        }
-    }
+    write_file_diff_metadata_human(w, file)?;
 
     if file.binary {
         if file.content_changed {

@@ -7,7 +7,7 @@ use grit_lib::diff::{DiffEntry, DiffStatus};
 use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
-use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment};
+use crate::commands::diff::{file_diff_status_label, FileDiff, Hunk, Line, LineKind, Segment};
 use crate::commands::history::{HistoryAbsorbOutcome, HistoryRewordOutcome};
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
@@ -117,6 +117,7 @@ pub fn print_diff_files(
         }
         let header = ui::format_diff_file_header(file.old_path.as_deref(), &file.path, path_opts);
         outln!(w, "## {header}");
+        print_file_diff_metadata(w, file)?;
         if file.binary {
             if file.content_changed {
                 outln!(w);
@@ -124,8 +125,24 @@ pub fn print_diff_files(
             }
             continue;
         }
-        outln!(w);
-        print_fenced_diff(w, &render_file_patch(file))?;
+        let patch = render_file_patch(file);
+        if !patch.is_empty() {
+            outln!(w);
+            print_fenced_diff(w, &patch)?;
+        }
+    }
+    Ok(())
+}
+
+fn print_file_diff_metadata(w: &mut dyn Write, file: &FileDiff) -> anyhow::Result<()> {
+    outln!(w, "**status:** {}", file_diff_status_label(file.status));
+    if file.old_mode != file.new_mode {
+        if let Some(m) = &file.old_mode {
+            outln!(w, "**old_mode:** `{}`", m);
+        }
+        if let Some(m) = &file.new_mode {
+            outln!(w, "**new_mode:** `{}`", m);
+        }
     }
     Ok(())
 }

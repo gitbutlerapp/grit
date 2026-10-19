@@ -143,18 +143,30 @@ Example:
 ## Markdown output
 
 Schema: [v1](/schemas/diff/v1.json)
-Pass [`--markdown`](../global-options/) for one `diff`-fenced unified patch per changed file (binary files note `Binary file differs.` when content changed):
+Pass [`--markdown`](../global-options/) for one section per changed file: a level-2 heading, then metadata lines (`**status:**`, and `**old_mode:**` / `**new_mode:**` when the git mode changed), then a `diff`-fenced unified patch when there are text hunks (binary files note `Binary file differs.` when content changed). Mode-only or rename-only changes omit the fence when the patch would be empty.
 
 ```text
-File: main.rs
+## main.rs
+**status:** modified
+```
 
+When there are text hunks, a unified patch follows in a `diff` code fence:
+
+```diff
 @@ -1,1 +1,2 @@
  fn main() {
 +    println!("hello");
  }
 ```
 
-Each changed file is introduced with a level-2 heading on stdout, followed by a `diff`-fenced patch.
+Mode-only changes list modes and omit an empty fence:
+
+```text
+## run.sh
+**status:** modified
+**old_mode:** `100644`
+**new_mode:** `100755`
+```
 
 ## See also
 

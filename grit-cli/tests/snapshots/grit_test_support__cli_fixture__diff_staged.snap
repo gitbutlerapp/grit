@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## staged.txt\n\n```diff\n@@ -0,0 +1,1 @@\n+staged contents\n```\n",
+    "stdout": "## staged.txt\n**status:** added\n**new_mode:** `100644`\n\n```diff\n@@ -0,0 +1,1 @@\n+staged contents\n```\n",
     "stderr": ""
   }
 }

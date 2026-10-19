@@ -1100,6 +1100,30 @@ fn diff_color_tty_shows_hunk_range_without_function_context() -> TestResult {
 }
 
 #[test]
+fn diff_human_deleted_labels_deleted_before_mode() -> TestResult {
+    let scratch = Scratch::new("diffdelhuman")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    std::fs::write(repo.join("gone.txt"), b"x\n")?;
+    gs_ok(&repo, &["commit", "init"]);
+    fs::remove_file(repo.join("gone.txt"))?;
+    let out = gs(&repo, ["diff"]);
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert!(
+        out.stdout.contains("deleted"),
+        "expected deleted marker in human diff: {}",
+        out.dump()
+    );
+    assert!(
+        out.stdout.contains("old mode 100644"),
+        "expected old mode line: {}",
+        out.dump()
+    );
+    Ok(())
+}
+
+#[test]
 #[cfg(unix)]
 fn diff_binary_mode_only_shows_modes_not_content_message() -> TestResult {
     let scratch = Scratch::new("diffbinmode")?;
