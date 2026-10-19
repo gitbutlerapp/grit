@@ -7920,7 +7920,9 @@ pub grit_lib::porcelain::add::StageOptions::pathspecs: alloc::vec::Vec<alloc::st
 impl grit_lib::porcelain::add::StageOptions
 pub fn grit_lib::porcelain::add::StageOptions::all() -> Self
 pub fn grit_lib::porcelain::add::StageOptions::pathspecs(alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::add::StageOptions::pathspecs_with_sources(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::porcelain::add::StageOptions::update() -> Self
+pub fn grit_lib::porcelain::add::StageOptions::with_executable_hint(self, grit_lib::porcelain::index_mode::StageExecutableHint) -> Self
 impl core::clone::Clone for grit_lib::porcelain::add::StageOptions
 pub fn grit_lib::porcelain::add::StageOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::add::StageOptions
