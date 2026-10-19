@@ -15,6 +15,7 @@
 mod core;
 pub mod handle;
 mod patch_log;
+mod unified_emit;
 
 pub use core::*;
 pub use handle::Diff;

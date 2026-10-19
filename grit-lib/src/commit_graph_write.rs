@@ -783,6 +783,10 @@ mod test_inject {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// `test_inject::FAIL_RENAME` is process-global; keep inject tests serial.
+    static ATOMIC_REPLACE_INJECT: Mutex<()> = Mutex::new(());
 
     use crate::bloom::BloomFilterSettings;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
@@ -941,6 +945,9 @@ mod tests {
 
     #[test]
     fn atomic_replace_preserves_existing_graph_when_rename_fails() {
+        let _inject = ATOMIC_REPLACE_INJECT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(
             dir.path(),
@@ -975,6 +982,9 @@ mod tests {
 
     #[test]
     fn atomic_replace_renames_over_existing_file() {
+        let _inject = ATOMIC_REPLACE_INJECT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(
             dir.path(),

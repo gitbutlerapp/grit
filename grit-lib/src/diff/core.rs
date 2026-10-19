@@ -41,6 +41,11 @@ use crate::repo::Repository;
 use crate::userdiff::FuncnameMatcher;
 use crate::worktree_rules::WorktreeRules;
 
+use super::unified_emit::{
+    emit_unified_body_from_edits, line_ending_only_edits, write_patch_line, EditSpan, LineSide,
+    UnifiedEmitOptions,
+};
+
 #[path = "../structured_diff.rs"]
 pub mod structured;
 
@@ -69,6 +74,8 @@ fn histogram_unified_body_raw(
     let input = InternedInput::new(old_content, new_content);
     let mut diff = Diff::compute(Algorithm::Histogram, &input);
     diff.postprocess_lines(&input);
+    let before_side = LineSide::from_text(old_content);
+    let after_side = LineSide::from_text(new_content);
 
     // Assemble hunks ourselves: imara's `UnifiedDiff` printer starts the first
     // hunk's context at line 0 whenever the first change is within
@@ -77,6 +84,22 @@ fn histogram_unified_body_raw(
     // Git's odd `2 * U + inter_hunk_context` fuse limits (t4032).
     let hunks: Vec<Hunk> = diff.hunks().collect();
     if hunks.is_empty() {
+        if old_content != new_content {
+            let edits = line_ending_only_edits(&before_side, &after_side);
+            if !edits.is_empty() {
+                return emit_unified_body_from_edits(
+                    &before_side,
+                    &after_side,
+                    &edits,
+                    UnifiedEmitOptions {
+                        context_lines,
+                        inter_hunk_context,
+                        function_context: false,
+                    },
+                    None,
+                );
+            }
+        }
         return String::new();
     }
 
@@ -97,14 +120,6 @@ fn histogram_unified_body_raw(
         }
     }
     groups.push(&hunks[group_start..]);
-
-    fn push_line(out: &mut String, prefix: char, text: &str) {
-        out.push(prefix);
-        out.push_str(text);
-        if !text.ends_with('\n') {
-            out.push('\n');
-        }
-    }
 
     // Git hunk header range: 1-based start (the preceding line when the range
     // is empty) with the `,count` part omitted when the count is exactly 1.
@@ -135,19 +150,19 @@ fn histogram_unified_body_raw(
 
         let mut pos = b_start;
         for hunk in group {
-            for &token in &input.before[pos as usize..hunk.before.start as usize] {
-                push_line(&mut out, ' ', input.interner[token]);
+            for idx in pos..hunk.before.start {
+                write_patch_line(&mut out, ' ', before_side.line(idx as usize));
             }
-            for &token in &input.before[hunk.before.start as usize..hunk.before.end as usize] {
-                push_line(&mut out, '-', input.interner[token]);
+            for idx in hunk.before.start..hunk.before.end {
+                write_patch_line(&mut out, '-', before_side.line(idx as usize));
             }
-            for &token in &input.after[hunk.after.start as usize..hunk.after.end as usize] {
-                push_line(&mut out, '+', input.interner[token]);
+            for idx in hunk.after.start..hunk.after.end {
+                write_patch_line(&mut out, '+', after_side.line(idx as usize));
             }
             pos = hunk.before.end;
         }
-        for &token in &input.before[pos as usize..b_end as usize] {
-            push_line(&mut out, ' ', input.interner[token]);
+        for idx in pos..b_end {
+            write_patch_line(&mut out, ' ', before_side.line(idx as usize));
         }
     }
 
@@ -183,7 +198,6 @@ where
     F: Fn(&[&str], &[&str]) -> bool,
 {
     use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
-    use std::fmt::Write as _;
 
     let input = InternedInput::new(old_content, new_content);
     let mut diff = Diff::compute(Algorithm::Histogram, &input);
@@ -194,15 +208,6 @@ where
         return String::new();
     }
 
-    let before_len = input.before.len() as i64;
-    let after_len = input.after.len() as i64;
-    let ctxlen = context_lines as i64;
-    let interhunk = inter_hunk_context as i64;
-    // Git's xdl_get_hunk fuse limit: 2*ctxlen + interhunkctxlen.
-    let max_common = ctxlen.saturating_add(ctxlen).saturating_add(interhunk);
-    let max_ignorable = ctxlen;
-
-    // A change record mirrors Git's xdchange_t.
     struct Change {
         i1: i64,
         chg1: i64,
@@ -235,212 +240,29 @@ where
         });
     }
 
-    // Helper to fetch a line of either side (token interner over lines).
-    let before_line = |idx: i64| -> &str { input.interner[input.before[idx as usize]] };
-    let after_line = |idx: i64| -> &str { input.interner[input.after[idx as usize]] };
-
-    // Port of xdl_get_hunk: starting at change index `start`, return
-    // `(new_start, last)` — the possibly-advanced first change index (leading
-    // ignorable changes dropped) and the index of the last change to include in
-    // this hunk — or `None` when the leading ignorable changes are all dropped
-    // and nothing remains.
-    let get_hunk = |start: usize| -> Option<(usize, usize)> {
-        // Remove ignorable changes that are too far before other changes.
-        // Faithful port of xdl_get_hunk's leading loop: walk every leading
-        // ignorable change; whenever its successor is absent or far enough away
-        // (>= max_ignorable), advance the hunk start past it. `scr` is the new
-        // start index, or `changes.len()` when everything is dropped.
-        let mut scr = start;
-        let mut xchp = start;
-        while xchp < changes.len() && changes[xchp].ignore {
-            let next = xchp + 1;
-            if next >= changes.len()
-                || changes[next].i1 - (changes[xchp].i1 + changes[xchp].chg1) >= max_ignorable
-            {
-                scr = next;
-            }
-            xchp = next;
-        }
-        if scr >= changes.len() {
-            return None;
-        }
-
-        let mut lxch = scr;
-        let mut ignored: i64 = 0;
-        let mut xchp = scr;
-        let mut idx = scr + 1;
-        while idx < changes.len() {
-            let xch = &changes[idx];
-            let prev = &changes[xchp];
-            let distance = xch.i1 - (prev.i1 + prev.chg1);
-            if distance > max_common {
-                break;
-            }
-            if distance < max_ignorable && (!xch.ignore || lxch == xchp) {
-                lxch = idx;
-                ignored = 0;
-            } else if distance < max_ignorable && xch.ignore {
-                ignored += xch.chg2;
-            } else if lxch != xchp
-                && xch.i1 + ignored - (changes[lxch].i1 + changes[lxch].chg1) > max_common
-            {
-                break;
-            } else if !xch.ignore {
-                lxch = idx;
-                ignored = 0;
-            } else {
-                ignored += xch.chg2;
-            }
-            xchp = idx;
-            idx += 1;
-        }
-        Some((scr, lxch))
-    };
-
-    fn push_line(out: &mut String, prefix: char, text: &str) {
-        out.push(prefix);
-        out.push_str(text);
-        if !text.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-
-    // Git hunk header range (xdl_emit_hunk_hdr): `,count` part omitted when 1.
-    fn fmt_side(start: i64, count: i64) -> String {
-        if count == 1 {
-            format!("{start}")
-        } else {
-            format!("{start},{count}")
-        }
-    }
-
-    let mut out = String::new();
-    let mut cursor = 0usize;
-    while cursor < changes.len() {
-        let Some((xch_idx, xche_idx)) = get_hunk(cursor) else {
-            break;
-        };
-        let xch = &changes[xch_idx];
-        let xche = &changes[xche_idx];
-
-        // pre-context
-        let mut s1 = (xch.i1 - ctxlen).max(0);
-        let mut s2 = (xch.i2 - ctxlen).max(0);
-        // post-context (clamped so it does not run past either side's EOF).
-        let mut lctx = ctxlen;
-        lctx = lctx.min(before_len - (xche.i1 + xche.chg1));
-        lctx = lctx.min(after_len - (xche.i2 + xche.chg2));
-        let mut e1 = xche.i1 + xche.chg1 + lctx;
-        let mut e2 = xche.i2 + xche.chg2 + lctx;
-
-        // `--function-context`: expand the hunk up to the enclosing function's
-        // header and down to the line before the next function (Git's
-        // XDL_EMIT_FUNCCONTEXT in xemit.c), using the already ignore-pruned
-        // change boundaries.
-        if function_context {
-            // Upward: find the function line at or before xch.i1, then climb to
-            // the start of that function (past non-empty non-func lines).
-            let mut fs1 = xch.i1;
-            while fs1 >= 0 && !is_func_line(before_line(fs1), funcname_matcher) {
-                fs1 -= 1;
-            }
-            while fs1 > 0
-                && !before_line(fs1 - 1).trim().is_empty()
-                && !is_func_line(before_line(fs1 - 1), funcname_matcher)
-            {
-                fs1 -= 1;
-            }
-            if fs1 < 0 {
-                fs1 = 0;
-            }
-            if fs1 < s1 {
-                s2 = (s2 - (s1 - fs1)).max(0);
-                s1 = fs1;
-            }
-            // Downward: find the next function line after the hunk end, climb up
-            // past trailing empty lines, and extend e1/e2 to it.
-            let end1 = xche.i1 + xche.chg1;
-            let mut fe1 = end1;
-            while fe1 < before_len && !is_func_line(before_line(fe1), funcname_matcher) {
-                fe1 += 1;
-            }
-            while fe1 > 0 && before_line(fe1 - 1).trim().is_empty() {
-                fe1 -= 1;
-            }
-            if fe1 > before_len {
-                fe1 = before_len;
-            }
-            if fe1 > e1 {
-                e2 = (e2 + (fe1 - e1)).min(after_len);
-                e1 = fe1;
-            }
-        }
-
-        let _ = writeln!(
-            out,
-            "@@ -{} +{} @@",
-            fmt_side(s1 + 1, e1 - s1),
-            fmt_side(s2 + 1, e2 - s2)
-        );
-
-        // Emit pre-context from the new side.
-        let mut s2c = s2;
-        while s2c < xch.i2 {
-            push_line(&mut out, ' ', after_line(s2c));
-            s2c += 1;
-        }
-
-        // Emit each change record and the context between merged records.
-        let mut s1c = xch.i1;
-        let mut s2c = xch.i2;
-        let mut k = xch_idx;
-        loop {
-            let c = &changes[k];
-            // Context between previous and current change atom.
-            while s1c < c.i1 && s2c < c.i2 {
-                push_line(&mut out, ' ', after_line(s2c));
-                s1c += 1;
-                s2c += 1;
-            }
-            // Removed lines from old side.
-            let mut r = c.i1;
-            while r < c.i1 + c.chg1 {
-                push_line(&mut out, '-', before_line(r));
-                r += 1;
-            }
-            // Added lines from new side.
-            let mut a = c.i2;
-            while a < c.i2 + c.chg2 {
-                push_line(&mut out, '+', after_line(a));
-                a += 1;
-            }
-            if k == xche_idx {
-                break;
-            }
-            s1c = c.i1 + c.chg1;
-            s2c = c.i2 + c.chg2;
-            k += 1;
-        }
-
-        // Post-context.
-        let mut s2p = xche.i2 + xche.chg2;
-        while s2p < e2 {
-            push_line(&mut out, ' ', after_line(s2p));
-            s2p += 1;
-        }
-
-        cursor = xche_idx + 1;
-    }
-
-    out
-}
-
-/// One xdiff change record (`xdchange_t`) for unified hunk emission.
-struct XdlChangeRecord {
-    i1: i64,
-    chg1: i64,
-    i2: i64,
-    chg2: i64,
+    let before = LineSide::from_text(old_content);
+    let after = LineSide::from_text(new_content);
+    let edits: Vec<EditSpan> = changes
+        .into_iter()
+        .map(|c| EditSpan {
+            before_start: c.i1,
+            before_len: c.chg1,
+            after_start: c.i2,
+            after_len: c.chg2,
+            skip_in_output: c.ignore,
+        })
+        .collect();
+    emit_unified_body_from_edits(
+        &before,
+        &after,
+        &edits,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context,
+        },
+        funcname_matcher,
+    )
 }
 
 fn git_xdiff_compacted_line_ops(
@@ -458,7 +280,7 @@ fn git_xdiff_compacted_line_ops(
     diff_indent_heuristic::apply_change_compact_to_ops(&raw, old_lines, new_lines, indent_heuristic)
 }
 
-fn diff_ops_to_xdl_changes(ops: &[similar::DiffOp]) -> Vec<XdlChangeRecord> {
+fn diff_ops_to_edit_spans(ops: &[similar::DiffOp]) -> Vec<EditSpan> {
     use similar::DiffOp;
     let mut out = Vec::new();
     for op in ops {
@@ -468,39 +290,42 @@ fn diff_ops_to_xdl_changes(ops: &[similar::DiffOp]) -> Vec<XdlChangeRecord> {
                 old_index,
                 old_len,
                 new_index,
-            } => out.push(XdlChangeRecord {
-                i1: old_index as i64,
-                chg1: old_len as i64,
-                i2: new_index as i64,
-                chg2: 0,
+            } => out.push(EditSpan {
+                before_start: old_index as i64,
+                before_len: old_len as i64,
+                after_start: new_index as i64,
+                after_len: 0,
+                skip_in_output: false,
             }),
             DiffOp::Insert {
                 old_index,
                 new_index,
                 new_len,
-            } => out.push(XdlChangeRecord {
-                i1: old_index as i64,
-                chg1: 0,
-                i2: new_index as i64,
-                chg2: new_len as i64,
+            } => out.push(EditSpan {
+                before_start: old_index as i64,
+                before_len: 0,
+                after_start: new_index as i64,
+                after_len: new_len as i64,
+                skip_in_output: false,
             }),
             DiffOp::Replace {
                 old_index,
                 old_len,
                 new_index,
                 new_len,
-            } => out.push(XdlChangeRecord {
-                i1: old_index as i64,
-                chg1: old_len as i64,
-                i2: new_index as i64,
-                chg2: new_len as i64,
+            } => out.push(EditSpan {
+                before_start: old_index as i64,
+                before_len: old_len as i64,
+                after_start: new_index as i64,
+                after_len: new_len as i64,
+                skip_in_output: false,
             }),
         }
     }
     out
 }
 
-/// Unified hunk body using Git's xdiff Myers engine and `xdl_emit` rules (no `---` / `+++`).
+/// Unified hunk body using Git's xdiff Myers engine (no `---` / `+++`).
 fn myers_git_xdiff_unified_body_raw(
     old_content: &str,
     new_content: &str,
@@ -508,203 +333,34 @@ fn myers_git_xdiff_unified_body_raw(
     inter_hunk_context: usize,
     indent_heuristic: bool,
 ) -> String {
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    let new_lines: Vec<&str> = new_content.lines().collect();
-    if old_lines.is_empty() && new_lines.is_empty() {
+    let before = LineSide::from_text(old_content);
+    let after = LineSide::from_text(new_content);
+    if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let ops = git_xdiff_compacted_line_ops(&old_lines, &new_lines, indent_heuristic);
-    let changes = diff_ops_to_xdl_changes(&ops);
-    if changes.is_empty() {
-        return String::new();
+    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let ops = git_xdiff_compacted_line_ops(&old_refs, &new_refs, indent_heuristic);
+    let mut edits = diff_ops_to_edit_spans(&ops);
+    if edits.is_empty() {
+        if old_content != new_content {
+            edits = line_ending_only_edits(&before, &after);
+        }
+        if edits.is_empty() {
+            return String::new();
+        }
     }
-    xdl_emit_unified_hunks(
-        old_lines.len() as i64,
-        new_lines.len() as i64,
-        |i| old_lines[i as usize],
-        |i| new_lines[i as usize],
-        &changes,
-        context_lines,
-        inter_hunk_context,
-        false,
+    emit_unified_body_from_edits(
+        &before,
+        &after,
+        &edits,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context: false,
+        },
         None,
     )
-}
-
-/// Port of Git `xdl_get_hunk` + `xdl_emit_diff` for pre-built change records.
-#[allow(clippy::too_many_arguments)]
-fn xdl_emit_unified_hunks<'a>(
-    before_len: i64,
-    after_len: i64,
-    before_line: impl Fn(i64) -> &'a str,
-    after_line: impl Fn(i64) -> &'a str,
-    changes: &[XdlChangeRecord],
-    context_lines: usize,
-    inter_hunk_context: usize,
-    function_context: bool,
-    funcname_matcher: Option<&FuncnameMatcher>,
-) -> String {
-    use std::fmt::Write as _;
-
-    let ctxlen = context_lines as i64;
-    let interhunk = inter_hunk_context as i64;
-    let max_common = ctxlen.saturating_add(ctxlen).saturating_add(interhunk);
-    let max_ignorable = ctxlen;
-
-    fn push_line(out: &mut String, prefix: char, text: &str) {
-        out.push(prefix);
-        out.push_str(text);
-        if !text.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-
-    fn fmt_side(start0: i64, count: i64) -> String {
-        let shown_start = if count == 0 { start0 } else { start0 + 1 };
-        if count == 1 {
-            format!("{shown_start}")
-        } else {
-            format!("{shown_start},{count}")
-        }
-    }
-
-    let get_hunk = |start: usize| -> Option<(usize, usize)> {
-        let mut scr = start;
-        if scr >= changes.len() {
-            return None;
-        }
-
-        let mut lxch = scr;
-        let mut ignored: i64 = 0;
-        let mut xchp = scr;
-        let mut idx = scr + 1;
-        while idx < changes.len() {
-            let xch = &changes[idx];
-            let prev = &changes[xchp];
-            let distance = xch.i1 - (prev.i1 + prev.chg1);
-            if distance > max_common {
-                break;
-            }
-            if distance < max_ignorable {
-                lxch = idx;
-                ignored = 0;
-            } else if lxch != xchp
-                && xch.i1 + ignored - (changes[lxch].i1 + changes[lxch].chg1) > max_common
-            {
-                break;
-            } else {
-                lxch = idx;
-                ignored = 0;
-            }
-            xchp = idx;
-            idx += 1;
-        }
-        Some((scr, lxch))
-    };
-
-    let mut out = String::new();
-    let mut cursor = 0usize;
-    while cursor < changes.len() {
-        let Some((xch_idx, xche_idx)) = get_hunk(cursor) else {
-            break;
-        };
-        let xch = &changes[xch_idx];
-        let xche = &changes[xche_idx];
-
-        let mut s1 = (xch.i1 - ctxlen).max(0);
-        let mut s2 = (xch.i2 - ctxlen).max(0);
-        let mut lctx = ctxlen;
-        lctx = lctx.min(before_len - (xche.i1 + xche.chg1));
-        lctx = lctx.min(after_len - (xche.i2 + xche.chg2));
-        let mut e1 = xche.i1 + xche.chg1 + lctx;
-        let mut e2 = xche.i2 + xche.chg2 + lctx;
-
-        if function_context {
-            let mut fs1 = xch.i1;
-            while fs1 >= 0 && !is_func_line(before_line(fs1), funcname_matcher) {
-                fs1 -= 1;
-            }
-            while fs1 > 0
-                && !before_line(fs1 - 1).trim().is_empty()
-                && !is_func_line(before_line(fs1 - 1), funcname_matcher)
-            {
-                fs1 -= 1;
-            }
-            if fs1 < 0 {
-                fs1 = 0;
-            }
-            if fs1 < s1 {
-                s2 = (s2 - (s1 - fs1)).max(0);
-                s1 = fs1;
-            }
-            let end1 = xche.i1 + xche.chg1;
-            let mut fe1 = end1;
-            while fe1 < before_len && !is_func_line(before_line(fe1), funcname_matcher) {
-                fe1 += 1;
-            }
-            while fe1 > 0 && before_line(fe1 - 1).trim().is_empty() {
-                fe1 -= 1;
-            }
-            if fe1 > before_len {
-                fe1 = before_len;
-            }
-            if fe1 > e1 {
-                e2 = (e2 + (fe1 - e1)).min(after_len);
-                e1 = fe1;
-            }
-        }
-
-        let _ = writeln!(
-            out,
-            "@@ -{} +{} @@",
-            fmt_side(s1, e1 - s1),
-            fmt_side(s2, e2 - s2)
-        );
-
-        let mut s2c = s2;
-        while s2c < xch.i2 {
-            push_line(&mut out, ' ', after_line(s2c));
-            s2c += 1;
-        }
-
-        let mut s1c = xch.i1;
-        let mut s2c = xch.i2;
-        let mut k = xch_idx;
-        loop {
-            let c = &changes[k];
-            while s1c < c.i1 && s2c < c.i2 {
-                push_line(&mut out, ' ', after_line(s2c));
-                s1c += 1;
-                s2c += 1;
-            }
-            let mut r = c.i1;
-            while r < c.i1 + c.chg1 {
-                push_line(&mut out, '-', before_line(r));
-                r += 1;
-            }
-            let mut a = c.i2;
-            while a < c.i2 + c.chg2 {
-                push_line(&mut out, '+', after_line(a));
-                a += 1;
-            }
-            if k == xche_idx {
-                break;
-            }
-            s1c = c.i1 + c.chg1;
-            s2c = c.i2 + c.chg2;
-            k += 1;
-        }
-
-        let mut s2p = xche.i2 + xche.chg2;
-        while s2p < e2 {
-            push_line(&mut out, ' ', after_line(s2p));
-            s2p += 1;
-        }
-
-        cursor = xche_idx + 1;
-    }
-
-    out
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -7850,7 +7506,7 @@ fn is_line_empty_for_func_context(line: &str) -> bool {
     line.chars().all(|c| c.is_whitespace())
 }
 
-fn is_func_line(line: &str, matcher: Option<&FuncnameMatcher>) -> bool {
+pub(crate) fn is_func_line(line: &str, matcher: Option<&FuncnameMatcher>) -> bool {
     if let Some(m) = matcher {
         return m.match_line(line).is_some();
     }
@@ -8353,10 +8009,7 @@ pub fn format_stat_line_width(
 }
 
 fn last_line_index_without_trailing_newline(text: &str) -> Option<usize> {
-    if text.is_empty() || text.ends_with('\n') {
-        return None;
-    }
-    Some(text.lines().count().saturating_sub(1))
+    LineSide::from_text(text).incomplete_last_line_index()
 }
 
 fn parse_unified_hunk_starts(header: &str) -> Option<(usize, usize)> {
