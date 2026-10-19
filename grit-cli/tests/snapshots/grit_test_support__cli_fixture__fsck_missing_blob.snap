@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 1,
-    "stdout": "{\n  \"ok\": false,\n  \"objects_checked\": 10,\n  \"issues\": [\n    {\n      \"kind\": \"missingObject\",\n      \"severity\": \"error\",\n      \"oid\": \"1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219\",\n      \"detail\": \"object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 missing (staged in index)\"\n    }\n  ],\n  \"dangling\": []\n}\n",
+    "stdout": "{\"ok\":false,\"objects_checked\":10,\"issues\":[{\"kind\":\"missingObject\",\"severity\":\"error\",\"oid\":\"1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219\",\"detail\":\"object 1269488f7fb1f4b56a8c0e5eb48cecbfadfa9219 missing (staged in index)\"}],\"dangling\":[]}\n",
     "stderr": ""
   },
   "markdown": {

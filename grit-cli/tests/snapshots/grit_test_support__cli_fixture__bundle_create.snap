@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"path\": \"snap.bundle\",\n  \"refs\": 1\n}\n",
+    "stdout": "{\"path\":\"snap.bundle\",\"refs\":1}\n",
     "stderr": ""
   },
   "markdown": {

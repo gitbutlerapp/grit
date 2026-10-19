@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"remove\",\n  \"notes_ref\": \"refs/notes/commits\",\n  \"objects\": [\n    \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"\n  ]\n}\n",
+    "stdout": "{\"action\":\"remove\",\"notes_ref\":\"refs/notes/commits\",\"objects\":[\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"]}\n",
     "stderr": ""
   },
   "markdown": {

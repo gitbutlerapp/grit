@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"operation\": \"squash\",\n  \"rewritten\": [\n    {\n      \"old\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"new\": \"11ec1698903b13b5f62e0341a3821b2570876cfe\"\n    },\n    {\n      \"old\": \"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\n      \"new\": \"11ec1698903b13b5f62e0341a3821b2570876cfe\"\n    }\n  ],\n  \"refs\": [\n    {\n      \"name\": \"refs/heads/main\",\n      \"old\": \"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\n      \"new\": \"11ec1698903b13b5f62e0341a3821b2570876cfe\"\n    }\n  ],\n  \"head\": {\n    \"old\": \"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\n    \"new\": \"11ec1698903b13b5f62e0341a3821b2570876cfe\"\n  },\n  \"dry_run\": false\n}\n",
+    "stdout": "{\"operation\":\"squash\",\"rewritten\":[{\"old\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"},{\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"}],\"refs\":[{\"name\":\"refs/heads/main\",\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"}],\"head\":{\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"},\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {

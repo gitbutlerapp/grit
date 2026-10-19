@@ -11,7 +11,7 @@ expression: payload
     },
     "json": {
       "exit": 0,
-      "stdout": "{\n  \"authenticated\": true,\n  \"host\": \"github.com\"\n}\n",
+      "stdout": "{\"authenticated\":true,\"host\":\"github.com\"}\n",
       "stderr": ""
     },
     "markdown": {
@@ -28,7 +28,7 @@ expression: payload
     },
     "json": {
       "exit": 0,
-      "stdout": "{\n  \"logged_out\": true,\n  \"host\": \"github.com\"\n}\n",
+      "stdout": "{\"logged_out\":true,\"host\":\"github.com\"}\n",
       "stderr": ""
     },
     "markdown": {

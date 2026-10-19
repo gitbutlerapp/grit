@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"removed\": [\n    \"second.txt\"\n  ]\n}\n",
+    "stdout": "{\"removed\":[\"second.txt\"]}\n",
     "stderr": ""
   },
   "markdown": {

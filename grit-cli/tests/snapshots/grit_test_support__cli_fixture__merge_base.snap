@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"merge_bases\": [\n    \"72934dedd47ecaf7e340fd6c5ef46620187fb317\"\n  ],\n  \"is_ancestor\": null\n}\n",
+    "stdout": "{\"merge_bases\":[\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"],\"is_ancestor\":null}\n",
     "stderr": ""
   },
   "markdown": {

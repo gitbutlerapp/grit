@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"index\": 0,\n  \"dropped\": true,\n  \"conflicts\": false\n}\n",
+    "stdout": "{\"index\":0,\"dropped\":true,\"conflicts\":false}\n",
     "stderr": ""
   },
   "markdown": {

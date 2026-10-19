@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"dry_run\": true,\n  \"tasks\": [\n    {\n      \"task\": \"reflog-expire\",\n      \"duration_ms\": 0,\n      \"entries_pruned\": 4\n    },\n    {\n      \"task\": \"repack\",\n      \"duration_ms\": 0,\n      \"loose_before\": 9,\n      \"packs_before\": 0,\n      \"objects_packed\": 8,\n      \"pack_bytes\": null,\n      \"pack_path\": null,\n      \"removed_pack_files\": 0,\n      \"pruned_loose\": 0,\n      \"unreachable_loose_pruned\": 0\n    }\n  ]\n}\n",
+    "stdout": "{\"dry_run\":true,\"tasks\":[{\"task\":\"reflog-expire\",\"duration_ms\": 0,\"entries_pruned\":4},{\"task\":\"repack\",\"duration_ms\": 0,\"loose_before\":9,\"packs_before\":0,\"objects_packed\":8,\"pack_bytes\":null,\"pack_path\":null,\"removed_pack_files\":0,\"pruned_loose\":0,\"unreachable_loose_pruned\":0}]}\n",
     "stderr": ""
   },
   "markdown": {

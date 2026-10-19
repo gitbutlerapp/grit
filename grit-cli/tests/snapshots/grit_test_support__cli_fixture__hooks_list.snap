@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"list\",\n  \"hooks\": [\n    {\n      \"name\": \"pre-commit\",\n      \"path\": \"[REPO]/.git/hooks/pre-commit\",\n      \"executable\": true,\n      \"source\": \"hooks_dir\"\n    }\n  ]\n}\n",
+    "stdout": "{\"action\":\"list\",\"hooks\":[{\"name\":\"pre-commit\",\"path\":\"[REPO]/.git/hooks/pre-commit\",\"executable\":true,\"source\":\"hooks_dir\"}]}\n",
     "stderr": ""
   },
   "markdown": {

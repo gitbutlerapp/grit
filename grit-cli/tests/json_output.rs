@@ -21,6 +21,21 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 const GS: &str = env!("CARGO_BIN_EXE_grit");
 
+fn diff_json_line_text(line: &Value) -> String {
+    if let Some(text) = line.get("text").and_then(|v| v.as_str()) {
+        return text.to_owned();
+    }
+    line.get("segments")
+        .and_then(|v| v.as_array())
+        .map(|segments| {
+            segments
+                .iter()
+                .filter_map(|seg| seg.get("text").and_then(|t| t.as_str()))
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+}
+
 struct CmdOutput {
     status: Option<i32>,
     stdout: String,
@@ -892,6 +907,55 @@ fn diff_json_uncommitted_and_commit() -> TestResult {
         .unwrap()
         .iter()
         .all(|l| l["kind"] == "add"));
+    for line in cfiles[0]["hunks"][0]["lines"].as_array().unwrap() {
+        assert!(
+            line.get("text").is_some() && line.get("segments").is_none(),
+            "line-level JSON must use compact text field: {line}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn diff_json_payload_stays_near_line_text_size() -> TestResult {
+    let scratch = Scratch::new("diff-json-size")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    let mut body = String::new();
+    for i in 0..400 {
+        body.push_str(&format!("line {i}\n"));
+    }
+    write_file(&repo.join("big.txt"), &body);
+    gs_ok(&repo, &["add", "big.txt"]);
+    gs_ok(&repo, &["commit", "v1"]);
+    write_file(&repo.join("big.txt"), &body.replace("line", "LINE"));
+    let out = gs_ok(&repo, &["--json", "diff"]);
+    let json_bytes = out.stdout.len();
+    let line_text_bytes: usize = serde_json::from_str::<Value>(&out.stdout)?["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|f| f["hunks"].as_array().unwrap())
+        .flat_map(|h| h["lines"].as_array().unwrap())
+        .map(|l| diff_json_line_text(l).len())
+        .sum();
+    assert!(
+        line_text_bytes > 5000,
+        "fixture should materialize many diff lines: {line_text_bytes}"
+    );
+    assert!(
+        json_bytes <= line_text_bytes.saturating_mul(6),
+        "JSON overhead too high: json={json_bytes} line_text={line_text_bytes}"
+    );
+    assert!(
+        !out.stdout.contains("\"segments\""),
+        "line-level diff JSON must not emit segments arrays"
+    );
+    assert!(
+        !out.stdout.contains('\n') || out.stdout.matches('\n').count() <= 1,
+        "diff --json should be compact (at most one trailing newline)"
+    );
     Ok(())
 }
 
@@ -941,7 +1005,7 @@ fn diff_json_head_includes_staged_added_then_worktree_edited() -> TestResult {
             .as_array()
             .unwrap()
             .iter()
-            .any(|l| l["kind"] == "add" && l["segments"][0]["text"].as_str() == Some("worktree")),
+            .any(|l| l["kind"] == "add" && diff_json_line_text(l) == "worktree"),
         "new side must reflect current worktree bytes"
     );
     Ok(())
@@ -984,13 +1048,11 @@ fn diff_json_unstaged_eol_crlf_normalizes_worktree_lines() -> TestResult {
         "one line change after eol normalization: {kinds:?}"
     );
     for line in v["files"][0]["hunks"][0]["lines"].as_array().unwrap() {
-        for seg in line["segments"].as_array().unwrap() {
-            let text = seg["text"].as_str().unwrap();
-            assert!(
-                !text.contains('\r'),
-                "JSON line text must not retain CR: {text:?}"
-            );
-        }
+        let text = diff_json_line_text(line);
+        assert!(
+            !text.contains('\r'),
+            "JSON line text must not retain CR: {text:?}"
+        );
     }
     Ok(())
 }
@@ -1025,7 +1087,7 @@ fn diff_json_preserves_crlf_no_eof_and_mode() -> TestResult {
         .iter()
         .find(|l| l["kind"] == "del")
         .unwrap();
-    assert_eq!(del["segments"][0]["text"], "a\r");
+    assert_eq!(diff_json_line_text(del), "a\r");
 
     let nonl = files.iter().find(|f| f["path"] == "nonl.txt").unwrap();
     let del2 = nonl["hunks"][0]["lines"]

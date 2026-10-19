@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"ref\": \"HEAD\",\n  \"entries\": [\n    {\n      \"index\": 0,\n      \"oid\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"relative_date\": \"[TIME_AGO]\",\n      \"message\": \"commit: second\"\n    },\n    {\n      \"index\": 1,\n      \"oid\": \"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\n      \"relative_date\": \"[TIME_AGO]\",\n      \"message\": \"commit (initial): first\"\n    }\n  ]\n}\n",
+    "stdout": "{\"ref\":\"HEAD\",\"entries\":[{\"index\":0,\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"relative_date\":\"[TIME_AGO]\",\"message\":\"commit: second\"},{\"index\":1,\"oid\":\"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\"relative_date\":\"[TIME_AGO]\",\"message\":\"commit (initial): first\"}]}\n",
     "stderr": ""
   },
   "markdown": {

@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 1,
-    "stdout": "{\n  \"any_ignored\": false,\n  \"entries\": []\n}\n",
+    "stdout": "{\"any_ignored\":false,\"entries\":[]}\n",
     "stderr": ""
   },
   "markdown": {

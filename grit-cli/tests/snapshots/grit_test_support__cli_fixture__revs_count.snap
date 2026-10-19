@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"commits\": [],\n  \"count\": 2\n}\n",
+    "stdout": "{\"commits\":[],\"count\":2}\n",
     "stderr": ""
   },
   "markdown": {

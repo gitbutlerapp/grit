@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"file\": \"tracked.txt\",\n  \"rev\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n  \"lines\": [\n    {\n      \"commit\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"original_line\": 1,\n      \"final_line\": 1,\n      \"content\": \"tracked v2\"\n    }\n  ],\n  \"commits\": {\n    \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\": {\n      \"author\": {\n        \"name\": \"Test\",\n        \"email\": \"test@example.com\",\n        \"date\": \"2023-11-14T22:13:20Z\"\n      },\n      \"summary\": \"second\"\n    }\n  }\n}\n",
+    "stdout": "{\"file\":\"tracked.txt\",\"rev\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"lines\":[{\"commit\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"original_line\":1,\"final_line\":1,\"content\":\"tracked v2\"}],\"commits\":{\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\":{\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"summary\":\"second\"}}}\n",
     "stderr": ""
   },
   "markdown": {

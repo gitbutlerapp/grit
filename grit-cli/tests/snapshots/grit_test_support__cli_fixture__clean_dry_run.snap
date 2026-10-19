@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"removed\": [\n    \"untracked.txt\"\n  ],\n  \"dry_run\": true\n}\n",
+    "stdout": "{\"removed\":[\"untracked.txt\"],\"dry_run\":true}\n",
     "stderr": ""
   },
   "markdown": {

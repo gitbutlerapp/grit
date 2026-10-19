@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"initialized\": true,\n  \"path\": \"[REPO]\",\n  \"bare\": true,\n  \"branch\": \"main\",\n  \"ref_format\": \"files\"\n}\n",
+    "stdout": "{\"initialized\":true,\"path\":\"[REPO]\",\"bare\":true,\"branch\":\"main\",\"ref_format\":\"files\"}\n",
     "stderr": ""
   },
   "markdown": {

@@ -132,9 +132,9 @@ fn write_json<T: Serialize>(w: &mut dyn Write, value: &T, filter: Option<&str>) 
         let full = serde_json::to_value(value)
             .map_err(|e| anyhow::anyhow!("serializing JSON output: {e}"))?;
         let filtered = apply_json_filter(&full, expr)?;
-        json_write(serde_json::to_writer_pretty(&mut *w, &filtered))?;
+        json_write(serde_json::to_writer(&mut *w, &filtered))?;
     } else {
-        json_write(serde_json::to_writer_pretty(&mut *w, value))?;
+        json_write(serde_json::to_writer(&mut *w, value))?;
     }
     stdio::io_result(writeln!(w)).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
     Ok(())
@@ -339,7 +339,7 @@ mod tests {
         let human = render_to_string(&value, OutputMode::Human, &ctx).expect("human");
         assert_eq!(human, "branch=main clean=true\n");
         let json = render_to_string(&value, OutputMode::Json, &ctx).expect("json");
-        assert!(json.contains("\"branch\": \"main\""));
+        assert!(json.contains("\"branch\":\"main\""));
         let md = render_to_string(&value, OutputMode::Markdown, &ctx).expect("markdown");
         assert!(md.contains("**branch**"));
         assert!(md.contains("**clean**"));

@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"branch\": \"feature\",\n  \"created\": false,\n  \"detached\": false\n}\n",
+    "stdout": "{\"branch\":\"feature\",\"created\":false,\"detached\":false}\n",
     "stderr": ""
   },
   "markdown": {

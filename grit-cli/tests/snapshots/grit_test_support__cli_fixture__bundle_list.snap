@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"path\": \"snap.bundle\",\n  \"references\": [\n    {\n      \"name\": \"HEAD\",\n      \"oid\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"\n    }\n  ]\n}\n",
+    "stdout": "{\"path\":\"snap.bundle\",\"references\":[{\"name\":\"HEAD\",\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}]}\n",
     "stderr": ""
   },
   "markdown": {

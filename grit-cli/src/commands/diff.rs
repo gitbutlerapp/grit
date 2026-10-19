@@ -135,23 +135,87 @@ pub struct Hunk {
     pub lines: Vec<Line>,
 }
 
+/// JSON schema shape for [`Line`] (`text` or `segments`, never both).
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct LineJsonSchema {
+    kind: LineKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    old: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    new: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    segments: Option<Vec<Segment>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(default)]
+    no_newline_at_eof: bool,
+}
+
+impl JsonSchema for Line {
+    fn schema_name() -> String {
+        "Line".to_string()
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        LineJsonSchema::json_schema(gen)
+    }
+}
+
 /// One rendered line of a hunk.
-#[derive(Serialize, JsonSchema)]
 pub struct Line {
     pub kind: LineKind,
     /// 1-based old/new line numbers (absent on the side where the line is new/gone).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
     pub old: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
     pub new: Option<usize>,
     /// The line split into segments; `emphasis` marks the intra-line word changes.
     pub segments: Vec<Segment>,
     /// Missing newline at end of file on this side (Git `\ No newline at end of file`).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    #[schemars(default)]
     pub no_newline_at_eof: bool,
+}
+
+impl Serialize for Line {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let field_count = 3
+            + usize::from(self.old.is_some())
+            + usize::from(self.new.is_some())
+            + usize::from(self.no_newline_at_eof)
+            + 1;
+        let mut state = serializer.serialize_struct("Line", field_count)?;
+        state.serialize_field("kind", &self.kind)?;
+        if let Some(old) = self.old {
+            state.serialize_field("old", &old)?;
+        }
+        if let Some(new) = self.new {
+            state.serialize_field("new", &new)?;
+        }
+        if segments_have_emphasis(&self.segments) {
+            state.serialize_field("segments", &self.segments)?;
+        } else {
+            state.serialize_field("text", &line_text(&self.segments))?;
+        }
+        if self.no_newline_at_eof {
+            state.serialize_field("no_newline_at_eof", &true)?;
+        }
+        state.end()
+    }
+}
+
+fn line_text(segments: &[Segment]) -> String {
+    segments.iter().map(|s| s.text.as_str()).collect()
+}
+
+fn segments_have_emphasis(segments: &[Segment]) -> bool {
+    segments.iter().any(|s| s.emphasis)
 }
 
 #[derive(Serialize, JsonSchema, Clone, Copy, PartialEq)]
@@ -166,6 +230,8 @@ pub enum LineKind {
 #[derive(Serialize, JsonSchema)]
 pub struct Segment {
     pub text: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(default)]
     pub emphasis: bool,
 }
 
@@ -442,6 +508,7 @@ fn outcome_from_changes(
     thread_policy: &grit_lib::parallel::ThreadPolicy,
     diff_options: StructuredDiffOptions,
 ) -> DiffOutcome {
+    let diff_options = diff_options.cap_word_level_inline_for_changed_files(changes.len());
     let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
     par_opts.min_items = 0;
     let est_bytes = changes.len().saturating_mul(8192);

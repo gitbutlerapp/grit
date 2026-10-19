@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"from\": \"second.txt\",\n  \"to\": \"renamed.txt\"\n}\n",
+    "stdout": "{\"from\":\"second.txt\",\"to\":\"renamed.txt\"}\n",
     "stderr": ""
   },
   "markdown": {

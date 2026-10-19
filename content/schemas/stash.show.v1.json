@@ -207,7 +207,7 @@
       "type": "object"
     },
     "Line": {
-      "description": "One rendered line of a hunk.",
+      "description": "JSON schema shape for [`Line`] (`text` or `segments`, never both).",
       "properties": {
         "kind": {
           "$ref": "#/definitions/LineKind"
@@ -221,11 +221,9 @@
           ]
         },
         "no_newline_at_eof": {
-          "description": "Missing newline at end of file on this side (Git `\\ No newline at end of file`).",
           "type": "boolean"
         },
         "old": {
-          "description": "1-based old/new line numbers (absent on the side where the line is new/gone).",
           "format": "uint",
           "minimum": 0.0,
           "type": [
@@ -234,16 +232,23 @@
           ]
         },
         "segments": {
-          "description": "The line split into segments; `emphasis` marks the intra-line word changes.",
           "items": {
             "$ref": "#/definitions/Segment"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "kind",
-        "segments"
+        "kind"
       ],
       "type": "object"
     },
@@ -266,7 +271,6 @@
         }
       },
       "required": [
-        "emphasis",
         "text"
       ],
       "type": "object"

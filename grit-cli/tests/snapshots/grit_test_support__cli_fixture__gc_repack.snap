@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"dry_run\": false,\n  \"tasks\": [\n    {\n      \"task\": \"repack\",\n      \"duration_ms\": 0,\n      \"loose_before\": 13,\n      \"packs_before\": 0,\n      \"objects_packed\": 13,\n      \"pack_bytes\": 887,\n      \"pack_path\": \"[REPO]/.git/objects/pack/pack-[HASH].pack\",\n      \"removed_pack_files\": 0,\n      \"pruned_loose\": 13,\n      \"unreachable_loose_pruned\": 0\n    }\n  ]\n}\n",
+    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"repack\",\"duration_ms\": 0,\"loose_before\":13,\"packs_before\":0,\"objects_packed\":13,\"pack_bytes\":887,\"pack_path\":\"[REPO]/.git/objects/pack/pack-[HASH].pack\",\"removed_pack_files\":0,\"pruned_loose\":13,\"unreachable_loose_pruned\":0}]}\n",
     "stderr": ""
   },
   "markdown": {

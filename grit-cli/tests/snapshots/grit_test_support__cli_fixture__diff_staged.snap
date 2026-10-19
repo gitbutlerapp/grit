@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"files\": [\n    {\n      \"path\": \"staged.txt\",\n      \"status\": \"added\",\n      \"new_mode\": \"100644\",\n      \"binary\": false,\n      \"hunks\": [\n        {\n          \"old_start\": 0,\n          \"new_start\": 1,\n          \"old_lines\": 0,\n          \"new_lines\": 1,\n          \"lines\": [\n            {\n              \"kind\": \"add\",\n              \"new\": 1,\n              \"segments\": [\n                {\n                  \"text\": \"staged contents\",\n                  \"emphasis\": false\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}\n",
+    "stdout": "{\"files\":[{\"path\":\"staged.txt\",\"status\":\"added\",\"new_mode\":\"100644\",\"binary\":false,\"hunks\":[{\"old_start\":0,\"new_start\":1,\"old_lines\":0,\"new_lines\":1,\"lines\":[{\"kind\":\"add\",\"new\":1,\"text\":\"staged contents\"}]}]}]}\n",
     "stderr": ""
   },
   "markdown": {

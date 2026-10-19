@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"list\",\n  \"remotes\": []\n}\n",
+    "stdout": "{\"action\":\"list\",\"remotes\":[]}\n",
     "stderr": ""
   },
   "markdown": {

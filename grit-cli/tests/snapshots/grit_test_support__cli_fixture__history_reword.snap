@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"operation\": \"reword\",\n  \"rewritten\": [\n    {\n      \"old\": \"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\n      \"new\": \"c37ee67194a68367e5ad89da7e74e6b8a086cdd8\"\n    },\n    {\n      \"old\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"new\": \"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"\n    }\n  ],\n  \"refs\": [\n    {\n      \"name\": \"refs/heads/feature\",\n      \"old\": \"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\n      \"new\": \"c37ee67194a68367e5ad89da7e74e6b8a086cdd8\"\n    },\n    {\n      \"name\": \"refs/heads/main\",\n      \"old\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"new\": \"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"\n    }\n  ],\n  \"head\": {\n    \"old\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n    \"new\": \"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"\n  },\n  \"dry_run\": false\n}\n",
+    "stdout": "{\"operation\":\"reword\",\"rewritten\":[{\"old\":\"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\"new\":\"c37ee67194a68367e5ad89da7e74e6b8a086cdd8\"},{\"old\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"new\":\"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"}],\"refs\":[{\"name\":\"refs/heads/feature\",\"old\":\"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\"new\":\"c37ee67194a68367e5ad89da7e74e6b8a086cdd8\"},{\"name\":\"refs/heads/main\",\"old\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"new\":\"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"}],\"head\":{\"old\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"new\":\"0659df19cc6bfb69d48a83d9a5270f17b7dcae29\"},\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {

@@ -20,7 +20,7 @@ With one commit, shows the change that commit introduced (its first parent’s t
 
 Pass one or more paths after `--` (or as trailing arguments when unambiguous) to limit any diff form to those paths—the same pathspec rules as [`grit log`](log.md). A single positional argument that is neither a revision nor a range is still treated as a worktree path for unstaged changes (`grit diff a.txt`).
 
-Each file starts with its path (UTF-8 names print literally; C-quoted only when the name contains control characters, unless `core.quotepath=true`), and each hunk with its position. Lines have two number columns, the line number before and after the change. In a terminal, removed lines are red, added lines are green, and the words that changed within a line are highlighted. When the output isn't a terminal, or `NO_COLOR` is set, lines are marked with `-` and `+` instead. `--json` and `--markdown` use line-level hunks only (no word-level `emphasis` segments) so large commit-range diffs stay fast. Large tree diffs honor the global `--threads` flag and `index.threads` when loading blobs and computing line diffs. Three lines of unchanged context are shown around each change. Binary files print `Binary file differs` when the blob changed (mode-only binary changes show mode lines only).
+Each file starts with its path (UTF-8 names print literally; C-quoted only when the name contains control characters, unless `core.quotepath=true`), and each hunk with its position. Lines have two number columns, the line number before and after the change. In a terminal, removed lines are red, added lines are green, and the words that changed within a line are highlighted when the diff touches at most 64 changed files; larger tree and commit-range diffs stay line-level for throughput. When the output isn't a terminal, or `NO_COLOR` is set, lines are marked with `-` and `+` instead. `--json` and `--markdown` use line-level hunks only (no word-level `emphasis` segments) so large commit-range diffs stay fast. Large tree diffs honor the global `--threads` flag and `index.threads` when loading blobs and computing line diffs. Three lines of unchanged context are shown around each change. Binary files print `Binary file differs` when the blob changed (mode-only binary changes show mode lines only).
 
 `<commit>` can be anything that names a commit: a full or short commit id, a branch or tag name, or an expression like `HEAD~2`.
 
@@ -106,7 +106,7 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `files` | array | Changed files, each with `path`, `status`, `binary`, optional `old_mode` / `new_mode`, optional `old_encoding_lossy` / `new_encoding_lossy`, and `hunks`. |
 
-Nested fields include `files[].status` (`added`, `modified`, `deleted`, `renamed`, and so on), optional `files[].old_path` when `status` is `renamed`, `hunks[].old_start` / `new_start` / `old_lines` / `new_lines`, optional `hunks[].context` (enclosing definition line), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, `segments` with optional `emphasis` on intra-line changes, and `no_newline_at_eof` when that side lacks a trailing newline (Git’s `\ No newline at end of file`). When `files[].binary` is true, `hunks` is always an empty array — blob bytes are never included in JSON (use human or `--markdown` output for the “Binary file differs” note). For unstaged and other worktree-sourced sides, line text is normalized to repository form (`.gitattributes` / `core.autocrlf`) before diffing, so trailing `\r` from CRLF checkouts does not appear in `segments[].text`. Commit and staged diffs compare stored blobs and may still show carriage returns when the on-disk object bytes differ. When file bytes are not valid UTF-8 and the file is treated as text, `old_encoding_lossy` or `new_encoding_lossy` is true and non-UTF-8 bytes appear as U+FFFD in text fields.
+Nested fields include `files[].status` (`added`, `modified`, `deleted`, `renamed`, and so on), optional `files[].old_path` when `status` is `renamed`, `hunks[].old_start` / `new_start` / `old_lines` / `new_lines`, optional `hunks[].context` (enclosing definition line), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, a compact `text` string per line (or `segments` with optional `emphasis` only when intra-line word highlights are present), and `no_newline_at_eof` when that side lacks a trailing newline (Git’s `\ No newline at end of file`). JSON is written in compact form (no pretty-printing). When `files[].binary` is true, `hunks` is always an empty array — blob bytes are never included in JSON (use human or `--markdown` output for the “Binary file differs” note). For unstaged and other worktree-sourced sides, line text is normalized to repository form (`.gitattributes` / `core.autocrlf`) before diffing, so trailing `\r` from CRLF checkouts does not appear in line `text`. Commit and staged diffs compare stored blobs and may still show carriage returns when the on-disk object bytes differ. When file bytes are not valid UTF-8 and the file is treated as text, `old_encoding_lossy` or `new_encoding_lossy` is true and non-UTF-8 bytes appear as U+FFFD in text fields.
 
 Example:
 
@@ -125,12 +125,12 @@ Example:
             {
               "kind": "del",
               "old": 1,
-              "segments": [{ "text": "fn main() {}" }]
+              "text": "fn main() {}"
             },
             {
               "kind": "add",
               "new": 1,
-              "segments": [{ "text": "fn main() {" }]
+              "text": "fn main() {"
             }
           ]
         }

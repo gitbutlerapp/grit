@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"list\",\n  \"worktrees\": [\n    {\n      \"path\": \"[REPO]\",\n      \"head\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"branch\": \"main\",\n      \"detached\": false,\n      \"bare\": false,\n      \"locked\": false,\n      \"prunable\": false\n    },\n    {\n      \"path\": \"[REPO]/linked-wt\",\n      \"head\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"branch\": \"wt|branch\",\n      \"detached\": false,\n      \"bare\": false,\n      \"locked\": false,\n      \"prunable\": false\n    }\n  ]\n}\n",
+    "stdout": "{\"action\":\"list\",\"worktrees\":[{\"path\":\"[REPO]\",\"head\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"branch\":\"main\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false},{\"path\":\"[REPO]/linked-wt\",\"head\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"branch\":\"wt|branch\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false}]}\n",
     "stderr": ""
   },
   "markdown": {

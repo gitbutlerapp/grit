@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"updated\": true,\n  \"version\": \"[VERSION]\"\n}\n",
+    "stdout": "{\"updated\":true,\"version\":\"0.5.13\"}\n",
     "stderr": ""
   },
   "markdown": {

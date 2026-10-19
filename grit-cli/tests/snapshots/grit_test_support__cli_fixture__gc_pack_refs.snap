@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"dry_run\": false,\n  \"tasks\": [\n    {\n      \"task\": \"pack-refs\",\n      \"duration_ms\": 0,\n      \"refs_packed\": 0,\n      \"refs_pruned\": 0,\n      \"path\": \"[REPO]/.git/packed-refs\"\n    }\n  ]\n}\n",
+    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"pack-refs\",\"duration_ms\": 0,\"refs_packed\":0,\"refs_pruned\":0,\"path\":\"[REPO]/.git/packed-refs\"}]}\n",
     "stderr": ""
   },
   "markdown": {

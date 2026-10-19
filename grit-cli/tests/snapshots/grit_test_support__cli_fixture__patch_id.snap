@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"entries\": [\n    {\n      \"patch_id\": \"db20cbf19404d5a762136b964e1df57a06af6104\",\n      \"commit\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"\n    }\n  ]\n}\n",
+    "stdout": "{\"entries\":[{\"patch_id\":\"db20cbf19404d5a762136b964e1df57a06af6104\",\"commit\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}]}\n",
     "stderr": ""
   },
   "markdown": {

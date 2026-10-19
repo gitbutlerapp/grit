@@ -61,10 +61,11 @@ where
         .output()?)
 }
 
-/// Run `grit … | head -n 1` and return grit's exit status and stderr.
+/// Run `grit … | head …` and return grit's exit status and stderr.
 fn grit_piped_to_head(
     dir: &Path,
     args: &[&str],
+    head_args: &[&str],
 ) -> Result<(std::process::ExitStatus, String), Box<dyn Error>> {
     let mut grit = Command::new(GS)
         .args(args)
@@ -77,8 +78,7 @@ fn grit_piped_to_head(
         .take()
         .ok_or_else(|| std::io::Error::other("missing piped stdout"))?;
     let head = Command::new("head")
-        .arg("-n")
-        .arg("1")
+        .args(head_args)
         .stdin(grit_stdout)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -124,7 +124,7 @@ fn seed_large_diff_repo(dir: &Path) -> TestResult {
 fn large_diff_piped_to_head_does_not_panic() -> TestResult {
     let scratch = Scratch::new("diff")?;
     seed_large_diff_repo(&scratch.path)?;
-    let (status, stderr) = grit_piped_to_head(&scratch.path, &["diff", "HEAD~1"])?;
+    let (status, stderr) = grit_piped_to_head(&scratch.path, &["diff", "HEAD~1"], &["-n", "1"])?;
     assert!(
         !stderr.contains("panicked"),
         "stderr contained a panic:\n{stderr}"
@@ -140,7 +140,9 @@ fn large_diff_piped_to_head_does_not_panic() -> TestResult {
 fn large_json_diff_piped_to_head_does_not_panic() -> TestResult {
     let scratch = Scratch::new("json-diff")?;
     seed_large_diff_repo(&scratch.path)?;
-    let (status, stderr) = grit_piped_to_head(&scratch.path, &["--json", "diff", "HEAD~1"])?;
+    // Compact JSON is one line; cap bytes read so the pipe closes mid-payload.
+    let (status, stderr) =
+        grit_piped_to_head(&scratch.path, &["--json", "diff", "HEAD~1"], &["-c", "512"])?;
     assert!(
         !stderr.contains("panicked"),
         "stderr contained a panic:\n{stderr}"

@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"staged\": 1\n}\n",
+    "stdout": "{\"staged\":1}\n",
     "stderr": ""
   },
   "markdown": {

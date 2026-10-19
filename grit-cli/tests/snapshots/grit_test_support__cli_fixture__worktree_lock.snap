@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"lock\",\n  \"path\": \"[REPO]/linked-wt\",\n  \"reason\": \"hold\"\n}\n",
+    "stdout": "{\"action\":\"lock\",\"path\":\"[REPO]/linked-wt\",\"reason\":\"hold\"}\n",
     "stderr": ""
   },
   "markdown": {

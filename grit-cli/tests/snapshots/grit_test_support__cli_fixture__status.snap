@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"branch\": \"main\",\n  \"detached\": false,\n  \"head\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n  \"target\": \"main\",\n  \"ahead\": 0,\n  \"behind\": 0,\n  \"commits\": [],\n  \"staged\": [\n    {\n      \"path\": \"staged.txt\",\n      \"status\": \"added\"\n    }\n  ],\n  \"unstaged\": [\n    {\n      \"path\": \"tracked.txt\",\n      \"status\": \"modified\"\n    }\n  ],\n  \"untracked\": [\n    \"untracked.txt\"\n  ],\n  \"clean\": false,\n  \"merging\": false\n}\n",
+    "stdout": "{\"branch\":\"main\",\"detached\":false,\"head\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"target\":\"main\",\"ahead\":0,\"behind\":0,\"commits\":[],\"staged\":[{\"path\":\"staged.txt\",\"status\":\"added\"}],\"unstaged\":[{\"path\":\"tracked.txt\",\"status\":\"modified\"}],\"untracked\":[\"untracked.txt\"],\"clean\":false,\"merging\":false}\n",
     "stderr": ""
   },
   "markdown": {

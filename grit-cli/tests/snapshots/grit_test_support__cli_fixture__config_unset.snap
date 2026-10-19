@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"unset\",\n  \"key\": \"user.email\"\n}\n",
+    "stdout": "{\"action\":\"unset\",\"key\":\"user.email\"}\n",
     "stderr": ""
   },
   "markdown": {

@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"dry_run\": false,\n  \"tasks\": [\n    {\n      \"task\": \"prune\",\n      \"duration_ms\": 0,\n      \"pruned\": 0,\n      \"kept\": 9\n    }\n  ]\n}\n",
+    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"prune\",\"duration_ms\": 0,\"pruned\":0,\"kept\":9}]}\n",
     "stderr": ""
   },
   "markdown": {

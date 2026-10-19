@@ -35,6 +35,9 @@ impl SideBytes {
     }
 }
 
+/// Changed-file count above which word-level inline emphasis is skipped (human TTY diffs).
+pub const WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize = 64;
+
 /// Options for [`structured_text_diff`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StructuredDiffOptions {
@@ -50,6 +53,48 @@ impl Default for StructuredDiffOptions {
             context_lines: 3,
             word_level_inline: true,
         }
+    }
+}
+
+impl StructuredDiffOptions {
+    /// Turn off word-level inline when `changed_files` exceeds
+    /// [`WORD_LEVEL_INLINE_MAX_CHANGED_FILES`].
+    #[must_use]
+    pub fn cap_word_level_inline_for_changed_files(self, changed_files: usize) -> Self {
+        let mut opts = self;
+        if opts.word_level_inline && changed_files > WORD_LEVEL_INLINE_MAX_CHANGED_FILES {
+            opts.word_level_inline = false;
+        }
+        opts
+    }
+}
+
+#[cfg(test)]
+mod word_level_cap_tests {
+    use super::*;
+
+    #[test]
+    fn cap_word_level_inline_for_changed_files() {
+        let on = StructuredDiffOptions {
+            word_level_inline: true,
+            ..StructuredDiffOptions::default()
+        };
+        assert!(
+            on.cap_word_level_inline_for_changed_files(WORD_LEVEL_INLINE_MAX_CHANGED_FILES)
+                .word_level_inline
+        );
+        assert!(
+            !on.cap_word_level_inline_for_changed_files(WORD_LEVEL_INLINE_MAX_CHANGED_FILES + 1)
+                .word_level_inline
+        );
+        let off = StructuredDiffOptions {
+            word_level_inline: false,
+            ..StructuredDiffOptions::default()
+        };
+        assert!(
+            !off.cap_word_level_inline_for_changed_files(WORD_LEVEL_INLINE_MAX_CHANGED_FILES + 100)
+                .word_level_inline
+        );
     }
 }
 

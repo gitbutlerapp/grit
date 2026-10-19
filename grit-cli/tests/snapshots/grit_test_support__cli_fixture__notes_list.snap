@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"list\",\n  \"notes_ref\": \"refs/notes/commits\",\n  \"notes\": []\n}\n",
+    "stdout": "{\"action\":\"list\",\"notes_ref\":\"refs/notes/commits\",\"notes\":[]}\n",
     "stderr": ""
   },
   "markdown": {

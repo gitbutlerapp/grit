@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 1,
-    "stdout": "{\n  \"result\": \"conflicts\",\n  \"branch\": \"side\",\n  \"conflicts\": [\n    \"f.txt\"\n  ],\n  \"conflict_details\": [\n    {\n      \"path\": \"f.txt\",\n      \"kind\": \"content\"\n    }\n  ]\n}\n",
+    "stdout": "{\"result\":\"conflicts\",\"branch\":\"side\",\"conflicts\":[\"f.txt\"],\"conflict_details\":[{\"path\":\"f.txt\",\"kind\":\"content\"}]}\n",
     "stderr": ""
   },
   "markdown": {

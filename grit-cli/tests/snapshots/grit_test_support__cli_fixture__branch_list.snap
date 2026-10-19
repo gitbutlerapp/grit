@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"list\",\n  \"current\": \"main\",\n  \"branches\": [\n    {\n      \"name\": \"feature\",\n      \"current\": false\n    },\n    {\n      \"name\": \"main\",\n      \"current\": true\n    }\n  ]\n}\n",
+    "stdout": "{\"action\":\"list\",\"current\":\"main\",\"branches\":[{\"name\":\"feature\",\"current\":false},{\"name\":\"main\",\"current\":true}]}\n",
     "stderr": ""
   },
   "markdown": {

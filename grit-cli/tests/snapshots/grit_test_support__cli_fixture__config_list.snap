@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"list\",\n  \"entries\": [\n    {\n      \"key\": \"core.repositoryformatversion\",\n      \"value\": \"0\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"core.filemode\",\n      \"value\": \"true\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"core.bare\",\n      \"value\": \"false\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"core.logallrefupdates\",\n      \"value\": \"true\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    },\n    {\n      \"key\": \"user.email\",\n      \"value\": \"snap@example.com\",\n      \"scope\": \"local\",\n      \"file\": \"[REPO]/.git/config\"\n    }\n  ]\n}\n",
+    "stdout": "{\"action\":\"list\",\"entries\":[{\"key\":\"core.repositoryformatversion\",\"value\":\"0\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.filemode\",\"value\":\"true\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.bare\",\"value\":\"false\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.logallrefupdates\",\"value\":\"true\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"user.email\",\"value\":\"snap@example.com\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"}]}\n",
     "stderr": ""
   },
   "markdown": {

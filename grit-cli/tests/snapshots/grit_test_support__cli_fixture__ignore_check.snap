@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"any_ignored\": true,\n  \"entries\": [\n    {\n      \"path\": \"noise.log\",\n      \"ignored\": true,\n      \"matched\": {\n        \"source\": {\n          \"kind\": \"per_directory\",\n          \"path\": \".gitignore\"\n        },\n        \"line_number\": 1,\n        \"pattern_text\": \"*.log\",\n        \"negative\": false\n      }\n    }\n  ]\n}\n",
+    "stdout": "{\"any_ignored\":true,\"entries\":[{\"path\":\"noise.log\",\"ignored\":true,\"matched\":{\"source\":{\"kind\":\"per_directory\",\"path\":\".gitignore\"},\"line_number\":1,\"pattern_text\":\"*.log\",\"negative\":false}}]}\n",
     "stderr": ""
   },
   "markdown": {

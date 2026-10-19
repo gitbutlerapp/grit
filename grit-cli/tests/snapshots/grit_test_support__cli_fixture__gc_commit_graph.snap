@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"dry_run\": false,\n  \"tasks\": [\n    {\n      \"task\": \"commit-graph\",\n      \"duration_ms\": 0,\n      \"commit_count\": 2,\n      \"path\": \"[REPO]/.git/objects/info/commit-graph\",\n      \"removed_chain\": false\n    }\n  ]\n}\n",
+    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"commit-graph\",\"duration_ms\": 0,\"commit_count\":2,\"path\":\"[REPO]/.git/objects/info/commit-graph\",\"removed_chain\":false}]}\n",
     "stderr": ""
   },
   "markdown": {

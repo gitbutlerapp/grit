@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"merge_bases\": [],\n  \"is_ancestor\": true\n}\n",
+    "stdout": "{\"merge_bases\":[],\"is_ancestor\":true}\n",
     "stderr": ""
   },
   "markdown": {

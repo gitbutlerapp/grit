@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"action\": \"unlock\",\n  \"path\": \"[REPO]/linked-wt\"\n}\n",
+    "stdout": "{\"action\":\"unlock\",\"path\":\"[REPO]/linked-wt\"}\n",
     "stderr": ""
   },
   "markdown": {

@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\n  \"results\": [\n    {\n      \"spec\": \"HEAD\",\n      \"oid\": \"b5ea30d\",\n      \"kind\": \"commit\",\n      \"size\": 201,\n      \"ref_name\": \"HEAD\"\n    }\n  ]\n}\n",
+    "stdout": "{\"results\":[{\"spec\":\"HEAD\",\"oid\":\"b5ea30d\",\"kind\":\"commit\",\"size\":201,\"ref_name\":\"HEAD\"}]}\n",
     "stderr": ""
   },
   "markdown": {
