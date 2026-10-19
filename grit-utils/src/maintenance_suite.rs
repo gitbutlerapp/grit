@@ -166,6 +166,7 @@ pub fn run_maintenance_suite(
     }
     std::fs::write(&marker, bare.display().to_string()).context("write maintenance bare marker")?;
     let worktree = prepare_gc_fixture(git, &bare)?;
+    write_gc_base_marker(git, &worktree)?;
     let mut scenarios = Vec::new();
     let prepare_kind = Some(PrepareKind::MaintenanceReset);
 
@@ -255,4 +256,42 @@ pub fn run_maintenance_suite(
         fixtures: vec![],
         scenarios,
     })
+}
+
+#[cfg(test)]
+mod prepare_tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn hyperfine_prepare_maintenance_succeeds_after_gc_base_marker() -> Result<()> {
+        let git = PathBuf::from("git");
+        let dir = tempfile::tempdir()?;
+        let bare = dir.path().join("remote.git");
+        Command::new(&git)
+            .args(["init", "--bare", "-q", bare.to_str().unwrap()])
+            .status()?;
+        let worktree = dir.path().join("wt");
+        Command::new(&git)
+            .args([
+                "clone",
+                "-q",
+                bare.to_str().unwrap(),
+                worktree.to_str().unwrap(),
+            ])
+            .status()?;
+        Command::new(&git)
+            .args(["commit", "--allow-empty", "-qm", "init"])
+            .current_dir(&worktree)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .status()?;
+        write_gc_base_marker(&git, &worktree)?;
+        std::env::set_var("GRIT_BENCH_MAINTENANCE_BARE", bare.to_str().unwrap());
+        run_prepare_maintenance(&git, Some(worktree.as_path()))?;
+        std::env::remove_var("GRIT_BENCH_MAINTENANCE_BARE");
+        Ok(())
+    }
 }

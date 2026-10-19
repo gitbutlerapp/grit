@@ -50,6 +50,20 @@ fn init_committed_repo(repo_dir: &Path) {
     git(repo_dir, &["status", "-s"]);
 }
 
+/// Second oracle repo: hardlink objects via `git clone --local` (same disk as one full seed).
+fn clone_committed_repo(source: &Path, dest: &Path) {
+    if dest.exists() {
+        fs::remove_dir_all(dest).expect("remove clone dest");
+    }
+    let parent = dest.parent().expect("clone dest parent");
+    let source_str = source.to_str().expect("source path utf-8");
+    let name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .expect("clone dest name");
+    git(parent, &["clone", "--local", "-q", source_str, name]);
+}
+
 fn remove_first_n_files(repo_dir: &Path, n: usize) {
     for i in 0..n {
         let _ = fs::remove_file(repo_dir.join(format!("f{i:06}.txt")));
@@ -63,22 +77,23 @@ fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
         "fixture must start at or above 80k entries"
     );
 
-    let grit_dir = tempfile::tempdir().expect("tempdir");
     let git_dir = tempfile::tempdir().expect("tempdir");
-    init_committed_repo(grit_dir.path());
     init_committed_repo(git_dir.path());
+    let grit_dir = tempfile::tempdir().expect("tempdir");
+    clone_committed_repo(git_dir.path(), &grit_dir.path().join("repo"));
+    let grit_root = grit_dir.path().join("repo");
 
-    let index_before = Index::load(&grit_dir.path().join(".git/index")).expect("load index");
+    let index_before = Index::load(&grit_root.join(".git/index")).expect("load index");
     assert!(
         index_before.entries().len() >= LARGE_THRESHOLD,
         "index at start: {}",
         index_before.entries().len()
     );
 
-    remove_first_n_files(grit_dir.path(), REMOVE);
+    remove_first_n_files(&grit_root, REMOVE);
     remove_first_n_files(git_dir.path(), REMOVE);
 
-    let grit = open_grit(grit_dir.path());
+    let grit = open_grit(&grit_root);
     let wt = grit.work_tree().expect("work tree");
     let campaign_thresholds = IndexStagingThresholds {
         large_index_restage: LARGE_THRESHOLD,
@@ -92,7 +107,7 @@ fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
         "defer must reflect entry count at start (>= {LARGE_THRESHOLD}), not after removals"
     );
 
-    let grit_index = fs::read(grit_dir.path().join(".git/index")).expect("grit index");
+    let grit_index = fs::read(grit_root.join(".git/index")).expect("grit index");
     let grit_parsed = Index::parse(&grit_index).expect("parse grit index");
     let final_count = grit_parsed.entries().len();
     assert_eq!(final_count, ENTRIES - REMOVE);
