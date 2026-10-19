@@ -77,6 +77,22 @@ fn root_public_module_count_within_budget() {
 }
 
 #[test]
+fn no_orphan_gitlinks_without_gitmodules() {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root");
+    let status = std::process::Command::new("python3")
+        .arg("scripts/check_gitlink_gitmodules.py")
+        .current_dir(workspace)
+        .status()
+        .expect("run check_gitlink_gitmodules.py");
+    assert!(
+        status.success(),
+        "every mode-160000 index entry must appear in .gitmodules"
+    );
+}
+
+#[test]
 fn no_noncanonical_grit_lib_imports() {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
