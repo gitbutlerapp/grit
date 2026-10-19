@@ -2104,7 +2104,6 @@ mod tests {
             }
             current = parent;
         }
-        eprintln!("Makefile bloom: yes={bloom_yes} no={bloom_no}");
         assert!(
             bloom_yes > bloom_no,
             "expected mostly bloom skips, yes={bloom_yes} no={bloom_no}"
