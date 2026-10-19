@@ -3855,6 +3855,10 @@ fn diff_index_to_worktree_inner(
     let mut stat_refresh_verified = vec![false; index.entries.len()];
     let paths_by_entry_index =
         crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
+    let scan_symlink_ancestors = config
+        .get_bool("core.symlinks")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
     // Parallel preload must lstat ancestor directories without following symlinks. When a
     // tracked directory is replaced by a symlink, indexed paths under it are deletions even if
     // the link target still holds a file at the same relative path with an unchanged stat.
@@ -3864,11 +3868,17 @@ fn diff_index_to_worktree_inner(
         blob_scan,
         &thread_policy,
         &config,
-        true,
+        scan_symlink_ancestors,
         dir_abs,
         file_abs,
         |rel_path| {
-            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+            scan_symlink_ancestors
+                && dir_symlinks.has_symlink_in_path(
+                    work_tree,
+                    rel_path,
+                    precompose_unicode,
+                    ignorecase,
+                )
         },
         |entry_index, path_str_ref, lookup| {
             if use_fsmonitor_stat_skip {
@@ -4787,17 +4797,27 @@ pub fn refresh_index_stat_content_verified_with_rules(
     let thread_policy = crate::parallel::ThreadPolicy::default();
     let paths_by_entry_index =
         crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
+    let scan_symlink_ancestors = config
+        .get_bool("core.symlinks")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
     for_each_blob_by_directory_parallel(
         &paths_by_entry_index,
         &blob_dirs,
         blob_scan,
         &thread_policy,
         &config,
-        true,
+        scan_symlink_ancestors,
         dir_abs,
         file_abs,
         |rel_path| {
-            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+            scan_symlink_ancestors
+                && dir_symlinks.has_symlink_in_path(
+                    work_tree,
+                    rel_path,
+                    precompose_unicode,
+                    ignorecase,
+                )
         },
         |entry_index, path_str_ref, lookup| {
             let BlobDiskLookup::Present(meta) = lookup else {

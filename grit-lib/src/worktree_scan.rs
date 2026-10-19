@@ -21,12 +21,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Minimum blob entries sharing a parent before `read_dir` amortizes separate stats.
-/// Deep trees often have one tracked file per leaf directory; `read_dir` still beats a
-/// separate stat per file when grouping parallel preload by directory.
-#[cfg(windows)]
-const READ_DIR_AMORTIZE_MIN: usize = 2;
-#[cfg(not(windows))]
-const READ_DIR_AMORTIZE_MIN: usize = 2;
+/// Deep trees often have one tracked file per leaf directory; one `read_dir` plus
+/// `DirEntry::metadata` per parent beats a full-path `symlink_metadata` per indexed file on
+/// large trees (issue #1231), including NTFS and deep Unix worktrees.
+const READ_DIR_AMORTIZE_MIN: usize = 1;
 
 /// Test hook: incremented once per worktree metadata syscall used by directory scans.
 static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0);
@@ -737,14 +735,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(seen, CHAINS);
-        assert_eq!(
-            worktree_read_dir_probe_count(),
-            0,
-            "single-blob parent dirs must not read_dir"
+        assert!(
+            worktree_read_dir_probe_count() >= CHAINS,
+            "deep leaf dirs should read_dir each parent (got {} read_dirs)",
+            worktree_read_dir_probe_count()
         );
         assert!(
             worktree_metadata_probe_count() <= CHAINS + 5,
-            "expected ~one stat per file, got {}",
+            "read_dir scan should stat via DirEntry metadata, got {}",
             worktree_metadata_probe_count()
         );
     }
