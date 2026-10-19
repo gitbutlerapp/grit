@@ -1410,6 +1410,9 @@ fn clear_worktree_path_before_restore(
 }
 
 fn restore_worktree_path(abs: &Path, saved: &WorktreePathSnapshot) -> std::io::Result<()> {
+    if !matches!(saved.kind, WorktreePathKind::Absent) {
+        clear_worktree_path_before_restore(abs, saved)?;
+    }
     match saved.kind {
         WorktreePathKind::Absent => Ok(()),
         WorktreePathKind::Directory => {
