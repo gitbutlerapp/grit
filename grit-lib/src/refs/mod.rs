@@ -4437,7 +4437,8 @@ mod pack_refs_tests {
         fs::create_dir_all(git_dir.join("refs/heads")).expect("refs/heads");
         let oid = ObjectId::from_hex("0000000000000000000000000000000000000001").expect("oid");
         fs::write(git_dir.join("refs/heads/keep"), format!("{oid}\n")).expect("loose ref");
-        fs::create_dir_all(git_dir.join("packed-refs")).expect("block packed-refs file");
+        fs::create_dir_all(store::paths::packed_refs_path(git_dir))
+            .expect("block packed-refs file");
         let err = write_packed_refs_file(
             git_dir,
             &[PackedRefRecord {
