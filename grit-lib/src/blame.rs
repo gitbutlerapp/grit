@@ -108,6 +108,23 @@ fn should_drop_tail_match_for_myers_blob(
         >= 2
 }
 
+/// True when every focused child line index lies in the unchanged prefix or suffix
+/// after affix trimming (middle xdiff can be skipped for those lines).
+fn child_lines_only_in_affix(
+    focus: &[usize],
+    new_len: usize,
+    prefix: usize,
+    suffix: usize,
+) -> bool {
+    if focus.is_empty() {
+        return false;
+    }
+    let suffix_start = new_len.saturating_sub(suffix);
+    focus
+        .iter()
+        .all(|&idx| idx < prefix || (suffix > 0 && idx >= suffix_start))
+}
+
 fn common_affix_trim_blob_lines(
     old: &BlobLines,
     new: &BlobLines,
@@ -167,6 +184,7 @@ fn build_line_map_with_changed_flags_owned(
     diff_algorithm: BlameDiffAlgorithm,
     indent_heuristic: bool,
     with_changed_flags: bool,
+    child_focus: Option<&[usize]>,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
     let (prefix, suffix, old_lo, old_hi, new_lo, new_hi) = common_affix_trim_blob_lines(old, new);
     let mut map = vec![None; new.len()];
@@ -185,13 +203,76 @@ fn build_line_map_with_changed_flags_owned(
             (map, Vec::new())
         };
     }
+    if child_focus.is_some_and(|focus| child_lines_only_in_affix(focus, new.len(), prefix, suffix))
+    {
+        return if with_changed_flags {
+            (map, vec![false; new.len()])
+        } else {
+            (map, Vec::new())
+        };
+    }
     let mut flags = if with_changed_flags {
         vec![false; new.len()]
     } else {
         Vec::new()
     };
-    let old_mid_refs: Vec<&str> = (old_lo..old_hi).map(|i| old.line(i)).collect();
-    let new_mid_refs: Vec<&str> = (new_lo..new_hi).map(|i| new.line(i)).collect();
+
+    let (old_mid_refs, new_mid_refs, mid_new_offset): (Vec<&str>, Vec<&str>, usize) =
+        if let Some(focus) = child_focus {
+            if !with_changed_flags
+                && old.len() == new.len()
+                && (old_hi - old_lo) == (new_hi - new_lo)
+                && !focus.is_empty()
+                && focus.len() * 8 < new_hi.saturating_sub(new_lo)
+            {
+                let mid_focus: Vec<usize> = focus
+                    .iter()
+                    .copied()
+                    .filter(|&idx| (new_lo..new_hi).contains(&idx))
+                    .collect();
+                if !mid_focus.is_empty() {
+                    let f_min = *mid_focus.iter().min().unwrap_or(&new_lo);
+                    let f_max = *mid_focus.iter().max().unwrap_or(&new_lo);
+                    const PAD: usize = 48;
+                    let w_lo = f_min.saturating_sub(PAD).max(new_lo);
+                    let w_hi = (f_max + 1 + PAD).min(new_hi);
+                    let delta = w_lo - new_lo;
+                    let old_w_lo = old_lo + delta;
+                    let old_w_hi = old_w_lo + (w_hi - w_lo);
+                    if old_w_hi <= old_hi {
+                        (
+                            (old_w_lo..old_w_hi).map(|i| old.line(i)).collect(),
+                            (w_lo..w_hi).map(|i| new.line(i)).collect(),
+                            w_lo,
+                        )
+                    } else {
+                        (
+                            (old_lo..old_hi).map(|i| old.line(i)).collect(),
+                            (new_lo..new_hi).map(|i| new.line(i)).collect(),
+                            new_lo,
+                        )
+                    }
+                } else {
+                    (
+                        (old_lo..old_hi).map(|i| old.line(i)).collect(),
+                        (new_lo..new_hi).map(|i| new.line(i)).collect(),
+                        new_lo,
+                    )
+                }
+            } else {
+                (
+                    (old_lo..old_hi).map(|i| old.line(i)).collect(),
+                    (new_lo..new_hi).map(|i| new.line(i)).collect(),
+                    new_lo,
+                )
+            }
+        } else {
+            (
+                (old_lo..old_hi).map(|i| old.line(i)).collect(),
+                (new_lo..new_hi).map(|i| new.line(i)).collect(),
+                new_lo,
+            )
+        };
     let ops = if diff_algorithm == BlameDiffAlgorithm::Myers {
         crate::diff::line_diff_ops_git_xdiff_compacted(
             &old_mid_refs,
@@ -208,13 +289,13 @@ fn build_line_map_with_changed_flags_owned(
     };
     let mid_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_mid_refs.len());
     for (j, parent) in mid_map.into_iter().enumerate() {
-        map[prefix + j] = parent.map(|idx| idx + prefix);
+        map[mid_new_offset + j] = parent.map(|idx| idx + (mid_new_offset - new_lo + old_lo));
     }
     if with_changed_flags {
         let mid_flags =
             crate::diff_indent_heuristic::new_line_changed_flags_from_ops(&ops, new_mid_refs.len());
         for (j, flag) in mid_flags.into_iter().enumerate() {
-            flags[prefix + j] = flag;
+            flags[mid_new_offset + j] = flag;
         }
         (map, flags)
     } else {
@@ -1524,6 +1605,7 @@ impl<'a> BlameSession<'a> {
         indent_heuristic: bool,
         is_ignored: bool,
         include_stop_blame: bool,
+        child_focus: Option<&[usize]>,
     ) -> PairMapCacheValue {
         let key = PairMapCacheKey {
             parent: parent_oid,
@@ -1537,8 +1619,10 @@ impl<'a> BlameSession<'a> {
             fuzzy: is_ignored,
             include_stop_blame,
         };
-        if let Some(maps) = self.pair_maps.get(&key) {
-            return maps.clone();
+        if child_focus.is_none() {
+            if let Some(maps) = self.pair_maps.get(&key) {
+                return maps.clone();
+            }
         }
 
         let identity_map = parent_oid == child_oid && par_lines.len() == cur_lines.len();
@@ -1554,6 +1638,7 @@ impl<'a> BlameSession<'a> {
                 diff_algorithm,
                 indent_heuristic,
                 true,
+                child_focus,
             )
         } else {
             (
@@ -1563,6 +1648,7 @@ impl<'a> BlameSession<'a> {
                     diff_algorithm,
                     indent_heuristic,
                     false,
+                    child_focus,
                 )
                 .0,
                 Vec::new(),
@@ -1605,7 +1691,9 @@ impl<'a> BlameSession<'a> {
             line_map: Arc::new(line_map),
             stop_blame_on_current: Arc::new(stop_blame_on_current),
         };
-        self.pair_maps.insert(key, value.clone());
+        if child_focus.is_none() {
+            self.pair_maps.insert(key, value.clone());
+        }
         value
     }
 }
@@ -2140,6 +2228,43 @@ fn compute_blame_with_session(
                 }
                 let pl_arc = session.load_blob_lines(blob, &current_path, mode)?;
                 let map_algo = diff_algorithm;
+                let mut next_remaining: Vec<TrackedLine> = Vec::new();
+                let mut need_diff_remaining: Vec<TrackedLine> = Vec::new();
+                for t in remaining {
+                    let idx = t.current_idx;
+                    if idx < pl_arc.len()
+                        && idx < line_count
+                        && pl_arc.line(idx) == cur_lines_arc.line(idx)
+                    {
+                        next_remaining.push(t);
+                    } else {
+                        need_diff_remaining.push(t);
+                    }
+                }
+                remaining = next_remaining;
+                if need_diff_remaining.is_empty() {
+                    let parent_line_count = pl_arc.len();
+                    session.merge_line_stamps[i].begin_pass(parent_line_count);
+                    for t in std::mem::take(&mut remaining) {
+                        let idx = t.current_idx;
+                        if idx < parent_line_count && session.merge_line_stamps[i].is_unused(idx) {
+                            session.merge_line_stamps[i].mark(idx);
+                            buckets[i].push(TrackedLine {
+                                final_lineno: t.final_lineno,
+                                current_idx: idx,
+                                ignored: t.ignored,
+                                source_path: t.source_path.clone(),
+                            });
+                        } else {
+                            remaining.push(t);
+                        }
+                    }
+                    par_lines_vec[i] = Some(pl_arc);
+                    maps[i] = Some(session.identity_line_map(line_count));
+                    continue;
+                }
+                let child_focus: Vec<usize> =
+                    need_diff_remaining.iter().map(|t| t.current_idx).collect();
                 let pair = session.parent_child_line_maps(
                     blob,
                     &current_path,
@@ -2153,6 +2278,7 @@ fn compute_blame_with_session(
                     indent_heuristic,
                     false,
                     false,
+                    Some(&child_focus),
                 );
                 par_lines_vec[i] = Some(pl_arc);
                 maps[i] = Some(pair.diff_line_map);
@@ -2170,7 +2296,7 @@ fn compute_blame_with_session(
                 };
                 let parent_line_count = par_lines.len();
                 session.merge_line_stamps[i].begin_pass(parent_line_count);
-                for t in remaining {
+                for t in need_diff_remaining {
                     let idx = t.current_idx;
                     let cur_line = Some(cur_lines_arc.line(idx));
                     let m = map.get(idx).copied().flatten();
@@ -2190,6 +2316,20 @@ fn compute_blame_with_session(
                         } else {
                             next_remaining.push(t);
                         }
+                    } else {
+                        next_remaining.push(t);
+                    }
+                }
+                for t in remaining {
+                    let idx = t.current_idx;
+                    if idx < parent_line_count && session.merge_line_stamps[i].is_unused(idx) {
+                        session.merge_line_stamps[i].mark(idx);
+                        buckets[i].push(TrackedLine {
+                            final_lineno: t.final_lineno,
+                            current_idx: idx,
+                            ignored: t.ignored,
+                            source_path: t.source_path.clone(),
+                        });
                     } else {
                         next_remaining.push(t);
                     }
@@ -2465,6 +2605,42 @@ fn compute_blame_with_session(
                 };
                 let par_lines_arc =
                     session.load_blob_lines(p_blob_oid, &parent_blob_path, p_blob_mode)?;
+                let mut still_pending = Vec::new();
+                let mut need_diff_pending = Vec::new();
+                if line_range.is_some() || cur_lines_arc.len() > 64 {
+                    for t in pending.drain(..) {
+                        let i = t.current_idx;
+                        if i < par_lines_arc.len()
+                            && i < cur_lines_arc.len()
+                            && par_lines_arc.line(i) == cur_lines_arc.line(i)
+                        {
+                            still_pending.push(TrackedLine {
+                                final_lineno: t.final_lineno,
+                                current_idx: i,
+                                ignored: t.ignored,
+                                source_path: t.source_path.clone(),
+                            });
+                        } else {
+                            need_diff_pending.push(t);
+                        }
+                    }
+                    if need_diff_pending.is_empty() {
+                        pending = still_pending;
+                        current_oid = parent_oid;
+                        current_blob_oid = p_blob_oid;
+                        current_blob_mode = p_blob_mode;
+                        walk_lines = Some((p_blob_oid, Arc::clone(&par_lines_arc)));
+                        if parent_blob_path != current_path {
+                            current_path = parent_blob_path;
+                            session.set_bloom_path(&current_path);
+                        }
+                        continue 'blame_loop;
+                    }
+                } else {
+                    need_diff_pending = std::mem::take(&mut pending);
+                }
+                let child_focus: Vec<usize> =
+                    need_diff_pending.iter().map(|t| t.current_idx).collect();
                 let maps = session.parent_child_line_maps(
                     p_blob_oid,
                     &parent_blob_path,
@@ -2478,6 +2654,7 @@ fn compute_blame_with_session(
                     indent_heuristic,
                     is_ignored,
                     true,
+                    Some(&child_focus),
                 );
                 let line_map = maps.line_map.as_slice();
                 let stop_blame_on_current = maps.stop_blame_on_current.as_slice();
@@ -2512,8 +2689,7 @@ fn compute_blame_with_session(
                     }
                 }
 
-                let mut still_pending = Vec::new();
-                for t in pending.drain(..) {
+                for t in need_diff_pending.drain(..) {
                     if t.current_idx < line_map.len() {
                         if let Some(parent_idx) = line_map[t.current_idx] {
                             if should_drop_tail_match_for_myers_blob(
@@ -3323,6 +3499,13 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn child_lines_only_in_affix_detects_prefix_and_suffix() {
+        assert!(child_lines_only_in_affix(&[0, 1, 2], 10, 3, 2));
+        assert!(child_lines_only_in_affix(&[8, 9], 10, 3, 2));
+        assert!(!child_lines_only_in_affix(&[5], 10, 3, 2));
+    }
+
     fn parse_diff_algorithm_name_known_and_unknown() {
         assert_eq!(
             parse_diff_algorithm_name("myers"),
