@@ -913,6 +913,31 @@ pub(crate) fn valid_cached_dir(ucd: &UntrackedCacheDir, abs: &Path, check_only: 
     stat_data_from_meta(&meta) == ucd.stat_data && ucd.check_only == check_only
 }
 
+/// Every `valid` node in the in-memory UNTR tree must still match on-disk stat data.
+fn cached_untr_tree_still_valid(work_tree: &Path, ucd: &UntrackedCacheDir, rel: &str) -> bool {
+    if ucd.valid {
+        let abs = if rel.is_empty() {
+            work_tree.to_path_buf()
+        } else {
+            work_tree.join(rel)
+        };
+        if !valid_cached_dir(ucd, &abs, ucd.check_only) {
+            return false;
+        }
+    }
+    for child in &ucd.dirs {
+        let child_rel = if rel.is_empty() {
+            child.name.clone()
+        } else {
+            format!("{rel}/{}", child.name)
+        };
+        if !cached_untr_tree_still_valid(work_tree, child, &child_rel) {
+            return false;
+        }
+    }
+    true
+}
+
 enum DirSource {
     Disk(fs::ReadDir),
     Cache {
@@ -943,6 +968,9 @@ pub fn try_untracked_from_valid_cache(
         return Ok(None);
     };
     if !valid_cached_dir(root, work_tree, false) {
+        return Ok(None);
+    }
+    if !cached_untr_tree_still_valid(work_tree, root, "") {
         return Ok(None);
     }
     let gitignore_gen = uc.gitignore_invalidated;

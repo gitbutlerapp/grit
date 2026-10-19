@@ -13,13 +13,14 @@ use grit_lib::index::untracked_cache::{
     refresh_untracked_cache_for_status, untracked_cache_ident, UntrackedCache,
     UntrackedIgnoredMode, DIR_HIDE_EMPTY_DIRECTORIES, DIR_SHOW_OTHER_DIRECTORIES,
 };
+use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 use support::{
     append_git_config, entry_from_worktree_path, extension_payload, fsck_strict, git,
-    git_porcelain_untracked, git_status_porcelain_normal_with_trace,
+    git_porcelain_untracked, git_status_porcelain_normal, git_status_porcelain_normal_with_trace,
     git_update_index_untracked_cache, read_index_bytes, trace2_read_directory_counter,
 };
 
@@ -37,6 +38,51 @@ fn grit_untracked_paths(repo: &Repository) -> Vec<String> {
     };
     let model = status(repo, &opts, &mut NullProgress).expect("status");
     model.untracked
+}
+
+fn grit_untracked_paths_normal(repo: &Repository) -> Vec<String> {
+    let opts = StatusOptions {
+        untracked: UntrackedMode::Normal,
+        ..StatusOptions::default()
+    };
+    let model = status(repo, &opts, &mut NullProgress).expect("status");
+    model.untracked
+}
+
+#[test]
+fn issue_1227_new_file_in_git_warmed_cached_dir() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo(root);
+    fs::create_dir(root.join("d")).expect("mkdir");
+    fs::write(root.join("d/a.txt"), "1\n").expect("write");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "one"]);
+    git_update_index_untracked_cache(root);
+    git_status_porcelain_normal(root);
+    git_status_porcelain_normal(root);
+
+    fs::write(root.join("d/new.txt"), "new\n").expect("write new");
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let grit_paths = grit_untracked_paths_normal(&repo);
+    let git_paths = git_porcelain_untracked(root);
+    assert!(
+        git_paths.iter().any(|p| p == "d/new.txt"),
+        "fixture must list d/new.txt as untracked"
+    );
+    assert_eq!(
+        BTreeSet::from_iter(grit_paths),
+        BTreeSet::from_iter(git_paths),
+        "normal untracked mode must see new file under git-warmed UNTR dir"
+    );
+
+    let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage for commit");
+    assert!(
+        outcome.added >= 1,
+        "commit staging must include new untracked file, got {outcome:?}"
+    );
+    fsck_strict(root);
 }
 
 #[test]
