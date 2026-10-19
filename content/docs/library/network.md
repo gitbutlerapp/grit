@@ -26,7 +26,7 @@ Local paths resolve through [`resolve_local_remote_git_dir`](rustdoc:grit_lib::r
 
 [`Remote::fetch`](rustdoc:grit_lib::remote::Remote) accepts [`FetchOptions`](rustdoc:grit_lib::remote::transfer::FetchOptions) and a [`Progress`](rustdoc:grit_lib::remote::fetch::Progress) sink; fetch negotiates protocol v2 when the server supports it. [`Remote::push`](rustdoc:grit_lib::remote::Remote) uses [`PushRefSpec`](rustdoc:grit_lib::remote::transfer::PushRefSpec) and returns [`PushOutcome`](rustdoc:grit_lib::remote::transfer::PushOutcome).
 
-HTTP remotes need an [`HttpClient`](rustdoc:grit_lib::remote::transport::http::HttpClient). Implement [`HttpClientFactory`](rustdoc:grit_lib::remote::HttpClientFactory) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider)).
+HTTP remotes need an [`HttpClient`](rustdoc:grit_lib::remote::transport::http::HttpClient). Implement [`HttpClientFactory`](rustdoc:grit_lib::remote::HttpClientFactory) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider)). The `grit` binary on macOS enables `http-ureq-native-tls` (Secure Transport) for HTTPS throughput; other platforms use rustls unless you opt into `http-ureq-native-tls` when depending on `grit-lib`.
 
 ## Credentials and progress
 

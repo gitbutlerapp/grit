@@ -30,7 +30,7 @@ regex = "1"
 unicode-width = "0.2"
 libc = "0.2"
 hungarian = "1.1.1"
-ureq = "3.3"
+ureq = { version = "3.3", default-features = false }
 url = "2.5"
 base64 = "0.22"
 crc32fast = "1.5.0"

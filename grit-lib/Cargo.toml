@@ -28,7 +28,9 @@ bare_urls = "deny"
 # Provides the default `ureq`-backed `HttpClient` for the smart-HTTP transport
 # (`transport::http::ureq_client`). Off by default so embedders can bring their
 # own HTTP stack.
-http-ureq = ["dep:ureq", "dep:base64"]
+http-ureq = ["dep:ureq", "dep:base64", "ureq?/rustls"]
+# Use the platform TLS stack (Secure Transport on macOS) instead of rustls.
+http-ureq-native-tls = ["http-ureq", "ureq?/native-tls"]
 # Internal helpers for Criterion benches (EWAH); omitted from the public API snapshot.
 unstable-bench-helpers = []
 
@@ -54,7 +56,7 @@ filetime.workspace = true
 shell-words.workspace = true
 
 # Optional: the default `ureq`-backed HTTP client (feature `http-ureq`).
-ureq = { workspace = true, optional = true }
+ureq = { workspace = true, optional = true, default-features = false, features = ["gzip"] }
 base64 = { workspace = true, optional = true }
 crc32fast.workspace = true
 memmap2.workspace = true
@@ -104,6 +106,11 @@ harness = false
 [[bench]]
 name = "index_pack_resolve"
 harness = false
+
+[[bench]]
+name = "pack_sideband"
+harness = false
+required-features = ["unstable-bench-helpers"]
 
 [[bench]]
 name = "repack"
