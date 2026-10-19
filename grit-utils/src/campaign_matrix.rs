@@ -352,6 +352,12 @@ pub fn run_fixture_cli_matrix(
         }
     }
 
+    if !smoke && fixture.id == "git-dot-git" {
+        append_git_dot_git_path_limited_rev_scenarios(
+            hyperfine, git, grit, cfg, fixture, &mut out,
+        )?;
+    }
+
     if !smoke {
         let blame_path = blame_target_path(git, &fixture.worktree)?;
         out.push(run_matrix_scenario(
@@ -1060,6 +1066,73 @@ fn merge_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
             meta.topic_branch.clone(),
         ],
     )
+}
+
+fn append_git_dot_git_path_limited_rev_scenarios(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    out: &mut Vec<ScenarioResult>,
+) -> Result<()> {
+    let rows: [(&str, &str, Vec<&str>, Vec<&str>); 3] = [
+        (
+            "revs-path-builtin-add-c",
+            "path-limited revs HEAD -- builtin/add.c (issue #1159)",
+            vec!["revs", "HEAD", "--", "builtin/add.c"],
+            vec!["log", "--format=%H", "--", "builtin/add.c"],
+        ),
+        (
+            "log-path-doc-git-add-limit50",
+            "path-limited log --limit 50 -- Documentation/git-add.txt (#1159)",
+            vec![
+                "log",
+                "--limit",
+                "50",
+                "--json",
+                "--",
+                "Documentation/git-add.txt",
+            ],
+            vec![
+                "log",
+                "-n",
+                "50",
+                "--format=%H",
+                "--",
+                "Documentation/git-add.txt",
+            ],
+        ),
+        (
+            "revs-path-documentation",
+            "path-limited revs HEAD -- Documentation (#1159)",
+            vec!["revs", "HEAD", "--", "Documentation"],
+            vec!["log", "--format=%H", "--", "Documentation"],
+        ),
+    ];
+    for (suffix, description, grit_argv, git_argv) in rows {
+        out.push(run_matrix_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, suffix),
+                group: "history".into(),
+                fixture: fixture.label.clone(),
+                description: description.into(),
+                grit_argv: grit_argv.into_iter().map(String::from).collect(),
+                git_argv: git_argv.into_iter().map(String::from).collect(),
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+            false,
+        )?);
+    }
+    Ok(())
 }
 
 struct CampaignCwdGuard;

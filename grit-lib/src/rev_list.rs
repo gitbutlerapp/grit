@@ -10,7 +10,6 @@ use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips};
@@ -4850,13 +4849,108 @@ struct DenseBloomCtx<'a> {
     cwd: Option<&'a str>,
 }
 
-/// Memo for literal-path tree-same results during one dense path-limited walk.
+/// Memo for literal-path tree-same results and bounded `(tree, component) → child` lookups.
 #[derive(Default)]
 struct DenseWalkCache {
     literal_tree_diff: HashMap<(ObjectId, ObjectId, u64), bool>,
+    component_child: HashMap<(ObjectId, Arc<str>, bool), CachedTreeChild>,
+    /// FIFO eviction order; stale keys are skipped when popping (O(1) insert, no scan on hit).
+    component_evict_order: VecDeque<(ObjectId, Arc<str>, bool)>,
+    component_hits: u64,
+    component_misses: u64,
+    tree_reads: u64,
 }
 
 const LITERAL_TREE_DIFF_CAP: usize = 4096;
+const COMPONENT_CACHE_MAX_ENTRIES: usize = 512 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CachedTreeChild {
+    Found { oid: ObjectId, mode: u32 },
+    Missing,
+}
+
+impl DenseWalkCache {
+    #[cfg(test)]
+    fn component_cache_hits(&self) -> u64 {
+        self.component_hits
+    }
+
+    #[cfg(test)]
+    fn component_cache_misses(&self) -> u64 {
+        self.component_misses
+    }
+
+    #[cfg(test)]
+    fn component_tree_reads(&self) -> u64 {
+        self.tree_reads
+    }
+
+    fn insert_component(
+        &mut self,
+        tree: ObjectId,
+        component: Arc<str>,
+        as_tree: bool,
+        value: CachedTreeChild,
+    ) {
+        let key = (tree, Arc::clone(&component), as_tree);
+        if let Some(slot) = self.component_child.get_mut(&key) {
+            *slot = value;
+            return;
+        }
+        while self.component_child.len() >= COMPONENT_CACHE_MAX_ENTRIES {
+            let Some(evict) = self.component_evict_order.pop_front() else {
+                break;
+            };
+            self.component_child.remove(&evict);
+        }
+        self.component_child.insert(key.clone(), value);
+        self.component_evict_order.push_back(key);
+    }
+
+    /// Resolve one path component under `tree` using Git tree directory ordering when `as_tree`.
+    fn lookup_tree_component(
+        &mut self,
+        repo: &Repository,
+        tree: ObjectId,
+        component: &str,
+        as_tree: bool,
+    ) -> Result<CachedTreeChild> {
+        let key_name: Arc<str> = Arc::from(component);
+        let key = (tree, Arc::clone(&key_name), as_tree);
+        if let Some(cached) = self.component_child.get(&key).copied() {
+            self.component_hits += 1;
+            return Ok(cached);
+        }
+        self.component_misses += 1;
+        self.tree_reads += 1;
+        let entries = read_parsed_tree(repo, tree)?;
+        let resolved = match tree_entry_by_name(&entries, component, as_tree) {
+            Some(entry) => CachedTreeChild::Found {
+                oid: entry.oid,
+                mode: entry.mode,
+            },
+            None => CachedTreeChild::Missing,
+        };
+        self.insert_component(tree, key_name, as_tree, resolved);
+        Ok(resolved)
+    }
+
+    fn lookup_tree_component_dir_or_file(
+        &mut self,
+        repo: &Repository,
+        tree: ObjectId,
+        component: &str,
+    ) -> Result<CachedTreeChild> {
+        let as_dir = self.lookup_tree_component(repo, tree, component, true)?;
+        if let CachedTreeChild::Found { mode, .. } = as_dir {
+            if is_tree_mode(mode) {
+                return Ok(as_dir);
+            }
+        }
+        self.lookup_tree_component(repo, tree, component, false)
+    }
+}
 
 fn literal_path_hash(path: &str) -> u64 {
     use std::collections::hash_map::DefaultHasher;
@@ -4879,27 +4973,6 @@ fn record_literal_tree_diff(
     cache
         .literal_tree_diff
         .insert((old, new, literal_path_hash(path)), differs);
-}
-
-/// Trees read while comparing one literal path between two commit trees (bounded, per call).
-#[derive(Default)]
-struct LiteralPathTreeCache {
-    trees: HashMap<ObjectId, Rc<Vec<crate::objects::TreeEntry>>>,
-}
-
-impl LiteralPathTreeCache {
-    fn read_parsed_tree(
-        &mut self,
-        repo: &Repository,
-        tree_oid: ObjectId,
-    ) -> Result<Rc<Vec<crate::objects::TreeEntry>>> {
-        if let Some(entries) = self.trees.get(&tree_oid) {
-            return Ok(Rc::clone(entries));
-        }
-        let entries = Rc::new(read_parsed_tree(repo, tree_oid)?);
-        self.trees.insert(tree_oid, Rc::clone(&entries));
-        Ok(entries)
-    }
 }
 
 /// Plain normalized literal pathspec safe for [`trees_differ_at_literal_path`].
@@ -5044,7 +5117,7 @@ fn dense_path_limited_action(
     let parents = graph.parents_of(oid)?;
 
     if parents.is_empty() {
-        let visible = sparse || tree_has_pathspec_match_cached(repo, commit_tree, "", paths)?;
+        let visible = sparse || tree_has_pathspec_match(repo, commit_tree, "", paths)?;
         return Ok(DensePathAction {
             visible,
             parents_to_walk: Vec::new(),
@@ -5220,7 +5293,7 @@ fn tree_has_pathspec_match(
     prefix: &str,
     pathspecs: &[String],
 ) -> Result<bool> {
-    tree_has_pathspec_match_cached(repo, tree_oid, prefix, pathspecs)
+    tree_has_pathspec_match_cached(repo, tree_oid, prefix, pathspecs, None)
 }
 
 fn tree_has_pathspec_match_cached(
@@ -5228,6 +5301,7 @@ fn tree_has_pathspec_match_cached(
     tree_oid: ObjectId,
     prefix: &str,
     pathspecs: &[String],
+    _cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     let entries = read_parsed_tree(repo, tree_oid)?;
     for entry in &entries {
@@ -5243,7 +5317,7 @@ fn tree_has_pathspec_match_cached(
         }
         if is_tree
             && crate::pathspec::pathspec_wants_descent_for_rev_tree(&path, pathspecs)
-            && tree_has_pathspec_match_cached(repo, entry.oid, &path, pathspecs)?
+            && tree_has_pathspec_match_cached(repo, entry.oid, &path, pathspecs, None)?
         {
             return Ok(true);
         }
@@ -5281,7 +5355,12 @@ fn trees_differ_for_pathspecs_optional(
 ) -> Result<bool> {
     if prefix.is_empty() && pathspecs.len() == 1 {
         if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
-            return trees_differ_at_literal_path(repo, old_tree, new_tree, &literal, cache);
+            let mut local = DenseWalkCache::default();
+            let walk_cache = match cache {
+                Some(c) => c,
+                None => &mut local,
+            };
+            return trees_differ_at_literal_path(repo, old_tree, new_tree, &literal, walk_cache);
         }
     }
     match (old_tree, new_tree) {
@@ -5325,7 +5404,9 @@ fn trees_differ_tree_entries(
                         let path = format_path_for_tree_diff(prefix, &name);
                         if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
                             if is_tree_mode(o.mode) {
-                                if tree_has_pathspec_match_cached(repo, o.oid, &path, pathspecs)? {
+                                if tree_has_pathspec_match_cached(
+                                    repo, o.oid, &path, pathspecs, None,
+                                )? {
                                     return Ok(true);
                                 }
                             } else {
@@ -5339,7 +5420,9 @@ fn trees_differ_tree_entries(
                         let path = format_path_for_tree_diff(prefix, &name);
                         if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
                             if is_tree_mode(n.mode) {
-                                if tree_has_pathspec_match_cached(repo, n.oid, &path, pathspecs)? {
+                                if tree_has_pathspec_match_cached(
+                                    repo, n.oid, &path, pathspecs, None,
+                                )? {
                                     return Ok(true);
                                 }
                             } else {
@@ -5399,7 +5482,7 @@ fn trees_differ_tree_entries(
                 let path = format_path_for_tree_diff(prefix, &name);
                 if pathspec_entry_is_relevant(&path, is_tree_mode(o.mode), pathspecs) {
                     if is_tree_mode(o.mode) {
-                        if tree_has_pathspec_match_cached(repo, o.oid, &path, pathspecs)? {
+                        if tree_has_pathspec_match_cached(repo, o.oid, &path, pathspecs, None)? {
                             return Ok(true);
                         }
                     } else {
@@ -5413,7 +5496,7 @@ fn trees_differ_tree_entries(
                 let path = format_path_for_tree_diff(prefix, &name);
                 if pathspec_entry_is_relevant(&path, is_tree_mode(n.mode), pathspecs) {
                     if is_tree_mode(n.mode) {
-                        if tree_has_pathspec_match_cached(repo, n.oid, &path, pathspecs)? {
+                        if tree_has_pathspec_match_cached(repo, n.oid, &path, pathspecs, None)? {
                             return Ok(true);
                         }
                     } else {
@@ -5455,38 +5538,25 @@ fn tree_entry_by_name<'a>(
     })
 }
 
-/// Lookup a tree entry by name, trying directory ordering first then file ordering.
-fn tree_entry_by_name_dir_or_file<'a>(
-    entries: &'a [crate::objects::TreeEntry],
-    name: &str,
-) -> Option<&'a crate::objects::TreeEntry> {
-    if let Some(entry) = tree_entry_by_name(entries, name, true) {
-        if is_tree_mode(entry.mode) {
-            return Some(entry);
-        }
-    }
-    tree_entry_by_name(entries, name, false)
-}
-
 fn tree_oid_at_literal_prefix(
     repo: &Repository,
     tree: ObjectId,
     components: &[&str],
-    trees: &mut LiteralPathTreeCache,
+    cache: &mut DenseWalkCache,
 ) -> Result<Option<ObjectId>> {
     if components.is_empty() {
         return Ok(Some(tree));
     }
     let mut current = tree;
     for &part in components {
-        let entries = trees.read_parsed_tree(repo, current)?;
-        let Some(entry) = tree_entry_by_name(entries.as_ref(), part, true) else {
+        let child = cache.lookup_tree_component(repo, current, part, true)?;
+        let CachedTreeChild::Found { oid, mode } = child else {
             return Ok(None);
         };
-        if !is_tree_mode(entry.mode) {
+        if !is_tree_mode(mode) {
             return Ok(None);
         }
-        current = entry.oid;
+        current = oid;
     }
     Ok(Some(current))
 }
@@ -5496,7 +5566,7 @@ fn trees_differ_at_literal_path(
     old_tree: Option<ObjectId>,
     new_tree: Option<ObjectId>,
     path: &str,
-    diff_cache: Option<&mut DenseWalkCache>,
+    cache: &mut DenseWalkCache,
 ) -> Result<bool> {
     match (old_tree, new_tree) {
         (None, None) => Ok(false),
@@ -5507,10 +5577,8 @@ fn trees_differ_at_literal_path(
                 if old == new {
                     return Ok(false);
                 }
-                if let Some(cache) = diff_cache.as_ref() {
-                    if let Some(&differs) = cache.literal_tree_diff.get(&(old, new, path_hash)) {
-                        return Ok(differs);
-                    }
+                if let Some(&differs) = cache.literal_tree_diff.get(&(old, new, path_hash)) {
+                    return Ok(differs);
                 }
             }
             let path_trimmed = path.trim_end_matches('/');
@@ -5520,47 +5588,37 @@ fn trees_differ_at_literal_path(
             }
             let (dir, leaf) = parts.split_at(parts.len().saturating_sub(1));
             let leaf = leaf[0];
-            let mut trees = LiteralPathTreeCache::default();
             let (old_dir, new_dir) = match (old_o, new_o) {
                 (Some(old), Some(new)) => (
-                    tree_oid_at_literal_prefix(repo, old, dir, &mut trees)?,
-                    tree_oid_at_literal_prefix(repo, new, dir, &mut trees)?,
+                    tree_oid_at_literal_prefix(repo, old, dir, cache)?,
+                    tree_oid_at_literal_prefix(repo, new, dir, cache)?,
                 ),
-                (Some(old), None) => (
-                    tree_oid_at_literal_prefix(repo, old, dir, &mut trees)?,
-                    None,
-                ),
-                (None, Some(new)) => (
-                    None,
-                    tree_oid_at_literal_prefix(repo, new, dir, &mut trees)?,
-                ),
+                (Some(old), None) => (tree_oid_at_literal_prefix(repo, old, dir, cache)?, None),
+                (None, Some(new)) => (None, tree_oid_at_literal_prefix(repo, new, dir, cache)?),
                 (None, None) => (None, None),
             };
-            let read_dir = |tree: Option<ObjectId>,
-                            trees: &mut LiteralPathTreeCache|
-             -> Result<Rc<Vec<crate::objects::TreeEntry>>> {
-                match tree {
-                    Some(oid) => trees.read_parsed_tree(repo, oid),
-                    None => Ok(Rc::new(Vec::new())),
+            let leaf_entry = |tree: Option<ObjectId>,
+                              cache: &mut DenseWalkCache|
+             -> Result<Option<(ObjectId, u32)>> {
+                let Some(oid) = tree else {
+                    return Ok(None);
+                };
+                match cache.lookup_tree_component_dir_or_file(repo, oid, leaf)? {
+                    CachedTreeChild::Found { oid, mode } => Ok(Some((oid, mode))),
+                    CachedTreeChild::Missing => Ok(None),
                 }
             };
-            let old_entries = read_dir(old_dir, &mut trees)?;
-            let new_entries = read_dir(new_dir, &mut trees)?;
-            // Leaf may be a file (d1/f3.txt) or directory (outer/inner, outer/inner/); Git
-            // tree ordering differs for the two, so try directory key first then file.
-            let old_ent = tree_entry_by_name_dir_or_file(old_entries.as_ref(), leaf);
-            let new_ent = tree_entry_by_name_dir_or_file(new_entries.as_ref(), leaf);
+            let old_ent = leaf_entry(old_dir, cache)?;
+            let new_ent = leaf_entry(new_dir, cache)?;
             let differs = match (old_ent, new_ent) {
                 (None, None) => false,
                 (None, Some(_)) | (Some(_), None) => true,
-                (Some(o), Some(n)) => {
-                    o.oid != n.oid || canon_tree_mode(o.mode) != canon_tree_mode(n.mode)
+                (Some((o_oid, o_mode)), Some((n_oid, n_mode))) => {
+                    o_oid != n_oid || canon_tree_mode(o_mode) != canon_tree_mode(n_mode)
                 }
             };
             if let (Some(old), Some(new)) = (old_o, new_o) {
-                if let Some(cache) = diff_cache {
-                    record_literal_tree_diff(cache, old, new, path, differs);
-                }
+                record_literal_tree_diff(cache, old, new, path, differs);
             }
             Ok(differs)
         }
@@ -6508,6 +6566,12 @@ impl<'r> CommitGraph<'r> {
         if let Some(tree) = self.commit_trees.get(&oid).copied() {
             return Ok(tree);
         }
+        if let Some(chain) = &self.graph_chain {
+            if let Some(tree) = chain.graph_commit_tree(&oid) {
+                self.commit_trees.insert(oid, tree);
+                return Ok(tree);
+            }
+        }
         self.populate(oid)?;
         if let Some(tree) = self.commit_trees.get(&oid).copied() {
             return Ok(tree);
@@ -6577,6 +6641,9 @@ impl<'r> CommitGraph<'r> {
                 }
                 if self.first_parent_only && parents.len() > 1 {
                     parents.truncate(1);
+                }
+                if let Some(tree) = chain.graph_commit_tree(&oid) {
+                    self.commit_trees.insert(oid, tree);
                 }
                 self.committer_time.insert(oid, ctime);
                 self.parents.insert(oid, parents);
@@ -10357,6 +10424,67 @@ mod line_coverage_tests {
             0,
             "commit-graph count path must not parse commit objects"
         );
+        Ok(())
+    }
+
+    fn write_flat_tree(odb: &crate::odb::Odb, entries: &[(u32, &str, ObjectId)]) -> ObjectId {
+        let mut body = Vec::new();
+        for (mode, name, oid) in entries {
+            body.extend_from_slice(format!("{mode:o} {name}\0").as_bytes());
+            body.extend_from_slice(oid.as_bytes());
+        }
+        odb.write(ObjectKind::Tree, &body).expect("tree")
+    }
+
+    #[test]
+    fn dense_walk_component_cache_survives_wide_tree() -> Result<()> {
+        let dir = tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                initial_branch: "main".into(),
+                ref_storage: RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty())
+            .expect("open");
+
+        let mut sorted: Vec<(String, ObjectId)> = (0..70)
+            .map(|i| {
+                let blob = repo
+                    .odb()
+                    .write(ObjectKind::Blob, format!("blob{i}").as_bytes())
+                    .expect("blob");
+                (format!("f{i:02}"), blob)
+            })
+            .collect();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        let flat: Vec<(u32, &str, ObjectId)> = sorted
+            .iter()
+            .map(|(name, oid)| (0o100644, name.as_str(), *oid))
+            .collect();
+        assert!(
+            flat.len() > 64,
+            "fixture must exceed old narrow-tree cutoff"
+        );
+        let tree = write_flat_tree(&repo.odb(), &flat);
+
+        let mut cache = DenseWalkCache::default();
+        let first = cache.lookup_tree_component(&repo, tree, "f42", false)?;
+        assert!(matches!(first, CachedTreeChild::Found { .. }));
+        assert_eq!(cache.component_cache_misses(), 1);
+        assert_eq!(cache.component_cache_hits(), 0);
+        assert_eq!(cache.component_tree_reads(), 1);
+
+        let second = cache.lookup_tree_component(&repo, tree, "f42", false)?;
+        assert!(matches!(second, CachedTreeChild::Found { .. }));
+        assert_eq!(cache.component_cache_hits(), 1);
+        assert_eq!(cache.component_cache_misses(), 1);
+        assert_eq!(cache.component_tree_reads(), 1);
+
         Ok(())
     }
 }
