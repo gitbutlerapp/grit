@@ -11419,8 +11419,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefUpdateFl
 pub struct grit_lib::refs::store::ReflogUpdate
 pub grit_lib::refs::store::ReflogUpdate::identity: alloc::string::String
 pub grit_lib::refs::store::ReflogUpdate::message: alloc::string::String
-pub grit_lib::refs::store::ReflogUpdate::old_oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::ReflogUpdate::new_oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::refs::store::ReflogUpdate::old_oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::ReflogUpdate::time: time::offset_date_time::OffsetDateTime
 impl core::clone::Clone for grit_lib::refs::store::ReflogUpdate
 pub fn grit_lib::refs::store::ReflogUpdate::clone(&self) -> Self
