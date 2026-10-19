@@ -30,7 +30,9 @@ use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
-use grit_lib::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository;
+use grit_lib::porcelain::pathspec_match::{
+    ensure_pathspec_matches_known_in_repository, pathspec_matches_known_in_repository,
+};
 use grit_lib::revwalk::merge_base::merge_base_for_diff_two_commits;
 use grit_lib::revwalk::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_revision_for_range_end,
@@ -481,6 +483,27 @@ fn token_is_diff_revision(repo: &grit_lib::repo::Repository, token: &str) -> boo
         || parse_commit_range(repo, token).ok().flatten().is_some()
 }
 
+/// Whether `token` names a path in the index, `HEAD`, or worktree (for `commit path` disambiguation).
+fn token_is_known_worktree_pathspec(repo: &grit_lib::repo::Repository, token: &str) -> bool {
+    let Some(work_tree) = repo.work_tree() else {
+        return false;
+    };
+    let Ok(cwd) = std::env::current_dir() else {
+        return false;
+    };
+    let prefix = pathdiff(&cwd, work_tree);
+    let Ok(resolved) = resolve_pathspec_in_worktree_with_git_dir(
+        token,
+        token,
+        work_tree,
+        prefix.as_deref(),
+        Some(repo.git_dir()),
+    ) else {
+        return false;
+    };
+    pathspec_matches_known_in_repository(repo, &resolved).unwrap_or(false)
+}
+
 /// When a path is given without `--`, clap may place it in `commits`; move non-revisions to paths.
 fn disambiguate_diff_revision_and_paths(
     repo: &grit_lib::repo::Repository,
@@ -491,20 +514,13 @@ fn disambiguate_diff_revision_and_paths(
         let first_rev = token_is_diff_revision(repo, &commits[0]);
         let second_rev = token_is_diff_revision(repo, &commits[1]);
         match (first_rev, second_rev) {
-            (true, false) => {
-                if let Some(path) = commits.pop() {
-                    paths.push(path);
-                }
-            }
-            (false, true) => {
-                paths.push(commits.remove(0));
-            }
-            (false, false) => {
+            (true, false) if token_is_known_worktree_pathspec(repo, &commits[1]) => {
                 if let Some(path) = commits.pop() {
                     paths.push(path);
                 }
             }
             (true, true) => {}
+            (true, false) | (false, true) | (false, false) => {}
         }
     } else if paths.is_empty() {
         while commits.len() >= 2 {
