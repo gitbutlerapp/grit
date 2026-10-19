@@ -730,6 +730,55 @@ impl Repository {
         )
     }
 
+    /// Repository-relative prefix of the process cwd for argv pathspecs (no trailing slash).
+    ///
+    /// Matches Git `GIT_PREFIX` / `pathdiff` semantics used by `git log --`, `git rev-list --`,
+    /// and `git blame` from a subdirectory.
+    #[must_use]
+    pub fn pathspec_cwd_prefix(&self) -> Option<&str> {
+        self.git_prefix.as_deref().filter(|p| !p.is_empty())
+    }
+
+    /// Resolve argv path operands for revision walks (`log`, `revs`, `rev-list`, …).
+    ///
+    /// Literal segments are interpreted relative to the process cwd under the work tree, like
+    /// `git diff --` and Git pathspec cwd rules. Exclude-only lists gain Git's implicit cwd
+    /// positive prefix when appropriate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::PathError`] when a pathspec resolves outside the work tree.
+    pub fn resolve_rev_walk_pathspecs(&self, paths: &[String]) -> Result<Vec<String>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let prefix = self.pathspec_cwd_prefix();
+        let cwd_for_implicit = prefix.map(str::to_owned);
+        let mut resolved = Vec::with_capacity(paths.len());
+        if let Some(wt) = self.work_tree() {
+            for pathspec in paths {
+                let spec = crate::pathspec::resolve_pathspec_in_worktree_with_git_dir(
+                    pathspec,
+                    pathspec,
+                    wt,
+                    prefix,
+                    Some(self.git_dir()),
+                )
+                .map_err(|e| Error::PathError(e.to_string()))?;
+                resolved.push(spec);
+            }
+        } else {
+            let root = self.git_dir();
+            for pathspec in paths {
+                resolved.push(crate::pathspec::resolve_pathspec(pathspec, root, prefix));
+            }
+        }
+        Ok(crate::pathspec::extend_pathspec_list_implicit_cwd(
+            &resolved,
+            cwd_for_implicit.as_deref(),
+        ))
+    }
+
     /// Absolute path to the git directory (`.git/` or bare repository root).
     #[must_use]
     pub fn git_dir(&self) -> &Path {

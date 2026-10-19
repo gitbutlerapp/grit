@@ -3,12 +3,23 @@
 mod support;
 
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::RevWalkListOptions;
 
 use support::{git, git_rev_list, open_grit_repo, HistoryRepo};
+
+fn open_grit_repo_from_cwd(worktree: &Path, cwd: &Path) -> Repository {
+    let mut env = Environment::empty();
+    env.cwd = cwd.to_path_buf();
+    let mut opts = RepositoryOptions::empty();
+    opts.environment = env;
+    Repository::discover(Some(worktree), &opts).expect("discover grit repo from cwd")
+}
 
 fn commit_tree_with_file(
     wt: &std::path::Path,
@@ -454,6 +465,110 @@ fn path_limited_dot_slash_file_and_dir_match_git() {
         assert_eq!(grit_count, git_count, "path {path:?}");
         assert_eq!(git_count, 2, "path {path:?}");
     }
+}
+
+#[test]
+fn path_limited_from_subdirectory_cwd_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(wt.join("sub")).expect("mkdir sub");
+    std::fs::create_dir_all(wt.join("other")).expect("mkdir other");
+    std::fs::write(wt.join("sub/f.txt"), "1\n").expect("write sub");
+    std::fs::write(wt.join("other/g.txt"), "1\n").expect("write other");
+    git(wt, &["add", "-A"]);
+    git(wt, &["commit", "-m", "one"]);
+    std::fs::write(wt.join("other/g.txt"), "2\n").expect("touch other");
+    git(wt, &["commit", "-am", "two"]);
+    std::fs::write(wt.join("sub/f.txt"), "2\n").expect("touch sub");
+    git(wt, &["commit", "-am", "three"]);
+
+    let sub = wt.join("sub");
+    let git_count_file = Command::new("git")
+        .current_dir(&sub)
+        .args(["rev-list", "--count", "HEAD", "--", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git rev-list")
+        .stdout;
+    let git_count_file: usize = String::from_utf8_lossy(&git_count_file)
+        .trim()
+        .parse()
+        .expect("git count f.txt");
+    assert_eq!(git_count_file, 2);
+
+    let git_count_dot = Command::new("git")
+        .current_dir(&sub)
+        .args(["rev-list", "--count", "HEAD", "--", "."])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git rev-list dot")
+        .stdout;
+    let git_count_dot: usize = String::from_utf8_lossy(&git_count_dot)
+        .trim()
+        .parse()
+        .expect("git count dot");
+    assert_eq!(git_count_dot, 2);
+
+    let repo = open_grit_repo_from_cwd(wt, &sub);
+    let grit_count_file = repo
+        .rev_walk()
+        .count(
+            &["HEAD"],
+            &RevWalkListOptions {
+                paths: vec!["f.txt".to_owned()],
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit count f.txt");
+    assert_eq!(grit_count_file, git_count_file);
+
+    let grit_count_dot = repo
+        .rev_walk()
+        .count(
+            &["HEAD"],
+            &RevWalkListOptions {
+                paths: vec![".".to_owned()],
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit count dot");
+    assert_eq!(grit_count_dot, git_count_dot);
+
+    let git_commits = Command::new("git")
+        .current_dir(&sub)
+        .args(["rev-list", "HEAD", "--", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git rev-list list")
+        .stdout;
+    let git_hex: Vec<String> = String::from_utf8_lossy(&git_commits)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+
+    let grit_commits = repo
+        .rev_walk()
+        .commits(
+            &["HEAD"],
+            &RevWalkListOptions {
+                paths: vec!["f.txt".to_owned()],
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit list");
+    assert_eq!(
+        grit_commits
+            .iter()
+            .map(ObjectId::to_hex)
+            .collect::<Vec<_>>(),
+        git_hex
+    );
 }
 
 #[test]

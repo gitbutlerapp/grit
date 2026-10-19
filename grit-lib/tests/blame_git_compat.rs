@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::blame::{blame_file, BlameOptions};
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
@@ -217,6 +217,31 @@ fn build_blame_fixture() -> (tempfile::TempDir, Repository, String) {
     let repo =
         Repository::discover(Some(&root), &RepositoryOptions::empty()).expect("open grit repo");
     (tmp, repo, mid)
+}
+
+#[test]
+fn blame_from_subdirectory_cwd_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::write(root.join("sub/f.txt"), "line one\n").unwrap();
+    git_run(root, &["add", "-A"]);
+    git_run(root, &["commit", "-m", "add sub file"]);
+    std::fs::write(root.join("sub/f.txt"), "line two\n").unwrap();
+    git_run(root, &["commit", "-am", "edit sub file"]);
+
+    let sub = root.join("sub");
+    let mut env = Environment::empty();
+    env.cwd = sub.clone();
+    let mut opts = RepositoryOptions::empty();
+    opts.environment = env;
+    let repo = Repository::discover(Some(root), &opts).expect("open grit repo from subdir cwd");
+
+    assert_blame_matches(&repo, &sub, "f.txt", None, None);
 }
 
 #[test]

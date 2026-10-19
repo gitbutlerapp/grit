@@ -91,21 +91,24 @@ fn symmetric_rev_list_specs(
 }
 
 fn rev_list_options_from_walk(
+    repo: &Repository,
     walk: &RevWalkListOptions,
     parsed: &RevWalkParsedSpecs,
     count: bool,
-) -> RevListOptions {
-    RevListOptions {
+) -> Result<RevListOptions> {
+    let paths = repo.resolve_rev_walk_pathspecs(&walk.paths)?;
+    Ok(RevListOptions {
         first_parent: walk.first_parent,
         max_count: walk.limit,
-        paths: walk.paths.clone(),
+        paths,
         count,
         use_commit_graph: true,
         use_commit_graph_bloom: !walk.paths.is_empty(),
+        paths_resolved_from_argv: !walk.paths.is_empty(),
         symmetric_left: parsed.symmetric_left,
         symmetric_right: parsed.symmetric_right,
         ..RevListOptions::default()
-    }
+    })
 }
 
 fn commit_count_from_result(result: RevListResult) -> Result<usize> {
@@ -126,7 +129,7 @@ impl<'repo> RevWalk<'repo> {
     pub fn commits(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<Vec<ObjectId>> {
         let repo = self.repository();
         let parsed = parse_rev_walk_tokens(repo, tokens)?;
-        let opts = rev_list_options_from_walk(options, &parsed, false);
+        let opts = rev_list_options_from_walk(repo, options, &parsed, false)?;
         let result = rev_list(repo, &parsed.positive, &parsed.negative, &opts)?;
         Ok(result.commits)
     }
@@ -139,7 +142,7 @@ impl<'repo> RevWalk<'repo> {
     pub fn count(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<usize> {
         let repo = self.repository();
         let parsed = parse_rev_walk_tokens(repo, tokens)?;
-        let opts = rev_list_options_from_walk(options, &parsed, true);
+        let opts = rev_list_options_from_walk(repo, options, &parsed, true)?;
         let result = rev_list(repo, &parsed.positive, &parsed.negative, &opts)?;
         commit_count_from_result(result)
     }

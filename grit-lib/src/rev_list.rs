@@ -569,6 +569,9 @@ pub struct RevListOptions {
     pub commit_graph_changed_paths_version: i32,
     /// Optional trace counters for `GIT_TRACE2_PERF` Bloom statistics.
     pub bloom_stats: Option<BloomWalkStatsHandle>,
+    /// When true, [`Self::paths`] were resolved from argv with cwd rules; Bloom checks must not
+    /// prepend process cwd again.
+    pub paths_resolved_from_argv: bool,
 }
 
 impl RevListOptions {
@@ -655,6 +658,7 @@ impl Default for RevListOptions {
             commit_graph_read_changed_paths: true,
             commit_graph_changed_paths_version: -1,
             bloom_stats: None,
+            paths_resolved_from_argv: false,
         }
     }
 }
@@ -1093,7 +1097,12 @@ pub fn rev_list(
         } else {
             version
         };
-        (chain, read_changed, version, repo.bloom_pathspec_cwd())
+        let bloom_cwd = if options.paths_resolved_from_argv {
+            None
+        } else {
+            repo.bloom_pathspec_cwd()
+        };
+        (chain, read_changed, version, bloom_cwd)
     } else {
         (None, false, -1, None)
     };
@@ -6072,7 +6081,12 @@ fn dense_bloom_context_for_paths(
     } else {
         version
     };
-    (chain, read_changed, version, repo.bloom_pathspec_cwd())
+    let bloom_cwd = if options.paths_resolved_from_argv {
+        None
+    } else {
+        repo.bloom_pathspec_cwd()
+    };
+    (chain, read_changed, version, bloom_cwd)
 }
 
 /// Git-style combined `--max-count` / `--skip` with dense path limiting: date-priority queue from

@@ -17,7 +17,7 @@ Walks commits reachable from one or more revision ranges and prints each commit�
 
 Use `--count` to print only the number of reachable commits (no subject lines). When a commit-graph file is present, counting uses it for speed.
 
-Path arguments after `--` limit history to commits that touched those paths.
+Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
 
 ## Options
 
@@ -27,7 +27,7 @@ Path arguments after `--` limit history to commits that touched those paths.
 | `--count` | Print only the commit count. |
 | `--limit N` | Stop after `N` commits (listing mode only). |
 | `--first-parent` | Follow first parents only at merges. |
-| `-- <PATH>…` | Limit to commits touching these paths. |
+| `-- <PATH>…` | Limit to commits touching these paths (cwd-relative under the work tree, like `grit diff`). |
 
 ## Examples
 

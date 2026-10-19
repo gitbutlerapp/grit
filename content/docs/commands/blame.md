@@ -13,7 +13,7 @@ grit blame [--rev <commit>] [-L START,END] [--first-parent] <file>
 
 ## Description
 
-Walks history for one file and prints each line with the commit that last modified it, the author, when that commit was made, and the line number in the blamed revision.
+Walks history for one file and prints each line with the commit that last modified it, the author, when that commit was made, and the line number in the blamed revision. The file operand uses Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, a bare name like `f.txt` refers to that path under your current directory.
 
 Blame reuses parsed blob lines, tree path lookups, and parent/child line maps across the history walk so large files with deep history stay responsive. On this repository, blaming `grit-lib/src/pack.rs` (~4.6k lines, ~90 commits) completes in a few seconds on a release build; system `git blame` on the same path is still faster, and very large histories may take longer than `git`.
 
@@ -58,7 +58,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `file` | string | Repository-relative path that was blamed. |
+| `file` | string | Work-tree path that was blamed (repository-relative after cwd resolution). |
 | `rev` | string | Full commit oid of the start revision. |
 | `lines` | array | One record per line (after any `-L` filter), in final-line order. |
 | `lines[].commit` | string | Full commit oid for the line. |

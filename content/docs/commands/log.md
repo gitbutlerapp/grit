@@ -15,7 +15,7 @@ grit log [--before <cursor>] [--limit <N>] [--stat] [-- <path>…]
 
 Lists the commits reachable from the current commit, newest first, ten at a time (unless you pass `--limit`). Each line shows the short commit id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`.
 
-Pass one or more paths after `--` to show only commits that touched those paths (same rules as [`grit revs`](../revs/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `--limit`, every matching commit is listed (not capped at ten).
+Pass one or more paths after `--` to show only commits that touched those paths (same rules as [`grit revs`](../revs/)). Path operands follow Git pathspec cwd rules—the same as [`grit diff`](../diff/): from a subdirectory, `f.txt` means that file under your current directory, not at the repository root. Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `--limit`, every matching commit is listed (not capped at ten).
 
 When there's more history on the default walk, the last line shows the command for the next page. Path filters and a one-shot `--limit` without `--before` do not emit a continuation cursor.
 
@@ -28,7 +28,7 @@ With `--stat`, each commit is followed by the files it changed and how many line
 | `--before <cursor>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). This is not a commit oid: it encodes the walk queue so merges and side branches are not skipped. Cannot be combined with path operands. |
 | `--limit <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--before`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `--limit` without `--before` and without paths lists `N` commits with no `next` cursor. |
 | `--stat` | Show which files each commit changed, with insertion and deletion counts. |
-| `<path>…` | After `--`, limit to commits that touch these paths (all matches unless `--limit` is set). |
+| `<path>…` | After `--`, limit to commits that touch these paths (cwd-relative under the work tree, like `grit diff`; all matches unless `--limit` is set). |
 
 ## Examples
 

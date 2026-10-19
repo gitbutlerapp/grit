@@ -3177,7 +3177,7 @@ fn normalize_blame_path(repo: &Repository, path: &str) -> String {
         crate::pathspec::normalize_worktree_file_path_with_git_dir(
             path,
             work_tree,
-            None,
+            repo.pathspec_cwd_prefix(),
             Some(repo.git_dir()),
         )
     } else {

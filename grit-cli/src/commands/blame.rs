@@ -125,7 +125,11 @@ pub fn run(
         .with_context(|| "could not parse line range")?;
 
     let normalized = if let Some(wt) = repo.work_tree() {
-        grit_lib::worktree::pathspec::normalize_worktree_file_path(&file, wt, None)
+        grit_lib::worktree::pathspec::normalize_worktree_file_path(
+            &file,
+            wt,
+            repo.pathspec_cwd_prefix(),
+        )
     } else {
         file.clone()
     };
