@@ -12,10 +12,10 @@ grit history drop <commit>
 grit history move <commit> (--before <anchor> | --after <anchor>)
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
-grit history drop|move|reword|fixup|absorb … [--dry-run] [--update-refs=(branches|head)]
+grit history drop|move|reword|fixup|squash|absorb … [--dry-run] [--update-refs=(branches|head)]
 grit history fixup <commit> [--empty=(drop|keep|abort)] [-m|--message-file]
+grit history squash <range>… [-m|--message-file|--combine]
 grit history absorb [--base <rev>]
-grit history squash <range> [-m|--message-file|--combine] [--dry-run] [--update-refs=(branches|head)]
 ```
 
 ## Description
@@ -73,6 +73,17 @@ The range uses the same revision syntax as `git rev-list` (for example `HEAD~3..
 | `--update-refs` | `branches` (default) or `head`. |
 
 ## Examples
+
+### `squash` options
+
+| Option | Description |
+| --- | --- |
+| `<range>…` | One or more revision specs defining the commits to fold (required). |
+| `-m`, `--message` | Message for the squashed commit (conflicts with `--message-file` and `--combine`). |
+| `--message-file` | Read the squashed commit message from a file, or `-` for stdin. |
+| `--combine` | Combine messages from every commit in the range. |
+| `--dry-run` | List ref updates without moving refs. |
+| `--update-refs` | `branches` (default) or `head`. |
 
 ### `absorb` options
 
