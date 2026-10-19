@@ -1,88 +1,98 @@
 //! Fast collision-aware object-id abbreviation for patch output (`core.abbrev`).
 
 use std::collections::HashMap;
-use std::ops::ControlFlow;
 
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 
-/// Precomputed ambiguous short-prefix buckets plus per-OID memoization.
+/// Per-OID memoization with lazy extension when two emitted ids share a prefix.
 #[derive(Default)]
 pub struct OidAbbrevCache {
     min_len: usize,
-    loaded: bool,
     memo: HashMap<ObjectId, String>,
-    /// Prefixes at `min_len` that map to more than one object id.
-    ambiguous: HashMap<String, Vec<ObjectId>>,
 }
 
 impl OidAbbrevCache {
-    /// Create a cache that will load prefix groups from `odb` on first use.
+    /// Create a cache keyed at `min_len` hex digits (clamped like Git `core.abbrev`).
     #[must_use]
     pub fn new(min_len: usize) -> Self {
         Self {
             min_len: min_len.clamp(4, 40),
-            loaded: false,
             memo: HashMap::new(),
-            ambiguous: HashMap::new(),
         }
     }
 
-    /// Unique abbreviated hex for `oid`, extending past `min_len` when required.
-    pub fn abbrev(&mut self, odb: &Odb, oid: &ObjectId) -> Result<String> {
+    /// Unique abbreviated hex for `oid`, extending past `min_len` only when needed.
+    ///
+    /// Collision checks are limited to ids already passed through this cache, so
+    /// log-patch workloads never scan the full object database up front.
+    pub fn abbrev(&mut self, _odb: &Odb, oid: &ObjectId) -> Result<String> {
         if let Some(hit) = self.memo.get(oid) {
             return Ok(hit.clone());
         }
-        self.ensure_loaded(odb)?;
         let hex = oid.to_hex();
-        let abbrev = if hex.len() <= self.min_len {
-            hex
-        } else {
-            let key = hex[..self.min_len].to_string();
-            if let Some(group) = self.ambiguous.get(&key) {
-                let mut len = self.min_len;
-                while len < hex.len() {
-                    let prefix = &hex[..len];
-                    let matches = group
-                        .iter()
-                        .filter(|candidate| candidate.to_hex().starts_with(prefix))
-                        .count();
-                    if matches <= 1 {
-                        break;
-                    }
-                    len += 1;
+        let mut len = self.min_len.min(hex.len());
+        loop {
+            let prefix = &hex[..len];
+            let mut conflict = false;
+            for (other, abbrev) in &self.memo {
+                if other == oid {
+                    continue;
                 }
-                hex[..len].to_string()
-            } else {
-                hex[..self.min_len].to_string()
+                let other_hex = other.to_hex();
+                if other_hex.len() >= len
+                    && &other_hex[..len] == prefix
+                    && abbrev.len() >= len
+                    && &abbrev[..len] == prefix
+                {
+                    conflict = true;
+                    break;
+                }
             }
-        };
+            if !conflict {
+                break;
+            }
+            len += 1;
+            if len >= hex.len() {
+                break;
+            }
+        }
+        let abbrev = hex[..len].to_string();
+        self.reconcile_collisions(oid, &hex, len);
         self.memo.insert(*oid, abbrev.clone());
         Ok(abbrev)
     }
 
-    fn ensure_loaded(&mut self, odb: &Odb) -> Result<()> {
-        if self.loaded {
-            return Ok(());
-        }
-        let mut buckets: HashMap<String, Vec<ObjectId>> = HashMap::new();
-        odb.for_each_object(&mut |oid| {
-            let hex = oid.to_hex();
-            if hex.len() >= self.min_len {
-                buckets
-                    .entry(hex[..self.min_len].to_string())
-                    .or_default()
-                    .push(*oid);
-            }
-            ControlFlow::Continue(())
-        })?;
-        self.ambiguous = buckets
-            .into_iter()
-            .filter(|(_, ids)| ids.len() > 1)
+    fn reconcile_collisions(&mut self, oid: &ObjectId, hex: &str, len: usize) {
+        let prefix = &hex[..len.min(hex.len())];
+        let mut to_refresh: Vec<ObjectId> = self
+            .memo
+            .iter()
+            .filter_map(|(other, abbrev)| {
+                if other == oid {
+                    return None;
+                }
+                let other_hex = other.to_hex();
+                (other_hex.starts_with(prefix) && abbrev.len() < len).then_some(*other)
+            })
             .collect();
-        self.loaded = true;
-        Ok(())
+        to_refresh.sort_unstable();
+        for other in to_refresh {
+            let other_hex = other.to_hex();
+            let mut new_len = len;
+            while new_len < other_hex.len() {
+                let candidate = &other_hex[..new_len];
+                let clash = self.memo.iter().any(|(id, ab)| {
+                    *id != other && ab.starts_with(candidate) && id.to_hex().starts_with(candidate)
+                });
+                if !clash {
+                    break;
+                }
+                new_len += 1;
+            }
+            self.memo.insert(other, other_hex[..new_len].to_string());
+        }
     }
 }
 

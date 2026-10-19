@@ -131,13 +131,15 @@ pub fn write_commit_log_patch<W: Write>(
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     write_parsed_commit_log_patch(
         out,
-        repo,
-        odb,
-        oid,
-        &commit,
-        parent_tree,
-        opts,
-        &mut abbrev_cache,
+        &mut ParsedCommitLogPatch {
+            repo,
+            odb,
+            oid,
+            commit: &commit,
+            parent_tree,
+            opts,
+            abbrev_cache: &mut abbrev_cache,
+        },
     )
 }
 
@@ -169,13 +171,15 @@ pub fn write_commits_log_patch<W: Write>(
         let parent_tree = parent_tree_for_commit(odb, commit, Some(&trees_by_commit))?;
         write_parsed_commit_log_patch(
             out,
-            repo,
-            odb,
-            oid,
-            commit,
-            parent_tree,
-            opts,
-            &mut abbrev_cache,
+            &mut ParsedCommitLogPatch {
+                repo,
+                odb,
+                oid,
+                commit,
+                parent_tree,
+                opts,
+                abbrev_cache: &mut abbrev_cache,
+            },
         )?;
         if i + 1 < parsed.len() {
             writeln!(out)?;
@@ -214,16 +218,29 @@ fn abbrev_for_index_line(
     cache.abbrev(odb, oid)
 }
 
+struct ParsedCommitLogPatch<'a> {
+    repo: &'a Repository,
+    odb: &'a Odb,
+    oid: &'a ObjectId,
+    commit: &'a CommitData,
+    parent_tree: Option<ObjectId>,
+    opts: &'a LogPatchOptions,
+    abbrev_cache: &'a mut OidAbbrevCache,
+}
+
 fn write_parsed_commit_log_patch<W: Write>(
     out: &mut W,
-    repo: &Repository,
-    odb: &Odb,
-    oid: &ObjectId,
-    commit: &CommitData,
-    parent_tree: Option<ObjectId>,
-    opts: &LogPatchOptions,
-    abbrev_cache: &mut OidAbbrevCache,
+    ctx: &mut ParsedCommitLogPatch<'_>,
 ) -> Result<()> {
+    let ParsedCommitLogPatch {
+        repo,
+        odb,
+        oid,
+        commit,
+        parent_tree,
+        opts,
+        abbrev_cache,
+    } = ctx;
     match opts.commit_header {
         LogPatchCommitHeader::Full => {
             writeln!(out, "commit {oid}")?;
@@ -255,7 +272,7 @@ fn write_parsed_commit_log_patch<W: Write>(
     }
     let entries = diff_trees(odb, parent_tree.as_ref(), Some(&commit.tree), "")?;
     for entry in entries {
-        write_diff_entry_log_patch(out, repo, odb, &entry, opts, abbrev_cache)?;
+        write_diff_entry_log_patch_with_cache(out, repo, odb, &entry, opts, abbrev_cache)?;
     }
     Ok(())
 }
@@ -349,6 +366,17 @@ fn log_patch_parse_mode_u32(mode: &str) -> u32 {
 ///
 /// Propagates ODB reads and I/O errors.
 pub fn write_diff_entry_log_patch<W: Write>(
+    out: &mut W,
+    _repo: &Repository,
+    odb: &Odb,
+    entry: &DiffEntry,
+    opts: &LogPatchOptions,
+) -> Result<()> {
+    let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
+    write_diff_entry_log_patch_with_cache(out, _repo, odb, entry, opts, &mut abbrev_cache)
+}
+
+fn write_diff_entry_log_patch_with_cache<W: Write>(
     out: &mut W,
     _repo: &Repository,
     odb: &Odb,
@@ -579,8 +607,7 @@ mod tests {
         repo.odb().write(ObjectKind::Blob, b"x")?;
         let mut out = Cursor::new(Vec::new());
         let opts = LogPatchOptions::git_default(&ConfigSet::default());
-        let mut cache = OidAbbrevCache::new(opts.abbrev_len);
-        write_diff_entry_log_patch(&mut out, &repo, repo.odb(), &entry, &opts, &mut cache)?;
+        write_diff_entry_log_patch(&mut out, &repo, repo.odb(), &entry, &opts)?;
         let text = String::from_utf8(out.into_inner()).expect("utf-8");
         assert!(text.contains("copy from src/a.txt"));
         assert!(text.contains("copy to dst/b.txt"));
