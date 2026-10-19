@@ -48,6 +48,12 @@ Provide exactly one of `-m` / `--message` or `--message-file` (use `-` to read f
 
 Descendant **merge** commits are replayed the same way as for [`drop`](#drop): parents are remapped and the merge tree is updated to match the rewritten first-parent chain.
 
+### `fixup`
+
+Fold **staged** changes into an earlier commit on the first-parent chain of `HEAD`, then replay descendants onto the rewritten history. Grit three-way merges staged edits into the target commit’s tree; descendant commits are replayed like other history rewrites. If the merge would make the target empty, grit aborts unless `--empty` is set.
+
+Provide exactly one of `-m` / `--message` or `--message-file` when you want an explicit fixup message; otherwise grit uses the staged diff to build the amended commit.
+
 ### `absorb`
 
 Assign **staged** hunks into the commits that last touched overlapping lines (between `--base` and `HEAD`), then replay descendants in **one** rewrite. Grit uses blame line mapping to find candidate commits and checks that each hunk commutes with commits after its target. Assigned hunks are folded into target commits via the same three-way merge as [`fixup`](#fixup); unassigned hunks stay staged.
@@ -141,7 +147,7 @@ Absorbed 1 hunk(s) into 2 commit(s)
 
 ## JSON output
 
-Schemas: [drop v1](/schemas/history.drop/v1.json), [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json), [squash v1](/schemas/history.squash/v1.json), [absorb v1](/schemas/history.absorb/v1.json)
+Schemas: [drop v1](/schemas/history.drop/v1.json), [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json), [squash v1](/schemas/history.squash/v1.json), [absorb v1](/schemas/history.absorb/v1.json), [rebase v1](/schemas/history.rebase/v1.json), [split v1](/schemas/history.split/v1.json)
 
 Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`, `grit history fixup`, `grit history squash`, or `grit history absorb`:
 

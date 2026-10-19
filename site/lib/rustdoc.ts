@@ -34,15 +34,44 @@ function isFile(p: string): boolean {
   return fs.existsSync(p) && fs.statSync(p).isFile();
 }
 
+/** Rust type or enum variant segment (`MergeCommitInReplay`, not `try_from`). */
+function isRustTypeSegment(segment: string): boolean {
+  return /^[A-Z][A-Za-z0-9_]*$/.test(segment);
+}
+
+/** Field or method segment (`base`, `try_from`), not a module or type name. */
+function isRustMemberSegment(segment: string): boolean {
+  return /^[a-z][A-Za-z0-9_]*$/.test(segment);
+}
+
+/**
+ * `Type::Variant` and `Type::field` paths link to the type page with a rustdoc fragment.
+ * Returns the path without the suffix and the anchor fragment, if any.
+ */
+function splitAssociatedItemSuffix(segments: string[]): { pathSegments: string[]; fragment?: string } {
+  if (segments.length < 2) return { pathSegments: segments };
+  const member = segments[segments.length - 1]!;
+  const typeName = segments[segments.length - 2]!;
+  if (!isRustTypeSegment(typeName)) return { pathSegments: segments };
+  if (isRustTypeSegment(member)) {
+    return { pathSegments: segments.slice(0, -1), fragment: `variant.${member}` };
+  }
+  if (isRustMemberSegment(member)) {
+    return { pathSegments: segments.slice(0, -1), fragment: `structfield.${member}` };
+  }
+  return { pathSegments: segments };
+}
+
 /** The rustdoc HTML path (relative to `grit_lib/`) for a qualified item path. */
 export function resolveRustdocPath(qualified: string): string {
   if (!RUSTDOC_PATH.test(qualified)) throw new Error(`invalid rustdoc path syntax: ${qualified}`);
-  const [, ...segments] = qualified.split("::");
+  const [, ...rawSegments] = qualified.split("::");
+  const { pathSegments, fragment } = splitAssociatedItemSuffix(rawSegments);
   const root = crateDir();
-  if (segments.length === 0) return "index.html";
+  if (pathSegments.length === 0) return "index.html";
   let current = root;
-  const modules = segments.slice(0, -1);
-  const last = segments[segments.length - 1];
+  const modules = pathSegments.slice(0, -1);
+  const last = pathSegments[pathSegments.length - 1]!;
   for (const mod of modules) {
     const nested = path.join(current, mod);
     if (isFile(path.join(nested, "index.html"))) {
@@ -53,10 +82,16 @@ export function resolveRustdocPath(qualified: string): string {
   }
   for (const kind of ITEM_KINDS) {
     const candidate = path.join(current, `${kind}.${last}.html`);
-    if (isFile(candidate)) return path.relative(root, candidate).split(path.sep).join("/");
+    if (isFile(candidate)) {
+      const relative = path.relative(root, candidate).split(path.sep).join("/");
+      return fragment ? `${relative}#${fragment}` : relative;
+    }
   }
   const modIndex = path.join(current, last, "index.html");
-  if (isFile(modIndex)) return path.relative(root, modIndex).split(path.sep).join("/");
+  if (isFile(modIndex)) {
+    const relative = path.relative(root, modIndex).split(path.sep).join("/");
+    return fragment ? `${relative}#${fragment}` : relative;
+  }
   throw new Error(`rustdoc item not found: ${qualified}`);
 }
 
