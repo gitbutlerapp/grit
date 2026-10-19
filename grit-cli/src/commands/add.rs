@@ -4,7 +4,7 @@
 //! a thin wrapper over the library.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions};
+use grit_lib::porcelain::add::{stage as stage_paths, StageOptions};
 use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -101,15 +101,12 @@ fn stage_with_hint(
         (specs, selectors.to_vec())
     };
 
-    let mut opts = if pathspecs.is_empty() {
-        StageOptions::all()
+    let opts = if pathspecs.is_empty() {
+        StageOptions::all().with_executable_hint(executable_hint)
     } else {
-        let mut o = StageOptions::pathspecs(pathspecs);
-        o.mode = StageMode::All;
-        o
+        StageOptions::pathspecs_with_sources(pathspecs, pathspec_sources)
+            .with_executable_hint(executable_hint)
     };
-    opts.pathspec_sources = pathspec_sources;
-    opts.executable_hint = executable_hint;
     let outcome =
         stage_paths(repo, &opts, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(outcome.total())

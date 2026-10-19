@@ -100,6 +100,26 @@ impl StageOptions {
             ..Self::default()
         }
     }
+
+    /// Explicit pathspecs when resolved paths and argv sources differ (CLI pathspec resolution).
+    #[must_use]
+    pub fn pathspecs_with_sources(pathspecs: Vec<String>, pathspec_sources: Vec<String>) -> Self {
+        Self {
+            pathspecs,
+            pathspec_sources,
+            mode: StageMode::All,
+            ..Self::default()
+        }
+    }
+
+    /// Returns a copy with the executable hint applied to explicitly listed paths.
+    #[must_use]
+    pub fn with_executable_hint(self, executable_hint: StageExecutableHint) -> Self {
+        Self {
+            executable_hint,
+            ..self
+        }
+    }
 }
 
 /// Counts returned by [`stage`].
