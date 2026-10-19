@@ -4,17 +4,24 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions};
+use grit_lib::porcelain::commit::{commit_worktree, create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
 use grit_test_support::git;
 
 fn init_repo(root: &std::path::Path) {
     git(root, &["init", "-q", "-b", "main", "."]);
     git(root, &["config", "user.email", "t@example.com"]);
     git(root, &["config", "user.name", "Test"]);
+}
+
+fn init_windows_like_repo(root: &std::path::Path) {
+    init_repo(root);
+    git(root, &["config", "core.ignorecase", "true"]);
+    git(root, &["config", "core.autocrlf", "true"]);
 }
 
 /// Shallow wide layout: many leaf directories with a few tracked files each.
@@ -168,4 +175,85 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
         .output()
         .expect("git fsck");
     assert!(out.status.success(), "git fsck after grit commit");
+}
+
+/// Windows NTFS defaults: `core.ignorecase` + `core.autocrlf` must not force a full index diff (issue #1230).
+#[test]
+fn stage_for_commit_ignorecase_autocrlf_uses_tracked_scan_on_deep_tree() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_windows_like_repo(root);
+    write_deep_tree(root, 25, 25, 7);
+    fs::write(root.join(".gitattributes"), "*.txt text eol=lf\n").expect("attrs");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    assert!(
+        git(root, &["ls-files"]).lines().count() >= 4096,
+        "fixture should exceed UNTR auto-cache entry threshold"
+    );
+
+    let repo = open_repo(root);
+    status(&repo, &StatusOptions::default(), &mut NullProgress).expect("warm untracked cache");
+    fs::write(root.join("b00/d00/f0.txt"), "edited\n").expect("edit");
+
+    let _probe = reset_worktree_metadata_probe(root);
+    let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage");
+    assert_eq!(outcome.modified, 1);
+    assert_eq!(outcome.added, 0);
+
+    let tracked = git(root, &["ls-files"]).lines().count();
+    let dir_budget = 25 * 25 + 64;
+    let meta_calls = worktree_metadata_probe_count();
+    assert!(
+        meta_calls <= tracked + dir_budget,
+        "ignorecase staging must use stat-trust tracked scan, not full diff (metadata probes {meta_calls}, tracked {tracked})"
+    );
+}
+
+#[test]
+fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_windows_like_repo(root);
+    write_deep_tree(root, 25, 25, 7);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let repo = open_repo(root);
+    stage(
+        &repo,
+        &StageOptions {
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("grit add");
+    status(&repo, &StatusOptions::default(), &mut NullProgress).expect("warm UNTR");
+
+    let ident = "Test <t@example.com> 1 +0000".to_string();
+    let mut req = CommitRequest {
+        message: "empty".into(),
+        author: ident.clone(),
+        committer: ident,
+        allow_empty: true,
+        sign_override: None,
+        amend: false,
+        assume_worktree_synced: true,
+        skip_pre_commit_tree_match: true,
+        staged_change_count: None,
+    };
+
+    let _probe = reset_worktree_metadata_probe(root);
+    commit_worktree(&repo, &req, &mut NullProgress).expect("allow-empty commit");
+
+    let tracked = git(root, &["ls-files"]).lines().count();
+    let meta_calls = worktree_metadata_probe_count();
+    assert!(
+        meta_calls <= tracked + 500,
+        "clean allow-empty commit should not rescan every tracked blob twice (metadata {meta_calls}, tracked {tracked})"
+    );
+
+    req.message = "second empty".into();
+    commit_worktree(&repo, &req, &mut NullProgress).expect("second allow-empty");
 }

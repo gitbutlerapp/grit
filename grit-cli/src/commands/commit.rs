@@ -5,7 +5,7 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -61,7 +61,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     }
 
-    stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let staged = stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if repo.index_handle().load()?.has_unmerged_entries() {
         return Err(map_commit_error(Error::IndexUnmerged));
@@ -70,10 +70,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
     let message = match message {
         Some(m) if !m.trim().is_empty() => Some(m),
         None if amend => None,
-        _ => {
-            stage_for_commit(&repo, &mut NullProgress).context("stage for commit")?;
-            bail!("provide a commit message, e.g. grit commit \"what changed\"");
-        }
+        _ => bail!("provide a commit message, e.g. grit commit \"what changed\""),
     };
     let message_text = message.as_deref().unwrap_or("");
 
@@ -101,7 +98,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         )?
     };
 
-    let outcome = commit_worktree(
+    let outcome = create_commit(
         &repo,
         &CommitRequest {
             message: message_text.to_owned(),
@@ -112,7 +109,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
             amend,
             assume_worktree_synced: true,
             skip_pre_commit_tree_match: true,
-            staged_change_count: None,
+            staged_change_count: Some(staged.total()),
         },
         &mut NullProgress,
     )
