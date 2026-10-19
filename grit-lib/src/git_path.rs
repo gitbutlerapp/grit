@@ -791,7 +791,7 @@ pub fn path_to_git_slash(path: &Path) -> String {
 #[must_use]
 pub fn relative_path_for_display(from: &Path, to: &Path) -> Option<String> {
     let from_cmp = path_for_disk_compare(from);
-    let to_cmp = path_lexical_for_disk_compare(to);
+    let to_cmp = apply_macos_private_alias_for_compare(path_lexical_for_disk_compare(to));
     if from_cmp == to_cmp {
         return Some(".".to_owned());
     }
@@ -1078,6 +1078,40 @@ mod git_path_component_tests {
         assert_eq!(
             strip_worktree_prefix(&missing_private, &canon).as_deref(),
             Some("nested/not-yet.txt")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn relative_path_for_display_macos_private_tmp_alias() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo_canon = tmp.path().canonicalize().expect("canonicalize tempdir");
+        let repo_public = if let Ok(stripped) = repo_canon.strip_prefix("/private") {
+            std::path::PathBuf::from("/").join(stripped)
+        } else {
+            repo_canon.clone()
+        };
+        if repo_public == repo_canon {
+            return;
+        }
+        let sub = repo_public.join("sub");
+        std::fs::create_dir_all(&sub).expect("mkdir sub");
+        let file = sub.join("f.txt");
+        std::fs::write(&file, b"x").expect("write");
+
+        // cwd at public /tmp/.../sub, target under repo (private spelling in path buffer).
+        let cwd = sub.clone();
+        let target = repo_canon.join("sub/f.txt");
+        assert_eq!(
+            relative_path_for_display(&cwd, &target).as_deref(),
+            Some("f.txt")
+        );
+
+        // Physical cwd after cd -P (private spelling).
+        let cwd_private = sub.canonicalize().expect("canonicalize sub");
+        assert_eq!(
+            relative_path_for_display(&cwd_private, &target).as_deref(),
+            Some("f.txt")
         );
     }
 
