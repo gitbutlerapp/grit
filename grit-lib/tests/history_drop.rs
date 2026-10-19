@@ -332,8 +332,8 @@ fn history_drop_matches_git_rebase_drop() {
 
 #[test]
 fn history_drop_matches_git_history_when_available() {
-    if !support::git_version_at_least(2, 54) {
-        eprintln!("skipping: system git < 2.54 (no git history drop)");
+    if !support::git_history_subcommand_available("drop") {
+        eprintln!("skipping: system git has no `git history drop` subcommand");
         return;
     }
     let grit_dir = tempfile::tempdir().expect("grit dir");

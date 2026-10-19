@@ -100,6 +100,21 @@ pub fn skip_unless_git_at_least(major: u32, minor: u32) -> bool {
     false
 }
 
+/// Whether `git history <subcommand>` exists on the system git (not just `git --version`).
+#[must_use]
+pub fn git_history_subcommand_available(subcommand: &str) -> bool {
+    let Ok(out) = Command::new("git")
+        .args(["history", subcommand])
+        .env("GIT_CONFIG_GLOBAL", null_device_for_tests())
+        .env("GIT_CONFIG_SYSTEM", null_device_for_tests())
+        .output()
+    else {
+        return false;
+    };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    !stderr.contains("unknown subcommand")
+}
+
 /// Temporary repository initialized with system `git`.
 pub struct HistoryRepo {
     _root: tempfile::TempDir,
