@@ -3614,6 +3614,7 @@ pub mod caches {
 mod index_write_fail_inject {
     use std::cell::RefCell;
 
+    // hygiene: thread-local index write failure injection for tests
     thread_local! {
         pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
         pub static INJECT_REMAINING: RefCell<Option<usize>> = const { RefCell::new(None) };

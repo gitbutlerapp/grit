@@ -25,7 +25,7 @@ use super::types::{
 };
 
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
-static MERGE_TREE_CALLS: AtomicUsize = AtomicUsize::new(0);
+static MERGE_TREE_CALLS: AtomicUsize = AtomicUsize::new(0); // hygiene: merge-call counter for tests and unstable-bench-helpers
 
 /// Test hook: number of three-way tree merges performed by planning.
 #[cfg(any(test, feature = "unstable-bench-helpers"))]

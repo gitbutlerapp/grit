@@ -185,7 +185,7 @@ fn conflict_paths(merge: &crate::merge_trees::TreeMergeOutput) -> Vec<String> {
 }
 
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
-static FIXUP_MERGE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static FIXUP_MERGE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0); // hygiene: merge-call counter for tests and unstable-bench-helpers
 
 fn record_fixup_merge() {
     #[cfg(any(test, feature = "unstable-bench-helpers"))]
