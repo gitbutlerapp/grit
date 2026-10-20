@@ -32,6 +32,7 @@ const MIDX_VERSION_V2: u8 = 2;
 const HASH_VERSION_SHA1: u8 = 1;
 const HASH_VERSION_SHA256: u8 = 2;
 const MIDX_HEADER_SIZE: usize = 12;
+const MIDX_MIN_FILE_LEN: u64 = (MIDX_HEADER_SIZE + 20) as u64;
 const CHUNK_TOC_ENTRY_SIZE: usize = 12;
 const MIDX_CHUNKID_PACKNAMES: u32 = 0x504e_414d;
 const MIDX_CHUNKID_OIDFANOUT: u32 = 0x4f49_4446;
@@ -296,14 +297,14 @@ pub(crate) mod midx_cache {
     use super::{
         midx_chain_layer_paths_newest_first, midx_load_for_read,
         repo_midx_hash_version_for_objects_dir, MidxLoadResult, MidxReadView,
-        MIDX_LARGE_OFFSET_NEEDED,
+        MIDX_LARGE_OFFSET_NEEDED, MIDX_MIN_FILE_LEN,
     };
     use crate::diagnostics::{DiagnosticSink, Warning};
     use crate::error::{Error, Result};
     use crate::objects::{ObjectId, ObjectInfo};
     use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
+    use crate::pack_map::PackData;
     use std::collections::HashMap;
-    use std::fs;
     use std::ops::ControlFlow;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -311,7 +312,7 @@ pub(crate) mod midx_cache {
 
     /// Parsed MIDX layer: fanout + binary search; pack indexes opened on first read per pack id.
     pub struct PreparedMidxLayer {
-        bytes: Arc<[u8]>,
+        bytes: Arc<PackData>,
         fanout: [u32; 256],
         oidl_off: usize,
         num_objects: usize,
@@ -325,18 +326,32 @@ pub(crate) mod midx_cache {
     }
 
     impl PreparedMidxLayer {
-        fn prepare(bytes: Arc<[u8]>, view: MidxReadView, pack_dir: &Path) -> Self {
-            let hash_len = if bytes.get(5) == Some(&2) { 32 } else { 20 };
+        fn prepare(bytes: Arc<PackData>, view: MidxReadView, pack_dir: &Path) -> Self {
+            Self::prepare_inner(bytes, view, pack_dir)
+        }
+
+        #[cfg(test)]
+        pub(crate) fn prepare_for_test(
+            bytes: Arc<PackData>,
+            view: MidxReadView,
+            pack_dir: &Path,
+        ) -> Self {
+            Self::prepare_inner(bytes, view, pack_dir)
+        }
+
+        fn prepare_inner(bytes: Arc<PackData>, view: MidxReadView, pack_dir: &Path) -> Self {
+            let data = bytes.as_ref();
+            let hash_len = if data.get(5) == Some(&2) { 32 } else { 20 };
             let mut fanout = [0u32; 256];
             for (i, slot) in fanout.iter_mut().enumerate() {
-                *slot = read_be_u32(&bytes, view.oidf_off + i * 4).unwrap_or(0);
+                *slot = read_be_u32(data, view.oidf_off + i * 4).unwrap_or(0);
             }
             let mut pack_offsets = Vec::with_capacity(view.num_objects);
             for i in 0..view.num_objects {
                 let ob = view.ooff_off + i * 8;
-                let pack_id = read_be_u32(&bytes, ob).unwrap_or(0);
-                let raw_off = read_be_u32(&bytes, ob + 4).unwrap_or(0);
-                let offset = decode_midx_object_offset(&bytes, raw_off, view.loff).unwrap_or(0);
+                let pack_id = read_be_u32(data, ob).unwrap_or(0);
+                let raw_off = read_be_u32(data, ob + 4).unwrap_or(0);
+                let offset = decode_midx_object_offset(data, raw_off, view.loff).unwrap_or(0);
                 pack_offsets.push((pack_id, offset));
             }
             Self {
@@ -500,7 +515,7 @@ pub(crate) mod midx_cache {
             }
             let pack_offsets: Vec<(u32, u64)> = (0..n).map(|i| (0, i as u64)).collect();
             Self {
-                bytes: Arc::from(bytes),
+                bytes: PackData::from_owned(bytes),
                 fanout,
                 oidl_off: 0,
                 num_objects: n,
@@ -859,17 +874,17 @@ pub(crate) mod midx_cache {
         let mut layers = Vec::with_capacity(path_count);
         let mut pack_names_by_layer = Vec::with_capacity(path_count);
         for path in paths {
-            let bytes: Arc<[u8]> = match fs::read(&path) {
-                Ok(b) => Arc::from(b),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let bytes = match PackData::open_with_min_len(&path, MIDX_MIN_FILE_LEN) {
+                Ok(b) => b,
+                Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
                     if require_every_layer {
                         return Ok(None);
                     }
                     continue;
                 }
-                Err(err) => return Err(Error::Io(err)),
+                Err(err) => return Err(err),
             };
-            let view = match midx_load_for_read(&bytes, hash_version, diagnostics) {
+            let view = match midx_load_for_read(bytes.as_ref(), hash_version, diagnostics) {
                 Ok(MidxLoadResult::Ok(v)) => v,
                 Ok(MidxLoadResult::Skip) => {
                     if require_every_layer {
@@ -3988,5 +4003,58 @@ mod tests {
         let after = read_object_from_packs(&objects, &oid).expect("historical commit still packed");
         assert_eq!(before.kind, after.kind);
         assert_eq!(before.data, after.data);
+    }
+
+    #[test]
+    fn git_midx_mapped_bytes_match_owned_prepare() {
+        use super::midx_cache::PreparedMidxLayer;
+        use crate::diagnostics::NullDiagnostics;
+        use crate::pack_map::PackData;
+
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let midx_path = pack_dir.join("multi-pack-index");
+        let hash_version = super::repo_midx_hash_version_for_objects_dir(&objects);
+        let mapped =
+            PackData::open_with_min_len(&midx_path, super::MIDX_MIN_FILE_LEN).expect("mmap");
+        let owned = PackData::from_owned(std::fs::read(&midx_path).expect("read"));
+        let view_mapped =
+            match super::midx_load_for_read(mapped.as_ref(), hash_version, &NullDiagnostics)
+                .expect("load mapped")
+            {
+                super::MidxLoadResult::Ok(v) => v,
+                super::MidxLoadResult::Skip => panic!("mapped midx skipped"),
+            };
+        let view_owned =
+            match super::midx_load_for_read(owned.as_ref(), hash_version, &NullDiagnostics)
+                .expect("load owned")
+            {
+                super::MidxLoadResult::Ok(v) => v,
+                super::MidxLoadResult::Skip => panic!("owned midx skipped"),
+            };
+        let layer_mapped = PreparedMidxLayer::prepare_for_test(mapped, view_mapped, &pack_dir);
+        let layer_owned = PreparedMidxLayer::prepare_for_test(owned, view_owned, &pack_dir);
+        let loc = layer_mapped
+            .lookup_pack_and_offset(&oid)
+            .expect("mapped lookup");
+        assert_eq!(
+            loc,
+            layer_owned
+                .lookup_pack_and_offset(&oid)
+                .expect("owned lookup")
+        );
+        let mapped_obj = layer_mapped
+            .read_at(loc.0, loc.1)
+            .expect("read mapped")
+            .expect("object mapped");
+        let owned_obj = layer_owned
+            .read_at(loc.0, loc.1)
+            .expect("read owned")
+            .expect("object owned");
+        assert_eq!(mapped_obj.data, owned_obj.data);
     }
 }
