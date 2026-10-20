@@ -578,6 +578,8 @@ pub struct RevListOptions {
     /// Author/committer/grep filter applied during the walk (output filter; traversable commits
     /// remain reachable through non-matching commits).
     pub commit_filter: Option<Arc<CommitFilter>>,
+    /// Pickaxe filter (`-S` / `-G`) applied after cheap commit filters.
+    pub pickaxe: Option<Arc<crate::diff::Pickaxe>>,
 }
 
 impl RevListOptions {
@@ -666,6 +668,7 @@ impl Default for RevListOptions {
             bloom_stats: None,
             paths_resolved_from_argv: false,
             commit_filter: None,
+            pickaxe: None,
         }
     }
 }
@@ -1186,7 +1189,8 @@ pub fn rev_list(
         .commit_filter
         .as_ref()
         .is_some_and(|f| f.is_active());
-    let output_filter_active = parent_count_filter_active || commit_filter_active;
+    let pickaxe_active = options.pickaxe.is_some();
+    let output_filter_active = parent_count_filter_active || commit_filter_active || pickaxe_active;
     let traversable = if output_filter_active {
         // The walk must be able to traverse *through* commits that path limiting already dropped
         // from `included` (e.g. a tip that does not touch the pathspec): Git never severs the graph
@@ -1212,6 +1216,10 @@ pub fn rev_list(
     }
     if let Some(filter) = options.commit_filter.as_ref().filter(|f| f.is_active()) {
         included.retain(|oid| filter.matches(repo, *oid).unwrap_or(false));
+    }
+    if let Some(pickaxe) = options.pickaxe.as_ref() {
+        let paths = &options.paths;
+        included.retain(|oid| pickaxe.matches_commit(repo, *oid, paths).unwrap_or(false));
     }
 
     if options.maximal_only {
@@ -5075,6 +5083,10 @@ fn dense_path_limited_count_from_included(
     if let Some(filter) = options.commit_filter.as_ref().filter(|f| f.is_active()) {
         included.retain(|oid| filter.matches(repo, *oid).unwrap_or(false));
     }
+    if let Some(pickaxe) = options.pickaxe.as_ref() {
+        let paths = &options.paths;
+        included.retain(|oid| pickaxe.matches_commit(repo, *oid, paths).unwrap_or(false));
+    }
     if options.until_cutoff.is_some() || options.since_cutoff.is_some() {
         let until = options.until_cutoff;
         let since = options.since_cutoff;
@@ -5792,6 +5804,7 @@ fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
             .commit_filter
             .as_ref()
             .is_none_or(|f| !f.is_active())
+        && options.pickaxe.is_none()
         && !options.maximal_only
         && options.skip == 0
         && options.max_count.is_none()
@@ -5854,6 +5867,7 @@ fn try_commit_graph_count_only(
             .commit_filter
             .as_ref()
             .is_some_and(|f| f.is_active())
+        || options.pickaxe.is_some()
     {
         return Ok(None);
     }
@@ -6021,14 +6035,17 @@ fn bounded_limit_list_need(options: &RevListOptions) -> usize {
 }
 
 fn can_use_bounded_commit_filter_list(options: &RevListOptions) -> bool {
-    options
+    let output_filter = options
         .commit_filter
         .as_ref()
         .is_some_and(|f| f.is_active())
+        || options.pickaxe.is_some();
+    output_filter
         && (options.max_count.is_some() || options.skip > 0)
         && bounded_limit_list_need(options) < BOUNDED_LIMIT_LIST_EARLY_STOP_MAX
         && can_use_bounded_limit_list(&RevListOptions {
             commit_filter: None,
+            pickaxe: None,
             ..options.clone()
         })
 }
@@ -6039,9 +6056,11 @@ fn try_bounded_commit_filter_limit_list(
     exclude: &[ObjectId],
     options: &RevListOptions,
 ) -> Result<Option<Vec<ObjectId>>> {
-    let Some(filter) = options.commit_filter.as_ref().filter(|f| f.is_active()) else {
+    let filter = options.commit_filter.as_ref().filter(|f| f.is_active());
+    let pickaxe = options.pickaxe.as_ref();
+    if filter.is_none() && pickaxe.is_none() {
         return Ok(None);
-    };
+    }
     if include.is_empty() || !can_use_bounded_commit_filter_list(options) {
         return Ok(None);
     }
@@ -6049,7 +6068,8 @@ fn try_bounded_commit_filter_limit_list(
         return Ok(None);
     };
 
-    if filter.identity_only()
+    if pickaxe.is_none()
+        && filter.is_some_and(|f| f.identity_only())
         && matches!(
             options.ordering,
             OrderingMode::Default | OrderingMode::DateOrderWalk
@@ -6059,14 +6079,23 @@ fn try_bounded_commit_filter_limit_list(
             since: options.since_cutoff,
             until: options.until_cutoff,
         };
+        let Some(filter) = filter else {
+            return Ok(None);
+        };
         let walk_filter = if filter.skips_identity_check_during_bounded_walk() {
             None
         } else {
-            Some(filter.as_ref())
+            Some(filter)
         };
         let mut ordered = repo.odb().with_pack_read_context(|| {
             let mut state = crate::merge_base::ReachableWalkState::new(repo, include, exclude)?;
-            state.emit_until_filtered(repo, Some(max_count), options.skip, cutoffs, walk_filter)
+            state.emit_until_filtered(
+                repo,
+                Some(max_count),
+                options.skip,
+                cutoffs,
+                walk_filter.map(|v| v.as_ref()),
+            )
         })?;
         if options.reverse {
             ordered.reverse();
@@ -6117,13 +6146,22 @@ fn try_bounded_commit_filter_limit_list(
         }
 
         if consider {
-            let (author_line, committer_line) = graph.commit_identity_lines(oid)?;
-            if filter.matches_identities(
-                repo,
-                oid,
-                author_line.as_deref(),
-                committer_line.as_deref(),
-            )? {
+            let mut passes = true;
+            if let Some(filter) = filter {
+                let (author_line, committer_line) = graph.commit_identity_lines(oid)?;
+                passes = filter.matches_identities(
+                    repo,
+                    oid,
+                    author_line.as_deref(),
+                    committer_line.as_deref(),
+                )?;
+            }
+            if passes {
+                if let Some(px) = pickaxe {
+                    passes = px.matches_commit(repo, oid, &options.paths)?;
+                }
+            }
+            if passes {
                 matched_seen += 1;
                 if matched_seen > options.skip && ordered.len() < max_count {
                     ordered.push(oid);
@@ -6161,6 +6199,7 @@ fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
             .commit_filter
             .as_ref()
             .is_none_or(|f| !f.is_active())
+        && options.pickaxe.is_none()
         && !options.all_refs
         && !options.first_parent
         && !options.objects

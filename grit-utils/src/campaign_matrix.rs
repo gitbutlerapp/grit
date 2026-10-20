@@ -317,6 +317,39 @@ pub fn run_fixture_cli_matrix(
             &fixture.worktree,
             false,
         )?);
+        out.push(run_matrix_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "log-pickaxe-S"),
+                group: "log".into(),
+                fixture: fixture.label.clone(),
+                description: "log -S Copyright -n 30 (pickaxe occurrence walk)".into(),
+                grit_argv: vec![
+                    "log".into(),
+                    "-S".into(),
+                    "Copyright".into(),
+                    "-n".into(),
+                    "30".into(),
+                ],
+                git_argv: vec![
+                    "log".into(),
+                    "-S".into(),
+                    "Copyright".into(),
+                    "-n".into(),
+                    "30".into(),
+                    "--format=%H".into(),
+                ],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+            false,
+        )?);
     }
 
     if !smoke {

@@ -12,6 +12,7 @@ grit revs <RANGE>... [-n <N>] [--count] [--left-right]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--author <pat>] [--committer <pat>] [--grep <pat>]
+  [-S <string>] [-G <pat>] [--pickaxe-regex]
   [-i] [--all-match] [--invert-grep] [-F] [--no-mailmap]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
   [-- <PATH>...]
@@ -25,7 +26,7 @@ Use `--count` to print only the number of reachable commits (no subject lines). 
 
 Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
 
-Author, committer, and message filters use the same rules as [`grit log`](../log/): POSIX BRE by default, `-F` for literals, `-i` for case folding, `--all-match` / `--invert-grep` on grep only, and `.mailmap` when `log.mailmap` is unset or true unless `--no-mailmap` is set. Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
+Author, committer, message, and pickaxe filters use the same rules as [`grit log`](../log/) (`-S`, `-G`, `--pickaxe-regex`, and the same `-i` / `-F` / mailmap behavior). Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
 
 ## Options
 

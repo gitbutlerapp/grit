@@ -5,6 +5,10 @@ summary: Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEnt
 
 Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain module (tree/content diff, merge helpers, patch-ids). Prefer `Repository::diff` (`Diff`) for tree, index, and worktree comparisons on one open handle. Results are `DiffEntry` rows with a `DiffStatus` letter (`M`, `A`, `D`, …), paths, modes, and object ids — the same shape [`grit diff`](../../diff/) and `porcelain::status` use before formatting output. See [API layout](../api-layout/) for the flat-path map.
 
+## Pickaxe
+
+[`Pickaxe`](rustdoc:grit_lib::diff::Pickaxe) implements Git's pickaxe filters for revision walks: [`Pickaxe::occurrences`](rustdoc:grit_lib::diff::Pickaxe::occurrences) (`-S`, occurrence-count change per file) and [`Pickaxe::line_grep`](rustdoc:grit_lib::diff::Pickaxe::line_grep) (`-G`, regex on added/removed lines). Call [`Pickaxe::matches_commit`](rustdoc:grit_lib::diff::Pickaxe::matches_commit) to test one commit against its first parent; wire the filter through [`RevWalkListOptions::pickaxe`](rustdoc:grit_lib::revwalk::queries::RevWalkListOptions) for `grit log` / `grit revs`.
+
 ## Tree-to-tree
 
 `diff_trees` compares two tree objects recursively and returns changed paths. Pass `None` for either side to diff against an empty tree. `diff_trees_show_tree_entries` can emit tree objects themselves (Git’s `diff-tree -t` behavior).

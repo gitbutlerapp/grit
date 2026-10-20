@@ -25,12 +25,17 @@ Common helpers that do not need a full repository walk:
 | `max_count` / `skip` | Limit how many commits are returned. |
 | `reverse` | Reverse the selected list after sorting. |
 | `commit_filter` | Optional [`CommitFilter`](rustdoc:grit_lib::revwalk::filter::CommitFilter) (`--author`, `--committer`, `--grep`, mailmap). |
+| `pickaxe` | Optional [`Pickaxe`](rustdoc:grit_lib::diff::Pickaxe) (`-S` / `-G` tree-diff filters). |
 
 For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). That matches `git rev-list main..feature`.
 
 ### Commit filters
 
 [`CommitFilter`](rustdoc:grit_lib::revwalk::filter::CommitFilter) mirrors `git rev-list` / `git log` identity and message filtering. Build one with [`CommitFilterBuilder`](rustdoc:grit_lib::revwalk::filter::CommitFilterBuilder): author and committer patterns OR together; `--grep` patterns OR together unless `all_match` is set; `invert_grep` negates only the grep group; `-i` applies to all. Patterns default to Git’s POSIX BRE rules (use `fixed_strings` for literal `-F` mode). Load a [`MailmapTable`](rustdoc:grit_lib::config::mailmap::MailmapTable) with [`load_mailmap_table`](rustdoc:grit_lib::config::mailmap::load_mailmap_table) and pass it to the builder — the filter never reads config on its own. Set [`RevListOptions::commit_filter`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) or [`RevWalkListOptions::commit_filter`](rustdoc:grit_lib::revwalk::queries::RevWalkListOptions); filtered commits stay traversable (like `--no-merges`), and `-n` / `--count` apply after filtering.
+
+## Pickaxe (`-S` / `-G`)
+
+[`Pickaxe`](rustdoc:grit_lib::diff::Pickaxe) filters commits by tree diffs against the first parent (Git `log -S` / `-G`). Build with [`Pickaxe::occurrences`](rustdoc:grit_lib::diff::Pickaxe::occurrences) or [`Pickaxe::line_grep`](rustdoc:grit_lib::diff::Pickaxe::line_grep), then set [`RevListOptions::pickaxe`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) or [`RevWalkListOptions::pickaxe`](rustdoc:grit_lib::revwalk::queries::RevWalkListOptions). Evaluation runs after cheap [`CommitFilter`](rustdoc:grit_lib::revwalk::filter::CommitFilter) checks; pathspecs limit which files are diffed.
 
 <!-- include: grit-examples/src/bin/log_by_author.rs -->
 

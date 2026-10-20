@@ -16,6 +16,7 @@ pub mod filter;
 pub mod handle;
 pub mod queries;
 
+pub use crate::diff::{Pickaxe, PickaxeError, PickaxeKind};
 pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError, Pattern};
 pub use handle::RevWalk;
 pub use queries::{

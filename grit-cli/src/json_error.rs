@@ -86,3 +86,17 @@ pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) 
     })
     .context(InvalidCommitFilterExit)
 }
+
+/// Build a structured CLI error from [`grit_lib::diff::PickaxeError`].
+pub fn invalid_pickaxe(err: grit_lib::diff::PickaxeError) -> Error {
+    let human = err.to_string();
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: "invalid_pattern",
+            conflicts: None,
+        },
+        human,
+    })
+    .context(InvalidCommitFilterExit)
+}

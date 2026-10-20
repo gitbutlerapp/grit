@@ -7,13 +7,14 @@ use clap::Args;
 use grit_lib::config::environment::Environment;
 use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::config::parse_bool;
+use grit_lib::diff::{Pickaxe, PickaxeError};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::filter::{CommitFilter, CommitFilterBuilder, CommitFilterError};
 use grit_lib::revwalk::{
     committer_cutoff_from_date, MergeFilter, RefSelection, RevWalkListOptions,
 };
 
-use crate::json_error::invalid_commit_filter;
+use crate::json_error::{invalid_commit_filter, invalid_pickaxe};
 
 const CURSOR_PREFIX: &str = "lw1.";
 
@@ -127,6 +128,18 @@ pub struct RevSelectArgs {
     #[arg(long = "no-mailmap")]
     pub no_mailmap: bool,
 
+    /// Keep commits where occurrence count of this string changed (`git log -S`).
+    #[arg(short = 'S', value_name = "STRING", conflicts_with = "pickaxe_grep")]
+    pub pickaxe_string: Option<String>,
+
+    /// Keep commits whose added/removed lines match this pattern (`git log -G`).
+    #[arg(short = 'G', value_name = "PAT", conflicts_with = "pickaxe_string")]
+    pub pickaxe_grep: Option<String>,
+
+    /// Treat `-S` as a BRE instead of a literal string (`--pickaxe-regex`).
+    #[arg(long = "pickaxe-regex")]
+    pub pickaxe_regex: bool,
+
     /// Limit to commits that touch these paths.
     #[arg(value_name = "PATH", last = true)]
     pub paths: Vec<String>,
@@ -136,7 +149,11 @@ impl RevSelectArgs {
     /// True when author/committer/grep filters are set (disables log cursor paging).
     #[must_use]
     pub fn has_commit_filter_flags(&self) -> bool {
-        !self.author.is_empty() || !self.committer.is_empty() || !self.grep.is_empty()
+        !self.author.is_empty()
+            || !self.committer.is_empty()
+            || !self.grep.is_empty()
+            || self.pickaxe_string.is_some()
+            || self.pickaxe_grep.is_some()
     }
 
     /// Convert CLI flags into [`RevWalkListOptions`].
@@ -180,6 +197,7 @@ impl RevSelectArgs {
         let commit_filter = self
             .build_commit_filter(repo)
             .map_err(invalid_commit_filter)?;
+        let pickaxe = self.build_pickaxe().map_err(invalid_pickaxe)?;
         let _ = default_revs;
         Ok(RevWalkListOptions {
             limit: self.max_count,
@@ -192,6 +210,7 @@ impl RevSelectArgs {
             first_parent: self.first_parent,
             paths: self.paths.clone(),
             commit_filter,
+            pickaxe,
         })
     }
 
@@ -202,6 +221,44 @@ impl RevSelectArgs {
         } else {
             self.revs.iter().map(String::as_str).collect()
         }
+    }
+
+    fn build_pickaxe(&self) -> std::result::Result<Option<Arc<Pickaxe>>, PickaxeError> {
+        if let Some(s) = &self.pickaxe_string {
+            if s.is_empty() {
+                return Err(PickaxeError::InvalidPattern {
+                    pattern: String::new(),
+                    detail: "-S requires a non-empty argument".into(),
+                });
+            }
+            if self.pickaxe_regex && self.pickaxe_grep.is_some() {
+                return Err(PickaxeError::InvalidPattern {
+                    pattern: s.clone(),
+                    detail: "--pickaxe-regex cannot be used with -G".into(),
+                });
+            }
+            let px = Pickaxe::occurrences(s.as_str())
+                .ignore_case(self.regexp_ignore_case)
+                .pickaxe_regex(self.pickaxe_regex);
+            return Ok(Some(px.into_shared()));
+        }
+        if let Some(g) = &self.pickaxe_grep {
+            if g.is_empty() {
+                return Err(PickaxeError::InvalidPattern {
+                    pattern: String::new(),
+                    detail: "-G requires a non-empty argument".into(),
+                });
+            }
+            if self.pickaxe_regex {
+                return Err(PickaxeError::InvalidPattern {
+                    pattern: g.clone(),
+                    detail: "--pickaxe-regex cannot be used with -G".into(),
+                });
+            }
+            let px = Pickaxe::line_grep(g, self.regexp_ignore_case)?;
+            return Ok(Some(px.into_shared()));
+        }
+        Ok(None)
     }
 
     fn build_commit_filter(

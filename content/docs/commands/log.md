@@ -12,6 +12,7 @@ grit log [<REV>…] [-n <N>] [--cursor <token>] [--stat]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--author <pat>] [--committer <pat>] [--grep <pat>]
+  [-S <string>] [-G <pat>] [--pickaxe-regex]
   [-i] [--all-match] [--invert-grep] [-F] [--no-mailmap]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
   [-- <path>…]
@@ -23,7 +24,9 @@ Lists commits reachable from the selected revisions (default `HEAD`), newest fir
 
 Revision selection matches [`grit revs`](../revs/): plain tips, `A..B`, `A...B`, `^tip`, and the same ref-set flags (`--all`, `--branches`, and so on). Path operands after `--` limit to commits that touch those paths (same cwd rules as [`grit diff`](../diff/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `-n`, every matching commit is listed when paths are set (not capped at ten).
 
-When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, commit filters (`--author`, `--grep`, …), `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
+When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, commit filters (`--author`, `--grep`, …), pickaxe filters (`-S`, `-G`), `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
+
+Pickaxe filters match Git's `-S` and `-G`: `-S` keeps commits where the number of occurrences of a string changed in the diff against the first parent (literal string unless `--pickaxe-regex`); `-G` keeps commits where added or removed lines match a BRE. `-i` applies to both. Binary files are skipped for `-G` (not for `-S`). `-S` and `-G` cannot be combined.
 
 Author, committer, and message filters match [`grit revs`](../revs/): patterns use Git's default POSIX BRE rules unless `-F` / `--fixed-strings` is set; multiple `--author` or `--committer` patterns OR together; multiple `--grep` patterns OR together unless `--all-match`; `--invert-grep` negates only the grep group; `-i` applies to all. When `log.mailmap` is unset or true (and `--no-mailmap` is not passed), `.mailmap` is applied before matching author or committer (same sources as Git). Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
 
@@ -52,7 +55,10 @@ With `--stat`, each commit is followed by the files it changed and how many line
 | `--author <pat>` | Only commits whose author matches (repeatable; OR). |
 | `--committer <pat>` | Only commits whose committer matches (repeatable; OR). |
 | `--grep <pat>` | Only commits whose message matches (repeatable; OR unless `--all-match`). |
-| `-i`, `--regexp-ignore-case` | Case-insensitive patterns for author, committer, and grep. |
+| `-S <string>` | Only commits where this string's occurrence count changed in the tree diff vs the first parent. |
+| `-G <pat>` | Only commits where added/removed lines match this BRE (binary files skipped). |
+| `--pickaxe-regex` | Treat `-S` as a BRE instead of a literal string (not valid with `-G`). |
+| `-i`, `--regexp-ignore-case` | Case-insensitive patterns for author, committer, grep, and pickaxe. |
 | `--all-match` | Every `--grep` pattern must match. |
 | `--invert-grep` | Exclude commits that match the grep group. |
 | `-F`, `--fixed-strings` | Literal string patterns (no regex). |
