@@ -17,6 +17,10 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](rustdoc:grit_lib::objects::odb::Odb) (see `read_info` on [`Odb`](rustdoc:grit_lib::objects::odb::Odb)). It returns [`ObjectInfo`](rustdoc:grit_lib::objects::ObjectInfo) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
 
+## Peeling tags
+
+A ref tip can name an annotated tag, or a tag of a tag. `Odb::peel_tags` (on [`Odb`](rustdoc:grit_lib::objects::odb::Odb)) follows the chain and returns the id and kind of the first non-tag object; `Odb::peel_to_commit` returns `Some(commit)` when that object is a commit and `None` for a tree or blob. Only tag objects are read in full; the final object's kind comes from `read_info`. A missing object, an unparsable tag, or a chain of more than 64 tags is an error, not `None`, so you can tell "not a commit" apart from a broken repository. Revision walks, fetch negotiation, upload-pack ref advertisement, bundles, commit-graph tips, `packed-refs` peel lines, tag listing and log decorations all peel through these two methods.
+
 ## Pack read caching
 
 [`Odb`](rustdoc:grit_lib::objects::odb::Odb) owns a repository-scoped [`PackStore`](rustdoc:grit_lib::objects::pack_store::PackStore): pack directory listings, parsed `.idx` files, pack bytes, MIDX layers, and the delta-base LRU. Cloned [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handles share the same store; alternate object directories get separate stores on the parent [`Odb`](rustdoc:grit_lib::objects::odb::Odb).
