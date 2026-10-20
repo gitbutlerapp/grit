@@ -30,7 +30,26 @@ cargo test -p grit-lib --lib --release
 
 ### Release and benchmark binaries
 
-The workspace root [`Cargo.toml`](Cargo.toml) sets **`[profile.release]`** with **`lto = "fat"`**, **`codegen-units = 1`**, and **`panic = "unwind"`**. That profile is what **`cargo build --release`**, the GitHub **Release** workflow, and **`grit-bench`** use. Fat LTO lengthens clean builds compared with the default profile but keeps text size and dynamic relocations down so cold-start CLI work (for example `grit status` in an empty repo) maps less of the binary at startup. **`make gate`** and day-to-day library tests still use the **`dev`** profile unless you pass **`--release`** explicitly.
+The workspace root [`Cargo.toml`](Cargo.toml) defines two profiles:
+
+| Profile | Used for |
+| --- | --- |
+| **`release`** | Fast workspace **`cargo build --release`** (including **`cargo test --release`**) — **`codegen-units = 16`**, no fat LTO |
+| **`dist`** | Shipped **`grit`**, the GitHub **Release** workflow, and **`make build`** / **`grit-bench`** timings — **`lto = "fat"`**, **`codegen-units = 1`**, **`opt-level = "s"`**, **`strip = true`**, **`panic = "abort"`** |
+
+Build the CLI with **`cargo build --profile dist -p grit-cli`** (or **`make build`**). The binary is **`target/dist/grit`**. **`grit-bench`** resolves **`target/dist/grit`** before **`target/release/grit`**.
+
+**Trivial status RSS check** (empty repo, factory VM methodology):
+
+```bash
+cargo build --profile dist -p grit-cli -p grit-utils
+tmpdir=$(mktemp -d)
+git -C "$tmpdir" init -q && git -C "$tmpdir" commit --allow-empty -m init
+export GRIT_BENCH_MEASURE_CMD="$(pwd)/target/dist/grit status"
+./target/release/grit-bench measure-rss --cwd "$tmpdir"
+```
+
+Peak RSS is printed in bytes (Linux **`getrusage(RUSAGE_CHILDREN)`** from the helper). Repeat in a loop or sample **`VmHWM`** from **`/proc/<pid>/status`** for acceptance comparisons.
 
 ### CLI output snapshots
 

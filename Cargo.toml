@@ -63,9 +63,17 @@ opt-level = 3
 [profile.dev.package.sha2]
 opt-level = 3
 
-# Release binaries: link-time optimization shrinks text and dynamic relocations so
-# cold-start commands spend less time in the loader (see factory step 2370).
+# Release vs dist (factory step 2370).
+# `release`: workspace `--release` builds (including `cargo test --release`) without fat LTO.
+# `dist`: shipped `grit`, Release workflow, and grit-bench timings (fat LTO, size-tuned).
+
 [profile.release]
+codegen-units = 16
+
+[profile.dist]
+inherits = "release"
 lto = "fat"
 codegen-units = 1
-panic = "unwind"
+strip = true
+opt-level = "s"
+panic = "abort"

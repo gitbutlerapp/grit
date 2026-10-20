@@ -18,6 +18,8 @@
 CARGO ?= cargo
 CARGO_BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
 export CARGO_BUILD_JOBS
+# Shipped CLI and benchmark timings use the `dist` profile (see root Cargo.toml).
+GRIT_PROFILE ?= dist
 
 LLVM_COV_TARGET ?= target/llvm-cov-target
 GRIT_COV_BIN := $(CURDIR)/$(LLVM_COV_TARGET)/debug/grit
@@ -34,7 +36,7 @@ SCENARIO_HOST := $(shell hostname -s 2>/dev/null || echo localhost)
 all: build
 
 build:
-	$(CARGO) build --release -p grit-cli
+	$(CARGO) build --profile $(GRIT_PROFILE) -p grit-cli
 
 debug:
 	$(CARGO) build -p grit-cli
@@ -62,7 +64,8 @@ bench-lib:
 
 bench-scenarios:
 	@mkdir -p $(BENCH_DIR)
-	$(CARGO) build --release -p grit-cli -p grit-http-server -p grit-utils
+	$(CARGO) build --profile $(GRIT_PROFILE) -p grit-cli -p grit-http-server
+	$(CARGO) build --release -p grit-utils
 	./target/release/grit-bench scenarios --tier $(TIER_ARG) $(if $(filter 1,$(SMOKE)),--smoke,) --format json --output $(BENCH_DIR)/scenarios-$(SCENARIO_HOST).json
 	./target/release/grit-bench render --format markdown --input $(BENCH_DIR)/scenarios-$(SCENARIO_HOST).json --output $(BENCH_DIR)/scenarios-$(SCENARIO_HOST).md
 

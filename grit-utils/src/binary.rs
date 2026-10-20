@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-/// Resolve a binary: explicit user path, workspace `target/release/grit`, then `PATH`.
+/// Resolve a binary: explicit user path, workspace `target/dist/grit` or `target/release/grit`, then `PATH`.
 ///
 /// Explicit paths are made absolute and canonicalized so they remain valid after the
 /// harness changes working directory for hyperfine runs.
@@ -14,26 +14,38 @@ pub fn resolve_binary(name: &str, user_path: Option<&Path>) -> Result<PathBuf> {
         return canonicalize_executable(p);
     }
     if name == "grit" {
-        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit");
-        if workspace.is_file() {
-            return workspace.canonicalize().context("canonicalize grit path");
+        if let Some(p) = workspace_executable("grit") {
+            return Ok(p);
         }
     }
     if name == "grit-http-server" {
+        if let Some(p) = workspace_executable("grit-http-server") {
+            return Ok(p);
+        }
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        for rel in [
-            "../target/release/grit-http-server",
-            "../target/debug/grit-http-server",
-        ] {
-            let candidate = manifest.join(rel);
-            if candidate.is_file() {
-                return candidate
-                    .canonicalize()
-                    .context("canonicalize grit-http-server path");
-            }
+        let debug = manifest.join("../target/debug/grit-http-server");
+        if debug.is_file() {
+            return debug
+                .canonicalize()
+                .context("canonicalize grit-http-server path");
         }
     }
     find_on_path(name).with_context(|| format!("could not find `{name}` on PATH"))
+}
+
+/// Prefer `target/dist/<name>` (shipped profile), then `target/release/<name>`.
+fn workspace_executable(name: &str) -> Option<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    for profile in ["dist", "release"] {
+        let candidate = root.join("target").join(profile).join(name);
+        if candidate.is_file() {
+            return candidate
+                .canonicalize()
+                .context("canonicalize workspace executable")
+                .ok();
+        }
+    }
+    None
 }
 
 fn canonicalize_executable(p: &Path) -> Result<PathBuf> {

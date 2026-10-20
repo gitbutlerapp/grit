@@ -63,23 +63,23 @@ jobs:
       - name: Build
         if: ${{ !matrix.cross }}
         run: |
-          cargo build --release --target ${{ matrix.target }} -p grit-cli
+          cargo build --profile dist --target ${{ matrix.target }} -p grit-cli
 
       - name: Build (cross)
         if: matrix.cross
         run: |
-          cross build --release --target ${{ matrix.target }} -p grit-cli
+          cross build --profile dist --target ${{ matrix.target }} -p grit-cli
 
       # Completion scripts depend only on the CLI shape, not the target CPU. Generate
       # them with a host-native binary so cross-compiled artifacts (e.g. aarch64
       # Linux built on x86_64 Ubuntu) can still ship pre-generated scripts.
       - name: Build host grit for completions
-        run: cargo build --release -p grit-cli
+        run: cargo build --profile dist -p grit-cli
 
       - name: Package
         run: |
-          host_grit="${GITHUB_WORKSPACE}/target/release/grit"
-          cd target/${{ matrix.target }}/release
+          host_grit="${GITHUB_WORKSPACE}/target/dist/grit"
+          cd target/${{ matrix.target }}/dist
           mkdir -p completions
           "$host_grit" completions bash > completions/grit.bash
           "$host_grit" completions zsh > completions/_grit
@@ -125,12 +125,12 @@ jobs:
 
       - name: Build
         run: |
-          cargo build --release --target ${{ matrix.target }} -p grit-cli
+          cargo build --profile dist --target ${{ matrix.target }} -p grit-cli
 
       - name: Package
         shell: pwsh
         run: |
-          $release = "target/${{ matrix.target }}/release"
+          $release = "target/${{ matrix.target }}/dist"
           New-Item -ItemType Directory -Force -Path "$release/completions" | Out-Null
           & "$release/grit.exe" completions bash | Set-Content -Encoding utf8 "$release/completions/grit.bash"
           & "$release/grit.exe" completions zsh | Set-Content -Encoding utf8 "$release/completions/_grit"

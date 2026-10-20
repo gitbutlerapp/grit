@@ -25,10 +25,12 @@ pub fn collect_machine_info(scratch_dir: &Path) -> Result<MachineInfo> {
     })
 }
 
-/// Profile this `grit-bench` binary was built with (`dev` or `release`).
+/// Profile this `grit-bench` binary was built with (`dev`, `release`, or `dist`).
 pub fn grit_bench_cargo_profile() -> String {
     if cfg!(debug_assertions) {
         "dev".into()
+    } else if option_env!("CARGO_PROFILE").is_some_and(|p| p == "dist") {
+        "dist".into()
     } else {
         "release".into()
     }
@@ -220,7 +222,10 @@ mod tests {
         if cfg!(debug_assertions) {
             assert_eq!(profile, "dev");
         } else {
-            assert_eq!(profile, "release");
+            assert!(
+                profile == "release" || profile == "dist",
+                "unexpected cargo profile {profile}"
+            );
         }
     }
 }

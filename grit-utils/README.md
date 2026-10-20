@@ -18,7 +18,7 @@ Daily performance census reports use the [`grit-daily-bench/1`](DAILY-SCHEMA.md)
 ## Requirements
 
 - **`hyperfine`** on `PATH` (install via your package manager or `cargo install hyperfine`). If hyperfine is missing, `grit-bench` exits with an explicit error.
-- Built **`grit`** binary (defaults to `../target/release/grit` from this crate, then `PATH`).
+- Built **`grit`** binary (defaults to `../target/dist/grit`, then `../target/release/grit`, then `PATH`).
 - System **`git`**.
 
 ## Usage
