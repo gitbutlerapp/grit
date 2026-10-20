@@ -4873,6 +4873,7 @@ struct DenseBloomCtx<'a> {
 #[derive(Default)]
 struct DenseWalkCache {
     literal_tree_diff: HashMap<(ObjectId, ObjectId, u64), bool>,
+    follow_rename_to: HashMap<(ObjectId, ObjectId, Arc<str>), Option<String>>,
     component_child: HashMap<(ObjectId, Arc<str>, bool), CachedTreeChild>,
     /// FIFO eviction order; stale keys are skipped when popping (O(1) insert, no scan on hit).
     component_evict_order: VecDeque<(ObjectId, Arc<str>, bool)>,
@@ -4883,6 +4884,7 @@ struct DenseWalkCache {
 
 const LITERAL_TREE_DIFF_CAP: usize = 4096;
 const COMPONENT_CACHE_MAX_ENTRIES: usize = 512 * 1024;
+const FOLLOW_RENAME_CACHE_MAX: usize = 8192;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CachedTreeChild {
@@ -4904,6 +4906,38 @@ impl DenseWalkCache {
     #[cfg(test)]
     fn component_tree_reads(&self) -> u64 {
         self.tree_reads
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cached_follow_rename_to(
+        &mut self,
+        repo: &Repository,
+        parent_tree: ObjectId,
+        commit_tree: ObjectId,
+        new_path: &str,
+        threshold: u32,
+        config: &ConfigSet,
+        thread_policy: &crate::parallel::ThreadPolicy,
+    ) -> Result<Option<String>> {
+        let path_key: Arc<str> = Arc::from(new_path);
+        let key = (parent_tree, commit_tree, Arc::clone(&path_key));
+        if let Some(hit) = self.follow_rename_to.get(&key) {
+            return Ok(hit.clone());
+        }
+        let found = follow_find_rename_to_path(
+            repo.odb(),
+            &parent_tree,
+            &commit_tree,
+            new_path,
+            threshold,
+            config,
+            thread_policy,
+        )?;
+        if self.follow_rename_to.len() >= FOLLOW_RENAME_CACHE_MAX {
+            self.follow_rename_to.clear();
+        }
+        self.follow_rename_to.insert(key, found.clone());
+        Ok(found)
     }
 
     fn insert_component(
@@ -5379,18 +5413,6 @@ fn follow_history_heap(
             walk.since.is_none_or(|since| ts >= since) && walk.until.is_none_or(|until| ts <= until)
         };
 
-        let follow = follow_path_limited_action(
-            repo,
-            graph,
-            oid,
-            initial_path,
-            &path,
-            rename_threshold,
-            config.as_ref(),
-            &thread_policy,
-            Some(bloom),
-            &mut cache,
-        )?;
         let parent_count = graph.parents_of(oid)?.len();
         let passes_merge_filter = match walk.merges {
             crate::revwalk::MergeFilter::Any => true,
@@ -5405,7 +5427,33 @@ fn follow_history_heap(
             crate::revwalk::MergeFilter::OnlyMerges => parent_count >= 2,
         };
 
-        if follow.visible && passes_follow_merge_emit && passes_date_cutoff && passes_merge_filter {
+        let (follow_visible, parents_to_walk) = if parent_count <= 1 || path == initial_path {
+            let dense = dense_path_limited_action(
+                repo,
+                graph,
+                oid,
+                std::slice::from_ref(&path),
+                false,
+                false,
+                Some(bloom),
+                &mut cache,
+            )?;
+            (dense.visible, dense.parents_to_walk)
+        } else {
+            follow_predecessor_path_merge_action(
+                repo,
+                graph,
+                oid,
+                &path,
+                rename_threshold,
+                config.as_ref(),
+                &thread_policy,
+                Some(bloom),
+                &mut cache,
+            )?
+        };
+
+        if follow_visible && passes_follow_merge_emit && passes_date_cutoff && passes_merge_filter {
             visible_seen += 1;
             if visible_seen > skip && out.len() < max_count {
                 out.push((oid, path.clone()));
@@ -5419,38 +5467,46 @@ fn follow_history_heap(
                 .take(1)
                 .collect::<Vec<_>>()
         } else if parent_count > 1 {
-            follow.parents_to_walk.clone()
+            parents_to_walk
         } else {
-            load_commit(repo, oid)?.parents
+            graph.parents_of(oid)?
         };
 
         for parent in parents {
             if excluded.contains(&parent) {
                 continue;
             }
-            let commit_tree = graph.commit_tree(oid)?;
-            let parent_tree = graph.commit_tree(parent)?;
-            let parent_path = if commit_tree == parent_tree
-                || follow_tree_has_path(repo, parent_tree, &path)?
-            {
+            let parent_path = if !follow_visible {
                 path.clone()
-            } else if follow_tree_has_path(repo, commit_tree, &path)? {
-                follow_path_into_parent(
-                    repo,
-                    graph,
-                    parent,
-                    oid,
-                    &path,
-                    rename_threshold,
-                    config.as_ref(),
-                    &thread_policy,
-                )?
             } else {
-                path.clone()
+                let commit_tree = graph.commit_tree(oid)?;
+                let parent_tree = graph.commit_tree(parent)?;
+                if commit_tree == parent_tree
+                    || follow_tree_has_path_cached(repo, parent_tree, &path, &mut cache)?
+                {
+                    path.clone()
+                } else if follow_tree_has_path_cached(repo, commit_tree, &path, &mut cache)? {
+                    follow_path_into_parent(
+                        repo,
+                        graph,
+                        parent,
+                        oid,
+                        &path,
+                        rename_threshold,
+                        config.as_ref(),
+                        &thread_policy,
+                        &mut cache,
+                    )?
+                } else {
+                    path.clone()
+                }
             };
             if parent_path != path {
-                let rename_step = follow_tree_has_path(repo, commit_tree, &path)?
-                    && !follow_tree_has_path(repo, parent_tree, &path)?;
+                let commit_tree = graph.commit_tree(oid)?;
+                let parent_tree = graph.commit_tree(parent)?;
+                let rename_step =
+                    follow_tree_has_path_cached(repo, commit_tree, &path, &mut cache)?
+                        && !follow_tree_has_path_cached(repo, parent_tree, &path, &mut cache)?;
                 if !rename_step {
                     continue;
                 }
@@ -5505,197 +5561,64 @@ fn drop_sandwiched_predecessor_commits(
         .collect())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FollowFileEntry {
-    mode: u32,
-    oid: ObjectId,
-}
-
-fn follow_file_entry_at(
-    repo: &Repository,
-    tree_oid: ObjectId,
-    path: &str,
-) -> Result<Option<FollowFileEntry>> {
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.is_empty() {
-        return Ok(None);
-    }
-    let mut current = tree_oid;
-    for (i, part) in parts.iter().enumerate() {
-        let is_last = i + 1 == parts.len();
-        let entries = read_parsed_tree(repo, current)?;
-        let entry = if is_last {
-            tree_entry_by_name(&entries, part, false)
-                .or_else(|| tree_entry_by_name(&entries, part, true))
-        } else {
-            tree_entry_by_name(&entries, part, true)
-        };
-        let Some(entry) = entry else {
-            return Ok(None);
-        };
-        if is_last {
-            if entry.mode == 0o040000 {
-                return Ok(None);
-            }
-            return Ok(Some(FollowFileEntry {
-                mode: entry.mode,
-                oid: entry.oid,
-            }));
-        }
-        if entry.mode != 0o040000 {
-            return Ok(None);
-        }
-        current = entry.oid;
-    }
-    Ok(None)
-}
-
-fn follow_file_entries_same(left: Option<FollowFileEntry>, right: Option<FollowFileEntry>) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(a), Some(b)) => a.mode == b.mode && a.oid == b.oid,
-        _ => false,
-    }
-}
-
-struct FollowPathAction {
-    visible: bool,
-    parents_to_walk: Vec<ObjectId>,
-}
-
+/// Predecessor-path merge: bloom-backed dense visibility plus parent lines that still carry `path`.
 #[allow(clippy::too_many_arguments)]
-fn follow_path_limited_action(
+fn follow_predecessor_path_merge_action(
     repo: &Repository,
     graph: &mut CommitGraph<'_>,
     oid: ObjectId,
-    initial_path: &str,
     path: &str,
     rename_threshold: u32,
     config: &ConfigSet,
     thread_policy: &crate::parallel::ThreadPolicy,
     bloom: Option<&DenseBloomCtx<'_>>,
     cache: &mut DenseWalkCache,
-) -> Result<FollowPathAction> {
+) -> Result<(bool, Vec<ObjectId>)> {
+    let dense = dense_path_limited_action(
+        repo,
+        graph,
+        oid,
+        &[path.to_owned()],
+        false,
+        false,
+        bloom,
+        cache,
+    )?;
     let parents = graph.parents_of(oid)?;
-    let on_initial_path = path == initial_path;
-    if on_initial_path && parents.len() <= 1 {
-        let dense = dense_path_limited_action(
-            repo,
-            graph,
-            oid,
-            &[path.to_owned()],
-            false,
-            false,
-            bloom,
-            cache,
-        )?;
-        return Ok(FollowPathAction {
-            visible: dense.visible,
-            parents_to_walk: dense.parents_to_walk,
-        });
+    if parents.len() <= 1 || dense.parents_to_walk.len() > 1 {
+        return Ok((dense.visible, dense.parents_to_walk));
     }
-    let dense = if on_initial_path {
-        dense_path_limited_action(
-            repo,
-            graph,
-            oid,
-            &[path.to_owned()],
-            false,
-            false,
-            bloom,
-            cache,
-        )?
-    } else {
-        DensePathAction {
-            visible: false,
-            parents_to_walk: parents.clone(),
-        }
-    };
-    if parents.is_empty() {
-        let commit_tree = graph.commit_tree(oid)?;
-        let visible = follow_tree_has_path(repo, commit_tree, path)?;
-        return Ok(FollowPathAction {
-            visible,
-            parents_to_walk: Vec::new(),
-        });
-    }
-
     let commit_tree = graph.commit_tree(oid)?;
-    let commit_entry = follow_file_entry_at(repo, commit_tree, path)?;
-
-    let mut treesame = Vec::new();
-    for parent_oid in &parents {
-        let parent_tree = graph.commit_tree(*parent_oid)?;
-        if commit_tree == parent_tree {
-            treesame.push(*parent_oid);
+    let mut walk = Vec::new();
+    for &parent in &parents {
+        let parent_tree = graph.commit_tree(parent)?;
+        if follow_tree_has_path_cached(repo, parent_tree, path, cache)? {
+            walk.push(parent);
             continue;
         }
-        if follow_tree_has_path(repo, parent_tree, path)? {
-            let parent_entry = follow_file_entry_at(repo, parent_tree, path)?;
-            if follow_file_entries_same(commit_entry, parent_entry) {
-                treesame.push(*parent_oid);
-            }
-            continue;
-        }
-        let parent_path = follow_path_into_parent(
-            repo,
-            graph,
-            *parent_oid,
-            oid,
-            path,
-            rename_threshold,
-            config,
-            thread_policy,
-        )?;
-        let parent_entry = follow_file_entry_at(repo, parent_tree, &parent_path)?;
-        let same = parent_path == path && follow_file_entries_same(commit_entry, parent_entry);
-        if same {
-            treesame.push(*parent_oid);
+        if follow_tree_has_path_cached(repo, commit_tree, path, cache)?
+            && cache
+                .cached_follow_rename_to(
+                    repo,
+                    parent_tree,
+                    commit_tree,
+                    path,
+                    rename_threshold,
+                    config,
+                    thread_policy,
+                )?
+                .is_some()
+        {
+            walk.push(parent);
         }
     }
-
-    let visible = treesame.is_empty();
-
-    let parents_to_walk = if parents.len() > 1 {
-        if on_initial_path {
-            dense.parents_to_walk
-        } else {
-            let mut walk = Vec::new();
-            for parent_oid in &parents {
-                let parent_tree = graph.commit_tree(*parent_oid)?;
-                if follow_tree_has_path(repo, parent_tree, path)? {
-                    walk.push(*parent_oid);
-                    continue;
-                }
-                if follow_tree_has_path(repo, commit_tree, path)?
-                    && follow_find_rename_to_path(
-                        repo.odb(),
-                        &parent_tree,
-                        &commit_tree,
-                        path,
-                        rename_threshold,
-                        config,
-                        thread_policy,
-                    )?
-                    .is_some()
-                {
-                    walk.push(*parent_oid);
-                }
-            }
-            if walk.is_empty() {
-                parents.clone()
-            } else {
-                walk
-            }
+    if walk.is_empty() {
+        walk = dense.parents_to_walk;
+        if walk.is_empty() {
+            walk = parents;
         }
-    } else {
-        parents.clone()
-    };
-
-    Ok(FollowPathAction {
-        visible,
-        parents_to_walk,
-    })
+    }
+    Ok((dense.visible, walk))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5708,27 +5631,27 @@ fn follow_path_into_parent(
     threshold: u32,
     config: &ConfigSet,
     thread_policy: &crate::parallel::ThreadPolicy,
+    cache: &mut DenseWalkCache,
 ) -> Result<String> {
-    let odb = repo.odb();
     let parent_tree = graph.commit_tree(parent_oid)?;
     let commit_tree = graph.commit_tree(commit_oid)?;
     if parent_tree == commit_tree {
         return Ok(path.to_owned());
     }
 
-    if follow_tree_has_path(repo, parent_tree, path)? {
+    if follow_tree_has_path_cached(repo, parent_tree, path, cache)? {
         return Ok(path.to_owned());
     }
 
-    let commit_has_path = follow_tree_has_path(repo, commit_tree, path)?;
+    let commit_has_path = follow_tree_has_path_cached(repo, commit_tree, path, cache)?;
     if !commit_has_path {
         return Ok(path.to_owned());
     }
 
-    if let Some(old_path) = follow_find_rename_to_path(
-        odb,
-        &parent_tree,
-        &commit_tree,
+    if let Some(old_path) = cache.cached_follow_rename_to(
+        repo,
+        parent_tree,
+        commit_tree,
         path,
         threshold,
         config,
@@ -5739,8 +5662,34 @@ fn follow_path_into_parent(
     Ok(path.to_owned())
 }
 
-fn follow_tree_has_path(repo: &Repository, tree_oid: ObjectId, path: &str) -> Result<bool> {
-    Ok(follow_tree_entry_mode(repo, tree_oid, path)?.is_some())
+fn follow_tree_has_path_cached(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    path: &str,
+    cache: &mut DenseWalkCache,
+) -> Result<bool> {
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return Ok(false);
+    }
+    let mut current = tree_oid;
+    for (i, part) in parts.iter().enumerate() {
+        let is_last = i + 1 == parts.len();
+        let as_tree = !is_last;
+        match cache.lookup_tree_component(repo, current, part, as_tree)? {
+            CachedTreeChild::Missing => return Ok(false),
+            CachedTreeChild::Found { oid, mode } => {
+                if is_last {
+                    return Ok(true);
+                }
+                if mode != 0o040000 {
+                    return Ok(false);
+                }
+                current = oid;
+            }
+        }
+    }
+    Ok(true)
 }
 
 fn follow_tree_entry_mode(

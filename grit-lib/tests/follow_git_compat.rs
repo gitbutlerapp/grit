@@ -255,6 +255,33 @@ fn follow_git_git_builtin_add_c_smoke() {
     assert_follow_matches_git(wt, "builtin/add.c", RevWalkListOptions::default(), None);
 }
 
+/// Side-branch predecessor edits sandwiched between two tip-path commits (git.git 6b3020a shape).
+#[test]
+fn follow_sandwiched_predecessor_path_matches_git() {
+    let repo = HistoryRepo::init();
+    let worktree = repo.worktree();
+    git(worktree, &["config", "user.email", "t@e"]);
+    git(worktree, &["config", "user.name", "T"]);
+    std::fs::create_dir_all(worktree.join("dir")).unwrap();
+    std::fs::write(worktree.join("dir/sub.txt"), "v1\n").unwrap();
+    git(worktree, &["add", "dir/sub.txt"]);
+    git(worktree, &["commit", "-m", "tip-path"]);
+    git(worktree, &["checkout", "-q", "-b", "side"]);
+    std::fs::write(worktree.join("dir-sub.txt"), "side\n").unwrap();
+    git(worktree, &["add", "dir-sub.txt"]);
+    git(worktree, &["commit", "-m", "predecessor-side"]);
+    git(worktree, &["checkout", "-q", "main"]);
+    std::fs::write(worktree.join("dir/sub.txt"), "v2\n").unwrap();
+    git(worktree, &["add", "dir/sub.txt"]);
+    git(worktree, &["commit", "-m", "tip-path-2"]);
+    assert_follow_matches_git(
+        &worktree,
+        "dir/sub.txt",
+        RevWalkListOptions::default(),
+        None,
+    );
+}
+
 #[test]
 fn follow_resolved_walk_pathspec_matches_git() {
     let repo = HistoryRepo::init();
