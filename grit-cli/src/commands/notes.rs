@@ -8,7 +8,7 @@ use grit_lib::error::Error;
 use grit_lib::notes::{resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::repo_handles::NotesWriteOptions;
+use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -201,21 +201,18 @@ fn resolve_notes_ref(repo: &Repository, override_ref: Option<&str>) -> Result<No
 }
 
 fn list_notes(repo: &Repository, notes_ref: &NotesRef) -> Result<NotesOutcome> {
-    let handle = repo.notes();
-    let mut notes = handle
-        .list(notes_ref)
+    let notes = repo
+        .notes()
+        .list_with_bodies(notes_ref)
         .map_err(map_notes_error)?
         .into_iter()
-        .map(|listing| {
-            let body = read_body(repo, &listing.note_blob);
-            NoteEntry {
-                object: listing.object.to_hex(),
-                blob: listing.note_blob.to_hex(),
-                body,
-            }
+        .map(|note| NoteEntry {
+            object: note.object.to_hex(),
+            blob: note.note_blob.to_hex(),
+            body: String::from_utf8(note.body)
+                .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
         })
-        .collect::<Vec<_>>();
-    notes.sort_by(|a, b| a.object.cmp(&b.object));
+        .collect();
     Ok(NotesOutcome::List {
         notes_ref: notes_ref.to_string(),
         notes,
@@ -248,23 +245,19 @@ fn add_note(
         bail!("note message must not be empty (use -m)");
     }
     let object = resolve_object(repo, rev)?;
-    let existed = repo
-        .notes()
-        .read(notes_ref, &object)
-        .map_err(map_notes_error)?
-        .is_some();
     let write_opts = notes_write_options(repo, "add", now)?;
     let mut content = message.as_bytes().to_vec();
     if !content.ends_with(b"\n") {
         content.push(b'\n');
     }
-    repo.notes()
+    let outcome = repo
+        .notes()
         .add(notes_ref, &object, &content, &write_opts, force)
         .map_err(map_notes_error)?;
     Ok(NotesOutcome::Add {
         notes_ref: notes_ref.to_string(),
         object: object.to_hex(),
-        replaced: existed,
+        replaced: outcome == NoteAddOutcome::Replaced,
     })
 }
 
@@ -294,14 +287,6 @@ fn remove_notes(
 
 fn resolve_object(repo: &Repository, rev: &str) -> Result<ObjectId> {
     resolve_revision(repo, rev).map_err(map_notes_error)
-}
-
-fn read_body(repo: &Repository, blob: &ObjectId) -> String {
-    repo.odb()
-        .read(blob)
-        .ok()
-        .map(|obj| String::from_utf8_lossy(&obj.data).into_owned())
-        .unwrap_or_default()
 }
 
 fn notes_write_options(
