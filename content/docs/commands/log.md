@@ -12,6 +12,8 @@ grit log [<REV>…] [-n <N>] [--cursor <token>] [--stat]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
+  [--author <pat>] [--committer <pat>] [--grep <pat>]
+  [-i] [--all-match] [--invert-grep] [-F] [--no-mailmap]
   [-- <path>…]
 ```
 
@@ -21,7 +23,9 @@ Lists commits reachable from the selected revisions (default `HEAD`), newest fir
 
 Revision selection matches [`grit revs`](../revs/): plain tips, `A..B`, `A...B`, `^tip`, and the same ref-set flags (`--all`, `--branches`, and so on). Path operands after `--` limit to commits that touch those paths (same cwd rules as [`grit diff`](../diff/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `-n`, every matching commit is listed when paths are set (not capped at ten).
 
-When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
+When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, commit filters (`--author`, `--grep`, …), `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
+
+Author, committer, and message filters match [`grit revs`](../revs/): patterns use Git's default POSIX BRE rules unless `-F` / `--fixed-strings` is set; multiple `--author` or `--committer` patterns OR together; multiple `--grep` patterns OR together unless `--all-match`; `--invert-grep` negates only the grep group; `-i` applies to all. When `log.mailmap` is unset or true (and `--no-mailmap` is not passed), `.mailmap` is applied before matching author or committer (same sources as Git). Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
 
 With `--stat`, each commit is followed by the files it changed and how many lines were added and removed in each, like [`grit show`](../show/). Merge commits show the change against their first parent.
 
@@ -44,6 +48,14 @@ With `--stat`, each commit is followed by the files it changed and how many line
 | `--branches[=<glob>]` | Branch tips, optionally filtered by glob under `refs/heads/`. |
 | `--tags[=<glob>]` | Tag tips, optionally filtered by glob under `refs/tags/`. |
 | `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob under `refs/remotes/`. |
+| `--author <pat>` | Only commits whose author matches (repeatable; OR). |
+| `--committer <pat>` | Only commits whose committer matches (repeatable; OR). |
+| `--grep <pat>` | Only commits whose message matches (repeatable; OR unless `--all-match`). |
+| `-i`, `--regexp-ignore-case` | Case-insensitive patterns for author, committer, and grep. |
+| `--all-match` | Every `--grep` pattern must match. |
+| `--invert-grep` | Exclude commits that match the grep group. |
+| `-F`, `--fixed-strings` | Treat author, committer, and grep patterns as fixed strings. |
+| `--no-mailmap` | Do not apply `.mailmap` for author/committer matching. |
 | `--stat` | Show which files each commit changed, with insertion and deletion counts. |
 | `<path>…` | After `--`, limit to commits that touch these paths (cwd-relative under the work tree, like `grit diff`; all matches unless `-n` is set). |
 
