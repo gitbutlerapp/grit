@@ -51,7 +51,7 @@ List commits on the current branch:
 ```console
 $ grit revs HEAD
 92501f188ae0815af09a0cef6e121eddda4113cf  second
-919c45f33de5e0bd05f8ffb089f697f4644976  initial
+919c45f33de5e5c0bd05f8ffb089f697f4644976  initial
 ```
 
 Count reachable commits:

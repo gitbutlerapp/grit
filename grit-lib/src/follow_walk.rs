@@ -68,8 +68,20 @@ pub fn follow_history(
     path: &str,
     options: &FollowWalkOptions,
 ) -> Result<FollowWalk> {
-    if options.walk.paths.len() > 1 {
-        return Err(Error::RevList(RevListError::FollowMultiplePaths));
+    let follow_path = if options.walk.paths.is_empty() {
+        path.to_owned()
+    } else {
+        let resolved = repo.resolve_rev_walk_pathspecs(&options.walk.paths)?;
+        if resolved.len() > 1 {
+            return Err(Error::RevList(RevListError::FollowMultiplePaths));
+        }
+        resolved
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| path.to_owned())
+    };
+    if follow_path.is_empty() {
+        return Err(Error::RevList(RevListError::FollowRequiresSingleFilePath));
     }
 
     let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, &options.walk)?;
@@ -84,14 +96,14 @@ pub fn follow_history(
         });
     }
 
-    validate_follow_file_path_at_tip(repo, include[0], path)?;
+    validate_follow_file_path_at_tip(repo, include[0], &follow_path)?;
 
     let excluded: std::collections::HashSet<ObjectId> = exclude.into_iter().collect();
     let raw = follow_history_commits(
         repo,
         &include,
         &excluded,
-        path,
+        &follow_path,
         &options.walk,
         options.rename_threshold,
     )?;

@@ -244,19 +244,48 @@ fn follow_unrelated_dash_path_not_followed() {
 }
 
 #[test]
-#[ignore = "git.git oracle: 307 vs grit on /tmp/git-wt; perf still above 1.5x git median"]
 fn follow_git_git_builtin_add_c_smoke() {
     let wt = Path::new("/tmp/git-wt");
     if !wt.is_dir() {
         return;
     }
-    let git_n = git_follow_hashes(wt, "builtin/add.c", None, None).len();
-    if git_n == 0 {
+    if git_follow_hashes(wt, "builtin/add.c", None, None).is_empty() {
         return;
     }
-    let grit_n = grit_follow_hashes(wt, "builtin/add.c", RevWalkListOptions::default()).len();
-    eprintln!("git={git_n} grit={grit_n}");
-    assert_eq!(grit_n, git_n, "git.git follow count mismatch");
+    assert_follow_matches_git(wt, "builtin/add.c", RevWalkListOptions::default(), None);
+}
+
+#[test]
+fn follow_resolved_walk_pathspec_matches_git() {
+    let repo = HistoryRepo::init();
+    let worktree = repo.worktree();
+    git(worktree, &["config", "user.email", "t@e"]);
+    git(worktree, &["config", "user.name", "T"]);
+    std::fs::create_dir_all(worktree.join("sub")).unwrap();
+    std::fs::write(worktree.join("sub").join("f.txt"), "x\n").unwrap();
+    git(worktree, &["add", "sub/f.txt"]);
+    git(worktree, &["commit", "-m", "add"]);
+    std::fs::write(worktree.join("sub").join("f.txt"), "y\n").unwrap();
+    git(worktree, &["add", "sub/f.txt"]);
+    git(worktree, &["commit", "-m", "edit"]);
+    let git_list = git_follow_hashes(worktree, "sub/f.txt", None, None);
+    let grit = open_grit_repo(worktree);
+    let walked = grit
+        .rev_walk()
+        .follow(
+            &["HEAD"],
+            "sub/f.txt",
+            &FollowWalkOptions {
+                walk: RevWalkListOptions {
+                    paths: vec!["sub/f.txt".into()],
+                    ..RevWalkListOptions::default()
+                },
+                ..FollowWalkOptions::default()
+            },
+        )
+        .expect("follow");
+    let grit_list: Vec<ObjectId> = walked.map(|c| c.oid).collect();
+    assert_eq!(grit_list, git_list);
 }
 
 #[test]

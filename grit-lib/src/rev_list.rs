@@ -5383,6 +5383,7 @@ fn follow_history_heap(
             repo,
             graph,
             oid,
+            initial_path,
             &path,
             rename_threshold,
             config.as_ref(),
@@ -5397,9 +5398,14 @@ fn follow_history_heap(
             crate::revwalk::MergeFilter::NoMerges => parent_count <= 1,
         };
 
-        // Git `log --follow` never lists merge commits; it walks through them via TREESAME
-        // parent selection but only emits single-parent revisions that touch the file.
-        if follow.visible && parent_count <= 1 && passes_date_cutoff && passes_merge_filter {
+        let passes_follow_merge_emit = match walk.merges {
+            crate::revwalk::MergeFilter::Any | crate::revwalk::MergeFilter::NoMerges => {
+                parent_count <= 1
+            }
+            crate::revwalk::MergeFilter::OnlyMerges => parent_count >= 2,
+        };
+
+        if follow.visible && passes_follow_merge_emit && passes_date_cutoff && passes_merge_filter {
             visible_seen += 1;
             if visible_seen > skip && out.len() < max_count {
                 out.push((oid, path.clone()));
@@ -5422,18 +5428,27 @@ fn follow_history_heap(
             if excluded.contains(&parent) {
                 continue;
             }
-            let parent_path = follow_path_into_parent(
-                repo,
-                parent,
-                oid,
-                &path,
-                rename_threshold,
-                config.as_ref(),
-                &thread_policy,
-            )?;
+            let commit_tree = graph.commit_tree(oid)?;
+            let parent_tree = graph.commit_tree(parent)?;
+            let parent_path = if commit_tree == parent_tree
+                || follow_tree_has_path(repo, parent_tree, &path)?
+            {
+                path.clone()
+            } else if follow_tree_has_path(repo, commit_tree, &path)? {
+                follow_path_into_parent(
+                    repo,
+                    graph,
+                    parent,
+                    oid,
+                    &path,
+                    rename_threshold,
+                    config.as_ref(),
+                    &thread_policy,
+                )?
+            } else {
+                path.clone()
+            };
             if parent_path != path {
-                let commit_tree = graph.commit_tree(oid)?;
-                let parent_tree = graph.commit_tree(parent)?;
                 let rename_step = follow_tree_has_path(repo, commit_tree, &path)?
                     && !follow_tree_has_path(repo, parent_tree, &path)?;
                 if !rename_step {
@@ -5459,7 +5474,35 @@ fn follow_history_heap(
     if walk.reverse {
         out.reverse();
     }
+    out = drop_sandwiched_predecessor_commits(repo, &out, initial_path)?;
     Ok(out)
+}
+
+/// Drop predecessor-path commits sandwiched between two commits at `initial_path` (Git
+/// omits side-branch predecessor edits that fall between two revisions at the tip path).
+fn drop_sandwiched_predecessor_commits(
+    _repo: &Repository,
+    out: &[(ObjectId, String)],
+    initial_path: &str,
+) -> Result<Vec<(ObjectId, String)>> {
+    if out.len() < 3 {
+        return Ok(out.to_vec());
+    }
+    Ok(out
+        .iter()
+        .enumerate()
+        .filter_map(|(i, entry @ (_, path))| {
+            if path == initial_path {
+                return Some(entry.clone());
+            }
+            if i == 0 || i + 1 == out.len() {
+                return Some(entry.clone());
+            }
+            let (_, before_path) = &out[i - 1];
+            let (_, after_path) = &out[i + 1];
+            (before_path != initial_path || after_path != initial_path).then(|| entry.clone())
+        })
+        .collect())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -5525,14 +5568,49 @@ fn follow_path_limited_action(
     repo: &Repository,
     graph: &mut CommitGraph<'_>,
     oid: ObjectId,
+    initial_path: &str,
     path: &str,
     rename_threshold: u32,
     config: &ConfigSet,
     thread_policy: &crate::parallel::ThreadPolicy,
-    _bloom: Option<&DenseBloomCtx<'_>>,
-    _cache: &mut DenseWalkCache,
+    bloom: Option<&DenseBloomCtx<'_>>,
+    cache: &mut DenseWalkCache,
 ) -> Result<FollowPathAction> {
     let parents = graph.parents_of(oid)?;
+    let on_initial_path = path == initial_path;
+    if on_initial_path && parents.len() <= 1 {
+        let dense = dense_path_limited_action(
+            repo,
+            graph,
+            oid,
+            &[path.to_owned()],
+            false,
+            false,
+            bloom,
+            cache,
+        )?;
+        return Ok(FollowPathAction {
+            visible: dense.visible,
+            parents_to_walk: dense.parents_to_walk,
+        });
+    }
+    let dense = if on_initial_path {
+        dense_path_limited_action(
+            repo,
+            graph,
+            oid,
+            &[path.to_owned()],
+            false,
+            false,
+            bloom,
+            cache,
+        )?
+    } else {
+        DensePathAction {
+            visible: false,
+            parents_to_walk: parents.clone(),
+        }
+    };
     if parents.is_empty() {
         let commit_tree = graph.commit_tree(oid)?;
         let visible = follow_tree_has_path(repo, commit_tree, path)?;
@@ -5547,8 +5625,21 @@ fn follow_path_limited_action(
 
     let mut treesame = Vec::new();
     for parent_oid in &parents {
+        let parent_tree = graph.commit_tree(*parent_oid)?;
+        if commit_tree == parent_tree {
+            treesame.push(*parent_oid);
+            continue;
+        }
+        if follow_tree_has_path(repo, parent_tree, path)? {
+            let parent_entry = follow_file_entry_at(repo, parent_tree, path)?;
+            if follow_file_entries_same(commit_entry, parent_entry) {
+                treesame.push(*parent_oid);
+            }
+            continue;
+        }
         let parent_path = follow_path_into_parent(
             repo,
+            graph,
             *parent_oid,
             oid,
             path,
@@ -5556,7 +5647,6 @@ fn follow_path_limited_action(
             config,
             thread_policy,
         )?;
-        let parent_tree = graph.commit_tree(*parent_oid)?;
         let parent_entry = follow_file_entry_at(repo, parent_tree, &parent_path)?;
         let same = parent_path == path && follow_file_entries_same(commit_entry, parent_entry);
         if same {
@@ -5567,9 +5657,36 @@ fn follow_path_limited_action(
     let visible = treesame.is_empty();
 
     let parents_to_walk = if parents.len() > 1 {
-        match treesame.first().copied() {
-            Some(parent) => vec![parent],
-            None => parents.clone(),
+        if on_initial_path {
+            dense.parents_to_walk
+        } else {
+            let mut walk = Vec::new();
+            for parent_oid in &parents {
+                let parent_tree = graph.commit_tree(*parent_oid)?;
+                if follow_tree_has_path(repo, parent_tree, path)? {
+                    walk.push(*parent_oid);
+                    continue;
+                }
+                if follow_tree_has_path(repo, commit_tree, path)?
+                    && follow_find_rename_to_path(
+                        repo.odb(),
+                        &parent_tree,
+                        &commit_tree,
+                        path,
+                        rename_threshold,
+                        config,
+                        thread_policy,
+                    )?
+                    .is_some()
+                {
+                    walk.push(*parent_oid);
+                }
+            }
+            if walk.is_empty() {
+                parents.clone()
+            } else {
+                walk
+            }
         }
     } else {
         parents.clone()
@@ -5581,8 +5698,10 @@ fn follow_path_limited_action(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn follow_path_into_parent(
     repo: &Repository,
+    graph: &mut CommitGraph<'_>,
     parent_oid: ObjectId,
     commit_oid: ObjectId,
     path: &str,
@@ -5591,25 +5710,25 @@ fn follow_path_into_parent(
     thread_policy: &crate::parallel::ThreadPolicy,
 ) -> Result<String> {
     let odb = repo.odb();
-    let parent = load_commit(repo, parent_oid)?;
-    let commit = load_commit(repo, commit_oid)?;
-    if parent.tree == commit.tree {
+    let parent_tree = graph.commit_tree(parent_oid)?;
+    let commit_tree = graph.commit_tree(commit_oid)?;
+    if parent_tree == commit_tree {
         return Ok(path.to_owned());
     }
 
-    if follow_tree_has_path(repo, parent.tree, path)? {
+    if follow_tree_has_path(repo, parent_tree, path)? {
         return Ok(path.to_owned());
     }
 
-    let commit_has_path = follow_tree_has_path(repo, commit.tree, path)?;
+    let commit_has_path = follow_tree_has_path(repo, commit_tree, path)?;
     if !commit_has_path {
         return Ok(path.to_owned());
     }
 
     if let Some(old_path) = follow_find_rename_to_path(
         odb,
-        &parent.tree,
-        &commit.tree,
+        &parent_tree,
+        &commit_tree,
         path,
         threshold,
         config,
