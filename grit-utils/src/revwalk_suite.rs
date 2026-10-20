@@ -12,12 +12,28 @@ use crate::fixture::{remove_dir_robust, scratch_dir};
 use crate::hot_path_fixture::{setup_pick_merge_fixture, HotPathRepoSpec};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::network_fixture::{ensure_fixture, NetworkFixtureKind, NetworkProfile};
+use crate::odb_suite::{run_odb_scenario, OdbRunConfig};
 use crate::scenarios::{run_scenario, Driver, RunConfig, Scenario};
 use crate::schema::{BenchReport, ToolVersions, SCHEMA_VERSION};
 
 fn git_env(cmd: &mut Command) {
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null");
+}
+
+fn lib_op_argv(sub: &str, repo: &Path, extra: &[String]) -> Vec<String> {
+    let mut v = vec!["lib-op".into(), sub.into(), repo.display().to_string()];
+    v.extend_from_slice(extra);
+    v
+}
+
+fn odb_cfg_from_run(cfg: &RunConfig) -> OdbRunConfig {
+    OdbRunConfig {
+        warmup: cfg.warmup,
+        min_runs: cfg.min_runs,
+        exact_runs: cfg.exact_runs,
+        prepare_bin: cfg.prepare_bin.clone(),
+    }
 }
 
 fn clone_deep_worktree(git: &Path, bare: &Path) -> Result<PathBuf> {
@@ -42,12 +58,14 @@ fn clone_deep_worktree(git: &Path, bare: &Path) -> Result<PathBuf> {
 /// Rev-list count and merge-base scenarios vs system git.
 pub fn run_revwalk_suite(
     hyperfine: &Path,
+    bench_exe: &Path,
     git: &Path,
     grit: &Path,
     cfg: &RunConfig,
     smoke: bool,
     timestamp: OffsetDateTime,
 ) -> Result<BenchReport> {
+    let odb_cfg = odb_cfg_from_run(cfg);
     let profile = if smoke {
         NetworkProfile::Smoke
     } else {
@@ -76,12 +94,11 @@ pub fn run_revwalk_suite(
             }
             let _ = prep;
         }
-        let lib_prefix = vec!["lib-op".to_string()];
-        scenarios.push(run_scenario(
+        scenarios.push(run_odb_scenario(
             hyperfine,
+            bench_exe,
             git,
-            grit,
-            cfg,
+            &odb_cfg,
             &Scenario {
                 id: format!("revs-count-author-{id_suffix}"),
                 group: "revs".into(),
@@ -89,12 +106,7 @@ pub fn run_revwalk_suite(
                 description: format!(
                     "rev-list --count --author=. HEAD on deep-history ({id_suffix})"
                 ),
-                grit_argv: {
-                    let mut v = lib_prefix.clone();
-                    v.push("rev-list-count-author-head".into());
-                    v.push(worktree.display().to_string());
-                    v
-                },
+                grit_argv: lib_op_argv("rev-list-count-author-head", &worktree, &[]),
                 git_argv: vec![
                     "rev-list".into(),
                     "--count".into(),
@@ -108,11 +120,11 @@ pub fn run_revwalk_suite(
             },
             &worktree,
         )?);
-        scenarios.push(run_scenario(
+        scenarios.push(run_odb_scenario(
             hyperfine,
+            bench_exe,
             git,
-            grit,
-            cfg,
+            &odb_cfg,
             &Scenario {
                 id: format!("revs-author-n50-{id_suffix}"),
                 group: "revs".into(),
@@ -120,14 +132,11 @@ pub fn run_revwalk_suite(
                 description: format!(
                     "rev-list -n 50 --author=. HEAD on deep-history ({id_suffix})"
                 ),
-                grit_argv: {
-                    let mut v = lib_prefix;
-                    v.push("rev-list-author-n-head".into());
-                    v.push(worktree.display().to_string());
-                    v.push("--max-count".into());
-                    v.push("50".into());
-                    v
-                },
+                grit_argv: lib_op_argv(
+                    "rev-list-author-n-head",
+                    &worktree,
+                    &["--max-count".into(), "50".into()],
+                ),
                 git_argv: vec![
                     "rev-list".into(),
                     "-n".into(),

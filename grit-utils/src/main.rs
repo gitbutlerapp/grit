@@ -1425,7 +1425,10 @@ fn main() -> Result<()> {
         Cmd::Revwalk { smoke } => {
             eprintln!("Running revwalk benchmarks...");
             let cfg = run_config(&cli, true);
-            run_revwalk_suite(&hyperfine, &git, &grit, &cfg, *smoke, timestamp)?
+            {
+                let bench_exe = std::env::current_exe().context("current exe")?;
+                run_revwalk_suite(&hyperfine, &bench_exe, &git, &grit, &cfg, *smoke, timestamp)?
+            }
         }
         Cmd::Fsck { smoke } => {
             eprintln!("Running fsck benchmarks...");

@@ -204,6 +204,7 @@ pub fn run_scenario_suite(
 
     reports.push(run_revwalk_suite(
         hyperfine,
+        bench_exe,
         git,
         grit,
         cfg,
