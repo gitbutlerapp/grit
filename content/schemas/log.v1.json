@@ -154,7 +154,7 @@
       "type": "array"
     },
     "next": {
-      "description": "Opaque continuation cursor for `--before`, or `null` when there is no further history.",
+      "description": "Opaque continuation cursor for `--cursor`, or `null` when there is no further history.",
       "type": [
         "string",
         "null"

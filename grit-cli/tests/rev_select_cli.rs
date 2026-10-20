@@ -70,6 +70,20 @@ fn git_oids(dir: &Path, git_args: &[&str]) -> Vec<String> {
         .collect()
 }
 
+fn git_branch(dir: &Path, name: &str, start: &str) {
+    let out = Command::new("git")
+        .args(["-C", dir.to_str().expect("utf8"), "branch", name, start])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git branch");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 fn grit_log_oids(dir: &Path, args: &[&str]) -> Vec<String> {
     let v = grit_json(dir, args);
     v["commits"]
@@ -169,15 +183,16 @@ fn log_cursor_pages_through_range() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 15);
-    let git = git_oids(&dir, &[]);
+    seed_linear_repo(&dir, 13);
+    git_branch(&dir, "base", "HEAD~12");
+    let git = git_oids(&dir, &["base..HEAD"]);
     let mut paged = Vec::new();
     let mut cursor: Option<String> = None;
     for _ in 0..10 {
         let v = if let Some(ref c) = cursor {
             grit_json(&dir, &["log", &format!("--cursor={c}")])
         } else {
-            grit_json(&dir, &["log"])
+            grit_json(&dir, &["log", "base..HEAD"])
         };
         for c in v["commits"].as_array().expect("commits") {
             paged.push(c["oid"].as_str().expect("oid").to_owned());
@@ -188,6 +203,27 @@ fn log_cursor_pages_through_range() -> TestResult {
         }
     }
     assert_eq!(paged, git);
+    Ok(())
+}
+
+#[test]
+fn log_cursor_rejects_revision_selection() -> TestResult {
+    let dir = std::env::temp_dir().join(format!(
+        "grit-rev-select-cursor-reject-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    seed_linear_repo(&dir, 13);
+    git_branch(&dir, "base", "HEAD~12");
+    let page1 = grit_json(&dir, &["log", "base..HEAD"]);
+    let cursor = page1["next"].as_str().expect("next").to_owned();
+    let out = grit_run(&dir, &["log", &format!("--cursor={cursor}"), "base..HEAD"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cannot combine `--cursor`"),
+        "stderr: {stderr}"
+    );
     Ok(())
 }
 

@@ -17,6 +17,26 @@
         "subject"
       ],
       "type": "object"
+    },
+    "RevsLeftRightCount": {
+      "description": "Left/right counts for a symmetric range (`--left-right --count`).",
+      "properties": {
+        "left": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "right": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left",
+        "right"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit revs`.",
@@ -29,13 +49,24 @@
       "type": "array"
     },
     "count": {
-      "description": "Total reachable commits when `--count` is set; otherwise `null`.",
+      "description": "Total reachable commits when `--count` is set without `--left-right`; otherwise `null`.",
       "format": "uint",
       "minimum": 0.0,
       "type": [
         "integer",
         "null"
       ]
+    },
+    "left_right": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RevsLeftRightCount"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Left/right counts when `--count` and `--left-right` are set; otherwise `null`."
     }
   },
   "required": [

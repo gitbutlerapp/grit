@@ -154,6 +154,26 @@ impl RevSelectArgs {
         })
     }
 
+    /// Whether the caller supplied revision, date, ref-set, or walk-shape filters.
+    ///
+    /// Used to reject combining explicit selection with a log continuation cursor.
+    pub fn has_explicit_log_selection(&self, before_is_deprecated_cursor: bool) -> bool {
+        !self.revs.is_empty()
+            || self.since.is_some()
+            || self.after.is_some()
+            || self.until.is_some()
+            || (self.before.is_some() && !before_is_deprecated_cursor)
+            || self.first_parent
+            || self.merges
+            || self.no_merges
+            || self.reverse
+            || self.skip != 0
+            || self.all
+            || self.branches.is_some()
+            || self.tags.is_some()
+            || self.remotes.is_some()
+    }
+
     /// Revision tokens passed to the library walk (after applying command defaults).
     pub fn rev_tokens<'a>(&'a self, default_revs: &'a [&'a str]) -> Vec<&'a str> {
         if self.revs.is_empty() {
