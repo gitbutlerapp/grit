@@ -21,5 +21,6 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeDiff),
         build_git: |c| diff_worktree_bench(c).1,
         build_grit: |c| diff_worktree_bench(c).0,
+        verify: None,
     }]
 }

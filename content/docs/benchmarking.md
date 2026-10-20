@@ -90,7 +90,7 @@ Headline scenarios compare **`grit`** and system **`git`** with the direct-spawn
 
 ```bash
 cargo build --release -p grit-cli -p grit-utils
-./target/release/grit-bench fixtures prepare --only synth-10k-smoke,many-refs-smoke,git-git-wt
+./target/release/grit-bench fixtures prepare --only synth-10k-smoke,many-refs-smoke,git-git-wt,git-git
 ./target/release/grit-bench daily --smoke --offline --output target/bench/daily-smoke.json
 ./target/release/grit-bench daily validate target/bench/daily-smoke.json
 ```
@@ -103,4 +103,4 @@ cargo build --release -p grit-cli -p grit-utils
 | `--baseline-grit <path>` | Also time a second grit binary on headline rows |
 | `--offline` | Do not clone `git.git` (fixtures must already be cached) |
 
-The **13 local headline** ids run end-to-end today; the four **remote** headlines (`fetch`, `pull`, `push`, `clone`) are emitted as **`pending`** on full (non-smoke) runs until the remote matrix lands. CI job **`bench-daily-smoke`** runs the smoke command above; timings are not gated.
+All **17 headline** ids run in **`--smoke`** mode (including the four **remote** headlines on cached `git-git` bare and synth-10k bare remotes). Additional **remote matrix** rows (`fetch/noop`, `ls-remote/all`, HTTP clone/fetch/push) run on full daily reports and in `grit-utils` remote e2e tests. CI job **`bench-daily-smoke`** runs the smoke command above; timings are not gated.

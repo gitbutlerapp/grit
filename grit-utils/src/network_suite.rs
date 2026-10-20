@@ -624,7 +624,7 @@ fn ensure_client_repo(git: &Path, bare: &Path, meta: &NetworkBenchMeta) -> Resul
     Ok(())
 }
 
-fn configure_remote(git: &Path, client: &Path, url: &str, default_branch: &str) -> Result<()> {
+pub fn configure_remote(git: &Path, client: &Path, url: &str, default_branch: &str) -> Result<()> {
     let remote_file = client.join(".git/config");
     if remote_file.is_file() {
         run_git_cmd(git, Some(client), &["remote", "remove", "origin"]).ok();

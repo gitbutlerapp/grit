@@ -194,6 +194,45 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 17] = [
         area: Area::Remotes,
         headline: true,
         name: Some("clone"),
-        description: "Local clone vs git clone",
+        description: "Clone over file:// (not git clone --local hardlink shortcut) vs git clone",
+    },
+];
+
+/// Remote matrix scenarios (non-headline) for the daily census.
+pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 5] = [
+    ScenarioSpec {
+        id: "fetch/noop@git-git",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "No-op fetch when client already matches remote (file:// git-git)",
+    },
+    ScenarioSpec {
+        id: "ls-remote/all@many-refs",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "List all refs on many-refs bare remote vs git ls-remote",
+    },
+    ScenarioSpec {
+        id: "clone/http@synth-10k",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Clone synth-10k over grit smart HTTP vs git clone",
+    },
+    ScenarioSpec {
+        id: "fetch/incremental-http@git-git",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Incremental fetch over grit smart HTTP (git-git bare remote)",
+    },
+    ScenarioSpec {
+        id: "push/incremental-http@git-git",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Incremental push over grit smart HTTP (git-git bare remote)",
     },
 ];

@@ -20,12 +20,17 @@ pub fn resolve_binary(name: &str, user_path: Option<&Path>) -> Result<PathBuf> {
         }
     }
     if name == "grit-http-server" {
-        let workspace =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit-http-server");
-        if workspace.is_file() {
-            return workspace
-                .canonicalize()
-                .context("canonicalize grit-http-server path");
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for rel in [
+            "../target/release/grit-http-server",
+            "../target/debug/grit-http-server",
+        ] {
+            let candidate = manifest.join(rel);
+            if candidate.is_file() {
+                return candidate
+                    .canonicalize()
+                    .context("canonicalize grit-http-server path");
+            }
         }
     }
     find_on_path(name).with_context(|| format!("could not find `{name}` on PATH"))

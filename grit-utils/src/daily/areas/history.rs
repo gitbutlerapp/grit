@@ -25,6 +25,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| log_oneline_bench(c).1,
             build_grit: |c| log_oneline_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("show/head@git-git"),
@@ -33,6 +34,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| show_head_bench(c).1,
             build_grit: |c| show_head_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("blame/file@git-git"),
@@ -47,6 +49,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
                 let path = c.blame_path.as_deref().unwrap_or("README.md");
                 blame_file_bench(c, path).0
             },
+            verify: None,
         },
     ]
 }

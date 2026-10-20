@@ -29,6 +29,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| branch_list_bench(c).1,
             build_grit: |c| branch_list_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("merge/clean@synth-10k"),
@@ -37,6 +38,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::MergeReset),
             build_git: |c| merge_bench(c).1,
             build_grit: |c| merge_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("pick/one@synth-10k"),
@@ -45,6 +47,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::PickReset),
             build_git: |c| pick_bench(c).1,
             build_grit: |c| pick_bench(c).0,
+            verify: None,
         },
     ]
 }

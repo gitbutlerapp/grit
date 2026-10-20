@@ -4,6 +4,8 @@ pub mod areas;
 pub mod helpers;
 pub mod plan;
 pub mod registry;
+pub mod remote_fixture;
+pub mod remote_state;
 pub mod run;
 pub mod runner;
 pub mod schema;

@@ -5,14 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::registry::HeadlineScenario;
+use super::remote_state::DailyRemoteState;
 use super::runner::BenchArgv;
 use crate::scenarios::PrepareKind;
-
-/// How to prepare the repo before each timed iteration.
-pub enum DailyPrepare {
-    None,
-    Hook(PrepareKind),
-}
 
 /// One headline row the daily runner can execute (or mark pending).
 pub struct DailyHeadlinePlan {
@@ -22,6 +17,8 @@ pub struct DailyHeadlinePlan {
     pub prepare: DailyPrepare,
     pub build_git: fn(&DailyHeadlineContext) -> BenchArgv,
     pub build_grit: fn(&DailyHeadlineContext) -> BenchArgv,
+    /// Optional git vs grit ref parity check before timed runs.
+    pub verify: Option<fn(&DailyHeadlineContext, &Path) -> Result<()>>,
 }
 
 /// Inputs shared while building plans for a run.
@@ -41,6 +38,8 @@ pub struct DailyHeadlineContext {
     pub blame_path: Option<String>,
     /// Hot-path fixture metadata for switch / pick / merge headlines.
     pub hot_path_meta: Option<crate::hot_path_fixture::HotPathMeta>,
+    /// Network transport state (bare remote, URL, HTTP servers).
+    pub remote: Option<DailyRemoteState>,
 }
 
 impl DailyHeadlineContext {
@@ -51,6 +50,14 @@ impl DailyHeadlineContext {
             grit: grit.to_path_buf(),
             blame_path: None,
             hot_path_meta: None,
+            remote: None,
         }
     }
+}
+
+/// Reset hook via `grit-bench prepare-network-*` subcommands.
+pub enum DailyPrepare {
+    None,
+    Hook(PrepareKind),
+    Network(&'static str),
 }

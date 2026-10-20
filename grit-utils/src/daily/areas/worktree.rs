@@ -35,6 +35,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::WorktreeStatusClean),
             build_git: |c| status_clean_bench(c).1,
             build_grit: |c| status_clean_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("status/dirty@synth-10k"),
@@ -43,6 +44,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::WorktreeStatusDirty),
             build_git: |c| status_dirty_bench(c).1,
             build_grit: |c| status_dirty_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("add/modified@synth-10k"),
@@ -51,6 +53,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::WorktreeAdd),
             build_git: |c| add_modified_bench(c).1,
             build_grit: |c| add_modified_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("commit/small@synth-10k"),
@@ -59,6 +62,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::WorktreeCommit),
             build_git: |c| commit_small_bench(c).1,
             build_grit: |c| commit_small_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("switch/branch@synth-10k"),
@@ -67,6 +71,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::SwitchReset),
             build_git: |c| switch_bench(c).1,
             build_grit: |c| switch_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("stash/push-pop@synth-10k"),
@@ -75,6 +80,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::Hook(PrepareKind::StashReset),
             build_git: |c| stash_bench(c).1,
             build_grit: |c| stash_bench(c).0,
+            verify: None,
         },
     ]
 }

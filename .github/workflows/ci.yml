@@ -232,7 +232,7 @@ jobs:
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
         run: |
-          ./target/release/grit-bench fixtures prepare --only synth-10k-smoke,many-refs-smoke,git-git-wt
+          ./target/release/grit-bench fixtures prepare --only synth-10k-smoke,many-refs-smoke,git-git-wt,git-git
 
       - name: Daily headline smoke (timings not gated)
         run: |

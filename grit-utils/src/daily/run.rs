@@ -8,7 +8,8 @@ use time::OffsetDateTime;
 use super::areas;
 use super::helpers::{pin_daily_scratch_root, prepare_bench_argv};
 use super::plan::{DailyHeadlinePlan, DailyPrepare, DailySetup};
-use super::registry::{Area, HEADLINE_SCENARIOS};
+use super::registry::Area;
+use super::remote_fixture::refresh_grit_http_server;
 use super::runner::{
     run_ab_bench, run_prepare, run_timed_via_helper, timing_stats_from_samples, AbBenchRequest,
     BenchArgv, RunLimits, RunPolicy,
@@ -111,6 +112,9 @@ fn select_plans(opts: &DailyRunOptions) -> Vec<DailyHeadlinePlan> {
     let mut plans = areas::all_headline_plans();
     if opts.smoke {
         plans.retain(|p| !p.pending);
+        if opts.only.is_none() {
+            plans.retain(|p| p.spec.headline);
+        }
     }
     if let Some(area) = opts.area {
         plans.retain(|p| p.spec.area == area);
@@ -126,6 +130,13 @@ fn prepare_argv(prepare_bin: &Path, git: &Path, prepare: &DailyPrepare) -> Optio
     match prepare {
         DailyPrepare::None => None,
         DailyPrepare::Hook(kind) => Some(prepare_bench_argv(prepare_bin, git, *kind)),
+        DailyPrepare::Network(sub) => {
+            let bare = std::env::var("GRIT_BENCH_DAILY_NETWORK_BARE").ok()?;
+            Some(BenchArgv::new(
+                prepare_bin,
+                [sub, "--git", &git.display().to_string(), "--bare", &bare],
+            ))
+        }
     }
 }
 
@@ -176,10 +187,19 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
             scenarios.push(pending_row(plan.spec));
             continue;
         }
-        let headline_ctx = (plan.setup)(&setup)
+        let mut headline_ctx = (plan.setup)(&setup)
             .with_context(|| format!("setup daily scenario {}", plan.spec.id))?;
         let repo = headline_ctx.repo.clone();
         std::env::set_var("GRIT_BENCH_CAMPAIGN_CWD", &repo);
+        if let Some(remote) = &headline_ctx.remote {
+            std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &remote.bare);
+        }
+        if let Some(verify) = plan.verify {
+            verify(&headline_ctx, &repo)
+                .with_context(|| format!("correctness {}", plan.spec.id))?;
+        }
+        refresh_grit_http_server(&mut headline_ctx)
+            .with_context(|| format!("refresh HTTP server for {}", plan.spec.id))?;
         let git_cmd = (plan.build_git)(&headline_ctx);
         let grit_cmd = (plan.build_grit)(&headline_ctx);
         let prepare = prepare_argv(&opts.measure_helper, &opts.git, &plan.prepare);
@@ -230,23 +250,6 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
             baseline_grit_ratio,
             pending: false,
         });
-    }
-
-    if !opts.smoke {
-        for spec in HEADLINE_SCENARIOS.iter().filter(|s| {
-            matches!(
-                s.id,
-                "fetch/incremental@git-git"
-                    | "pull/fast-forward@git-git"
-                    | "push/incremental@git-git"
-                    | "clone/local@synth-10k"
-            )
-        }) {
-            if scenarios.iter().any(|r| r.id == spec.id) {
-                continue;
-            }
-            scenarios.push(pending_row(spec));
-        }
     }
 
     scenarios.sort_by(|a, b| a.id.cmp(&b.id));
