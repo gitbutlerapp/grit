@@ -80,8 +80,11 @@ impl<'a> PackIndexEntryRef<'a> {
     }
 
     /// Byte offset of the object in the corresponding `.pack`.
-    #[must_use]
-    pub fn offset(&self) -> u64 {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the index row encodes an invalid pack offset.
+    pub fn offset(&self) -> Result<u64> {
         self.index.offset_at(self.position)
     }
 
@@ -103,13 +106,15 @@ pub struct PackIndexEntry {
     pub crc32: Option<u32>,
 }
 
-impl From<PackIndexEntryRef<'_>> for PackIndexEntry {
-    fn from(r: PackIndexEntryRef<'_>) -> Self {
-        Self {
+impl TryFrom<PackIndexEntryRef<'_>> for PackIndexEntry {
+    type Error = Error;
+
+    fn try_from(r: PackIndexEntryRef<'_>) -> Result<Self> {
+        Ok(Self {
             oid: r.oid().to_vec(),
-            offset: r.offset(),
+            offset: r.offset()?,
             crc32: r.crc32(),
-        }
+        })
     }
 }
 
@@ -177,27 +182,72 @@ impl PackIndex {
     }
 
     /// Pack byte offset at sorted position `i`.
-    #[must_use]
-    pub fn offset_at(&self, i: usize) -> u64 {
-        debug_assert!(i < self.layout.count);
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when offset tables are malformed (including lazy-open
+    /// indexes that skipped full verification).
+    pub fn offset_at(&self, i: usize) -> Result<u64> {
+        if i >= self.layout.count {
+            return Err(Error::CorruptObject(format!(
+                "index row {i} out of range in {}",
+                self.idx_path.display()
+            )));
+        }
         match self.layout.version {
             PackIndexVersion::V1 => {
                 let start = self.layout.oid_base + i * (4 + self.layout.hash_bytes);
-                read_u32_be_slice(&self.storage, start) as u64
+                Ok(read_u32_be_slice(&self.storage, start) as u64)
             }
             PackIndexVersion::V2 => {
                 let start = self.layout.off32_base + i * 4;
                 let raw = read_u32_be_slice(&self.storage, start);
-                if (raw & 0x8000_0000) == 0 {
-                    u64::from(raw)
-                } else {
-                    let slot = (raw & 0x7fff_ffff) as usize;
-                    debug_assert!(slot < self.layout.large_off_count);
-                    let loff = self.layout.large_off_base + slot * 8;
-                    read_u64_be_slice(&self.storage, loff)
-                }
+                self.decode_v2_offset_at(i, raw)
             }
         }
+    }
+
+    fn decode_v2_offset_at(&self, row: usize, raw: u32) -> Result<u64> {
+        if (raw & 0x8000_0000) == 0 {
+            return Ok(u64::from(raw));
+        }
+        let slot = (raw & 0x7fff_ffff) as usize;
+        if slot >= self.layout.large_off_count {
+            return Err(Error::CorruptObject(format!(
+                "large offset slot {slot} out of range ({} slots) in {}",
+                self.layout.large_off_count,
+                self.idx_path.display()
+            )));
+        }
+        let expected_slot = self.large_slot_index_for_row(row)?;
+        if slot != expected_slot {
+            return Err(Error::CorruptObject(format!(
+                "inconsistent 64b offset index at entry {row} in {}",
+                self.idx_path.display()
+            )));
+        }
+        let loff = self.layout.large_off_base + slot * 8;
+        let trailer = self.layout.hash_bytes * 2;
+        if loff + 8 > self.storage.len().saturating_sub(trailer) {
+            return Err(Error::CorruptObject(format!(
+                "truncated large offset table in {}",
+                self.idx_path.display()
+            )));
+        }
+        Ok(read_u64_be_slice(&self.storage, loff))
+    }
+
+    fn large_slot_index_for_row(&self, row: usize) -> Result<usize> {
+        debug_assert!(self.layout.version == PackIndexVersion::V2);
+        let mut next = 0usize;
+        for i in 0..row {
+            let start = self.layout.off32_base + i * 4;
+            let raw = read_u32_be_slice(&self.storage, start);
+            if (raw & 0x8000_0000) != 0 {
+                next += 1;
+            }
+        }
+        Ok(next)
     }
 
     /// CRC32 at sorted position `i` (`None` for version-1 indexes).
@@ -232,21 +282,30 @@ impl PackIndex {
     }
 
     /// Pack byte offset for `oid`, if present.
-    #[must_use]
-    pub fn find_offset(&self, oid: &ObjectId) -> Option<u64> {
-        self.find_position(oid).map(|i| self.offset_at(i))
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the matching row encodes an invalid offset.
+    pub fn find_offset(&self, oid: &ObjectId) -> Result<Option<u64>> {
+        match self.find_position(oid) {
+            Some(i) => Ok(Some(self.offset_at(i)?)),
+            None => Ok(None),
+        }
     }
 
     /// Like [`Self::find_offset`] but optimized for monotonically non-decreasing `oid` probes.
     ///
     /// Updates `cursor` to the matching row on success. When the probe regresses (out-of-order
     /// input), falls back to fanout + binary search and resets `cursor`.
-    #[must_use]
-    pub fn find_offset_monotonic(&self, oid: &ObjectId, cursor: &mut usize) -> Option<u64> {
+    pub fn find_offset_monotonic(
+        &self,
+        oid: &ObjectId,
+        cursor: &mut usize,
+    ) -> Result<Option<u64>> {
         const FORWARD_SCAN_MAX: usize = 128;
         let needle = oid.as_bytes();
         if needle.len() != self.layout.hash_bytes {
-            return None;
+            return Ok(None);
         }
         let len = self.len();
         if *cursor >= len {
@@ -255,9 +314,9 @@ impl PackIndex {
         if *cursor < len && compare_oid_bytes(self.oid_at(*cursor), needle) == Ordering::Greater {
             if let Some(pos) = self.find_position(oid) {
                 *cursor = pos;
-                return Some(self.offset_at(pos));
+                return Ok(Some(self.offset_at(pos)?));
             }
-            return None;
+            return Ok(None);
         }
         let mut pos = *cursor;
         let scan_start = pos;
@@ -266,24 +325,23 @@ impl PackIndex {
                 Ordering::Less => pos += 1,
                 Ordering::Equal => {
                     *cursor = pos;
-                    return Some(self.offset_at(pos));
+                    return Ok(Some(self.offset_at(pos)?));
                 }
-                Ordering::Greater => return None,
+                Ordering::Greater => return Ok(None),
             }
         }
         if pos < len {
             if let Some(found) = self.find_position(oid) {
                 *cursor = found;
-                return Some(self.offset_at(found));
+                return Ok(Some(self.offset_at(found)?));
             }
-            return None;
+            return Ok(None);
         }
-        None
+        Ok(None)
     }
     /// Whether this pack index contains the given OID.
-    #[must_use]
-    pub fn contains(&self, oid: &ObjectId) -> bool {
-        self.find_offset(oid).is_some()
+    pub fn contains(&self, oid: &ObjectId) -> Result<bool> {
+        Ok(self.find_offset(oid)?.is_some())
     }
 
     /// Iterate rows in OID sort order.
@@ -296,19 +354,24 @@ impl PackIndex {
 
     /// Smallest pack offset strictly greater than `entry_offset`, capped at `pack_end`.
     #[must_use]
-    pub fn next_pack_offset_after(&self, entry_offset: u64, pack_end: u64) -> u64 {
-        self.iter()
-            .map(|e| e.offset())
-            .filter(|&o| o > entry_offset && o <= pack_end)
-            .min()
-            .unwrap_or(pack_end)
+    pub fn next_pack_offset_after(&self, entry_offset: u64, pack_end: u64) -> Result<u64> {
+        let mut min_after = pack_end;
+        for entry in self.iter() {
+            let off = entry.offset()?;
+            if off > entry_offset && off <= pack_end && off < min_after {
+                min_after = off;
+            }
+        }
+        Ok(min_after)
     }
 
     /// CRC32 for the index row at `entry_offset`, if any.
     #[must_use]
-    pub fn crc32_for_pack_offset(&self, entry_offset: u64) -> Option<u32> {
-        self.find_position_by_offset_sorted(entry_offset)
-            .and_then(|i| self.crc32_at(i))
+    pub fn crc32_for_pack_offset(&self, entry_offset: u64) -> Result<Option<u32>> {
+        Ok(match self.find_position_by_offset_sorted(entry_offset)? {
+            Some(i) => self.crc32_at(i),
+            None => None,
+        })
     }
 
     /// Index row position for a pack byte offset via a sorted offset table.
@@ -325,18 +388,21 @@ impl PackIndex {
     }
 
     /// `find_position_by_offset_sorted` method.
-    pub fn find_position_by_offset_sorted(&self, offset: u64) -> Option<usize> {
+    pub fn find_position_by_offset_sorted(&self, offset: u64) -> Result<Option<usize>> {
         let mut guard = self.offset_lookup.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
-            let mut pairs: Vec<(u64, u32)> = (0..self.len())
-                .map(|i| (self.offset_at(i), i as u32))
-                .collect();
+            let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(self.len());
+            for i in 0..self.len() {
+                pairs.push((self.offset_at(i)?, i as u32));
+            }
             pairs.sort_by_key(|p| p.0);
             *guard = Some(pairs);
         }
-        let pairs = guard.as_ref()?;
-        let idx = pairs.binary_search_by_key(&offset, |p| p.0).ok()?;
-        Some(pairs[idx].1 as usize)
+        let Some(pairs) = guard.as_ref() else {
+            return Ok(None);
+        };
+        let idx = pairs.binary_search_by_key(&offset, |p| p.0).ok();
+        Ok(idx.map(|i| pairs[i].1 as usize))
     }
 
     fn find_position_in_bucket(&self, lo: usize, hi: usize, needle: &[u8]) -> Option<usize> {

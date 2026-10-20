@@ -1306,7 +1306,7 @@ impl Odb {
                 return false;
             };
             for idx in &indexes {
-                if idx.contains(oid) {
+                if idx.contains(oid).unwrap_or(false) {
                     return self.freshen_pack_once(&idx.pack_path, idx.is_cruft);
                 }
             }

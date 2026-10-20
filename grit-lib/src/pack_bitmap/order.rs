@@ -182,8 +182,13 @@ impl BitmapOrder {
 fn compute_rank_order_from_offsets(idx: &PackIndex) -> Result<Vec<u32>> {
     let n = idx.len();
     let mut rows: Vec<(u64, u32)> = (0..n)
-        .map(|i| (idx.offset_at(i), u32::try_from(i).unwrap_or(u32::MAX)))
-        .collect();
+        .map(|i| {
+            Ok((
+                idx.offset_at(i)?,
+                u32::try_from(i).unwrap_or(u32::MAX),
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
     rows.sort_by_key(|(off, _)| *off);
     Ok(rows.into_iter().map(|(_, row)| row).collect())
 }

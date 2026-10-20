@@ -211,7 +211,7 @@ fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
         if idx.is_promisor {
             continue;
         }
-        if idx.contains(oid) {
+        if idx.contains(oid).unwrap_or(false) {
             return true;
         }
     }

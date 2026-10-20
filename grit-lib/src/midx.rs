@@ -1398,10 +1398,11 @@ fn build_midx_bytes_filtered(
                     continue;
                 }
             }
+            let offset = e.offset()?;
             let cand = MidxEntry {
                 oid,
                 pack_id,
-                offset: e.offset(),
+                offset,
                 pack_mtime: mtime,
             };
             match best.get(&oid) {
@@ -1409,7 +1410,7 @@ fn build_midx_bytes_filtered(
                     best.insert(oid, cand);
                 }
                 Some(cur) => {
-                    if midx_pick_better_entry(cur, pack_id, e.offset(), mtime, preferred_pack_idx) {
+                    if midx_pick_better_entry(cur, pack_id, offset, mtime, preferred_pack_idx) {
                         best.insert(oid, cand);
                     }
                 }
@@ -2072,16 +2073,21 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
             continue;
         };
         match idx.find_offset(&oid) {
-            Some(p_offset) => {
+            Ok(Some(p_offset)) => {
                 if m_offset != p_offset {
                     errors.push(format!(
                         "incorrect object offset for oid[{i}] = {oid_hex}: {m_offset:x} != {p_offset:x}"
                     ));
                 }
             }
-            None => {
+            Ok(None) => {
                 errors.push(format!(
                     "failed to load pack entry for oid[{i}] = {oid_hex}"
+                ));
+            }
+            Err(err) => {
+                errors.push(format!(
+                    "failed to load pack entry for oid[{i}] = {oid_hex}: {err}"
                 ));
             }
         }
@@ -3178,10 +3184,11 @@ pub fn write_multi_pack_index_with_options(
             if opts.incremental && base_oids.contains(&oid) {
                 continue;
             }
+            let offset = e.offset()?;
             let cand = MidxEntry {
                 oid,
                 pack_id,
-                offset: e.offset(),
+                offset,
                 pack_mtime: mtime,
             };
             match best.get(&oid) {
@@ -3189,7 +3196,7 @@ pub fn write_multi_pack_index_with_options(
                     best.insert(oid, cand);
                 }
                 Some(cur) => {
-                    if midx_pick_better_entry(cur, pack_id, e.offset(), mtime, preferred_u32) {
+                    if midx_pick_better_entry(cur, pack_id, offset, mtime, preferred_u32) {
                         best.insert(oid, cand);
                     }
                 }

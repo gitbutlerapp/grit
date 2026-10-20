@@ -143,10 +143,14 @@ pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
 }
 
 fn emit_pack_in_offset_order(out: &mut impl Write, idx: &PackIndex) -> Result<()> {
+    let offsets: Vec<u64> = (0..idx.len())
+        .map(|i| idx.offset_at(i))
+        .collect::<std::result::Result<Vec<_>, Error>>()
+        .context("pack index offset")?;
     let mut order: Vec<usize> = (0..idx.len()).collect();
-    order.sort_by_key(|&i| idx.offset_at(i));
+    order.sort_by(|&a, &b| offsets[a].cmp(&offsets[b]));
     for i in order {
-        let offset = idx.offset_at(i);
+        let offset = offsets[i];
         let oid = ObjectId::from_bytes(idx.oid_at(i)).context("pack entry oid")?;
         let object = read_object_from_pack_at_offset(idx, offset)
             .with_context(|| format!("read packed object at offset {offset}"))?;

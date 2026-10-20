@@ -815,6 +815,9 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             retention,
         )?;
 
+        // Drop cached pack/index mmaps before deleting superseded pack artifacts (Windows).
+        odb.invalidate_packs();
+
         report.packs_removed = if opts.incremental {
             0
         } else {
@@ -823,8 +826,6 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
 
         prune_packed_loose =
             prune_packed_objects(objects_dir, PrunePackedOptions::default())?.len();
-
-        odb.invalidate_packs();
 
         if opts.write_commit_graph {
             write_commit_graph(repo, &CommitGraphOptions::with_changed_paths(true))?;

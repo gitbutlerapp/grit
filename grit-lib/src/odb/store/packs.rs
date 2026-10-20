@@ -92,7 +92,7 @@ impl PackedObjects {
     pub fn contains_filtered(&self, oid: &ObjectId, filter: PackFilter) -> Result<bool> {
         self.with_pack(|objects_dir| {
             for idx in filtered_indexes(objects_dir, filter)? {
-                if idx.contains(oid) {
+                if idx.contains(oid)? {
                     return Ok(true);
                 }
             }
@@ -173,7 +173,7 @@ impl PackedObjects {
         self.with_pack(|objects_dir| {
             let indexes = read_local_pack_indexes_cached(objects_dir)?;
             for idx in &indexes {
-                if !idx.contains(oid) {
+                if !idx.contains(oid)? {
                     continue;
                 }
                 if idx.is_cruft {

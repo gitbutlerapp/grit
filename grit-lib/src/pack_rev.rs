@@ -53,10 +53,12 @@ pub fn hashfile_checksum_valid(data: &[u8], hash_len: usize) -> bool {
 }
 
 /// Build `.rev` file bytes for a pack index (RIDX body + trailing SHA-1 of the body).
-#[must_use]
-pub fn build_pack_rev_bytes(index: &PackIndex) -> Vec<u8> {
-    let offsets: Vec<u64> = index.iter().map(|e| e.offset()).collect();
-    build_pack_rev_bytes_from_index_order_offsets(&offsets)
+pub fn build_pack_rev_bytes(index: &PackIndex) -> Result<Vec<u8>> {
+    let offsets: Vec<u64> = index
+        .iter()
+        .map(|e| e.offset())
+        .collect::<Result<Vec<_>>>()?;
+    Ok(build_pack_rev_bytes_from_index_order_offsets(&offsets))
 }
 
 /// Build `.rev` bytes from object offsets in **pack index order** (OID-sorted, same row order as `.idx`).
@@ -132,7 +134,9 @@ pub fn write_pack_rev_sidecar(index: &PackIndex) -> Result<()> {
         return Err(Error::CorruptObject("pack file too short for rev".into()));
     }
     let pack_checksum = pack_data[pack_data.len() - hash_len..].to_vec();
-    let offsets: Vec<u64> = (0..index.len()).map(|i| index.offset_at(i)).collect();
+    let offsets: Vec<u64> = (0..index.len())
+        .map(|i| index.offset_at(i))
+        .collect::<Result<Vec<_>>>()?;
     let rev_bytes =
         build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, &pack_checksum);
     let parent = rev_path.parent().ok_or_else(|| {
@@ -226,8 +230,15 @@ pub fn pack_rev_fsck_messages(
         msgs.push("invalid checksum".to_owned());
     }
 
+    let Ok(offsets) = (0..n)
+        .map(|i| index.offset_at(i))
+        .collect::<Result<Vec<_>>>()
+    else {
+        msgs.push("corrupt pack index offsets".to_owned());
+        return msgs;
+    };
     let mut order: Vec<u32> = (0..n as u32).collect();
-    order.sort_by_key(|&i| index.offset_at(i as usize));
+    order.sort_by(|&a, &b| offsets[a as usize].cmp(&offsets[b as usize]));
 
     for (i, &expected) in order.iter().enumerate() {
         let Some(got) = read_u32_be(data, &mut pos) else {
@@ -280,8 +291,12 @@ pub fn verify_pack_rev_file_contents(
             "reverse-index file {path_for_errors} has unsupported hash id {hash_id}"
         ));
     }
+    let offsets: Vec<u64> = (0..n)
+        .map(|i| index.offset_at(i))
+        .collect::<Result<Vec<_>>>()
+        .map_err(|e| format!("corrupt pack index: {e}"))?;
     let mut order: Vec<u32> = (0..n as u32).collect();
-    order.sort_by_key(|&i| index.offset_at(i as usize));
+    order.sort_by(|&a, &b| offsets[a as usize].cmp(&offsets[b as usize]));
     for (i, &expected) in order.iter().enumerate() {
         let got =
             read_u32_be(data, &mut pos).ok_or_else(|| "truncated rev-index data".to_owned())?;
@@ -385,7 +400,7 @@ mod coverage_tests {
         std::fs::create_dir_all(&rev_path).expect("dir");
         assert!(verify_pack_rev_file(&rev_path, &index).is_err());
 
-        let rev = build_pack_rev_bytes(&index);
+        let rev = build_pack_rev_bytes(&index).expect("rev bytes");
         assert!(try_rev_positions_in_pack_order(&rev, index.len()).is_some());
         assert!(try_rev_positions_in_pack_order(&rev[..rev.len() - 1], index.len()).is_none());
 

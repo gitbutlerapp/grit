@@ -310,7 +310,10 @@ fn ensure_rev_sidecar(idx: &PackIndex) -> Result<(), PackBitmapWriteError> {
     }
     let hash_len = idx.hash_bytes();
     let pack_checksum = read_pack_trailer(idx, hash_len)?;
-    let offsets: Vec<u64> = (0..idx.len()).map(|i| idx.offset_at(i)).collect();
+    let offsets: Vec<u64> = (0..idx.len())
+        .map(|i| idx.offset_at(i))
+        .collect::<crate::error::Result<Vec<_>>>()
+        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
     let rev_bytes =
         build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, &pack_checksum);
     let tmp =
