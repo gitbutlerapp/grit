@@ -417,6 +417,7 @@ pub fn ahead_behind_of_target_commits(
             std::slice::from_ref(&head),
             &[target],
             ReachableWalkLimit::CountAllRetainNewest(retain_newest_ahead),
+            ReachableWalkCommitterCutoffs::default(),
         )?
     };
 
@@ -428,6 +429,7 @@ pub fn ahead_behind_of_target_commits(
             std::slice::from_ref(&target),
             &[head],
             ReachableWalkLimit::CountAllRetainNewest(0),
+            ReachableWalkCommitterCutoffs::default(),
         )?
         .0
     };
@@ -447,6 +449,15 @@ pub fn ahead_behind_of_target_commits(
 /// # Errors
 ///
 /// Propagates object read and parse errors from commit traversal.
+/// Committer-date filters applied during bounded reachable walks (Git `--since` / `--until`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReachableWalkCommitterCutoffs {
+    /// Exclude commits with committer date strictly before this Unix timestamp (`--since`).
+    pub since: Option<i64>,
+    /// Exclude commits with committer date strictly after this Unix timestamp (`--until`).
+    pub until: Option<i64>,
+}
+
 /// How [`walk_commits_reachable_excluding_ancestors_of`] bounds its output.
 #[derive(Debug, Clone, Copy)]
 pub enum ReachableWalkLimit {
@@ -665,7 +676,11 @@ impl ReachableWalkState {
         Ok(())
     }
 
-    fn pop_next_emit(&mut self, cache: &mut CommitGraphCache<'_>) -> Result<Option<ObjectId>> {
+    fn pop_next_emit(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<Option<ObjectId>> {
         loop {
             let Some(key) = self.heap.pop() else {
                 return Ok(None);
@@ -674,11 +689,19 @@ impl ReachableWalkState {
             if !self.done.insert(oid) {
                 continue;
             }
+            if cutoffs.since.is_some_and(|since| key.time < since) {
+                return Ok(None);
+            }
             let hidden = self.is_hidden(cache, oid)?;
-            self.after_processed(cache, oid)?;
             if hidden {
+                self.after_processed(cache, oid)?;
                 continue;
             }
+            if cutoffs.until.is_some_and(|until| key.time > until) {
+                self.after_processed(cache, oid)?;
+                continue;
+            }
+            self.after_processed(cache, oid)?;
             return Ok(Some(oid));
         }
     }
@@ -688,10 +711,15 @@ impl ReachableWalkState {
     /// # Errors
     ///
     /// Propagates object read and ancestry errors during traversal.
-    pub fn emit_until(&mut self, repo: &Repository, limit: Option<usize>) -> Result<Vec<ObjectId>> {
+    pub fn emit_until(
+        &mut self,
+        repo: &Repository,
+        limit: Option<usize>,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<Vec<ObjectId>> {
         let mut cache = CommitGraphCache::new(repo);
         let mut out = Vec::new();
-        while let Some(oid) = self.pop_next_emit(&mut cache)? {
+        while let Some(oid) = self.pop_next_emit(&mut cache, cutoffs)? {
             out.push(oid);
             if limit.is_some_and(|n| out.len() >= n) {
                 break;
@@ -711,6 +739,7 @@ pub fn walk_commits_reachable_excluding_ancestors_of(
     tips: &[ObjectId],
     hide: &[ObjectId],
     limit: ReachableWalkLimit,
+    cutoffs: ReachableWalkCommitterCutoffs,
 ) -> Result<(usize, Vec<ObjectId>)> {
     if tips.is_empty() {
         return Ok((0, Vec::new()));
@@ -727,7 +756,7 @@ pub fn walk_commits_reachable_excluding_ancestors_of(
         let mut cache = CommitGraphCache::new(repo);
         let mut out = Vec::new();
         let mut emitted = 0usize;
-        while let Some(oid) = state.pop_next_emit(&mut cache)? {
+        while let Some(oid) = state.pop_next_emit(&mut cache, cutoffs)? {
             emitted += 1;
             if out.len() < k {
                 out.push(oid);
@@ -736,7 +765,7 @@ pub fn walk_commits_reachable_excluding_ancestors_of(
         return Ok((emitted, out));
     }
 
-    let out = state.emit_until(repo, stop_early_at)?;
+    let out = state.emit_until(repo, stop_early_at, cutoffs)?;
     Ok((out.len(), out))
 }
 
@@ -760,6 +789,7 @@ pub fn ahead_of_target_commits(
         std::slice::from_ref(&head),
         &[target],
         ReachableWalkLimit::CountAllRetainNewest(retain_newest),
+        ReachableWalkCommitterCutoffs::default(),
     )
 }
 
@@ -769,13 +799,14 @@ pub fn commits_reachable_excluding_ancestors_of(
     tips: &[ObjectId],
     hide: &[ObjectId],
     limit: Option<usize>,
+    cutoffs: ReachableWalkCommitterCutoffs,
 ) -> Result<Vec<ObjectId>> {
     let walk_limit = match limit {
         Some(n) => ReachableWalkLimit::StopAfter(n),
         None => ReachableWalkLimit::Unlimited,
     };
     let (_emitted, oids) =
-        walk_commits_reachable_excluding_ancestors_of(repo, tips, hide, walk_limit)?;
+        walk_commits_reachable_excluding_ancestors_of(repo, tips, hide, walk_limit, cutoffs)?;
     Ok(oids)
 }
 
@@ -1644,17 +1675,30 @@ mod tests {
         let c2 = write_commit_same_time(&repo.odb(), &[c1], "two", 200)?;
         let c3 = write_commit_same_time(&repo.odb(), &[c2], "three", 300)?;
 
-        let all = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[], None)?;
+        let all =
+            commits_reachable_excluding_ancestors_of(&repo, &[c3], &[], None, Default::default())?;
         assert_eq!(all, vec![c3, c2, c1]);
 
-        let limited = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[], Some(2))?;
+        let limited = commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[c3],
+            &[],
+            Some(2),
+            Default::default(),
+        )?;
         assert_eq!(limited, vec![c3, c2]);
 
         let (total, retained) = ahead_of_target_commits(&repo, c3, c1, 1)?;
         assert_eq!(total, 2);
         assert_eq!(retained, vec![c3]);
 
-        let ahead = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[c1], None)?;
+        let ahead = commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[c3],
+            &[c1],
+            None,
+            Default::default(),
+        )?;
         assert_eq!(ahead, vec![c3, c2]);
 
         Ok(())
@@ -1671,7 +1715,8 @@ mod tests {
 
         fs::write(repo.git_dir().join("shallow"), format!("{tip}\n")).map_err(Error::Io)?;
 
-        let out = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None)?;
+        let out =
+            commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None, Default::default())?;
         assert_eq!(out, vec![tip]);
 
         Ok(())
@@ -1718,7 +1763,9 @@ mod tests {
             .expect("oid");
         let tip = write_commit_same_time(&repo.odb(), &[missing], "tip", 100)?;
 
-        let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();
+        let err =
+            commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None, Default::default())
+                .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound(_)));
 
         Ok(())

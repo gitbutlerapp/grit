@@ -55,7 +55,11 @@ pub fn run_revwalk_suite(
     };
     let bare = ensure_fixture(git, profile, NetworkFixtureKind::DeepHistory)?;
     let worktree = clone_deep_worktree(git, &bare)?;
+    let bench_exe = std::env::current_exe().context("grit-bench exe")?;
     let mut scenarios = Vec::new();
+    // Deep-history synthetic commits use small committer timestamps (~50k); keep them all.
+    const SINCE_DEEP_HISTORY: i64 = 50_000;
+    const SINCE_LIMIT: &str = "20";
 
     let env_prefix = cfg.isolated_config.then(isolated_env_prefix);
     for (id_suffix, prepare) in [
@@ -96,6 +100,73 @@ pub fn run_revwalk_suite(
             &worktree,
         )?);
     }
+
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        &bench_exe,
+        cfg,
+        &Scenario {
+            id: "revs-count-since-no-graph".into(),
+            group: "revs".into(),
+            fixture: bare.display().to_string(),
+            description: "RevWalk count HEAD --since on deep-history fixture".into(),
+            grit_argv: vec![
+                "drive".into(),
+                "rev-walk-count-head-since".into(),
+                worktree.display().to_string(),
+                SINCE_DEEP_HISTORY.to_string(),
+            ],
+            git_argv: vec![
+                "rev-list".into(),
+                "--count".into(),
+                format!("--since={SINCE_DEEP_HISTORY}"),
+                "-n".into(),
+                SINCE_LIMIT.into(),
+                "HEAD".into(),
+            ],
+            driver: Driver::Lib,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &worktree,
+    )?);
+
+    let lr_range = if smoke {
+        "HEAD~20...HEAD".to_string()
+    } else {
+        "HEAD~500...HEAD".to_string()
+    };
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        &bench_exe,
+        cfg,
+        &Scenario {
+            id: "revs-left-right-count-no-graph".into(),
+            group: "revs".into(),
+            fixture: bare.display().to_string(),
+            description: "RevWalk left/right counts on deep-history fixture".into(),
+            grit_argv: vec![
+                "drive".into(),
+                "rev-walk-left-right-count".into(),
+                worktree.display().to_string(),
+                lr_range.clone(),
+            ],
+            git_argv: vec![
+                "rev-list".into(),
+                "--left-right".into(),
+                "--count".into(),
+                lr_range,
+            ],
+            driver: Driver::Lib,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &worktree,
+    )?);
 
     let spec = HotPathRepoSpec::for_size(if smoke { 80 } else { 10_000 });
     let (pick_repo, meta) = setup_pick_merge_fixture(git, spec, 4)?;

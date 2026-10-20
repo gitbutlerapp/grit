@@ -20,7 +20,7 @@ use crate::error::{Error, Result};
 use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
 use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
-use crate::merge_base::commits_reachable_excluding_ancestors_of;
+use crate::merge_base::{commits_reachable_excluding_ancestors_of, ReachableWalkCommitterCutoffs};
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -5992,8 +5992,6 @@ fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
         && !options.maximal_only
         && options.symmetric_left.is_none()
         && options.symmetric_right.is_none()
-        && options.until_cutoff.is_none()
-        && options.since_cutoff.is_none()
         && !options.boundary
         && !options.no_kept_objects
         && !options.unpacked_only
@@ -6019,7 +6017,12 @@ fn try_bounded_limit_list(
     let need = options
         .skip
         .saturating_add(options.max_count.unwrap_or(usize::MAX));
-    let mut ordered = commits_reachable_excluding_ancestors_of(repo, include, exclude, Some(need))?;
+    let cutoffs = ReachableWalkCommitterCutoffs {
+        since: options.since_cutoff,
+        until: options.until_cutoff,
+    };
+    let mut ordered =
+        commits_reachable_excluding_ancestors_of(repo, include, exclude, Some(need), cutoffs)?;
     if options.skip > 0 {
         ordered = ordered.into_iter().skip(options.skip).collect();
     }

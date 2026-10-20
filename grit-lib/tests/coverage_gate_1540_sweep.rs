@@ -112,7 +112,13 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
     let _ = ancestor_closure(&repo, tip)?;
     let (ahead, behind) = count_symmetric_ahead_behind(&repo, tip, feature)?;
     let _ = (ahead, behind);
-    let _ = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old_main], None)?;
+    let _ = commits_reachable_excluding_ancestors_of(
+        &repo,
+        &[tip],
+        &[old_main],
+        None,
+        Default::default(),
+    )?;
 
     for n in 0..90 {
         for spec in [

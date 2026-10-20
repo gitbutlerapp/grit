@@ -566,6 +566,7 @@ pub(crate) fn build_pack_push_fast(
             &[want],
             &hide,
             ReachableWalkLimit::Unlimited,
+            crate::merge_base::ReachableWalkCommitterCutoffs::default(),
         )?;
         commit_set.extend(commits);
     }

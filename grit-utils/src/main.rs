@@ -759,6 +759,14 @@ enum DriveCmd {
     CommitGraphWrite {
         repo: PathBuf,
     },
+    RevWalkCountHeadSince {
+        repo: PathBuf,
+        since: i64,
+    },
+    RevWalkLeftRightCount {
+        repo: PathBuf,
+        range: String,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -909,6 +917,14 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
         DriveCmd::CommitGraphWrite { repo } => {
             let repo = open_repo(repo)?;
             odb_driver::commit_graph_write(&repo)?;
+        }
+        DriveCmd::RevWalkCountHeadSince { repo, since } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_walk_count_head_since(&repo, *since)?;
+        }
+        DriveCmd::RevWalkLeftRightCount { repo, range } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_walk_left_right_count(&repo, range)?;
         }
     }
     Ok(())

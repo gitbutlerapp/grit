@@ -107,6 +107,7 @@ pub fn run(
             limit,
             first_parent: false,
             paths: paths.to_vec(),
+            ..RevWalkListOptions::default()
         };
         let oids = walk
             .commits(&["HEAD"], &opts)

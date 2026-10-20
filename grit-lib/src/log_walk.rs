@@ -63,7 +63,11 @@ impl LogWalkCursor {
             }
         };
 
-        let commits = state.emit_until(repo, Some(limit))?;
+        let commits = state.emit_until(
+            repo,
+            Some(limit),
+            crate::merge_base::ReachableWalkCommitterCutoffs::default(),
+        )?;
         let next = state.has_pending().then(|| LogWalkCursor {
             anchor_head: head,
             walk: state.snapshot(),

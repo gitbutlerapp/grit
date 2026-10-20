@@ -38,6 +38,10 @@ pub enum RevListError {
     #[error("invalid argument to --no-walk")]
     InvalidNoWalkArgument,
 
+    /// [`crate::revwalk::RevWalk::left_right_counts`] requires a single `A...B` token.
+    #[error("symmetric revision range (A...B) required for left/right commit counts")]
+    SymmetricRangeRequired,
+
     /// Object walk expected a tree, blob, commit, or tag but read another kind from the ODB (upstream `t6102`).
     #[error("object {input} is not a {expected}")]
     UnexpectedObjectKind {

@@ -76,6 +76,7 @@ pub fn run(
         limit,
         first_parent,
         paths: paths.to_vec(),
+        ..RevWalkListOptions::default()
     };
     let token_refs: Vec<&str> = ranges.iter().map(String::as_str).collect();
     if count {
