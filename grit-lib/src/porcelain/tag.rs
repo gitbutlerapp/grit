@@ -120,12 +120,14 @@ pub fn tag_ref_metadata(repo: &Repository, ref_oid: &ObjectId) -> (TagKind, Opti
     let Ok(info) = repo.odb().read_info(ref_oid) else {
         return (TagKind::Lightweight, None);
     };
-    let kind = if info.kind == ObjectKind::Tag {
-        TagKind::Annotated
-    } else {
-        TagKind::Lightweight
-    };
-    (kind, repo.odb().peel_to_commit(*ref_oid).ok().flatten())
+    match info.kind {
+        ObjectKind::Commit => (TagKind::Lightweight, Some(*ref_oid)),
+        ObjectKind::Tag => (
+            TagKind::Annotated,
+            repo.odb().peel_to_commit(*ref_oid).ok().flatten(),
+        ),
+        ObjectKind::Tree | ObjectKind::Blob => (TagKind::Lightweight, None),
+    }
 }
 
 /// Get annotation text for a tag (up to `n` lines).
