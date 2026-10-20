@@ -13,6 +13,7 @@
 //! # }
 //! ```
 mod core;
+mod filter;
 pub mod handle;
 mod options;
 mod patch_log;
@@ -20,6 +21,7 @@ mod tree_content;
 mod unified_emit;
 
 pub use core::*;
+pub use filter::{DiffFilter, InvalidDiffFilter};
 pub use handle::Diff;
 pub use options::{
     renames_from_config, DiffAlgorithm, DiffOptions, RenameDetection, UnknownDiffAlgorithm,

@@ -33,6 +33,10 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
 | `<commit>` | One commit (that commit’s patch), two commits (tree diff), or a range `A..B` / `A...B`. Omit for uncommitted changes. |
 | `<path>…` | After `--`, limit the diff to these paths (all forms above, including `--staged`). |
+| `-M`, `--find-renames`, `--find-renames=<n>` | Rename detection threshold (Git `-M`, default 50). `<n>` may be a percent like `50%`. A single digit attaches to `-M` (`-M5` is 5%, not `-M` with path `5`). |
+| `--no-renames` | Report renames as separate delete and add entries (skips rename detection). |
+| `--diff-algorithm <myers\|minimal\|patience\|histogram>` | Line diff algorithm; overrides `diff.algorithm`. |
+| `--diff-filter <letters>` | Show only changes whose status matches the filter (Git letter syntax: `A` added, `D` deleted, `M` modified, `R` renamed, `T` type change, `U` unmerged; uppercase includes, lowercase excludes). Copy/broken/unknown letters (`C`, `X`, `B`) are rejected. Applied after rename detection, so `--diff-filter=A` omits renames. |
 
 ## Examples
 
@@ -66,6 +70,18 @@ What changed between two commits?
 ```console
 $ grit diff HEAD~1 HEAD
 $ grit diff HEAD~1..HEAD
+```
+
+Only added and deleted paths (no renames), between two commits:
+
+```console
+$ grit diff --no-renames --diff-filter=AD HEAD~1 HEAD --json --filter '.files[].path'
+```
+
+Stricter rename similarity and histogram line diff:
+
+```console
+$ grit diff -M90 --diff-algorithm=histogram HEAD~1 HEAD
 ```
 
 Only one file between two branches:

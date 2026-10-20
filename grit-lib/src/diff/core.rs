@@ -9924,6 +9924,26 @@ pub fn should_break_rewrite_pair(old: &[u8], new: &[u8], break_score: u64) -> bo
     should_break_rewrite_inner(old, new, break_score)
 }
 
+/// Parse `-M` / `--find-renames` threshold into Git's 0–100 similarity percent.
+#[must_use]
+pub fn parse_diff_rename_threshold_percent(arg: &str) -> Option<u8> {
+    let token = if arg.is_empty() { "50" } else { arg };
+    let internal = parse_diff_rename_score_token(token)?;
+    Some((internal.saturating_mul(100) / GIT_DIFF_MAX_SCORE).min(100) as u8)
+}
+
+/// Drop entries that do not match `filter` (Git `--diff-filter`, after rename detection).
+#[must_use]
+pub fn apply_diff_filter(
+    entries: Vec<DiffEntry>,
+    filter: Option<super::filter::DiffFilter>,
+) -> Vec<DiffEntry> {
+    match filter {
+        Some(f) => f.filter_entries(entries),
+        None => entries,
+    }
+}
+
 /// Parse a single Git `parse_rename_score` token (`50`, `50%`, decimal forms) into internal
 /// 0–[`GIT_DIFF_MAX_SCORE`] units.
 pub fn parse_diff_rename_score_token(arg: &str) -> Option<u64> {
