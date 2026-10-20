@@ -129,6 +129,30 @@ fn bench_diff_worktree_clean_10k(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_merge_trees_three_way_2000(c: &mut Criterion) {
+    let fx = HotPathsFixture::heavy();
+    let (base, head, source) = fx.pick_three_trees(2000);
+    let mut group = c.benchmark_group("merge_trees_three_way");
+    group.bench_function("merge_only_2000_paths_H", |b| {
+        b.iter(|| {
+            black_box(
+                grit_lib::diff::merge_trees::merge_trees_three_way(
+                    &fx.repo,
+                    base,
+                    head,
+                    source,
+                    grit_lib::diff::merge_file::MergeFavor::default(),
+                    grit_lib::diff::merge_trees::WhitespaceMergeOptions::default(),
+                    None,
+                    grit_lib::diff::merge_trees::TreeMergeConflictPresentation::default(),
+                )
+                .expect("merge"),
+            );
+        });
+    });
+    group.finish();
+}
+
 fn bench_tree_merge_group(c: &mut Criterion) {
     let fx = HotPathsFixture::heavy();
     let mut group = c.benchmark_group("merge");
@@ -174,6 +198,7 @@ criterion_group!(
     bench_push_stash_group,
     bench_apply_stash_group,
     bench_pick_paths,
+    bench_merge_trees_three_way_2000,
     bench_tree_merge_group
 );
 criterion_main!(hot_paths);

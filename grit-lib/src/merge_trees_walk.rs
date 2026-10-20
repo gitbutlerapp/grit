@@ -2,12 +2,16 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use super::merge_tree_cache::{
+    find_tree_entry, lookup_index_entry_at_path_cached, side_tree_has_descendant_at_cached,
+    MergeTreeCache, MergeTreeSide,
+};
 use crate::index::IndexEntry;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_one_path, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_tree, serialize_tree, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 use crate::repo::Repository;
 
@@ -24,7 +28,7 @@ pub(crate) fn subtree_touched(prefix: &[u8], touched: &HashSet<Vec<u8>>) -> bool
     touched.iter().any(|p| path_has_prefix(p, prefix))
 }
 
-fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> IndexEntry {
+pub(crate) fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> IndexEntry {
     IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
@@ -45,37 +49,12 @@ fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> IndexEntry {
 }
 
 pub(crate) fn lookup_index_entry_at_path(
+    cache: &mut MergeTreeCache,
     odb: &Odb,
     tree_oid: &ObjectId,
     path: &[u8],
 ) -> crate::error::Result<Option<IndexEntry>> {
-    if path.is_empty() {
-        return Ok(None);
-    }
-    let parts: Vec<&[u8]> = path
-        .split(|&b| b == b'/')
-        .filter(|s| !s.is_empty())
-        .collect();
-    let mut current = *tree_oid;
-    for (i, comp) in parts.iter().enumerate() {
-        let obj = odb.read(&current)?;
-        if obj.kind != ObjectKind::Tree {
-            return Ok(None);
-        }
-        let entries = parse_tree(&obj.data)?;
-        let Some(te) = entries.iter().find(|e| e.name.as_slice() == *comp) else {
-            return Ok(None);
-        };
-        let is_last = i + 1 == parts.len();
-        if is_last {
-            return Ok(Some(tree_entry_to_index(path, te)));
-        }
-        if te.mode != MODE_DIR {
-            return Ok(None);
-        }
-        current = te.oid;
-    }
-    Ok(None)
+    lookup_index_entry_at_path_cached(cache, odb, tree_oid, path)
 }
 
 pub(crate) fn paths_from_tree_diff(
@@ -120,6 +99,7 @@ type SparseSideMaps = (
 );
 
 pub(crate) fn build_sparse_maps(
+    cache: &mut MergeTreeCache,
     repo: &Repository,
     base_tree: ObjectId,
     ours_tree: ObjectId,
@@ -130,27 +110,119 @@ pub(crate) fn build_sparse_maps(
     let mut base = BTreeMap::new();
     let mut ours = BTreeMap::new();
     let mut theirs = BTreeMap::new();
-    for path in paths {
-        if let Some(e) = lookup_index_entry_at_path(odb, &base_tree, path)? {
-            if e.mode != MODE_DIR {
-                base.insert(path.clone(), e);
-            }
-        }
-        if let Some(e) = lookup_index_entry_at_path(odb, &ours_tree, path)? {
-            if e.mode != MODE_DIR {
-                ours.insert(path.clone(), e);
-            }
-        }
-        if let Some(e) = lookup_index_entry_at_path(odb, &theirs_tree, path)? {
-            if e.mode != MODE_DIR {
-                theirs.insert(path.clone(), e);
-            }
-        }
-    }
+    let empty_tree = odb.write(crate::objects::ObjectKind::Tree, &[])?;
+    fill_sparse_maps_walk(
+        cache,
+        odb,
+        b"",
+        &base_tree,
+        &ours_tree,
+        &theirs_tree,
+        paths,
+        &empty_tree,
+        &mut base,
+        &mut ours,
+        &mut theirs,
+    )?;
     Ok((base, ours, theirs))
 }
 
-fn full_path(prefix: &[u8], name: &[u8]) -> Vec<u8> {
+#[expect(clippy::too_many_arguments)]
+fn fill_sparse_maps_walk(
+    cache: &mut MergeTreeCache,
+    odb: &Odb,
+    prefix: &[u8],
+    base_oid: &ObjectId,
+    ours_oid: &ObjectId,
+    theirs_oid: &ObjectId,
+    touched: &HashSet<Vec<u8>>,
+    empty_tree: &ObjectId,
+    base: &mut BTreeMap<Vec<u8>, IndexEntry>,
+    ours: &mut BTreeMap<Vec<u8>, IndexEntry>,
+    theirs: &mut BTreeMap<Vec<u8>, IndexEntry>,
+) -> crate::error::Result<()> {
+    if !prefix.is_empty() && !subtree_touched(prefix, touched) {
+        return Ok(());
+    }
+
+    let base_entries: Vec<TreeEntry> = cache.tree_entries(odb, base_oid)?.to_vec();
+    let ours_entries: Vec<TreeEntry> = cache.tree_entries(odb, ours_oid)?.to_vec();
+    let theirs_entries: Vec<TreeEntry> = cache.tree_entries(odb, theirs_oid)?.to_vec();
+
+    let mut names: BTreeMap<Vec<u8>, ()> = BTreeMap::new();
+    for e in &base_entries {
+        names.insert(e.name.clone(), ());
+    }
+    for e in &ours_entries {
+        names.insert(e.name.clone(), ());
+    }
+    for e in &theirs_entries {
+        names.insert(e.name.clone(), ());
+    }
+
+    for (name, ()) in names {
+        let fp = full_path(prefix, &name);
+        let b_te = find_tree_entry(&base_entries, &name);
+        let o_te = find_tree_entry(&ours_entries, &name);
+        let t_te = find_tree_entry(&theirs_entries, &name);
+
+        if touched.contains(&fp) {
+            if let Some(te) = b_te {
+                if te.mode != MODE_DIR {
+                    base.insert(fp.clone(), tree_entry_to_index(&fp, te));
+                    cache.note_file_path(MergeTreeSide::Base, &fp);
+                }
+            }
+            if let Some(te) = o_te {
+                if te.mode != MODE_DIR {
+                    ours.insert(fp.clone(), tree_entry_to_index(&fp, te));
+                    cache.note_file_path(MergeTreeSide::Ours, &fp);
+                }
+            }
+            if let Some(te) = t_te {
+                if te.mode != MODE_DIR {
+                    theirs.insert(fp.clone(), tree_entry_to_index(&fp, te));
+                    cache.note_file_path(MergeTreeSide::Theirs, &fp);
+                }
+            }
+        }
+
+        let b_sub = b_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
+        let o_sub = o_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
+        let t_sub = t_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
+        let descend = subtree_touched(&fp, touched);
+        if !descend {
+            continue;
+        }
+
+        if o_sub.is_some() && subtree_touched(&fp, touched) {
+            cache.note_dir_with_descendant(MergeTreeSide::Ours, &fp);
+        }
+        if t_sub.is_some() && subtree_touched(&fp, touched) {
+            cache.note_dir_with_descendant(MergeTreeSide::Theirs, &fp);
+        }
+        if b_sub.is_some() && subtree_touched(&fp, touched) {
+            cache.note_dir_with_descendant(MergeTreeSide::Base, &fp);
+        }
+
+        fill_sparse_maps_walk(
+            cache,
+            odb,
+            &fp,
+            &b_sub.unwrap_or(*empty_tree),
+            &o_sub.unwrap_or(*empty_tree),
+            &t_sub.unwrap_or(*empty_tree),
+            touched,
+            empty_tree,
+            base,
+            ours,
+            theirs,
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn full_path(prefix: &[u8], name: &[u8]) -> Vec<u8> {
     if prefix.is_empty() {
         name.to_vec()
     } else {
@@ -161,61 +233,20 @@ fn full_path(prefix: &[u8], name: &[u8]) -> Vec<u8> {
     }
 }
 
-fn parse_tree_entries(odb: &Odb, oid: &ObjectId) -> crate::error::Result<Vec<TreeEntry>> {
-    let obj = odb.read(oid)?;
-    if obj.kind != ObjectKind::Tree {
-        return Ok(Vec::new());
-    }
-    parse_tree(&obj.data)
-}
-
 pub(crate) fn side_tree_has_descendant_at(
+    cache: &mut MergeTreeCache,
     odb: &Odb,
     tree_oid: &ObjectId,
+    side: MergeTreeSide,
     prefix: &[u8],
+    sparse_paths: &HashSet<Vec<u8>>,
 ) -> crate::error::Result<bool> {
-    if let Some(entry) = lookup_index_entry_at_path(odb, tree_oid, prefix)? {
-        if entry.mode == MODE_DIR {
-            let children = parse_tree_entries(odb, &entry.oid)?;
-            return Ok(!children.is_empty());
-        }
-    }
-    tree_has_entries_with_path_prefix(odb, tree_oid, prefix)
-}
-
-fn tree_has_entries_with_path_prefix(
-    odb: &Odb,
-    tree_oid: &ObjectId,
-    prefix: &[u8],
-) -> crate::error::Result<bool> {
-    fn walk(
-        odb: &Odb,
-        tree_oid: &ObjectId,
-        current: &[u8],
-        prefix: &[u8],
-    ) -> crate::error::Result<bool> {
-        for te in parse_tree_entries(odb, tree_oid)? {
-            let fp = full_path(current, &te.name);
-            if fp.len() > prefix.len()
-                && fp.starts_with(prefix)
-                && fp.as_slice().get(prefix.len()) == Some(&b'/')
-            {
-                return Ok(true);
-            }
-            if te.mode == MODE_DIR
-                && (fp.starts_with(prefix) || prefix.starts_with(&fp))
-                && walk(odb, &te.oid, &fp, prefix)?
-            {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-    walk(odb, tree_oid, b"", prefix)
+    side_tree_has_descendant_at_cached(cache, odb, tree_oid, side, prefix, sparse_paths)
 }
 
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn compose_merged_tree_oid(
+    cache: &mut MergeTreeCache,
     odb: &Odb,
     prefix: &[u8],
     base_oid: &ObjectId,
@@ -224,15 +255,15 @@ pub(crate) fn compose_merged_tree_oid(
     touched: &HashSet<Vec<u8>>,
     renamed_away: &HashSet<Vec<u8>>,
     stage0_by_path: &BTreeMap<Vec<u8>, IndexEntry>,
+    empty_tree: &ObjectId,
 ) -> crate::error::Result<ObjectId> {
     if !subtree_touched(prefix, touched) {
         return Ok(*ours_oid);
     }
 
-    let empty_tree = odb.write(ObjectKind::Tree, &[])?;
-    let base_entries = parse_tree_entries(odb, base_oid)?;
-    let ours_entries = parse_tree_entries(odb, ours_oid)?;
-    let theirs_entries = parse_tree_entries(odb, theirs_oid)?;
+    let base_entries: Vec<TreeEntry> = cache.tree_entries(odb, base_oid)?.to_vec();
+    let ours_entries: Vec<TreeEntry> = cache.tree_entries(odb, ours_oid)?.to_vec();
+    let theirs_entries: Vec<TreeEntry> = cache.tree_entries(odb, theirs_oid)?.to_vec();
 
     let mut names: BTreeMap<Vec<u8>, ()> = BTreeMap::new();
     for e in &base_entries {
@@ -265,9 +296,9 @@ pub(crate) fn compose_merged_tree_oid(
     let mut out_entries: Vec<TreeEntry> = Vec::new();
     for (name, ()) in names {
         let fp = full_path(prefix, &name);
-        let b_te = base_entries.iter().find(|e| e.name == name);
-        let o_te = ours_entries.iter().find(|e| e.name == name);
-        let t_te = theirs_entries.iter().find(|e| e.name == name);
+        let b_te = find_tree_entry(&base_entries, &name);
+        let o_te = find_tree_entry(&ours_entries, &name);
+        let t_te = find_tree_entry(&theirs_entries, &name);
 
         if !subtree_touched(&fp, touched) {
             if let Some(te) = o_te {
@@ -287,10 +318,11 @@ pub(crate) fn compose_merged_tree_oid(
 
         let mode = o_te.or(t_te).or(b_te).map(|e| e.mode).unwrap_or(MODE_DIR);
         if mode == MODE_DIR {
-            let b_sub = b_te.map(|e| e.oid).unwrap_or(empty_tree);
-            let o_sub = o_te.map(|e| e.oid).unwrap_or(empty_tree);
-            let t_sub = t_te.map(|e| e.oid).unwrap_or(empty_tree);
+            let b_sub = b_te.map(|e| e.oid).unwrap_or(*empty_tree);
+            let o_sub = o_te.map(|e| e.oid).unwrap_or(*empty_tree);
+            let t_sub = t_te.map(|e| e.oid).unwrap_or(*empty_tree);
             let sub = compose_merged_tree_oid(
+                cache,
                 odb,
                 &fp,
                 &b_sub,
@@ -299,6 +331,7 @@ pub(crate) fn compose_merged_tree_oid(
                 touched,
                 renamed_away,
                 stage0_by_path,
+                empty_tree,
             )?;
             out_entries.push(TreeEntry {
                 mode: MODE_DIR,
@@ -333,6 +366,7 @@ pub(crate) fn compose_merged_tree_oid(
 
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn three_way_on_touched_paths(
+    cache: &mut MergeTreeCache,
     repo: &Repository,
     base_tree: ObjectId,
     ours_tree: ObjectId,
@@ -382,19 +416,19 @@ pub(crate) fn three_way_on_touched_paths(
         if theirs_rename_destinations.contains(&op) && !ours_new_to_old.contains_key(&op) {
             if let Some(old) = theirs_rename_source_by_dest.get(&op) {
                 let ours_still_at_source = ours.contains_key(old)
-                    || lookup_index_entry_at_path(odb, &ours_tree, old)
+                    || lookup_index_entry_at_path(cache, odb, &ours_tree, old)
                         .ok()
                         .flatten()
                         .is_some();
                 if ours_still_at_source {
                     let ours_present_at_dest = ours.contains_key(&op)
-                        || lookup_index_entry_at_path(odb, &ours_tree, &op)
+                        || lookup_index_entry_at_path(cache, odb, &ours_tree, &op)
                             .ok()
                             .flatten()
                             .is_some();
                     if !ours_present_at_dest {
                         if theirs.get(&op).is_some()
-                            || lookup_index_entry_at_path(odb, &theirs_tree, &op)
+                            || lookup_index_entry_at_path(cache, odb, &theirs_tree, &op)
                                 .ok()
                                 .flatten()
                                 .is_some()
@@ -425,18 +459,18 @@ pub(crate) fn three_way_on_touched_paths(
 
         let b = bp.as_ref().and_then(|p| base.get(p).cloned()).or_else(|| {
             bp.as_ref().and_then(|p| {
-                lookup_index_entry_at_path(odb, &base_tree, p)
+                lookup_index_entry_at_path(cache, odb, &base_tree, p)
                     .ok()
                     .flatten()
             })
         });
         let o = ours.get(&op).cloned().or_else(|| {
-            lookup_index_entry_at_path(odb, &ours_tree, &op)
+            lookup_index_entry_at_path(cache, odb, &ours_tree, &op)
                 .ok()
                 .flatten()
         });
         let t = theirs.get(&tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(odb, &theirs_tree, &tp)
+            lookup_index_entry_at_path(cache, odb, &theirs_tree, &tp)
                 .ok()
                 .flatten()
         });
@@ -480,7 +514,7 @@ pub(crate) fn three_way_on_touched_paths(
             .cloned()
             .unwrap_or_else(|| bp.clone());
         let b = base.get(&bp).cloned().or_else(|| {
-            lookup_index_entry_at_path(odb, &base_tree, &bp)
+            lookup_index_entry_at_path(cache, odb, &base_tree, &bp)
                 .ok()
                 .flatten()
         });
@@ -488,7 +522,7 @@ pub(crate) fn three_way_on_touched_paths(
             continue;
         }
         let t = theirs.get(&tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(odb, &theirs_tree, &tp)
+            lookup_index_entry_at_path(cache, odb, &theirs_tree, &tp)
                 .ok()
                 .flatten()
         });
@@ -518,7 +552,7 @@ pub(crate) fn three_way_on_touched_paths(
             continue;
         }
         let t = theirs.get(&tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(odb, &theirs_tree, &tp)
+            lookup_index_entry_at_path(cache, odb, &theirs_tree, &tp)
                 .ok()
                 .flatten()
         });
@@ -551,6 +585,7 @@ pub(crate) fn three_way_on_touched_paths(
 }
 
 pub(crate) fn finish_merge_result_tree(
+    cache: &mut MergeTreeCache,
     odb: &Odb,
     output: &TreeMergeOutput,
     base_tree: ObjectId,
@@ -577,7 +612,9 @@ pub(crate) fn finish_merge_result_tree(
             stage0.insert(e.path.clone(), e);
         }
     }
+    let empty_tree = odb.write(crate::objects::ObjectKind::Tree, &[])?;
     compose_merged_tree_oid(
+        cache,
         odb,
         b"",
         &base_tree,
@@ -586,5 +623,6 @@ pub(crate) fn finish_merge_result_tree(
         &output.touched_paths,
         renamed_away,
         &stage0,
+        &empty_tree,
     )
 }

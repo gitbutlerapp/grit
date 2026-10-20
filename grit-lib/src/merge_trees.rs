@@ -6,6 +6,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+#[path = "merge_tree_cache.rs"]
+mod merge_tree_cache;
 #[path = "merge_trees_walk.rs"]
 mod merge_trees_walk;
 
@@ -115,11 +117,18 @@ pub fn merge_trees_three_way(
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<TreeMergeOutput> {
     let odb = &repo.odb();
+    let mut cache = merge_tree_cache::MergeTreeCache::default();
     let mut touched =
         merge_trees_walk::collect_touched_merge_paths(odb, &base_tree, &ours_tree, &theirs_tree)?;
 
-    let (mut base, mut ours, mut theirs) =
-        merge_trees_walk::build_sparse_maps(repo, base_tree, ours_tree, theirs_tree, &touched)?;
+    let (mut base, mut ours, mut theirs) = merge_trees_walk::build_sparse_maps(
+        &mut cache,
+        repo,
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        &touched,
+    )?;
 
     let mut ours_old_to_new_pairs = rename_pairs_base_to_other(odb, &base_tree, &ours_tree)?;
     let base_h: HashMap<Vec<u8>, IndexEntry> =
@@ -138,6 +147,7 @@ pub fn merge_trees_three_way(
         presentation.df_directory_theirs_commit,
     ) {
         df_escapes = apply_df_file_directory_conflicts_trees(
+            &mut cache,
             repo,
             &base_tree,
             &ours_tree,
@@ -192,6 +202,7 @@ pub fn merge_trees_three_way(
     }
 
     let mut output = merge_trees_walk::three_way_on_touched_paths(
+        &mut cache,
         repo,
         base_tree,
         ours_tree,
@@ -233,6 +244,7 @@ pub fn merge_trees_three_way(
         }
     }
     output.result_tree = merge_trees_walk::finish_merge_result_tree(
+        &mut cache,
         odb,
         &output,
         base_tree,
@@ -267,13 +279,14 @@ struct DfEscapes {
     relocated_from: Vec<Vec<u8>>,
 }
 
-fn side_has_descendant(side: &HashMap<Vec<u8>, IndexEntry>, prefix: &[u8]) -> bool {
+fn side_has_descendant(side: &BTreeMap<Vec<u8>, IndexEntry>, prefix: &[u8]) -> bool {
     side.keys()
         .any(|p| p.len() > prefix.len() && p.starts_with(prefix) && p[prefix.len()] == b'/')
 }
 
 #[expect(clippy::too_many_arguments)]
 fn apply_df_file_directory_conflicts_trees(
+    cache: &mut merge_tree_cache::MergeTreeCache,
     repo: &Repository,
     base_tree: &ObjectId,
     ours_tree: &ObjectId,
@@ -285,8 +298,12 @@ fn apply_df_file_directory_conflicts_trees(
     ours_commit: ObjectId,
     theirs_commit: ObjectId,
 ) -> crate::error::Result<DfEscapes> {
+    use merge_tree_cache::MergeTreeSide;
+
     let odb = repo.odb();
     let mut out = DfEscapes::default();
+    let theirs_sparse: HashSet<Vec<u8>> = theirs.keys().cloned().collect();
+    let ours_sparse: HashSet<Vec<u8>> = ours.keys().cloned().collect();
     let ours_paths: Vec<Vec<u8>> = ours.keys().cloned().collect();
     for path in ours_paths {
         let Some(entry) = ours.get(&path) else {
@@ -295,19 +312,20 @@ fn apply_df_file_directory_conflicts_trees(
         if entry.mode == 0o040000 {
             continue;
         }
-        if !merge_trees_walk::side_tree_has_descendant_at(odb, theirs_tree, &path)? {
+        if !merge_trees_walk::side_tree_has_descendant_at(
+            cache,
+            odb,
+            theirs_tree,
+            MergeTreeSide::Theirs,
+            &path,
+            &theirs_sparse,
+        )? {
             continue;
         }
-        let base_map: HashMap<Vec<u8>, IndexEntry> =
-            base.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let ours_map: HashMap<Vec<u8>, IndexEntry> =
-            ours.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let theirs_map: HashMap<Vec<u8>, IndexEntry> =
-            theirs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        if skip_df_expansion_ours_file(&base_map, &ours_map, &theirs_map, &path) {
+        if skip_df_expansion_ours_file(base, ours, theirs, &path) {
             continue;
         }
-        if parent_has_file(&theirs_map, &path) {
+        if parent_has_file(theirs, &path) {
             continue;
         }
         let escaped = escape_df_path_side(ours, &path, ours_commit, &mut out.stage2);
@@ -325,19 +343,20 @@ fn apply_df_file_directory_conflicts_trees(
         if entry.mode == 0o040000 {
             continue;
         }
-        if !merge_trees_walk::side_tree_has_descendant_at(odb, ours_tree, &path)? {
+        if !merge_trees_walk::side_tree_has_descendant_at(
+            cache,
+            odb,
+            ours_tree,
+            MergeTreeSide::Ours,
+            &path,
+            &ours_sparse,
+        )? {
             continue;
         }
-        let base_map: HashMap<Vec<u8>, IndexEntry> =
-            base.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let ours_map: HashMap<Vec<u8>, IndexEntry> =
-            ours.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let theirs_map: HashMap<Vec<u8>, IndexEntry> =
-            theirs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        if skip_df_expansion_theirs_file(&base_map, &ours_map, &theirs_map, &path) {
+        if skip_df_expansion_theirs_file(base, ours, theirs, &path) {
             continue;
         }
-        if parent_has_file(&ours_map, &path) {
+        if parent_has_file(ours, &path) {
             continue;
         }
         let escaped = escape_df_path_side(theirs, &path, theirs_commit, &mut out.stage3);
@@ -371,9 +390,9 @@ fn escape_df_path_side(
 
 /// Git skips D/F relocation when one side only expanded a base file into `path/…`.
 fn skip_df_expansion_ours_file(
-    base: &HashMap<Vec<u8>, IndexEntry>,
-    ours: &HashMap<Vec<u8>, IndexEntry>,
-    theirs: &HashMap<Vec<u8>, IndexEntry>,
+    base: &BTreeMap<Vec<u8>, IndexEntry>,
+    ours: &BTreeMap<Vec<u8>, IndexEntry>,
+    theirs: &BTreeMap<Vec<u8>, IndexEntry>,
     path: &[u8],
 ) -> bool {
     let Some(base_e) = base.get(path) else {
@@ -395,9 +414,9 @@ fn skip_df_expansion_ours_file(
 }
 
 fn skip_df_expansion_theirs_file(
-    base: &HashMap<Vec<u8>, IndexEntry>,
-    ours: &HashMap<Vec<u8>, IndexEntry>,
-    theirs: &HashMap<Vec<u8>, IndexEntry>,
+    base: &BTreeMap<Vec<u8>, IndexEntry>,
+    ours: &BTreeMap<Vec<u8>, IndexEntry>,
+    theirs: &BTreeMap<Vec<u8>, IndexEntry>,
     path: &[u8],
 ) -> bool {
     let Some(base_e) = base.get(path) else {
@@ -418,7 +437,7 @@ fn skip_df_expansion_theirs_file(
     side_has_descendant(ours, path)
 }
 
-fn parent_has_file(side: &HashMap<Vec<u8>, IndexEntry>, path: &[u8]) -> bool {
+fn parent_has_file(side: &BTreeMap<Vec<u8>, IndexEntry>, path: &[u8]) -> bool {
     let Some(pos) = path.iter().rposition(|b| *b == b'/') else {
         return false;
     };
