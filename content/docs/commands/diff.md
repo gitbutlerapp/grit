@@ -41,6 +41,7 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--exit-code` | Exit with status **1** when there are changes, **0** when the selected diff is empty. Errors exit **2**. |
 | `--quiet` | Print nothing (implies `--exit-code`). Useful for scripts that only need the exit status. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
+| `--patch-text` | Emit a unified patch on stdout for `git apply` (`git diff --binary` shape). Not compatible with `--json`. Human and `--markdown` print the raw patch bytes. |
 | `<commit>` | One commit (that commit’s patch), two commits (tree diff), or a range `A..B` / `A...B`. Omit for uncommitted changes. |
 | `<path>…` | After `--`, limit the diff to these paths (all forms above, including `--staged`). |
 | `-M`, `-M<n>`, `-M=<n>` | Detect renames (default 50%). Attached forms like `-M30` work; bare `-M` does not consume the next revision. Use `100%` for exact renames only. Git treats `-M5` as 0.5 (50%); use `-M5%` or `-M05` for 5%. |
@@ -143,6 +144,17 @@ $ grit diff v0.1 --json --filter '.files[].path'
   "main.rs"
 ]
 ```
+
+### Patches for git apply
+
+`--patch-text` writes the same kind of output as `git diff --binary`: `diff --git` headers, `index` lines, unified hunks, and `GIT binary patch` sections for binary files. Pipe it to `git apply --index` (or use [`write_patch`](../../library/diff.md) in `grit-lib`) to reproduce the target tree without using grit’s delta-style human diff.
+
+```console
+$ grit diff --patch-text HEAD~1 HEAD | git apply --index
+$ git diff --cached --stat
+```
+
+`--patch-text` cannot be combined with `--json`; use the structured diff in JSON when you need machine-readable hunks.
 
 ## JSON output
 

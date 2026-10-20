@@ -511,6 +511,9 @@ enum Command {
         /// Print nothing; implies `--exit-code`.
         #[arg(long = "quiet")]
         quiet: bool,
+        /// Emit a unified patch for `git apply` (not compatible with `--json`).
+        #[arg(long = "patch-text")]
+        patch_text: bool,
         /// One commit (that commit's patch), two commits (tree diff), or a range `A..B` / `A...B`.
         #[arg(value_name = "COMMIT")]
         commits: Vec<String>,
@@ -1109,10 +1112,29 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             against,
             exit_code,
             quiet,
+            patch_text,
             commits,
             paths,
             format,
         } => {
+            if patch_text && matches!(opts.mode, crate::output::OutputMode::Json) {
+                anyhow::bail!("--patch-text cannot be used with --json");
+            }
+            if patch_text {
+                return commands::diff::run_patch_text(commands::diff::DiffRunOptions {
+                    no_index,
+                    staged,
+                    unstaged,
+                    against,
+                    commits,
+                    paths,
+                    format,
+                    word_level_inline: false,
+                    exit_code: false,
+                    quiet: false,
+                    patch_text: true,
+                });
+            }
             let exit_code = exit_code || quiet || no_index;
             match commands::diff::run(commands::diff::DiffRunOptions {
                 no_index,
@@ -1126,6 +1148,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     && commands::diff::diff_word_level_inline_for_output(),
                 exit_code,
                 quiet,
+                patch_text: false,
             }) {
                 Ok(outcome) => {
                     if !quiet {

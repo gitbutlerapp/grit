@@ -21,7 +21,10 @@ use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderCont
 use crate::ui::{self, PathDisplayOptions};
 use anyhow::{Context, Result};
 use grit_lib::diff::structured::{format_hunk_range, StructuredHunk, StructuredLineKind};
-use grit_lib::diff::{diff_paths, resolve_diff_arguments, DiffEntry, DiffOptions, DiffTarget};
+use grit_lib::diff::{
+    diff_paths, resolve_diff_arguments, write_patch_structured, DiffEntry, DiffOptions, DiffTarget,
+    PatchTextOptions,
+};
 use grit_lib::objects::ObjectId;
 use grit_lib::worktree::pathspec::pathdiff;
 use schemars::JsonSchema;
@@ -227,6 +230,9 @@ pub struct DiffRunOptions {
     pub exit_code: bool,
     /// Print nothing; implies [`Self::exit_code`].
     pub quiet: bool,
+    /// Emit `git diff --binary`-compatible patch text for `git apply`.
+    #[expect(dead_code)]
+    pub patch_text: bool,
 }
 
 /// Exit status when `grit diff` fails while `--exit-code` or `--quiet` is set.
@@ -253,6 +259,38 @@ pub fn diff_word_level_inline_for_output() -> bool {
 fn attach_path_display(repo: &grit_lib::repo::Repository, mut outcome: DiffOutcome) -> DiffOutcome {
     outcome.path_display = PathDisplayOptions::from_repo(repo).ok();
     outcome
+}
+
+/// Write `git apply`-compatible patch text to stdout (`--patch-text`).
+pub fn run_patch_text(opts: DiffRunOptions) -> Result<()> {
+    if opts.no_index {
+        anyhow::bail!("--patch-text cannot be used with --no-index");
+    }
+    let repo = context::discover()?;
+    let config = repo.config().context("could not load config")?;
+    let prefix = pathspec_prefix_for_repo(&repo)?;
+    let mut diff_options = opts
+        .format
+        .to_options(DiffOptions::from_config(config.as_ref()))?;
+    diff_options.word_level_inline = false;
+    let args = resolve_diff_arguments(
+        &repo,
+        prefix.as_deref(),
+        opts.staged,
+        opts.unstaged,
+        opts.against.as_deref(),
+        &opts.commits,
+        &opts.paths,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let patch_opts = PatchTextOptions::from_repo(&repo, diff_options)?;
+    let structured = repo
+        .diff()
+        .tree_structured(&args.target, &args.pathspecs, &patch_opts.diff)
+        .context("could not build patch diff")?;
+    write_patch_structured(&repo, &structured, &patch_opts, &mut std::io::stdout())
+        .context("could not write patch text")?;
+    Ok(())
 }
 
 fn pathspec_prefix_for_repo(repo: &grit_lib::repo::Repository) -> Result<Option<String>> {

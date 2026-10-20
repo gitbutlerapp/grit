@@ -319,6 +319,120 @@ fn include_file_in_diff(file: &FileDiff, opts: DiffOptions) -> bool {
     !file.hunks.is_empty()
 }
 
+/// Structured tree diff rows for patch-text output (`write_patch_structured`).
+pub(crate) fn collect_tree_structured_for_target(
+    repo: &Repository,
+    target: &DiffTarget,
+    pathspecs: &[String],
+    opts: DiffOptions,
+) -> Result<Vec<TreeDiffStructured>> {
+    let config = repo.config()?;
+    let thread_policy = repo.thread_policy();
+    let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
+
+    let items = match target {
+        DiffTarget::WorktreeVsHead => {
+            let head = resolve_head(repo.git_dir())?;
+            let head_tree = match head.oid() {
+                Some(oid) => Some(commit_tree(repo, oid)?),
+                None => None,
+            };
+            let entries = filter_diff_entries(
+                worktree_diff_entries(repo, head_tree.as_ref(), rename_threshold)?,
+                repo,
+                pathspecs,
+            );
+            tree_diff_structured_parallel(
+                repo.odb(),
+                entries,
+                config.as_ref(),
+                &thread_policy,
+                opts,
+            )?
+        }
+        DiffTarget::WorktreeVsTree(tree) => {
+            let entries = filter_diff_entries(
+                worktree_diff_entries(repo, Some(tree), rename_threshold)?,
+                repo,
+                pathspecs,
+            );
+            tree_diff_structured_parallel(
+                repo.odb(),
+                entries,
+                config.as_ref(),
+                &thread_policy,
+                opts,
+            )?
+        }
+        DiffTarget::IndexVsHead => {
+            let entries = filter_diff_entries(staged_diff_entries(repo, rename_threshold)?, repo, pathspecs);
+            tree_diff_structured_parallel(
+                repo.odb(),
+                entries,
+                config.as_ref(),
+                &thread_policy,
+                opts,
+            )?
+        }
+        DiffTarget::WorktreeVsIndex => {
+            let entries =
+                filter_diff_entries(unstaged_diff_entries(repo, rename_threshold)?, repo, pathspecs);
+            tree_diff_structured_parallel(
+                repo.odb(),
+                entries,
+                config.as_ref(),
+                &thread_policy,
+                opts,
+            )?
+        }
+        DiffTarget::Commit(oid) => {
+            let items = commit_changes(repo, oid, &config, &thread_policy, opts, rename_threshold)?;
+            filter_tree_diff(items, repo, pathspecs)
+        }
+        DiffTarget::Trees { old, new } => {
+            let items = if let Some(base) = old {
+                tree_commit_changes(
+                    repo,
+                    base,
+                    new,
+                    &config,
+                    &thread_policy,
+                    opts,
+                    rename_threshold,
+                )?
+            } else {
+                commit_changes(repo, new, &config, &thread_policy, opts, rename_threshold)?
+            };
+            filter_tree_diff(items, repo, pathspecs)
+        }
+    };
+    Ok(items
+        .into_iter()
+        .filter(|t| include_tree_structured_in_diff(t, opts))
+        .collect())
+}
+
+fn include_tree_structured_in_diff(item: &TreeDiffStructured, opts: DiffOptions) -> bool {
+    if !opts.whitespace.is_active() || item.binary {
+        return true;
+    }
+    let e = &item.entry;
+    if matches!(
+        e.status,
+        DiffStatus::Renamed
+            | DiffStatus::Added
+            | DiffStatus::Deleted
+            | DiffStatus::Copied
+            | DiffStatus::TypeChanged
+    ) {
+        return true;
+    }
+    if e.old_mode != e.new_mode {
+        return true;
+    }
+    !item.structured.hunks.is_empty()
+}
+
 pub(crate) fn collect_files_for_target(
     repo: &Repository,
     target: &DiffTarget,
@@ -659,6 +773,146 @@ fn filter_file_changes(
         .into_iter()
         .filter(|c| file_change_matches_pathspecs(repo, &c.path, c.old_path.as_deref(), specs))
         .collect()
+}
+
+fn filter_diff_entries(
+    entries: Vec<DiffEntry>,
+    repo: &Repository,
+    specs: &[String],
+) -> Vec<DiffEntry> {
+    if specs.is_empty() {
+        return entries;
+    }
+    entries
+        .into_iter()
+        .filter(|e| {
+            let path = e
+                .new_path
+                .as_deref()
+                .or(e.old_path.as_deref())
+                .unwrap_or("");
+            let old_path = e.old_path.as_deref();
+            file_change_matches_pathspecs(repo, path, old_path, specs)
+        })
+        .collect()
+}
+
+fn staged_diff_entries(repo: &Repository, rename_threshold: u32) -> Result<Vec<DiffEntry>> {
+    let head = resolve_head(repo.git_dir())?;
+    let head_tree = match head.oid() {
+        Some(oid) => Some(commit_tree(repo, oid)?),
+        None => None,
+    };
+    let index = repo.index_handle().load()?;
+    let config = repo.config()?;
+    let thread_policy = repo.thread_policy();
+    let mut entries = diff_index_to_tree_with_renames(
+        repo.odb(),
+        &index,
+        head_tree.as_ref(),
+        false,
+        rename_threshold,
+        config.as_ref(),
+        &thread_policy,
+    )?;
+    sort_entries(&mut entries);
+    Ok(entries)
+}
+
+fn unstaged_diff_entries(repo: &Repository, rename_threshold: u32) -> Result<Vec<DiffEntry>> {
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::Message("grit diff needs a working tree".into()))?;
+    let mut index = repo.index_handle().load()?;
+    let rules_arc = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));
+    let config_arc = rules_arc
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .config_arc();
+    let diff_index_mtime = index_mtime_for_diff(&index, None);
+    let diff_opts = DiffIndexToWorktreeOptions {
+        repository_git_dir: Some(repo.git_dir().to_path_buf()),
+        index_mtime: diff_index_mtime,
+        config: Some(config_arc.clone()),
+        thread_policy: Some(repo.thread_policy()),
+        refresh_index_stat_in_pass: false,
+        for_status: true,
+        refresh_fsmonitor: fsmonitor_enabled(config_arc.as_ref()),
+        worktree_rules: Some(Arc::clone(&rules_arc)),
+        command_runner: Some(repo.command_runner()),
+        ..DiffIndexToWorktreeOptions::default()
+    };
+    let (mut entries, _) = diff_index_to_worktree_with_renames(
+        repo,
+        &mut index,
+        work_tree,
+        diff_opts,
+        rename_threshold,
+    )?;
+    sort_entries(&mut entries);
+    Ok(entries)
+}
+
+fn worktree_diff_entries(
+    repo: &Repository,
+    base_tree: Option<&ObjectId>,
+    rename_threshold: u32,
+) -> Result<Vec<DiffEntry>> {
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::Message("grit diff needs a working tree".into()))?;
+    let mut index = repo.index_handle().load()?;
+    let config = repo.config()?;
+
+    let index_backed = base_tree
+        .zip(index.cache_tree_root.as_ref())
+        .map(|(left, right)| left == right)
+        .unwrap_or(base_tree.is_none() && index.cache_tree_root.is_none())
+        && crate::index::write_tree::cache_tree_extension_valid(index.cache_tree.as_ref());
+    let diff_index_mtime = index_mtime_for_diff(&index, None);
+    let rules_arc = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));
+    let mut entries = if index_backed {
+        let (entries, _) = diff_index_to_worktree_with_renames(
+            repo,
+            &mut index,
+            work_tree,
+            DiffIndexToWorktreeOptions {
+                repository_git_dir: Some(repo.git_dir().to_path_buf()),
+                config: Some(config.clone()),
+                index_mtime: diff_index_mtime,
+                thread_policy: Some(repo.thread_policy()),
+                refresh_index_stat_in_pass: false,
+                for_status: true,
+                refresh_fsmonitor: fsmonitor_enabled(config.as_ref()),
+                worktree_rules: Some(Arc::clone(&rules_arc)),
+                command_runner: Some(repo.command_runner()),
+                ..DiffIndexToWorktreeOptions::default()
+            },
+            rename_threshold,
+        )?;
+        entries
+    } else {
+        let worktree_rules = WorktreeRules::from_repository(repo, &index)?;
+        let raw = diff_tree_to_worktree_with_git_dir_and_rules(
+            repo.odb(),
+            base_tree,
+            work_tree,
+            repo.git_dir(),
+            &index,
+            Some(config.as_ref()),
+            Some(&worktree_rules),
+        )?;
+        apply_rename_detection_to_diff_entries(
+            repo.odb(),
+            raw,
+            Some(work_tree),
+            rename_threshold,
+            config.as_ref(),
+            &repo.thread_policy(),
+        )?
+    };
+    sort_entries(&mut entries);
+    Ok(entries)
 }
 
 fn filter_tree_diff(

@@ -32,6 +32,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | Task | Command |
 | --- | --- |
 | Uncommitted changes as a diff | `grit diff` |
+| Patch text for `git apply` | `grit diff --patch-text` |
 | Is the tree clean? (exit code only) | `grit diff --quiet` — **0** clean, **1** changed |
 | Diff ignoring whitespace (reformatted code) | `grit diff -w` |
 | Diff with no context lines (scripting) | `grit diff -U0` |
