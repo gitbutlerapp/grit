@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit log [--before <cursor>] [--limit <N>] [--stat] [-- <path>…]
+grit log [--before <cursor>] [--limit <N>] [-p] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U<N>] [-- <path>…]
 ```
 
 ## Description
@@ -19,15 +19,18 @@ Pass one or more paths after `--` to show only commits that touched those paths 
 
 When there's more history on the default walk, the last line shows the command for the next page. Path filters and a one-shot `--limit` without `--before` do not emit a continuation cursor.
 
-With `--stat`, each commit is followed by the files it changed and how many lines were added and removed in each, like [`grit show`](../show/). Merge commits show the change against their first parent.
+Diff detail flags append output under each commit line; see [Diff output options](../diff/#diff-output-options). Only one format flag at a time (`--patch`, `--stat`, …).
+
+With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape matching [`grit show`](../show/)). Merge commits show the change against their first parent for stat and name modes; `-p` skips merge patches (like `git log -p`). Path operands limit both which commits appear and the paths included in each patch.
 
 ## Options
+
+Per-commit diff format flags are listed in [Diff output options](../diff/#diff-output-options). Flags on `grit log`: `-p`, `--patch`, `--stat`, `--numstat`, `--shortstat`, `--name-only`, `--name-status`, `-U`, `--unified`, `-W`, `--function-context`, `-w`, `--ignore-all-space`, `-b`, `--ignore-space-change`, `--ignore-blank-lines`, `-M`, `--find-renames`, `--no-renames`, `--diff-algorithm`, `--diff-filter`.
 
 | Option | Description |
 | --- | --- |
 | `--before <cursor>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). This is not a commit oid: it encodes the walk queue so merges and side branches are not skipped. Cannot be combined with path operands. |
 | `--limit <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--before`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `--limit` without `--before` and without paths lists `N` commits with no `next` cursor. |
-| `--stat` | Show which files each commit changed, with insertion and deletion counts. |
 | `<path>…` | After `--`, limit to commits that touch these paths (cwd-relative under the work tree, like `grit diff`; all matches unless `--limit` is set). |
 
 ## Examples
@@ -92,7 +95,9 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `commits` | array | Up to ten commits by default, or up to `--limit` when set, newest first. Each entry has `oid`, `subject`, `author` (`name`, `email`, `date` in RFC 3339 — same shape as [`grit show`](../show/)), and `relative_date` (e.g. `3 days ago`). |
-| `commits[].stat` | object | Only with `--stat`: `files` (each with `path`, `old_path` for renames, `status`, `insertions`, `deletions`, `binary`), `files_changed`, `insertions` and `deletions`. The same shape as `stat` in [`grit show`](../show/). |
+| `commits[].files` | array | With any diff detail flag: same [`FileDiff`](/schemas/diff/v1.json) objects as [`grit diff`](../diff/) (including `stat` sub-objects for `--stat` / `--numstat`). |
+| `commits[].totals` | object | With stat-style flags: `files_changed`, `insertions`, `deletions`. |
+| `commits[].stat` | object | Only with `--stat`: duplicate summary in the legacy [`grit show`](../show/) `stat` shape (`files`, `files_changed`, …). |
 | `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--before` for the next page, or `null` when there is no more history. |
 
 Example:

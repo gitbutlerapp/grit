@@ -37,6 +37,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | The change one commit made | `grit diff <commit>` |
 | A commit's message and file summary | `grit show [<commit-or-branch-or-tag>]` |
 | Recent history, ten at a time | `grit log`, then `grit log --before <next>` using the `next` value |
+| History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` |
 
 Revisions can be full or short ids, branch or tag names, or expressions like `HEAD~2`.

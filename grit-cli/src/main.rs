@@ -434,15 +434,14 @@ enum Command {
         /// Continue listing from before this commit (for paging).
         #[arg(long)]
         before: Option<String>,
-        /// Show which files each commit changed, with insertion and deletion counts.
-        #[arg(long)]
-        stat: bool,
         /// Stop after this many commits (default page size is ten when omitted).
         #[arg(long = "limit", value_name = "N")]
         limit: Option<usize>,
         /// Limit to commits that touch these paths.
         #[arg(value_name = "PATH", last = true)]
         paths: Vec<String>,
+        #[command(flatten)]
+        format: diff_format::DiffFormatArgs,
     },
     /// List or count commits matching revision ranges.
     Revs {
@@ -1054,10 +1053,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         },
         Command::Log {
             before,
-            stat,
             limit,
             paths,
-        } => emit(&commands::log::run(before, stat, limit, &paths)?, opts, ctx),
+            format,
+        } => emit(
+            &commands::log::run(before, format, limit, &paths)?,
+            opts,
+            ctx,
+        ),
         Command::Revs {
             ranges,
             count,
