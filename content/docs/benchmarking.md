@@ -91,7 +91,7 @@ Headline scenarios compare **`grit`** and system **`git`** with the direct-spawn
 ```bash
 cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench fixtures prepare --only synth-10k-smoke,many-refs-smoke,git-git-wt
-./target/release/grit-bench daily run --smoke --offline --output target/bench/daily-smoke.json
+./target/release/grit-bench daily --smoke --offline --output target/bench/daily-smoke.json
 ./target/release/grit-bench daily validate target/bench/daily-smoke.json
 ```
 

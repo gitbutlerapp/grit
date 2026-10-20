@@ -41,18 +41,42 @@ pub fn hot_path_spec(smoke: bool) -> HotPathRepoSpec {
     }
 }
 
+/// Pin a stable scratch root for the current `run_daily` invocation (avoids nested `daily-*` paths).
+pub fn pin_daily_scratch_root() {
+    if std::env::var("GRIT_BENCH_DAILY_ROOT").is_ok() {
+        return;
+    }
+    let mut root = std::env::var("GRIT_BENCH_SCRATCH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-scratch"));
+    while root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("daily-"))
+    {
+        root = root
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp/grit-bench-scratch"));
+    }
+    std::env::set_var("GRIT_BENCH_DAILY_ROOT", &root);
+}
+
 fn with_scratch<T, F>(label: &str, f: F) -> Result<T>
 where
     F: FnOnce(&Path) -> Result<T>,
 {
-    let scratch = scratch_dir().join(format!("daily-{label}"));
+    pin_daily_scratch_root();
+    let base = std::env::var("GRIT_BENCH_DAILY_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-scratch"));
+    let scratch = base.join(format!("daily-{label}"));
     std::env::set_var("GRIT_BENCH_SCRATCH", &scratch);
     f(&scratch)
 }
 
 pub fn setup_registry_worktree(setup: &DailySetup<'_>, kind: FixtureKind) -> Result<PathBuf> {
-    with_scratch(kind.cache_name(), |scratch| {
-        std::env::set_var("GRIT_BENCH_SCRATCH", scratch);
+    with_scratch(kind.cache_name(), |_scratch| {
         let (repo, _record) =
             ensure_worktree_bench_repo(setup.git, kind, setup.offline).context("worktree repo")?;
         set_worktree_bench_cwd(&repo)?;
@@ -64,30 +88,24 @@ pub fn setup_git_git_worktree(setup: &DailySetup<'_>) -> Result<PathBuf> {
     setup_registry_worktree(setup, FixtureKind::GitGitWt)
 }
 
-pub fn setup_hot_path_switch(
-    setup: &DailySetup<'_>,
-) -> Result<super::plan::DailyHeadlineContext> {
-    with_scratch("switch", |scratch| {
-        std::env::set_var("GRIT_BENCH_SCRATCH", scratch);
+pub fn setup_hot_path_switch(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    with_scratch("switch", |_scratch| {
         let spec = hot_path_spec(setup.smoke);
         let (repo, meta) = setup_switch_fixture(setup.git, spec, false)?;
-        let mut ctx = ctx(repo, setup);
-        ctx.hot_path_meta = Some(meta);
-        Ok(ctx)
+        let mut headline = ctx(repo, setup);
+        headline.hot_path_meta = Some(meta);
+        Ok(headline)
     })
 }
 
-pub fn setup_hot_path_pick_merge(
-    setup: &DailySetup<'_>,
-) -> Result<super::plan::DailyHeadlineContext> {
-    with_scratch("pick-merge", |scratch| {
-        std::env::set_var("GRIT_BENCH_SCRATCH", scratch);
+pub fn setup_hot_path_pick_merge(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    with_scratch("pick-merge", |_scratch| {
         let spec = hot_path_spec(setup.smoke);
         let touch = touch_paths_for_size(spec.file_count);
         let (_repo, meta) = setup_pick_merge_fixture(setup.git, spec, touch)?;
-        let mut ctx = ctx(scratch_dir(), setup);
-        ctx.hot_path_meta = Some(meta);
-        Ok(ctx)
+        let mut headline = ctx(scratch_dir(), setup);
+        headline.hot_path_meta = Some(meta);
+        Ok(headline)
     })
 }
 
@@ -105,8 +123,7 @@ pub fn setup_many_refs_worktree(setup: &DailySetup<'_>) -> Result<PathBuf> {
 }
 
 pub fn setup_stash_repo(setup: &DailySetup<'_>) -> Result<PathBuf> {
-    with_scratch("stash", |scratch| {
-        std::env::set_var("GRIT_BENCH_SCRATCH", scratch);
+    with_scratch("stash", |_scratch| {
         let size = if setup.smoke { 1_000 } else { 10_000 };
         let repo = crate::fixture::create_repo(setup.git, size).context("stash repo")?;
         crate::fixture::prepare_commit_iteration(&repo, setup.git)
@@ -272,4 +289,23 @@ pub fn headline_spec(id: &str) -> &'static super::registry::HeadlineScenario {
         .iter()
         .find(|s| s.id == id)
         .unwrap_or_else(|| panic!("unknown headline id {id}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn daily_scratch_paths_do_not_nest() {
+        std::env::remove_var("GRIT_BENCH_DAILY_ROOT");
+        std::env::set_var("GRIT_BENCH_SCRATCH", "/tmp/grit-bench-scratch");
+        let _a = with_scratch("first", |p| Ok(p.to_path_buf())).expect("first");
+        let first = std::env::var("GRIT_BENCH_SCRATCH").expect("scratch");
+        let _b = with_scratch("second", |p| Ok(p.to_path_buf())).expect("second");
+        let second = std::env::var("GRIT_BENCH_SCRATCH").expect("scratch");
+        assert_eq!(first, "/tmp/grit-bench-scratch/daily-first");
+        assert_eq!(second, "/tmp/grit-bench-scratch/daily-second");
+        assert!(!second.contains("daily-first/daily-second"));
+        std::env::remove_var("GRIT_BENCH_DAILY_ROOT");
+    }
 }

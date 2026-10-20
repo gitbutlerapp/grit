@@ -7,12 +7,12 @@ Daily performance census reports use the [`grit-daily-bench/1`](DAILY-SCHEMA.md)
 ```bash
 # Headline smoke (13 local scenarios; direct-spawn timing + peak RSS)
 ./target/release/grit-bench fixtures prepare --only synth-10k-smoke,many-refs-smoke,git-git-wt
-./target/release/grit-bench daily run --smoke --offline --output target/bench/daily-smoke.json
+./target/release/grit-bench daily --smoke --offline --output target/bench/daily-smoke.json
 ./target/release/grit-bench daily validate target/bench/daily-smoke.json
 
 # Filters and baseline grit on headline rows
-./target/release/grit-bench daily run --only status/clean@synth-10k --area worktree --smoke
-./target/release/grit-bench daily run --smoke --baseline-grit /path/to/older/grit --output /tmp/daily.json
+./target/release/grit-bench daily --only status/clean@synth-10k --area worktree --smoke
+./target/release/grit-bench daily --smoke --baseline-grit /path/to/older/grit --output /tmp/daily.json
 ```
 
 ## Requirements

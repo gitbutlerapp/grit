@@ -269,7 +269,7 @@ pub fn run_ab_bench(request: &AbBenchRequest<'_>) -> Result<AbBenchOutcome> {
     })
 }
 
-fn run_prepare(cwd: &Path, prepare: Option<&BenchArgv>) -> Result<()> {
+pub(crate) fn run_prepare(cwd: &Path, prepare: Option<&BenchArgv>) -> Result<()> {
     let Some(prep) = prepare else {
         return Ok(());
     };

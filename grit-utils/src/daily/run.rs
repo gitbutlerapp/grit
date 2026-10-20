@@ -6,17 +6,18 @@ use anyhow::{Context, Result};
 use time::OffsetDateTime;
 
 use super::areas;
-use super::helpers::prepare_bench_argv;
+use super::helpers::{pin_daily_scratch_root, prepare_bench_argv};
 use super::plan::{DailyHeadlinePlan, DailyPrepare, DailySetup};
 use super::registry::{Area, HEADLINE_SCENARIOS};
 use super::runner::{
-    run_ab_bench, run_timed_via_helper, timing_stats_from_samples, AbBenchRequest, BenchArgv,
-    RunLimits, RunPolicy,
+    run_ab_bench, run_prepare, run_timed_via_helper, timing_stats_from_samples, AbBenchRequest,
+    BenchArgv, RunLimits, RunPolicy,
 };
 use super::schema::{
     DailyBenchReport, DailyScenarioResult, DailyToolRun, DailyToolVersions, SCHEMA_TAG,
 };
 use crate::binary::{grit_source_commit, tool_version};
+use crate::capped_run::TerminationKind;
 use crate::machine::{collect_machine_info, format_timestamp};
 
 /// Options for [`run_daily`].
@@ -131,21 +132,31 @@ fn prepare_argv(prepare_bin: &Path, git: &Path, prepare: &DailyPrepare) -> Optio
 fn run_baseline_samples(
     cwd: &Path,
     cmd: &BenchArgv,
+    prepare: Option<&BenchArgv>,
     policy: &RunPolicy,
     limits: &RunLimits,
     helper: &Path,
 ) -> Result<DailyToolRun> {
     let mut samples = Vec::new();
     for _ in 0..policy.min_runs_per_tool.max(1) {
+        run_prepare(cwd, prepare)?;
         let sample = run_timed_via_helper(cwd, cmd, limits, helper)?;
+        if sample.termination != TerminationKind::Success {
+            anyhow::bail!("baseline grit timed run failed: {:?}", sample.termination);
+        }
         samples.push(sample);
     }
     let stats = timing_stats_from_samples(&samples);
-    Ok(tool_run(&stats, samples.len() as u32))
+    let run = tool_run(&stats, samples.len() as u32);
+    if run.peak_rss_bytes == 0 {
+        anyhow::bail!("baseline grit missing peak_rss_bytes");
+    }
+    Ok(run)
 }
 
 /// Execute headline scenarios and write a daily census JSON report.
 pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<DailyBenchReport> {
+    pin_daily_scratch_root();
     let policy = if opts.smoke {
         smoke_policy()
     } else {
@@ -192,8 +203,14 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
         let (baseline_grit, baseline_grit_ratio) =
             if let Some(base_bin) = opts.baseline_grit.as_ref().filter(|_| plan.spec.headline) {
                 let base_cmd = baseline_grit_argv(&grit_cmd, &opts.grit, base_bin);
-                let base_run =
-                    run_baseline_samples(&repo, &base_cmd, &policy, &limits, &opts.measure_helper)?;
+                let base_run = run_baseline_samples(
+                    &repo,
+                    &base_cmd,
+                    prepare.as_ref(),
+                    &policy,
+                    &limits,
+                    &opts.measure_helper,
+                )?;
                 let base_ratio = ratio(base_run.median_wall_ms, git_run.median_wall_ms);
                 (Some(base_run), Some(base_ratio))
             } else {
@@ -235,10 +252,13 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
     scenarios.sort_by(|a, b| a.id.cmp(&b.id));
 
     let baseline_version = opts.baseline_grit.as_ref().map(|p| tool_version(p));
-    let baseline_commit = opts
-        .baseline_grit
-        .as_ref()
-        .and_then(|_| grit_source_commit());
+    let baseline_commit = opts.baseline_grit.as_ref().and_then(|base| {
+        if base == &opts.grit {
+            grit_source_commit()
+        } else {
+            None
+        }
+    });
 
     let report = DailyBenchReport {
         schema: SCHEMA_TAG.to_string(),

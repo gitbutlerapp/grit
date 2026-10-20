@@ -237,7 +237,7 @@ jobs:
       - name: Daily headline smoke (timings not gated)
         run: |
           mkdir -p target/bench
-          ./target/release/grit-bench daily run --smoke --offline --output target/bench/daily-smoke.json
+          ./target/release/grit-bench daily --smoke --offline --output target/bench/daily-smoke.json
           ./target/release/grit-bench daily validate target/bench/daily-smoke.json
 
   test-threaded:

@@ -318,9 +318,12 @@ enum Cmd {
         tolerance: f64,
     },
     /// Daily performance census (headline scenarios + schema validation)
+    #[command(args_conflicts_with_subcommands = true)]
     Daily {
+        #[command(flatten)]
+        run: DailyRunArgs,
         #[command(subcommand)]
-        command: DailyCmd,
+        command: Option<DailySubCmd>,
     },
     /// Prepare and list cached benchmark fixtures (git.git + synthetic tiers)
     Fixtures {
@@ -546,29 +549,30 @@ impl From<SynthTierArg> for SynthTier {
     }
 }
 
+#[derive(clap::Args)]
+struct DailyRunArgs {
+    /// Run only these scenario ids (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    only: Option<Vec<String>>,
+    /// Limit to one functional area
+    #[arg(long, value_enum)]
+    area: Option<grit_utils::daily::registry::Area>,
+    /// Smoke fixtures, zero warmups, one timed run per tool
+    #[arg(long)]
+    smoke: bool,
+    /// Write JSON report to this path
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    /// Also time this grit binary on headline rows (`baseline_grit` in the report)
+    #[arg(long)]
+    baseline_grit: Option<PathBuf>,
+    /// Do not clone git.git (fixtures must already be cached)
+    #[arg(long)]
+    offline: bool,
+}
+
 #[derive(Subcommand)]
-enum DailyCmd {
-    /// Run headline scenarios and write a daily census JSON report
-    Run {
-        /// Run only these scenario ids (comma-separated)
-        #[arg(long, value_delimiter = ',')]
-        only: Option<Vec<String>>,
-        /// Limit to one functional area
-        #[arg(long, value_enum)]
-        area: Option<grit_utils::daily::registry::Area>,
-        /// Smoke fixtures, zero warmups, one timed run per tool
-        #[arg(long)]
-        smoke: bool,
-        /// Write JSON report to this path
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-        /// Also time this grit binary on headline rows (`baseline_grit` in the report)
-        #[arg(long)]
-        baseline_grit: Option<PathBuf>,
-        /// Do not clone git.git (fixtures must already be cached)
-        #[arg(long)]
-        offline: bool,
-    },
+enum DailySubCmd {
     /// Parse a report and verify schema tag, ids, and peak RSS fields
     Validate {
         /// Daily census JSON report path
@@ -999,50 +1003,39 @@ fn main() -> Result<()> {
         Cmd::MeasureDirectRun { cwd, argv } => {
             return grit_utils::daily::runner::run_measure_direct_cli(cwd, argv);
         }
-        Cmd::Daily {
-            command:
-                DailyCmd::Run {
-                    only,
-                    area,
-                    smoke,
-                    output,
-                    baseline_grit,
-                    offline,
-                },
-        } => {
-            let git = resolve_binary("git", cli.git.as_deref())?;
-            let grit = resolve_binary("grit", cli.grit.as_deref())?;
-            let measure_helper = std::env::current_exe().context("grit-bench exe path")?;
-            let baseline = baseline_grit.clone();
-            let timestamp = parse_timestamp(&cli)?;
-            let report = grit_utils::daily::run_daily(
-                grit_utils::daily::DailyRunOptions {
-                    git,
-                    grit,
-                    baseline_grit: baseline,
-                    measure_helper,
-                    smoke: *smoke,
-                    offline: *offline,
-                    only: only.clone(),
-                    area: *area,
-                    output: output.clone(),
-                },
-                timestamp,
-            )?;
-            if let Some(path) = output {
-                eprintln!("daily report written: {}", path.display());
-            } else {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+        Cmd::Daily { run, command } => match command {
+            Some(DailySubCmd::Validate { report }) => {
+                grit_utils::validate_daily_report(report)?;
+                eprintln!("daily report valid: {}", report.display());
+                return Ok(());
             }
-            return Ok(());
-        }
-        Cmd::Daily {
-            command: DailyCmd::Validate { report },
-        } => {
-            grit_utils::validate_daily_report(report)?;
-            eprintln!("daily report valid: {}", report.display());
-            return Ok(());
-        }
+            None => {
+                let git = resolve_binary("git", cli.git.as_deref())?;
+                let grit = resolve_binary("grit", cli.grit.as_deref())?;
+                let measure_helper = std::env::current_exe().context("grit-bench exe path")?;
+                let timestamp = parse_timestamp(&cli)?;
+                let report = grit_utils::daily::run_daily(
+                    grit_utils::daily::DailyRunOptions {
+                        git,
+                        grit,
+                        baseline_grit: run.baseline_grit.clone(),
+                        measure_helper,
+                        smoke: run.smoke,
+                        offline: run.offline,
+                        only: run.only.clone(),
+                        area: run.area,
+                        output: run.output.clone(),
+                    },
+                    timestamp,
+                )?;
+                if let Some(path) = &run.output {
+                    eprintln!("daily report written: {}", path.display());
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                return Ok(());
+            }
+        },
         Cmd::Drive { workload } => {
             return run_drive(workload);
         }

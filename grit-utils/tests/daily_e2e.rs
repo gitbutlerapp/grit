@@ -11,6 +11,7 @@ use tempfile::TempDir;
 static DAILY_E2E_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_e2e() -> MutexGuard<'static, ()> {
+    std::env::remove_var("GRIT_BENCH_DAILY_ROOT");
     DAILY_E2E_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -44,7 +45,6 @@ fn prepare_fixtures(git: &Path, kinds: &[FixtureKind]) {
 fn run_daily_smoke(git: &Path, grit: &Path, output: &Path, extra: &[&str]) -> std::process::Output {
     let mut cmd = Command::new(bench_exe());
     cmd.arg("daily")
-        .arg("run")
         .arg("--smoke")
         .arg("--offline")
         .arg("--output")
@@ -56,7 +56,7 @@ fn run_daily_smoke(git: &Path, grit: &Path, output: &Path, extra: &[&str]) -> st
     for arg in extra {
         cmd.arg(arg);
     }
-    cmd.output().expect("spawn grit-bench daily run")
+    cmd.output().expect("spawn grit-bench daily")
 }
 
 const LOCAL_HEADLINE_IDS: [&str; 13] = [
@@ -180,7 +180,6 @@ fn baseline_grit_records_headlines() {
     let out_path = cache.path().join("daily-baseline.json");
     let mut cmd = Command::new(bench_exe());
     cmd.arg("daily")
-        .arg("run")
         .arg("--smoke")
         .arg("--offline")
         .arg("--output")
@@ -192,7 +191,7 @@ fn baseline_grit_records_headlines() {
         .arg("--baseline-grit")
         .arg(&grit)
         .arg("--only")
-        .arg("status/clean@synth-10k");
+        .arg("commit/small@synth-10k");
     let out = cmd.output().expect("spawn");
     assert!(
         out.status.success(),
