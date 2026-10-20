@@ -141,6 +141,72 @@ fn symlink_metadata_path(path: &Path) -> io::Result<fs::Metadata> {
     fs::symlink_metadata(path)
 }
 
+fn sparse_stat_policy(sparse: BlobScanSparseMode) -> crate::index::StatMatchPolicy {
+    match sparse {
+        BlobScanSparseMode::StatusDiff { stat_policy, .. }
+        | BlobScanSparseMode::WorktreeGuard { stat_policy }
+        | BlobScanSparseMode::StatRefresh { stat_policy, .. } => stat_policy,
+        _ => crate::index::StatMatchPolicy::default(),
+    }
+}
+
+/// When a directory scan stat disagrees with the index but path `symlink_metadata` agrees,
+/// prefer the path probe (Git `mingw_stat` / post-close semantics on Windows).
+fn align_lookup_stat_with_index_path(
+    index: &Index,
+    entry_index: usize,
+    lookup: BlobDiskLookup,
+    target_abs: &Path,
+    stat_policy: crate::index::StatMatchPolicy,
+) -> BlobDiskLookup {
+    #[cfg(windows)]
+    {
+        return align_lookup_stat_with_index_path_windows(
+            index,
+            entry_index,
+            lookup,
+            target_abs,
+            stat_policy,
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (index, entry_index, target_abs, stat_policy);
+        lookup
+    }
+}
+
+#[cfg(windows)]
+fn align_lookup_stat_with_index_path_windows(
+    index: &Index,
+    entry_index: usize,
+    lookup: BlobDiskLookup,
+    target_abs: &Path,
+    stat_policy: crate::index::StatMatchPolicy,
+) -> BlobDiskLookup {
+    let BlobDiskLookup::Present(stat) = lookup else {
+        return lookup;
+    };
+    let ie = &index.entries[entry_index];
+    if crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy) {
+        return BlobDiskLookup::Present(stat);
+    }
+    match symlink_metadata_path(target_abs) {
+        Ok(meta) => {
+            let path_stat = BlobDiskStat::from_metadata(&meta);
+            if crate::diff::stat_matches_blob_stat(ie, &path_stat, stat_policy) {
+                BlobDiskLookup::Present(path_stat)
+            } else {
+                BlobDiskLookup::Present(stat)
+            }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
+            BlobDiskLookup::Missing
+        }
+        Err(e) => BlobDiskLookup::Io(e),
+    }
+}
+
 use std::collections::BTreeSet;
 
 use crate::error::{Error, Result};
@@ -592,6 +658,7 @@ fn collect_blob_lookups_in_directory(
         sparse,
         scanned,
     };
+    let stat_policy = sparse_stat_policy(sparse);
     for_each_blob_in_one_directory(
         index,
         dir,
@@ -599,7 +666,12 @@ fn collect_blob_lookups_in_directory(
         dir_abs,
         file_abs,
         &mut |rel| symlink_missing.contains(rel),
-        &mut |entry_index, _path, lookup| sink.push(index, entry_index, lookup),
+        &mut |entry_index, rel_path, lookup| {
+            let target = file_abs(rel_path);
+            let lookup =
+                align_lookup_stat_with_index_path(index, entry_index, lookup, &target, stat_policy);
+            sink.push(index, entry_index, lookup)
+        },
     )?;
     Ok(())
 }
@@ -657,15 +729,17 @@ where
 
     let abs_dir = dir_abs(dir);
     #[cfg(windows)]
-    if blobs.len() == 1 {
-        let blob = &blobs[0];
-        if has_symlink_ancestor(&blob.rel_path) {
-            visit(blob.entry_index, &blob.rel_path, BlobDiskLookup::Missing)?;
+    if entry_indices.len() == 1 {
+        let entry_index = entry_indices[0];
+        let rel_path = entry_rel_path(index, entry_index)?;
+        if has_symlink_ancestor(rel_path) {
+            visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
             return Ok(());
         }
-        let target = file_abs(&blob.rel_path);
-        let lookup = lookup_lone_blob_in_directory(&abs_dir, &blob.file_name, &target);
-        visit(blob.entry_index, &blob.rel_path, lookup)?;
+        let file_name = entry_file_name(index, entry_index)?;
+        let target = file_abs(rel_path);
+        let lookup = lookup_lone_blob_in_directory(&abs_dir, file_name, &target);
+        visit(entry_index, rel_path, lookup)?;
         return Ok(());
     }
 
@@ -765,13 +839,13 @@ fn lookup_lone_blob_in_directory(
         }
         if name == index_file_name || dir_entry_name_matches(index_file_name, &entry) {
             return match dir_entry_metadata(&entry) {
-                Ok(m) => BlobDiskLookup::Present(m),
+                Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
                 Err(e) => BlobDiskLookup::Io(e),
             };
         }
     }
     match symlink_metadata_path(target_abs) {
-        Ok(meta) => BlobDiskLookup::Present(meta),
+        Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
         Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
             BlobDiskLookup::Missing
         }
