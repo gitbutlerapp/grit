@@ -4,9 +4,8 @@ use std::collections::HashSet;
 
 use crate::blame::{blame_file, BlameOptions};
 use crate::branch_tracking::upstream_tracking_full_ref;
-use crate::diff::structured::{
-    structured_text_diff, StructuredDiffOptions, StructuredHunk, StructuredLineKind,
-};
+use crate::diff::structured::{structured_text_diff, StructuredHunk, StructuredLineKind};
+use crate::diff::DiffOptions;
 use crate::diff::{diff_index_to_tree, diff_trees, DiffEntry, DiffStatus};
 use crate::index::write_tree::write_tree_from_index;
 use crate::merge_base::fork_point;
@@ -333,9 +332,10 @@ fn classify_path_hunks(
     let diff = structured_text_diff(
         &String::from_utf8_lossy(&head_blob),
         &String::from_utf8_lossy(&index_blob),
-        StructuredDiffOptions {
+        DiffOptions {
             context_lines: 0,
             word_level_inline: false,
+            ..DiffOptions::default()
         },
     );
 
@@ -717,9 +717,10 @@ fn tree_diff_hunks(
     let diff = structured_text_diff(
         &String::from_utf8_lossy(&old_blob),
         &String::from_utf8_lossy(&new_blob),
-        StructuredDiffOptions {
+        DiffOptions {
             context_lines: 0,
             word_level_inline: false,
+            ..DiffOptions::default()
         },
     );
     Some(
@@ -745,9 +746,10 @@ pub(crate) fn remaining_index_blob_for_path(
     let diff = structured_text_diff(
         &String::from_utf8_lossy(&pre_head_blob),
         &String::from_utf8_lossy(pre_index_blob),
-        StructuredDiffOptions {
+        DiffOptions {
             context_lines: 0,
             word_level_inline: false,
+            ..DiffOptions::default()
         },
     );
     let assigned_keys: HashSet<(usize, usize, usize, usize)> = assignments
@@ -949,9 +951,10 @@ fn blob_with_assignments_on_path(
     let diff = structured_text_diff(
         &String::from_utf8_lossy(&head_blob),
         &String::from_utf8_lossy(&index_blob),
-        StructuredDiffOptions {
+        DiffOptions {
             context_lines: 0,
             word_level_inline: false,
+            ..DiffOptions::default()
         },
     );
     let target_ranges: HashSet<(usize, usize, usize, usize)> = assignments

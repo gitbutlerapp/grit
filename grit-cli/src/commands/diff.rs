@@ -20,11 +20,10 @@ use grit_lib::diff::{
     diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames,
     diff_trees_with_renames_and_policy, read_submodule_head_oid, read_worktree_side_bytes_for_diff,
     structured::{
-        format_hunk_range, structured_file_diff, SideBytes, StructuredDiffOptions,
-        StructuredFileDiff, StructuredLineKind,
+        format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
     submodule_porcelain_flags, tree_diff_structured_parallel, DiffEntry,
-    DiffIndexToWorktreeOptions, DiffStatus, TreeDiffStructured,
+    DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -56,7 +55,12 @@ use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderCont
 use crate::ui::{self, PathDisplayOptions};
 
 /// Git `-M` rename similarity threshold (matches commit-to-commit diffs in this command).
-const DIFF_RENAME_THRESHOLD: u32 = 50;
+fn rename_threshold(config: &grit_lib::config::ConfigSet) -> u32 {
+    DiffOptions::from_config(config)
+        .renames
+        .threshold_percent()
+        .unwrap_or(101)
+}
 
 /// Lines of unchanged context to show around each change.
 const CONTEXT_LINES: usize = 3;
@@ -268,10 +272,9 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let thread_policy = repo.thread_policy();
     let (commits, path_args) =
         disambiguate_diff_revision_and_paths(&repo, opts.commits, opts.paths);
-    let diff_options = StructuredDiffOptions {
-        context_lines: CONTEXT_LINES,
-        word_level_inline: opts.word_level_inline,
-    };
+    let mut diff_options = DiffOptions::from_config(config.as_ref());
+    diff_options.context_lines = CONTEXT_LINES;
+    diff_options.word_level_inline = opts.word_level_inline;
     if opts.staged && opts.unstaged {
         anyhow::bail!("--staged and --unstaged cannot be combined");
     }
@@ -423,10 +426,9 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
 pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<DiffOutcome> {
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
-    let diff_options = StructuredDiffOptions {
-        context_lines: CONTEXT_LINES,
-        word_level_inline: false,
-    };
+    let mut diff_options = DiffOptions::from_config(config.as_ref());
+    diff_options.context_lines = CONTEXT_LINES;
+    diff_options.word_level_inline = false;
     Ok(attach_path_display(
         repo,
         outcome_from_tree_structured(commit_changes(
@@ -455,10 +457,9 @@ pub fn outcome_from_tree_entries(
         .collect::<Result<Vec<_>>>()?;
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
-    let diff_options = StructuredDiffOptions {
-        context_lines: CONTEXT_LINES,
-        word_level_inline: false,
-    };
+    let mut diff_options = DiffOptions::from_config(config.as_ref());
+    diff_options.context_lines = CONTEXT_LINES;
+    diff_options.word_level_inline = false;
     Ok(attach_path_display(
         repo,
         outcome_from_changes(changes, &config, &thread_policy, diff_options),
@@ -535,7 +536,7 @@ fn outcome_from_changes(
     changes: Vec<FileChange>,
     config: &grit_lib::config::ConfigSet,
     thread_policy: &grit_lib::parallel::ThreadPolicy,
-    diff_options: StructuredDiffOptions,
+    diff_options: DiffOptions,
 ) -> DiffOutcome {
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(changes.len());
     let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
@@ -818,7 +819,7 @@ fn unstaged_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>
         &mut index,
         work_tree,
         diff_opts,
-        DIFF_RENAME_THRESHOLD,
+        rename_threshold(config_arc.as_ref()),
     )
     .context("could not diff the index against the working tree")?;
     sort_entries(&mut entries);
@@ -855,7 +856,7 @@ fn staged_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>> 
         &index,
         head_tree.as_ref(),
         false,
-        DIFF_RENAME_THRESHOLD,
+        rename_threshold(config.as_ref()),
         config.as_ref(),
         &thread_policy,
     )
@@ -908,13 +909,13 @@ fn tree_commit_changes(
     tip: &ObjectId,
     config: &grit_lib::config::ConfigSet,
     thread_policy: &grit_lib::parallel::ThreadPolicy,
-    diff_options: StructuredDiffOptions,
+    diff_options: DiffOptions,
 ) -> Result<Vec<TreeDiffStructured>> {
     let mut entries = diff_commits_with_renames_and_policy(
         repo.odb(),
         base,
         tip,
-        DIFF_RENAME_THRESHOLD,
+        rename_threshold(config),
         config,
         thread_policy,
     )
@@ -1016,7 +1017,7 @@ fn worktree_against_tree(
                 command_runner: Some(repo.command_runner()),
                 ..DiffIndexToWorktreeOptions::default()
             },
-            DIFF_RENAME_THRESHOLD,
+            rename_threshold(config.as_ref()),
         )
         .context("could not diff the working tree")?;
         entries
@@ -1038,7 +1039,7 @@ fn worktree_against_tree(
             repo.odb(),
             raw,
             Some(work_tree),
-            DIFF_RENAME_THRESHOLD,
+            rename_threshold(config.as_ref()),
             config.as_ref(),
             &repo.thread_policy(),
         )
@@ -1066,7 +1067,7 @@ fn commit_changes(
     oid: &ObjectId,
     config: &grit_lib::config::ConfigSet,
     thread_policy: &grit_lib::parallel::ThreadPolicy,
-    diff_options: StructuredDiffOptions,
+    diff_options: DiffOptions,
 ) -> Result<Vec<TreeDiffStructured>> {
     let commit = context::read_commit(repo, oid)?;
     let new_tree = commit.tree;
@@ -1080,7 +1081,7 @@ fn commit_changes(
         old_tree.as_ref(),
         Some(&new_tree),
         "",
-        DIFF_RENAME_THRESHOLD,
+        rename_threshold(config),
         config,
         thread_policy,
     )
@@ -1227,10 +1228,7 @@ fn diff_mode_display(mode: &str) -> Option<String> {
     }
 }
 
-fn structured_for_file_change(
-    fc: &FileChange,
-    diff_options: StructuredDiffOptions,
-) -> StructuredFileDiff {
+fn structured_for_file_change(fc: &FileChange, diff_options: DiffOptions) -> StructuredFileDiff {
     if fc.binary {
         StructuredFileDiff {
             old_mode: diff_mode_display(&fc.old_mode),
@@ -1250,7 +1248,7 @@ fn structured_for_file_change(
     }
 }
 
-fn build_file_diff(fc: &FileChange, diff_options: StructuredDiffOptions) -> FileDiff {
+fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
     let structured = structured_for_file_change(fc, diff_options);
     let hunks = structured
         .hunks

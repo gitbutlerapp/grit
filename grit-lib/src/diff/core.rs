@@ -265,7 +265,7 @@ where
     )
 }
 
-fn git_xdiff_compacted_line_ops(
+pub(crate) fn git_xdiff_compacted_line_ops(
     old_lines: &[&str],
     new_lines: &[&str],
     indent_heuristic: bool,
@@ -7500,7 +7500,7 @@ pub fn unified_diff_with_prefix_and_funcname_and_algorithm(
 /// (`2 * context + inter_hunk_context`), and each hunk keeps at most `context` unchanged lines
 /// at its edges. Unlike `similar::group_diff_ops`, the split threshold is decoupled from the
 /// edge context so odd gap limits group exactly like Git.
-fn group_diff_ops_gap(
+pub(crate) fn group_diff_ops_gap(
     mut ops: Vec<similar::DiffOp>,
     context: usize,
     max_common_gap: usize,

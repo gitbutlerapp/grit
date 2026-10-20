@@ -1,6 +1,7 @@
 //! Structured diff metadata matches system `git diff` hunk line counts.
 
-use grit_lib::diff::structured::{format_hunk_range, structured_text_diff, StructuredDiffOptions};
+use grit_lib::diff::structured::{format_hunk_range, structured_text_diff};
+use grit_lib::diff::DiffOptions;
 use std::process::Command;
 
 fn git_diff(repo: &std::path::Path) -> String {
@@ -74,10 +75,9 @@ fn structured_hunk_counts_match_git_diff() {
     let d = structured_text_diff(
         "x\nmore\n",
         "x\n",
-        StructuredDiffOptions {
-            context_lines: 3,
-            word_level_inline: true,
-        },
+        DiffOptions::default()
+            .with_context_lines(3)
+            .with_word_level_inline(true),
     );
     let h = &d.hunks[0];
     assert_eq!(h.old_start, g_os);
@@ -132,10 +132,9 @@ fn line_level_histogram_hunk_counts_match_git_diff() {
     let d = structured_text_diff(
         "x\nmore\n",
         "x\n",
-        StructuredDiffOptions {
-            context_lines: 3,
-            word_level_inline: false,
-        },
+        DiffOptions::default()
+            .with_context_lines(3)
+            .with_word_level_inline(false),
     );
     let h = &d.hunks[0];
     assert_eq!(h.old_start, g_os);
