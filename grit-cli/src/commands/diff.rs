@@ -23,12 +23,13 @@ use grit_lib::diff::{
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
-    submodule_porcelain_flags, tree_diff_structured_parallel, DiffDetail, DiffEntry,
-    DiffFilesOutput, DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
+    submodule_porcelain_flags, tree_diff_structured_parallel, tree_oid_of_commit, DiffDetail,
+    DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions, DiffOptions, DiffStatus,
+    TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{CommitData, ObjectId};
 use grit_lib::parallel::ParallelOp;
 use grit_lib::porcelain::pathspec_match::{
     ensure_pathspec_matches_known_in_repository, pathspec_matches_known_in_repository,
@@ -712,6 +713,16 @@ pub fn diff_for_commit(
     oid: &ObjectId,
     opts: CommitDiffOptions,
 ) -> Result<DiffOutcome> {
+    let commit = context::read_commit(repo, oid)?;
+    diff_for_commit_data(repo, &commit, opts)
+}
+
+/// Like [`diff_for_commit`], but reuses an already-loaded commit (avoids a second ODB read).
+pub fn diff_for_commit_data(
+    repo: &grit_lib::repo::Repository,
+    commit: &CommitData,
+    opts: CommitDiffOptions,
+) -> Result<DiffOutcome> {
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
@@ -722,7 +733,7 @@ pub fn diff_for_commit(
     let detail = opts.format.detail();
     let format = opts.format;
     let entries = filter_diff_entries(
-        commit_entries(repo, oid, &config, &thread_policy)?,
+        commit_entries_from_data(repo, commit, &config, &thread_policy)?,
         repo,
         &pathspecs,
     );
@@ -1263,9 +1274,18 @@ fn commit_entries(
     thread_policy: &grit_lib::parallel::ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
     let commit = context::read_commit(repo, oid)?;
+    commit_entries_from_data(repo, &commit, config, thread_policy)
+}
+
+fn commit_entries_from_data(
+    repo: &grit_lib::repo::Repository,
+    commit: &CommitData,
+    config: &grit_lib::config::ConfigSet,
+    thread_policy: &grit_lib::parallel::ThreadPolicy,
+) -> Result<Vec<DiffEntry>> {
     let new_tree = commit.tree;
     let old_tree = match commit.parents.first() {
-        Some(parent) => Some(context::commit_tree(repo, parent)?),
+        Some(parent) => Some(tree_oid_of_commit(repo.odb(), parent)?),
         None => None,
     };
     let mut entries = diff_trees_with_renames_and_policy(

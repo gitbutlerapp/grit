@@ -42,7 +42,8 @@ use crate::userdiff::FuncnameMatcher;
 use crate::worktree_rules::WorktreeRules;
 
 use super::unified_emit::{
-    emit_unified_body_from_edits, line_ending_only_edits, write_patch_line, EditSpan, LineSide,
+    emit_unified_body_from_edits, emit_unified_body_from_edits_lf, lf_split_lines,
+    line_ending_only_edits, line_ending_only_edits_lf, write_patch_line, EditSpan, LineSide,
     UnifiedEmitOptions,
 };
 
@@ -411,6 +412,38 @@ fn git_xdiff_unified_body_raw(
     need_min: bool,
     function_context: bool,
 ) -> String {
+    let emit_opts = UnifiedEmitOptions {
+        context_lines,
+        inter_hunk_context,
+        function_context,
+    };
+    if !old_content.contains('\r') && !new_content.contains('\r') {
+        let (old_lines, old_ends_nl) = lf_split_lines(old_content);
+        let (new_lines, new_ends_nl) = lf_split_lines(new_content);
+        if old_lines.is_empty() && new_lines.is_empty() {
+            return String::new();
+        }
+        let ops = git_xdiff_compacted_line_ops(&old_lines, &new_lines, indent_heuristic, need_min);
+        let mut edits = diff_ops_to_edit_spans(&ops);
+        if edits.is_empty() {
+            if old_content != new_content {
+                edits = line_ending_only_edits_lf(&old_lines, old_ends_nl, &new_lines, new_ends_nl);
+            }
+            if edits.is_empty() {
+                return String::new();
+            }
+        }
+        return emit_unified_body_from_edits_lf(
+            &old_lines,
+            old_ends_nl,
+            &new_lines,
+            new_ends_nl,
+            &edits,
+            emit_opts,
+            None,
+        );
+    }
+
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
     if before.is_empty() && after.is_empty() {
@@ -428,17 +461,7 @@ fn git_xdiff_unified_body_raw(
             return String::new();
         }
     }
-    emit_unified_body_from_edits(
-        &before,
-        &after,
-        &edits,
-        UnifiedEmitOptions {
-            context_lines,
-            inter_hunk_context,
-            function_context,
-        },
-        None,
-    )
+    emit_unified_body_from_edits(&before, &after, &edits, emit_opts, None)
 }
 
 /// Unified hunk bodies (`@@` …) for [`DiffOptions`], shared by structured and log-patch output.
@@ -6840,7 +6863,7 @@ pub fn detect_renames_with_policy(
             .filter_map(|opt| opt.as_ref().map(|b| b.len()))
             .sum();
 
-        let score_rows: Vec<Vec<(u32, usize, usize)>> = parallel_map_indices(
+        let score_rows: Vec<Vec<(u32, usize, usize)>> = match parallel_map_indices(
             odb,
             remaining_deleted.len(),
             par_opts,
@@ -6874,8 +6897,10 @@ pub fn detect_renames_with_policy(
                 }
                 Ok(out)
             },
-        )
-        .expect("rename score rows");
+        ) {
+            Ok(rows) => rows,
+            Err(e) => match e {},
+        };
         let mut inexact_scores: Vec<(u32, usize, usize)> =
             score_rows.into_iter().flatten().collect();
         sort_rename_scores(&mut inexact_scores, &deleted, &added);

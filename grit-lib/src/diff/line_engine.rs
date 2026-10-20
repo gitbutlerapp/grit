@@ -33,7 +33,11 @@ fn structured_hunks_from_unified_body(
     let after_ends_nl = new_content.ends_with('\n');
     let before_count = line_count(old_content);
     let after_count = line_count(new_content);
-    let old_line_bodies = super::old_line_bodies_for_context(old_content);
+    let old_line_bodies = if enclosing_function_context {
+        super::old_line_bodies_for_context(old_content)
+    } else {
+        Vec::new()
+    };
 
     imara_unified_hunk_slices(body)
         .into_iter()

@@ -363,6 +363,38 @@ pub fn write_diff_entry_log_patch<W: Write>(
     write_diff_entry_log_patch_with_tree(out, repo, odb, entry, opts, &mut abbrev_cache, None)
 }
 
+/// Write unified patch bodies for many tree diff entries (no commit header).
+///
+/// `new_tree` enables `-W` / userdiff function headers on the new side.
+///
+/// # Errors
+///
+/// Propagates ODB reads and I/O errors.
+pub fn write_tree_diff_log_patch<W: Write>(
+    repo: &Repository,
+    out: &mut W,
+    entries: &[DiffEntry],
+    new_tree: Option<&ObjectId>,
+    opts: &LogPatchOptions,
+) -> Result<()> {
+    let odb = repo.odb();
+    let config = repo.config()?.clone();
+    let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
+    for entry in entries {
+        write_diff_entry_log_patch_with_tree_cached_config(
+            out,
+            repo,
+            odb,
+            entry,
+            opts,
+            &config,
+            &mut abbrev_cache,
+            new_tree,
+        )?;
+    }
+    Ok(())
+}
+
 fn write_diff_entry_log_patch_with_tree<W: Write>(
     out: &mut W,
     repo: &Repository,
@@ -373,6 +405,29 @@ fn write_diff_entry_log_patch_with_tree<W: Write>(
     new_tree: Option<&ObjectId>,
 ) -> Result<()> {
     let config = repo.config()?.clone();
+    write_diff_entry_log_patch_with_tree_cached_config(
+        out,
+        repo,
+        odb,
+        entry,
+        opts,
+        &config,
+        abbrev_cache,
+        new_tree,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_diff_entry_log_patch_with_tree_cached_config<W: Write>(
+    out: &mut W,
+    repo: &Repository,
+    odb: &Odb,
+    entry: &DiffEntry,
+    opts: &LogPatchOptions,
+    config: &ConfigSet,
+    abbrev_cache: &mut OidAbbrevCache,
+    new_tree: Option<&ObjectId>,
+) -> Result<()> {
     let git_old = entry
         .old_path
         .as_deref()
@@ -523,7 +578,7 @@ fn write_diff_entry_log_patch_with_tree<W: Write>(
     };
     let d = &opts.diff;
     let funcname_matcher = if let Some(tree) = new_tree {
-        log_patch_funcname_matcher(repo, &config, tree, git_new)?
+        log_patch_funcname_matcher(repo, config, tree, git_new)?
     } else {
         None
     };

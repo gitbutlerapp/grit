@@ -31,7 +31,7 @@ pub use options::{
 };
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
-    write_diff_entry_log_patch, LogPatchCommitHeader, LogPatchOptions,
+    write_diff_entry_log_patch, write_tree_diff_log_patch, LogPatchCommitHeader, LogPatchOptions,
 };
 pub use tree_content::{
     set_diff_blob_read_hook_for_tests, tree_diff_contents_parallel, tree_diff_stat_parallel,

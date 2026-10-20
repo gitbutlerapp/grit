@@ -118,9 +118,9 @@ pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
         message: data.message.trim_end().to_owned(),
     };
 
-    let diff = crate::commands::diff::diff_for_commit(
+    let diff = crate::commands::diff::diff_for_commit_data(
         &repo,
-        &commit_oid,
+        &data,
         CommitDiffOptions {
             paths: opts.paths.clone(),
             format: opts.format,
@@ -129,9 +129,9 @@ pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
     )?;
     let stat = match opts.format.detail() {
         grit_lib::diff::DiffDetail::NameOnly | grit_lib::diff::DiffDetail::NameStatus => {
-            let stat_diff = crate::commands::diff::diff_for_commit(
+            let stat_diff = crate::commands::diff::diff_for_commit_data(
                 &repo,
-                &commit_oid,
+                &data,
                 CommitDiffOptions {
                     paths: opts.paths,
                     format: {

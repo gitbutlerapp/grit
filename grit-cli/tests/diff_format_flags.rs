@@ -40,7 +40,7 @@ fn diff_name_only_matches_git_bytes() {
 }
 
 #[test]
-fn diff_numstat_rename_matches_git_bytes() {
+fn diff_numstat_unstaged_rename_matches_git_bytes() {
     let dir = tempfile::tempdir().expect("tempdir");
     let grit_init = grit(dir.path(), &["init"]);
     assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
@@ -57,13 +57,48 @@ fn diff_numstat_rename_matches_git_bytes() {
         .args(["diff", "--numstat"])
         .output()
         .expect("git diff");
-    let grit_out = grit(dir.path(), &["diff", "--numstat"]);
+    let grit_out = grit(dir.path(), &["diff", "--unstaged", "--numstat"]);
     assert_eq!(
         String::from_utf8_lossy(&git_out.stdout),
         grit_out.stdout,
         "{}",
-        grit_out.dump("grit diff --numstat rename")
+        grit_out.dump("grit diff --unstaged --numstat rename")
     );
+}
+
+#[test]
+fn diff_numstat_default_lists_same_paths_as_default_patch() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let grit_init = grit(dir.path(), &["init"]);
+    assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
+    std::fs::write(dir.path().join("f.txt"), b"line\n").expect("write");
+    assert!(grit(dir.path(), &["add", "."]).ok(), "grit add");
+    assert!(
+        grit(dir.path(), &["commit", "-m", "init"]).ok(),
+        "grit commit"
+    );
+    git(dir.path(), &["mv", "f.txt", "g.txt"]);
+    std::fs::write(dir.path().join("g.txt"), b"line\nextra\n").expect("write");
+
+    let patch_json = grit(dir.path(), &["--json", "diff"]);
+    assert!(patch_json.ok(), "{}", patch_json.dump("patch json"));
+    let stat_json = grit(dir.path(), &["--json", "diff", "--stat"]);
+    assert!(stat_json.ok(), "{}", stat_json.dump("stat json"));
+    let patch: serde_json::Value = serde_json::from_str(&patch_json.stdout).expect("patch json");
+    let stat: serde_json::Value = serde_json::from_str(&stat_json.stdout).expect("stat json");
+    let patch_paths: Vec<String> = patch["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .map(|f| f["path"].as_str().expect("path").to_owned())
+        .collect();
+    let stat_paths: Vec<String> = stat["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .map(|f| f["path"].as_str().expect("path").to_owned())
+        .collect();
+    assert_eq!(patch_paths, stat_paths, "default patch vs --stat file sets");
 }
 
 #[test]
