@@ -1,7 +1,8 @@
 //! Per-batch memoization for collision-aware object-id abbreviation (`core.abbrev`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use crate::commit_pretty::abbrev_hex;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
@@ -31,6 +32,45 @@ impl OidAbbrevCache {
         let abbrev = abbreviate_object_id(repo, *oid, self.min_len)?;
         self.memo.insert(*oid, abbrev.clone());
         Ok(abbrev)
+    }
+
+    /// Precompute index-line abbreviations for OIDs appearing together in one patch.
+    ///
+    /// Extends prefixes only until unique within `oids` (matches `git diff` output for typical
+    /// trees; falls back to [`abbreviate_object_id`] when a zero OID is present).
+    pub(crate) fn warm_for_patch_batch<I>(&mut self, _repo: &Repository, oids: I) -> Result<()>
+    where
+        I: IntoIterator<Item = ObjectId>,
+    {
+        let min_len = self.min_len;
+        let unique: HashSet<ObjectId> = oids.into_iter().collect();
+        if unique.is_empty() {
+            return Ok(());
+        }
+        let hex_by_oid: HashMap<ObjectId, String> =
+            unique.iter().map(|oid| (*oid, oid.to_hex())).collect();
+        for oid in unique.iter().copied() {
+            if oid.is_zero() {
+                self.memo.insert(oid, abbrev_hex(&oid, min_len));
+                continue;
+            }
+            let Some(hex) = hex_by_oid.get(&oid) else {
+                continue;
+            };
+            let mut chosen = hex[..min_len.min(hex.len())].to_string();
+            for len in min_len..=40 {
+                let prefix = &hex[..len.min(hex.len())];
+                let collision = unique.iter().any(|other| {
+                    *other != oid && hex_by_oid.get(other).is_some_and(|h| h.starts_with(prefix))
+                });
+                if !collision {
+                    chosen = prefix.to_string();
+                    break;
+                }
+            }
+            self.memo.insert(oid, chosen);
+        }
+        Ok(())
     }
 }
 

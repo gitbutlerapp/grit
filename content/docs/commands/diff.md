@@ -31,6 +31,7 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
+| `--patch-text` | Emit a unified patch on stdout for `git apply` (`git diff --binary` shape). Not compatible with `--json`. Human and `--markdown` print the raw patch bytes. |
 | `<commit>` | One commit (that commit’s patch), two commits (tree diff), or a range `A..B` / `A...B`. Omit for uncommitted changes. |
 | `<path>…` | After `--`, limit the diff to these paths (all forms above, including `--staged`). |
 
@@ -95,6 +96,17 @@ $ grit diff v0.1 --json --filter '.files[].path'
   "main.rs"
 ]
 ```
+
+### Patches for git apply
+
+`--patch-text` writes the same kind of output as `git diff --binary`: `diff --git` headers, `index` lines, unified hunks, and `GIT binary patch` sections for binary files. Pipe it to `git apply --index` (or use [`write_patch`](../../library/diff.md) in `grit-lib`) to reproduce the target tree without using grit’s delta-style human diff.
+
+```console
+$ grit diff --patch-text HEAD~1 HEAD | git apply --index
+$ git diff --cached --stat
+```
+
+`--patch-text` cannot be combined with `--json`; use the structured diff in JSON when you need machine-readable hunks.
 
 ## JSON output
 

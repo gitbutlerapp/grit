@@ -511,6 +511,9 @@ enum Command {
         /// Compare the worktree to this ref's tree instead of HEAD (no commit arguments).
         #[arg(long = "against", value_name = "REF")]
         against: Option<String>,
+        /// Emit a unified patch for `git apply` (not compatible with `--json`).
+        #[arg(long = "patch-text")]
+        patch_text: bool,
         /// One commit (that commit's patch), two commits (tree diff), or a range `A..B` / `A...B`.
         #[arg(value_name = "COMMIT")]
         commits: Vec<String>,
@@ -1112,10 +1115,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             staged,
             unstaged,
             against,
+            patch_text,
             commits,
             paths,
-        } => emit(
-            &commands::diff::run(commands::diff::DiffRunOptions {
+        } => {
+            if patch_text && matches!(opts.mode, crate::output::OutputMode::Json) {
+                anyhow::bail!("--patch-text cannot be used with --json");
+            }
+            let run_opts = commands::diff::DiffRunOptions {
                 staged,
                 unstaged,
                 against,
@@ -1123,10 +1130,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 paths,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
-            })?,
-            opts,
-            ctx,
-        ),
+                patch_text,
+            };
+            if patch_text {
+                commands::diff::run_patch_text(run_opts)?;
+                return Ok(());
+            }
+            emit(&commands::diff::run(run_opts)?, opts, ctx)
+        }
         Command::Show { object } => emit(&commands::show::run(object)?, opts, ctx),
         Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),

@@ -1296,6 +1296,28 @@ fn append_binary_literal_section(out: &mut String, uncompressed: &[u8]) -> Resul
     Ok(())
 }
 
+/// Write the `GIT binary patch` body (literal forward then reverse) to `out`.
+///
+/// Forward literal is `new`; reverse literal is `old`, matching Git's `git diff --binary`.
+/// The `index` line and `diff --git` header are the caller's responsibility.
+pub fn write_git_binary_patch_sections<W: std::io::Write>(
+    out: &mut W,
+    old: &[u8],
+    new: &[u8],
+) -> Result<()> {
+    out.write_all(b"GIT binary patch\n")
+        .map_err(|e| Error::Message(format!("write binary patch header: {e}")))?;
+    let mut buf = String::new();
+    append_binary_literal_section(&mut buf, new)?;
+    out.write_all(buf.as_bytes())
+        .map_err(|e| Error::Message(format!("write binary patch forward: {e}")))?;
+    buf.clear();
+    append_binary_literal_section(&mut buf, old)?;
+    out.write_all(buf.as_bytes())
+        .map_err(|e| Error::Message(format!("write binary patch reverse: {e}")))?;
+    Ok(())
+}
+
 /// Emit a unified diff whose body is a `GIT binary patch` with zlib+base85 literals.
 ///
 /// Forward literal is `new`; reverse literal is `old`, matching Git's `git diff --binary`.

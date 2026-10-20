@@ -27,7 +27,8 @@ pub use options::{
 };
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
-    write_diff_entry_log_patch, LogPatchCommitHeader, LogPatchOptions,
+    write_diff_entry_log_patch, write_patch, write_patch_structured, LogPatchCommitHeader,
+    LogPatchOptions, PatchTextOptions,
 };
 pub use tree_content::{
     tree_diff_contents_parallel, tree_diff_structured_parallel, TreeDiffContent, TreeDiffStructured,
