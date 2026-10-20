@@ -11,11 +11,12 @@ use crate::diff::structured::{
     structured_file_diff, SideBytes, StructuredFileDiff, StructuredHunk,
 };
 use crate::diff::{
-    apply_rename_detection_to_diff_entries, diff_commits_with_renames_and_policy,
-    diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames,
-    diff_tree_to_worktree_with_git_dir_and_rules, index_mtime_for_diff, read_submodule_head_oid,
-    read_worktree_side_bytes_for_diff, submodule_porcelain_flags, tree_diff_structured_parallel,
-    DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
+    apply_diff_filter, apply_rename_detection_to_diff_entries,
+    diff_commits_with_renames_and_policy, diff_index_to_tree_with_renames,
+    diff_index_to_worktree_with_renames, diff_tree_to_worktree_with_git_dir_and_rules,
+    index_mtime_for_diff, read_submodule_head_oid, read_worktree_side_bytes_for_diff,
+    submodule_porcelain_flags, tree_diff_structured_parallel, DiffEntry,
+    DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
 };
 use crate::error::{Error, Result};
 use crate::index::Index;
@@ -287,6 +288,7 @@ pub(crate) fn file_diffs_from_entries(
     mut entries: Vec<DiffEntry>,
     opts: DiffOptions,
 ) -> Result<Vec<FileDiff>> {
+    entries = apply_diff_filter(entries, opts.filter);
     sort_entries(&mut entries);
     let config = repo.config()?;
     let thread_policy = repo.thread_policy();
@@ -306,9 +308,6 @@ pub(crate) fn collect_files_for_target(
 ) -> Result<Vec<FileDiff>> {
     let config = repo.config()?;
     let thread_policy = repo.thread_policy();
-    // Git uses similarity 50 by default; when renames are off, skip detection (101 = never).
-    let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
-
     let files = match target {
         DiffTarget::WorktreeVsHead => {
             let head = resolve_head(repo.git_dir())?;
@@ -317,7 +316,7 @@ pub(crate) fn collect_files_for_target(
                 None => None,
             };
             let changes = filter_file_changes(
-                worktree_changes(repo, head_tree.as_ref(), rename_threshold)?,
+                worktree_changes(repo, head_tree.as_ref(), opts)?,
                 repo,
                 pathspecs,
             );
@@ -325,39 +324,30 @@ pub(crate) fn collect_files_for_target(
         }
         DiffTarget::WorktreeVsTree(tree) => {
             let changes = filter_file_changes(
-                worktree_changes(repo, Some(tree), rename_threshold)?,
+                worktree_changes(repo, Some(tree), opts)?,
                 repo,
                 pathspecs,
             );
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts)?
         }
         DiffTarget::IndexVsHead => {
-            let changes =
-                filter_file_changes(staged_changes(repo, rename_threshold)?, repo, pathspecs);
+            let changes = filter_file_changes(staged_changes(repo, opts)?, repo, pathspecs);
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts)?
         }
         DiffTarget::WorktreeVsIndex => {
             let changes =
-                filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs);
+                filter_file_changes(unstaged_changes(repo, opts)?, repo, pathspecs);
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts)?
         }
         DiffTarget::Commit(oid) => {
-            let items = commit_changes(repo, oid, &config, &thread_policy, opts, rename_threshold)?;
+            let items = commit_changes(repo, oid, &config, &thread_policy, opts)?;
             filter_and_map_tree_structured(items, repo, pathspecs)
         }
         DiffTarget::Trees { old, new } => {
             let items = if let Some(base) = old {
-                tree_commit_changes(
-                    repo,
-                    base,
-                    new,
-                    &config,
-                    &thread_policy,
-                    opts,
-                    rename_threshold,
-                )?
+                tree_commit_changes(repo, base, new, &config, &thread_policy, opts)?
             } else {
-                commit_changes(repo, new, &config, &thread_policy, opts, rename_threshold)?
+                commit_changes(repo, new, &config, &thread_policy, opts)?
             };
             filter_and_map_tree_structured(items, repo, pathspecs)
         }
@@ -658,7 +648,9 @@ fn filter_tree_diff(
         .collect()
 }
 
-fn unstaged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<FileChange>> {
+fn unstaged_changes(repo: &Repository, opts: DiffOptions) -> Result<Vec<FileChange>> {
+    let rename_threshold = opts.rename_threshold_percent();
+    let status_filter = opts.filter;
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("grit diff needs a working tree".into()))?;
@@ -688,6 +680,7 @@ fn unstaged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<File
         diff_opts,
         rename_threshold,
     )?;
+    entries = apply_diff_filter(entries, status_filter);
     sort_entries(&mut entries);
     let side = WorktreeDiffSide {
         work_tree,
@@ -697,7 +690,9 @@ fn unstaged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<File
     entries_to_file_changes(repo, entries, Some(&side))
 }
 
-fn staged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<FileChange>> {
+fn staged_changes(repo: &Repository, opts: DiffOptions) -> Result<Vec<FileChange>> {
+    let rename_threshold = opts.rename_threshold_percent();
+    let status_filter = opts.filter;
     let head = resolve_head(repo.git_dir())?;
     let head_tree = match head.oid() {
         Some(oid) => Some(commit_tree(repo, oid)?),
@@ -715,6 +710,7 @@ fn staged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<FileCh
         config.as_ref(),
         &thread_policy,
     )?;
+    entries = apply_diff_filter(entries, status_filter);
     sort_entries(&mut entries);
     entries_to_file_changes(repo, entries, None)
 }
@@ -722,8 +718,10 @@ fn staged_changes(repo: &Repository, rename_threshold: u32) -> Result<Vec<FileCh
 fn worktree_changes(
     repo: &Repository,
     base_tree: Option<&ObjectId>,
-    rename_threshold: u32,
+    opts: DiffOptions,
 ) -> Result<Vec<FileChange>> {
+    let rename_threshold = opts.rename_threshold_percent();
+    let status_filter = opts.filter;
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("grit diff needs a working tree".into()))?;
@@ -777,6 +775,7 @@ fn worktree_changes(
             &repo.thread_policy(),
         )?
     };
+    entries = apply_diff_filter(entries, status_filter);
     sort_entries(&mut entries);
     let side = WorktreeDiffSide {
         work_tree,
@@ -808,8 +807,8 @@ fn tree_commit_changes(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
-    rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
+    let rename_threshold = diff_options.rename_threshold_percent();
     let mut entries = diff_commits_with_renames_and_policy(
         repo.odb(),
         base,
@@ -818,6 +817,7 @@ fn tree_commit_changes(
         config,
         thread_policy,
     )?;
+    entries = apply_diff_filter(entries, diff_options.filter);
     sort_entries(&mut entries);
     tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
 }
@@ -828,8 +828,8 @@ fn commit_changes(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
-    rename_threshold: u32,
 ) -> Result<Vec<TreeDiffStructured>> {
+    let rename_threshold = diff_options.rename_threshold_percent();
     let commit = read_commit(repo, oid)?;
     let new_tree = commit.tree;
     let old_tree = match commit.parents.first() {
@@ -846,6 +846,7 @@ fn commit_changes(
         config,
         thread_policy,
     )?;
+    entries = apply_diff_filter(entries, diff_options.filter);
     sort_entries(&mut entries);
     tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
 }

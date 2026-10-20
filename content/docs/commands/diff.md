@@ -29,6 +29,10 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | Option | Description |
 | --- | --- |
 | `-U <lines>`, `--unified <lines>` | Lines of unchanged context around each hunk (default `3`, same as Git `-U`). |
+| `-M`, `--find-renames`, `--find-renames=<n>` | Rename detection threshold (Git `-M`, default 50). `<n>` may be a percent like `50%`. A single digit attaches to `-M` (`-M5` is 5%, not `-M` with path `5`). |
+| `--no-renames` | Report renames as separate delete and add entries (skips rename detection). |
+| `--diff-algorithm <myers\|minimal\|patience\|histogram>` | Line diff algorithm; overrides `diff.algorithm`. |
+| `--diff-filter <letters>` | Show only changes whose status matches the filter (Git letter syntax: `A` added, `D` deleted, `M` modified, `R` renamed, `T` type change, `U` unmerged; uppercase includes, lowercase excludes). Copy/broken/unknown letters (`C`, `X`, `B`) are rejected. Applied after rename detection, so `--diff-filter=A` omits renames. |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
@@ -67,6 +71,18 @@ What changed between two commits?
 ```console
 $ grit diff HEAD~1 HEAD
 $ grit diff HEAD~1..HEAD
+```
+
+Only added and deleted paths (no renames), between two commits:
+
+```console
+$ grit diff --no-renames --diff-filter=AD HEAD~1 HEAD --json --filter '.files[].path'
+```
+
+Stricter rename similarity and histogram line diff:
+
+```console
+$ grit diff -M90 --diff-algorithm=histogram HEAD~1 HEAD
 ```
 
 Only one file between two branches:

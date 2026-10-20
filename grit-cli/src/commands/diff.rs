@@ -247,7 +247,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let prefix = pathspec_prefix_for_repo(&repo)?;
     let mut diff_options = opts
         .format
-        .to_options(DiffOptions::from_config(config.as_ref()));
+        .apply_to(DiffOptions::from_config(config.as_ref()), config.as_ref())?;
     diff_options.word_level_inline = opts.word_level_inline;
     let args = resolve_diff_arguments(
         &repo,

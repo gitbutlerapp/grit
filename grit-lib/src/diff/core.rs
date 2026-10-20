@@ -9899,6 +9899,26 @@ pub fn parse_diff_rename_score_token(arg: &str) -> Option<u64> {
     })
 }
 
+/// Parse Git `-M` / `--find-renames` threshold (`50`, `50%`, …) into 0–100 percent.
+#[must_use]
+pub fn parse_diff_rename_threshold_percent(arg: &str) -> Option<u8> {
+    let token = if arg.is_empty() { "50" } else { arg };
+    let internal = parse_diff_rename_score_token(token)?;
+    Some((internal.saturating_mul(100) / GIT_DIFF_MAX_SCORE).min(100) as u8)
+}
+
+/// Drop entries that do not match `filter` (Git `--diff-filter`, after rename detection).
+#[must_use]
+pub fn apply_diff_filter(
+    entries: Vec<DiffEntry>,
+    filter: Option<super::filter::DiffFilter>,
+) -> Vec<DiffEntry> {
+    match filter {
+        Some(f) => f.filter_entries(entries),
+        None => entries,
+    }
+}
+
 /// Git `merge_score` from `diffcore-break.c` when a pair is considered broken: how much of the
 /// source blob was removed (0–`DIFF_MAX_SCORE` scale). Used for `dissimilarity index` metadata.
 #[must_use]

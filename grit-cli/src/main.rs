@@ -886,7 +886,8 @@ struct ServeArgs {
 
 fn main() {
     stdio::configure();
-    let cli = match Cli::try_parse() {
+    let argv = diff_args::normalize_diff_argv(std::env::args().collect());
+    let cli = match Cli::try_parse_from(argv) {
         Ok(cli) => cli,
         Err(err) if err.use_stderr() => {
             let json = std::env::args().any(|a| a == "--json");
