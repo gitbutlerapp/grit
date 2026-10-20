@@ -3,7 +3,7 @@
 use anyhow::Result;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::{
-    collect_decorations, load_commits_with_decorations, DecorationMap, LoadedCommit,
+    collect_decorations_for_commits, load_commits_with_decorations, DecorationMap, LoadedCommit,
 };
 use grit_lib::repo::Repository;
 
@@ -16,10 +16,10 @@ pub struct CommitJsonLoader {
 }
 
 impl CommitJsonLoader {
-    /// Collect ref decorations once for the repository.
-    pub fn new(repo: &Repository) -> Result<Self> {
+    /// Collect ref decorations for the commits that will appear in this JSON page.
+    pub fn new(repo: &Repository, commits: &[ObjectId]) -> Result<Self> {
         Ok(Self {
-            decorations: collect_decorations(repo, false)?,
+            decorations: collect_decorations_for_commits(repo, false, commits)?,
         })
     }
 

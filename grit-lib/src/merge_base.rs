@@ -623,6 +623,19 @@ impl ReachableWalkState {
         !self.heap.is_empty()
     }
 
+    /// Drop heap entries that cannot be emitted under committer-date cutoffs.
+    ///
+    /// Used after a bounded page so `--cursor` is not offered when only
+    /// too-old (or too-new) commits remain queued.
+    pub fn prune_heap_for_cutoffs(&mut self, cutoffs: ReachableWalkCommitterCutoffs) {
+        if let Some(since) = cutoffs.since {
+            self.heap.retain(|key| key.time >= since);
+        }
+        if let Some(until) = cutoffs.until {
+            self.heap.retain(|key| key.time <= until);
+        }
+    }
+
     fn is_hidden(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<bool> {
         if self.hide.contains(&oid) || self.hide_set.contains(&oid) {
             return Ok(true);

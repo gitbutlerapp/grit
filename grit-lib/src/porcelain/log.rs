@@ -189,7 +189,30 @@ fn prepend_decoration(items: &mut Vec<DecorationItem>, item: DecorationItem) {
 /// order, so the final per-commit list matches upstream (e.g. `tag: A1` before `other/main` before
 /// `other/HEAD`).
 pub fn collect_decorations(repo: &Repository, full: bool) -> Result<DecorationMap> {
-    collect_decorations_inner(repo, full, false, &DecorationFilter::default())
+    collect_decorations_inner(repo, full, false, &DecorationFilter::default(), None)
+}
+
+/// Like [`collect_decorations`], but only records decorations for the given commits.
+///
+/// Refs are still scanned (Git decorates by walking refs), but map entries are
+/// created only for commits in `commits`, which avoids large maps when listing a
+/// bounded `-n` page on repos with deep history.
+pub fn collect_decorations_for_commits(
+    repo: &Repository,
+    full: bool,
+    commits: &[ObjectId],
+) -> Result<DecorationMap> {
+    if commits.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let targets: HashSet<String> = commits.iter().map(ObjectId::to_hex).collect();
+    collect_decorations_inner(
+        repo,
+        full,
+        false,
+        &DecorationFilter::default(),
+        Some(&targets),
+    )
 }
 
 /// Load commit metadata for `oids`, attaching decorations from a pre-built [`DecorationMap`].
@@ -235,14 +258,30 @@ pub fn load_commits_with_decorations(
     Ok(out)
 }
 
+fn prepend_if_target(
+    map: &mut DecorationMap,
+    commit_hex: String,
+    targets: Option<&HashSet<String>>,
+    item: DecorationItem,
+) {
+    if targets.is_some_and(|set| !set.contains(&commit_hex)) {
+        return;
+    }
+    prepend_decoration(map.entry(commit_hex).or_default(), item);
+}
+
 /// Like [`collect_decorations`], but `clear_decorations` removes the default ref
 /// filter so refs that are normally hidden (e.g. `refs/notes/*`) also get
 /// decorated (matches `git log --clear-decorations`).
+///
+/// When `commit_targets` is [`Some`], only commits whose hex appears in the set
+/// receive map entries (refs are still scanned).
 pub fn collect_decorations_inner(
     repo: &Repository,
     full: bool,
     clear_decorations: bool,
     filter: &DecorationFilter,
+    commit_targets: Option<&HashSet<String>>,
 ) -> Result<DecorationMap> {
     let mut map: DecorationMap = HashMap::new();
     let git_dir = &repo.git_dir();
@@ -274,8 +313,10 @@ pub fn collect_decorations_inner(
             if rest.len() != 40 || rest.parse::<ObjectId>().is_err() {
                 continue;
             }
-            prepend_decoration(
-                map.entry(rest.to_owned()).or_default(),
+            prepend_if_target(
+                &mut map,
+                rest.to_owned(),
+                commit_targets,
                 DecorationItem {
                     refname: None,
                     display: "replaced".to_owned(),
@@ -287,8 +328,10 @@ pub fn collect_decorations_inner(
 
         if refname == "refs/stash" || refname.starts_with("refs/stash/") {
             let hex = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
-            prepend_decoration(
-                map.entry(hex).or_default(),
+            prepend_if_target(
+                &mut map,
+                hex,
+                commit_targets,
                 DecorationItem {
                     refname: Some("refs/stash".to_string()),
                     display: "refs/stash".to_owned(),
@@ -305,8 +348,10 @@ pub fn collect_decorations_inner(
                 rest.to_owned()
             };
             let hex = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
-            prepend_decoration(
-                map.entry(hex).or_default(),
+            prepend_if_target(
+                &mut map,
+                hex,
+                commit_targets,
                 DecorationItem {
                     refname: Some(refname.clone()),
                     display,
@@ -323,8 +368,10 @@ pub fn collect_decorations_inner(
                 rest.to_owned()
             };
             let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
-            prepend_decoration(
-                map.entry(peeled).or_default(),
+            prepend_if_target(
+                &mut map,
+                peeled,
+                commit_targets,
                 DecorationItem {
                     refname: Some(refname.clone()),
                     display,
@@ -341,8 +388,10 @@ pub fn collect_decorations_inner(
                 rest.to_owned()
             };
             let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
-            prepend_decoration(
-                map.entry(peeled).or_default(),
+            prepend_if_target(
+                &mut map,
+                peeled,
+                commit_targets,
                 DecorationItem {
                     refname: Some(refname.clone()),
                     display,
@@ -361,8 +410,10 @@ pub fn collect_decorations_inner(
         // name and `DECORATION_NONE` (reset) color (log-tree.c `add_ref_decoration`).
         if clear_decorations || !filter.is_empty() {
             let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
-            prepend_decoration(
-                map.entry(peeled).or_default(),
+            prepend_if_target(
+                &mut map,
+                peeled,
+                commit_targets,
                 DecorationItem {
                     refname: Some(refname.clone()),
                     display: refname.clone(),
@@ -375,8 +426,10 @@ pub fn collect_decorations_inner(
     if let Some(oid) = head.oid() {
         if filter.is_empty() || filter.matches("HEAD") {
             let hex = oid.to_hex();
-            prepend_decoration(
-                map.entry(hex).or_default(),
+            prepend_if_target(
+                &mut map,
+                hex,
+                commit_targets,
                 DecorationItem {
                     refname: Some("HEAD".to_string()),
                     display: "HEAD".to_owned(),

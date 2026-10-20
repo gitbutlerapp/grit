@@ -98,7 +98,7 @@ pub fn run() -> Result<ShortlogOutcome> {
     let ahead = context::commits_ahead_of(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let oids: Vec<ObjectId> = ahead.commits.iter().map(|c| c.oid).collect();
-    let loader = CommitJsonLoader::new(&repo)?;
+    let loader = CommitJsonLoader::new(&repo, &oids)?;
     let (commits, commit_rows) = loader.load_with_summaries(&repo, &oids, now)?;
     let truncated = ahead.total > commits.len();
     Ok(ShortlogOutcome {

@@ -159,7 +159,7 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
     let oids = walk.commits(&token_refs, &fetch_opts)?;
     let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
     let now = context::wall_clock_now(env).unix_timestamp();
-    let loader = CommitJsonLoader::new(&repo)?;
+    let loader = CommitJsonLoader::new(&repo, &oids)?;
     let commits = loader.load(&repo, &oids, now)?;
     Ok(RevsOutcome {
         commits,

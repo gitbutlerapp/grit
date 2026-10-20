@@ -106,7 +106,7 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
             .with_context(|| format!("could not resolve '{target}'"))?;
     let commit_oid = peel_to_commit(&repo, resolved)?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let loader = CommitJsonLoader::new(&repo)?;
+    let loader = CommitJsonLoader::new(&repo, std::slice::from_ref(&commit_oid))?;
     let commit = loader.load_one(&repo, &commit_oid, now)?;
 
     let stat = diffstat(&diff_of_commit(&repo, &commit_oid)?);

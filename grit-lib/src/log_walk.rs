@@ -119,6 +119,7 @@ impl LogWalkCursor {
         };
 
         let commits = state.emit_until(repo, Some(limit), query.cutoffs)?;
+        state.prune_heap_for_cutoffs(query.cutoffs);
         let next = state.has_pending().then(|| LogWalkCursor {
             query: query.clone(),
             walk: state.snapshot(),

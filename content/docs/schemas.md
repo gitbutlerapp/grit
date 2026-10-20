@@ -7,6 +7,28 @@ Every command that prints a JSON outcome object with `--json` has a matching **v
 
 Plain command failures with `--json` validate against the shared [error schema](/schemas/error/v1.json).
 
+## Commit JSON object (`CommitJson`)
+
+List and show commands embed the same commit object in `--json` output. The v1 command schemas reference it as **`CommitJson`** (see [`log`](../log/), [`show`](../show/), [`revs`](../revs/), [`shortlog`](../shortlog/)).
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `oid` | string | Full 40-character commit hex id. |
+| `parents` | array of strings | Parent commit oids (empty for root commits). |
+| `author` | object | Author `name`, `email`, and `date` (RFC 3339). |
+| `committer` | object | Committer `name`, `email`, and `date` (RFC 3339). |
+| `subject` | string | First line of the commit message. |
+| `message` | string | Full message body with trailing whitespace trimmed. |
+| `refs` | array | Ref decorations on this commit: each `{ "name", "kind" }` where `kind` is `branch`, `remote_branch`, `tag`, `stash`, `head`, `grafted`, or `other`. |
+| `relative_date` | string or omitted | Human-relative author date (e.g. `3 days ago`) when the command supplies a clock. |
+
+List outcomes (`log`, `revs`, `shortlog`) also expose:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `truncated` | boolean | `true` when more commits matched the query than returned (`-n` or default page size). |
+| `next` | string or null | Opaque continuation cursor for resumable lists (`log` only today), otherwise `null`. |
+
 ## Command schemas
 
 | Command path | Schema |

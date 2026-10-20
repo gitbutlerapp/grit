@@ -610,12 +610,23 @@ fn log_json_refs_match_git_decorate() -> TestResult {
     fs::write(tags.join("v1"), format!("{tip}\n"))?;
 
     let grit_refs = &gs_json(&repo, &["log", "--limit", "1"])["commits"][0]["refs"];
-    let grit_names: Vec<_> = grit_refs
+    let mut grit_tokens: Vec<String> = grit_refs
         .as_array()
         .unwrap()
         .iter()
-        .map(|r| r["name"].as_str().unwrap())
+        .map(|r| {
+            let name = r["name"].as_str().unwrap();
+            match r["kind"].as_str() {
+                Some("head") => "HEAD".to_owned(),
+                Some("tag") => format!("tag: refs/tags/{name}"),
+                Some("branch") => format!("refs/heads/{name}"),
+                Some("remote_branch") => format!("refs/remotes/{name}"),
+                Some("stash") => name.to_owned(),
+                other => format!("{}:{name}", other.unwrap_or("other")),
+            }
+        })
         .collect();
+    grit_tokens.sort();
 
     let git_out = Command::new("git")
         .args(["-C"])
@@ -626,12 +637,24 @@ fn log_json_refs_match_git_decorate() -> TestResult {
         .output()?;
     assert!(git_out.status.success());
     let git_d = String::from_utf8_lossy(&git_out.stdout).trim().to_owned();
-    for name in ["main", "v1", "HEAD"] {
-        assert!(
-            grit_names.iter().any(|n| n.contains(name)),
-            "grit refs {grit_names:?} should mention {name}; git %D={git_d:?}"
-        );
+    let mut git_tokens = Vec::new();
+    for token in git_d.split(',') {
+        let t = token.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("HEAD -> ") {
+            git_tokens.push("HEAD".to_owned());
+            git_tokens.push(rest.to_owned());
+        } else {
+            git_tokens.push(t.to_owned());
+        }
     }
+    git_tokens.sort();
+    assert_eq!(
+        grit_tokens, git_tokens,
+        "grit refs should match git %D tokens (raw %D={git_d:?})"
+    );
     Ok(())
 }
 

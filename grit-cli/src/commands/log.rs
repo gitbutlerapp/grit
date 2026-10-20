@@ -164,7 +164,7 @@ fn build_outcome(
 ) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
-    let loader = CommitJsonLoader::new(repo)?;
+    let loader = CommitJsonLoader::new(repo, oids)?;
     let (loaded, commit_rows) = loader.load_with_summaries(repo, oids, now)?;
 
     let commits = loaded

@@ -53,26 +53,4 @@ Closing fences stay untagged: ` ``` ` on its own line.
 6. **Markdown output** — **required** for every command that supports `--markdown` (including via global flags). Document real `--markdown` output, agent-oriented headings and bullets, and link the same v1 JSON Schema as the JSON output section so agents can rely on one contract.
 7. **See also** — links to related command pages.
 
-## Commit JSON object (`CommitJson`)
-
-List and show commands share one commit object in `--json` output. The v1 schema defines it as **`CommitJson`** (see [`log`](../log/), [`show`](../show/), [`revs`](../revs/), [`shortlog`](../shortlog/)).
-
-| Field | Type | Meaning |
-| ----- | ---- | ------- |
-| `oid` | string | Full 40-character commit hex id. |
-| `parents` | array of strings | Parent commit oids (empty for root commits). |
-| `author` | object | Author `name`, `email`, and `date` (RFC 3339). |
-| `committer` | object | Committer `name`, `email`, and `date` (RFC 3339). |
-| `subject` | string | First line of the commit message. |
-| `message` | string | Full message body with trailing whitespace trimmed. |
-| `refs` | array | Ref decorations on this commit: each `{ "name", "kind" }` where `kind` is `branch`, `remote_branch`, `tag`, `stash`, `head`, `grafted`, or `other`. |
-| `relative_date` | string or omitted | Human-relative author date (e.g. `3 days ago`) when the command supplies a clock. |
-
-List outcomes (`log`, `revs`, `shortlog`) also expose:
-
-| Field | Type | Meaning |
-| ----- | ---- | ------- |
-| `truncated` | boolean | `true` when more commits matched the query than returned (`-n` or default page size). |
-| `next` | string or null | Opaque continuation cursor for resumable lists (`log` only today), otherwise `null`. |
-
 There is no generated HTML to commit: the site is built from these files on deploy. Preview with `make docs` and validate with `cd site && npm run check`.
