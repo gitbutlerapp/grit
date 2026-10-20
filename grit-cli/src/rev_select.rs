@@ -256,7 +256,8 @@ impl RevSelectArgs {
     }
 }
 
-fn log_mailmap_enabled(repo: &Repository, no_mailmap: bool) -> bool {
+/// Whether author/committer mailmap applies for log-style commands (`log.mailmap`, `--no-mailmap`).
+pub(crate) fn log_mailmap_enabled(repo: &Repository, no_mailmap: bool) -> bool {
     if no_mailmap {
         return false;
     }

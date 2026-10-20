@@ -18,7 +18,9 @@ pub mod handle;
 pub mod queries;
 
 pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError, Pattern};
-pub use group_by::{group_commits_by_author, mailmap_for_grouping, AuthorGroup};
+pub use group_by::{
+    group_commits_by_author, mailmap_for_grouping, AuthorGroup, GroupByAuthorOptions,
+};
 pub use handle::RevWalk;
 pub use queries::{
     committer_cutoff_from_date, parse_rev_walk_tokens, resolve_log_walk_tips_and_hide,

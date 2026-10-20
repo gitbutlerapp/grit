@@ -278,8 +278,7 @@ pub struct CommitJson {
 }
 
 impl CommitJson {
-    /// Build from a [`CommitSummary`] when only summary fields are available (legacy paths).
-    #[allow(dead_code)]
+    /// Build from a [`CommitSummary`] when ref decorations were not loaded.
     pub fn from_summary(commit: &CommitSummary, now: i64) -> Self {
         Self {
             oid: commit.oid.to_hex(),

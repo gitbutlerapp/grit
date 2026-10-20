@@ -10,12 +10,18 @@ use grit_lib::repo::Repository;
 use crate::output::{outln, CommitJson, CommitRefJson, CommitRefKind};
 
 /// Format ref decorations for `--oneline` / `--decorate` (Git `%d` / `%h %d %s`).
-pub fn format_decorations_folded(refs: &[CommitRefJson]) -> String {
+///
+/// When `head_branch` is set (symbolic `HEAD` on that branch), fold `HEAD -> <branch>`
+/// using that branch name instead of an arbitrary same-tip branch.
+pub fn format_decorations_folded(refs: &[CommitRefJson], head_branch: Option<&str>) -> String {
     if refs.is_empty() {
         return String::new();
     }
     let head = refs.iter().find(|r| r.kind == CommitRefKind::Head);
-    let branch = refs.iter().find(|r| r.kind == CommitRefKind::Branch);
+    let branch = head_branch.and_then(|hb| {
+        refs.iter()
+            .find(|r| r.kind == CommitRefKind::Branch && r.name == hb)
+    });
     let mut parts: Vec<String> = Vec::new();
     if head.is_some() {
         if let Some(b) = branch {
@@ -37,8 +43,8 @@ pub fn format_decorations_folded(refs: &[CommitRefJson]) -> String {
 }
 
 /// Insert decorations into a default log row after the abbreviated sha column.
-pub fn decorate_commit_row(row: &str, refs: &[CommitRefJson]) -> String {
-    let deco = format_decorations_folded(refs);
+pub fn decorate_commit_row(row: &str, refs: &[CommitRefJson], head_branch: Option<&str>) -> String {
+    let deco = format_decorations_folded(refs, head_branch);
     if deco.is_empty() {
         return row.to_owned();
     }
@@ -63,6 +69,7 @@ pub fn render_oneline_line(
     repo: &Repository,
     commit: &CommitJson,
     decorate: bool,
+    head_branch: Option<&str>,
 ) -> Result<String> {
     let oid: ObjectId = commit
         .oid
@@ -70,7 +77,7 @@ pub fn render_oneline_line(
         .map_err(|e| anyhow::anyhow!("invalid commit oid in log row: {e}"))?;
     let abbrev = abbreviate_for_display(repo, oid, true)?;
     let deco = if decorate {
-        let d = format_decorations_folded(&commit.refs);
+        let d = format_decorations_folded(&commit.refs, head_branch);
         if d.is_empty() {
             String::new()
         } else {

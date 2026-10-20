@@ -1097,7 +1097,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 }),
                 group_count_only: count,
             };
-            emit(&commands::log::run(rev, cursor, stat, display)?, opts, ctx)
+            emit(
+                &commands::log::run(rev, cursor, stat, display, opts.mode)?,
+                opts,
+                ctx,
+            )
         }
         Command::Revs {
             rev,

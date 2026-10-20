@@ -13,7 +13,9 @@ use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
-use grit_lib::revwalk::{group_commits_by_author, mailmap_for_grouping, RevWalkListOptions};
+use grit_lib::revwalk::{
+    group_commits_by_author, mailmap_for_grouping, GroupByAuthorOptions, RevWalkListOptions,
+};
 use similar::Algorithm;
 use std::sync::Arc;
 
@@ -127,7 +129,15 @@ fn bench_log_group_by_author(c: &mut Criterion) {
                 .commits(&["HEAD"], &RevWalkListOptions::default())
                 .expect("commits");
             let mailmap = mailmap_for_grouping(&fx.repo, true).expect("mailmap");
-            black_box(group_commits_by_author(&fx.repo, &oids, mailmap.as_ref()).expect("group"))
+            black_box(
+                group_commits_by_author(
+                    &fx.repo,
+                    &oids,
+                    mailmap.as_ref(),
+                    GroupByAuthorOptions::default(),
+                )
+                .expect("group"),
+            )
         });
     });
     group.finish();

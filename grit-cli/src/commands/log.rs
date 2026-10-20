@@ -5,8 +5,11 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
-use grit_lib::revwalk::group_by::{group_commits_by_author, mailmap_for_grouping};
+use grit_lib::revwalk::group_by::{
+    group_commits_by_author, mailmap_for_grouping, GroupByAuthorOptions,
+};
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
+use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -20,8 +23,8 @@ use crate::log_display::{
     render_oneline_line,
 };
 use crate::markdown;
-use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
-use crate::rev_select::RevSelectArgs;
+use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::rev_select::{self, RevSelectArgs};
 use crate::ui;
 
 /// How many commits to show per page when the caller does not set `-n` / `--max-count`.
@@ -45,7 +48,7 @@ pub struct LogDisplayOptions {
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
 #[derive(Serialize, JsonSchema)]
 pub struct LogOutcome {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub commits: Vec<LogCommit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<LogAuthorGroupJson>>,
@@ -62,6 +65,12 @@ pub struct LogOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     display: LogDisplayOptions,
+    #[serde(skip)]
+    #[schemars(skip)]
+    head_branch: Option<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    oneline_lines: Vec<String>,
 }
 
 /// Author aggregate in `--json` output when `--group-by author` is set.
@@ -89,10 +98,9 @@ impl HumanRender for LogOutcome {
         }
         let now = ctx.now.unix_timestamp();
         let color = use_color();
-        let repo = context::discover()?;
+        let head_branch = self.head_branch.as_deref();
         if self.display.oneline {
-            for commit in &self.commits {
-                let line = render_oneline_line(&repo, &commit.commit, self.display.decorate)?;
+            for line in &self.oneline_lines {
                 outln!(w, "{line}");
             }
         } else {
@@ -101,7 +109,7 @@ impl HumanRender for LogOutcome {
                 .zip(&self.commits)
             {
                 let row = if self.display.decorate {
-                    decorate_commit_row(row, &commit.commit.refs)
+                    decorate_commit_row(row, &commit.commit.refs, head_branch)
                 } else {
                     row.clone()
                 };
@@ -144,10 +152,23 @@ impl MarkdownRender for LogOutcome {
             return Ok(());
         }
         if self.display.oneline {
-            let repo = context::discover()?;
-            for commit in &self.commits {
-                let line = render_oneline_line(&repo, &commit.commit, self.display.decorate)?;
+            for line in &self.oneline_lines {
                 outln!(w, "- `{line}`");
+            }
+        } else if self.display.decorate {
+            let now = ctx.now.unix_timestamp();
+            let head_branch = self.head_branch.as_deref();
+            for (summary, commit) in self.commit_rows.iter().zip(&self.commits) {
+                outln!(
+                    w,
+                    "{}",
+                    markdown::commit_bullet_with_decorations(
+                        summary,
+                        &commit.commit.refs,
+                        head_branch,
+                        now,
+                    )
+                );
             }
         } else {
             markdown::print_commit_list(w, &self.commit_rows, ctx)?;
@@ -165,6 +186,7 @@ pub fn run(
     cursor: Option<String>,
     stat: bool,
     display: LogDisplayOptions,
+    output_mode: OutputMode,
 ) -> Result<LogOutcome> {
     if display.group_by.is_some() {
         if stat {
@@ -225,7 +247,15 @@ pub fn run(
             .context("could not list commits")?;
         let truncated = page.next.is_some();
         let next = page.next.map(|c| c.encode()).transpose()?;
-        return build_commit_outcome(&repo, &page.commits, stat, next, truncated, display);
+        return build_commit_outcome(
+            &repo,
+            &page.commits,
+            stat,
+            next,
+            truncated,
+            display,
+            output_mode,
+        );
     }
 
     let token_refs = rev.rev_tokens(&["HEAD"]);
@@ -249,9 +279,10 @@ pub fn run(
             .context("could not list commits")?;
         let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
         if display.group_by == Some(LogGroupBy::Author) {
-            return build_author_group_outcome(&repo, &oids, truncated, display, !rev.no_mailmap);
+            let use_mailmap = rev_select::log_mailmap_enabled(&repo, rev.no_mailmap);
+            return build_author_group_outcome(&repo, &oids, truncated, display, use_mailmap);
         }
-        return build_commit_outcome(&repo, &oids, stat, None, truncated, display);
+        return build_commit_outcome(&repo, &oids, stat, None, truncated, display, output_mode);
     }
 
     let query = LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?
@@ -261,7 +292,24 @@ pub fn run(
         LogWalkCursor::step(&repo, &query, None, page_size).context("could not list commits")?;
     let truncated = page.next.is_some();
     let next = page.next.map(|c| c.encode()).transpose()?;
-    build_commit_outcome(&repo, &page.commits, stat, next, truncated, display)
+    build_commit_outcome(
+        &repo,
+        &page.commits,
+        stat,
+        next,
+        truncated,
+        display,
+        output_mode,
+    )
+}
+
+fn resolve_current_branch(repo: &grit_lib::repo::Repository) -> Result<Option<String>> {
+    Ok(
+        match resolve_head(repo.git_dir()).context("could not resolve HEAD")? {
+            HeadState::Branch { short_name, .. } => Some(short_name),
+            _ => None,
+        },
+    )
 }
 
 fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
@@ -277,6 +325,8 @@ fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
         commit_rows: Vec::new(),
         author_group_rows: Vec::new(),
         display,
+        head_branch: None,
+        oneline_lines: Vec::new(),
     })
 }
 
@@ -288,7 +338,14 @@ fn build_author_group_outcome(
     use_mailmap: bool,
 ) -> Result<LogOutcome> {
     let mailmap = mailmap_for_grouping(repo, use_mailmap)?;
-    let grouped = group_commits_by_author(repo, oids, mailmap.as_ref())?;
+    let grouped = group_commits_by_author(
+        repo,
+        oids,
+        mailmap.as_ref(),
+        GroupByAuthorOptions {
+            count_only: display.group_count_only,
+        },
+    )?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let loader = CommitJsonLoader::new(repo)?;
     let include_commits = !display.group_count_only;
@@ -316,6 +373,8 @@ fn build_author_group_outcome(
         commit_rows: Vec::new(),
         author_group_rows,
         display,
+        head_branch: None,
+        oneline_lines: Vec::new(),
     })
 }
 
@@ -326,13 +385,27 @@ fn build_commit_outcome(
     next: Option<String>,
     truncated: bool,
     display: LogDisplayOptions,
+    output_mode: OutputMode,
 ) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
-    let loader = CommitJsonLoader::new(repo)?;
-    let (loaded, commit_rows) = loader.load_with_summaries(repo, oids, now)?;
+    let head_branch = resolve_current_branch(repo)?;
+    let json_output = output_mode == OutputMode::Json;
+    let need_refs = display.decorate || json_output;
 
-    let commits = loaded
+    let (commit_json_rows, commit_rows) = if need_refs {
+        let loader = CommitJsonLoader::new(repo)?;
+        loader.load_with_summaries(repo, oids, now)?
+    } else {
+        let summaries = CommitJsonLoader::load_summaries_only(repo, oids)?;
+        let json_rows = summaries
+            .iter()
+            .map(|s| CommitJson::from_summary(s, now))
+            .collect();
+        (json_rows, summaries)
+    };
+
+    let commits = commit_json_rows
         .into_iter()
         .zip(oids.iter())
         .map(|(commit, oid)| {
@@ -347,6 +420,16 @@ fn build_commit_outcome(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let head_branch_ref = head_branch.as_deref();
+    let oneline_lines = if display.oneline {
+        commits
+            .iter()
+            .map(|c| render_oneline_line(repo, &c.commit, display.decorate, head_branch_ref))
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+
     Ok(LogOutcome {
         commits,
         groups: None,
@@ -355,5 +438,7 @@ fn build_commit_outcome(
         commit_rows,
         author_group_rows: Vec::new(),
         display,
+        head_branch,
+        oneline_lines,
     })
 }

@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::RevWalkListOptions;
-use grit_lib::revwalk::{group_commits_by_author, mailmap_for_grouping};
+use grit_lib::revwalk::{group_commits_by_author, mailmap_for_grouping, GroupByAuthorOptions};
 use grit_test_support::git;
 
 fn commit_as(root: &std::path::Path, name: &str, email: &str, msg: &str) {
@@ -50,7 +50,12 @@ fn group_by_author_matches_git_shortlog_sne() -> grit_lib::error::Result<()> {
         .rev_walk()
         .commits(&["HEAD"], &RevWalkListOptions::default())?;
     let table = mailmap_for_grouping(&repo, true)?;
-    let groups = group_commits_by_author(&repo, &oids, table.as_ref())?;
+    let groups = group_commits_by_author(
+        &repo,
+        &oids,
+        table.as_ref(),
+        GroupByAuthorOptions::default(),
+    )?;
 
     let git_out = Command::new("git")
         .args(["-C"])

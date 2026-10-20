@@ -23,6 +23,23 @@ impl CommitJsonLoader {
         })
     }
 
+    /// Build human [`CommitSummary`] rows without loading ref decorations (no extra config I/O).
+    pub fn load_summaries_only(repo: &Repository, oids: &[ObjectId]) -> Result<Vec<CommitSummary>> {
+        let mut summaries = Vec::with_capacity(oids.len());
+        for oid in oids {
+            let data = context::read_commit(repo, oid)?;
+            let (author, timestamp) = context::author_and_time(&data.author);
+            summaries.push(CommitSummary {
+                oid: *oid,
+                subject: subject_line(&data.message),
+                author,
+                author_ident: data.author,
+                timestamp,
+            });
+        }
+        Ok(summaries)
+    }
+
     /// Build JSON rows for `oids` in order (one commit read per oid).
     pub fn load(&self, repo: &Repository, oids: &[ObjectId], now: i64) -> Result<Vec<CommitJson>> {
         Ok(self.load_with_summaries(repo, oids, now)?.0)
