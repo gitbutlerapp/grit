@@ -1574,10 +1574,7 @@ fn walk_intersecting_histories(
             if *slot & MARK_BASE == 0 {
                 *slot |= MARK_BASE;
                 discovered.push(oid);
-                if !collect_every_base
-                    && (tally.newest_rank_seen < tally.rank_stop
-                        || tally.newest_rank_seen == UNRANKED_COMMIT)
-                {
+                if !collect_every_base && tally.newest_rank_seen < tally.rank_stop {
                     break;
                 }
             }
