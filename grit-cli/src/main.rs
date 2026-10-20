@@ -16,6 +16,7 @@ mod json_error;
 mod json_filter;
 #[cfg(test)]
 mod json_schema;
+mod log_display;
 mod markdown;
 mod output;
 mod progress;
@@ -30,6 +31,11 @@ use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
 use output::{emit, OutputMode, OutputOptions, RenderContext};
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum LogGroupByArg {
+    Author,
+}
 
 /// A small, opinionated Git client built on `grit-lib`.
 #[derive(Debug, Parser)]
@@ -440,6 +446,18 @@ enum Command {
         /// Show which files each commit changed, with insertion and deletion counts.
         #[arg(long)]
         stat: bool,
+        /// One line per commit: short oid and subject (refs when `--decorate`).
+        #[arg(long)]
+        oneline: bool,
+        /// Show branch and tag names that point at each commit.
+        #[arg(long)]
+        decorate: bool,
+        /// Aggregate commits (`author` matches `git shortlog -sne` ordering).
+        #[arg(long = "group-by", value_enum, value_name = "FIELD")]
+        group_by: Option<LogGroupByArg>,
+        /// With `--group-by`, omit per-commit lists in `--json` output.
+        #[arg(long)]
+        count: bool,
     },
     /// List or count commits matching revision ranges.
     Revs {
@@ -1059,8 +1077,27 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 ctx,
             ),
         },
-        Command::Log { rev, cursor, stat } => {
-            emit(&commands::log::run(rev, cursor, stat)?, opts, ctx)
+        Command::Log {
+            rev,
+            cursor,
+            stat,
+            oneline,
+            decorate,
+            group_by,
+            count,
+        } => {
+            if count && group_by.is_none() {
+                bail!("`--count` requires `--group-by`");
+            }
+            let display = commands::log::LogDisplayOptions {
+                oneline,
+                decorate,
+                group_by: group_by.map(|g| match g {
+                    LogGroupByArg::Author => commands::log::LogGroupBy::Author,
+                }),
+                group_count_only: count,
+            };
+            emit(&commands::log::run(rev, cursor, stat, display)?, opts, ctx)
         }
         Command::Revs {
             rev,

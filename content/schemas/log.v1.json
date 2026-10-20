@@ -15,6 +15,57 @@
       ],
       "type": "string"
     },
+    "CommitJson": {
+      "description": "Shared commit object in JSON output (`log`, `show`, `revs`, `shortlog`, …).",
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/Person"
+        },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "description": "Full message body with trailing whitespace trimmed.",
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "refs": {
+          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
+          "items": {
+            "$ref": "#/definitions/CommitRefJson"
+          },
+          "type": "array"
+        },
+        "relative_date": {
+          "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "committer",
+        "message",
+        "oid",
+        "parents",
+        "refs",
+        "subject"
+      ],
+      "type": "object"
+    },
     "CommitRefJson": {
       "description": "Ref decoration attached to a commit in JSON output.",
       "properties": {
@@ -114,6 +165,37 @@
       ],
       "type": "object"
     },
+    "LogAuthorGroupJson": {
+      "description": "Author aggregate in `--json` output when `--group-by author` is set.",
+      "properties": {
+        "commits": {
+          "items": {
+            "$ref": "#/definitions/CommitJson"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "count": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    },
     "LogCommit": {
       "description": "One commit in `grit log` JSON output.",
       "properties": {
@@ -206,6 +288,15 @@
       },
       "type": "array"
     },
+    "groups": {
+      "items": {
+        "$ref": "#/definitions/LogAuthorGroupJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "next": {
       "description": "Opaque continuation cursor for `--cursor`, or `null` when there is no further history.",
       "type": [
@@ -219,7 +310,6 @@
     }
   },
   "required": [
-    "commits",
     "truncated"
   ],
   "title": "LogOutcome",

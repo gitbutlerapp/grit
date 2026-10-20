@@ -9,6 +9,7 @@ order: 1
 
 ```text
 grit log [<REV>…] [-n <N>] [--cursor <token>] [--stat]
+  [--oneline] [--decorate] [--group-by author] [--count]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--author <pat>] [--committer <pat>] [--grep <pat>]
@@ -49,6 +50,10 @@ With `--stat`, each commit is followed by the files it changed and how many line
 | `--tags[=<glob>]` | Tag tips, optionally filtered by glob under `refs/tags/`. |
 | `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob under `refs/remotes/`. |
 | `--stat` | Show which files each commit changed, with insertion and deletion counts. |
+| `--oneline` | One line per commit: short oid and subject (`--json` unchanged). With `--decorate`, refs appear in parentheses after the oid. |
+| `--decorate` | Show branch/tag/`HEAD` labels on each commit in human and Markdown output (refs are always in `--json`). |
+| `--group-by author` | Aggregate by author (mailmap-aware, sorted like `git shortlog -sne`). Uses the rev walk for the full selection (no cursor paging). |
+| `--count` | With `--group-by`, omit per-commit lists in `--json` (counts and author names only). |
 | `--author <pat>` | Only commits whose author matches (repeatable; OR). |
 | `--committer <pat>` | Only commits whose committer matches (repeatable; OR). |
 | `--grep <pat>` | Only commits whose message matches (repeatable; OR unless `--all-match`). |
@@ -132,9 +137,10 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry uses the shared [`CommitJson`](../README/#commit-json-object-commitjson) shape (`oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, optional `relative_date`). |
+| `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry uses the shared [`CommitJson`](../README/#commit-json-object-commitjson) shape (`oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, optional `relative_date`). Omitted when `--group-by` is set. |
 | `commits[].stat` | object | Only with `--stat`: `files` (each with `path`, `old_path` for renames, `status`, `insertions`, `deletions`, `binary`), `files_changed`, `insertions` and `deletions`. The same shape as `stat` in [`grit show`](../show/). |
-| `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--cursor` for the next page, or `null` when there is no more history or when the walk does not support paging (paths, `--reverse`, and similar). |
+| `groups` | array | With `--group-by author`: `{name, email, count, commits?}` sorted like `git shortlog -sne`. `commits` holds full [`CommitJson`](../README/#commit-json-object-commitjson) rows unless `--count` is set. |
+| `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--cursor` for the next page, or `null` when there is no more history or when the walk does not support paging (paths, `--reverse`, `--group-by`, and similar). |
 | `truncated` | boolean | `true` when more commits matched the query than returned in this page (`-n` or the default page size). |
 
 Example:

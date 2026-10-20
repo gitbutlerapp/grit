@@ -14780,6 +14780,32 @@ impl core::marker::Unpin for grit_lib::revwalk::filter::Pattern
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::Pattern
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::Pattern
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::Pattern
+pub mod grit_lib::revwalk::group_by
+pub struct grit_lib::revwalk::group_by::AuthorGroup
+pub grit_lib::revwalk::group_by::AuthorGroup::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::revwalk::group_by::AuthorGroup::count: usize
+pub grit_lib::revwalk::group_by::AuthorGroup::email: alloc::string::String
+pub grit_lib::revwalk::group_by::AuthorGroup::name: alloc::string::String
+impl core::clone::Clone for grit_lib::revwalk::group_by::AuthorGroup
+pub fn grit_lib::revwalk::group_by::AuthorGroup::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::group_by::AuthorGroup
+impl core::cmp::PartialEq for grit_lib::revwalk::group_by::AuthorGroup
+pub fn grit_lib::revwalk::group_by::AuthorGroup::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::revwalk::group_by::AuthorGroup
+pub fn grit_lib::revwalk::group_by::AuthorGroup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::group_by::AuthorGroup
+impl core::marker::Send for grit_lib::revwalk::group_by::AuthorGroup
+impl core::marker::Sync for grit_lib::revwalk::group_by::AuthorGroup
+impl core::marker::Unpin for grit_lib::revwalk::group_by::AuthorGroup
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::group_by::AuthorGroup
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::group_by::AuthorGroup
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::group_by::AuthorGroup
+pub fn grit_lib::revwalk::group_by::group_commits_by_author(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], core::option::Option<&grit_lib::config::mailmap::MailmapTable>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::revwalk::group_by::AuthorGroup>>
+pub fn grit_lib::revwalk::group_by::mailmap_for_grouping(&grit_lib::repo::Repository, bool) -> grit_lib::error::Result<core::option::Option<grit_lib::config::mailmap::MailmapTable>>
+pub struct grit_lib::revwalk::group_by::AuthorGroup
+pub fn grit_lib::revwalk::group_commits_by_author(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], core::option::Option<&grit_lib::config::mailmap::MailmapTable>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::revwalk::group_by::AuthorGroup>>
+pub struct grit_lib::revwalk::AuthorGroup
+pub fn grit_lib::revwalk::mailmap_for_grouping(&grit_lib::repo::Repository, bool) -> grit_lib::error::Result<core::option::Option<grit_lib::config::mailmap::MailmapTable>>
 pub mod grit_lib::revwalk::handle
 pub struct grit_lib::revwalk::handle::RevWalk<'repo>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>

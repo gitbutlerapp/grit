@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, ObjectId};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};

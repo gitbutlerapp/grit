@@ -13,6 +13,7 @@ use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::{group_commits_by_author, mailmap_for_grouping, RevWalkListOptions};
 use similar::Algorithm;
 use std::sync::Arc;
 
@@ -112,6 +113,24 @@ fn bench_revwalk_topo(c: &mut Criterion) {
 
 fn bench_revwalk_date(c: &mut Criterion) {
     revwalk_group(c, OrderingMode::DateOrderWalk, "date_order");
+}
+
+fn bench_log_group_by_author(c: &mut Criterion) {
+    let fx = HistoryBenchFixtures::global();
+    let mut group = c.benchmark_group("log-group-by-author");
+    group.throughput(Throughput::Elements(fx.commit_count as u64));
+    fx.ensure_commit_graph();
+    group.bench_function("group_head", |b| {
+        b.iter(|| {
+            let walk = fx.repo.rev_walk();
+            let oids = walk
+                .commits(&["HEAD"], &RevWalkListOptions::default())
+                .expect("commits");
+            let mailmap = mailmap_for_grouping(&fx.repo, true).expect("mailmap");
+            black_box(group_commits_by_author(&fx.repo, &oids, mailmap.as_ref()).expect("group"))
+        });
+    });
+    group.finish();
 }
 
 fn bench_revwalk_filter(c: &mut Criterion) {
@@ -340,6 +359,7 @@ criterion_group!(
     bench_s1_rev_list_objects_v1,
     bench_revwalk_topo,
     bench_revwalk_date,
+    bench_log_group_by_author,
     bench_revwalk_filter,
     bench_revwalk_path_limited,
     bench_log_first_1000_gitgit_like,

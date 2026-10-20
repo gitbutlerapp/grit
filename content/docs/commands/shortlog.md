@@ -18,6 +18,8 @@ Shows the current branch, its target branch, and every commit on the current bra
 
 The target branch is found the same way as for [`grit status`](../status/#the-target-branch): the `target.branch` setting, then `origin/master`, `origin/main`, `master` and `main`. Unlike `grit status`, which shows at most ten commits, `grit shortlog` lists all of them.
 
+For author commit counts over an arbitrary revision range (Git's `shortlog -sne` shape), use [`grit log --group-by author`](log.md#options) instead — `grit shortlog` means commits ahead of the target branch, not author grouping.
+
 ## Options
 
 `grit shortlog` takes no options beyond the [global ones](../global-options/).

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "e9856e3 third\n104137d second\ne5deeaf first\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"commits\":[{\"oid\":\"e9856e370a4e270d0ffda380cfb0d764f9fb6a48\",\"parents\":[\"104137df3d967586d4c4c40329decc18b0d9ef97\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"third\",\"message\":\"third\",\"refs\":[{\"name\":\"HEAD\",\"kind\":\"head\"},{\"name\":\"main\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\"},{\"oid\":\"104137df3d967586d4c4c40329decc18b0d9ef97\",\"parents\":[\"e5deeaf22cc2b2cb5b2b076d384a62806ab766b7\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"second\",\"message\":\"second\",\"refs\":[],\"relative_date\":\"[TIME_AGO]\"},{\"oid\":\"e5deeaf22cc2b2cb5b2b076d384a62806ab766b7\",\"parents\":[\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"first\",\"message\":\"first\",\"refs\":[],\"relative_date\":\"[TIME_AGO]\"}],\"next\":null,\"truncated\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "- `e9856e3 third`\n- `104137d second`\n- `e5deeaf first`\n",
+    "stderr": ""
+  }
+}

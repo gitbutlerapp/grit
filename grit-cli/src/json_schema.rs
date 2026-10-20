@@ -529,6 +529,8 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("repack", &["repack", "--dry-run"]),
         ("status", &["status"]),
         ("log", &["log"]),
+        ("log_oneline", &["log", "--oneline", "--limit", "3"]),
+        ("log_decorate", &["log", "--decorate", "--oneline", "--limit", "1"]),
         ("reflog", &["reflog"]),
         ("diff", &["diff"]),
         ("diff_staged", &["diff", "--staged"]),
