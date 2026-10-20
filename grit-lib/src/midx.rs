@@ -1028,10 +1028,21 @@ fn repo_midx_hash_version_for_objects_dir(objects_dir: &Path) -> u8 {
     sniff_objectformat_hash_version(&gitdir.join("config"))
 }
 
-/// Uncached `[extensions] objectformat` scan of one config file.
+/// Cached `[extensions] objectformat` scan of one config file (reuses process-local config text cache).
 fn sniff_objectformat_hash_version(config_path: &Path) -> u8 {
-    let Ok(text) = fs::read_to_string(config_path) else {
-        return HASH_VERSION_SHA1;
+    sniff_objectformat_hash_version_uncached(config_path)
+}
+
+/// Uncached `[extensions] objectformat` scan of one config file.
+fn sniff_objectformat_hash_version_uncached(config_path: &Path) -> u8 {
+    let text = if let Some(text) = crate::repo_caches::published_local_config_for_midx(config_path)
+    {
+        text
+    } else {
+        let Ok(text) = crate::repo_caches::read_local_config_file(config_path) else {
+            return HASH_VERSION_SHA1;
+        };
+        text
     };
     // Minimal scan for `[extensions]` ... `objectformat = sha256`. Section and key
     // names are case-insensitive in git config; values are case-sensitive but git

@@ -16,6 +16,7 @@ use regex::Regex;
 
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
@@ -194,7 +195,7 @@ fn remote_tracking_head_symbolic_target(repo: &Repository, name: &str) -> Option
     {
         return None;
     }
-    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).ok()?;
+    let config = repo.ensure_config_arc_fast().ok()?;
     let url_key = format!("remote.{name}.url");
     config.get(&url_key)?;
     let head_ref = format!("refs/remotes/{name}/HEAD");
@@ -277,8 +278,9 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
         return resolve_push_ref_name(repo, base);
     }
     let (branch_key, display_branch) = resolve_upstream_branch_context(repo, base)?;
-    let config_path = repo.git_dir().join("config");
-    let config_content = fs::read_to_string(&config_path).map_err(Error::Io)?;
+    let config_path = repo.common_git_dir().join("config");
+    let _ = repo.config()?;
+    let config_content = repo.caches().local_config_text(&config_path)?;
     let Some((remote, merge)) = parse_branch_tracking(&config_content, &branch_key) else {
         return Err(RevParseError::NoUpstream {
             branch: display_branch,
@@ -310,10 +312,9 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
 /// Honors `remote.pushRemote`, `branch.<name>.pushRemote`, `push.default`, and per-remote
 /// `push` refspecs (exact `refs/heads/<branch>:refs/heads/<dest>` mappings).
 pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -> Result<String> {
-    let config_path = crate::refs::common_dir(repo.git_dir())
-        .unwrap_or_else(|| repo.git_dir().to_path_buf())
-        .join("config");
-    let config_content = fs::read_to_string(&config_path).map_err(Error::Io)?;
+    let config_path = repo.common_git_dir().join("config");
+    let _ = repo.config()?;
+    let config_content = repo.caches().local_config_text(&config_path)?;
 
     let upstream_tracking =
         parse_branch_tracking(&config_content, branch_short).and_then(|(remote, merge)| {
@@ -1172,7 +1173,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
     let refname_opts = RefNameOptions::default();
     for rule in RULES {
         let candidate = rule.replace("{0}", spec);
-        if let Ok(Some(target)) = refs::read_symbolic_ref(repo.git_dir(), &candidate) {
+        if let Ok(Some(target)) = refs::read_symbolic_ref_for_repository(repo, &candidate) {
             if check_refname_format(&target, &refname_opts).is_err()
                 || repo.resolve_ref_name(&target).is_err()
             {
@@ -1216,7 +1217,7 @@ fn resolve_revision_impl(
     if let Some(pattern) = spec.strip_prefix(":/") {
         if pattern.is_empty() {
             // `:/` with an empty pattern resolves to the youngest reachable commit (HEAD tip).
-            let head = crate::state::resolve_head(repo.git_dir())
+            let head = crate::state::resolve_head_for_repository(repo)
                 .map_err(|_| Error::ObjectNotFound(":/".to_owned()))?;
             return head
                 .oid()
@@ -1933,8 +1934,9 @@ pub fn ambiguous_object_hint_lines(
 }
 
 fn read_core_disambiguate(repo: &Repository) -> Option<&'static str> {
-    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
-        .unwrap_or_else(|_| ConfigSet::new());
+    let config = repo
+        .ensure_config_arc_fast()
+        .unwrap_or_else(|_| Arc::new(ConfigSet::new()));
     let v = config.get("core.disambiguate")?;
     match v.to_ascii_lowercase().as_str() {
         "committish" | "commit" => Some("commit"),

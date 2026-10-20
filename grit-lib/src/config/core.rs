@@ -237,6 +237,8 @@ pub struct LoadConfigOptions {
     pub include_ctx: IncludeContext,
     /// Optional sink for non-fatal config load warnings.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// When set, repository-local `config` is read at most once per [`crate::repo_caches::RepoCaches`] handle.
+    pub repo_caches: Option<std::sync::Arc<crate::repo_caches::RepoCaches>>,
 }
 
 impl std::fmt::Debug for LoadConfigOptions {
@@ -258,6 +260,7 @@ impl Default for LoadConfigOptions {
             command_includes: true,
             include_ctx: IncludeContext::default(),
             diagnostics: None,
+            repo_caches: None,
         }
     }
 }
@@ -2338,6 +2341,27 @@ impl ConfigSet {
         Self::load_with_options_uncached(env, git_dir, opts, &mut Vec::new())
     }
 
+    fn read_local_config_text_optional(
+        path: &Path,
+        caches: Option<&std::sync::Arc<crate::repo_caches::RepoCaches>>,
+    ) -> Result<Option<String>> {
+        let read = |p: &Path| -> Result<Option<String>> {
+            match fs::read_to_string(p) {
+                Ok(text) => Ok(Some(text)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(Error::Io(e)),
+            }
+        };
+        let Some(c) = caches else {
+            return read(path);
+        };
+        match c.local_config_text(path) {
+            Ok(text) => Ok(Some(text)),
+            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     pub(crate) fn load_with_options_uncached(
         env: &Environment,
         git_dir: Option<&Path>,
@@ -2380,32 +2404,26 @@ impl ConfigSet {
         if let Some(gd) = git_dir {
             let common_dir = crate::repo::common_git_dir_for_config(gd);
             let local_path = common_dir.join("config");
-            if let Some(msg) = crate::repo::early_config_ignore_repo_reason(&common_dir) {
+            let local_text =
+                Self::read_local_config_text_optional(&local_path, opts.repo_caches.as_ref())?;
+            if let Some(msg) =
+                crate::repo::early_config_ignore_repo_reason_for_text(local_text.as_deref())
+            {
                 if let Some(sink) = opts.diagnostics.as_ref() {
                     sink.warn(crate::diagnostics::Warning::IgnoredGitDir {
                         path: gd.to_path_buf(),
                         reason: msg,
                     });
                 }
-            } else {
-                match ConfigFile::from_path(&local_path, ConfigScope::Local) {
-                    Ok(Some(f)) => Self::merge_with_includes_collect(
-                        &mut set,
-                        &f,
-                        proc,
-                        0,
-                        &ctx,
-                        included_files,
-                    )?,
-                    Ok(None) => {}
-                    Err(e) => return Err(e),
-                }
+            } else if let Some(text) = local_text.as_deref() {
+                let f = ConfigFile::parse(&local_path, text, ConfigScope::Local)?;
+                Self::merge_with_includes_collect(&mut set, &f, proc, 0, &ctx, included_files)?;
             }
 
             // Worktree config — Git only reads `config.worktree` when
             // `extensions.worktreeConfig` is enabled in the common repository `config`.
             let wt_path = gd.join("config.worktree");
-            if crate::repo::worktree_config_enabled(&common_dir) {
+            if crate::repo::worktree_config_enabled_for_text(local_text.as_deref()) {
                 match ConfigFile::from_path(&wt_path, ConfigScope::Worktree) {
                     Ok(Some(f)) => Self::merge_with_includes_collect(
                         &mut set,
@@ -2761,11 +2779,18 @@ fn include_directive_for_entry(entry: &ConfigEntry) -> Option<(String, Option<St
 // strictly more conservative than upstream.
 
 /// Stat snapshot of one cascade file (`None` = file absent).
-type ConfigFileStamp = (PathBuf, Option<(SystemTime, u64)>);
+pub(crate) type ConfigFileStamp = (PathBuf, Option<(SystemTime, u64)>);
 
-#[derive(PartialEq, Eq, Hash)]
+/// Stamp metadata stored with a memoized config cascade entry.
+pub(crate) type ConfigCacheEntryStamps = (
+    Vec<(String, Option<String>)>,
+    Vec<ConfigFileStamp>,
+    Vec<ConfigFileStamp>,
+);
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ConfigCacheKey {
-    git_dir: Option<PathBuf>,
+    pub(crate) git_dir: Option<PathBuf>,
     include_system: bool,
     process_includes: bool,
     command_includes: bool,
@@ -2829,7 +2854,7 @@ fn config_cascade_file_paths(
     paths
 }
 
-fn stamp_for_path(path: &Path) -> Option<(SystemTime, u64)> {
+pub(crate) fn stamp_for_path(path: &Path) -> Option<(SystemTime, u64)> {
     fs::metadata(path)
         .ok()
         .and_then(|m| Some((m.modified().ok()?, m.len())))
@@ -4877,5 +4902,20 @@ mod config_cache_tests {
         // the cached cascade so the condition is re-evaluated.
         fs::write(gd.join("HEAD"), "ref: refs/heads/dev\n").expect("rewrite HEAD");
         assert_eq!(load_value(&caches, gd), None);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn load_propagates_local_config_io_errors() {
+        use std::os::unix::fs::symlink;
+        let td = tempfile::tempdir().expect("tempdir");
+        let git_dir = td.path();
+        let config = git_dir.join("config");
+        symlink("config", &config).expect("self-referential symlink");
+        let err = ConfigSet::load(&Environment::empty(), Some(git_dir), false).unwrap_err();
+        assert!(
+            matches!(err, Error::Io(_)),
+            "expected I/O error for symlink loop, got {err:?}"
+        );
     }
 }

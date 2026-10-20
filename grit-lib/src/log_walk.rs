@@ -9,7 +9,6 @@ use crate::error::{Error, Result};
 use crate::merge_base::{ReachableWalkSnapshot, ReachableWalkState};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
-use crate::state::resolve_head;
 
 const CURSOR_PREFIX: &str = "lw1.";
 const MAGIC: &[u8; 4] = b"GLW2";
@@ -46,7 +45,7 @@ impl LogWalkCursor {
         cursor: Option<&LogWalkCursor>,
         limit: usize,
     ) -> Result<LogWalkPage> {
-        let head_state = resolve_head(repo.git_dir())?;
+        let head_state = crate::state::resolve_head_for_repository(repo)?;
         let head = *head_state
             .oid()
             .ok_or_else(|| Error::CorruptObject("repository has no commits".to_owned()))?;

@@ -2047,6 +2047,7 @@ pub grit_lib::config::LoadConfigOptions::diagnostics: core::option::Option<grit_
 pub grit_lib::config::LoadConfigOptions::include_ctx: grit_lib::config::IncludeContext
 pub grit_lib::config::LoadConfigOptions::include_system: bool
 pub grit_lib::config::LoadConfigOptions::process_includes: bool
+pub grit_lib::config::LoadConfigOptions::repo_caches: core::option::Option<alloc::rcs::arc::Arc<grit_lib::repo::caches::RepoCaches>>
 impl core::clone::Clone for grit_lib::config::LoadConfigOptions
 pub fn grit_lib::config::LoadConfigOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::config::LoadConfigOptions
@@ -10390,6 +10391,7 @@ pub struct grit_lib::prelude::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
+pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
 pub fn grit_lib::repo::Repository::config_handle(&self) -> grit_lib::config::handle::ConfigHandle<'_>
 pub fn grit_lib::repo::Repository::diagnostics(&self) -> grit_lib::diagnostics::DiagnosticsHandle
@@ -10446,7 +10448,7 @@ pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintena
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
 impl core::fmt::Debug for grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::repo::Repository
+impl !core::marker::Freeze for grit_lib::repo::Repository
 impl core::marker::Send for grit_lib::repo::Repository
 impl core::marker::Sync for grit_lib::repo::Repository
 impl core::marker::Unpin for grit_lib::repo::Repository
@@ -12001,7 +12003,7 @@ pub grit_lib::remote::clone::CloneOutcome::transfer: grit_lib::remote::transfer:
 pub grit_lib::remote::clone::CloneOutcome::url: alloc::string::String
 impl core::fmt::Debug for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::CloneOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::remote::clone::CloneOutcome
+impl !core::marker::Freeze for grit_lib::remote::clone::CloneOutcome
 impl core::marker::Send for grit_lib::remote::clone::CloneOutcome
 impl core::marker::Sync for grit_lib::remote::clone::CloneOutcome
 impl core::marker::Unpin for grit_lib::remote::clone::CloneOutcome
@@ -12110,7 +12112,7 @@ pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::known_common(&mut
 pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::new(grit_lib::repo::Repository) -> Self
 pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::next_have(&mut self) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::repo(&self) -> &grit_lib::repo::Repository
-impl core::marker::Freeze for grit_lib::remote::fetch_negotiator::SkippingNegotiator
+impl !core::marker::Freeze for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl core::marker::Send for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl core::marker::Sync for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl core::marker::Unpin for grit_lib::remote::fetch_negotiator::SkippingNegotiator
@@ -13672,6 +13674,7 @@ pub fn grit_lib::repo::caches::RepoCaches::open_ref_store(&self, &std::path::Pat
 pub fn grit_lib::repo::caches::RepoCaches::pathspec_precompose_enabled(&self, &grit_lib::config::environment::Environment, &std::path::Path) -> bool
 pub fn grit_lib::repo::caches::RepoCaches::promisor_hydrate_hook(&self) -> core::option::Option<grit_lib::blame::PromisorHydrateHook>
 pub fn grit_lib::repo::caches::RepoCaches::ref_storage_format(&self, &std::path::Path) -> grit_lib::refs::ref_storage::RefStorageFormat
+pub fn grit_lib::repo::caches::RepoCaches::ref_storage_format_from_local_config(&self, &std::path::Path) -> grit_lib::error::Result<grit_lib::refs::ref_storage::RefStorageFormat>
 pub fn grit_lib::repo::caches::RepoCaches::set_promisor_hydrate_hook(&self, core::option::Option<grit_lib::blame::PromisorHydrateHook>)
 pub fn grit_lib::repo::caches::RepoCaches::should_warn_commit_graph_once(&self, &str) -> bool
 pub fn grit_lib::repo::caches::RepoCaches::warn_bare_worktree_conflict_once(&self, &std::path::Path)
@@ -13739,6 +13742,7 @@ pub struct grit_lib::repo::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
+pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
 pub fn grit_lib::repo::Repository::config_handle(&self) -> grit_lib::config::handle::ConfigHandle<'_>
 pub fn grit_lib::repo::Repository::diagnostics(&self) -> grit_lib::diagnostics::DiagnosticsHandle
@@ -13795,7 +13799,7 @@ pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintena
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
 impl core::fmt::Debug for grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::repo::Repository
+impl !core::marker::Freeze for grit_lib::repo::Repository
 impl core::marker::Send for grit_lib::repo::Repository
 impl core::marker::Sync for grit_lib::repo::Repository
 impl core::marker::Unpin for grit_lib::repo::Repository
@@ -13817,6 +13821,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryBuil
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryBuilder
 pub fn grit_lib::repo::common_git_dir_for_config(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::repo::early_config_ignore_repo_reason(&std::path::Path) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::repo::early_config_ignore_repo_reason_for_text(core::option::Option<&str>) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::repo::ensure_core_bare(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::init_worktree_config(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::repository_format_warning(&std::path::Path) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
@@ -13825,6 +13830,7 @@ pub fn grit_lib::repo::resolve_git_directory_arg(&std::path::Path) -> grit_lib::
 pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::repo::validate_repo_format(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::worktree_config_enabled(&std::path::Path) -> bool
+pub fn grit_lib::repo::worktree_config_enabled_for_text(core::option::Option<&str>) -> bool
 pub mod grit_lib::repo_handles
 pub enum grit_lib::repo_handles::HookSource
 pub grit_lib::repo_handles::HookSource::CoreHooksPath

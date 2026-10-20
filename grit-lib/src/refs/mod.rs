@@ -334,6 +334,9 @@ pub fn resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
 /// git directory. Returns `None` when git_dir is already the common dir.
 pub fn common_dir(git_dir: &Path) -> Option<PathBuf> {
     let commondir_file = git_dir.join("commondir");
+    if !commondir_file.is_file() {
+        return None;
+    }
     let raw = fs::read_to_string(commondir_file).ok()?;
     let rel = raw.trim();
     // Match Git: `commondir` may be relative to this gitdir or an absolute path (see
@@ -1961,6 +1964,17 @@ pub fn read_head(git_dir: &Path) -> Result<Option<String>> {
 /// `Ok(None)` when it is direct or missing.
 pub fn read_symbolic_ref(git_dir: &Path, refname: &str) -> Result<Option<String>> {
     match open_ref_store(git_dir)?.read_raw(refname)? {
+        Some(StoreRawRef::Symbolic(target)) => Ok(Some(target)),
+        Some(StoreRawRef::Direct(_)) | None => Ok(None),
+    }
+}
+
+/// Like [`read_symbolic_ref`] but uses an open [`crate::repo::Repository`] ref store (no format re-detection).
+pub fn read_symbolic_ref_for_repository(
+    repo: &crate::repo::Repository,
+    refname: &str,
+) -> Result<Option<String>> {
+    match repo.refs().read_raw(refname)? {
         Some(StoreRawRef::Symbolic(target)) => Ok(Some(target)),
         Some(StoreRawRef::Direct(_)) | None => Ok(None),
     }
