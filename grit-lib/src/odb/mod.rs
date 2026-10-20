@@ -22,6 +22,7 @@
 //! Custom primary store — see [`OdbBuilder`] and [`crate::repo::RepositoryBuilder`].
 
 pub mod builder;
+mod peel;
 pub mod store;
 
 #[doc(inline)]
