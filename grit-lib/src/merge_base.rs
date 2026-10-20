@@ -623,6 +623,7 @@ impl ReachableWalkState {
         !self.heap.is_empty()
     }
 
+    /// Drop heap entries that cannot be emitted under committer-date cutoffs.
     pub fn prune_heap_for_cutoffs(&mut self, cutoffs: ReachableWalkCommitterCutoffs) {
         if let Some(since) = cutoffs.since {
             self.heap.retain(|key| key.time >= since);
