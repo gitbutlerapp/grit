@@ -2510,11 +2510,15 @@ fn compute_blame_with_session(
                 };
                 let par_lines_arc =
                     session.load_blob_lines(p_blob_oid, &parent_blob_path, p_blob_mode)?;
+                let pending_batch = std::mem::take(&mut pending);
                 let (affix_mapped, need_diff) = partition_pending_by_affix(
                     par_lines_arc.as_ref(),
                     cur_lines_arc.as_ref(),
-                    std::mem::take(&mut pending),
+                    pending_batch,
                 );
+                // Only use affix partition when it avoids work: affix-only skip, or mixed
+                // affix + middle. When every pending line sits in the edited middle, fall back
+                // to the pre-round-3 path (full batch through parent_child_line_maps).
                 if need_diff.is_empty() {
                     pending = affix_mapped;
                     current_oid = parent_oid;
@@ -2527,7 +2531,13 @@ fn compute_blame_with_session(
                     }
                     continue 'blame_loop;
                 }
-                pending = need_diff;
+                let mut still_pending = if affix_mapped.is_empty() {
+                    pending = need_diff;
+                    Vec::new()
+                } else {
+                    pending = need_diff;
+                    affix_mapped
+                };
                 let maps = session.parent_child_line_maps(
                     p_blob_oid,
                     &parent_blob_path,
@@ -2575,7 +2585,6 @@ fn compute_blame_with_session(
                     }
                 }
 
-                let mut still_pending = affix_mapped;
                 for t in pending.drain(..) {
                     if t.current_idx < line_map.len() {
                         if let Some(parent_idx) = line_map[t.current_idx] {
