@@ -10,6 +10,7 @@ use crate::error::Error;
 use crate::hash::verify_trailer;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::{hash_algo_for_objects_dir, Odb};
+use crate::pack_map::PackData;
 
 fn warn_once_for_disabled_bloom_layer(
     caches: Option<&crate::repo_caches::RepoCaches>,
@@ -33,6 +34,7 @@ fn warn_once_for_base_chunk_too_small(
 
 const SIGNATURE: &[u8; 4] = b"CGPH";
 const GRAPH_VERSION: u8 = 1;
+const COMMIT_GRAPH_MIN_FILE_LEN: u64 = 28;
 
 const CHUNK_OID_FANOUT: u32 = 0x4f49_4446; // OIDF
 const CHUNK_OID_LOOKUP: u32 = 0x4f49_444c; // OIDL
@@ -69,7 +71,8 @@ fn warn_path_for_graph_file(path: &Path) -> String {
 pub struct CommitGraphLayer {
     /// Repository-relative or filesystem path related to the failure.
     pub path: PathBuf,
-    body: Vec<u8>,
+    file: Arc<PackData>,
+    body_len: usize,
     num_commits: u32,
     oid_lookup_off: usize,
     #[allow(dead_code)]
@@ -236,8 +239,23 @@ fn validate_single_layer_parent_indices(
 }
 
 impl CommitGraphLayer {
+    fn body(&self) -> &[u8] {
+        &self.file[..self.body_len]
+    }
+
+    /// Map or read a commit-graph layer from disk (hot path; borrows mapped bytes).
+    fn try_open(path: PathBuf) -> Result<Self, Error> {
+        let storage = PackData::open_with_min_len(&path, COMMIT_GRAPH_MIN_FILE_LEN)?;
+        Self::try_parse_storage(path, storage)
+    }
+
     /// Parse a commit-graph layer; fails if generation overflow chunk is inconsistent with GDA2.
     pub fn try_parse(path: PathBuf, raw: Vec<u8>) -> Result<Self, Error> {
+        Self::try_parse_storage(path, PackData::from_owned(raw))
+    }
+
+    fn try_parse_storage(path: PathBuf, storage: Arc<PackData>) -> Result<Self, Error> {
+        let raw = storage.as_ref();
         if raw.len() < 28 {
             return Err(Error::CorruptObject(
                 "commit-graph file too small".to_owned(),
@@ -260,9 +278,10 @@ impl CommitGraphLayer {
                 raw[4], raw[5]
             ))
         })?;
-        verify_trailer(algo, &raw)
+        verify_trailer(algo, raw)
             .map_err(|_| Error::CorruptObject("commit-graph incorrect checksum".to_owned()))?;
-        let body = raw[..raw.len() - hash_len].to_vec();
+        let body_len = raw.len().saturating_sub(hash_len);
+        let body = &raw[..body_len];
         if body.len() < 8 || &body[0..4] != SIGNATURE {
             return Err(Error::CorruptObject(
                 "commit-graph has bad signature".to_owned(),
@@ -441,7 +460,7 @@ impl CommitGraphLayer {
             let gda_len = gda_end.saturating_sub(gda);
             let fo = fanout_off
                 .ok_or_else(|| Error::CorruptObject("commit-graph missing fanout".to_owned()))?;
-            let num_commits = fanout_num_commits(&body, fo)?;
+            let num_commits = fanout_num_commits(body, fo)?;
             let expected = num_commits as usize * 4;
             if gda_len < expected {
                 return Err(Error::CorruptObject(
@@ -498,7 +517,7 @@ impl CommitGraphLayer {
             Error::CorruptObject("commit-graph missing commit data chunk".to_owned())
         })?;
         checked_add_end(oid_lookup_off, 4, body.len())?;
-        let num_commits = fanout_num_commits(&body, fanout_off)?;
+        let num_commits = fanout_num_commits(body, fanout_off)?;
         let oid_lookup_bytes = (num_commits as usize)
             .checked_mul(hash_len)
             .ok_or_else(commit_graph_chunk_oob)?;
@@ -516,7 +535,7 @@ impl CommitGraphLayer {
                 .checked_add(bucket.checked_mul(4).ok_or_else(commit_graph_chunk_oob)?)
                 .ok_or_else(commit_graph_chunk_oob)?;
             let a = u32::from_be_bytes(
-                body_slice(&body, a_off, 4)?
+                body_slice(body, a_off, 4)?
                     .try_into()
                     .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?,
             );
@@ -528,7 +547,7 @@ impl CommitGraphLayer {
                 )
                 .ok_or_else(commit_graph_chunk_oob)?;
             let b = u32::from_be_bytes(
-                body_slice(&body, b_off, 4)?
+                body_slice(body, b_off, 4)?
                     .try_into()
                     .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?,
             );
@@ -554,8 +573,8 @@ impl CommitGraphLayer {
                         .ok_or_else(commit_graph_chunk_oob)?,
                 )
                 .ok_or_else(commit_graph_chunk_oob)?;
-            let slice_a = body_slice(&body, off_a, hash_len)?;
-            let slice_b = body_slice(&body, off_b, hash_len)?;
+            let slice_a = body_slice(body, off_a, hash_len)?;
+            let slice_b = body_slice(body, off_b, hash_len)?;
             if slice_a >= slice_b {
                 return Err(Error::CorruptObject(
                     "commit-graph incorrect OID order".to_owned(),
@@ -565,7 +584,7 @@ impl CommitGraphLayer {
 
         if base_graphs_off.is_none() {
             validate_single_layer_parent_indices(
-                &body,
+                body,
                 num_commits,
                 commit_data_off,
                 graph_data_width,
@@ -633,7 +652,8 @@ impl CommitGraphLayer {
 
         Ok(Self {
             path,
-            body,
+            file: storage,
+            body_len,
             num_commits,
             oid_lookup_off,
             chunk_commit_data_off: commit_data_off,
@@ -660,7 +680,7 @@ impl CommitGraphLayer {
             return None;
         }
         let off = self.oid_lookup_off + lex_index as usize * self.hash_len;
-        ObjectId::from_bytes(self.body.get(off..off + self.hash_len)?).ok()
+        ObjectId::from_bytes(self.body().get(off..off + self.hash_len)?).ok()
     }
 
     /// Decode the CDAT (commit-data) record at `lex_index` into
@@ -696,7 +716,7 @@ impl CommitGraphLayer {
                     return None;
                 }
                 let ev = u32::from_be_bytes(
-                    self.body[edge_off + idx * 4..edge_off + idx * 4 + 4]
+                    self.body()[edge_off + idx * 4..edge_off + idx * 4 + 4]
                         .try_into()
                         .ok()?,
                 );
@@ -721,7 +741,7 @@ impl CommitGraphLayer {
             return None;
         }
         let base = self.chunk_commit_data_off + lex_index as usize * (self.hash_len + 16);
-        ObjectId::from_bytes(self.body.get(base..base + self.hash_len)?).ok()
+        ObjectId::from_bytes(self.body().get(base..base + self.hash_len)?).ok()
     }
 
     fn cdat_record(&self, lex_index: u32) -> Option<(u32, u32, i64)> {
@@ -730,9 +750,10 @@ impl CommitGraphLayer {
         }
         let base = self.chunk_commit_data_off + lex_index as usize * (self.hash_len + 16);
         let p1_off = base + self.hash_len;
-        let p1 = u32::from_be_bytes(self.body.get(p1_off..p1_off + 4)?.try_into().ok()?);
-        let p2 = u32::from_be_bytes(self.body.get(p1_off + 4..p1_off + 8)?.try_into().ok()?);
-        let gen_time = u64::from_be_bytes(self.body.get(p1_off + 8..p1_off + 16)?.try_into().ok()?);
+        let p1 = u32::from_be_bytes(self.body().get(p1_off..p1_off + 4)?.try_into().ok()?);
+        let p2 = u32::from_be_bytes(self.body().get(p1_off + 4..p1_off + 8)?.try_into().ok()?);
+        let gen_time =
+            u64::from_be_bytes(self.body().get(p1_off + 8..p1_off + 16)?.try_into().ok()?);
         let commit_time = (gen_time & 0x3_FFFF_FFFF) as i64;
         Some((p1, p2, commit_time))
     }
@@ -748,13 +769,13 @@ impl CommitGraphLayer {
             return None;
         }
         let start = gda_off + lex_index as usize * 4;
-        let word = u32::from_be_bytes(self.body.get(start..start + 4)?.try_into().ok()?);
+        let word = u32::from_be_bytes(self.body().get(start..start + 4)?.try_into().ok()?);
         let offset = if word & CORRECTED_COMMIT_DATE_OFFSET_OVERFLOW != 0 {
             let slot = (word ^ CORRECTED_COMMIT_DATE_OFFSET_OVERFLOW) as usize;
             let gdo_off = self.chunk_generation_overflow?;
             let off = gdo_off + slot * 8;
-            let hi = u32::from_be_bytes(self.body.get(off..off + 4)?.try_into().ok()?);
-            let lo = u32::from_be_bytes(self.body.get(off + 4..off + 8)?.try_into().ok()?);
+            let hi = u32::from_be_bytes(self.body().get(off..off + 4)?.try_into().ok()?);
+            let lo = u32::from_be_bytes(self.body().get(off + 4..off + 8)?.try_into().ok()?);
             (u64::from(hi) << 32) | u64::from(lo)
         } else {
             u64::from(word)
@@ -769,7 +790,7 @@ impl CommitGraphLayer {
         while lo < hi {
             let mid = (lo + hi) / 2;
             let off = self.oid_lookup_off + mid as usize * self.hash_len;
-            let slice = &self.body[off..off + self.hash_len];
+            let slice = &self.body()[off..off + self.hash_len];
             match slice.cmp(bytes) {
                 std::cmp::Ordering::Less => lo = mid + 1,
                 std::cmp::Ordering::Greater => hi = mid,
@@ -804,7 +825,7 @@ impl CommitGraphLayer {
         }
         let payload_len = bdat_total.saturating_sub(BLOOM_HEADER);
         let end_rel = u32::from_be_bytes(
-            self.body[bidx_base + lex_index as usize * 4..bidx_base + lex_index as usize * 4 + 4]
+            self.body()[bidx_base + lex_index as usize * 4..bidx_base + lex_index as usize * 4 + 4]
                 .try_into()
                 .ok()?,
         ) as usize;
@@ -812,7 +833,7 @@ impl CommitGraphLayer {
             0usize
         } else {
             u32::from_be_bytes(
-                self.body[bidx_base + (lex_index as usize - 1) * 4
+                self.body()[bidx_base + (lex_index as usize - 1) * 4
                     ..bidx_base + (lex_index as usize - 1) * 4 + 4]
                     .try_into()
                     .ok()?,
@@ -839,7 +860,7 @@ impl CommitGraphLayer {
         if abs_end > bdat_off + bdat_total || abs_start > abs_end {
             return None;
         }
-        Some(&self.body[abs_start..abs_end])
+        Some(&self.body()[abs_start..abs_end])
     }
 }
 
@@ -895,6 +916,12 @@ pub type BloomWalkStatsHandle = Arc<Mutex<BloomWalkStats>>;
 #[derive(Debug, Clone)]
 pub struct CommitGraphChain {
     layers: Vec<CommitGraphLayer>,
+}
+
+/// Test-only constructor (tip-first layer order).
+#[doc(hidden)]
+pub fn commit_graph_chain_from_layers_for_test(layers: Vec<CommitGraphLayer>) -> CommitGraphChain {
+    CommitGraphChain { layers }
 }
 
 impl CommitGraphChain {
@@ -1026,8 +1053,7 @@ impl CommitGraphChain {
                     continue;
                 }
                 let graph_path = info.join("commit-graphs").join(format!("graph-{h}.graph"));
-                let raw = std::fs::read(&graph_path).map_err(Error::from)?;
-                let layer = CommitGraphLayer::try_parse(graph_path, raw)?;
+                let layer = CommitGraphLayer::try_open(graph_path)?;
                 // `add_graph_to_chain`: a layer that declares N base graphs must
                 // carry a BASE chunk large enough to hold N hashes. If it is too
                 // small, Git warns and refuses to add this layer (and anything
@@ -1054,8 +1080,7 @@ impl CommitGraphChain {
         }
         let single = info.join("commit-graph");
         if single.is_file() {
-            let raw = std::fs::read(&single).map_err(Error::from)?;
-            let layer = CommitGraphLayer::try_parse(single.clone(), raw)?;
+            let layer = CommitGraphLayer::try_open(single.clone())?;
             let mut chain = Self {
                 layers: vec![layer],
             };
@@ -1162,8 +1187,7 @@ impl CommitGraphChain {
                     format!("commit-graph layer graph-{h}.graph not found"),
                 ))
             })?;
-            let raw = std::fs::read(&graph_path).map_err(Error::from)?;
-            let layer = CommitGraphLayer::try_parse(graph_path, raw)?;
+            let layer = CommitGraphLayer::try_open(graph_path)?;
             let n = layers.len();
             if n > 0 && layer.base_chunk_size / layer.hash_len < n {
                 warn_once_for_base_chunk_too_small(caches, &layer.layer_display_id());
