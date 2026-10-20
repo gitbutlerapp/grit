@@ -82,9 +82,11 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `commits` | array | Commits in walk order. Each entry has `oid` and `subject`. Empty when `--count` is set. |
+| `commits` | array | Commits in walk order. Each entry uses the shared [`CommitJson`](../README/#commit-json-object-commitjson) shape. Empty when `--count` is set. |
 | `count` | number or null | Total reachable commits when `--count` is set without `--left-right`; otherwise `null`. |
 | `left_right` | object or omitted | When `--count` and `--left-right` are set: `left` and `right` commit counts for the symmetric range. |
+| `truncated` | boolean | `true` when more commits matched than returned (`-n`). |
+| `next` | null | Reserved for future paging; always `null` today. |
 
 Example (listing):
 
@@ -96,7 +98,9 @@ Example (listing):
       "subject": "second"
     }
   ],
-  "count": null
+  "count": null,
+  "truncated": false,
+  "next": null
 }
 ```
 

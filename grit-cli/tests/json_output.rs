@@ -522,6 +522,7 @@ fn log_json_pages_with_next_cursor() -> TestResult {
     }
     let v = gs_json(&repo, &["log"]);
     assert_eq!(v["commits"].as_array().unwrap().len(), 10);
+    assert_eq!(v["truncated"], Value::Bool(true));
     assert!(v["next"].as_str().is_some(), "expected a next cursor: {v}");
     let first = &v["commits"][0];
     assert_eq!(first["subject"], "commit 10");
@@ -535,6 +536,191 @@ fn log_json_pages_with_next_cursor() -> TestResult {
     );
     let v2 = gs_json(&repo, &["log", &format!("--cursor={next}")]);
     assert_eq!(v2["next"], Value::Null);
+    assert_eq!(v2["truncated"], Value::Bool(false));
+    Ok(())
+}
+
+fn commit_json_keys(value: &Value) -> Vec<String> {
+    keys(value)
+}
+
+fn assert_commit_json_shape(commit: &Value) {
+    assert_eq!(
+        commit_json_keys(commit),
+        [
+            "author",
+            "committer",
+            "message",
+            "oid",
+            "parents",
+            "refs",
+            "relative_date",
+            "subject",
+        ]
+    );
+}
+
+#[test]
+fn commit_shape_is_identical_across_log_show_revs_shortlog() -> TestResult {
+    let scratch = Scratch::new("commit-shape")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "one\n");
+    gs_ok(&repo, &["commit", "seed"]);
+    write_file(&repo.join("a.txt"), "two\n");
+    gs_ok(&repo, &["commit", "tip"]);
+    gs_ok(&repo, &["branch", "side"]);
+    gs_ok(&repo, &["switch", "main"]);
+
+    let log_commit = &gs_json(&repo, &["log", "--limit", "1"])["commits"][0];
+    let show_commit = &gs_json(&repo, &["show"])["commit"];
+    let revs_commit = &gs_json(&repo, &["revs", "HEAD", "--limit", "1"])["commits"][0];
+
+    for commit in [log_commit, show_commit, revs_commit] {
+        assert_commit_json_shape(commit);
+    }
+    assert_eq!(log_commit["oid"], show_commit["oid"]);
+
+    let remote = scratch.child("origin.git");
+    gs_ok(scratch.path(), &["init", "--bare", &path_arg(&remote)]);
+    gs_ok(&repo, &["remote", "add", "origin", &path_arg(&remote)]);
+    system_git_ok(&repo, &["push", "-u", "origin", "main"]);
+    write_file(&repo.join("a.txt"), "three\n");
+    gs_ok(&repo, &["commit", "ahead"]);
+    let shortlog_commit = &gs_json(&repo, &["shortlog"])["commits"][0];
+    assert_commit_json_shape(shortlog_commit);
+    Ok(())
+}
+
+#[test]
+fn log_json_refs_match_git_decorate() -> TestResult {
+    let scratch = Scratch::new("log-refs")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "x\n");
+    gs_ok(&repo, &["commit", "only"]);
+    let tip = gs_json(&repo, &["log", "--limit", "1"])["commits"][0]["oid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let tags = repo.join(".git/refs/tags");
+    fs::create_dir_all(&tags)?;
+    fs::write(tags.join("v1"), format!("{tip}\n"))?;
+
+    let grit_refs = &gs_json(&repo, &["log", "--limit", "1"])["commits"][0]["refs"];
+    let grit_names: Vec<_> = grit_refs
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["name"].as_str().unwrap())
+        .collect();
+
+    let git_out = Command::new("git")
+        .args(["-C"])
+        .arg(&repo)
+        .args(["log", "-1", "--decorate=full", "--format=%D"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    assert!(git_out.status.success());
+    let git_d = String::from_utf8_lossy(&git_out.stdout).trim().to_owned();
+    for name in ["main", "v1", "HEAD"] {
+        assert!(
+            grit_names.iter().any(|n| n.contains(name)),
+            "grit refs {grit_names:?} should mention {name}; git %D={git_d:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn log_json_parents_and_committer_match_git() -> TestResult {
+    let scratch = Scratch::new("log-parents")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "a\n");
+    gs_ok(&repo, &["commit", "root"]);
+    write_file(&repo.join("a.txt"), "b\n");
+    gs_ok(&repo, &["commit", "child"]);
+
+    let grit = &gs_json(&repo, &["log", "--limit", "1"])["commits"][0];
+    let git_parents = Command::new("git")
+        .args(["-C"])
+        .arg(&repo)
+        .args(["log", "-1", "--format=%P"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    assert!(git_parents.status.success());
+    let git_p = String::from_utf8_lossy(&git_parents.stdout)
+        .trim()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let grit_p: Vec<_> = grit["parents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(grit_p, git_p);
+
+    let git_committer = Command::new("git")
+        .args(["-C"])
+        .arg(&repo)
+        .args(["log", "-1", "--format=%cn <%ce>"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    assert!(git_committer.status.success());
+    let git_c_raw = String::from_utf8_lossy(&git_committer.stdout);
+    let git_c = git_c_raw.trim();
+    let grit_c = format!(
+        "{} <{}>",
+        grit["committer"]["name"].as_str().unwrap(),
+        grit["committer"]["email"].as_str().unwrap()
+    );
+    assert_eq!(grit_c, git_c);
+    Ok(())
+}
+
+#[test]
+fn log_json_truncated_and_next() -> TestResult {
+    let scratch = Scratch::new("log-trunc")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    for i in 0..6 {
+        write_file(&repo.join("a.txt"), &format!("v{i}\n"));
+        gs_ok(&repo, &["add", "a.txt"]);
+        gs_ok(&repo, &["commit", &format!("c{i}")]);
+    }
+    let limited = gs_json(&repo, &["log", "--limit", "3"]);
+    assert_eq!(limited["commits"].as_array().unwrap().len(), 3);
+    assert_eq!(limited["truncated"], Value::Bool(true));
+    assert_eq!(limited["next"], Value::Null);
+    Ok(())
+}
+
+#[test]
+fn revs_json_truncated() -> TestResult {
+    let scratch = Scratch::new("revs-trunc")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    for i in 0..5 {
+        write_file(&repo.join("a.txt"), &format!("v{i}\n"));
+        gs_ok(&repo, &["add", "a.txt"]);
+        gs_ok(&repo, &["commit", &format!("c{i}")]);
+    }
+    let v = gs_json(&repo, &["revs", "HEAD", "--limit", "2"]);
+    assert_eq!(v["commits"].as_array().unwrap().len(), 2);
+    assert_eq!(v["truncated"], Value::Bool(true));
+    assert_eq!(v["next"], Value::Null);
+    assert_eq!(keys(&v), ["commits", "count", "next", "truncated"]);
     Ok(())
 }
 
@@ -1721,6 +1907,7 @@ fn log_json_honors_limit_without_cursor() -> TestResult {
     let v = gs_json(&repo, &["log", "--limit", "5"]);
     assert_eq!(v["commits"].as_array().unwrap().len(), 5);
     assert_eq!(v["next"], Value::Null);
+    assert_eq!(v["truncated"], Value::Bool(true));
     assert_eq!(v["commits"][0]["subject"], "commit 7");
     Ok(())
 }
@@ -2077,7 +2264,7 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     );
 
     let log = gs_json(&seed, &["log"]);
-    assert_eq!(keys(&log), ["commits", "next"]);
+    assert_eq!(keys(&log), ["commits", "next", "truncated"]);
 
     write_file(&seed.join("blame.txt"), "hello\n");
     gs_ok(&seed, &["add", "blame.txt"]);

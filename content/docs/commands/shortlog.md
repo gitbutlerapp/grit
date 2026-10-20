@@ -50,7 +50,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `branch` | string | Current branch name. |
 | `target` | string or null | Target branch used for comparison, or `null` when none was found. |
 | `ahead` | number | How many commits are on the branch but not on the target. |
-| `commits` | array | Those commits, newest first, each with `oid`, `subject`, and `author` (`name`, `email`, `date` — same shape as [`grit show`](../show/)). |
+| `commits` | array | Those commits, newest first, each using the shared [`CommitJson`](../README/#commit-json-object-commitjson) shape (bounded list; see `truncated`). |
+| `truncated` | boolean | `true` when `ahead` exceeds the number of commits listed. |
+| `next` | null | Reserved for future paging; always `null` today. |
 
 Example:
 

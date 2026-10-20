@@ -8692,6 +8692,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::log::Decor
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::log::DecorationItem
 pub fn grit_lib::porcelain::log::collect_decorations(&grit_lib::repo::Repository, bool) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
 pub fn grit_lib::porcelain::log::collect_decorations_inner(&grit_lib::repo::Repository, bool, bool, &grit_lib::porcelain::log::DecorationFilter) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
+pub fn grit_lib::porcelain::log::load_commits_with_decorations(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &grit_lib::porcelain::log::DecorationMap) -> grit_lib::error::Result<Vec<grit_lib::porcelain::log::LoadedCommit>>
+pub struct grit_lib::porcelain::log::CommitRefDecoration
+pub struct grit_lib::porcelain::log::LoadedCommit
 pub fn grit_lib::porcelain::log::current_branch_decoration_index(&[grit_lib::porcelain::log::DecorationItem], &grit_lib::state::HeadState) -> core::option::Option<usize>
 pub fn grit_lib::porcelain::log::normalize_glob_ref(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::log::peel_to_commit_hex(&grit_lib::objects::odb::Odb, &str) -> core::option::Option<alloc::string::String>

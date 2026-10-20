@@ -15,6 +15,35 @@
       ],
       "type": "string"
     },
+    "CommitRefJson": {
+      "description": "Ref decoration attached to a commit in JSON output.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/CommitRefKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CommitRefKind": {
+      "description": "Decoration category in JSON (`--json` contract).",
+      "enum": [
+        "branch",
+        "remote_branch",
+        "tag",
+        "stash",
+        "head",
+        "grafted",
+        "other"
+      ],
+      "type": "string"
+    },
     "DiffStat": {
       "description": "A diffstat: per-file insertion/deletion counts plus totals.",
       "properties": {
@@ -91,8 +120,28 @@
         "author": {
           "$ref": "#/definitions/Person"
         },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "description": "Full message body with trailing whitespace trimmed.",
+          "type": "string"
+        },
         "oid": {
           "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "refs": {
+          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
+          "items": {
+            "$ref": "#/definitions/CommitRefJson"
+          },
+          "type": "array"
         },
         "relative_date": {
           "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
@@ -118,7 +167,11 @@
       },
       "required": [
         "author",
+        "committer",
+        "message",
         "oid",
+        "parents",
+        "refs",
         "subject"
       ],
       "type": "object"
@@ -159,10 +212,15 @@
         "string",
         "null"
       ]
+    },
+    "truncated": {
+      "description": "True when more commits matched the query than returned in this page (`-n` or default page size).",
+      "type": "boolean"
     }
   },
   "required": [
-    "commits"
+    "commits",
+    "truncated"
   ],
   "title": "LogOutcome",
   "type": "object"

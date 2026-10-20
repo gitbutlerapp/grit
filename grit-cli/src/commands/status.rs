@@ -409,10 +409,12 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
     let ahead = ahead_total;
     let behind = behind_total;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let commits = ahead_commits
-        .iter()
-        .map(|c| CommitJson::from_summary(c, now))
-        .collect();
+    let ahead_oids: Vec<_> = ahead_commits.iter().map(|c| c.oid).collect();
+    let commits = if ahead_oids.is_empty() {
+        Vec::new()
+    } else {
+        crate::commits_json::CommitJsonLoader::new(&repo)?.load(&repo, &ahead_oids, now)?
+    };
 
     let staged: Vec<ChangeJson> = model.staged.iter().map(change_json).collect();
     let unstaged: Vec<ChangeJson> = model.unstaged.iter().map(change_json).collect();

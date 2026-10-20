@@ -114,9 +114,10 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry has `oid`, `subject`, `author` (`name`, `email`, `date` in RFC 3339 — same shape as [`grit show`](../show/)), and `relative_date` (e.g. `3 days ago`). |
+| `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry uses the shared [`CommitJson`](../README/#commit-json-object-commitjson) shape (`oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, optional `relative_date`). |
 | `commits[].stat` | object | Only with `--stat`: `files` (each with `path`, `old_path` for renames, `status`, `insertions`, `deletions`, `binary`), `files_changed`, `insertions` and `deletions`. The same shape as `stat` in [`grit show`](../show/). |
 | `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--cursor` for the next page, or `null` when there is no more history or when the walk does not support paging (paths, `--reverse`, and similar). |
+| `truncated` | boolean | `true` when more commits matched the query than returned in this page (`-n` or the default page size). |
 
 Example:
 
@@ -144,7 +145,8 @@ Example:
       "relative_date": "4 days ago"
     }
   ],
-  "next": null
+  "next": null,
+  "truncated": false
 }
 ```
 

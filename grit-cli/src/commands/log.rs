@@ -12,7 +12,8 @@ use std::io::Write;
 
 use crate::commands::diff::diff_of_commit;
 use crate::commands::show::{diffstat, render_stat, use_color, DiffStat};
-use crate::context::{self, subject_line, CommitSummary};
+use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
+use crate::context::{self, CommitSummary};
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::rev_select::RevSelectArgs;
@@ -27,6 +28,8 @@ pub struct LogOutcome {
     pub commits: Vec<LogCommit>,
     /// Opaque continuation cursor for `--cursor`, or `null` when there is no further history.
     pub next: Option<String>,
+    /// True when more commits matched the query than returned in this page (`-n` or default page size).
+    pub truncated: bool,
     #[serde(skip)]
     #[schemars(skip)]
     commit_rows: Vec<CommitSummary>,
@@ -116,8 +119,9 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
         let page_size = rev.max_count.unwrap_or(PAGE);
         let page = LogWalkCursor::step(&repo, resume.query(), Some(&resume), page_size)
             .context("could not list commits")?;
+        let truncated = page.next.is_some();
         let next = page.next.map(|c| c.encode()).transpose()?;
-        return build_outcome(&repo, &page.commits, stat, next);
+        return build_outcome(&repo, &page.commits, stat, next, truncated);
     }
 
     let token_refs = rev.rev_tokens(&["HEAD"]);
@@ -129,13 +133,16 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
 
     if use_rev_walk {
         if rev.max_count == Some(0) {
-            return build_outcome(&repo, &[], stat, None);
+            return build_outcome(&repo, &[], stat, None, false);
         }
         let walk = repo.rev_walk();
+        let mut fetch_opts = opts.clone();
+        fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
         let oids = walk
-            .commits(&token_refs, &opts)
+            .commits(&token_refs, &fetch_opts)
             .context("could not list commits")?;
-        return build_outcome(&repo, &oids, stat, None);
+        let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
+        return build_outcome(&repo, &oids, stat, None, truncated);
     }
 
     let query = LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?
@@ -143,8 +150,9 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
 
     let page =
         LogWalkCursor::step(&repo, &query, None, page_size).context("could not list commits")?;
+    let truncated = page.next.is_some();
     let next = page.next.map(|c| c.encode()).transpose()?;
-    build_outcome(&repo, &page.commits, stat, next)
+    build_outcome(&repo, &page.commits, stat, next, truncated)
 }
 
 fn build_outcome(
@@ -152,31 +160,21 @@ fn build_outcome(
     oids: &[ObjectId],
     stat: bool,
     next: Option<String>,
+    truncated: bool,
 ) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
+    let loader = CommitJsonLoader::new(repo)?;
+    let (loaded, commit_rows) = loader.load_with_summaries(repo, oids, now)?;
 
-    let commit_rows = oids
-        .iter()
-        .map(|oid| {
-            let commit = context::read_commit(repo, oid)?;
-            let (author, timestamp) = context::author_and_time(&commit.author);
-            Ok(CommitSummary {
-                oid: *oid,
-                subject: subject_line(&commit.message),
-                author,
-                author_ident: commit.author.clone(),
-                timestamp,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let commits = commit_rows
-        .iter()
-        .map(|row| {
+    let commits = loaded
+        .into_iter()
+        .zip(oids.iter())
+        .map(|(commit, oid)| {
             Ok(LogCommit {
-                commit: CommitJson::from_summary(row, now),
+                commit,
                 stat: if stat {
-                    Some(diffstat(&diff_of_commit(repo, &row.oid)?))
+                    Some(diffstat(&diff_of_commit(repo, oid)?))
                 } else {
                     None
                 },
@@ -187,6 +185,7 @@ fn build_outcome(
     Ok(LogOutcome {
         commits,
         next,
+        truncated,
         commit_rows,
     })
 }

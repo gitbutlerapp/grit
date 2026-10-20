@@ -7,6 +7,7 @@
 
 mod cli_messages;
 mod commands;
+mod commits_json;
 mod context;
 mod dates;
 mod diagnostics;

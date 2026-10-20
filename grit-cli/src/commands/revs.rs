@@ -1,22 +1,15 @@
 //! `grit revs` — list or count commits matching revision ranges.
 
 use anyhow::{bail, Result};
-use grit_lib::objects::{read_commit_subject_line, ObjectId};
 use grit_lib::revwalk::LeftRightCounts;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
+use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::rev_select::RevSelectArgs;
-
-/// One commit row in `grit revs` output.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RevsCommitRow {
-    pub oid: String,
-    pub subject: String,
-}
 
 /// Left/right counts for a symmetric range (`--left-right --count`).
 #[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
@@ -38,12 +31,16 @@ impl From<LeftRightCounts> for RevsLeftRightCount {
 #[derive(Serialize, JsonSchema)]
 pub struct RevsOutcome {
     /// Listed commits in `rev-list` order (empty when `--count` is set).
-    pub commits: Vec<RevsCommitRow>,
+    pub commits: Vec<CommitJson>,
     /// Total reachable commits when `--count` is set without `--left-right`; otherwise `null`.
     pub count: Option<usize>,
     /// Left/right counts when `--count` and `--left-right` are set; otherwise `null`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub left_right: Option<RevsLeftRightCount>,
+    /// True when more commits matched than returned (`-n`).
+    pub truncated: bool,
+    /// Continuation cursor when the list is resumable; always `null` for `revs` today.
+    pub next: Option<String>,
 }
 
 impl HumanRender for RevsOutcome {
@@ -124,6 +121,8 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
                 commits: Vec::new(),
                 count: if left_right { None } else { Some(0) },
                 left_right: left_right.then_some(RevsLeftRightCount { left: 0, right: 0 }),
+                truncated: false,
+                next: None,
             });
         }
         if left_right {
@@ -132,6 +131,8 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
                 commits: Vec::new(),
                 count: None,
                 left_right: Some(lr.into()),
+                truncated: false,
+                next: None,
             });
         }
         let n = walk.count(&token_refs, &opts)?;
@@ -139,6 +140,8 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
             commits: Vec::new(),
             count: Some(n),
             left_right: None,
+            truncated: false,
+            next: None,
         });
     }
 
@@ -147,29 +150,22 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
             commits: Vec::new(),
             count: None,
             left_right: None,
+            truncated: false,
+            next: None,
         });
     }
-    let oids = walk.commits(&token_refs, &opts)?;
-    let commits = load_commit_rows(&repo, &oids)?;
+    let mut fetch_opts = opts.clone();
+    fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
+    let oids = walk.commits(&token_refs, &fetch_opts)?;
+    let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
+    let now = context::wall_clock_now(env).unix_timestamp();
+    let loader = CommitJsonLoader::new(&repo)?;
+    let commits = loader.load(&repo, &oids, now)?;
     Ok(RevsOutcome {
         commits,
         count: None,
         left_right: None,
+        truncated,
+        next: None,
     })
-}
-
-fn load_commit_rows(
-    repo: &grit_lib::repo::Repository,
-    oids: &[ObjectId],
-) -> Result<Vec<RevsCommitRow>> {
-    let mut out = Vec::with_capacity(oids.len());
-    for oid in oids {
-        let obj = repo.odb().read(oid)?;
-        let subject = read_commit_subject_line(&obj.data)?;
-        out.push(RevsCommitRow {
-            oid: oid.to_hex(),
-            subject,
-        });
-    }
-    Ok(out)
 }
