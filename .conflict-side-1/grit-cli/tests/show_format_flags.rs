@@ -162,4 +162,39 @@ fn show_unified_and_w_flags() {
     let u5 = grit(&repo, &["show", "HEAD", "-U5"]);
     assert!(u5.ok(), "{}", u5.dump("-U5"));
     assert_ne!(u0.stdout, u5.stdout, "context width should change output");
+
+    let w = grit(&repo, &["show", "HEAD", "-W"]);
+    assert!(w.ok(), "{}", w.dump("-W"));
+    let plain = grit(&repo, &["show", "HEAD"]);
+    assert!(plain.ok(), "{}", plain.dump("plain"));
+    assert_ne!(
+        w.stdout, plain.stdout,
+        "-W should expand hunks to function context"
+    );
+}
+
+#[test]
+fn diff_stat_includes_staged_and_unstaged_like_patch() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("a.txt"), b"a\n").expect("write a");
+    std::fs::write(dir.path().join("b.txt"), b"b\n").expect("write b");
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "init"]);
+    std::fs::write(dir.path().join("a.txt"), b"a2\n").expect("write a staged");
+    git(dir.path(), &["add", "a.txt"]);
+    std::fs::write(dir.path().join("b.txt"), b"b2\n").expect("write b unstaged");
+    let grit_init = grit(dir.path(), &["init"]);
+    assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
+    let patch = gs_json(dir.path(), &["diff"]);
+    let stat = gs_json(dir.path(), &["diff", "--stat"]);
+    assert_eq!(
+        patch["files"].as_array().map(|a| a.len()),
+        stat["files"].as_array().map(|a| a.len()),
+        "diff --stat must list the same files as the default patch diff"
+    );
+    assert!(
+        stat["files"].as_array().is_some_and(|a| a.len() >= 2),
+        "expected staged a.txt and unstaged b.txt: {stat}"
+    );
 }

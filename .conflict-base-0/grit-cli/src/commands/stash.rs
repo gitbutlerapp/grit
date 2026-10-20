@@ -119,7 +119,7 @@ impl HumanRender for StashShowOutcome {
             let color = std::io::stdout().is_terminal()
                 && grit_lib::porcelain::terminal::ansi_supported()
                 && std::env::var_os("NO_COLOR").is_none();
-            show::render_stat(w, stat, color, None)?;
+            crate::diff_render::render_stat(w, stat, color, None)?;
         }
         Ok(())
     }
@@ -132,7 +132,7 @@ impl MarkdownRender for StashShowOutcome {
             return Ok(());
         }
         if let Some(stat) = &self.stat {
-            show::render_markdown_stat(w, stat, None)?;
+            crate::diff_render::render_markdown_stat(w, stat, None)?;
         }
         Ok(())
     }

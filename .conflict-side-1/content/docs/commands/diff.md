@@ -33,7 +33,8 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--shortstat` | Only the summary line (`N files changed, …`). |
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
-| `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (default 3). |
+| `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (bare `-U` means 3). |
+| `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |

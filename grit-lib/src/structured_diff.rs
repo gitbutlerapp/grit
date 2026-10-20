@@ -159,8 +159,7 @@ pub fn structured_text_diff(
     new_text: &str,
     options: DiffOptions,
 ) -> StructuredTextDiff {
-    let mut hunks =
-        line_engine::line_hunks(old_text, new_text, &options, options.word_level_inline);
+    let mut hunks = line_engine::line_hunks(old_text, new_text, &options, options.function_context);
     if options.word_level_inline {
         apply_word_level_inline(&mut hunks, old_text, new_text);
     }
@@ -595,7 +594,7 @@ mod tests {
     fn structured_hunk_retains_enclosing_function_context() {
         let old = "fn foo() {\n  let x = 1;\n}\n";
         let new = "fn foo() {\n  let x = 2;\n}\n";
-        let d = structured_text_diff(old, new, DiffOptions::default());
+        let d = structured_text_diff(old, new, DiffOptions::default().with_function_context(true));
         let h = &d.hunks[0];
         assert_eq!(h.context.as_deref(), Some("fn foo() {"));
     }

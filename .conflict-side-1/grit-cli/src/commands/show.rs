@@ -122,12 +122,32 @@ pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
         &repo,
         &commit_oid,
         CommitDiffOptions {
-            paths: opts.paths,
+            paths: opts.paths.clone(),
             format: opts.format,
             word_level_inline: opts.word_level_inline,
         },
     )?;
-    let stat = diffstat_from_files(&diff.files);
+    let stat = match opts.format.detail() {
+        grit_lib::diff::DiffDetail::NameOnly | grit_lib::diff::DiffDetail::NameStatus => {
+            let stat_diff = crate::commands::diff::diff_for_commit(
+                &repo,
+                &commit_oid,
+                CommitDiffOptions {
+                    paths: opts.paths,
+                    format: {
+                        let mut f = opts.format;
+                        f.stat = true;
+                        f.name_only = false;
+                        f.name_status = false;
+                        f
+                    },
+                    word_level_inline: false,
+                },
+            )?;
+            diffstat_from_files(&stat_diff.files)
+        }
+        _ => diffstat_from_files(&diff.files),
+    };
     let files = diff.files.clone();
     let totals = diff.totals;
 

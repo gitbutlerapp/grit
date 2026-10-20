@@ -477,7 +477,7 @@ where
         UnifiedEmitOptions {
             context_lines,
             inter_hunk_context,
-            function_context: false,
+            function_context,
         },
         None,
     )
@@ -7205,65 +7205,67 @@ pub fn detect_renames_with_policy(
                 }
                 odb.read(&deleted[remaining_deleted[i]].old_oid)
                     .ok()
-                    .map(|obj| normalize_bytes_for_rename(obj.data))
-            };
-            let load_added_blob = |i: usize| -> Option<Vec<u8>> {
-                if !load_added[i] {
-                    return None;
-                }
+                    .map(|obj| crate::crlf::crlf_to_lf(&obj.data))
+            });
+        let added_contents =
+            parallel_load_optional_blobs(odb, remaining_added.len(), par_opts, 0, |i| {
                 read_added_entry_bytes(odb, &added[remaining_added[i]], work_root)
-                    .map(normalize_bytes_for_rename)
-            };
-            let (deleted_contents, added_contents) = if loads_needed <= 32 {
-                (
-                    (0..remaining_deleted.len())
-                        .map(load_deleted_blob)
-                        .collect(),
-                    (0..remaining_added.len()).map(load_added_blob).collect(),
-                )
-            } else {
-                (
-                    parallel_load_optional_blobs(
-                        odb,
-                        remaining_deleted.len(),
-                        par_opts,
-                        0,
-                        load_deleted_blob,
-                    ),
-                    parallel_load_optional_blobs(
-                        odb,
-                        remaining_added.len(),
-                        par_opts,
-                        0,
-                        load_added_blob,
-                    ),
-                )
-            };
+                    .map(|data| crate::crlf::crlf_to_lf(&data))
+            });
 
-            let mut inexact_scores: Vec<(u32, usize, usize)> = Vec::new();
-            for (row, col) in candidate_pairs {
+        let est_bytes: usize = deleted_contents
+            .iter()
+            .chain(added_contents.iter())
+            .filter_map(|opt| opt.as_ref().map(|b| b.len()))
+            .sum();
+
+        let score_rows: Vec<Vec<(u32, usize, usize)>> = parallel_map_indices(
+            odb,
+            remaining_deleted.len(),
+            par_opts,
+            est_bytes,
+            |row| -> std::result::Result<Vec<(u32, usize, usize)>, std::convert::Infallible> {
                 let di = remaining_deleted[row];
-                let ai = remaining_added[col];
-                let (Some(old_data), Some(new_data)) =
-                    (&deleted_contents[row], &added_contents[col])
-                else {
-                    continue;
-                };
-                let score = line_hash_similarity_score(old_data, new_data);
-                if score >= threshold {
-                    inexact_scores.push((score, di, ai));
+                let del = &deleted[di];
+                let mut out: Vec<(u32, usize, usize)> = Vec::new();
+                for (col, &ai) in remaining_added.iter().enumerate() {
+                    let add = &added[ai];
+                    if !is_regularish_mode(&del.old_mode) || !is_regularish_mode(&add.new_mode) {
+                        continue;
+                    }
+                    let score = match (&deleted_contents[row], &added_contents[col]) {
+                        (Some(old_data), Some(new_data)) => {
+                            if !rename_pair_size_reachable(
+                                old_data.len(),
+                                new_data.len(),
+                                threshold,
+                            ) {
+                                0
+                            } else {
+                                line_hash_similarity_score(old_data, new_data)
+                            }
+                        }
+                        _ => 0,
+                    };
+                    if score >= threshold {
+                        out.push((score, di, ai));
+                    }
                 }
-            }
-            sort_rename_scores(&mut inexact_scores, &deleted, &added);
-            apply_rename_scores(
-                &inexact_scores,
-                &deleted,
-                &added,
-                &mut used_deleted,
-                &mut used_added,
-                &mut renames,
-            );
-        }
+                Ok(out)
+            },
+        )
+        .expect("rename score rows");
+        let mut inexact_scores: Vec<(u32, usize, usize)> =
+            score_rows.into_iter().flatten().collect();
+        sort_rename_scores(&mut inexact_scores, &deleted, &added);
+        apply_rename_scores(
+            &inexact_scores,
+            &deleted,
+            &added,
+            &mut used_deleted,
+            &mut used_added,
+            &mut renames,
+        );
     }
 
     // Collect unmatched entries.

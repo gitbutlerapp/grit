@@ -109,9 +109,7 @@ pub fn tree_diff_stat_parallel(
     if entries.is_empty() {
         return Ok(Vec::new());
     }
-    let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
-    par_opts.min_items = 0;
-    par_opts.min_total_bytes = None;
+    let par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
     let store = odb.pack_store_for(odb.objects_dir());
     let rows = try_par_map_with_local(
         &entries,
@@ -172,9 +170,7 @@ pub fn tree_diff_structured_parallel(
         return Ok(Vec::new());
     }
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
-    let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
-    par_opts.min_items = 0;
-    par_opts.min_total_bytes = None;
+    let par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
     let store = odb.pack_store_for(odb.objects_dir());
     let rows = try_par_map_with_local(
         &entries,

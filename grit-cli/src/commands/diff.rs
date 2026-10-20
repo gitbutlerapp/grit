@@ -664,7 +664,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         disambiguate_diff_revision_and_paths(&repo, opts.commits, opts.paths);
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
-    opts.format.apply_context(&mut diff_options);
+    opts.format.apply_to_options(&mut diff_options);
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
@@ -863,7 +863,7 @@ pub fn diff_for_commit(
     let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
-    opts.format.apply_context(&mut diff_options);
+    opts.format.apply_to_options(&mut diff_options);
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;

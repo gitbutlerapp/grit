@@ -526,6 +526,11 @@ enum Command {
     Show {
         /// The commit, tag, or branch to show.
         object: Option<String>,
+        /// Limit the diff to these paths (after `--`).
+        #[arg(value_name = "PATH", last = true)]
+        paths: Vec<String>,
+        #[command(flatten)]
+        format: diff_format::DiffFormatArgs,
     },
     /// Show what's changed and where you are (this is the default).
     #[command(alias = "st")]
@@ -1133,7 +1138,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             opts,
             ctx,
         ),
-        Command::Show { object } => emit(&commands::show::run(object)?, opts, ctx),
+        Command::Show {
+            object,
+            paths,
+            format,
+        } => emit(
+            &commands::show::run(commands::show::ShowRunOptions {
+                object,
+                paths,
+                format,
+                word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
+                    && commands::diff::diff_word_level_inline_for_output(),
+            })?,
+            opts,
+            ctx,
+        ),
         Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add {
