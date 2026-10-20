@@ -69,7 +69,16 @@ impl RefStorageFormat {
     /// Propagates I/O and repository format errors when local config is invalid.
     pub fn detect(git_dir: &Path) -> Result<Self> {
         let parsed = read_repository_format_from_git_dir(git_dir)?;
-        validate_repository_format_parsed(&parsed)?;
+        Self::from_repository_format(&parsed)
+    }
+
+    /// Resolve ref storage from an already-parsed repository-local format block.
+    ///
+    /// # Errors
+    ///
+    /// Propagates repository format validation and invalid `extensions.refStorage` values.
+    pub(crate) fn from_repository_format(parsed: &crate::repo::RepositoryFormat) -> Result<Self> {
+        validate_repository_format_parsed(parsed)?;
         match parsed.ref_storage.as_deref() {
             None => Ok(Self::Files),
             Some(raw) => Self::parse_config_value(raw),
