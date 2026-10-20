@@ -4,9 +4,7 @@ use std::io::Cursor;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{
-    write_commit_log_patch, LogPatchCommitHeader, LogPatchDiffOptions, LogPatchOptions,
-};
+use grit_lib::diff::{write_commit_log_patch, DiffOptions, LogPatchCommitHeader, LogPatchOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
@@ -114,7 +112,7 @@ fn index_line_abbrev_for_colliding_blobs_matches_git_show() {
     let head_oid = grit_lib::objects::ObjectId::from_hex(head_hex.trim()).expect("parse HEAD oid");
 
     let patch_opts = LogPatchOptions {
-        diff: LogPatchDiffOptions::default(),
+        diff: DiffOptions::default(),
         abbrev_len: 7,
         commit_header: LogPatchCommitHeader::FormatPercentH,
     };

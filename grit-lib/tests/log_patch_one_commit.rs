@@ -4,9 +4,7 @@ use std::io::Cursor;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{
-    write_commit_log_patch, LogPatchCommitHeader, LogPatchDiffOptions, LogPatchOptions,
-};
+use grit_lib::diff::{write_commit_log_patch, DiffOptions, LogPatchCommitHeader, LogPatchOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
@@ -52,7 +50,7 @@ fn log_patch_one_commit_env() {
     let repo = Repository::discover(Some(&corpus), &RepositoryOptions::empty()).expect("open");
     let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
     let patch_opts = LogPatchOptions {
-        diff: LogPatchDiffOptions::default(),
+        diff: DiffOptions::default(),
         commit_header: LogPatchCommitHeader::FormatPercentH,
         ..LogPatchOptions::git_default(&config)
     };

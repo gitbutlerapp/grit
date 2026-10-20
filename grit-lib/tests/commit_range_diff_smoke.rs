@@ -1,8 +1,6 @@
 //! Smoke test for parallel commit-tree structured diff (library path behind `grit diff A B`).
 
-use grit_lib::diff::{
-    diff_trees, structured::StructuredDiffOptions, tree_diff_structured_parallel,
-};
+use grit_lib::diff::{diff_trees, tree_diff_structured_parallel, DiffOptions};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -51,10 +49,9 @@ fn commit_range_structured_diff_parallel_matches_serial() {
     assert_eq!(entries.len(), FILE_COUNT);
 
     let config = repo.config().expect("config");
-    let opts = StructuredDiffOptions {
-        context_lines: 3,
-        word_level_inline: false,
-    };
+    let opts = DiffOptions::default()
+        .with_context_lines(3)
+        .with_word_level_inline(false);
     let serial = tree_diff_structured_parallel(
         repo.odb(),
         entries.clone(),

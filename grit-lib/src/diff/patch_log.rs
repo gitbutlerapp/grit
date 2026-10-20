@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use crate::attributes::load_gitattributes_for_check_attr_source;
-use crate::blame::{parse_diff_algorithm_name, BlameDiffAlgorithm};
 use crate::commit_pretty::{
     abbrev_hex, approximate_object_count, auto_abbrev_len_for_object_count,
 };
 use crate::config::ConfigSet;
+use crate::diff::options::DiffOptions;
 use crate::error::Result;
 use crate::merge_file;
 use crate::objects::CommitData;
@@ -19,64 +19,7 @@ use crate::quote_path::format_diff_path_with_prefix;
 use crate::repo::Repository;
 use crate::userdiff::{matcher_for_path_parsed, FuncnameMatcher};
 
-use super::{
-    diff_trees, empty_blob_oid, write_unified_diff_with_prefix_and_funcname_and_algorithm,
-    zero_oid, DiffEntry, DiffStatus,
-};
-
-/// Line diff settings for [`write_commit_log_patch`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LogPatchDiffOptions {
-    /// Context lines (`-U`, default 3).
-    pub context_lines: usize,
-    /// `--inter-hunk-context` (default 0).
-    pub inter_hunk_context: usize,
-    /// Line diff algorithm (Myers, patience, …).
-    pub algorithm: similar::Algorithm,
-    /// Use Git's histogram engine (`diff.algorithm = histogram`).
-    pub use_git_histogram: bool,
-    /// Apply Git's indent heuristic when generating hunks.
-    pub indent_heuristic: bool,
-}
-
-impl Default for LogPatchDiffOptions {
-    fn default() -> Self {
-        Self {
-            context_lines: 3,
-            inter_hunk_context: 0,
-            algorithm: similar::Algorithm::Myers,
-            use_git_histogram: false,
-            indent_heuristic: false,
-        }
-    }
-}
-
-impl LogPatchDiffOptions {
-    /// Resolve options from repository config (`diff.algorithm`, indent heuristic).
-    #[must_use]
-    pub fn from_config(config: &ConfigSet) -> Self {
-        let mut opts = Self::default();
-        if let Some(name) = config.get("diff.algorithm") {
-            if let Some(parsed) = parse_diff_algorithm_name(&name) {
-                match parsed {
-                    BlameDiffAlgorithm::Histogram => {
-                        opts.use_git_histogram = true;
-                        opts.algorithm = similar::Algorithm::Myers;
-                    }
-                    BlameDiffAlgorithm::Patience => {
-                        opts.algorithm = similar::Algorithm::Patience;
-                    }
-                    BlameDiffAlgorithm::Minimal => {
-                        opts.algorithm = similar::Algorithm::Lcs;
-                    }
-                    BlameDiffAlgorithm::Myers => {}
-                }
-            }
-        }
-        opts.indent_heuristic = super::resolve_indent_heuristic(config, false, false);
-        opts
-    }
-}
+use super::{diff_trees, empty_blob_oid, zero_oid, DiffEntry, DiffStatus};
 
 /// How much commit metadata precedes each patch in [`write_commit_log_patch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -92,7 +35,7 @@ pub enum LogPatchCommitHeader {
 #[derive(Debug, Clone)]
 pub struct LogPatchOptions {
     /// Unified diff hunk settings.
-    pub diff: LogPatchDiffOptions,
+    pub diff: DiffOptions,
     /// Minimum abbreviated oid length (`core.abbrev`, default 7).
     pub abbrev_len: usize,
     /// Commit header shape before patches.
@@ -104,7 +47,7 @@ impl LogPatchOptions {
     #[must_use]
     pub fn git_default(config: &ConfigSet) -> Self {
         Self {
-            diff: LogPatchDiffOptions::from_config(config),
+            diff: DiffOptions::from_config(config),
             abbrev_len: 7,
             commit_header: LogPatchCommitHeader::Full,
         }
@@ -587,42 +530,32 @@ fn write_diff_entry_log_patch_with_tree<W: Write>(
     let funcname_ref = funcname_matcher.as_ref();
     if byte_oriented {
         let mut patch_buf = Vec::new();
-        write_unified_diff_with_prefix_and_funcname_and_algorithm(
+        super::write_unified_diff_from_diff_options(
             &mut patch_buf,
             &old_text,
             &new_text,
             &old_path,
             &new_path,
-            d.context_lines,
-            d.inter_hunk_context,
             "a/",
             "b/",
             funcname_ref,
-            d.algorithm,
-            false,
-            d.use_git_histogram,
-            d.indent_heuristic,
+            d,
             QUOTE_FULLY,
         )?;
         let patch_str = std::str::from_utf8(&patch_buf)
             .map_err(|_| crate::error::Error::CorruptObject("patch re-encoding failed".into()))?;
         out.write_all(&crate::commit_encoding::encode_latin1_lossy(patch_str))?;
     } else {
-        write_unified_diff_with_prefix_and_funcname_and_algorithm(
+        super::write_unified_diff_from_diff_options(
             out,
             &old_text,
             &new_text,
             &old_path,
             &new_path,
-            d.context_lines,
-            d.inter_hunk_context,
             "a/",
             "b/",
             funcname_ref,
-            d.algorithm,
-            false,
-            d.use_git_histogram,
-            d.indent_heuristic,
+            d,
             QUOTE_FULLY,
         )?;
     }

@@ -10,6 +10,7 @@ mod commands;
 mod context;
 mod dates;
 mod diagnostics;
+mod diff_args;
 mod json_error;
 mod json_filter;
 #[cfg(test)]
@@ -517,6 +518,8 @@ enum Command {
         /// Limit the diff to these paths (after `--`, like `grit log`).
         #[arg(value_name = "PATH", last = true)]
         paths: Vec<String>,
+        #[command(flatten)]
+        format: diff_args::DiffFormatArgs,
     },
     /// Show information about a commit, tag, or branch (defaults to HEAD).
     Show {
@@ -1114,6 +1117,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             against,
             commits,
             paths,
+            format,
         } => emit(
             &commands::diff::run(commands::diff::DiffRunOptions {
                 staged,
@@ -1121,6 +1125,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 against,
                 commits,
                 paths,
+                format,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
             })?,
