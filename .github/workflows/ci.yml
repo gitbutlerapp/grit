@@ -118,6 +118,28 @@ jobs:
 
       - run: cargo clippy --workspace -- -D warnings
 
+  check-windows-msvc:
+    name: check-windows-msvc
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: check-windows-msvc
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Compiles cfg(windows) paths (e.g. worktree_scan) without a Windows runner.
+      - run: cargo check -p grit-lib --target x86_64-pc-windows-msvc
+
   public-api:
     name: public-api
     runs-on: ubuntu-latest

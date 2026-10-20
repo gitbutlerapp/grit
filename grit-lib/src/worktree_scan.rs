@@ -657,15 +657,17 @@ where
 
     let abs_dir = dir_abs(dir);
     #[cfg(windows)]
-    if blobs.len() == 1 {
-        let blob = &blobs[0];
-        if has_symlink_ancestor(&blob.rel_path) {
-            visit(blob.entry_index, &blob.rel_path, BlobDiskLookup::Missing)?;
+    if entry_indices.len() == 1 {
+        let entry_index = entry_indices[0];
+        let rel_path = entry_rel_path(index, entry_index)?;
+        if has_symlink_ancestor(rel_path) {
+            visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
             return Ok(());
         }
-        let target = file_abs(&blob.rel_path);
-        let lookup = lookup_lone_blob_in_directory(&abs_dir, &blob.file_name, &target);
-        visit(blob.entry_index, &blob.rel_path, lookup)?;
+        let file_name = entry_file_name(index, entry_index)?;
+        let target = file_abs(rel_path);
+        let lookup = lookup_lone_blob_in_directory(&abs_dir, file_name, &target);
+        visit(entry_index, rel_path, lookup)?;
         return Ok(());
     }
 
@@ -765,13 +767,13 @@ fn lookup_lone_blob_in_directory(
         }
         if name == index_file_name || dir_entry_name_matches(index_file_name, &entry) {
             return match dir_entry_metadata(&entry) {
-                Ok(m) => BlobDiskLookup::Present(m),
+                Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
                 Err(e) => BlobDiskLookup::Io(e),
             };
         }
     }
     match symlink_metadata_path(target_abs) {
-        Ok(meta) => BlobDiskLookup::Present(meta),
+        Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
         Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
             BlobDiskLookup::Missing
         }
