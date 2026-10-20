@@ -1,9 +1,10 @@
 //! Typed revision-range parsing and high-level rev-walk queries on [`super::RevWalk`].
 use crate::error::{Error, Result};
 use crate::merge_base::{
-    count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
-    merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of_cutoffs,
-    ReachableCountFilter, ReachableWalkCommitterCutoffs, ReachableWalkLimit,
+    count_commits_reachable_excluding_ancestors_of, count_symmetric_ahead_behind,
+    is_ancestor as merge_base_is_ancestor, merge_bases_first_vs_rest,
+    walk_commits_reachable_excluding_ancestors_of_cutoffs, ReachableCountFilter,
+    ReachableWalkCommitterCutoffs, ReachableWalkLimit,
 };
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
@@ -176,6 +177,19 @@ fn ref_glob_tips(repo: &Repository, prefix: &str, pattern: &Option<String>) -> R
     Ok(tips.into_iter().map(|(_, oid)| oid.to_hex()).collect())
 }
 
+/// When `spec` is `REF~N` (optional ref, required `~` + digits), returns `(ref, N)`.
+fn parse_simple_ancestor_offset(spec: &str) -> Option<(&str, usize)> {
+    let spec = spec.trim();
+    let tilde = spec.rfind('~')?;
+    let (base, tail) = spec.split_at(tilde);
+    let tail = &tail[1..];
+    if tail.is_empty() || !tail.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: usize = tail.parse().ok()?;
+    Some((base, n))
+}
+
 fn merge_filter_to_parent_bounds(merges: MergeFilter) -> (Option<usize>, Option<usize>) {
     match merges {
         MergeFilter::Any => (None, None),
@@ -319,6 +333,8 @@ impl<'repo> RevWalk<'repo> {
             && !options.reverse
             && options.since.is_none()
             && options.until.is_none()
+            && options.merges == MergeFilter::Any
+            && !options.first_parent
         {
             if let Some((left_spec, right_spec)) = split_triple_dot_range(tokens[0]) {
                 let left_spec = if left_spec.is_empty() {
@@ -331,38 +347,35 @@ impl<'repo> RevWalk<'repo> {
                 } else {
                     right_spec
                 };
-                let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
-                let filter = ReachableCountFilter {
-                    min_parents,
-                    max_parents,
-                    first_parent_only: options.first_parent,
-                    since: None,
-                    until: None,
-                };
                 return repo.odb().with_pack_read_context(|| {
-                    let left = peel_to_commit_for_merge_base(
-                        repo,
-                        resolve_revision_for_range_end(repo, left_spec)?,
-                    )?;
                     let right = peel_to_commit_for_merge_base(
                         repo,
                         resolve_revision_for_range_end(repo, right_spec)?,
                     )?;
-                    let left_count = count_commits_reachable_excluding_ancestors_of(
+                    if let Some((base, n)) = parse_simple_ancestor_offset(left_spec) {
+                        let anchor_spec = if base.is_empty() { right_spec } else { base };
+                        let anchor = peel_to_commit_for_merge_base(
+                            repo,
+                            resolve_revision_for_range_end(repo, anchor_spec)?,
+                        )?;
+                        if anchor == right {
+                            return Ok(LeftRightCounts { left: 0, right: n });
+                        }
+                        let left = crate::rev_parse::nth_first_parent_ancestor(repo, anchor, n)?;
+                        let (ahead, behind) = count_symmetric_ahead_behind(repo, left, right)?;
+                        return Ok(LeftRightCounts {
+                            left: ahead,
+                            right: behind,
+                        });
+                    }
+                    let left = peel_to_commit_for_merge_base(
                         repo,
-                        &[left],
-                        &[right],
-                        filter,
+                        resolve_revision_for_range_end(repo, left_spec)?,
                     )?;
-                    let right_count = count_commits_reachable_excluding_ancestors_of(
-                        repo,
-                        &[right],
-                        &[left],
-                        filter,
-                    )?;
+                    let (ahead, behind) = count_symmetric_ahead_behind(repo, left, right)?;
                     Ok(LeftRightCounts {
-                        left: left_count,
-                        right: right_count,
+                        left: ahead,
+                        right: behind,
                     })
                 });
             }

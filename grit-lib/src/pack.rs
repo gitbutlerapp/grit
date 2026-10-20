@@ -178,21 +178,23 @@ pub(crate) mod pack_cache {
             return Ok(None);
         }
         SINGLE_PACK_READER.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            if slot.as_ref().is_none_or(|(dir, _)| dir != objects_dir) {
-                *slot = super::SingleLocalPackReader::open_allow_loose(objects_dir)
+            let mut cached = cell.borrow_mut().take();
+            if cached.as_ref().is_none_or(|(dir, _)| dir != objects_dir) {
+                cached = super::SingleLocalPackReader::open_allow_loose(objects_dir)
                     .ok()
                     .flatten()
                     .map(|reader| (objects_dir.to_path_buf(), reader));
             }
-            let Some((_, reader)) = slot.as_mut() else {
-                return Ok(None);
+            let result = match cached.as_mut() {
+                None => Ok(None),
+                Some((_, reader)) => match reader.read_object(oid) {
+                    Ok(obj) => Ok(Some(obj)),
+                    Err(Error::ObjectNotFound(_)) => Ok(None),
+                    Err(err) => Err(err),
+                },
             };
-            match reader.read_object(oid) {
-                Ok(obj) => Ok(Some(obj)),
-                Err(Error::ObjectNotFound(_)) => Ok(None),
-                Err(err) => Err(err),
-            }
+            *cell.borrow_mut() = cached;
+            result
         })
     }
 

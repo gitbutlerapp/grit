@@ -407,9 +407,7 @@ pub fn ahead_behind_of_target_commits(
     if head == target {
         return Ok((0, 0, Vec::new()));
     }
-    let target_is_ancestor = is_ancestor(repo, target, head)?;
-    let head_is_ancestor = is_ancestor(repo, head, target)?;
-
+    let mut cache = CommitGraphCache::new(repo);
     let default_count_filter = ReachableCountFilter {
         min_parents: None,
         max_parents: None,
@@ -417,6 +415,38 @@ pub fn ahead_behind_of_target_commits(
         since: None,
         until: None,
     };
+
+    if try_direct_first_parent_chain_merge_base(&mut cache, head, target)?.is_some() {
+        let behind = count_commits_reachable_excluding_ancestors_of(
+            repo,
+            std::slice::from_ref(&target),
+            &[head],
+            default_count_filter,
+        )?;
+        return Ok((0, behind, Vec::new()));
+    }
+    if try_direct_first_parent_chain_merge_base(&mut cache, target, head)?.is_some() {
+        let (ahead, ahead_oids) = if retain_newest_ahead > 0 {
+            walk_commits_reachable_excluding_ancestors_of(
+                repo,
+                std::slice::from_ref(&head),
+                &[target],
+                ReachableWalkLimit::CountAllRetainNewest(retain_newest_ahead),
+            )?
+        } else {
+            let ahead = count_commits_reachable_excluding_ancestors_of(
+                repo,
+                std::slice::from_ref(&head),
+                &[target],
+                default_count_filter,
+            )?;
+            (ahead, Vec::new())
+        };
+        return Ok((ahead, 0, ahead_oids));
+    }
+
+    let target_is_ancestor = cache.is_ancestor(target, head)?;
+    let head_is_ancestor = cache.is_ancestor(head, target)?;
 
     let (ahead, ahead_oids) = if head_is_ancestor && !target_is_ancestor {
         (0, Vec::new())
@@ -528,6 +558,8 @@ pub struct ReachableWalkState {
     hide: Vec<ObjectId>,
     /// Commits excluded because they are a hide tip or an ancestor of one.
     hide_set: HashSet<ObjectId>,
+    /// Below-`--since` commits processed while the heap may still hide skewed work (Git slop).
+    since_below_slop: i32,
 }
 
 /// Serializable snapshot of [`ReachableWalkState`] for resuming a bounded walk.
@@ -558,6 +590,11 @@ impl ReachableWalkState {
     pub fn new(repo: &Repository, tips: &[ObjectId], hide: &[ObjectId]) -> Result<Self> {
         let hide_vec: Vec<ObjectId> = hide.to_vec();
         let mut cache = CommitGraphCache::new(repo);
+        let mut hide_set = HashSet::new();
+        for &hide_tip in &hide_vec {
+            hide_set.insert(hide_tip);
+            hide_set.extend(cache.ancestor_closure(hide_tip)?);
+        }
         let mut state = Self {
             heap: BinaryHeap::new(),
             done: HashSet::new(),
@@ -566,7 +603,8 @@ impl ReachableWalkState {
             seeded: HashSet::new(),
             seq: 0,
             hide: hide_vec,
-            hide_set: HashSet::new(),
+            hide_set,
+            since_below_slop: 0,
         };
         for &tip in tips {
             if state.hide.contains(&tip) {
@@ -606,6 +644,7 @@ impl ReachableWalkState {
             seq,
             hide_set: HashSet::new(),
             hide,
+            since_below_slop: 0,
         }
     }
 
@@ -638,7 +677,7 @@ impl ReachableWalkState {
     }
 
     fn is_hidden(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<bool> {
-        if self.hide.contains(&oid) || self.hide_set.contains(&oid) {
+        if self.hide_set.contains(&oid) {
             return Ok(true);
         }
         for &hide_tip in &self.hide {
@@ -648,6 +687,17 @@ impl ReachableWalkState {
             }
         }
         Ok(false)
+    }
+
+    /// Git `limit_list` early stop: every queued commit is below `--since`, with no gated parents left.
+    fn since_cutoff_exhausted(&self, cutoffs: ReachableWalkCommitterCutoffs) -> bool {
+        let Some(since) = cutoffs.since else {
+            return self.heap.is_empty();
+        };
+        if self.unfinished_children.values().any(|count| *count > 0) {
+            return false;
+        }
+        self.heap.is_empty() || self.heap.iter().all(|key| key.time < since)
     }
 
     fn push_on_heap(
@@ -682,31 +732,6 @@ impl ReachableWalkState {
         Ok(())
     }
 
-    /// True when some heap commit might still be emitted under `--since` (non-hidden, in range).
-    fn heap_has_emit_candidate_above_since(
-        &mut self,
-        cache: &mut CommitGraphCache<'_>,
-        cutoffs: ReachableWalkCommitterCutoffs,
-    ) -> Result<bool> {
-        let Some(since) = cutoffs.since else {
-            return Ok(!self.heap.is_empty());
-        };
-        let pending: Vec<WalkDateKey> = self.heap.iter().copied().collect();
-        for key in pending {
-            if key.time < since {
-                continue;
-            }
-            if self.is_hidden(cache, key.oid)? {
-                continue;
-            }
-            if cutoffs.until.is_some_and(|until| key.time > until) {
-                continue;
-            }
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
     fn pop_next_emit(
         &mut self,
         cache: &mut CommitGraphCache<'_>,
@@ -722,14 +747,18 @@ impl ReachableWalkState {
             }
             if cutoffs.since.is_some_and(|since| key.time < since) {
                 self.after_processed(cache, oid)?;
-                if self.heap.is_empty() {
-                    return Ok(None);
-                }
-                if !self.heap_has_emit_candidate_above_since(cache, cutoffs)? {
-                    return Ok(None);
+                const SINCE_SLOP: i32 = 100;
+                if self.since_cutoff_exhausted(cutoffs) {
+                    self.since_below_slop += 1;
+                    if self.since_below_slop > SINCE_SLOP {
+                        return Ok(None);
+                    }
+                } else {
+                    self.since_below_slop = 0;
                 }
                 continue;
             }
+            self.since_below_slop = 0;
             let hidden = self.is_hidden(cache, oid)?;
             if hidden {
                 self.after_processed(cache, oid)?;
@@ -1638,15 +1667,17 @@ fn reduce_to_best(
 
 struct CommitGraphCache<'r> {
     repo: &'r Repository,
+    parents: HashMap<ObjectId, Vec<ObjectId>>,
     closures: HashMap<ObjectId, HashSet<ObjectId>>,
     promisor_stop: std::collections::HashSet<ObjectId>,
     shallow_boundaries: HashSet<ObjectId>,
+    /// Committer timestamp (unix seconds) per visited oid, recorded alongside
+    /// parents so the date-pruned [`Self::is_ancestor`] walk needs no extra reads.
+    times: HashMap<ObjectId, i64>,
     /// Commit-graph file, when present: supplies parents + committer time without
     /// decompressing commit objects. Commits absent from it (or octopus merges)
     /// fall back to [`Self::parents_of`]'s object read.
     graph: Option<crate::commit_graph_file::CommitGraphChain>,
-    /// Monotonic pack cursor for single-pack repos (deep-history benchmarks).
-    single_pack: Option<crate::pack::SingleLocalPackReader>,
 }
 
 impl<'r> CommitGraphCache<'r> {
@@ -1674,35 +1705,12 @@ impl<'r> CommitGraphCache<'r> {
         let shallow_boundaries = load_shallow_boundaries(repo.git_dir());
         Self {
             repo,
+            parents: HashMap::new(),
             closures: HashMap::new(),
             promisor_stop,
             shallow_boundaries,
+            times: HashMap::new(),
             graph,
-            single_pack: None,
-        }
-    }
-
-    fn with_linkage<R>(
-        &self,
-        f: impl FnOnce(&mut crate::repo_caches::CommitLinkageCache) -> R,
-    ) -> R {
-        let mut guard = self
-            .repo
-            .caches()
-            .commit_linkage()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        f(&mut guard)
-    }
-
-    fn ensure_single_pack_reader(&mut self) {
-        if self.single_pack.is_some() {
-            return;
-        }
-        let objects_dir = self.repo.git_dir().join("objects");
-        if let Ok(Some(reader)) = crate::pack::SingleLocalPackReader::open_allow_loose(&objects_dir)
-        {
-            self.single_pack = Some(reader);
         }
     }
 
@@ -1727,16 +1735,14 @@ impl<'r> CommitGraphCache<'r> {
     }
 
     fn parents_of(&mut self, oid: ObjectId) -> Result<Vec<ObjectId>> {
-        if let Some(parents) = self.with_linkage(|link| link.parents.get(&oid).cloned()) {
-            return Ok(parents);
+        if let Some(parents) = self.parents.get(&oid) {
+            return Ok(parents.clone());
         }
         #[cfg(test)]
         intersect_walk_test_hooks::record_commit_parent_lookup();
         if self.promisor_stop.contains(&oid) {
-            self.with_linkage(|link| {
-                link.parents.insert(oid, Vec::new());
-                link.times.insert(oid, 0);
-            });
+            self.parents.insert(oid, Vec::new());
+            self.times.insert(oid, 0);
             return Ok(Vec::new());
         }
         if self.shallow_boundaries.contains(&oid) {
@@ -1752,17 +1758,18 @@ impl<'r> CommitGraphCache<'r> {
                 )));
             }
             let commit = parse_commit(&object.data)?;
-            let time = crate::ident::committer_timestamp_for_until_filter(&commit.committer);
-            self.with_linkage(|link| {
-                link.times.insert(oid, time);
-                link.parents.insert(oid, Vec::new());
-            });
+            self.times.insert(
+                oid,
+                crate::ident::committer_timestamp_for_until_filter(&commit.committer),
+            );
+            self.parents.insert(oid, Vec::new());
             return Ok(Vec::new());
         }
         // Fast path: parents + committer time from the commit-graph file (no
         // object decompression). Misses (not in graph / octopus) fall through.
         if let Some(graph) = &self.graph {
             if let Some((parents, ctime)) = graph.graph_commit(&oid) {
+                self.times.insert(oid, ctime);
                 let parents = if self.shallow_boundaries.contains(&oid) {
                     Vec::new()
                 } else {
@@ -1771,10 +1778,7 @@ impl<'r> CommitGraphCache<'r> {
                         .filter(|p| !self.promisor_stop.contains(p))
                         .collect()
                 };
-                self.with_linkage(|link| {
-                    link.times.insert(oid, ctime);
-                    link.parents.insert(oid, parents.clone());
-                });
+                self.parents.insert(oid, parents.clone());
                 return Ok(parents);
             }
         }
@@ -1782,25 +1786,17 @@ impl<'r> CommitGraphCache<'r> {
             Error::InvalidRef(msg) => Error::CorruptObject(msg),
             other => other,
         })?;
-        self.ensure_single_pack_reader();
-        let linkage = if let Some(reader) = self.single_pack.as_mut() {
-            let object = reader.read_object(&commit_oid)?;
-            if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
-            }
-            crate::objects::parse_commit_linkage(&object.data)?
-        } else {
-            let object = self.repo.odb().read(&commit_oid)?;
-            if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
-            }
-            crate::objects::parse_commit_linkage(&object.data)?
-        };
-        let time = crate::ident::committer_timestamp_for_until_filter(&linkage.committer);
+        let object = self.repo.odb().read(&commit_oid)?;
+        if object.kind != ObjectKind::Commit {
+            return Err(Error::CorruptObject(format!(
+                "object {commit_oid} is not a commit"
+            )));
+        }
+        let linkage = crate::objects::parse_commit_linkage(&object.data)?;
+        self.times.insert(
+            oid,
+            crate::ident::committer_timestamp_for_until_filter(&linkage.committer),
+        );
         let parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&commit_oid) {
             Vec::new()
         } else {
@@ -1811,10 +1807,7 @@ impl<'r> CommitGraphCache<'r> {
                 .filter(|p| !self.promisor_stop.contains(p))
                 .collect()
         };
-        self.with_linkage(|link| {
-            link.times.insert(oid, time);
-            link.parents.insert(oid, parents.clone());
-        });
+        self.parents.insert(oid, parents.clone());
         Ok(parents)
     }
 
@@ -1822,13 +1815,11 @@ impl<'r> CommitGraphCache<'r> {
     /// Populated as a side effect of [`Self::parents_of`]; missing/unreadable
     /// objects report `0` (treated as oldest, so they prune away).
     fn commit_time(&mut self, oid: ObjectId) -> Result<i64> {
-        if let Some(t) = self.with_linkage(|link| link.times.get(&oid).copied()) {
-            return Ok(t);
+        if let Some(t) = self.times.get(&oid) {
+            return Ok(*t);
         }
         self.parents_of(oid)?;
-        Ok(self
-            .with_linkage(|link| link.times.get(&oid).copied())
-            .unwrap_or(0))
+        Ok(self.times.get(&oid).copied().unwrap_or(0))
     }
 
     /// Whether `ancestor` is an ancestor of (or equal to) `descendant`.

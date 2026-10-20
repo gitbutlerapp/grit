@@ -401,6 +401,46 @@ fn since_until_match_git() {
             .collect::<Vec<_>>(),
         git_bounded.iter().map(ObjectId::to_hex).collect::<Vec<_>>()
     );
+
+    let base = support::commit_labeled_with_dates(
+        wt,
+        "skew-base",
+        &[],
+        "@1000000000 +0000",
+        "@1000000000 +0000",
+    );
+    let skew_left = support::commit_labeled_with_dates(
+        wt,
+        "skew-left",
+        &[base],
+        "@2000000000 +0000",
+        "@1500000000 +0000",
+    );
+    let skew_right = support::commit_labeled_with_dates(
+        wt,
+        "skew-right",
+        &[base],
+        "@3000000000 +0000",
+        "@1600000000 +0000",
+    );
+    let skew_merge = support::commit_labeled_with_dates(
+        wt,
+        "skew-merge",
+        &[skew_left, skew_right],
+        "@4000000000 +0000",
+        "@1700000000 +0000",
+    );
+    git(wt, &["update-ref", "refs/heads/skew", &skew_merge.to_hex()]);
+    let skew_opts = RevWalkListOptions {
+        since: Some(1_650_000_000),
+        ..RevWalkListOptions::default()
+    };
+    let git_skew = git_rev_list(wt, &["--since=1650000000", "skew"]);
+    let grit_skew = grit_rev_list_oids(&repo, &["skew"], &skew_opts);
+    assert_eq!(
+        grit_skew.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
+        git_skew.iter().map(ObjectId::to_hex).collect::<Vec<_>>()
+    );
 }
 
 #[test]

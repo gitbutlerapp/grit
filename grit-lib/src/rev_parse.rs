@@ -770,6 +770,15 @@ pub fn commit_parents_for_navigation(
     NavParentCache::new(repo).parents_of(commit_oid)
 }
 
+/// First-parent ancestor `n` steps from `tip` (`tip` when `n` is 0).
+///
+/// # Errors
+///
+/// Returns [`Error::ObjectNotFound`] when the chain is shorter than `n`.
+pub fn nth_first_parent_ancestor(repo: &Repository, tip: ObjectId, n: usize) -> Result<ObjectId> {
+    apply_nav_step(repo, &NavParentCache::new(repo), tip, NavStep::AncestorN(n))
+}
+
 #[derive(Debug, Clone, Copy)]
 enum ParentShorthandKind {
     /// `rev^@` — all parents.
@@ -1830,15 +1839,36 @@ fn apply_nav_step(
                 .ok_or_else(|| Error::ObjectNotFound(format!("{oid}^{n}")))
         }
         NavStep::AncestorN(n) => {
-            let mut current = peel_annotated_tag_chain(repo, oid)?;
+            let current = peel_annotated_tag_chain(repo, oid)?;
+            if n > 0 {
+                let objects_dir = repo.git_dir().join("objects");
+                if let Some(chain) = repo.caches().commit_graph_chain(&objects_dir) {
+                    let mut cur = current;
+                    let mut graph_ok = true;
+                    for _ in 0..n {
+                        let Some((parents, _)) = chain.graph_commit(&cur) else {
+                            graph_ok = false;
+                            break;
+                        };
+                        let Some(&parent) = parents.first() else {
+                            return Err(Error::ObjectNotFound(format!("{cur}~1")));
+                        };
+                        cur = parent;
+                    }
+                    if graph_ok {
+                        return Ok(cur);
+                    }
+                }
+            }
+            let mut cur = current;
             for _ in 0..n {
-                let parents = nav.parents_of(current)?;
-                current = parents
+                let parents = nav.parents_of(cur)?;
+                cur = parents
                     .first()
                     .copied()
-                    .ok_or_else(|| Error::ObjectNotFound(format!("{current}~1")))?;
+                    .ok_or_else(|| Error::ObjectNotFound(format!("{cur}~1")))?;
             }
-            Ok(current)
+            Ok(cur)
         }
     }
 }
