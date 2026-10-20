@@ -154,6 +154,35 @@ impl RewritePlan {
             .map(|u| u.new)
     }
 
+    /// Replacement OID for the original commit `old`.
+    ///
+    /// Returns `None` when `old` was dropped from history or is not part of the plan.
+    #[must_use]
+    pub fn replacement(&self, old: ObjectId) -> Option<ObjectId> {
+        self.commits
+            .iter()
+            .find(|c| c.old == old)
+            .and_then(|c| c.new)
+    }
+
+    /// `HEAD`'s commit before and after the rewrite, as `(old, new)`.
+    ///
+    /// The new commit is the tip of the ref update that moves `HEAD`'s old commit, else the
+    /// commit's replacement, else the old commit itself. Returns `None` when
+    /// [`HeadEffect::commit_changes`] is `false` or `HEAD` was unborn at plan time.
+    #[must_use]
+    pub fn head_change(&self) -> Option<(ObjectId, ObjectId)> {
+        if !self.head.commit_changes {
+            return None;
+        }
+        let old = self.head.old_commit?;
+        let new = self
+            .mapped_tip(old)
+            .or_else(|| self.replacement(old))
+            .unwrap_or(old);
+        Some((old, new))
+    }
+
     /// `update <ref> <new> <old>` lines accepted by `git update-ref --stdin`.
     #[must_use]
     pub fn ref_update_lines(&self) -> Vec<String> {
@@ -180,4 +209,75 @@ pub struct AppliedRewrite {
     pub ref_updates: Vec<PlannedRefUpdate>,
     /// Commit OID `HEAD` resolves to after apply.
     pub head: ObjectId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn oid(byte: u8) -> ObjectId {
+        let mut bytes = [0u8; 20];
+        bytes[19] = byte;
+        ObjectId::from_bytes(&bytes).expect("oid")
+    }
+
+    fn make_plan(
+        commits: &[(u8, Option<u8>)],
+        ref_updates: &[(u8, u8)],
+        head: Option<u8>,
+        commit_changes: bool,
+    ) -> RewritePlan {
+        RewritePlan {
+            commits: commits
+                .iter()
+                .map(|&(old, new)| RewrittenCommit {
+                    old: oid(old),
+                    new: new.map(oid),
+                })
+                .collect(),
+            ref_updates: ref_updates
+                .iter()
+                .map(|&(old, new)| PlannedRefUpdate {
+                    name: "refs/heads/main".into(),
+                    old: oid(old),
+                    new: oid(new),
+                })
+                .collect(),
+            head: HeadEffect {
+                commit_changes,
+                old_commit: head.map(oid),
+                ..HeadEffect::default()
+            },
+        }
+    }
+
+    #[test]
+    fn replacement_finds_rewritten_commits_only() {
+        let plan = make_plan(&[(1, Some(11)), (2, None)], &[], None, false);
+        assert_eq!(plan.replacement(oid(1)), Some(oid(11)));
+        assert_eq!(plan.replacement(oid(2)), None);
+        assert_eq!(plan.replacement(oid(3)), None);
+    }
+
+    #[test]
+    fn head_change_is_none_when_head_commit_stays() {
+        let plan = make_plan(&[(1, Some(11))], &[(1, 11)], Some(1), false);
+        assert_eq!(plan.head_change(), None);
+        let unborn = make_plan(&[(1, Some(11))], &[], None, true);
+        assert_eq!(unborn.head_change(), None);
+    }
+
+    #[test]
+    fn head_change_prefers_ref_update_tip() {
+        let plan = make_plan(&[(1, Some(11)), (2, Some(12))], &[(2, 13)], Some(2), true);
+        assert_eq!(plan.head_change(), Some((oid(2), oid(13))));
+    }
+
+    #[test]
+    fn head_change_falls_back_to_replacement_then_old() {
+        let detached = make_plan(&[(1, Some(11))], &[], Some(1), true);
+        assert_eq!(detached.head_change(), Some((oid(1), oid(11))));
+        let dropped = make_plan(&[(1, None)], &[], Some(1), true);
+        assert_eq!(dropped.head_change(), Some((oid(1), oid(1))));
+    }
 }

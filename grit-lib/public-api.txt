@@ -15084,8 +15084,10 @@ pub grit_lib::revwalk::history::RewritePlan::commits: alloc::vec::Vec<grit_lib::
 pub grit_lib::revwalk::history::RewritePlan::head: grit_lib::revwalk::history::HeadEffect
 pub grit_lib::revwalk::history::RewritePlan::ref_updates: alloc::vec::Vec<grit_lib::revwalk::history::PlannedRefUpdate>
 impl grit_lib::revwalk::history::RewritePlan
+pub fn grit_lib::revwalk::history::RewritePlan::head_change(&self) -> core::option::Option<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>
 pub fn grit_lib::revwalk::history::RewritePlan::mapped_tip(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::history::RewritePlan::ref_update_lines(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::revwalk::history::RewritePlan::replacement(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 impl core::clone::Clone for grit_lib::revwalk::history::RewritePlan
 pub fn grit_lib::revwalk::history::RewritePlan::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::RewritePlan

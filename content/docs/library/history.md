@@ -26,9 +26,11 @@ To assign staged hunks automatically, [`absorb`](rustdoc:grit_lib::revwalk::hist
 
 [`AppliedRewrite`](rustdoc:grit_lib::revwalk::history::AppliedRewrite) returns the ref updates that were committed and the commit OID `HEAD` resolves to afterward.
 
-## Dry-run ref lines
+## Inspecting a plan
 
 [`RewritePlan::ref_update_lines`](rustdoc:grit_lib::revwalk::history::RewritePlan::ref_update_lines) returns `update <ref> <new> <old>` lines suitable for `git update-ref --stdin`, so callers can preview ref motion without applying.
+
+[`RewritePlan::replacement`](rustdoc:grit_lib::revwalk::history::RewritePlan::replacement) maps one original commit to its rewritten OID (`None` when dropped), and [`RewritePlan::head_change`](rustdoc:grit_lib::revwalk::history::RewritePlan::head_change) reports `HEAD`'s commit before and after the rewrite, or `None` when `HEAD` does not move. `grit history` builds its `--json` `head` field from it.
 
 ## Errors
 

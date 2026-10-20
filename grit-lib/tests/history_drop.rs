@@ -110,6 +110,25 @@ fn drop_head_maps_to_parent_in_ref_updates() {
     let plan = history_drop(&grit, tip, &opts(0)).expect("drop head");
     assert!(plan.head.commit_changes);
     assert_eq!(plan.mapped_tip(tip), Some(parent));
+    assert_eq!(plan.replacement(tip), None);
+    assert_eq!(plan.head_change(), Some((tip, parent)));
+}
+
+#[test]
+fn drop_reports_replacements_and_head_change() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let plan = history_drop(&grit, oids["b"], &opts(9)).expect("drop");
+    assert_eq!(plan.replacement(oids["b"]), None);
+    assert_eq!(plan.replacement(oids["a"]), None);
+    let new_c = plan.replacement(oids["c"]).expect("c replayed");
+    assert_ne!(new_c, oids["c"]);
+    assert_eq!(plan.head_change(), Some((oids["c"], new_c)));
+    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    assert_eq!(git_rev_parse(wt, "HEAD"), Some(new_c));
+    git_fsck_strict(wt);
 }
 
 #[test]
