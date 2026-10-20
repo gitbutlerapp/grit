@@ -7066,6 +7066,9 @@ pub fn grit_lib::objects::odb::Odb::primary_writable(&self) -> grit_lib::error::
 pub fn grit_lib::objects::odb::Odb::uses_files_primary(&self) -> bool
 pub fn grit_lib::objects::odb::Odb::with_resolved_work_tree(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::write_commit_graph(&self) -> grit_lib::error::Result<()>
+impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::peel_tags(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectKind)>
+pub fn grit_lib::objects::odb::Odb::peel_to_commit(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl core::clone::Clone for grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::objects::odb::Odb
@@ -9452,7 +9455,6 @@ pub fn grit_lib::porcelain::tag::creator_date(&grit_lib::repo::Repository, &grit
 pub fn grit_lib::porcelain::tag::get_tag_annotation(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, u32) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::porcelain::tag::glob_matches(&str, &str) -> bool
 pub fn grit_lib::porcelain::tag::parse_epoch_from_ident(&str) -> i64
-pub fn grit_lib::porcelain::tag::peel_to_commit(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::porcelain::tag::strip_comments(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::tag::tag_contains(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::porcelain::tag::tag_points_at(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
@@ -10269,6 +10271,9 @@ pub fn grit_lib::objects::odb::Odb::primary_writable(&self) -> grit_lib::error::
 pub fn grit_lib::objects::odb::Odb::uses_files_primary(&self) -> bool
 pub fn grit_lib::objects::odb::Odb::with_resolved_work_tree(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::write_commit_graph(&self) -> grit_lib::error::Result<()>
+impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::peel_tags(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectKind)>
+pub fn grit_lib::objects::odb::Odb::peel_to_commit(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl core::clone::Clone for grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::objects::odb::Odb
