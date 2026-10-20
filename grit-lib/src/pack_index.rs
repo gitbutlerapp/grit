@@ -43,7 +43,6 @@ struct PackIndexLayout {
     crc_base: usize,
     off32_base: usize,
     large_off_base: usize,
-    #[allow(dead_code)]
     large_off_count: usize,
 }
 

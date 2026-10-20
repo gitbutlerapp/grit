@@ -13,14 +13,8 @@ pub struct RefStorageRoute {
     pub storage_name: String,
 }
 
-/// Compute storage directory and file name for `refname` in a linked checkout.
-#[must_use]
-#[allow(dead_code)]
-pub fn route_ref_storage(git_dir: &Path, refname: &str) -> RefStorageRoute {
-    route_ref_storage_with_namespace(git_dir, refname, None)
-}
-
-/// Like [`route_ref_storage`], but applies `namespace_prefix` from config instead of the environment.
+/// Compute storage directory and file name for `refname` in a linked checkout, applying
+/// `namespace_prefix` from config instead of the environment.
 #[must_use]
 pub fn route_ref_storage_with_namespace(
     git_dir: &Path,

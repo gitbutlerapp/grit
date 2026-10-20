@@ -349,54 +349,6 @@ pub fn common_dir(git_dir: &Path) -> Option<PathBuf> {
     path.canonicalize().ok()
 }
 
-/// Internal recursive resolver with cycle detection.
-///
-/// When operating inside a worktree, `common` points to the shared git
-/// directory where most refs live.  The worktree-specific `git_dir` is
-/// checked first for HEAD and per-worktree refs.
-#[allow(dead_code)]
-fn resolve_ref_depth(
-    git_dir: &Path,
-    _common: Option<&Path>,
-    refname: &str,
-    depth: usize,
-) -> Result<ObjectId> {
-    if depth >= SYMREF_MAXDEPTH {
-        return Err(Error::InvalidRef(format!(
-            "ref symlink too deep: {refname}"
-        )));
-    }
-
-    let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
-    let try_names: Vec<&str> =
-        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix_default().is_some() {
-            vec![storage_owned.as_str()]
-        } else if storage_owned != stor_name {
-            vec![storage_owned.as_str(), stor_name.as_str()]
-        } else {
-            vec![stor_name.as_str()]
-        };
-
-    for name in try_names {
-        let path = store.join(name);
-        match read_ref_file(&path) {
-            Ok(Ref::Direct(oid)) => return Ok(oid),
-            Ok(Ref::Symbolic(target)) => {
-                return resolve_ref_depth(git_dir, None, &target, depth + 1);
-            }
-            Err(Error::Io(ref e)) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
-
-        if let Some(oid) = lookup_packed_ref(&store, name)? {
-            return Ok(oid);
-        }
-    }
-
-    Err(Error::InvalidRef(format!("ref not found: {refname}")))
-}
-
 /// Outcome of a single storage-level ref lookup (Git `refs_read_raw_ref` style).
 ///
 /// This checks whether a ref **name** exists in the ref store without applying
@@ -452,26 +404,6 @@ pub fn lock_path_for_ref(path: &Path) -> PathBuf {
     let mut s = path.as_os_str().to_owned();
     s.push(".lock");
     PathBuf::from(s)
-}
-
-#[allow(dead_code)]
-fn read_raw_ref_at(path: PathBuf) -> Result<Option<RawRefLookup>> {
-    match fs::symlink_metadata(&path) {
-        Ok(meta) => {
-            if meta.is_dir() {
-                return Ok(Some(RawRefLookup::IsDirectory));
-            }
-            Ok(Some(RawRefLookup::Exists))
-        }
-        Err(e)
-            if e.kind() == io::ErrorKind::NotFound
-                || e.kind() == io::ErrorKind::NotADirectory
-                || e.raw_os_error() == Some(libc::ENOTDIR) =>
-        {
-            Ok(None)
-        }
-        Err(e) => Err(Error::Io(e)),
-    }
 }
 
 /// First packed ref name strictly under `refname/` (sorted `packed-refs` prefix scan).
@@ -864,73 +796,6 @@ fn refname_is_strict_prefix(parent: &str, child: &str) -> bool {
         && child.starts_with(parent)
 }
 
-/// Removes `lock` on drop unless [`disarm`](Self::disarm) was called after a successful delete.
-#[allow(dead_code)]
-struct LooseRefLockGuard<'a> {
-    lock: &'a Path,
-    armed: bool,
-}
-
-impl<'a> LooseRefLockGuard<'a> {
-    fn new(lock: &'a Path) -> Self {
-        Self { lock, armed: true }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for LooseRefLockGuard<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            abort_loose_ref_lock(self.lock);
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn delete_loose_ref_after_lock(
-    storage_dir: &Path,
-    stor: &str,
-    path: &Path,
-    lock: &Path,
-) -> Result<()> {
-    let mut lock_guard = LooseRefLockGuard::new(lock);
-    remove_packed_ref(storage_dir, stor)?;
-
-    remove_empty_ref_directory(path);
-    match fs::remove_file(path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e)
-            if e.kind() == io::ErrorKind::NotADirectory
-                || e.raw_os_error() == Some(libc::ENOTDIR) => {}
-        Err(e)
-            if e.raw_os_error() == Some(libc::EISDIR) || e.raw_os_error() == Some(libc::EPERM) => {}
-        Err(e) => return Err(Error::Io(e)),
-    }
-
-    let log_path = storage_dir.join("logs").join(stor);
-    let _ = fs::remove_file(&log_path);
-
-    let logs_root = storage_dir.join("logs");
-    let mut parent = log_path.parent();
-    while let Some(p) = parent {
-        if p == logs_root.as_path() || !p.starts_with(&logs_root) {
-            break;
-        }
-        if fs::remove_dir(p).is_err() {
-            break;
-        }
-        parent = p.parent();
-    }
-
-    fs::remove_file(lock)?;
-    lock_guard.disarm();
-    Ok(())
-}
-
 fn packed_refs_unexpected_line(path: &Path, line: impl Into<String>) -> Error {
     Error::PackedRefsUnexpectedLine {
         path: path.display().to_string(),
@@ -1127,20 +992,6 @@ impl PackedRefsFileView {
                 }
             }
             map.insert(refname, oid);
-        }
-        Ok(map)
-    }
-
-    fn map_for_names(
-        &self,
-        path: &Path,
-        names: &HashSet<String>,
-    ) -> Result<HashMap<String, ObjectId>> {
-        let mut map = HashMap::with_capacity(names.len());
-        for name in names {
-            if let Some((oid, _)) = self.lookup_entry(path, name)? {
-                map.insert(name.clone(), oid);
-            }
         }
         Ok(map)
     }
@@ -1384,20 +1235,6 @@ pub(crate) fn read_packed_refs_map(store: &Path) -> Result<HashMap<String, Objec
     read_packed_refs_map_for_prefix(store, "")
 }
 
-pub(crate) fn read_packed_refs_map_for_names(
-    store: &Path,
-    names: &HashSet<String>,
-) -> Result<HashMap<String, ObjectId>> {
-    if names.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let Some(view) = read_packed_refs_file_view(store)? else {
-        return Ok(HashMap::new());
-    };
-    let packed_path = store::paths::packed_refs_path(store);
-    view.map_for_names(&packed_path, names)
-}
-
 pub(crate) fn read_packed_refs_map_for_prefix(
     store: &Path,
     prefix: &str,
@@ -1458,7 +1295,7 @@ pub(crate) fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<
 }
 
 /// Look up a refname and optional peeled tag oid in `packed-refs`.
-#[allow(dead_code)] // peel path exercised in `packed_refs_parse_tests`
+#[cfg(test)]
 pub(crate) fn lookup_packed_ref_with_peel(
     git_dir: &Path,
     refname: &str,
@@ -1749,21 +1586,6 @@ impl PackedRefs {
     pub fn load(git_dir: &Path) -> Result<Self> {
         let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
         let map = read_packed_refs_map(&store)?;
-        Ok(packed_refs_from_map(map))
-    }
-
-    /// Validate the full `packed-refs` file but retain only entries listed in `names`.
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::load`].
-    #[allow(dead_code)]
-    pub(crate) fn load_for_ref_names(git_dir: &Path, names: &HashSet<String>) -> Result<Self> {
-        if names.is_empty() {
-            return Ok(packed_refs_from_map(HashMap::new()));
-        }
-        let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
-        let map = read_packed_refs_map_for_names(&store, names)?;
         Ok(packed_refs_from_map(map))
     }
 

@@ -1,7 +1,5 @@
 //! Merge adjacent line-level edits into unified-diff hunk spans (Git-compatible gaps).
 
-#![allow(dead_code)]
-
 /// One contiguous removed/added run on the old and new sides.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LineEdit {

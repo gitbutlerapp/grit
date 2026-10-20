@@ -74,9 +74,6 @@ struct PackedCacheEntry {
 
 #[derive(Debug)]
 struct PreparedFilesBatch {
-    #[allow(dead_code)]
-    lock_name: String,
-    #[allow(dead_code)]
     updates: Vec<RefUpdate>,
     ref_locks: HashMap<String, PathBuf>,
     packed_lock: Option<PathBuf>,
@@ -937,12 +934,7 @@ impl RefStore for FilesRefStore {
             packed_lock = Some(lock);
         }
 
-        let lock_name = updates
-            .first()
-            .map(|u| u.name.clone())
-            .unwrap_or_else(|| "refs".to_owned());
         *prepared_guard = Some(PreparedFilesBatch {
-            lock_name,
             updates,
             ref_locks,
             packed_lock,

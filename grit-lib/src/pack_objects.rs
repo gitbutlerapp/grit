@@ -1003,12 +1003,9 @@ pub(crate) struct PlannedEntry {
         Option<(u64, std::sync::Arc<crate::pack::PackData>, usize, usize)>,
 }
 
-/// The full delta plan: the ordered entries to emit plus the set of external
-/// (thin) bases that were referenced but deliberately not emitted.
+/// The full delta plan: the ordered entries to emit.
 pub(crate) struct DeltaPlan {
     pub(crate) entries: Vec<PlannedEntry>,
-    #[allow(dead_code)]
-    external_bases: HashSet<ObjectId>,
 }
 
 /// Select blob deltas for `send` and produce an ordered emit plan.
@@ -1033,8 +1030,8 @@ pub(crate) struct DeltaPlan {
 ///   recomputed, still subject to island rules.
 ///
 /// When `opts.thin`, a blob may also delta against a base reachable from the
-/// peer's `haves` (`have_closure`) even though that base is not emitted; the base
-/// oid is recorded in [`DeltaPlan::external_bases`] and referenced via REF_DELTA.
+/// peer's `haves` (`have_closure`) even though that base is not emitted; such a
+/// base is referenced via REF_DELTA.
 pub(crate) fn plan_deltas(
     odb: &Odb,
     send: &[ObjectId],
@@ -1067,7 +1064,6 @@ pub(crate) fn plan_deltas(
         ObjectId,
         (u64, std::sync::Arc<crate::pack::PackData>, usize, usize),
     > = HashMap::new();
-    let mut external_bases: HashSet<ObjectId> = HashSet::new();
 
     // On-disk delta reuse runs even with `--window=0` (no new deltas), matching Git pack-objects.
     if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
@@ -1190,7 +1186,6 @@ pub(crate) fn plan_deltas(
                 }
                 if let Some((base, _)) = best {
                     delta_to_base.insert(t, base);
-                    external_bases.insert(base);
                     if let Some(d) = external_blob_data.get(&base) {
                         objects
                             .entry(base)
@@ -1208,10 +1203,6 @@ pub(crate) fn plan_deltas(
         // A reused delta whose target was snipped (or whose base ceased to be the
         // chosen base) reverts to a freshly-computed full/delta object.
         reused_zlib.retain(|t, _| delta_to_base.contains_key(t));
-
-        // A base that is no longer referenced as an external base (because its
-        // only dependent was snipped) must not be counted as external.
-        external_bases.retain(|b| delta_to_base.values().any(|v| v == b));
     }
 
     // Emit in the original discovery order so commits precede their trees/blobs.
@@ -1238,10 +1229,7 @@ pub(crate) fn plan_deltas(
         });
     }
 
-    Ok(DeltaPlan {
-        entries,
-        external_bases,
-    })
+    Ok(DeltaPlan { entries })
 }
 
 /// Load delta-island marks for the objects being packed, honoring

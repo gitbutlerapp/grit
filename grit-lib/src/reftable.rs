@@ -1836,9 +1836,6 @@ struct StackCacheKey {
 }
 
 struct CachedStackTables {
-    #[allow(dead_code)]
-    key: StackCacheKey,
-    #[allow(dead_code)]
     table_names: Vec<String>,
     readers: Vec<ReftableReader>,
 }
@@ -1905,7 +1902,6 @@ fn load_cached_stack_tables(reftable_dir: &Path) -> Result<Arc<CachedStackTables
         readers.push(ReftableReader::from_arc(Arc::from(data))?);
     }
     let cached = Arc::new(CachedStackTables {
-        key: key.clone(),
         table_names,
         readers,
     });

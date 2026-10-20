@@ -11,8 +11,6 @@
 //! probes are parallelized. A later shared thread pool can replace the scoped helper without
 //! changing callers.
 
-#![allow(dead_code)]
-
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -93,8 +91,8 @@ pub fn worktree_metadata_probe_count() -> usize {
 }
 
 /// Returns `read_dir` probes recorded since [`reset_worktree_metadata_probe`].
-#[doc(hidden)]
-pub fn worktree_read_dir_probe_count() -> usize {
+#[cfg(test)]
+pub(crate) fn worktree_read_dir_probe_count() -> usize {
     WORKTREE_READ_DIR_PROBE.load(Ordering::Relaxed)
 }
 
@@ -993,6 +991,7 @@ pub(crate) fn blob_lookup_batch_entry_indices(
 }
 
 /// Like [`for_each_blob_by_directory`], optionally preloading disk lookups in parallel.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn for_each_blob_by_directory_parallel<F>(
     index: &Index,

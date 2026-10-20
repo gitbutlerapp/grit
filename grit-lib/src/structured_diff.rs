@@ -118,19 +118,16 @@ pub struct StructuredFileDiff {
 #[derive(Debug, Clone)]
 struct TextLines {
     lines: Vec<String>,
-    #[allow(dead_code)]
-    ends_with_newline: bool,
 }
 
 impl TextLines {
     fn from_text(text: &str) -> Self {
-        let (parts, ends_nl) = lines_with_trailing_newline(text);
+        let (parts, _) = lines_with_trailing_newline(text);
         Self {
             lines: parts
                 .iter()
                 .map(|s| strip_diff_newline_only(s).to_owned())
                 .collect(),
-            ends_with_newline: ends_nl,
         }
     }
 }

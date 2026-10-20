@@ -7,7 +7,6 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 
-use similar::{ChangeTag, TextDiff};
 use tempfile::NamedTempFile;
 
 use crate::combined_diff_patch::{format_combined_diff_body, CombinedDiffWsOptions};
@@ -958,32 +957,6 @@ fn conflict_combined_body(wt: &str) -> String {
         i += 1;
     }
     body
-}
-
-/// For each line of `result`, whether that line is absent from `parent` per a line-oriented diff.
-#[allow(dead_code)] // Reserved for tighter `--cc` hunk alignment with Git's `dump_sline`.
-fn result_line_differs_from_parent(parent: &str, result: &str) -> Vec<bool> {
-    let lr: Vec<&str> = result.lines().collect();
-    let mut out = vec![false; lr.len()];
-    let diff = TextDiff::configure().diff_lines(parent, result);
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Equal => {}
-            ChangeTag::Delete => {}
-            ChangeTag::Insert => {
-                let range = change.value().lines().count();
-                let Some(start) = change.new_index() else {
-                    continue;
-                };
-                for i in 0..range {
-                    if let Some(slot) = out.get_mut(start + i) {
-                        *slot = true;
-                    }
-                }
-            }
-        }
-    }
-    out
 }
 
 fn read_blob(odb: &Odb, oid: &ObjectId) -> Vec<u8> {

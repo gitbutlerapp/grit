@@ -75,9 +75,7 @@ pub struct CommitGraphLayer {
     body_len: usize,
     num_commits: u32,
     oid_lookup_off: usize,
-    #[allow(dead_code)]
     chunk_commit_data_off: usize,
-    #[allow(dead_code)]
     chunk_generation_data: Option<usize>,
     chunk_generation_overflow: Option<usize>,
     read_generation_data: bool,

@@ -69,7 +69,6 @@ pub fn smudge_meta_for_checkout(repo: &Repository, blob_hex: &str) -> FilterSmud
 }
 
 pub(crate) struct RunningFilter {
-    #[allow(dead_code)]
     child: Child,
     stdin: Option<ChildStdin>,
     stdout: Option<ChildStdout>,
@@ -96,11 +95,6 @@ impl FilterProcessState {
             registry: Mutex::new(HashMap::new()),
             disabled: Mutex::new(HashSet::new()),
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn command_runner(&self) -> &Arc<dyn CommandRunner> {
-        &self.command_runner
     }
 
     pub(crate) fn shutdown_all(&self) {

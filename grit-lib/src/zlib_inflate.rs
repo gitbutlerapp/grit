@@ -127,6 +127,7 @@ impl ZlibInflateScratch {
     /// # Errors
     ///
     /// Returns [`Error::Zlib`] for invalid or truncated zlib data.
+    #[cfg(test)]
     pub fn inflate_prefix(&mut self, bytes: &[u8], max_out: usize) -> Result<(Vec<u8>, usize)> {
         if max_out == 0 {
             return self.inflate_prefix_zero(bytes);
@@ -142,6 +143,7 @@ impl ZlibInflateScratch {
         Ok((out, consumed))
     }
 
+    #[cfg(test)]
     fn inflate_prefix_zero(&mut self, bytes: &[u8]) -> Result<(Vec<u8>, usize)> {
         self.reset();
         let mut sink = [0u8; 1];
@@ -401,7 +403,7 @@ impl ZlibInflateScratch {
 
 /// Inflate at most `max_out` bytes from a zlib stream at the start of `bytes`.
 ///
-/// Used for header-only pack/loose reads (object info APIs).
+#[cfg(test)]
 pub(crate) fn inflate_prefix(bytes: &[u8], max_out: usize) -> Result<(Vec<u8>, usize)> {
     ZlibInflateScratch::default().inflate_prefix(bytes, max_out)
 }

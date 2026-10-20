@@ -415,51 +415,6 @@ fn find_three_way_conflicts(index: &Index) -> Vec<String> {
     out
 }
 
-/// Add/add (and similar): unmerged path with stages 2 and 3 but no stage 1.
-#[allow(dead_code)]
-fn find_two_way_unmerged(index: &Index) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    while i < index.entries.len() {
-        let e = &index.entries[i];
-        if e.stage() == 0 {
-            i += 1;
-            continue;
-        }
-        let path = e.path.clone();
-        let mut has1 = false;
-        let mut has2 = false;
-        let mut has3 = false;
-        let mut j = i;
-        while j < index.entries.len() && index.entries[j].path == path {
-            match index.entries[j].stage() {
-                1 => has1 = true,
-                2 => has2 = true,
-                3 => has3 = true,
-                _ => {}
-            }
-            j += 1;
-        }
-        if has2 && has3 && !has1 {
-            out.push(String::from_utf8_lossy(&path).to_string());
-        }
-        i = j;
-    }
-    out
-}
-
-#[allow(dead_code)]
-fn all_rerere_conflict_paths(index: &Index) -> Vec<String> {
-    let mut paths: BTreeSet<String> = BTreeSet::new();
-    for p in find_three_way_conflicts(index) {
-        paths.insert(p);
-    }
-    for p in find_two_way_unmerged(index) {
-        paths.insert(p);
-    }
-    paths.into_iter().collect()
-}
-
 fn read_blob(odb: &crate::odb::Odb, oid: ObjectId) -> Result<Vec<u8>> {
     let obj = odb.read(&oid)?;
     Ok(obj.data)

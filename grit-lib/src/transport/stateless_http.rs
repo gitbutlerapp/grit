@@ -185,10 +185,6 @@ impl<C: HttpClient> StatelessHttpConnection<C> {
 }
 
 impl<C: HttpClient> RpcChannel for StatelessHttpConnection<C> {
-    fn is_stateless(&self) -> bool {
-        true
-    }
-
     fn request(&mut self, body: &[u8]) -> Result<Box<dyn Read + Send>> {
         self.drain_response();
         self.client

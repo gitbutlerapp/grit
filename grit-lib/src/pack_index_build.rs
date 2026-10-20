@@ -156,8 +156,6 @@ const LARGE_WHOLE_OBJECT: usize = 4 * 1024 * 1024;
 /// Work-stealing step when resolving a batch of ready deltas.
 const DELTA_STEAL_CHUNK: usize = 4;
 struct PackHeader {
-    #[allow(dead_code)]
-    version: u32,
     nr_objects: usize,
 }
 
@@ -268,10 +266,7 @@ fn read_pack_header(pack: &[u8]) -> Result<PackHeader> {
         )));
     }
     let nr_objects = rd.read_u32_be()? as usize;
-    Ok(PackHeader {
-        version,
-        nr_objects,
-    })
+    Ok(PackHeader { nr_objects })
 }
 
 /// Single-threaded pack walk: one inflate+hash per whole object; zlib-skip deltas only.

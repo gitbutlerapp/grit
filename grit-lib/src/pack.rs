@@ -13,7 +13,7 @@ use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 pub use crate::pack_map::PackData;
 use crate::unpack_objects::apply_delta_into;
-use crate::zlib_inflate::{inflate_prefix, ZlibInflateScratch};
+use crate::zlib_inflate::ZlibInflateScratch;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -1148,24 +1148,6 @@ pub(crate) mod pack_cache {
         });
         remember_pack_bytes(pack_path, &bytes);
         Ok(bytes)
-    }
-
-    /// Whether `path` names a final, content-addressed pack file (`pack-<hash>.pack`).
-    #[allow(dead_code)]
-    fn is_content_addressed_pack(path: &Path) -> bool {
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            return false;
-        };
-        let Some(hash_part) = name
-            .strip_prefix("pack-")
-            .and_then(|s| s.strip_suffix(".pack"))
-        else {
-            return false;
-        };
-        if hash_part.len() != 40 && hash_part.len() != 64 {
-            return false;
-        }
-        hash_part.bytes().all(|b| b.is_ascii_hexdigit())
     }
 
     /// Get the raw bytes of a pack file from cache, reading from disk only on cache miss.
@@ -4213,12 +4195,6 @@ pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Op
         return Ok(Some(slice.to_vec()));
     }
     Ok(None)
-}
-
-/// Inflate the first bytes of a pack object's zlib payload (after the type/size header).
-#[allow(dead_code)]
-fn peek_pack_zlib_prefix(bytes: &[u8], zlib_start: usize) -> Result<(Vec<u8>, usize)> {
-    inflate_prefix(&bytes[zlib_start..], 64)
 }
 
 pub(crate) fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
