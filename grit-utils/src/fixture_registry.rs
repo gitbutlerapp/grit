@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
+use grit_lib::bench_fixture::daily_special::{generate_daily_special_repo, DailySpecialShape};
 use grit_lib::bench_fixture::synth::{
     generate_synth_repo, generate_synth_repo_with_spec, RepoShape, SynthTier,
 };
@@ -51,11 +52,31 @@ pub enum FixtureKind {
     SynthM,
     #[value(alias = "synth-L")]
     SynthL,
+    /// ~1k commits, ~10k packed refs.
+    #[value(name = "many-refs")]
+    ManyRefs,
+    #[value(name = "many-refs-smoke")]
+    ManyRefsSmoke,
+    /// Same refs as [`Self::ManyRefs`], stored loose.
+    #[value(name = "many-refs-loose")]
+    ManyRefsLoose,
+    #[value(name = "many-refs-loose-smoke")]
+    ManyRefsLooseSmoke,
+    /// Large binary blobs in a packed repo.
+    #[value(name = "big-blobs")]
+    BigBlobs,
+    #[value(name = "big-blobs-smoke")]
+    BigBlobsSmoke,
+    /// Very deep directory hierarchy (~5k files).
+    #[value(name = "deep-tree")]
+    DeepTree,
+    #[value(name = "deep-tree-smoke")]
+    DeepTreeSmoke,
 }
 
 impl FixtureKind {
     /// All fixtures the registry can prepare.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 19] = [
         Self::GitGit,
         Self::GitGitWt,
         Self::Small,
@@ -67,6 +88,14 @@ impl FixtureKind {
         Self::SynthS,
         Self::SynthM,
         Self::SynthL,
+        Self::ManyRefs,
+        Self::ManyRefsSmoke,
+        Self::ManyRefsLoose,
+        Self::ManyRefsLooseSmoke,
+        Self::BigBlobs,
+        Self::BigBlobsSmoke,
+        Self::DeepTree,
+        Self::DeepTreeSmoke,
     ];
 
     fn synth_tier(self) -> Option<SynthTier> {
@@ -78,6 +107,14 @@ impl FixtureKind {
             Self::SynthS => Some(SynthTier::S),
             Self::SynthM => Some(SynthTier::M),
             Self::SynthL => Some(SynthTier::L),
+            Self::ManyRefs
+            | Self::ManyRefsSmoke
+            | Self::ManyRefsLoose
+            | Self::ManyRefsLooseSmoke
+            | Self::BigBlobs
+            | Self::BigBlobsSmoke
+            | Self::DeepTree
+            | Self::DeepTreeSmoke => None,
         }
     }
 
@@ -89,6 +126,20 @@ impl FixtureKind {
             Self::Synth10kSmoke => Some((RepoShape::Synth10k, true)),
             Self::Synth100k => Some((RepoShape::Synth100k, false)),
             Self::Synth100kSmoke => Some((RepoShape::Synth100k, true)),
+            _ => None,
+        }
+    }
+
+    fn daily_special_shape(self) -> Option<(DailySpecialShape, bool)> {
+        match self {
+            Self::ManyRefs => Some((DailySpecialShape::ManyRefs, false)),
+            Self::ManyRefsSmoke => Some((DailySpecialShape::ManyRefs, true)),
+            Self::ManyRefsLoose => Some((DailySpecialShape::ManyRefsLoose, false)),
+            Self::ManyRefsLooseSmoke => Some((DailySpecialShape::ManyRefsLoose, true)),
+            Self::BigBlobs => Some((DailySpecialShape::BigBlobs, false)),
+            Self::BigBlobsSmoke => Some((DailySpecialShape::BigBlobs, true)),
+            Self::DeepTree => Some((DailySpecialShape::DeepTree, false)),
+            Self::DeepTreeSmoke => Some((DailySpecialShape::DeepTree, true)),
             _ => None,
         }
     }
@@ -112,6 +163,14 @@ impl FixtureKind {
             Self::SynthS => "synth-s",
             Self::SynthM => "synth-m",
             Self::SynthL => "synth-l",
+            Self::ManyRefs => "many-refs",
+            Self::ManyRefsSmoke => "many-refs-smoke",
+            Self::ManyRefsLoose => "many-refs-loose",
+            Self::ManyRefsLooseSmoke => "many-refs-loose-smoke",
+            Self::BigBlobs => "big-blobs",
+            Self::BigBlobsSmoke => "big-blobs-smoke",
+            Self::DeepTree => "deep-tree",
+            Self::DeepTreeSmoke => "deep-tree-smoke",
         }
     }
 
@@ -388,6 +447,14 @@ pub fn ensure_cached(
         | FixtureKind::Synth10kSmoke
         | FixtureKind::Synth100k
         | FixtureKind::Synth100kSmoke => ensure_shape_cached(kind, &dest),
+        FixtureKind::ManyRefs
+        | FixtureKind::ManyRefsSmoke
+        | FixtureKind::ManyRefsLoose
+        | FixtureKind::ManyRefsLooseSmoke
+        | FixtureKind::BigBlobs
+        | FixtureKind::BigBlobsSmoke
+        | FixtureKind::DeepTree
+        | FixtureKind::DeepTreeSmoke => ensure_daily_special_cached(kind, &dest),
     }
 }
 
@@ -460,6 +527,28 @@ fn ensure_synth_cached(kind: FixtureKind, dest: &Path) -> Result<(PathBuf, Fixtu
     }
     fs::create_dir_all(cache_root()).context("create cache root")?;
     let report = generate_synth_repo(dest, tier)?;
+    write_ready_marker(dest, &report.head)?;
+    Ok((dest.to_path_buf(), collect_identity(&git, kind, dest)?))
+}
+
+fn ensure_daily_special_cached(kind: FixtureKind, dest: &Path) -> Result<(PathBuf, FixtureRecord)> {
+    let Some((shape, smoke)) = kind.daily_special_shape() else {
+        bail!("internal: ensure_daily_special_cached called for {kind:?}");
+    };
+    let git = crate::binary::resolve_binary("git", None)?;
+    if dest.join(".git").is_dir() {
+        if let Some(stored) = read_ready_marker(dest)? {
+            let head = git_head_oid(&git, dest)?;
+            if stored == head {
+                return Ok((dest.to_path_buf(), collect_identity(&git, kind, dest)?));
+            }
+        }
+        remove_dir_robust(dest);
+    } else if dest.exists() {
+        remove_dir_robust(dest);
+    }
+    fs::create_dir_all(cache_root()).context("create cache root")?;
+    let report = generate_daily_special_repo(dest, shape, smoke)?;
     write_ready_marker(dest, &report.head)?;
     Ok((dest.to_path_buf(), collect_identity(&git, kind, dest)?))
 }

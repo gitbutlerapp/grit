@@ -9,4 +9,5 @@
 //! # }
 //! ```
 
+pub mod daily_special;
 pub mod synth;
