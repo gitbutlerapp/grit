@@ -25,6 +25,23 @@ Batch ref updates use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTrans
 
 Reflog helpers live in [`reflog`](rustdoc:grit_lib::refs::reflog) and on [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) (`for_each_reflog_entry`, `replace_reflog`, …). [`append_reflog`](rustdoc:grit_lib::refs::append_reflog) records an update; [`read_reflog`](rustdoc:grit_lib::refs::reflog::read_reflog) reads entries back.
 
+## Upstream, target branch, and ahead/behind
+
+[`branch_tracking`](rustdoc:grit_lib::refs::branch_tracking) answers "how does this branch compare with its base?", the question `grit status` and `grit shortlog` show at the top. [`upstream_branch`](rustdoc:grit_lib::refs::branch_tracking::upstream_branch) resolves a branch's configured upstream, [`target_branch`](rustdoc:grit_lib::refs::branch_tracking::target_branch) finds the repository's trunk (the `target.branch` config value, then [`DEFAULT_TARGET_CANDIDATES`](rustdoc:grit_lib::refs::branch_tracking::DEFAULT_TARGET_CANDIDATES)), and [`comparison_base`](rustdoc:grit_lib::refs::branch_tracking::comparison_base) picks the upstream when it exists and the target otherwise. Each returns a [`ComparisonBase`](rustdoc:grit_lib::refs::branch_tracking::ComparisonBase) with the display name, full ref, commit, and [`BaseSource`](rustdoc:grit_lib::refs::branch_tracking::BaseSource), resolved through the repository's ref store.
+
+[`TipComparison`](rustdoc:grit_lib::refs::branch_tracking::TipComparison)`::compute` then counts commits on each side (the same numbers as `git rev-list --left-right --count tip...base`), keeps the newest ahead commits up to a limit, and classifies the result as a [`Standing`](rustdoc:grit_lib::refs::branch_tracking::Standing): even, ahead, behind, or diverged.
+
+```rust
+use grit_lib::refs::branch_tracking::{comparison_base, Standing, TipComparison};
+
+if let Some(base) = comparison_base(&repo, "main")? {
+    let cmp = TipComparison::compute(&repo, head_oid, base.oid, 10)?;
+    if cmp.standing() == Standing::Behind {
+        println!("{} new commits on {}", cmp.behind, base.name);
+    }
+}
+```
+
 ## Examples
 
 **Library guide** — resolve HEAD, list branches and tags, update a demo branch (included on this page):

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::blame::{blame_file, BlameOptions};
-use crate::branch_tracking::upstream_tracking_full_ref;
+use crate::branch_tracking::upstream_branch;
 use crate::diff::structured::{structured_text_diff, StructuredHunk, StructuredLineKind};
 use crate::diff::DiffOptions;
 use crate::diff::{diff_index_to_tree, diff_trees, DiffEntry, DiffStatus};
@@ -1135,11 +1135,9 @@ fn build_absorb_stack(
     } else {
         hide_other_branch_tips(repo, &mut hidden)?;
         if let Some(branch) = current_branch_short(repo)? {
-            if let Some(upstream) = upstream_tracking_full_ref(repo, &branch) {
-                if let Ok(upstream_tip) = crate::refs::resolve_ref(repo.git_dir(), &upstream) {
-                    if let Ok(fp) = fork_point(repo, &upstream, upstream_tip, head) {
-                        hidden.insert(fp);
-                    }
+            if let Some(upstream) = upstream_branch(repo, &branch) {
+                if let Ok(fp) = fork_point(repo, &upstream.full_ref, upstream.oid, head) {
+                    hidden.insert(fp);
                 }
             }
         }

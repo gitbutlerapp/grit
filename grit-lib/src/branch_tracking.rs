@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::config::ConfigSet;
 use crate::error::Result;
-use crate::merge_base::count_symmetric_ahead_behind;
+use crate::merge_base::{ahead_behind_of_target_commits, count_symmetric_ahead_behind};
 use crate::objects::ObjectId;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refs;
@@ -226,6 +226,218 @@ pub fn upstream_tracking_full_ref(repo: &Repository, branch_short: &str) -> Opti
     } else {
         let mb = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
         Some(format!("refs/remotes/{remote}/{mb}"))
+    }
+}
+
+/// Where a [`ComparisonBase`] came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BaseSource {
+    /// The branch's configured upstream (`branch.<name>.remote` / `branch.<name>.merge`).
+    Upstream,
+    /// The repository's target branch (see [`target_branch`]).
+    Target,
+}
+
+/// A resolved branch that another branch is measured against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComparisonBase {
+    /// Short display name: the full ref abbreviated (`origin/main`) for an upstream, or the
+    /// candidate as configured or listed in [`DEFAULT_TARGET_CANDIDATES`] for a target.
+    pub name: String,
+    /// Full ref the base resolved through (for example `refs/remotes/origin/main`).
+    pub full_ref: String,
+    /// Commit the base points at.
+    pub oid: ObjectId,
+    /// Whether the base is an upstream or the target branch.
+    pub source: BaseSource,
+}
+
+/// Trunk names tried, in order, after `target.branch` when looking for the target branch.
+pub const DEFAULT_TARGET_CANDIDATES: [&str; 4] = ["origin/master", "origin/main", "master", "main"];
+
+/// Resolve `refname` through the repository's ref store; refs that are missing or cannot be
+/// resolved (dangling symrefs, unreadable files) count as absent.
+fn resolve_optional(repo: &Repository, refname: &str) -> Option<ObjectId> {
+    repo.refs().resolve(refname).ok()
+}
+
+/// Full refs to try for one target-branch candidate, most specific first.
+fn target_candidate_refnames(candidate: &str) -> Vec<String> {
+    if candidate.starts_with("refs/") || candidate == "HEAD" {
+        return vec![candidate.to_owned()];
+    }
+    if let Some(remote_branch) = candidate.strip_prefix("origin/") {
+        return vec![
+            format!("refs/remotes/origin/{remote_branch}"),
+            format!("refs/heads/{candidate}"),
+        ];
+    }
+    vec![
+        format!("refs/heads/{candidate}"),
+        format!("refs/remotes/{candidate}"),
+    ]
+}
+
+/// The repository's target branch: the trunk the current branch is measured against.
+///
+/// Tries the `target.branch` config value first (when set and non-blank), then each of
+/// [`DEFAULT_TARGET_CANDIDATES`]. A candidate is a full ref (`refs/...` or `HEAD`), an
+/// `origin/<branch>` name (tried as `refs/remotes/origin/<branch>`, then as a local branch of
+/// that name), or a short name (tried as a local branch, then as a remote-tracking ref).
+/// Refs are resolved through the repository's ref store, so every ref backend is honoured.
+///
+/// # Parameters
+///
+/// - `repo`: the repository to search.
+///
+/// # Returns
+///
+/// The first candidate that resolves, with [`BaseSource::Target`], or `None` when none does.
+///
+/// # Errors
+///
+/// Returns an error when the repository configuration cannot be loaded.
+pub fn target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
+    let config = repo.config()?;
+    let configured = config
+        .get("target.branch")
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let candidates = configured
+        .into_iter()
+        .chain(DEFAULT_TARGET_CANDIDATES.iter().map(|c| (*c).to_owned()));
+    for candidate in candidates {
+        for full_ref in target_candidate_refnames(&candidate) {
+            if let Some(oid) = resolve_optional(repo, &full_ref) {
+                return Ok(Some(ComparisonBase {
+                    name: candidate,
+                    full_ref,
+                    oid,
+                    source: BaseSource::Target,
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// The configured upstream of local branch `branch_short`, when it is set and resolves.
+///
+/// The upstream ref comes from [`upstream_tracking_full_ref`] and is resolved through the
+/// repository's ref store.
+///
+/// # Parameters
+///
+/// - `repo`: the repository.
+/// - `branch_short`: local branch name without `refs/heads/`.
+///
+/// # Returns
+///
+/// The upstream with [`BaseSource::Upstream`], or `None` when no upstream is configured or
+/// its ref does not resolve (for example before the first fetch).
+#[must_use]
+pub fn upstream_branch(repo: &Repository, branch_short: &str) -> Option<ComparisonBase> {
+    let full_ref = upstream_tracking_full_ref(repo, branch_short)?;
+    let oid = resolve_optional(repo, &full_ref)?;
+    Some(ComparisonBase {
+        name: shorten_tracking_ref(&full_ref),
+        full_ref,
+        oid,
+        source: BaseSource::Upstream,
+    })
+}
+
+/// The base branch `branch_short` is compared against: its [`upstream_branch`] when that
+/// resolves, otherwise the repository's [`target_branch`].
+///
+/// # Parameters
+///
+/// - `repo`: the repository.
+/// - `branch_short`: local branch name without `refs/heads/`.
+///
+/// # Errors
+///
+/// Returns an error when the repository configuration cannot be loaded.
+pub fn comparison_base(repo: &Repository, branch_short: &str) -> Result<Option<ComparisonBase>> {
+    match upstream_branch(repo, branch_short) {
+        Some(upstream) => Ok(Some(upstream)),
+        None => target_branch(repo),
+    }
+}
+
+/// How a branch tip relates to its base, from symmetric ahead/behind counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Standing {
+    /// Neither side has commits the other lacks.
+    Even,
+    /// Only the branch has commits the base lacks.
+    Ahead,
+    /// Only the base has commits the branch lacks.
+    Behind,
+    /// Both sides have commits the other lacks.
+    Diverged,
+}
+
+impl Standing {
+    /// Classify symmetric counts: `ahead` commits only on the branch, `behind` only on the base.
+    #[must_use]
+    pub fn from_counts(ahead: usize, behind: usize) -> Self {
+        match (ahead, behind) {
+            (0, 0) => Self::Even,
+            (_, 0) => Self::Ahead,
+            (0, _) => Self::Behind,
+            _ => Self::Diverged,
+        }
+    }
+}
+
+/// Symmetric comparison of a branch tip with a base commit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TipComparison {
+    /// Commits reachable from the tip but not from the base (full count).
+    pub ahead: usize,
+    /// Commits reachable from the base but not from the tip (full count).
+    pub behind: usize,
+    /// Newest of the `ahead` commits (newest first), at most the requested limit.
+    pub newest_ahead: Vec<ObjectId>,
+}
+
+impl TipComparison {
+    /// Compare `tip` with `base`, matching `git rev-list --left-right --count tip...base` for
+    /// the counts and keeping at most `retain_newest_ahead` of the ahead commits.
+    ///
+    /// The walk streams commits instead of materializing ancestor closures, and skips a side
+    /// entirely when one tip is an ancestor of the other.
+    ///
+    /// # Parameters
+    ///
+    /// - `repo`: the repository holding both commits.
+    /// - `tip`: the branch tip.
+    /// - `base`: the commit it is compared against.
+    /// - `retain_newest_ahead`: how many of the newest ahead commits to return.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object read and parse errors from the commit walk.
+    pub fn compute(
+        repo: &Repository,
+        tip: ObjectId,
+        base: ObjectId,
+        retain_newest_ahead: usize,
+    ) -> Result<Self> {
+        let (ahead, behind, newest_ahead) =
+            ahead_behind_of_target_commits(repo, tip, base, retain_newest_ahead)?;
+        Ok(Self {
+            ahead,
+            behind,
+            newest_ahead,
+        })
+    }
+
+    /// How the tip stands relative to the base.
+    #[must_use]
+    pub fn standing(&self) -> Standing {
+        Standing::from_counts(self.ahead, self.behind)
     }
 }
 
@@ -467,4 +679,40 @@ and have {ahead} and {behind} different commits each, respectively.\n"
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standing_from_counts_covers_every_quadrant() {
+        assert_eq!(Standing::from_counts(0, 0), Standing::Even);
+        assert_eq!(Standing::from_counts(3, 0), Standing::Ahead);
+        assert_eq!(Standing::from_counts(0, 2), Standing::Behind);
+        assert_eq!(Standing::from_counts(1, 1), Standing::Diverged);
+    }
+
+    #[test]
+    fn target_candidates_expand_to_full_refs() {
+        assert_eq!(
+            target_candidate_refnames("refs/heads/dev"),
+            vec!["refs/heads/dev".to_owned()]
+        );
+        assert_eq!(target_candidate_refnames("HEAD"), vec!["HEAD".to_owned()]);
+        assert_eq!(
+            target_candidate_refnames("origin/main"),
+            vec![
+                "refs/remotes/origin/main".to_owned(),
+                "refs/heads/origin/main".to_owned(),
+            ]
+        );
+        assert_eq!(
+            target_candidate_refnames("upstream/dev"),
+            vec![
+                "refs/heads/upstream/dev".to_owned(),
+                "refs/remotes/upstream/dev".to_owned(),
+            ]
+        );
+    }
 }
