@@ -167,6 +167,9 @@ pub fn ensure_worktree_bench_repo(
         run_git(git, &dest, &["checkout", "-B", GIT_GIT_BENCH_BRANCH])?;
     } else {
         fixture_registry::copy_for_use(git, &cached, &dest)?;
+        if kind == FixtureKind::GitGitWt {
+            run_git(git, &dest, &["checkout", "-B", GIT_GIT_BENCH_BRANCH])?;
+        }
     }
     pin_worktree_bench_config(git, &dest)?;
 
@@ -281,6 +284,99 @@ pub fn shell_git_add_modified_set_and_commit(git: &Path) -> String {
 
 pub fn prepare_diff(git: &Path) -> Result<()> {
     apply_one_percent_modified(git, &active_worktree_repo())
+}
+
+const RM_DIR_MARKER: &str = ".grit-bench-rm-dir";
+const MV_SRC_MARKER: &str = ".grit-bench-mv-src";
+const MV_DST_MARKER: &str = ".grit-bench-mv-dst";
+
+fn write_marker(name: &str, value: &str) -> Result<()> {
+    fs::write(scratch_dir().join(name), format!("{value}\n")).context("write matrix marker")
+}
+
+fn read_marker(name: &str) -> Result<String> {
+    let raw = fs::read_to_string(scratch_dir().join(name)).context("read matrix marker")?;
+    let v = raw.trim().to_string();
+    anyhow::ensure!(!v.is_empty(), "empty matrix marker {name}");
+    Ok(v)
+}
+
+/// Pick stable rm/mv targets from the first modified-path parent directory.
+pub fn record_matrix_path_targets(git: &Path, repo: &Path) -> Result<()> {
+    let paths = modified_path_list(git, repo)?;
+    let first = paths
+        .first()
+        .context("matrix paths need at least one tracked file")?;
+    let parent = first
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .context("matrix path parent")?;
+    write_marker(RM_DIR_MARKER, &parent.display().to_string())?;
+    write_marker(MV_SRC_MARKER, &first.display().to_string())?;
+    let dst = parent.join(format!(
+        "{}-bench-mv.txt",
+        first.file_stem().and_then(|s| s.to_str()).unwrap_or("f")
+    ));
+    write_marker(MV_DST_MARKER, &dst.display().to_string())?;
+    Ok(())
+}
+
+pub fn prepare_staged_diff(git: &Path) -> Result<()> {
+    let repo = active_worktree_repo();
+    apply_one_percent_modified(git, &repo)?;
+    stage_modified_set(git, &repo)
+}
+
+pub fn prepare_restore_paths(git: &Path) -> Result<()> {
+    apply_one_percent_modified(git, &active_worktree_repo())
+}
+
+pub fn prepare_rm_dir(git: &Path) -> Result<()> {
+    reset_worktree_clean(git, &active_worktree_repo())
+}
+
+pub fn prepare_mv_file(git: &Path) -> Result<()> {
+    reset_worktree_clean(git, &active_worktree_repo())
+}
+
+pub fn prepare_clean_untracked(git: &Path) -> Result<()> {
+    let repo = active_worktree_repo();
+    reset_worktree_clean(git, &repo)?;
+    for i in 0..3 {
+        fs::write(
+            repo.join(format!(".grit-bench-clean-untracked-{i}.txt")),
+            "clean bench\n",
+        )?;
+    }
+    Ok(())
+}
+
+/// Shell snippet: restore the deterministic modified path set.
+pub fn shell_restore_modified_set(program: &Path) -> String {
+    let prog_q = shell_quote(&program.to_string_lossy());
+    let paths_q = shell_quote(&scratch_dir().join(PATHS_MARKER).to_string_lossy());
+    format!(
+        r#"set -eu
+if [ -s {paths_q} ]; then
+  tr '\n' '\0' < {paths_q} | xargs -0 {prog_q} restore -- > /dev/null 2>&1
+fi"#
+    )
+}
+
+pub fn shell_rm_dir_git(program: &Path) -> String {
+    let dir = read_marker(RM_DIR_MARKER).unwrap_or_else(|_| "data/d0000".into());
+    shell_redirect_devnull(program, &["rm", "-r", &dir])
+}
+
+pub fn shell_rm_dir_grit(program: &Path) -> String {
+    let dir = read_marker(RM_DIR_MARKER).unwrap_or_else(|_| "data/d0000".into());
+    shell_redirect_devnull(program, &["rm", &dir])
+}
+
+pub fn shell_mv_file(program: &Path) -> String {
+    let src = read_marker(MV_SRC_MARKER).unwrap_or_else(|_| "data/d0000/f0000.txt".into());
+    let dst = read_marker(MV_DST_MARKER).unwrap_or_else(|_| "data/d0000/f_bench_mv.txt".into());
+    shell_redirect_devnull(program, &["mv", &src, &dst])
 }
 
 #[cfg(test)]

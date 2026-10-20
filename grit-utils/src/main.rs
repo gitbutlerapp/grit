@@ -49,8 +49,11 @@ use grit_utils::scenarios::{
 use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
 use grit_utils::worktree_fixture::{
-    prepare_add as prepare_worktree_add, prepare_commit as prepare_worktree_commit,
-    prepare_diff as prepare_worktree_diff, prepare_status_clean as prepare_worktree_status_clean,
+    prepare_add as prepare_worktree_add, prepare_clean_untracked as prepare_worktree_clean,
+    prepare_commit as prepare_worktree_commit, prepare_diff as prepare_worktree_diff,
+    prepare_mv_file as prepare_worktree_mv, prepare_restore_paths as prepare_worktree_restore,
+    prepare_rm_dir as prepare_worktree_rm, prepare_staged_diff as prepare_worktree_staged_diff,
+    prepare_status_clean as prepare_worktree_status_clean,
     prepare_status_dirty as prepare_worktree_status_dirty,
 };
 use grit_utils::worktree_suite::run_worktree_group;
@@ -493,6 +496,31 @@ enum Cmd {
         git: PathBuf,
     },
     #[command(hide = true)]
+    PrepareWorktreeStagedDiff {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareWorktreeRestorePaths {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareWorktreeRmDir {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareWorktreeMvFile {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareWorktreeCleanUntracked {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
     PrepareParallelCheckout {
         #[arg(long)]
         git: PathBuf,
@@ -554,9 +582,9 @@ struct DailyRunArgs {
     /// Run only these scenario ids (comma-separated)
     #[arg(long, value_delimiter = ',')]
     only: Option<Vec<String>>,
-    /// Limit to one functional area
-    #[arg(long, value_enum)]
-    area: Option<grit_utils::daily::registry::Area>,
+    /// Limit to functional areas (comma-separated)
+    #[arg(long, value_delimiter = ',', value_enum)]
+    area: Option<Vec<grit_utils::daily::registry::Area>>,
     /// Smoke fixtures, zero warmups, one timed run per tool
     #[arg(long)]
     smoke: bool,
@@ -1023,7 +1051,7 @@ fn main() -> Result<()> {
                         smoke: run.smoke,
                         offline: run.offline,
                         only: run.only.clone(),
-                        area: run.area,
+                        areas: run.area.clone(),
                         output: run.output.clone(),
                     },
                     timestamp,
@@ -1240,6 +1268,26 @@ fn main() -> Result<()> {
         Cmd::PrepareWorktreeDiff { git } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_diff(&git);
+        }
+        Cmd::PrepareWorktreeStagedDiff { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_staged_diff(&git);
+        }
+        Cmd::PrepareWorktreeRestorePaths { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_restore(&git);
+        }
+        Cmd::PrepareWorktreeRmDir { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_rm(&git);
+        }
+        Cmd::PrepareWorktreeMvFile { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_mv(&git);
+        }
+        Cmd::PrepareWorktreeCleanUntracked { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_clean(&git);
         }
         Cmd::PrepareParallelCheckout { git, url, dest } => {
             let git = resolve_binary("git", Some(git))?;
@@ -1723,6 +1771,11 @@ fn main() -> Result<()> {
         | Cmd::PrepareWorktreeAdd { .. }
         | Cmd::PrepareWorktreeCommit { .. }
         | Cmd::PrepareWorktreeDiff { .. }
+        | Cmd::PrepareWorktreeStagedDiff { .. }
+        | Cmd::PrepareWorktreeRestorePaths { .. }
+        | Cmd::PrepareWorktreeRmDir { .. }
+        | Cmd::PrepareWorktreeMvFile { .. }
+        | Cmd::PrepareWorktreeCleanUntracked { .. }
         | Cmd::Render { .. }
         | Cmd::CriterionSummary { .. }
         | Cmd::PrepareParallelCheckout { .. }
