@@ -10,7 +10,7 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::follow::{FollowWalkOptions, FollowedCommit};
 use grit_lib::revwalk::RevWalkListOptions;
 
-use support::{git, open_grit_repo, HistoryRepo};
+use support::{commit_labeled_with_dates, git, open_grit_repo, HistoryRepo};
 
 fn git_follow_hashes(
     wt: &Path,
@@ -172,48 +172,42 @@ fn follow_until_with_newer_head_matches_git() {
     git(worktree, &["config", "user.name", "T"]);
     std::fs::write(worktree.join("f.txt"), "v2016\n").unwrap();
     git(worktree, &["add", "f.txt"]);
+    let c2016 = commit_labeled_with_dates(
+        worktree,
+        "c2016",
+        &[],
+        "2016-01-01T00:00:00",
+        "2016-01-01T00:00:00",
+    );
     git(
         worktree,
-        &[
-            "-c",
-            "user.name=T",
-            "-c",
-            "user.email=t@e",
-            "commit",
-            "-m",
-            "c2016",
-            "--date=2016-01-01T00:00:00",
-        ],
+        &["update-ref", "refs/heads/main", &c2016.to_hex()],
     );
     std::fs::write(worktree.join("f.txt"), "v2018\n").unwrap();
     git(worktree, &["add", "f.txt"]);
+    let c2018 = commit_labeled_with_dates(
+        worktree,
+        "c2018",
+        &[c2016],
+        "2018-01-01T00:00:00",
+        "2018-01-01T00:00:00",
+    );
     git(
         worktree,
-        &[
-            "-c",
-            "user.name=T",
-            "-c",
-            "user.email=t@e",
-            "commit",
-            "-m",
-            "c2018",
-            "--date=2018-01-01T00:00:00",
-        ],
+        &["update-ref", "refs/heads/main", &c2018.to_hex()],
     );
     std::fs::write(worktree.join("f.txt"), "v2020\n").unwrap();
     git(worktree, &["add", "f.txt"]);
+    let c2020 = commit_labeled_with_dates(
+        worktree,
+        "c2020",
+        &[c2018],
+        "2020-01-01T00:00:00",
+        "2020-01-01T00:00:00",
+    );
     git(
         worktree,
-        &[
-            "-c",
-            "user.name=T",
-            "-c",
-            "user.email=t@e",
-            "commit",
-            "-m",
-            "c2020",
-            "--date=2020-01-01T00:00:00",
-        ],
+        &["update-ref", "refs/heads/main", &c2020.to_hex()],
     );
     let until =
         grit_lib::revwalk::committer_cutoff_from_date("2019-06-01 00:00:00 +0000", 1_700_000_000)
@@ -230,8 +224,27 @@ fn follow_until_with_newer_head_matches_git() {
 }
 
 #[test]
+fn follow_unrelated_dash_path_not_followed() {
+    let repo = HistoryRepo::init();
+    let worktree = repo.worktree();
+    git(worktree, &["config", "user.email", "t@e"]);
+    git(worktree, &["config", "user.name", "T"]);
+    std::fs::create_dir(worktree.join("dir")).unwrap();
+    let mut long = String::new();
+    for i in 0..200 {
+        long.push_str(&format!("line {i}\n"));
+    }
+    std::fs::write(worktree.join("dir-file"), &long).unwrap();
+    git(worktree, &["add", "dir-file"]);
+    git(worktree, &["commit", "-m", "dash"]);
+    std::fs::write(worktree.join("dir").join("file"), "other\n").unwrap();
+    git(worktree, &["add", "dir/file"]);
+    git(worktree, &["commit", "-m", "nested"]);
+    assert_follow_matches_git(&worktree, "dir/file", RevWalkListOptions::default(), None);
+}
+
 #[test]
-#[ignore = "git.git full follow parity tracked separately; prefix matches first 219 commits"]
+#[ignore = "git.git oracle: 307 vs grit on /tmp/git-wt; perf still above 1.5x git median"]
 fn follow_git_git_builtin_add_c_smoke() {
     let wt = Path::new("/tmp/git-wt");
     if !wt.is_dir() {
