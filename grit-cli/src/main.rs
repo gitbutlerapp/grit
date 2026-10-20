@@ -18,6 +18,7 @@ mod markdown;
 mod output;
 mod progress;
 mod ref_name_messages;
+mod rev_select;
 mod stdio;
 mod terminal_progress;
 mod ui;
@@ -429,36 +430,25 @@ enum Command {
     },
     /// Show recent commits reachable from HEAD.
     Log {
-        /// Continue listing from before this commit (for paging).
-        #[arg(long)]
-        before: Option<String>,
+        #[command(flatten)]
+        rev: rev_select::RevSelectArgs,
+        /// Continue a paged walk using the opaque `next` token from a previous page.
+        #[arg(long = "cursor", value_name = "TOKEN")]
+        cursor: Option<String>,
         /// Show which files each commit changed, with insertion and deletion counts.
         #[arg(long)]
         stat: bool,
-        /// Stop after this many commits (default page size is ten when omitted).
-        #[arg(long = "limit", value_name = "N")]
-        limit: Option<usize>,
-        /// Limit to commits that touch these paths.
-        #[arg(value_name = "PATH", last = true)]
-        paths: Vec<String>,
     },
     /// List or count commits matching revision ranges.
     Revs {
-        /// Revision ranges (`A..B`, `A...B`, `^tip`, plain tips).
-        #[arg(value_name = "RANGE", required = true)]
-        ranges: Vec<String>,
+        #[command(flatten)]
+        rev: rev_select::RevSelectArgs,
         /// Print only the number of reachable commits.
         #[arg(long)]
         count: bool,
-        /// Stop after this many commits (listing mode only).
-        #[arg(long = "limit", value_name = "N")]
-        limit: Option<usize>,
-        /// Follow only the first parent at merges.
-        #[arg(long = "first-parent")]
-        first_parent: bool,
-        /// Limit to commits that touch these paths.
-        #[arg(value_name = "PATH", last = true)]
-        paths: Vec<String>,
+        /// With `--count`, print left/right counts for a symmetric range (`A...B`).
+        #[arg(long = "left-right")]
+        left_right: bool,
     },
     /// Find merge bases or test whether one commit is an ancestor of another.
     #[command(name = "merge-base")]
@@ -1048,23 +1038,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 ctx,
             ),
         },
-        Command::Log {
-            before,
-            stat,
-            limit,
-            paths,
-        } => emit(&commands::log::run(before, stat, limit, &paths)?, opts, ctx),
+        Command::Log { rev, cursor, stat } => {
+            emit(&commands::log::run(rev, cursor, stat)?, opts, ctx)
+        }
         Command::Revs {
-            ranges,
+            rev,
             count,
-            limit,
-            first_parent,
-            paths,
-        } => emit(
-            &commands::revs::run(&ranges, count, limit, first_parent, &paths)?,
-            opts,
-            ctx,
-        ),
+            left_right,
+        } => emit(&commands::revs::run(rev, count, left_right)?, opts, ctx),
         Command::MergeBase {
             a,
             b,

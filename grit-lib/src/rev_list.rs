@@ -3156,6 +3156,15 @@ pub fn resolve_revision_specs_to_commits(
     resolve_specs(repo, specs)
 }
 
+/// Commit tips for every ref (Git `--all`), for date-order history walks.
+///
+/// # Errors
+///
+/// Propagates ref listing and peel errors.
+pub fn all_ref_commit_tips_for_walk(repo: &Repository) -> Result<Vec<ObjectId>> {
+    all_ref_tips(repo, &RefExclusions::default())
+}
+
 /// `resolve_object_walk_roots` function.
 pub fn resolve_object_walk_roots(
     repo: &Repository,

@@ -5,8 +5,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
-use grit_lib::revwalk::log_walk::LogWalkCursor;
-use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -16,16 +15,17 @@ use crate::commands::show::{diffstat, render_stat, use_color, DiffStat};
 use crate::context::{self, subject_line, CommitSummary};
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
+use crate::rev_select::RevSelectArgs;
 use crate::ui;
 
-/// How many commits to show per page when the caller does not set `--limit`.
+/// How many commits to show per page when the caller does not set `-n` / `--max-count`.
 const PAGE: usize = 10;
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
 #[derive(Serialize, JsonSchema)]
 pub struct LogOutcome {
     pub commits: Vec<LogCommit>,
-    /// Opaque continuation cursor for `--before`, or `null` when there is no further history.
+    /// Opaque continuation cursor for `--cursor`, or `null` when there is no further history.
     pub next: Option<String>,
     #[serde(skip)]
     #[schemars(skip)]
@@ -52,7 +52,7 @@ impl HumanRender for LogOutcome {
         }
         if let Some(next) = &self.next {
             outln!(w);
-            outln!(w, "→ more: grit log --before={next}");
+            outln!(w, "→ more: grit log --cursor={next}");
         }
         Ok(())
     }
@@ -77,52 +77,63 @@ impl MarkdownRender for LogOutcome {
         markdown::print_commit_list(w, &self.commit_rows, ctx)?;
         if let Some(next) = &self.next {
             outln!(w);
-            outln!(w, "More history: run `grit log --before={next}`");
+            outln!(w, "More history: run `grit log --cursor={next}`");
         }
         Ok(())
     }
 }
 
-pub fn run(
-    before: Option<String>,
-    stat: bool,
-    limit: Option<usize>,
-    paths: &[String],
-) -> Result<LogOutcome> {
-    if before.is_some() && !paths.is_empty() {
+pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<LogOutcome> {
+    let repo = context::discover()?;
+    let env = repo.environment();
+    let mut deprecated_cursor = None;
+    let mut deprecated_warning = false;
+    let opts = rev.to_rev_walk_options(
+        env,
+        &["HEAD"],
+        &mut deprecated_cursor,
+        &mut deprecated_warning,
+    )?;
+    if deprecated_warning {
+        eprintln!(
+            "warning: passing a log cursor to `--before` is deprecated; use `--cursor` instead"
+        );
+    }
+    let continuation = cursor.or(deprecated_cursor);
+    if continuation.is_some() && !rev.paths.is_empty() {
         bail!(
-            "`grit log` cannot combine `--before` with path filters; drop `--before` or the paths"
+            "`grit log` cannot combine `--cursor` with path filters; drop the cursor or the paths"
         );
     }
 
-    let repo = context::discover()?;
-    let page_size = limit.unwrap_or(PAGE);
+    let token_refs = rev.rev_tokens(&["HEAD"]);
+    let page_size = rev.max_count.unwrap_or(PAGE);
 
-    let use_rev_walk = !paths.is_empty() || (limit.is_some() && before.is_none());
+    let use_rev_walk = !rev.paths.is_empty()
+        || (rev.max_count.is_some() && continuation.is_none())
+        || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
+
     if use_rev_walk {
+        if rev.max_count == Some(0) {
+            return build_outcome(&repo, &[], stat, None);
+        }
         let walk = repo.rev_walk();
-        // Omitted `--limit` means no cap (required for path history); default page
-        // size applies only to the LogWalkCursor branch below.
-        let opts = RevWalkListOptions {
-            limit,
-            first_parent: false,
-            paths: paths.to_vec(),
-            ..RevWalkListOptions::default()
-        };
         let oids = walk
-            .commits(&["HEAD"], &opts)
+            .commits(&token_refs, &opts)
             .context("could not list commits")?;
         return build_outcome(&repo, &oids, stat, None);
     }
 
-    let cursor = before
+    let query = LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?
+        .context("internal error: log walk query missing")?;
+    let cursor = continuation
         .as_deref()
         .map(LogWalkCursor::decode)
         .transpose()
         .context("invalid log continuation cursor")?;
 
-    let page =
-        LogWalkCursor::step(&repo, cursor.as_ref(), page_size).context("could not list commits")?;
+    let page = LogWalkCursor::step(&repo, &query, cursor.as_ref(), page_size)
+        .context("could not list commits")?;
     let next = page.next.map(|c| c.encode()).transpose()?;
     build_outcome(&repo, &page.commits, stat, next)
 }

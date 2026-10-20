@@ -88,16 +88,16 @@ fn log_human_continuation_emits_full_opaque_cursor() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let line = stdout
         .lines()
-        .find(|l| l.contains("→ more: grit log --before="))
+        .find(|l| l.contains("→ more: grit log --cursor="))
         .expect("continuation line");
-    let cursor = line.split("--before=").nth(1).expect("cursor suffix");
+    let cursor = line.split("--cursor=").nth(1).expect("cursor suffix");
     assert!(
         cursor.starts_with("lw1."),
         "expected opaque cursor, got: {cursor}"
     );
     assert!(cursor.len() > 20, "cursor must not be truncated: {cursor}");
     let next_page = Command::new(GRIT)
-        .args(["log", &format!("--before={cursor}")])
+        .args(["log", &format!("--cursor={cursor}")])
         .current_dir(dir.path())
         .output()
         .expect("log page 2");
@@ -123,14 +123,14 @@ fn log_markdown_continuation_emits_full_opaque_cursor() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let prefix = "More history: run `grit log --before=";
+    let prefix = "More history: run `grit log --cursor=";
     let start = stdout.find(prefix).expect("markdown continuation");
     let rest = &stdout[start + prefix.len()..];
     let cursor = rest.split('`').next().expect("closing backtick");
     assert!(cursor.starts_with("lw1."), "got: {cursor}");
     assert!(cursor.len() > 20, "cursor must not be truncated: {cursor}");
     let next_page = Command::new(GRIT)
-        .args(["log", &format!("--before={cursor}")])
+        .args(["log", &format!("--cursor={cursor}")])
         .current_dir(dir.path())
         .output()
         .expect("log page 2");

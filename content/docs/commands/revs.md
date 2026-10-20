@@ -8,14 +8,18 @@ order: 3
 ## Synopsis
 
 ```text
-grit revs <RANGE>... [--count] [--limit N] [--first-parent] [-- <PATH>...]
+grit revs <RANGE>... [-n <N>] [--count] [--left-right]
+  [--skip <N>] [--since|--after <date>] [--until|--before <date>]
+  [--first-parent] [--merges | --no-merges] [--reverse]
+  [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
+  [-- <PATH>...]
 ```
 
 ## Description
 
 Walks commits reachable from one or more revision ranges and prints each commit’s full object id and subject (first line of the message), one commit per line. Ranges use the same syntax as Git’s `rev-list`: plain tips, `A..B`, symmetric difference `A...B`, and `^tip` exclusions.
 
-Use `--count` to print only the number of reachable commits (no subject lines). When a commit-graph file is present, counting uses it for speed.
+Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). When a commit-graph file is present, counting uses it for speed.
 
 Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
 
@@ -23,10 +27,21 @@ Path arguments after `--` limit history to commits that touched those paths. Ope
 
 | Option | Description |
 | --- | --- |
-| `<RANGE>…` | One or more revision ranges (required). |
-| `--count` | Print only the commit count. |
-| `--limit N` | Stop after `N` commits (listing mode only). |
+| `<RANGE>…` | One or more revision ranges (required unless a ref-set flag such as `--all` is used). |
+| `-n`, `--max-count <N>` | Stop after `N` commits (listing mode only). `--limit` is a hidden alias for one release. |
+| `--count` | Print only the commit count (or left/right counts with `--left-right`). |
+| `--left-right` | With `--count` and one `A...B` range, print `{left, right}` instead of a single total. |
+| `--skip <N>` | Skip `N` commits after ordering. |
+| `--since`, `--after <date>` | Exclude commits older than this date (committer date). |
+| `--until`, `--before <date>` | Exclude commits newer than this date. |
 | `--first-parent` | Follow first parents only at merges. |
+| `--merges` | Only merge commits (conflicts with `--no-merges`). |
+| `--no-merges` | Exclude merge commits (conflicts with `--merges`). |
+| `--reverse` | Oldest commits first. |
+| `--all` | Include every ref tip. |
+| `--branches[=<glob>]` | Branch tips, optionally filtered by glob. |
+| `--tags[=<glob>]` | Tag tips, optionally filtered by glob. |
+| `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob. |
 | `-- <PATH>…` | Limit to commits touching these paths (cwd-relative under the work tree, like `grit diff`). |
 
 ## Examples
@@ -36,7 +51,7 @@ List commits on the current branch:
 ```console
 $ grit revs HEAD
 92501f188ae0815af09a0cef6e121eddda4113cf  second
-919c45f33de5e5c0bd05f8ffb089f697f4644976  initial
+919c45f33de5e0bd05f8ffb089f697f4644976  initial
 ```
 
 Count reachable commits:
@@ -44,6 +59,13 @@ Count reachable commits:
 ```console
 $ grit revs --count HEAD
 2
+```
+
+Left/right counts on a symmetric range:
+
+```console
+$ grit revs --count --left-right main...feature
+3	5
 ```
 
 Commits on one branch but not another:
@@ -61,7 +83,8 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `commits` | array | Commits in walk order. Each entry has `oid` and `subject`. Empty when `--count` is set. |
-| `count` | number or null | Total reachable commits when `--count` is set; otherwise `null`. |
+| `count` | number or null | Total reachable commits when `--count` is set without `--left-right`; otherwise `null`. |
+| `left_right` | object or omitted | When `--count` and `--left-right` are set: `left` and `right` commit counts for the symmetric range. |
 
 Example (listing):
 
@@ -83,6 +106,19 @@ Example (`--count`):
 {
   "commits": [],
   "count": 2
+}
+```
+
+Example (`--count --left-right`):
+
+```json
+{
+  "commits": [],
+  "count": null,
+  "left_right": {
+    "left": 3,
+    "right": 5
+  }
 }
 ```
 

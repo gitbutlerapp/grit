@@ -6,19 +6,65 @@
 use std::io::{Cursor, Read, Write};
 
 use crate::error::{Error, Result};
-use crate::merge_base::{ReachableWalkSnapshot, ReachableWalkState};
+use crate::merge_base::{ReachableWalkCommitterCutoffs, ReachableWalkSnapshot, ReachableWalkState};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
-use crate::state::resolve_head;
+use crate::revwalk::queries::{resolve_log_walk_tips_and_hide, MergeFilter, RevWalkListOptions};
 
 const CURSOR_PREFIX: &str = "lw1.";
-const MAGIC: &[u8; 4] = b"GLW2";
+const MAGIC_V2: &[u8; 4] = b"GLW2";
+const MAGIC_V3: &[u8; 4] = b"GLW3";
+const NO_CUTOFF: i64 = i64::MIN;
+
+/// Tips, exclusions, and date cutoffs for a resumable date-order log walk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogWalkQuery {
+    /// Positive walk tips (resolved commit oids).
+    pub tips: Vec<ObjectId>,
+    /// Hide tips whose ancestors are omitted from output.
+    pub hide: Vec<ObjectId>,
+    /// Committer-date filters applied during the walk.
+    pub cutoffs: ReachableWalkCommitterCutoffs,
+}
+
+impl LogWalkQuery {
+    /// Build a walk query when revision selection maps to default-order reachable walks.
+    ///
+    /// Returns [`None`] when `walk` uses options that require full `rev-list` (paths,
+    /// `--reverse`, `--first-parent`, parent-count filters, or `--skip`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates rev-parse and ref errors from [`resolve_log_walk_tips_and_hide`].
+    pub fn from_rev_walk(
+        repo: &Repository,
+        tokens: &[&str],
+        walk: &RevWalkListOptions,
+    ) -> Result<Option<Self>> {
+        if !walk.paths.is_empty()
+            || walk.reverse
+            || walk.first_parent
+            || walk.merges != MergeFilter::Any
+            || walk.skip > 0
+        {
+            return Ok(None);
+        }
+        let (tips, hide) = resolve_log_walk_tips_and_hide(repo, tokens, walk)?;
+        Ok(Some(Self {
+            tips,
+            hide,
+            cutoffs: ReachableWalkCommitterCutoffs {
+                since: walk.since,
+                until: walk.until,
+            },
+        }))
+    }
+}
 
 /// Opaque continuation token for paged `grit log` history walks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogWalkCursor {
-    /// `HEAD` commit oid when the walk started (must still match on resume).
-    pub anchor_head: ObjectId,
+    query: LogWalkQuery,
     walk: ReachableWalkSnapshot,
 }
 
@@ -32,44 +78,43 @@ pub struct LogWalkPage {
 }
 
 impl LogWalkCursor {
-    /// Start or resume a date-order walk from `HEAD`, emitting up to `limit` commits.
+    /// Start or resume a date-order walk for `query`, emitting up to `limit` commits.
     ///
     /// Pass `cursor` from a previous page's [`LogWalkPage::next`]. When `cursor` is
-    /// [`None`], a fresh walk begins at the current `HEAD`.
+    /// [`None`], a fresh walk begins from `query`.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] for an invalid cursor, when `HEAD` moved since
+    /// Returns [`Error::CorruptObject`] for an invalid cursor, when the query changed since
     /// the cursor was issued, or when commit objects cannot be read.
     pub fn step(
         repo: &Repository,
+        query: &LogWalkQuery,
         cursor: Option<&LogWalkCursor>,
         limit: usize,
     ) -> Result<LogWalkPage> {
-        let head_state = resolve_head(repo.git_dir())?;
-        let head = *head_state
-            .oid()
-            .ok_or_else(|| Error::CorruptObject("repository has no commits".to_owned()))?;
+        if limit == 0 {
+            return Ok(LogWalkPage {
+                commits: Vec::new(),
+                next: cursor.cloned(),
+            });
+        }
 
         let mut state = match cursor {
-            None => ReachableWalkState::new(repo, std::slice::from_ref(&head), &[])?,
+            None => ReachableWalkState::new(repo, &query.tips, &query.hide)?,
             Some(c) => {
-                if c.anchor_head != head {
+                if c.query != *query {
                     return Err(Error::CorruptObject(
-                        "log walk cursor is stale: HEAD has changed".to_owned(),
+                        "log walk cursor does not match the current revision selection".to_owned(),
                     ));
                 }
                 ReachableWalkState::from_snapshot(c.walk.clone())
             }
         };
 
-        let commits = state.emit_until(
-            repo,
-            Some(limit),
-            crate::merge_base::ReachableWalkCommitterCutoffs::default(),
-        )?;
+        let commits = state.emit_until(repo, Some(limit), query.cutoffs)?;
         let next = state.has_pending().then(|| LogWalkCursor {
-            anchor_head: head,
+            query: query.clone(),
             walk: state.snapshot(),
         });
         Ok(LogWalkPage { commits, next })
@@ -82,7 +127,7 @@ impl LogWalkCursor {
     /// Returns [`Error::CorruptObject`] if internal serialization fails.
     pub fn encode(&self) -> Result<String> {
         let mut buf = Vec::new();
-        write_snapshot(&mut buf, self.anchor_head, &self.walk)?;
+        write_snapshot_v3(&mut buf, &self.query, &self.walk)?;
         Ok(format!("{CURSOR_PREFIX}{}", base64_encode(&buf)))
     }
 
@@ -101,9 +146,20 @@ impl LogWalkCursor {
     }
 }
 
-fn write_snapshot(out: &mut Vec<u8>, anchor: ObjectId, walk: &ReachableWalkSnapshot) -> Result<()> {
-    out.write_all(MAGIC).map_err(Error::Io)?;
-    out.write_all(anchor.as_bytes()).map_err(Error::Io)?;
+fn write_snapshot_v3(
+    out: &mut Vec<u8>,
+    query: &LogWalkQuery,
+    walk: &ReachableWalkSnapshot,
+) -> Result<()> {
+    out.write_all(MAGIC_V3).map_err(Error::Io)?;
+    write_oid_vec(out, &query.tips)?;
+    write_oid_vec(out, &query.hide)?;
+    write_i64(out, query.cutoffs.since.unwrap_or(NO_CUTOFF))?;
+    write_i64(out, query.cutoffs.until.unwrap_or(NO_CUTOFF))?;
+    write_walk_body(out, walk)
+}
+
+fn write_walk_body(out: &mut Vec<u8>, walk: &ReachableWalkSnapshot) -> Result<()> {
     write_u64(out, walk.seq)?;
     write_oid_vec(out, &walk.hide)?;
     write_oid_vec(out, &walk.done)?;
@@ -128,48 +184,69 @@ fn read_snapshot(bytes: &[u8]) -> Result<LogWalkCursor> {
     let mut magic = [0u8; 4];
     cur.read_exact(&mut magic)
         .map_err(|_| Error::CorruptObject("truncated log walk cursor".to_owned()))?;
-    if &magic != MAGIC {
+    let query = if &magic == MAGIC_V3 {
+        let tips = read_oid_vec(&mut cur)?;
+        let hide = read_oid_vec(&mut cur)?;
+        let since_raw = read_i64(&mut cur)?;
+        let until_raw = read_i64(&mut cur)?;
+        LogWalkQuery {
+            tips,
+            hide,
+            cutoffs: ReachableWalkCommitterCutoffs {
+                since: (since_raw != NO_CUTOFF).then_some(since_raw),
+                until: (until_raw != NO_CUTOFF).then_some(until_raw),
+            },
+        }
+    } else if &magic == MAGIC_V2 {
+        let anchor = read_oid(&mut cur)?;
+        LogWalkQuery {
+            tips: vec![anchor],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        }
+    } else {
         return Err(Error::CorruptObject(
             "log walk cursor version mismatch".to_owned(),
         ));
-    }
-    let anchor = read_oid(&mut cur)?;
-    let seq = read_u64(&mut cur)?;
-    let hide = read_oid_vec(&mut cur)?;
-    let done = read_oid_vec(&mut cur)?;
-    let queued = read_oid_vec(&mut cur)?;
-    let unfinished_len = read_u32(&mut cur)? as usize;
-    let mut unfinished_children = Vec::with_capacity(unfinished_len);
-    for _ in 0..unfinished_len {
-        let oid = read_oid(&mut cur)?;
-        let count = read_u32(&mut cur)?;
-        unfinished_children.push((oid, count));
-    }
-    let seeded = read_oid_vec(&mut cur)?;
-    let heap_len = read_u32(&mut cur)? as usize;
-    let mut heap = Vec::with_capacity(heap_len);
-    for _ in 0..heap_len {
-        let time = read_i64(&mut cur)?;
-        let seq_entry = read_u64(&mut cur)?;
-        let oid = read_oid(&mut cur)?;
-        heap.push((time, seq_entry, oid));
-    }
+    };
+    let walk = read_walk_body(&mut cur)?;
     if cur.position() != bytes.len() as u64 {
         return Err(Error::CorruptObject(
             "log walk cursor trailing bytes".to_owned(),
         ));
     }
-    Ok(LogWalkCursor {
-        anchor_head: anchor,
-        walk: ReachableWalkSnapshot {
-            heap,
-            done,
-            queued,
-            unfinished_children,
-            seeded,
-            seq,
-            hide,
-        },
+    Ok(LogWalkCursor { query, walk })
+}
+
+fn read_walk_body(cur: &mut Cursor<&[u8]>) -> Result<ReachableWalkSnapshot> {
+    let seq = read_u64(cur)?;
+    let hide = read_oid_vec(cur)?;
+    let done = read_oid_vec(cur)?;
+    let queued = read_oid_vec(cur)?;
+    let unfinished_len = read_u32(cur)? as usize;
+    let mut unfinished_children = Vec::with_capacity(unfinished_len);
+    for _ in 0..unfinished_len {
+        let oid = read_oid(cur)?;
+        let count = read_u32(cur)?;
+        unfinished_children.push((oid, count));
+    }
+    let seeded = read_oid_vec(cur)?;
+    let heap_len = read_u32(cur)? as usize;
+    let mut heap = Vec::with_capacity(heap_len);
+    for _ in 0..heap_len {
+        let time = read_i64(cur)?;
+        let seq_entry = read_u64(cur)?;
+        let oid = read_oid(cur)?;
+        heap.push((time, seq_entry, oid));
+    }
+    Ok(ReachableWalkSnapshot {
+        heap,
+        done,
+        queued,
+        unfinished_children,
+        seeded,
+        seq,
+        hide,
     })
 }
 
@@ -372,10 +449,15 @@ mod tests {
         crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
 
         const PAGE: usize = 3;
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
         let mut cursor: Option<LogWalkCursor> = None;
         let mut paged = Vec::new();
         loop {
-            let page = LogWalkCursor::step(&repo, cursor.as_ref(), PAGE)?;
+            let page = LogWalkCursor::step(&repo, &query, cursor.as_ref(), PAGE)?;
             paged.extend(page.commits.clone());
             match page.next {
                 Some(next) => {
@@ -404,7 +486,12 @@ mod tests {
         crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
 
         let git_order = git_log_oids(&repo, 10);
-        let page = LogWalkCursor::step(&repo, None, 10)?;
+        let query = LogWalkQuery {
+            tips: vec![merge],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 10)?;
         assert_eq!(page.commits, git_order);
         assert_no_ancestor_before_descendant(&repo, &page.commits);
         Ok(())
@@ -433,11 +520,16 @@ mod tests {
         crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
         crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
 
-        let page1 = LogWalkCursor::step(&repo, None, 1)?;
+        let query = LogWalkQuery {
+            tips: vec![merge],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page1 = LogWalkCursor::step(&repo, &query, None, 1)?;
         assert_eq!(page1.commits, vec![merge]);
         assert!(page1.next.is_some());
 
-        let page2 = LogWalkCursor::step(&repo, page1.next.as_ref(), 10)?;
+        let page2 = LogWalkCursor::step(&repo, &query, page1.next.as_ref(), 10)?;
         let seen: HashSet<_> = page1
             .commits
             .iter()

@@ -533,7 +533,7 @@ fn log_json_pages_with_next_cursor() -> TestResult {
         next.starts_with("lw1."),
         "next must be an opaque walk cursor, got {next}"
     );
-    let v2 = gs_json(&repo, &["log", &format!("--before={next}")]);
+    let v2 = gs_json(&repo, &["log", &format!("--cursor={next}")]);
     assert_eq!(v2["next"], Value::Null);
     Ok(())
 }
@@ -580,7 +580,7 @@ fn log_json_paging_through_merge_matches_git_order() -> TestResult {
     let mut next: Option<String> = None;
     for _ in 0..20 {
         let v = if let Some(ref cursor) = next {
-            gs_json(&repo, &["log", &format!("--before={cursor}")])
+            gs_json(&repo, &["log", &format!("--cursor={cursor}")])
         } else {
             gs_json(&repo, &["log"])
         };

@@ -8,16 +8,20 @@ order: 1
 ## Synopsis
 
 ```text
-grit log [--before <cursor>] [--limit <N>] [--stat] [-- <path>…]
+grit log [<REV>…] [-n <N>] [--cursor <token>] [--stat]
+  [--skip <N>] [--since|--after <date>] [--until|--before <date>]
+  [--first-parent] [--merges | --no-merges] [--reverse]
+  [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
+  [-- <path>…]
 ```
 
 ## Description
 
-Lists the commits reachable from the current commit, newest first, ten at a time (unless you pass `--limit`). Each line shows the short commit id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`.
+Lists commits reachable from the selected revisions (default `HEAD`), newest first, ten at a time (unless you pass `-n` / `--max-count`). Each line shows the short commit id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`.
 
-Pass one or more paths after `--` to show only commits that touched those paths (same rules as [`grit revs`](../revs/)). Path operands follow Git pathspec cwd rules—the same as [`grit diff`](../diff/): from a subdirectory, `f.txt` means that file under your current directory, not at the repository root. Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `--limit`, every matching commit is listed (not capped at ten).
+Revision selection matches [`grit revs`](../revs/): plain tips, `A..B`, `A...B`, `^tip`, and the same ref-set flags (`--all`, `--branches`, and so on). Path operands after `--` limit to commits that touch those paths (same cwd rules as [`grit diff`](../diff/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `-n`, every matching commit is listed when paths are set (not capped at ten).
 
-When there's more history on the default walk, the last line shows the command for the next page. Path filters and a one-shot `--limit` without `--before` do not emit a continuation cursor.
+When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
 
 With `--stat`, each commit is followed by the files it changed and how many lines were added and removed in each, like [`grit show`](../show/). Merge commits show the change against their first parent.
 
@@ -25,10 +29,23 @@ With `--stat`, each commit is followed by the files it changed and how many line
 
 | Option | Description |
 | --- | --- |
-| `--before <cursor>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). This is not a commit oid: it encodes the walk queue so merges and side branches are not skipped. Cannot be combined with path operands. |
-| `--limit <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--before`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `--limit` without `--before` and without paths lists `N` commits with no `next` cursor. |
+| `<REV>…` | Tips and ranges to walk (default `HEAD`). |
+| `-n`, `--max-count <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--cursor`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `-n` without `--cursor` and without paths lists `N` commits with no `next` cursor. `--limit` is a hidden alias for one release. |
+| `--cursor <token>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). This is not a commit oid: it encodes the walk queue so merges and side branches are not skipped. Cannot be combined with path operands. |
+| `--before <date>` | Alias for `--until` (date cutoff). Values starting with `lw1.` are still accepted as a deprecated continuation cursor (with a warning); use `--cursor` instead. |
+| `--skip <N>` | Skip `N` commits after ordering (cursor walks do not support `--skip`). |
+| `--since`, `--after <date>` | Exclude commits older than this date (committer date, Git parsing rules). |
+| `--until`, `--before <date>` | Exclude commits newer than this date (unless `--before` is an `lw1.` cursor token). |
+| `--first-parent` | Follow only the first parent at merges (disables cursor paging). |
+| `--merges` | Only merge commits (conflicts with `--no-merges`; disables cursor paging). |
+| `--no-merges` | Exclude merge commits (conflicts with `--merges`; disables cursor paging). |
+| `--reverse` | Oldest commits first (disables cursor paging). |
+| `--all` | Include every ref tip. |
+| `--branches[=<glob>]` | Branch tips, optionally filtered by glob under `refs/heads/`. |
+| `--tags[=<glob>]` | Tag tips, optionally filtered by glob under `refs/tags/`. |
+| `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob under `refs/remotes/`. |
 | `--stat` | Show which files each commit changed, with insertion and deletion counts. |
-| `<path>…` | After `--`, limit to commits that touch these paths (cwd-relative under the work tree, like `grit diff`; all matches unless `--limit` is set). |
+| `<path>…` | After `--`, limit to commits that touch these paths (cwd-relative under the work tree, like `grit diff`; all matches unless `-n` is set). |
 
 ## Examples
 
@@ -41,7 +58,7 @@ $ grit log
   ...
   2efcc2d  Ada Lovelace  3 days ago     Start the project
 
-→ more: grit log --before=lw1.R0x…
+→ more: grit log --cursor=lw1.R0x…
 ```
 
 (`lw1.` cursors are opaque; copy the full token from `--json` `next` when scripting.)
@@ -49,7 +66,7 @@ $ grit log
 Show the next page:
 
 ```console
-$ grit log --before=lw1.R0x…
+$ grit log --cursor=lw1.R0x…
 ```
 
 See which files each recent commit touched:
@@ -74,13 +91,19 @@ $ grit log --json --filter '.commits[].subject'
 Show the five newest commits:
 
 ```console
-$ grit log --limit 5
+$ grit log -n 5
 ```
 
 History of one file:
 
 ```console
 $ grit log -- src/lib.rs
+```
+
+Commits on a range:
+
+```console
+$ grit log -n 20 main..feature
 ```
 
 ## JSON output
@@ -91,9 +114,9 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `commits` | array | Up to ten commits by default, or up to `--limit` when set, newest first. Each entry has `oid`, `subject`, `author` (`name`, `email`, `date` in RFC 3339 — same shape as [`grit show`](../show/)), and `relative_date` (e.g. `3 days ago`). |
+| `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry has `oid`, `subject`, `author` (`name`, `email`, `date` in RFC 3339 — same shape as [`grit show`](../show/)), and `relative_date` (e.g. `3 days ago`). |
 | `commits[].stat` | object | Only with `--stat`: `files` (each with `path`, `old_path` for renames, `status`, `insertions`, `deletions`, `binary`), `files_changed`, `insertions` and `deletions`. The same shape as `stat` in [`grit show`](../show/). |
-| `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--before` for the next page, or `null` when there is no more history. |
+| `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--cursor` for the next page, or `null` when there is no more history or when the walk does not support paging (paths, `--reverse`, and similar). |
 
 Example:
 
@@ -111,7 +134,7 @@ Example:
       "relative_date": "2 days ago"
     },
     {
-      "oid": "919c45f33de5e5c0bd05f8ffb089f697f4644976",
+      "oid": "919c45f33de5e0bd05f8ffb089f697f4644976",
       "subject": "initial",
       "author": {
         "name": "Ada Lovelace",
@@ -134,9 +157,9 @@ Pass [`--markdown`](../global-options/) for a bullet list of commits (short oid,
 - `b52cca6` Handle empty input (Ada Lovelace, 2 minutes ago)
 - `5fbefea` Add a greeting test (Ada Lovelace, 1 hour ago)
 
-More history: run `grit log --before=lw1.R0x…`
+More history: run `grit log --cursor=lw1.R0x…`
 ```
 
 ## See also
 
-[grit shortlog](../shortlog/), [grit show](../show/)
+[grit revs](../revs/), [grit shortlog](../shortlog/), [grit show](../show/)

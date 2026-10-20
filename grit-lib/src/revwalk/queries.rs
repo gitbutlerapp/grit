@@ -1,5 +1,6 @@
 //! Typed revision-range parsing and high-level rev-walk queries on [`super::RevWalk`].
 use crate::error::{Error, Result};
+use crate::git_date::parse::{parse_date_basic_at, DateParseError};
 use crate::merge_base::{
     count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
     merge_bases_first_vs_rest, ReachableCountFilter,
@@ -210,6 +211,46 @@ fn rev_list_options_from_walk(
         symmetric_right: parsed.symmetric_right,
         ..RevListOptions::default()
     })
+}
+
+/// Parse a user date string into a Unix committer cutoff (Git `--since` / `--until`).
+///
+/// Uses Git's `parse_date_basic` rules with `now_sec` for relative dates.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when the string cannot be parsed.
+pub fn committer_cutoff_from_date(
+    date: &str,
+    now_sec: i64,
+) -> std::result::Result<i64, DateParseError> {
+    let trimmed = date.trim();
+    if !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return trimmed.parse::<i64>().map_err(|_| DateParseError);
+    }
+    let (ts, _off) = parse_date_basic_at(date, now_sec)?;
+    Ok(ts as i64)
+}
+
+/// Positive tips and hide tips for a default-order reachable walk (no path filter).
+///
+/// Used by [`crate::log_walk::LogWalkQuery`] to mirror `rev-list` tip resolution.
+///
+/// # Errors
+///
+/// Propagates rev-parse errors from resolving revision tokens and ref globs.
+pub fn resolve_log_walk_tips_and_hide(
+    repo: &Repository,
+    tokens: &[&str],
+    walk: &RevWalkListOptions,
+) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
+    let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, walk)?;
+    let mut include = crate::rev_list::resolve_revision_specs_to_commits(repo, &positive)?;
+    if all_refs {
+        include.extend(crate::rev_list::all_ref_commit_tips_for_walk(repo)?);
+    }
+    let exclude = crate::rev_list::resolve_revision_specs_to_commits(repo, &parsed.negative)?;
+    Ok((include, exclude))
 }
 
 fn positive_specs_for_walk(
