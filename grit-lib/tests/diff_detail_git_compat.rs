@@ -4,7 +4,8 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 
 use grit_lib::diff::{
-    build_file_diffs, set_diff_blob_read_hook_for_tests, DiffDetail, DiffOptions, DiffTarget,
+    build_file_diffs, diff_trees_with_renames_and_policy, set_diff_blob_read_hook_for_tests,
+    DiffDetail, DiffOptions, DiffStatus, DiffTarget,
 };
 use grit_lib::objects::{ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
@@ -105,5 +106,44 @@ fn name_only_does_not_read_blobs_for_tree_to_tree() {
     .expect("name-only");
     set_diff_blob_read_hook_for_tests(None);
     assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
+    let _target = DiffTarget::Trees;
+}
+
+#[test]
+fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
+    let (_dir, repo) = init_repo();
+    let bin: Vec<u8> = (0u8..128).collect();
+    let old = tree_with(&repo, &[("data.bin", &bin)]);
+    let new = tree_with(&repo, &[("renamed.bin", &bin)]);
+    let config = repo.config().expect("config");
+    let entries = diff_trees_with_renames_and_policy(
+        repo.odb(),
+        Some(&old),
+        Some(&new),
+        "",
+        50,
+        config.as_ref(),
+        &ThreadPolicy::default(),
+    )
+    .expect("tree diff with renames");
+    assert!(
+        entries.iter().any(|e| e.status == DiffStatus::Renamed),
+        "{entries:?}"
+    );
+    let out = build_file_diffs(
+        repo.odb(),
+        entries,
+        DiffDetail::Stat,
+        DiffOptions::default(),
+        config.as_ref(),
+        &ThreadPolicy::default(),
+    )
+    .expect("stat diff");
+    assert_eq!(out.files.len(), 1, "{:?}", out.files);
+    assert!(
+        out.files[0].binary,
+        "identical binary rename must stay binary"
+    );
+    assert!(out.files[0].stat.is_none());
     let _target = DiffTarget::Trees;
 }

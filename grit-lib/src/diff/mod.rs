@@ -21,6 +21,7 @@ mod patch_log;
 mod tree_content;
 mod unified_emit;
 
+pub use core::set_diff_entry_scan_hook_for_tests;
 pub use core::*;
 pub use detail::{line_change_counts, DiffDetail, DiffTarget, DiffTotals, FileDiff, LineStat};
 pub use files::{build_file_diffs, name_status_line, DiffFilesOutput};

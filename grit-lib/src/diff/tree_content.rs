@@ -186,16 +186,17 @@ pub fn tree_diff_structured_parallel(
                 && entry.old_oid == entry.new_oid
                 && entry.old_mode == entry.new_mode
             {
+                let (old_bytes, old_bin) = load_old_side(odb, entry)?;
                 return Ok(TreeDiffStructured {
                     entry: entry.clone(),
                     structured: StructuredFileDiff {
                         old_mode: mode_display(&entry.old_mode),
                         new_mode: mode_display(&entry.new_mode),
-                        old_encoding_lossy: false,
-                        new_encoding_lossy: false,
+                        old_encoding_lossy: old_bytes.encoding_lossy,
+                        new_encoding_lossy: old_bytes.encoding_lossy,
                         hunks: Vec::new(),
                     },
-                    binary: false,
+                    binary: old_bin,
                 });
             }
             let (old_bytes, old_bin) = load_old_side(odb, entry)?;

@@ -2275,9 +2275,14 @@ pub fn diff_trees_with_renames_and_policy(
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
     let mut entries = diff_trees(odb, old_tree_oid, new_tree_oid, prefix)?;
-    if rename_threshold < 100 {
+    let needs_rename_detection = entries
+        .iter()
+        .any(|e| matches!(e.status, DiffStatus::Added | DiffStatus::Deleted));
+    if rename_threshold < 100 && needs_rename_detection {
         entries =
             detect_renames_with_policy(odb, None, entries, rename_threshold, config, thread_policy);
+    } else if !entries_sorted_by_path(&entries) {
+        entries.sort_by(|a, b| a.path().cmp(b.path()));
     }
     Ok(entries)
 }
@@ -2421,16 +2426,38 @@ fn diff_trees_opts(
     Ok(result)
 }
 
-#[cfg(test)]
 use std::cell::RefCell;
-#[cfg(test)]
 use std::rc::Rc;
-#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(test)]
 thread_local! {
     static DIFF_TREE_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
+}
+
+thread_local! {
+    static DIFF_ENTRY_SCAN_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
+}
+
+/// Install a per-thread counter for index/worktree diff entry scans (cleared when `hook` is `None`).
+#[doc(hidden)]
+pub fn set_diff_entry_scan_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
+    DIFF_ENTRY_SCAN_HOOK.with(|cell| *cell.borrow_mut() = hook);
+}
+
+fn note_diff_entry_scan() {
+    DIFF_ENTRY_SCAN_HOOK.with(|cell| {
+        if let Some(counter) = cell.borrow().as_ref() {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+    if let Ok(path) = std::env::var("GRIT_TEST_DIFF_ENTRY_SCAN_FILE") {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, b"1\n"));
+    }
 }
 
 /// Install a per-thread tree read counter for unit tests (cleared when `hook` is `None`).
@@ -2851,6 +2878,7 @@ pub fn diff_index_to_tree(
     tree_oid: Option<&ObjectId>,
     ignore_submodules: bool,
 ) -> Result<Vec<DiffEntry>> {
+    note_diff_entry_scan();
     match index_cache_tree_walk(index, tree_oid) {
         CacheTreeWalk::Fast {
             head_tree,
@@ -4307,6 +4335,7 @@ fn diff_index_to_worktree_inner(
     bool,
     std::collections::BTreeMap<String, crate::index::IndexStatFields>,
 )> {
+    note_diff_entry_scan();
     use crate::config::ConfigSet;
     use crate::crlf;
     use std::collections::BTreeMap;
@@ -6708,7 +6737,9 @@ pub fn detect_renames_with_policy(
         let mut result = others;
         result.extend(deleted);
         result.extend(added);
-        result.sort_by(|a, b| a.path().cmp(b.path()));
+        if !entries_sorted_by_path(&result) {
+            result.sort_by(|a, b| a.path().cmp(b.path()));
+        }
         return result;
     }
 
@@ -6825,7 +6856,11 @@ pub fn detect_renames_with_policy(
             .map(|&ai| {
                 let add = &added[ai];
                 if !add.new_oid.is_zero() {
-                    blob_payload_size(odb, &add.new_oid)
+                    blob_payload_size(odb, &add.new_oid).or_else(|| {
+                        work_root.and_then(|_| {
+                            read_added_entry_bytes(odb, add, work_root).map(|data| data.len())
+                        })
+                    })
                 } else if work_root.is_some() {
                     read_added_entry_bytes(odb, add, work_root).map(|data| data.len())
                 } else {
@@ -10151,11 +10186,21 @@ fn is_tree_mode(mode: u32) -> bool {
 }
 
 /// Build a path with an optional prefix.
+fn entries_sorted_by_path(entries: &[DiffEntry]) -> bool {
+    entries
+        .windows(2)
+        .all(|pair| pair[0].path().cmp(pair[1].path()) != std::cmp::Ordering::Greater)
+}
+
 fn format_path(prefix: &str, name: &str) -> String {
     if prefix.is_empty() {
         name.to_owned()
     } else {
-        format!("{prefix}/{name}")
+        let mut path = String::with_capacity(prefix.len() + 1 + name.len());
+        path.push_str(prefix);
+        path.push('/');
+        path.push_str(name);
+        path
     }
 }
 

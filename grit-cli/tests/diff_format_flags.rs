@@ -88,6 +88,59 @@ fn diff_stat_empty_is_zero_bytes() {
 }
 
 #[test]
+fn diff_name_status_two_commit_path_limit() {
+    let fx = CliFixture::new();
+    std::fs::write(fx.path().join("a.txt"), b"a\n").expect("write");
+    std::fs::write(fx.path().join("b.txt"), b"b\n").expect("write");
+    git(fx.path(), &["add", "a.txt", "b.txt"]);
+    git(fx.path(), &["commit", "-m", "initial"]);
+    std::fs::write(fx.path().join("a.txt"), b"aa\n").expect("write");
+    std::fs::write(fx.path().join("b.txt"), b"bb\n").expect("write");
+    git(fx.path(), &["add", "a.txt", "b.txt"]);
+    git(fx.path(), &["commit", "-m", "second"]);
+    let git_out = std::process::Command::new("git")
+        .current_dir(fx.path())
+        .args(["diff", "--name-status", "HEAD~1", "HEAD", "--", "a.txt"])
+        .output()
+        .expect("git diff");
+    let grit_out = grit(
+        fx.path(),
+        &["diff", "--name-status", "HEAD~1", "HEAD", "--", "a.txt"],
+    );
+    assert!(grit_out.ok(), "{}", grit_out.dump("name-status path"));
+    assert_eq!(
+        String::from_utf8_lossy(&git_out.stdout),
+        grit_out.stdout,
+        "{}",
+        grit_out.dump("grit name-status path limit")
+    );
+}
+
+#[test]
+fn diff_stat_no_leading_blank_line() {
+    let fx = CliFixture::new();
+    std::fs::write(fx.path().join("f.txt"), b"a\n").expect("write");
+    git(fx.path(), &["add", "f.txt"]);
+    git(fx.path(), &["commit", "-m", "init"]);
+    std::fs::write(fx.path().join("f.txt"), b"b\n").expect("write");
+    let out = grit(fx.path(), &["diff", "--stat", "HEAD~1", "HEAD"]);
+    assert!(out.ok(), "{}", out.dump("stat"));
+    assert!(
+        !out.stdout.starts_with('\n'),
+        "stat must not begin with a blank line: {:?}",
+        out.stdout
+    );
+}
+
+#[test]
+fn diff_markdown_shortstat_empty_is_zero_bytes() {
+    let fx = CliFixture::empty();
+    let out = grit(fx.path(), &["diff", "--markdown", "--shortstat"]);
+    assert!(out.ok(), "{}", out.dump("markdown shortstat empty"));
+    assert!(out.stdout.is_empty(), "stdout={:?}", out.stdout);
+}
+
+#[test]
 fn diff_name_only_path_limit() {
     let fx = CliFixture::new();
     std::fs::write(fx.path().join("only.txt"), b"x\n").expect("write");
