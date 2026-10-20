@@ -370,7 +370,7 @@ pub fn write_diff_entry_log_patch<W: Write>(
 /// # Errors
 ///
 /// Propagates ODB reads and I/O errors.
-pub fn write_tree_diff_log_patch<W: Write>(
+pub fn write_tree_diff_log_patch<W: Write + ?Sized>(
     repo: &Repository,
     out: &mut W,
     entries: &[DiffEntry],
@@ -395,7 +395,7 @@ pub fn write_tree_diff_log_patch<W: Write>(
     Ok(())
 }
 
-fn write_diff_entry_log_patch_with_tree<W: Write>(
+fn write_diff_entry_log_patch_with_tree<W: Write + ?Sized>(
     out: &mut W,
     repo: &Repository,
     odb: &Odb,
@@ -418,7 +418,7 @@ fn write_diff_entry_log_patch_with_tree<W: Write>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_diff_entry_log_patch_with_tree_cached_config<W: Write>(
+fn write_diff_entry_log_patch_with_tree_cached_config<W: Write + ?Sized>(
     out: &mut W,
     repo: &Repository,
     odb: &Odb,

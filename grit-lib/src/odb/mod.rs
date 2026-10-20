@@ -405,6 +405,25 @@ impl Odb {
         Arc::clone(&self.hot_path_test_metrics)
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_blob_content_read_for_test_metrics(&self) {
+        self.hot_path_test_metrics.record_blob_content_read();
+    }
+
+    /// Reset and enable blob read counting (integration tests).
+    #[cfg(test)]
+    pub fn test_reset_and_enable_blob_reads(&self) {
+        self.hot_path_test_metrics.reset_blob_content_reads();
+        self.hot_path_test_metrics.set_blob_counting(true);
+    }
+
+    /// Blob ODB reads since [`Self::test_reset_and_enable_blob_reads`].
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_blob_content_reads(&self) -> usize {
+        self.hot_path_test_metrics.blob_content_reads()
+    }
+
     /// Share the repository's lazy config snapshot (see [`crate::repo::Repository::config`]).
     #[must_use]
     pub(crate) fn with_shared_config_state(

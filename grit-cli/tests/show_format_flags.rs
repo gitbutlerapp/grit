@@ -43,12 +43,20 @@ fn show_default_includes_patch() {
 }
 
 #[test]
-fn show_json_files_equal_diff_json_files() {
+fn show_json_files_match_two_commit_diff() {
     let fx = CliFixture::new();
     for rev in ["HEAD", "HEAD~1"] {
         let show = gs_json(fx.path(), &["show", rev]);
-        let diff = gs_json(fx.path(), &["diff", rev]);
-        assert_eq!(show["files"], diff["files"], "files mismatch for {rev}");
+        let parents = show["commit"]["parents"].as_array().expect("parents");
+        if parents.is_empty() {
+            continue;
+        }
+        let parent = parents[0].as_str().expect("parent oid");
+        let diff = gs_json(fx.path(), &["diff", parent, rev]);
+        assert_eq!(
+            show["files"], diff["files"],
+            "show commit patch should match tree diff {parent}..{rev}"
+        );
     }
 }
 
@@ -99,6 +107,25 @@ fn show_stat_flag_matches_previous_default() {
         "stat bars expected: {}",
         stat.stdout
     );
+}
+
+#[test]
+fn show_name_only_json_omits_misleading_stat() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("f.txt"), b"x\n").expect("write");
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "init"]);
+    std::fs::write(dir.path().join("f.txt"), b"y\n").expect("write");
+    git(dir.path(), &["commit", "-am", "change"]);
+
+    let grit_init = grit(dir.path(), &["init"]);
+    assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
+    let out = grit(dir.path(), &["--json", "show", "HEAD", "--name-only"]);
+    assert!(out.ok(), "{}", out.dump("json name-only show"));
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).expect("json");
+    assert!(v.get("stat").is_none(), "stat must be omitted: {v}");
+    assert_eq!(v["files"].as_array().map(|a| a.len()), Some(1));
 }
 
 #[test]

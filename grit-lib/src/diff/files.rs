@@ -159,3 +159,62 @@ pub fn name_status_line(entry: &DiffEntry) -> String {
         DiffStatus::Unmerged => format!("U\t{path}"),
     }
 }
+
+#[cfg(test)]
+mod blob_read_tests {
+    use super::*;
+    use crate::objects::{ObjectKind, TreeEntry};
+    use crate::parallel::ThreadPolicy;
+    use crate::repo::{InitOptions, Repository};
+
+    fn init_repo() -> (tempfile::TempDir, Repository) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        (dir, repo)
+    }
+
+    fn write_blob(repo: &Repository, content: &[u8]) -> crate::objects::ObjectId {
+        repo.odb()
+            .write(ObjectKind::Blob, content)
+            .expect("write blob")
+    }
+
+    fn tree_with(repo: &Repository, entries: &[(&str, &[u8])]) -> crate::objects::ObjectId {
+        let mut tes = Vec::new();
+        for (name, data) in entries {
+            let oid = write_blob(repo, data);
+            tes.push(TreeEntry {
+                mode: 0o100644,
+                name: name.as_bytes().to_vec(),
+                oid,
+            });
+        }
+        let data = crate::objects::serialize_tree(&tes);
+        repo.odb()
+            .write(ObjectKind::Tree, &data)
+            .expect("write tree")
+    }
+
+    #[test]
+    fn name_only_does_not_read_blobs_for_tree_to_tree() {
+        let (_dir, repo) = init_repo();
+        let old = tree_with(&repo, &[("f.txt", b"alpha\n")]);
+        let new = tree_with(&repo, &[("f.txt", b"beta\n")]);
+        let entries = repo
+            .diff()
+            .tree_to_tree(Some(&old), Some(&new))
+            .expect("entries");
+        repo.odb().test_reset_and_enable_blob_reads();
+        let config = repo.config().expect("config");
+        let _ = build_file_diffs(
+            repo.odb(),
+            entries,
+            DiffDetail::NameOnly,
+            DiffOptions::default(),
+            config.as_ref(),
+            &ThreadPolicy::default(),
+        )
+        .expect("name-only");
+        assert_eq!(repo.odb().test_blob_content_reads(), 0);
+    }
+}

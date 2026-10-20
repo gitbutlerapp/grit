@@ -104,6 +104,8 @@ pub struct DiffOptions {
     pub word_level_inline: bool,
     /// Expand hunks to enclosing function boundaries (Git `-W` / `--function-context`).
     pub function_context: bool,
+    /// When false, keep unified patch text only (skip [`StructuredHunk`] parsing).
+    pub materialize_structured_hunks: bool,
 }
 
 impl Default for DiffOptions {
@@ -116,6 +118,7 @@ impl Default for DiffOptions {
             renames: RenameDetection::default(),
             word_level_inline: true,
             function_context: false,
+            materialize_structured_hunks: true,
         }
     }
 }

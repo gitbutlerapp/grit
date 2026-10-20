@@ -141,8 +141,14 @@ fn diff_commit_and_known_path_still_works() {
 
     let (code, stdout, stderr) = grit(dir.path(), &["diff", "HEAD", "f"]);
     assert_eq!(code, 0, "grit diff HEAD f should succeed: {stderr}");
-    assert!(
-        stdout.contains("f") || stdout.contains("No changes"),
-        "expected diff output mentioning f or no changes: {stdout}"
+    let git_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["diff", "HEAD", "f"])
+        .output()
+        .expect("git diff");
+    assert_eq!(
+        stdout,
+        String::from_utf8_lossy(&git_out.stdout),
+        "grit diff HEAD f should match git"
     );
 }

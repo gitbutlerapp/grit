@@ -12,6 +12,7 @@
 use std::io::Write;
 
 use anyhow::{bail, Context, Result};
+use grit_lib::diff::DiffDetail;
 use grit_lib::objects::{parse_tag, ObjectId, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -31,6 +32,7 @@ pub struct ShowRunOptions {
     pub paths: Vec<String>,
     pub format: DiffFormatArgs,
     pub word_level_inline: bool,
+    pub materialize_structured_hunks: bool,
 }
 
 /// What `grit show` resolved (`--json` contract).
@@ -65,8 +67,10 @@ pub struct ShowOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub totals: Option<DiffTotalsJson>,
-    /// Summary diffstat (always present for scripting convenience).
-    pub stat: DiffStat,
+    /// Summary diffstat when meaningful for the selected format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub stat: Option<DiffStat>,
     #[serde(skip)]
     #[schemars(skip)]
     diff: DiffOutcome,
@@ -125,28 +129,12 @@ pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
             paths: opts.paths.clone(),
             format: opts.format,
             word_level_inline: opts.word_level_inline,
+            materialize_structured_hunks: opts.materialize_structured_hunks,
         },
     )?;
     let stat = match opts.format.detail() {
-        grit_lib::diff::DiffDetail::NameOnly | grit_lib::diff::DiffDetail::NameStatus => {
-            let stat_diff = crate::commands::diff::diff_for_commit_data(
-                &repo,
-                &data,
-                CommitDiffOptions {
-                    paths: opts.paths,
-                    format: {
-                        let mut f = opts.format;
-                        f.stat = true;
-                        f.name_only = false;
-                        f.name_status = false;
-                        f
-                    },
-                    word_level_inline: false,
-                },
-            )?;
-            diffstat_from_files(&stat_diff.files)
-        }
-        _ => diffstat_from_files(&diff.files),
+        DiffDetail::NameOnly | DiffDetail::NameStatus => None,
+        _ => Some(diffstat_from_files(&diff.files)),
     };
     let files = diff.files.clone();
     let totals = diff.totals;
@@ -331,14 +319,16 @@ impl HumanRender for ShowOutcome {
 
         let fmt = self.diff.format_flags();
         if fmt.human_stat_block() {
-            diff_render::render_stat_with_leading_blank(
-                w,
-                &self.stat,
-                color,
-                self.diff.path_display_opts(),
-            )?;
+            if let Some(stat) = &self.stat {
+                diff_render::render_stat_with_leading_blank(
+                    w,
+                    stat,
+                    color,
+                    self.diff.path_display_opts(),
+                )?;
+            }
         } else {
-            if !self.diff.files.is_empty() && fmt.detail() == grit_lib::diff::DiffDetail::Patch {
+            if !self.diff.files.is_empty() && fmt.detail() == DiffDetail::Patch {
                 outln!(w);
             }
             self.diff.render_human_diff(w, None)?;

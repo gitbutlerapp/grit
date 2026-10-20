@@ -466,12 +466,15 @@
       ]
     },
     "stat": {
-      "allOf": [
+      "anyOf": [
         {
           "$ref": "#/definitions/DiffStat"
+        },
+        {
+          "type": "null"
         }
       ],
-      "description": "Summary diffstat (always present for scripting convenience)."
+      "description": "Summary diffstat when meaningful for the selected format."
     },
     "tag": {
       "anyOf": [
@@ -505,8 +508,7 @@
   "required": [
     "commit",
     "files",
-    "kind",
-    "stat"
+    "kind"
   ],
   "title": "ShowOutcome",
   "type": "object"

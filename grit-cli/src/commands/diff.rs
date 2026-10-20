@@ -2,10 +2,11 @@
 //!
 //! With no argument it shows all uncommitted changes (the worktree and index
 //! against HEAD's tree). Pass `--unstaged` for index against worktree only, or
-//! `--staged` for the index against HEAD. With one commit-ish
-//! it shows the change that commit introduced (its first parent's tree against
-//! its own). Two commits, or a two-dot range such as `A..B`, diff those
-//! commits' trees. Use `--against <ref>` to compare the worktree to another
+//! `--staged` for the index against HEAD. With one commit-ish it compares that
+//! commit's tree to the working tree when a work tree is present (like
+//! `git diff <commit>`); without a work tree it shows the commit's own patch.
+//! Two commits, or a two-dot range such as `A..B`, diff those commits' trees.
+//! Use `--against <ref>` to compare the worktree to another
 //! ref's tree instead of HEAD.
 //!
 //! The human rendering imitates [delta](https://github.com/dandavison/delta): a
@@ -161,6 +162,9 @@ pub struct FileDiff {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub hunks: Option<Vec<Hunk>>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) git_unified_patch: Option<String>,
 }
 
 /// A contiguous run of changes plus surrounding context.
@@ -389,6 +393,7 @@ fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -
             similarity: fc.similarity,
             stat: None,
             hunks: None,
+            git_unified_patch: None,
         })
         .collect();
     DiffOutcome {
@@ -491,6 +496,7 @@ fn lib_file_to_cli(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff 
         } else {
             None
         },
+        git_unified_patch: None,
     }
 }
 
@@ -625,7 +631,36 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     format,
                     tree_diff_outcome(&repo, entries, detail, diff_options, format)?,
                 ));
-            } else if let Ok(oid) = resolve_diff_commit(&repo, spec) {
+            } else if resolve_diff_commit(&repo, spec).is_ok() {
+                if repo.work_tree().is_some() {
+                    let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
+                    let changes =
+                        filter_file_changes(against_ref_changes(&repo, spec)?, &repo, &pathspecs);
+                    let outcome = match detail {
+                        DiffDetail::NameOnly | DiffDetail::NameStatus => {
+                            outcome_from_change_names(changes, format)
+                        }
+                        DiffDetail::Stat => {
+                            outcome_stat_from_changes(changes, diff_options, format)
+                        }
+                        DiffDetail::Patch => outcome_from_changes(
+                            changes,
+                            &config,
+                            &thread_policy,
+                            diff_options,
+                            format,
+                        ),
+                        _ => outcome_from_changes(
+                            changes,
+                            &config,
+                            &thread_policy,
+                            diff_options,
+                            format,
+                        ),
+                    };
+                    return Ok(finish_outcome(&repo, format, outcome));
+                }
+                let oid = resolve_diff_commit(&repo, spec)?;
                 let pathspecs = resolve_commit_diff_pathspecs(&repo, &path_args)?;
                 let entries = filter_diff_entries(
                     commit_entries(&repo, &oid, &config, &thread_policy)?,
@@ -705,6 +740,8 @@ pub struct CommitDiffOptions {
     pub paths: Vec<String>,
     pub format: DiffFormatArgs,
     pub word_level_inline: bool,
+    /// When false, skip parsing unified output into structured hunks (piped human show).
+    pub materialize_structured_hunks: bool,
 }
 
 /// Diff the change one commit introduced (first-parent tree vs commit tree).
@@ -730,6 +767,7 @@ pub fn diff_for_commit_data(
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_to_options(&mut diff_options);
     diff_options.word_level_inline = opts.word_level_inline;
+    diff_options.materialize_structured_hunks = opts.materialize_structured_hunks;
     let detail = opts.format.detail();
     let format = opts.format;
     let entries = filter_diff_entries(
@@ -753,6 +791,7 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
             paths: Vec::new(),
             format: DiffFormatArgs::default(),
             word_level_inline: false,
+            materialize_structured_hunks: true,
         },
     )
 }
@@ -813,6 +852,7 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
         .filter(|op| op.as_str() != path)
         .cloned();
     let structured = t.structured;
+    let git_unified_patch = structured.unified_patch.clone();
     let hunks = structured
         .hunks
         .into_iter()
@@ -858,7 +898,12 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
         content_changed: e.old_oid != e.new_oid,
         similarity,
         stat: None,
-        hunks: Some(hunks),
+        hunks: if git_unified_patch.is_some() {
+            None
+        } else {
+            Some(hunks)
+        },
+        git_unified_patch,
     }
 }
 
@@ -947,6 +992,10 @@ fn disambiguate_diff_revision_and_paths(
                 if let Some(path) = commits.pop() {
                     paths.push(path);
                 }
+            }
+            (false, true) if token_is_known_worktree_pathspec(repo, &commits[0]) => {
+                let path = commits.remove(0);
+                paths.push(path);
             }
             (true, true) => {}
             (true, false) | (false, true) | (false, false) => {}
@@ -1229,6 +1278,7 @@ fn outcome_stat_from_changes(
                 similarity: fc.similarity,
                 stat,
                 hunks: None,
+                git_unified_patch: None,
             }
         })
         .collect::<Vec<_>>();
@@ -1694,6 +1744,7 @@ fn structured_for_file_change(fc: &FileChange, diff_options: DiffOptions) -> Str
             old_encoding_lossy: fc.old_bytes.encoding_lossy,
             new_encoding_lossy: fc.new_bytes.encoding_lossy,
             hunks: Vec::new(),
+            unified_patch: None,
         }
     } else {
         structured_file_diff(
@@ -1754,7 +1805,12 @@ fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
         content_changed: fc.content_changed,
         similarity: fc.similarity,
         stat: None,
-        hunks: Some(hunks),
+        hunks: if structured.unified_patch.is_some() {
+            None
+        } else {
+            Some(hunks)
+        },
+        git_unified_patch: structured.unified_patch,
     }
 }
 
@@ -1848,7 +1904,7 @@ impl DiffOutcome {
 
 impl HumanRender for DiffOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        self.render_human_diff(w, Some("No changes."))
+        self.render_human_diff(w, None)
     }
 }
 
@@ -1918,6 +1974,13 @@ fn render_file(
             outln!(w, "{}", paint(color, FG_DIM, "Binary file differs"));
         }
         return Ok(());
+    }
+
+    if !color {
+        if let Some(patch) = &file.git_unified_patch {
+            w.write_all(patch.as_bytes())?;
+            return Ok(());
+        }
     }
 
     // Width of each line-number column = widest number shown.

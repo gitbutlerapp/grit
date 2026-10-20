@@ -8,33 +8,12 @@ use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::parallel::{try_par_map_with_local, ParallelHashError};
 use crate::parallel::{ParallelOp, ThreadPolicy};
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::detail::{line_change_counts, LineStat};
 use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
 use super::DiffOptions;
-
-thread_local! {
-    static DIFF_BLOB_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
-}
-
-/// Test hook: count blob ODB reads during diff content loading.
-#[doc(hidden)]
-pub fn set_diff_blob_read_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
-    DIFF_BLOB_READ_HOOK.with(|cell| *cell.borrow_mut() = hook);
-}
-
-fn note_blob_read() {
-    DIFF_BLOB_READ_HOOK.with(|cell| {
-        if let Some(counter) = cell.borrow().as_ref() {
-            counter.fetch_add(1, Ordering::Relaxed);
-        }
-    });
-}
 
 /// Tree diff entry with structured line hunks ready for CLI rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +169,7 @@ pub fn tree_diff_structured_parallel(
                         old_encoding_lossy: false,
                         new_encoding_lossy: false,
                         hunks: Vec::new(),
+                        unified_patch: None,
                     },
                     binary: false,
                 });
@@ -204,6 +184,7 @@ pub fn tree_diff_structured_parallel(
                     old_encoding_lossy: old_bytes.encoding_lossy,
                     new_encoding_lossy: new_bytes.encoding_lossy,
                     hunks: Vec::new(),
+                    unified_patch: None,
                 }
             } else {
                 structured_file_diff(
@@ -272,7 +253,8 @@ fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
     if *oid == ObjectId::zero() {
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
-    note_blob_read();
+    #[cfg(test)]
+    odb.record_blob_content_read_for_test_metrics();
     let data = odb.read(oid)?.data;
     Ok(bytes_for_diff(&data))
 }

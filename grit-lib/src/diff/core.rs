@@ -577,7 +577,7 @@ pub(crate) fn unified_hunk_header_counts(
 
 /// Write `---` / `+++` and unified hunks using [`unified_hunk_body_for_diff_options`].
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_unified_diff_from_diff_options<W: std::io::Write>(
+pub(crate) fn write_unified_diff_from_diff_options<W: std::io::Write + ?Sized>(
     out: &mut W,
     old_content: &str,
     new_content: &str,

@@ -209,7 +209,21 @@ fn diff_revision_then_bare_path_without_double_dash() {
     let dir = tempfile::tempdir().expect("tempdir");
     init_repo_with_two_files(dir.path());
 
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .expect("git")
+    };
+    let git_out = git(&["diff", "feature/v1.2/x", "a.txt"]);
+    assert!(git_out.status.success(), "git stderr={}", String::from_utf8_lossy(&git_out.stderr));
+
     let (code, stdout, stderr) = grit(dir.path(), &["diff", "feature/v1.2/x", "a.txt"]);
     assert_eq!(code, 0, "stderr={stderr}");
-    assert!(stdout.contains("a.txt"), "stdout={stdout}");
+    assert_eq!(
+        stdout,
+        String::from_utf8_lossy(&git_out.stdout),
+        "grit should match git for rev + path without `--`"
+    );
 }

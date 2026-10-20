@@ -112,6 +112,9 @@ pub struct StructuredFileDiff {
     pub new_encoding_lossy: bool,
     /// Hunks for this item.
     pub hunks: Vec<StructuredHunk>,
+    /// Unified hunk bodies when [`DiffOptions::materialize_structured_hunks`] is false.
+    #[doc(hidden)]
+    pub unified_patch: Option<String>,
 }
 
 /// Pre-split line bodies for O(1) lookup while building hunks.
@@ -312,6 +315,21 @@ pub fn structured_file_diff(
     let new_mode = mode_display(new_mode);
     let old_text = side_text_for_diff(old);
     let new_text = side_text_for_diff(new);
+    if !options.materialize_structured_hunks {
+        let patch = crate::diff::unified_hunk_body_for_diff_options(
+            old_text.as_ref(),
+            new_text.as_ref(),
+            &options,
+        );
+        return StructuredFileDiff {
+            old_mode,
+            new_mode,
+            old_encoding_lossy: old.encoding_lossy,
+            new_encoding_lossy: new.encoding_lossy,
+            hunks: Vec::new(),
+            unified_patch: if patch.is_empty() { None } else { Some(patch) },
+        };
+    }
     let hunks = structured_text_diff_cow(old_text, new_text, options).hunks;
     StructuredFileDiff {
         old_mode,
@@ -319,6 +337,7 @@ pub fn structured_file_diff(
         old_encoding_lossy: old.encoding_lossy,
         new_encoding_lossy: new.encoding_lossy,
         hunks,
+        unified_patch: None,
     }
 }
 

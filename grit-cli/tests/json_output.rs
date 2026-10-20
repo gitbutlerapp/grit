@@ -894,12 +894,12 @@ fn diff_json_uncommitted_and_commit() -> TestResult {
     assert!(lines.iter().any(|l| l["kind"] == "del" && l["old"] == 2));
     assert!(lines.iter().any(|l| l["kind"] == "add" && l["new"] == 2));
 
-    // Commit diff: the change a specific commit introduced (root commit → all added).
+    // Commit patch: the change a specific commit introduced (via show, not worktree diff).
     let head = gs_json(&repo, &["log"])["commits"][0]["oid"]
         .as_str()
         .unwrap()
         .to_owned();
-    let cv = gs_json(&repo, &["diff", &head]);
+    let cv = gs_json(&repo, &["show", &head]);
     let cfiles = cv["files"].as_array().unwrap();
     assert_eq!(cfiles[0]["path"], "a.txt");
     assert!(cfiles[0]["hunks"][0]["lines"]
