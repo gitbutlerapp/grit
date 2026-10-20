@@ -26,7 +26,7 @@ use crate::index::{
     entry_from_metadata, entry_from_stat, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK,
     MODE_REGULAR, MODE_SYMLINK,
 };
-use crate::objects::{parse_tree, ObjectId, ObjectKind};
+use crate::objects::ObjectId;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::path_icase::paths_equal;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink};
@@ -40,150 +40,15 @@ use checkout_parallel::{
     CheckoutPlanSlot, CheckoutWriteJob, WriteJobOutcome,
 };
 
-const CHECKOUT_FILE_PROGRESS_BATCH: u64 = 256;
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
 
-/// Batched file-count progress for the populated-tree checkout path.
-struct CheckoutFileProgress<'a> {
-    sink: &'a mut dyn ProgressSink,
-    pending: u64,
-}
-
-impl<'a> CheckoutFileProgress<'a> {
-    fn begin_populated(sink: &'a mut dyn ProgressSink) -> Self {
-        sink.start(ProgressPhase::CheckingOutFiles, None);
-        Self { sink, pending: 0 }
-    }
-
-    fn note_files(&mut self, count: u64) {
-        self.pending += count;
-        while self.pending >= CHECKOUT_FILE_PROGRESS_BATCH {
-            self.sink.inc(CHECKOUT_FILE_PROGRESS_BATCH);
-            self.pending -= CHECKOUT_FILE_PROGRESS_BATCH;
-        }
-    }
-
-    fn finish(self) {
-        if self.pending > 0 {
-            self.sink.inc(self.pending);
-        }
-        self.sink.finish();
-    }
-}
-
-/// Populate an empty work tree and index from `tree_oid` without building a full diff.
+/// Populate a work tree and index from `tree_oid` (empty index or wholesale replace).
 fn checkout_populated_tree(
     repo: &Repository,
     tree_oid: &ObjectId,
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
-    let mut index = repo.load_index()?;
-    if !index.entries.is_empty() {
-        return checkout_between_trees_slow(repo, None, Some(tree_oid), progress);
-    }
-    let mut file_progress = CheckoutFileProgress::begin_populated(progress);
-    let config = repo.config()?;
-    let mut prospective_index = index.clone();
-    prospective_index.entries = crate::porcelain::merge::tree_to_index_entries(repo, tree_oid, "")?;
-    prospective_index.sort();
-    let rules = WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)?;
-    let mut delayed = DelayedProcessCheckout::default();
-    let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
-    let mut new_entries: Vec<IndexEntry> = Vec::new();
-    let mut dir_cache = LeadingDirCache::new();
-    let mut stack: Vec<(String, ObjectId)> = vec![(String::new(), *tree_oid)];
-
-    while let Some((prefix, oid)) = stack.pop() {
-        let tree_obj = repo.odb().read(&oid)?;
-        if tree_obj.kind != ObjectKind::Tree {
-            return Err(Error::CorruptObject(format!(
-                "expected tree object at {oid}, got {:?}",
-                tree_obj.kind
-            )));
-        }
-        for entry in parse_tree(&tree_obj.data)? {
-            let name = String::from_utf8_lossy(&entry.name);
-            let path = if prefix.is_empty() {
-                name.into_owned()
-            } else {
-                format!("{prefix}/{name}")
-            };
-            let mode = entry.mode;
-            if mode == 0o040000 {
-                stack.push((path, entry.oid));
-                continue;
-            }
-            if mode == MODE_GITLINK {
-                materialize_gitlink_worktree(work_tree, &path, &mut dir_cache)?;
-                let abs = work_tree.join(&path);
-                let mut entry = entry_from_stat(&abs, path.as_bytes(), entry.oid, MODE_GITLINK)?;
-                entry.size = 0;
-                new_entries.push(entry);
-                file_progress.note_files(1);
-                continue;
-            }
-            let change = DiffEntry {
-                status: DiffStatus::Added,
-                old_path: None,
-                new_path: Some(path.clone()),
-                old_mode: "000000".to_owned(),
-                new_mode: format_mode(mode),
-                old_oid: ObjectId::zero(),
-                new_oid: entry.oid,
-                score: None,
-            };
-            let object = repo.odb().read(&entry.oid)?;
-            let worktree_bytes = worktree_bytes_from_index_blob(
-                repo,
-                &rules,
-                &path,
-                mode,
-                &object.data,
-                &entry.oid,
-                None,
-                Some(&mut delayed),
-            )?;
-            let Some(worktree_bytes) = worktree_bytes else {
-                pending_delayed.push(DelayedCheckoutTarget {
-                    path: path.clone(),
-                    mode,
-                    oid: entry.oid,
-                    change: change.clone(),
-                });
-                continue;
-            };
-            let index_entry = write_checkout_entry(
-                work_tree,
-                &path,
-                &worktree_bytes,
-                mode,
-                &change,
-                &mut dir_cache,
-                entry.oid,
-            )?;
-            new_entries.push(index_entry);
-            file_progress.note_files(1);
-        }
-    }
-
-    finish_delayed_checkouts(
-        repo,
-        &rules,
-        work_tree,
-        &mut delayed,
-        &pending_delayed,
-        &mut dir_cache,
-        &mut new_entries,
-        Some(&mut file_progress),
-    )?;
-
-    index.remove_paths_and_insert([], new_entries);
-    repo.write_index(&mut index)?;
-    file_progress.finish();
-    Ok(())
+    checkout_between_trees_slow(repo, None, Some(tree_oid), progress)
 }
 
 fn checkout_between_trees_slow(
@@ -419,7 +284,6 @@ pub fn checkout_hard_to_tree_from_head_tree(
         &pending_delayed,
         &mut dir_cache,
         &mut new_entries,
-        None,
     )?;
 
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
@@ -965,7 +829,6 @@ fn bulk_write_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRules) ->
         && changes
             .iter()
             .all(|c| matches!(c.status, DiffStatus::Added | DiffStatus::Modified))
-        && !tree_changes_touch_gitattributes(changes)
         && changes.iter().all(|change| {
             let Some(path) = change.new_path.as_deref() else {
                 return false;
@@ -1831,7 +1694,6 @@ fn checkout_tree_changes_with_progress(
             &pending_delayed,
             &mut dir_cache,
             &mut new_entries,
-            None,
         )?;
     }
 
@@ -2034,7 +1896,6 @@ fn finish_bulk_write_jobs(
         &pending_delayed,
         dir_cache,
         &mut new_entries,
-        None,
     )?;
     Ok(new_entries)
 }
@@ -2048,7 +1909,6 @@ fn finish_delayed_checkouts(
     pending: &[DelayedCheckoutTarget],
     dir_cache: &mut LeadingDirCache,
     new_entries: &mut Vec<IndexEntry>,
-    mut file_progress: Option<&mut CheckoutFileProgress<'_>>,
 ) -> Result<()> {
     if delayed.entries.is_empty() {
         return Ok(());
@@ -2071,9 +1931,6 @@ fn finish_delayed_checkouts(
             )
             .map_err(|e| e.to_string())?;
             new_entries.push(entry);
-            if let Some(fp) = file_progress.as_deref_mut() {
-                fp.note_files(1);
-            }
             Ok(())
         },
     );
@@ -3117,7 +2974,10 @@ mod tests {
         checkout_between_trees_with_progress(&repo, None, &tree, &mut rec).expect("checkout");
 
         let index = repo.load_index().expect("index after");
-        assert_eq!(rec.started, vec![(ProgressPhase::CheckingOutFiles, None)]);
+        assert_eq!(
+            rec.started,
+            vec![(ProgressPhase::CheckingOutFiles, Some(300))]
+        );
         assert_eq!(rec.finished, 1);
         assert_eq!(
             rec.file_units,
