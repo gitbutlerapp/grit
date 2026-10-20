@@ -159,7 +159,7 @@ pub fn timing_stats_from_samples(samples: &[TimedRunSample]) -> TimingStats {
                 d * d
             })
             .sum::<f64>()
-            / (n as f64)
+            / ((n - 1) as f64)
     };
     let stddev_ms = variance.sqrt();
     let min_ms = runs_ms.first().copied().unwrap_or(0.0);
