@@ -92,7 +92,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         revs::RevsOutcome,
         rm::RmOutcome,
         shortlog::ShortlogOutcome,
-        show::ShowOutcome,
+        show::ShowRunResult,
         skill::SkillOutcome,
         stash::{
             StashApplyOutcome, StashDropOutcome, StashListOutcome, StashPopOutcome,
@@ -120,7 +120,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<ReflogExpireOutcome>("reflog.expire"),
         entry::<BlameOutcome>("blame"),
         entry::<DiffOutcome>("diff"),
-        entry::<ShowOutcome>("show"),
+        entry::<ShowRunResult>("show"),
         entry::<ShortlogOutcome>("shortlog"),
         entry::<AddOutcome>("add"),
         entry::<RmOutcome>("rm"),

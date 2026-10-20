@@ -109,13 +109,30 @@ impl Serialize for ShowRunResult {
     }
 }
 
+#[derive(Serialize, JsonSchema)]
+struct ShowMultipleJson {
+    objects: Vec<ShowObjectResult>,
+}
+
 impl JsonSchema for ShowRunResult {
     fn schema_name() -> String {
         "ShowRunResult".to_string()
     }
 
     fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        ShowOutcome::json_schema(gen)
+        use schemars::schema::{SchemaObject, SubschemaValidation};
+        SchemaObject {
+            subschemas: Some(Box::new(SubschemaValidation {
+                one_of: Some(vec![
+                    gen.subschema_for::<ShowOutcome>(),
+                    gen.subschema_for::<ShowPathOutcome>(),
+                    gen.subschema_for::<ShowMultipleJson>(),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
@@ -367,8 +384,8 @@ fn show_rev_path(spec: &str) -> Result<ShowPathOutcome> {
 }
 
 fn rev_path_suffix(spec: &str) -> String {
-    spec.rsplit_once(':')
-        .map(|(_, p)| p.to_owned())
+    grit_lib::revwalk::rev_parse::split_treeish_colon(spec)
+        .map(|(_, path)| path.to_owned())
         .unwrap_or_default()
 }
 
@@ -412,11 +429,12 @@ fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
 impl HumanRender for ShowPathOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            ShowPathOutcome::Blob { text, .. } => {
-                if let Some(t) = text {
-                    w.write_all(t.as_bytes())
-                        .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
-                }
+            ShowPathOutcome::Blob { spec, .. } => {
+                let (repo, _) = context::discover_with_warnings()?;
+                let resolved = repo.resolve(spec)?;
+                let obj = repo.read_object_raw_for_display(&resolved.oid)?;
+                w.write_all(&obj.data)
+                    .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
                 Ok(())
             }
             ShowPathOutcome::Tree { spec, .. } => {

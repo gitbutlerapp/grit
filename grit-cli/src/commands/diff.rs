@@ -368,22 +368,27 @@ fn filtered_worktree_file_changes(
     Ok(filter_file_changes(raw, repo, pathspecs))
 }
 
-/// Default `grit diff` file list: full HEAD↔worktree, or unstaged-only when paths are given
-/// (matches `git diff -- <path>`).
-fn default_worktree_file_changes(
+/// Uncommitted file list for default `grit diff` (no commit arguments).
+///
+/// Patch output with no path limit uses HEAD↔worktree (full uncommitted tree). Format flags
+/// (`--numstat`, `--stat`, …) and path-limited diffs match Git's index↔worktree default.
+fn uncommitted_changes_for_default_diff(
     repo: &grit_lib::repo::Repository,
     against: Option<&str>,
     pathspecs: &[String],
+    detail: DiffDetail,
 ) -> Result<Vec<FileChange>> {
-    if against.is_some() || pathspecs.is_empty() {
-        filtered_worktree_file_changes(repo, against, pathspecs)
-    } else {
-        Ok(filter_file_changes(
-            unstaged_changes(repo)?,
-            repo,
-            pathspecs,
-        ))
+    if against.is_some() {
+        return filtered_worktree_file_changes(repo, against, pathspecs);
     }
+    if detail == DiffDetail::Patch && pathspecs.is_empty() {
+        return filtered_worktree_file_changes(repo, None, pathspecs);
+    }
+    Ok(filter_file_changes(
+        unstaged_changes(repo)?,
+        repo,
+        pathspecs,
+    ))
 }
 
 fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -> DiffOutcome {
@@ -434,6 +439,16 @@ fn outcome_from_lib(
     }
 }
 
+fn combined_line_kind(parents: &[char]) -> LineKind {
+    if parents.contains(&'-') {
+        LineKind::Del
+    } else if parents.contains(&'+') {
+        LineKind::Add
+    } else {
+        LineKind::Context
+    }
+}
+
 fn lib_file_to_cli(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff {
     let content_changed = f
         .stat
@@ -465,7 +480,7 @@ fn lib_file_to_cli(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff 
                         .lines
                         .into_iter()
                         .map(|l| Line {
-                            kind: LineKind::Context,
+                            kind: combined_line_kind(&l.parents),
                             old: None,
                             new: None,
                             segments: vec![Segment {
@@ -645,7 +660,8 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         0 => {
             let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
             let against_ref = opts.against.as_deref();
-            let changes = default_worktree_file_changes(&repo, against_ref, &pathspecs)?;
+            let changes =
+                uncommitted_changes_for_default_diff(&repo, against_ref, &pathspecs, detail)?;
             let outcome = match detail {
                 DiffDetail::NameOnly | DiffDetail::NameStatus => {
                     outcome_from_change_names(changes, format)
@@ -1335,9 +1351,7 @@ fn commit_entries(
         thread_policy,
     )
     .context("could not diff the commit")?;
-    if rename_threshold(config) >= 100 {
-        sort_entries(&mut entries);
-    }
+    sort_entries(&mut entries);
     Ok(entries)
 }
 

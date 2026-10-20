@@ -96,16 +96,25 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
+| `objects` | array | When more than one `<object>` is requested: each element is a commit show object or a `rev:path` blob/tree object (below). |
 | `warnings` | array | Non-fatal diagnostics emitted while resolving the object; omitted when empty. |
-| `kind` | string | `commit`, `branch`, `tag`, or `annotated_tag`. |
+| `kind` | string | For a commit, branch, tag, or annotated tag: `commit`, `branch`, `tag`, or `annotated_tag`. For `rev:path`: `blob` or `tree`. |
 | `ref_name` | string | Branch or tag name when you named a ref; omitted for a raw commit id. |
 | `tag` | object | For an annotated tag: `name`, `tagger`, and `message`. |
 | `commit` | object | Commit id, parents, author, committer, subject, and full message. |
 | `files` | array | Per-file diff rows (same shape as [`grit diff`](diff.md) `--json`). |
 | `totals` | object | Aggregate line counts when a stat-style format is selected; omitted for patch-only output unless the library computed totals. |
-| `stat` | object | Summary diffstat with `files`, `files_changed`, `insertions`, and `deletions` (always present). |
+| `stat` | object | Summary diffstat with `files`, `files_changed`, `insertions`, and `deletions` (always present on commit shows). |
+| `spec` | string | For `rev:path`: the object spec you passed (for example `HEAD:README.md`). |
+| `path` | string | For `rev:path`: repository-relative path after the first revision colon. |
+| `oid` | string | For `rev:path`: object id of the blob or tree. |
+| `size` | integer | For `rev:path`: uncompressed object size in bytes. |
+| `text` | string | For a text blob at `rev:path`; omitted for binary blobs. |
+| `data_base64` | string | For a binary blob at `rev:path`; standard base64 of raw bytes. |
+| `binary` | boolean | For `rev:path` blobs: true when `data_base64` is used instead of `text`. |
+| `entries` | array | For `rev:path` trees: `mode`, `type`, `oid`, and `path` per entry. |
 
-With more than one `<object>`, `--json` wraps each result in a top-level `objects` array instead of the fields above. Combined merge hunks may attach a `parents` array on each patch line in `files[].hunks[].lines[]`.
+Combined merge hunks may attach a `parents` array on each patch line in `files[].hunks[].lines[]`.
 
 Example:
 

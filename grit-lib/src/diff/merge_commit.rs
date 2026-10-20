@@ -196,7 +196,7 @@ fn combined_commit_diff_files(
     }
 
     let walk = CombinedTreeDiffOptions::default();
-    let mut paths = combined_diff_paths_filtered(odb, result_tree, &parent_trees, &walk, None)?;
+    let mut paths = combined_diff_paths_filtered(odb, result_tree, parent_commits, &walk, None)?;
     let path_names: Vec<String> = paths.iter().map(|p| p.path.clone()).collect();
     let filtered_names = filter_combined_paths(path_names, pathspecs);
     paths.retain(|p| filtered_names.iter().any(|n| n == &p.path));
@@ -319,10 +319,13 @@ fn parent_blob_texts(
 ) -> Result<Vec<String>> {
     let mut out = Vec::with_capacity(path.parents.len());
     for side in &path.parents {
-        let blob = odb.read(&side.oid)?.data;
-        out.push(blob_text_for_diff(
-            git_dir, config, &path.path, &blob, false,
-        ));
+        let text = if side.oid.is_zero() {
+            String::new()
+        } else {
+            let blob = odb.read(&side.oid)?.data;
+            blob_text_for_diff(git_dir, config, &path.path, &blob, false)
+        };
+        out.push(text);
     }
     Ok(out)
 }

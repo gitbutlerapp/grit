@@ -2141,7 +2141,16 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
-    fn schema_top_level_field_names(schema: &serde_json::Value) -> HashSet<String> {
+    fn schema_top_level_field_names(schema: &serde_json::Value, root: &serde_json::Value) -> HashSet<String> {
+        if let Some(ref_name) = schema
+            .get("$ref")
+            .and_then(|r| r.as_str())
+            .and_then(|r| r.strip_prefix("#/definitions/"))
+        {
+            if let Some(def) = root.get("definitions").and_then(|d| d.get(ref_name)) {
+                return schema_top_level_field_names(def, root);
+            }
+        }
         let mut keys = HashSet::new();
         if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
             keys.extend(props.keys().cloned());
@@ -2150,22 +2159,13 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         for branch_key in ["anyOf", "oneOf"] {
             if let Some(items) = schema.get(branch_key).and_then(|v| v.as_array()) {
                 for item in items {
-                    keys.extend(schema_top_level_field_names(item));
+                    keys.extend(schema_top_level_field_names(item, root));
                 }
                 return keys;
             }
         }
         if let Some(items) = schema.get("items") {
-            if let Some(ref_name) = items
-                .get("$ref")
-                .and_then(|r| r.as_str())
-                .and_then(|r| r.strip_prefix("#/definitions/"))
-            {
-                if let Some(def) = schema.get("definitions").and_then(|d| d.get(ref_name)) {
-                    return schema_top_level_field_names(def);
-                }
-            }
-            keys.extend(schema_top_level_field_names(items));
+            keys.extend(schema_top_level_field_names(items, root));
         }
         keys
     }
@@ -2175,7 +2175,8 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         let mut keys = HashSet::new();
         for path in expected_json_command_paths() {
             if path == command || path.starts_with(&format!("{command}.")) {
-                keys.extend(schema_top_level_field_names(&load_committed_schema(&path)));
+                let schema = load_committed_schema(&path);
+                keys.extend(schema_top_level_field_names(&schema, &schema));
             }
         }
         keys

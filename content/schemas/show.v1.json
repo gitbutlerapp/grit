@@ -418,6 +418,223 @@
       ],
       "type": "string"
     },
+    "ShowMultipleJson": {
+      "properties": {
+        "objects": {
+          "items": {
+            "$ref": "#/definitions/ShowObjectResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "objects"
+      ],
+      "type": "object"
+    },
+    "ShowObjectResult": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShowOutcome"
+            }
+          ],
+          "description": "Commit, branch, tag, or annotated tag."
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShowPathOutcome"
+            }
+          ],
+          "description": "Blob or tree at `revision:path`."
+        }
+      ],
+      "description": "One resolved object in a multi-object show (commit metadata or `rev:path` contents)."
+    },
+    "ShowOutcome": {
+      "description": "Result of `grit show`.",
+      "properties": {
+        "commit": {
+          "$ref": "#/definitions/CommitInfo"
+        },
+        "files": {
+          "description": "Per-file diff rows (same shape as `grit diff --json`).",
+          "items": {
+            "$ref": "#/definitions/FileDiff"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/definitions/ShowKind"
+        },
+        "ref_name": {
+          "description": "Branch or tag name, when shown via a ref.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stat": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DiffStat"
+            }
+          ],
+          "description": "Summary diffstat (always present for scripting convenience)."
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TagInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Annotated-tag metadata, when `kind == \"annotated_tag\"`."
+        },
+        "totals": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DiffTotalsJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "description": "Non-fatal warnings emitted while resolving the object.",
+          "items": {
+            "$ref": "#/definitions/WarningRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "commit",
+        "files",
+        "kind",
+        "stat"
+      ],
+      "type": "object"
+    },
+    "ShowPathOutcome": {
+      "description": "`grit show REV:path` JSON shape.",
+      "oneOf": [
+        {
+          "properties": {
+            "binary": {
+              "type": "boolean"
+            },
+            "data_base64": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "blob"
+              ],
+              "type": "string"
+            },
+            "oid": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "spec": {
+              "type": "string"
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "oid",
+            "path",
+            "size",
+            "spec"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "entries": {
+              "items": {
+                "$ref": "#/definitions/ShowTreeEntryJson"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "tree"
+              ],
+              "type": "string"
+            },
+            "oid": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "spec": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "entries",
+            "kind",
+            "oid",
+            "path",
+            "size",
+            "spec"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ShowTreeEntryJson": {
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "oid",
+        "path",
+        "type"
+      ],
+      "type": "object"
+    },
     "TagInfo": {
       "properties": {
         "message": {
@@ -459,71 +676,16 @@
       "type": "object"
     }
   },
-  "description": "Result of `grit show`.",
-  "properties": {
-    "commit": {
-      "$ref": "#/definitions/CommitInfo"
+  "oneOf": [
+    {
+      "$ref": "#/definitions/ShowOutcome"
     },
-    "files": {
-      "description": "Per-file diff rows (same shape as `grit diff --json`).",
-      "items": {
-        "$ref": "#/definitions/FileDiff"
-      },
-      "type": "array"
+    {
+      "$ref": "#/definitions/ShowPathOutcome"
     },
-    "kind": {
-      "$ref": "#/definitions/ShowKind"
-    },
-    "ref_name": {
-      "description": "Branch or tag name, when shown via a ref.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "stat": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/DiffStat"
-        }
-      ],
-      "description": "Summary diffstat (always present for scripting convenience)."
-    },
-    "tag": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/TagInfo"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Annotated-tag metadata, when `kind == \"annotated_tag\"`."
-    },
-    "totals": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/DiffTotalsJson"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "warnings": {
-      "description": "Non-fatal warnings emitted while resolving the object.",
-      "items": {
-        "$ref": "#/definitions/WarningRecord"
-      },
-      "type": "array"
+    {
+      "$ref": "#/definitions/ShowMultipleJson"
     }
-  },
-  "required": [
-    "commit",
-    "files",
-    "kind",
-    "stat"
   ],
-  "title": "ShowOutcome",
-  "type": "object"
+  "title": "ShowRunResult"
 }

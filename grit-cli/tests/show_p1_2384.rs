@@ -103,6 +103,48 @@ fn show_rev_path_tree_lists_entries() {
 }
 
 #[test]
+fn show_rev_path_binary_blob_human_bytes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(
+        dir.path().join("binary.dat"),
+        [0x00, 0x61, 0x62, 0x63, 0xff],
+    )
+    .unwrap();
+    git(dir.path(), &["add", "binary.dat"]);
+    git(dir.path(), &["commit", "-m", "binary"]);
+    grit(dir.path(), &["init"]).expect_ok();
+
+    let git_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["show", "HEAD:binary.dat"])
+        .output()
+        .expect("git show");
+    assert!(git_out.status.success());
+    let grit_out = Command::new(env!("CARGO_BIN_EXE_grit"))
+        .current_dir(dir.path())
+        .args(["show", "HEAD:binary.dat"])
+        .output()
+        .expect("grit show");
+    assert!(grit_out.status.success());
+    assert_eq!(grit_out.stdout, git_out.stdout);
+}
+
+#[test]
+fn show_rev_path_colon_in_path_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("a:b"), "x\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "colon path"]);
+    grit(dir.path(), &["init"]).expect_ok();
+
+    let json = gs_json(dir.path(), &["show", "HEAD:a:b"]);
+    assert_eq!(json["kind"], "blob");
+    assert_eq!(json["path"], "a:b");
+}
+
+#[test]
 fn show_diff_merges_first_parent_matches_git() {
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init"]);
