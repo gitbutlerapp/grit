@@ -134,9 +134,14 @@ pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
     )?;
     let stat = match opts.format.detail() {
         DiffDetail::NameOnly | DiffDetail::NameStatus => None,
+        _ if diff.has_streaming_unified_patch() => None,
         _ => Some(diffstat_from_files(&diff.files)),
     };
-    let files = diff.files.clone();
+    let files = if opts.materialize_structured_hunks {
+        diff.files.clone()
+    } else {
+        Vec::new()
+    };
     let totals = diff.totals;
 
     Ok(ShowOutcome {
@@ -328,7 +333,9 @@ impl HumanRender for ShowOutcome {
                 )?;
             }
         } else {
-            if !self.diff.files.is_empty() && fmt.detail() == DiffDetail::Patch {
+            if fmt.detail() == DiffDetail::Patch
+                && (!self.diff.files.is_empty() || self.diff.has_streaming_unified_patch())
+            {
                 outln!(w);
             }
             self.diff.render_human_diff(w, None)?;

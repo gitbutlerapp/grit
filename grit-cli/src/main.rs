@@ -1150,9 +1150,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 format,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
-                materialize_structured_hunks: opts.mode != crate::output::OutputMode::Human
-                    || std::io::stdout().is_terminal()
-                    || format.function_context,
+                materialize_structured_hunks: opts.mode == crate::output::OutputMode::Json
+                    || (opts.mode == crate::output::OutputMode::Human
+                        && (std::io::stdout().is_terminal() || format.function_context)),
             })?,
             opts,
             ctx,

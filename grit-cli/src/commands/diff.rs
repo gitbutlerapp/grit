@@ -24,9 +24,9 @@ use grit_lib::diff::{
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
-    submodule_porcelain_flags, tree_diff_structured_parallel, tree_oid_of_commit, DiffDetail,
-    DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions, DiffOptions, DiffStatus,
-    TreeDiffStructured,
+    submodule_porcelain_flags, tree_diff_structured_parallel, tree_diff_unified_parallel,
+    tree_oid_of_commit, DiffDetail, DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions,
+    DiffOptions, DiffStatus, TreeDiffStructured, TreeDiffUnified,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -117,6 +117,10 @@ pub struct DiffOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     path_display: Option<PathDisplayOptions>,
+    /// Unified patch bodies without structured [`FileDiff`] rows (piped human/markdown patch).
+    #[serde(skip)]
+    #[schemars(skip)]
+    streaming_unified: Option<Vec<TreeDiffUnified>>,
 }
 
 /// One changed file.
@@ -401,6 +405,7 @@ fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -
         totals: None,
         format,
         path_display: None,
+        streaming_unified: None,
     }
 }
 
@@ -423,6 +428,7 @@ fn outcome_from_lib(
         totals,
         format,
         path_display: None,
+        streaming_unified: None,
     }
 }
 
@@ -835,6 +841,17 @@ fn outcome_from_tree_structured(
         totals: None,
         format,
         path_display: None,
+        streaming_unified: None,
+    }
+}
+
+fn outcome_from_tree_unified(items: Vec<TreeDiffUnified>, format: DiffFormatArgs) -> DiffOutcome {
+    DiffOutcome {
+        files: Vec::new(),
+        totals: None,
+        format,
+        path_display: None,
+        streaming_unified: Some(items),
     }
 }
 
@@ -927,6 +944,7 @@ fn outcome_from_changes(
         totals: None,
         format,
         path_display: None,
+        streaming_unified: None,
     }
 }
 
@@ -1292,6 +1310,7 @@ fn outcome_stat_from_changes(
         files,
         format,
         path_display: None,
+        streaming_unified: None,
     }
 }
 
@@ -1364,14 +1383,25 @@ fn tree_diff_outcome(
     if detail == DiffDetail::Patch {
         let config = repo.config().context("could not load config")?;
         let thread_policy = repo.thread_policy();
-        let structured = tree_diff_structured_parallel(
-            repo.odb(),
-            entries,
-            config.as_ref(),
-            &thread_policy,
-            diff_options,
-        )?;
-        Ok(outcome_from_tree_structured(structured, format))
+        if diff_options.materialize_structured_hunks {
+            let structured = tree_diff_structured_parallel(
+                repo.odb(),
+                entries,
+                config.as_ref(),
+                &thread_policy,
+                diff_options,
+            )?;
+            Ok(outcome_from_tree_structured(structured, format))
+        } else {
+            let unified = tree_diff_unified_parallel(
+                repo.odb(),
+                entries,
+                config.as_ref(),
+                &thread_policy,
+                diff_options,
+            )?;
+            Ok(outcome_from_tree_unified(unified, format))
+        }
     } else {
         outcome_from_entries(repo, entries, detail, diff_options, format)
     }
@@ -1826,10 +1856,21 @@ impl DiffOutcome {
         self.path_display.as_ref()
     }
 
+    pub(crate) fn has_streaming_unified_patch(&self) -> bool {
+        self.streaming_unified
+            .as_ref()
+            .is_some_and(|u| !u.is_empty())
+    }
+
     /// Render only the diff body (no commit header). `empty_message` is printed when there
     /// are no files in patch mode; pass `None` to stay silent (as `grit show` does).
     pub fn render_human_diff(&self, w: &mut dyn Write, empty_message: Option<&str>) -> Result<()> {
-        if self.files.is_empty() {
+        let has_patch_body = !self.files.is_empty()
+            || self
+                .streaming_unified
+                .as_ref()
+                .is_some_and(|u| !u.is_empty());
+        if !has_patch_body {
             if format_is_byte_list_or_stat(self.format) {
                 return Ok(());
             }
@@ -1856,6 +1897,12 @@ impl DiffOutcome {
         if fmt.human_stat_block() {
             let stat = diffstat_from_files(&self.files);
             return render_stat(w, &stat, color, self.path_display.as_ref());
+        }
+        if let Some(unified) = &self.streaming_unified {
+            for item in unified {
+                render_unified_stream_file(w, item, color, self.path_display.as_ref())?;
+            }
+            return Ok(());
         }
         for file in &self.files {
             render_file(w, file, color, self.path_display.as_ref())?;
@@ -1895,6 +1942,10 @@ impl DiffOutcome {
             for file in &self.files {
                 outln!(w, "- `{}`", file.path);
             }
+            return Ok(());
+        }
+        if let Some(unified) = &self.streaming_unified {
+            markdown::print_unified_stream_files(w, unified, self.path_display.as_ref())?;
             return Ok(());
         }
         markdown::print_diff_files(w, &self.files, self.path_display.as_ref())?;
@@ -1955,6 +2006,63 @@ fn write_file_diff_mode_lines_human(w: &mut dyn Write, file: &FileDiff) -> Resul
         }
     }
     Ok(())
+}
+
+fn render_unified_stream_file(
+    w: &mut dyn Write,
+    item: &TreeDiffUnified,
+    color: bool,
+    path_opts: Option<&PathDisplayOptions>,
+) -> Result<()> {
+    let e = &item.entry;
+    let path = e
+        .new_path
+        .clone()
+        .or_else(|| e.old_path.clone())
+        .unwrap_or_default();
+    let old_path = e
+        .old_path
+        .as_ref()
+        .filter(|op| op.as_str() != path)
+        .cloned();
+    outln!(w);
+    let header = ui::format_diff_file_header(old_path.as_deref(), &path, path_opts);
+    outln!(w, "{}", paint(color, "1;4", &header));
+    let status = ChangeStatus::from(e.status);
+    let file = FileDiff {
+        path,
+        old_path,
+        status,
+        old_mode: mode_display_opt(&e.old_mode),
+        new_mode: mode_display_opt(&e.new_mode),
+        old_encoding_lossy: false,
+        new_encoding_lossy: false,
+        binary: item.binary,
+        content_changed: e.old_oid != e.new_oid,
+        similarity: e.rename_similarity(),
+        stat: None,
+        hunks: None,
+        git_unified_patch: item.unified_patch.clone(),
+    };
+    write_file_diff_metadata_human(w, &file)?;
+    if file.binary {
+        if file.content_changed {
+            outln!(w, "{}", paint(color, FG_DIM, "Binary file differs"));
+        }
+        return Ok(());
+    }
+    if let Some(patch) = &file.git_unified_patch {
+        w.write_all(patch.as_bytes())?;
+    }
+    Ok(())
+}
+
+fn mode_display_opt(mode: &str) -> Option<String> {
+    if mode == "000000" {
+        None
+    } else {
+        Some(mode.to_owned())
+    }
 }
 
 fn render_file(

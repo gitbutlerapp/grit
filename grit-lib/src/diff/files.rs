@@ -6,8 +6,10 @@ use crate::odb::Odb;
 use crate::parallel::ThreadPolicy;
 
 use super::detail::{DiffDetail, DiffTotals, FileDiff, LineStat};
+use super::structured::StructuredFileDiff;
 use super::tree_content::{
-    tree_diff_stat_parallel, tree_diff_structured_parallel, TreeDiffStructured,
+    tree_diff_stat_parallel, tree_diff_structured_parallel, tree_diff_unified_parallel,
+    TreeDiffStructured, TreeDiffUnified,
 };
 use super::{DiffEntry, DiffOptions, DiffStatus};
 
@@ -47,6 +49,28 @@ fn file_diff_name_only(entry: &DiffEntry) -> FileDiff {
         similarity: entry.rename_similarity(),
         stat: None,
         structured: None,
+    }
+}
+
+fn file_diff_from_unified(t: TreeDiffUnified) -> FileDiff {
+    let path = path_from_entry(&t.entry);
+    FileDiff {
+        path: path.clone(),
+        old_path: old_path_from_entry(&t.entry, &path),
+        status: t.entry.status,
+        old_mode: mode_display(&t.entry.old_mode),
+        new_mode: mode_display(&t.entry.new_mode),
+        binary: t.binary,
+        similarity: t.entry.rename_similarity(),
+        stat: None,
+        structured: t.unified_patch.map(|patch| StructuredFileDiff {
+            old_mode: mode_display(&t.entry.old_mode),
+            new_mode: mode_display(&t.entry.new_mode),
+            old_encoding_lossy: false,
+            new_encoding_lossy: false,
+            hunks: Vec::new(),
+            unified_patch: Some(patch),
+        }),
     }
 }
 
@@ -123,16 +147,32 @@ pub fn build_file_diffs(
             Ok(DiffFilesOutput { files, totals })
         }
         DiffDetail::Patch => {
-            let structured =
-                tree_diff_structured_parallel(odb, entries, config, thread_policy, diff_options)?;
-            let files: Vec<FileDiff> = structured
-                .into_iter()
-                .map(file_diff_from_structured)
-                .collect();
-            Ok(DiffFilesOutput {
-                files,
-                totals: None,
-            })
+            if diff_options.materialize_structured_hunks {
+                let structured = tree_diff_structured_parallel(
+                    odb,
+                    entries,
+                    config,
+                    thread_policy,
+                    diff_options,
+                )?;
+                let files: Vec<FileDiff> = structured
+                    .into_iter()
+                    .map(file_diff_from_structured)
+                    .collect();
+                Ok(DiffFilesOutput {
+                    files,
+                    totals: None,
+                })
+            } else {
+                let unified =
+                    tree_diff_unified_parallel(odb, entries, config, thread_policy, diff_options)?;
+                let files: Vec<FileDiff> =
+                    unified.into_iter().map(file_diff_from_unified).collect();
+                Ok(DiffFilesOutput {
+                    files,
+                    totals: None,
+                })
+            }
         }
     }
 }

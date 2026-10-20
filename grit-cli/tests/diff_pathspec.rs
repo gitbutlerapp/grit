@@ -217,7 +217,11 @@ fn diff_revision_then_bare_path_without_double_dash() {
             .expect("git")
     };
     let git_out = git(&["diff", "feature/v1.2/x", "a.txt"]);
-    assert!(git_out.status.success(), "git stderr={}", String::from_utf8_lossy(&git_out.stderr));
+    assert!(
+        git_out.status.success(),
+        "git stderr={}",
+        String::from_utf8_lossy(&git_out.stderr)
+    );
 
     let (code, stdout, stderr) = grit(dir.path(), &["diff", "feature/v1.2/x", "a.txt"]);
     assert_eq!(code, 0, "stderr={stderr}");

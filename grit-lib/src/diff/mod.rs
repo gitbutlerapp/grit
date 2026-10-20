@@ -36,7 +36,7 @@ pub use patch_log::{
 };
 pub use tree_content::{
     tree_diff_contents_parallel, tree_diff_stat_parallel, tree_diff_structured_parallel,
-    TreeDiffContent, TreeDiffStructured,
+    tree_diff_unified_parallel, TreeDiffContent, TreeDiffStructured, TreeDiffUnified,
 };
 
 pub mod bloom {

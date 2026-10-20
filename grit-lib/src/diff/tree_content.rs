@@ -15,6 +15,17 @@ use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
 use super::DiffOptions;
 
+/// Tree diff entry with a unified patch body only (no structured line hunks).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeDiffUnified {
+    /// Tree diff metadata (paths, modes, oids, status).
+    pub entry: DiffEntry,
+    /// `true` when either side looks like a binary blob (NUL in the first 8 KiB).
+    pub binary: bool,
+    /// Unified hunk bodies (`@@` …), when not binary and content changed.
+    pub unified_patch: Option<String>,
+}
+
 /// Tree diff entry with structured line hunks ready for CLI rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeDiffStructured {
@@ -125,6 +136,70 @@ pub fn tree_diff_stat_parallel(
                 ))
             };
             Ok((entry.clone(), binary, stat))
+        },
+    );
+    match rows {
+        Ok(rows) => Ok(rows),
+        Err(ParallelHashError::Task(err)) => Err(err),
+    }
+}
+
+/// Load sides and emit unified patch bodies for each entry in parallel (no structured hunks).
+///
+/// # Errors
+///
+/// Propagates object database read failures.
+pub fn tree_diff_unified_parallel(
+    odb: &Odb,
+    entries: Vec<DiffEntry>,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+    diff_options: DiffOptions,
+) -> Result<Vec<TreeDiffUnified>> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
+    let par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
+    let store = odb.pack_store_for(odb.objects_dir());
+    let rows = try_par_map_with_local(
+        &entries,
+        par_opts,
+        0,
+        || PackReadContextGuard::install(Arc::clone(&store)),
+        |_ctx, entry| {
+            if !entry.old_oid.is_zero()
+                && entry.old_oid == entry.new_oid
+                && entry.old_mode == entry.new_mode
+            {
+                return Ok(TreeDiffUnified {
+                    entry: entry.clone(),
+                    binary: false,
+                    unified_patch: None,
+                });
+            }
+            let (old_bytes, old_bin) = load_old_side(odb, entry)?;
+            let (new_bytes, new_bin) = load_new_side(odb, entry)?;
+            let binary = old_bin || new_bin;
+            let unified_patch = if binary {
+                None
+            } else {
+                let patch = super::unified_hunk_body_for_diff_options(
+                    &old_bytes.text(),
+                    &new_bytes.text(),
+                    &diff_options,
+                );
+                if patch.is_empty() {
+                    None
+                } else {
+                    Some(patch)
+                }
+            };
+            Ok(TreeDiffUnified {
+                entry: entry.clone(),
+                binary,
+                unified_patch,
+            })
         },
     );
     match rows {

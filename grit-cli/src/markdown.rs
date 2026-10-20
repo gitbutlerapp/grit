@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use grit_lib::diff::{DiffEntry, DiffStatus};
+use grit_lib::diff::{DiffEntry, DiffStatus, TreeDiffUnified};
 
 use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
@@ -101,6 +101,55 @@ pub fn print_untracked(
     Ok(())
 }
 
+/// Render unified-only tree diff rows (no structured [`FileDiff`] hunks).
+pub fn print_unified_stream_files(
+    w: &mut dyn Write,
+    items: &[TreeDiffUnified],
+    path_opts: Option<&PathDisplayOptions>,
+) -> anyhow::Result<()> {
+    if items.is_empty() {
+        outln!(w, "No changes.");
+        return Ok(());
+    }
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            outln!(w);
+        }
+        let e = &item.entry;
+        let path = e
+            .new_path
+            .clone()
+            .or_else(|| e.old_path.clone())
+            .unwrap_or_default();
+        let old_path = e
+            .old_path
+            .as_ref()
+            .filter(|op| op.as_str() != path)
+            .cloned();
+        let header = ui::format_diff_file_header(old_path.as_deref(), &path, path_opts);
+        outln!(w, "## {header}");
+        outln!(w, "**status:** {}", change_label(&e.status));
+        if e.old_mode != e.new_mode && e.old_mode != "000000" {
+            outln!(w, "**old_mode:** `{}`", e.old_mode.trim());
+        }
+        if e.old_mode != e.new_mode && e.new_mode != "000000" {
+            outln!(w, "**new_mode:** `{}`", e.new_mode.trim());
+        }
+        if item.binary {
+            if e.old_oid != e.new_oid {
+                outln!(w);
+                outln!(w, "Binary file differs.");
+            }
+            continue;
+        }
+        if let Some(patch) = &item.unified_patch {
+            outln!(w);
+            print_fenced_diff(w, patch)?;
+        }
+    }
+    Ok(())
+}
+
 /// Render a full diff outcome as Markdown (one fenced `diff` block per file).
 pub fn print_diff_files(
     w: &mut dyn Write,
@@ -169,6 +218,9 @@ fn print_fenced_diff(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
 }
 
 fn render_file_patch(file: &FileDiff) -> String {
+    if let Some(patch) = &file.git_unified_patch {
+        return patch.clone();
+    }
     let mut out = String::new();
     let hunks = file.hunks.as_deref().unwrap_or(&[]);
     for hunk in hunks {

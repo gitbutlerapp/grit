@@ -2182,6 +2182,23 @@ pub fn empty_blob_oid() -> ObjectId {
 
 // ── Tree-to-tree diff ───────────────────────────────────────────────
 
+/// Parsed tree bodies reused for the duration of one tree diff walk.
+#[derive(Default)]
+struct TreeParseCache {
+    parsed: std::collections::HashMap<ObjectId, std::sync::Arc<Vec<TreeEntry>>>,
+}
+
+impl TreeParseCache {
+    fn read(&mut self, odb: &Odb, oid: &ObjectId) -> Result<std::sync::Arc<Vec<TreeEntry>>> {
+        if let Some(entries) = self.parsed.get(oid) {
+            return Ok(std::sync::Arc::clone(entries));
+        }
+        let entries = std::sync::Arc::new(read_tree_from_odb(odb, oid)?);
+        self.parsed.insert(*oid, std::sync::Arc::clone(&entries));
+        Ok(entries)
+    }
+}
+
 /// Compare two trees and return the list of changed entries.
 ///
 /// # Parameters
@@ -2249,16 +2266,18 @@ pub fn diff_tree_path_change_count(
     if old_tree_oid == new_tree_oid {
         return Ok(0);
     }
+    let mut cache = TreeParseCache::default();
+    let empty: std::sync::Arc<Vec<TreeEntry>> = std::sync::Arc::new(Vec::new());
     let old_entries = match old_tree_oid {
-        Some(oid) => read_tree(odb, oid)?,
-        None => Vec::new(),
+        Some(oid) => cache.read(odb, oid)?,
+        None => std::sync::Arc::clone(&empty),
     };
     let new_entries = match new_tree_oid {
-        Some(oid) => read_tree(odb, oid)?,
-        None => Vec::new(),
+        Some(oid) => cache.read(odb, oid)?,
+        None => empty,
     };
     let mut count = 0usize;
-    diff_tree_entries_count(odb, &old_entries, &new_entries, prefix, false, &mut count)?;
+    diff_tree_entries_count(odb, old_entries.as_slice(), new_entries.as_slice(), prefix, false, &mut count)?;
     Ok(count)
 }
 
@@ -2401,6 +2420,7 @@ fn diff_subtrees_in_place(
     prefix: &str,
     show_trees: bool,
     index_hint: Option<&DiffTreesIndexHint<'_>>,
+    tree_cache: &mut TreeParseCache,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     if !show_trees {
@@ -2410,21 +2430,23 @@ fn diff_subtrees_in_place(
             }
         }
     }
+    let empty: std::sync::Arc<Vec<TreeEntry>> = std::sync::Arc::new(Vec::new());
     let old_entries = match old_tree_oid {
-        Some(oid) => read_tree(odb, oid)?,
-        None => Vec::new(),
+        Some(oid) => tree_cache.read(odb, oid)?,
+        None => std::sync::Arc::clone(&empty),
     };
     let new_entries = match new_tree_oid {
-        Some(oid) => read_tree(odb, oid)?,
-        None => Vec::new(),
+        Some(oid) => tree_cache.read(odb, oid)?,
+        None => empty,
     };
     diff_tree_entries_opts(
         odb,
-        &old_entries,
-        &new_entries,
+        old_entries.as_slice(),
+        new_entries.as_slice(),
         prefix,
         show_trees,
         index_hint,
+        tree_cache,
         result,
     )
 }
@@ -2438,6 +2460,7 @@ fn diff_trees_opts(
     index_hint: Option<&DiffTreesIndexHint<'_>>,
 ) -> Result<Vec<DiffEntry>> {
     let mut result = Vec::new();
+    let mut tree_cache = TreeParseCache::default();
     diff_subtrees_in_place(
         odb,
         old_tree_oid,
@@ -2445,6 +2468,7 @@ fn diff_trees_opts(
         prefix,
         show_trees,
         index_hint,
+        &mut tree_cache,
         &mut result,
     )?;
     Ok(result)
@@ -2468,8 +2492,8 @@ pub(crate) fn set_diff_tree_read_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
     DIFF_TREE_READ_HOOK.with(|cell| *cell.borrow_mut() = hook);
 }
 
-/// Read and parse a tree object from the ODB.
-fn read_tree(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
+/// Read and parse a tree object from the ODB (uncached; prefer [`TreeParseCache`] in tree diffs).
+fn read_tree_from_odb(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
     #[cfg(test)]
     if let Some(counter) = DIFF_TREE_READ_HOOK.with(|cell| cell.borrow().clone()) {
         counter.fetch_add(1, Ordering::Relaxed);
@@ -2602,6 +2626,7 @@ fn diff_tree_entries_opts(
     prefix: &str,
     show_trees: bool,
     index_hint: Option<&DiffTreesIndexHint<'_>>,
+    tree_cache: &mut TreeParseCache,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     let mut oi = 0;
@@ -2619,12 +2644,14 @@ fn diff_tree_entries_opts(
                 match cmp {
                     std::cmp::Ordering::Less => {
                         // Old entry not in new → deleted
-                        emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
+                        emit_deleted_opts(
+                            odb, o, prefix, show_trees, index_hint, tree_cache, result,
+                        )?;
                         oi += 1;
                     }
                     std::cmp::Ordering::Greater => {
                         // New entry not in old → added
-                        emit_added_opts(odb, n, prefix, show_trees, result)?;
+                        emit_added_opts(odb, n, prefix, show_trees, tree_cache, result)?;
                         ni += 1;
                     }
                     std::cmp::Ordering::Equal => {
@@ -2653,16 +2680,21 @@ fn diff_tree_entries_opts(
                                     &path,
                                     show_trees,
                                     index_hint,
+                                    tree_cache,
                                     result,
                                 )?;
                             } else if is_tree_mode(o.mode) && !is_tree_mode(n.mode) {
                                 // Tree → blob: delete tree contents, add blob
-                                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
-                                emit_added_opts(odb, n, prefix, show_trees, result)?;
+                                emit_deleted_opts(
+                                    odb, o, prefix, show_trees, index_hint, tree_cache, result,
+                                )?;
+                                emit_added_opts(odb, n, prefix, show_trees, tree_cache, result)?;
                             } else if !is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 // Blob → tree: delete blob, add tree contents
-                                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
-                                emit_added_opts(odb, n, prefix, show_trees, result)?;
+                                emit_deleted_opts(
+                                    odb, o, prefix, show_trees, index_hint, tree_cache, result,
+                                )?;
+                                emit_added_opts(odb, n, prefix, show_trees, tree_cache, result)?;
                             } else {
                                 // Both blobs — modified.
                                 // A mode-only change (e.g. chmod) is Modified.
@@ -2691,11 +2723,11 @@ fn diff_tree_entries_opts(
                 }
             }
             (Some(o), None) => {
-                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
+                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, tree_cache, result)?;
                 oi += 1;
             }
             (None, Some(n)) => {
-                emit_added_opts(odb, n, prefix, show_trees, result)?;
+                emit_added_opts(odb, n, prefix, show_trees, tree_cache, result)?;
                 ni += 1;
             }
             (None, None) => break,
@@ -2780,6 +2812,7 @@ fn emit_deleted_opts(
     prefix: &str,
     show_trees: bool,
     index_hint: Option<&DiffTreesIndexHint<'_>>,
+    tree_cache: &mut TreeParseCache,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     let name_str = String::from_utf8_lossy(&entry.name);
@@ -2801,7 +2834,16 @@ fn emit_deleted_opts(
             emit_deleted_tree_from_index(hint.index, &path, result);
             return Ok(());
         }
-        diff_subtrees_in_place(odb, Some(&entry.oid), None, &path, show_trees, None, result)?;
+        diff_subtrees_in_place(
+            odb,
+            Some(&entry.oid),
+            None,
+            &path,
+            show_trees,
+            None,
+            tree_cache,
+            result,
+        )?;
     } else {
         result.push(DiffEntry {
             status: DiffStatus::Deleted,
@@ -2822,6 +2864,7 @@ fn emit_added_opts(
     entry: &TreeEntry,
     prefix: &str,
     show_trees: bool,
+    tree_cache: &mut TreeParseCache,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     let name_str = String::from_utf8_lossy(&entry.name);
@@ -2839,7 +2882,16 @@ fn emit_added_opts(
                 score: None,
             });
         }
-        diff_subtrees_in_place(odb, None, Some(&entry.oid), &path, show_trees, None, result)?;
+        diff_subtrees_in_place(
+            odb,
+            None,
+            Some(&entry.oid),
+            &path,
+            show_trees,
+            None,
+            tree_cache,
+            result,
+        )?;
     } else {
         result.push(DiffEntry {
             status: DiffStatus::Added,
@@ -3486,7 +3538,7 @@ fn diff_index_tree_at(
     cache_node: Option<&CacheTreeNode>,
     dir_prefix: &str,
 ) -> Result<()> {
-    let tree_entries = read_tree(walk.odb, tree_oid)?;
+    let tree_entries = read_tree_from_odb(walk.odb, tree_oid)?;
     if tree_entries_have_duplicate_names(&tree_entries) {
         walk.abort_to_flatten = true;
         return Ok(());
@@ -10075,7 +10127,7 @@ struct FlatEntry {
 }
 
 fn flatten_tree(odb: &Odb, tree_oid: &ObjectId, prefix: &str) -> Result<Vec<FlatEntry>> {
-    let entries = read_tree(odb, tree_oid)?;
+    let entries = read_tree_from_odb(odb, tree_oid)?;
     let mut result = Vec::new();
 
     for entry in entries {

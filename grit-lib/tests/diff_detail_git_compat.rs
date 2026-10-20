@@ -76,4 +76,3 @@ fn diff_stat_counts_match_git_numstat_trees_text_and_binary() {
         .any(|(i, d, p)| p == "bin.dat" && *i == 0 && *d == 0));
     let _target = DiffTarget::Trees;
 }
-
