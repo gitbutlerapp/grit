@@ -35,6 +35,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | The change one commit made | `grit diff <commit>` |
 | A commit's message and file summary | `grit show [<commit-or-branch-or-tag>]` |
 | Recent history, ten at a time | `grit log`, then `grit log --cursor <next>` using the `next` value |
+| Filter history by author or message | `grit log --author=<pat>`, `grit log --grep=<pat> -i`, same flags on `grit revs` |
 | List or count commits on ranges | `grit revs <range>…`, `grit revs --count`, `grit revs --count --left-right A...B` |
 | Commits on this branch not on the target | `grit shortlog` |
 

@@ -58,3 +58,31 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
     err.downcast_ref::<StructuredCliError>()
         .map(|e| e.payload.clone())
 }
+/// Exit code for invalid `--author` / `--grep` patterns (documented on `grit log` / `grit revs`).
+pub const INVALID_COMMIT_FILTER_EXIT: i32 = 129;
+
+/// Marker for [`INVALID_COMMIT_FILTER_EXIT`] in the top-level error handler.
+#[derive(Debug)]
+pub struct InvalidCommitFilterExit;
+
+impl fmt::Display for InvalidCommitFilterExit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid commit filter pattern")
+    }
+}
+
+impl StdError for InvalidCommitFilterExit {}
+
+/// Build a structured CLI error from [`grit_lib::revwalk::filter::CommitFilterError`].
+pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) -> Error {
+    let human = err.to_string();
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: "invalid_pattern",
+            conflicts: None,
+        },
+        human,
+    })
+    .context(InvalidCommitFilterExit)
+}

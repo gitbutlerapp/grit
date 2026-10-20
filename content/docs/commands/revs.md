@@ -11,6 +11,8 @@ order: 3
 grit revs <RANGE>... [-n <N>] [--count] [--left-right]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
+  [--author <pat>] [--committer <pat>] [--grep <pat>]
+  [-i] [--all-match] [--invert-grep] [-F] [--no-mailmap]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
   [-- <PATH>...]
 ```
@@ -22,6 +24,8 @@ Walks commits reachable from one or more revision ranges and prints each commitâ
 Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). When a commit-graph file is present, counting uses it for speed.
 
 Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
+
+Author, committer, and message filters use the same rules as [`grit log`](../log/): POSIX BRE by default, `-F` for literals, `-i` for case folding, `--all-match` / `--invert-grep` on grep only, and `.mailmap` when `log.mailmap` is unset or true unless `--no-mailmap` is set. Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
 
 ## Options
 
@@ -42,6 +46,14 @@ Path arguments after `--` limit history to commits that touched those paths. Ope
 | `--branches[=<glob>]` | Branch tips, optionally filtered by glob. |
 | `--tags[=<glob>]` | Tag tips, optionally filtered by glob. |
 | `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob. |
+| `--author <pat>` | Only commits whose author matches (repeatable; OR). |
+| `--committer <pat>` | Only commits whose committer matches (repeatable; OR). |
+| `--grep <pat>` | Only commits whose message matches (repeatable; OR unless `--all-match`). |
+| `-i`, `--regexp-ignore-case` | Case-insensitive patterns. |
+| `--all-match` | Every `--grep` pattern must match. |
+| `--invert-grep` | Exclude commits that match the grep group. |
+| `-F`, `--fixed-strings` | Literal string patterns. |
+| `--no-mailmap` | Do not apply `.mailmap` for author/committer matching. |
 | `-- <PATH>â€¦` | Limit to commits touching these paths (cwd-relative under the work tree, like `grit diff`). |
 
 ## Examples
@@ -72,6 +84,12 @@ Commits on one branch but not another:
 
 ```console
 $ grit revs main..feature
+```
+
+Count commits mentioning an issue id on a range:
+
+```console
+$ grit revs --count --grep=JIRA-123 main..
 ```
 
 ## JSON output

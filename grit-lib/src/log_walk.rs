@@ -46,6 +46,7 @@ impl LogWalkQuery {
             || walk.first_parent
             || walk.merges != MergeFilter::Any
             || walk.skip > 0
+            || walk.commit_filter.as_ref().is_some_and(|f| f.is_active())
         {
             return Ok(None);
         }

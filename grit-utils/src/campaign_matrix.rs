@@ -290,6 +290,35 @@ pub fn run_fixture_cli_matrix(
         log_allows_grit_failure,
     )?);
 
+    if !smoke && fixture.id == "git-dot-git" {
+        out.push(run_matrix_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "log-author-n50"),
+                group: "log".into(),
+                fixture: fixture.label.clone(),
+                description: "log --author=. -n 50 (filtered author walk)".into(),
+                grit_argv: vec!["log".into(), "--author=.".into(), "-n".into(), "50".into()],
+                git_argv: vec![
+                    "log".into(),
+                    "--author=.".into(),
+                    "-n".into(),
+                    "50".into(),
+                    "--format=%H".into(),
+                ],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+            false,
+        )?);
+    }
+
     if !smoke {
         let patch_limit = 200;
         let grit_patch = shell_command(
