@@ -88,7 +88,6 @@ pub(crate) fn collect_touched_merge_paths(
 ) -> crate::error::Result<HashSet<Vec<u8>>> {
     let mut touched = paths_from_tree_diff(odb, base_tree, ours_tree)?;
     touched.extend(paths_from_tree_diff(odb, base_tree, theirs_tree)?);
-    touched.extend(paths_from_tree_diff(odb, ours_tree, theirs_tree)?);
     Ok(touched)
 }
 

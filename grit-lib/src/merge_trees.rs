@@ -88,6 +88,61 @@ impl Default for TreeMergeConflictPresentation<'_> {
         }
     }
 }
+
+/// Build tree-diff rows for cleanliness checks on paths a three-way merge may touch.
+pub fn tree_changes_for_touched_paths(
+    repo: &Repository,
+    head_tree: &ObjectId,
+    touched: &std::collections::HashSet<Vec<u8>>,
+) -> crate::error::Result<Vec<crate::diff::DiffEntry>> {
+    use crate::diff::{format_mode, DiffEntry, DiffStatus};
+    let odb = repo.odb();
+    let mut cache = merge_tree_cache::MergeTreeCache::default();
+    let mut changes = Vec::with_capacity(touched.len());
+    for path in touched {
+        let path_str = String::from_utf8_lossy(path).into_owned();
+        if let Some(entry) = merge_trees_walk::lookup_index_entry_at_path(
+            &mut cache,
+            odb,
+            head_tree,
+            path.as_slice(),
+        )? {
+            changes.push(DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some(path_str.clone()),
+                new_path: Some(path_str),
+                old_mode: format_mode(entry.mode),
+                new_mode: format_mode(entry.mode),
+                old_oid: entry.oid,
+                new_oid: entry.oid,
+                score: None,
+            });
+        } else {
+            changes.push(DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some(path_str),
+                old_mode: String::new(),
+                new_mode: format_mode(crate::index::MODE_REGULAR),
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            });
+        }
+    }
+    Ok(changes)
+}
+
+/// Paths that may change during a three-way tree merge (base↔ours and base↔theirs diffs only).
+pub fn touched_paths_for_three_way_merge(
+    repo: &Repository,
+    base_tree: ObjectId,
+    ours_tree: ObjectId,
+    theirs_tree: ObjectId,
+) -> crate::error::Result<std::collections::HashSet<Vec<u8>>> {
+    merge_trees_walk::collect_touched_merge_paths(repo.odb(), &base_tree, &ours_tree, &theirs_tree)
+}
+
 #[expect(clippy::too_many_arguments)]
 /// Merge `base` + `ours` + `their` trees (by OID) into an index using rename detection.
 ///

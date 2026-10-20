@@ -41,9 +41,9 @@ use crate::index::{Index, IndexEntry};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    apply_tree_merge_output_to_index, apply_tree_merge_output_to_worktree_index,
-    materialized_merge_result_tree, merge_trees_three_way, TreeMergeConflictPresentation,
-    TreeMergeOutput, WhitespaceMergeOptions,
+    apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_three_way,
+    touched_paths_for_three_way_merge, TreeMergeConflictPresentation, TreeMergeOutput,
+    WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout::{self, checkout_between_trees};
@@ -51,7 +51,11 @@ use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
 };
-use crate::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
+use crate::porcelain::tree_merge_checkout::{
+    apply_clean_tree_merge_to_worktree, ensure_worktree_clean_for_touched_paths,
+    ensure_worktree_clean_for_tree_changes,
+};
+use crate::porcelain::worktree_guard::{prepare_tree_checkout, prepare_tree_checkout_with_changes};
 use crate::refs;
 use crate::repo::Repository;
 use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
@@ -279,8 +283,6 @@ pub fn integrate_branch(
     other_oid: ObjectId,
     label: &str,
 ) -> Result<IntegrateBranchOutcome> {
-    ensure_worktree_clean_for_merge(repo)?;
-
     if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
         return Ok(IntegrateBranchOutcome::UpToDate);
     }
@@ -289,7 +291,14 @@ pub fn integrate_branch(
     let other_tree = commit_tree(repo, &other_oid)?;
 
     if is_ancestor(repo, into_oid, other_oid)? {
-        prepare_tree_checkout(repo, Some(&into_tree), &other_tree)?;
+        let ff_changes = diff_trees(repo.odb(), Some(&into_tree), Some(&other_tree), "")?;
+        ensure_worktree_clean_for_tree_changes(
+            repo,
+            &ff_changes,
+            "you have uncommitted changes — commit them before merging",
+            true,
+        )?;
+        prepare_tree_checkout_with_changes(repo, &ff_changes)?;
         checkout_between_trees(repo, Some(&into_tree), &other_tree)?;
         move_branch(
             repo,
@@ -317,6 +326,15 @@ pub fn integrate_branch(
         df_directory_theirs_commit: Some(other_oid),
         ..TreeMergeConflictPresentation::default()
     };
+    let touched = touched_paths_for_three_way_merge(repo, base_tree, into_tree, other_tree)?;
+    ensure_worktree_clean_for_touched_paths(
+        repo,
+        &into_tree,
+        &touched,
+        "you have uncommitted changes — commit them before merging",
+        true,
+    )?;
+
     let merged = merge_trees_three_way(
         repo,
         base_tree,
@@ -351,15 +369,10 @@ pub fn integrate_branch(
         "GIT_COMMITTER_DATE",
     )?;
 
-    let merged_tree = merged.result_tree;
-    prepare_tree_checkout(repo, Some(&into_tree), &merged_tree)?;
-    checkout_between_trees(repo, Some(&into_tree), &merged_tree)?;
-    let mut index = repo.load_index()?;
-    apply_tree_merge_output_to_worktree_index(repo, &mut index, &merged)?;
-    repo.write_index(&mut index)?;
+    apply_clean_tree_merge_to_worktree(repo, &into_tree, &merged)?;
 
     let commit = CommitData {
-        tree: merged_tree,
+        tree: merged.result_tree,
         parents: vec![into_oid, other_oid],
         author,
         committer,

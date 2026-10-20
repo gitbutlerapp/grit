@@ -127,6 +127,22 @@ fn replay_revert(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result
 }
 
 #[test]
+fn replay_pick_non_overlapping_branch_files() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "a.txt", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    commit_file(root.path(), "b.txt", "topic\n", "topic");
+    let picked = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    commit_file(root.path(), "c.txt", "main\n", "main");
+
+    let repo = open_repo(root.path());
+    let outcome = replay_pick(&repo, picked).expect("pick");
+    assert!(matches!(outcome, ReplayOutcome::Committed { .. }));
+}
+
+#[test]
 fn replay_pick_clean_commit_fsck_and_reflog() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());
