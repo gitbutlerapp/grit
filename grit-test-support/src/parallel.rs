@@ -210,7 +210,7 @@ mod in_process_fallback {
 ///
 /// On Unix, `flock(1)` on a shared lockfile coordinates across parallel `cargo test`
 /// binaries (CI disk peaks). Other platforms fall back to in-process serialization via
-/// [`in_process_fallback::HeavyDiskSerialGate`].
+/// a process-wide mutex gate.
 pub struct HeavyDiskSerialGuard {
     #[cfg(unix)]
     _process: ProcessHeavyDiskLock,

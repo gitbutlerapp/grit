@@ -2,7 +2,7 @@
 //!
 //! Patterns use Git's default POSIX basic regular expression (BRE) syntax unless
 //! [`CommitFilterBuilder::fixed_strings`] is set. Callers supply an optional
-//! [`MailmapTable`](crate::config::mailmap::MailmapTable) loaded explicitly
+//! [`MailmapTable`] loaded explicitly
 //! (for example via [`load_mailmap_table`](crate::config::mailmap::load_mailmap_table));
 //! the filter never reads repository config on its own.
 //!

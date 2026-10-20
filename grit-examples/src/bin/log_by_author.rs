@@ -1,4 +1,4 @@
-//! List commits matching an author pattern via [`CommitFilter`] and [`rev_list`].
+//! List commits matching an author pattern via [`CommitFilter`](grit_lib::revwalk::filter::CommitFilter) and [`rev_list`].
 //!
 //! Source for the library guide "Revwalk" page (included in the docs site).
 
