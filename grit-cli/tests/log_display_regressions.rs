@@ -74,7 +74,10 @@ fn log_group_by_respects_log_mailmap_false() {
     let fixture = CliFixture::empty();
     let root = fixture.path();
     fixture.run_ok(&["config", "log.mailmap", "false"]);
-    fixture.write_repo_file(".mailmap", "Mapped <mapped@example.com> <raw@example.com>\n");
+    fixture.write_repo_file(
+        ".mailmap",
+        "Mapped <mapped@example.com> <raw@example.com>\n",
+    );
     support::git_commit_as(root, "Raw", "raw@example.com", "one");
     let out = fixture
         .run_ok(&["log", "--group-by", "author", "--count"])

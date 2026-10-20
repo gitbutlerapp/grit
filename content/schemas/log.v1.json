@@ -283,6 +283,7 @@
   "description": "Result of `grit log`: one page of commits, plus the next page's start (if any).",
   "properties": {
     "commits": {
+      "default": [],
       "items": {
         "$ref": "#/definitions/LogCommit"
       },

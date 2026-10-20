@@ -4,6 +4,7 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::RevWalkListOptions;
 use grit_lib::revwalk::{group_commits_by_author, mailmap_for_grouping, GroupByAuthorOptions};
@@ -92,5 +93,56 @@ fn group_by_author_matches_git_shortlog_sne() -> grit_lib::error::Result<()> {
         };
         assert_eq!(grit_label, suffix, "line {git_line:?}");
     }
+    Ok(())
+}
+
+fn commit_with_raw_author_bytes(root: &std::path::Path, author_value: &[u8]) -> ObjectId {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let tree = git(root, &["mktree"]).trim().to_string();
+    let mut body = Vec::new();
+    body.extend_from_slice(b"tree ");
+    body.extend_from_slice(tree.as_bytes());
+    body.push(b'\n');
+    body.extend_from_slice(b"author ");
+    body.extend_from_slice(author_value);
+    body.extend_from_slice(b" 1 +0000\ncommitter C <c@x.com> 1 +0000\n\nm\n");
+    let mut child = Command::new("git")
+        .current_dir(root)
+        .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("hash-object");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(&body)
+        .expect("write");
+    let out = child.wait_with_output().expect("wait");
+    assert!(out.status.success());
+    let commit = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    git(root, &["update-ref", "refs/heads/main", &commit]);
+    commit.parse().expect("oid")
+}
+
+#[test]
+fn group_by_author_accepts_non_utf8_author_header() -> grit_lib::error::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let root = dir.path();
+    git(root, &["init", "-b", "main"]);
+    let oid = commit_with_raw_author_bytes(root, b"\xFFAlice <alice@example.com>");
+    let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
+    let groups = group_commits_by_author(
+        &repo,
+        std::slice::from_ref(&oid),
+        None,
+        GroupByAuthorOptions { count_only: true },
+    )?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].count, 1);
+    assert!(groups[0].email.contains("alice@example.com"));
     Ok(())
 }

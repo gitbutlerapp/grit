@@ -389,9 +389,13 @@ fn build_commit_outcome(
 ) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
-    let head_branch = resolve_current_branch(repo)?;
     let json_output = output_mode == OutputMode::Json;
     let need_refs = display.decorate || json_output;
+    let head_branch = if display.decorate {
+        resolve_current_branch(repo)?
+    } else {
+        None
+    };
 
     let (commit_json_rows, commit_rows) = if need_refs {
         let loader = CommitJsonLoader::new(repo)?;

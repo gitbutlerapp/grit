@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::commit_encoding;
 use crate::error::Result;
 use crate::mailmap::{load_mailmap_table, map_contact_table, parse_contact, MailmapTable};
 use crate::objects::ObjectId;
@@ -109,28 +110,67 @@ fn author_for_commit(
     mailmap: Option<&MailmapTable>,
 ) -> Result<(String, String)> {
     let obj = odb.read(&oid)?;
-    let author = scan_author_line(&obj.data).ok_or_else(|| {
+    let (author_raw, encoding) = scan_author_raw_and_encoding(&obj.data).ok_or_else(|| {
         crate::error::Error::CorruptObject(format!("commit {oid} missing author header"))
     })?;
-    let author = std::str::from_utf8(author).map_err(|_| {
-        crate::error::Error::CorruptObject(format!("commit {oid} author is not UTF-8"))
-    })?;
-    Ok(author_contact(author, mailmap))
+    let author = commit_encoding::decode_bytes(encoding.as_deref(), &author_raw);
+    Ok(author_contact(&author, mailmap))
 }
 
-fn scan_author_line(raw: &[u8]) -> Option<&[u8]> {
-    let mut line_start = 0usize;
-    for (i, &b) in raw.iter().enumerate() {
-        if b == b'\n' {
-            if line_start == i {
-                return None;
-            }
-            let line = &raw[line_start..i];
-            if let Some(rest) = line.strip_prefix(b"author ") {
-                return Some(rest);
-            }
-            line_start = i + 1;
+/// Author header bytes and optional `encoding` header (Git continuation lines included).
+fn scan_author_raw_and_encoding(raw: &[u8]) -> Option<(Vec<u8>, Option<String>)> {
+    #[derive(Clone, Copy)]
+    enum Continuation {
+        Author,
+        Ignore,
+    }
+
+    let mut pos = 0usize;
+    let mut author_raw: Option<Vec<u8>> = None;
+    let mut encoding: Option<String> = None;
+    let mut cont = Continuation::Ignore;
+
+    while pos < raw.len() {
+        let line_start = pos;
+        let mut line_end = pos;
+        while line_end < raw.len() && raw[line_end] != b'\n' {
+            line_end += 1;
         }
+        let line = &raw[line_start..line_end];
+        let after_nl = line_end.saturating_add(1);
+        if line.is_empty() {
+            let author = author_raw?;
+            return Some((author, encoding));
+        }
+
+        if line.first() == Some(&b' ') {
+            let rest = line.get(1..).unwrap_or_default();
+            if matches!(cont, Continuation::Author) {
+                author_raw.as_mut()?.extend_from_slice(rest);
+            }
+            pos = after_nl;
+            continue;
+        }
+
+        let key_end = line.iter().position(|&b| b == b' ')?;
+        let key = &line[..key_end];
+        let rest = line.get(key_end + 1..).unwrap_or_default();
+
+        match key {
+            b"author" => {
+                author_raw = Some(rest.to_vec());
+                cont = Continuation::Author;
+            }
+            b"encoding" => {
+                encoding = std::str::from_utf8(rest)
+                    .ok()
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty());
+                cont = Continuation::Ignore;
+            }
+            _ => cont = Continuation::Ignore,
+        }
+        pos = after_nl;
     }
     None
 }
