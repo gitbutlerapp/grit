@@ -2333,6 +2333,14 @@ impl Index {
         self.merge_replacements_into_sorted_index(replacements);
     }
 
+    /// Merge sorted `replacements` into a sorted index without a temporary appended tail.
+    fn merge_sorted_replacements_into_entries(&mut self, mut replacements: Vec<IndexEntry>) {
+        if replacements.is_empty() {
+            return;
+        }
+        merge_sorted_index_halves_into(&mut self.entries, &mut replacements);
+    }
+
     /// Merge sorted `replacements` into a sorted index in one linear pass.
     fn merge_replacements_into_sorted_index(&mut self, replacements: Vec<IndexEntry>) {
         if replacements.is_empty() {
@@ -2345,23 +2353,22 @@ impl Index {
             return;
         }
         const BULK_MERGE_MIN: usize = 64;
+        if self.defer_untracked_cache_invalidation {
+            // Campaign-scale tracked restage: merge in bulk but keep UNTR and invalidate only
+            // touched cache-tree paths (issue #1184).
+            for entry in replacements.iter().filter(|e| e.stage() == 0) {
+                self.invalidate_cache_tree_for_path(&entry.path);
+            }
+            self.merge_sorted_replacements_into_entries(replacements);
+            self.touch_fsmonitor_after_entry_change();
+            return;
+        }
         let repl_for_inval: Vec<Vec<u8>> = replacements
             .iter()
             .filter(|e| e.stage() == 0)
             .map(|e| e.path.clone())
             .collect();
-        let kept = std::mem::take(&mut self.entries);
-        self.entries = merge_sorted_index_entries(kept, replacements);
-        self.entries_sorted = true;
-        if self.defer_untracked_cache_invalidation {
-            // Campaign-scale tracked restage: merge in bulk but keep UNTR and invalidate only
-            // touched cache-tree paths (issue #1184).
-            for path in &repl_for_inval {
-                self.invalidate_cache_tree_for_path(path);
-            }
-            self.touch_fsmonitor_after_entry_change();
-            return;
-        }
+        self.merge_sorted_replacements_into_entries(replacements);
         if repl_for_inval.len() >= BULK_MERGE_MIN {
             self.cache_tree = None;
             self.cache_tree_root = None;
@@ -3005,42 +3012,89 @@ fn dedup_sorted_replacement_entries(replacements: &mut Vec<IndexEntry>) {
     *replacements = out;
 }
 
-fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) -> Vec<IndexEntry> {
-    let mut kept = kept.into_iter().peekable();
-    let mut insert = insert.into_iter().peekable();
-    let mut out = Vec::with_capacity(kept.size_hint().0.saturating_add(insert.size_hint().0));
-    loop {
-        match (kept.peek(), insert.peek()) {
-            (None, None) => break,
-            (Some(_), None) => {
-                out.extend(kept);
-                break;
+fn index_entry_path_stage_cmp(a: &IndexEntry, b: &IndexEntry) -> std::cmp::Ordering {
+    a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage()))
+}
+
+fn merge_sorted_index_entries(
+    mut kept: Vec<IndexEntry>,
+    mut insert: Vec<IndexEntry>,
+) -> Vec<IndexEntry> {
+    if insert.is_empty() {
+        return kept;
+    }
+    if kept.is_empty() {
+        return insert;
+    }
+    merge_sorted_index_halves_into(&mut kept, &mut insert);
+    kept
+}
+
+/// Merge sorted `short` into sorted `long` using auxiliary storage sized to the shorter half.
+///
+/// Peak live index entries stay near `long.len() + short.len()` by merging from a taken
+/// `long` buffer into an empty `long` output instead of holding a third full-sized `out` vec.
+fn merge_sorted_index_halves_into(long: &mut Vec<IndexEntry>, short: &mut Vec<IndexEntry>) {
+    if short.is_empty() {
+        return;
+    }
+    if long.is_empty() {
+        *long = std::mem::take(short);
+        return;
+    }
+    if long.len() < short.len() {
+        std::mem::swap(long, short);
+    }
+    let mut read = std::mem::take(long);
+    long.clear();
+    long.reserve(read.len());
+    merge_sorted_index_halves_into_out(long, &mut read, short);
+    debug_assert!(
+        read.is_empty(),
+        "index merge left {} unread entries",
+        read.len()
+    );
+}
+
+fn merge_sorted_index_halves_into_out(
+    out: &mut Vec<IndexEntry>,
+    long: &mut Vec<IndexEntry>,
+    short: &mut Vec<IndexEntry>,
+) {
+    use std::collections::VecDeque;
+
+    let mut short = VecDeque::from(std::mem::take(short));
+    let mut li = 0usize;
+    while li < long.len() {
+        let Some(short_front) = short.front() else {
+            break;
+        };
+        match index_entry_path_stage_cmp(&long[li], short_front) {
+            std::cmp::Ordering::Less => {
+                li += 1;
             }
-            (None, Some(_)) => {
-                out.extend(insert);
-                break;
+            std::cmp::Ordering::Equal => {
+                out.extend(long.drain(0..li));
+                li = 0;
+                let Some(mut entry) = short.pop_front() else {
+                    break;
+                };
+                entry.base_index_pos = long[li].base_index_pos;
+                out.push(entry);
+                long.remove(li);
             }
-            (Some(k), Some(i)) => {
-                let ord = (&k.path, k.stage()).cmp(&(&i.path, i.stage()));
-                if ord == std::cmp::Ordering::Less {
-                    if let Some(entry) = kept.next() {
-                        out.push(entry);
-                    }
-                } else if ord == std::cmp::Ordering::Equal {
-                    let old = kept.next();
-                    if let Some(mut entry) = insert.next() {
-                        if let Some(old) = old {
-                            entry.base_index_pos = old.base_index_pos;
-                        }
-                        out.push(entry);
-                    }
-                } else if let Some(entry) = insert.next() {
-                    out.push(entry);
-                }
+            std::cmp::Ordering::Greater => {
+                out.extend(long.drain(0..li));
+                li = 0;
+                let Some(entry) = short.pop_front() else {
+                    break;
+                };
+                out.push(entry);
             }
         }
     }
-    out
+    out.extend(long.drain(..));
+    out.extend(short);
 }
 
 fn prefix_under_or_equal(prefix: &[u8], path: &[u8]) -> bool {
