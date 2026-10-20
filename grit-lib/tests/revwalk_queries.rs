@@ -597,28 +597,42 @@ fn since_bounded_merge_dag_count_match_git() {
 fn since_skew_bounded_limit_match_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
-    let old = support::commit_labeled_with_dates(
+    let base = support::commit_labeled_with_dates(
         wt,
-        "old",
+        "base",
         &[],
         "@1000000000 +0000",
         "@1000000000 +0000",
     );
-    let skewed = support::commit_labeled_with_dates(
+    let left = support::commit_labeled_with_dates(
         wt,
-        "skewed",
-        &[old],
+        "left",
+        &[base],
         "@2000000000 +0000",
-        "@2000000000 +0000",
+        "@1500000000 +0000",
     );
-    git(wt, &["update-ref", "refs/heads/main", &skewed.to_hex()]);
+    let right = support::commit_labeled_with_dates(
+        wt,
+        "right",
+        &[base],
+        "@3000000000 +0000",
+        "@1600000000 +0000",
+    );
+    let merge = support::commit_labeled_with_dates(
+        wt,
+        "merge",
+        &[left, right],
+        "@4000000000 +0000",
+        "@1700000000 +0000",
+    );
+    git(wt, &["update-ref", "refs/heads/main", &merge.to_hex()]);
     let repo = open_grit(wt);
     let opts = RevWalkListOptions {
-        since: Some(1_500_000_000),
+        since: Some(1_650_000_000),
         limit: Some(2),
         ..RevWalkListOptions::default()
     };
-    let git_oids = git_rev_list(wt, &["--since=1500000000", "-n", "2", "main"]);
+    let git_oids = git_rev_list(wt, &["--since=1650000000", "-n", "2", "main"]);
     let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
     assert_eq!(
         grit_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),

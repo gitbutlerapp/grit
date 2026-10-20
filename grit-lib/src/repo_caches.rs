@@ -105,6 +105,15 @@ impl RepoCaches {
         &self.commit_linkage
     }
 
+    /// Drop cached commit parents/times (tests and cold merge-base walks).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn clear_commit_linkage(&self) {
+        if let Ok(mut guard) = self.commit_linkage.lock() {
+            guard.parents.clear();
+            guard.times.clear();
+        }
+    }
+
     /// Return the diagnostic sink for this cache arena.
     pub(crate) fn diagnostics_handle(&self) -> DiagnosticsHandle {
         self.diagnostics

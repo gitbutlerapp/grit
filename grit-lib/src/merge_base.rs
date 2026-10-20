@@ -8,7 +8,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 use crate::error::{Error, Result};
-use crate::ewah_bitmap::Bitmap;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
@@ -411,27 +410,42 @@ pub fn ahead_behind_of_target_commits(
     let target_is_ancestor = is_ancestor(repo, target, head)?;
     let head_is_ancestor = is_ancestor(repo, head, target)?;
 
+    let default_count_filter = ReachableCountFilter {
+        min_parents: None,
+        max_parents: None,
+        first_parent_only: false,
+        since: None,
+        until: None,
+    };
+
     let (ahead, ahead_oids) = if head_is_ancestor && !target_is_ancestor {
         (0, Vec::new())
-    } else {
+    } else if retain_newest_ahead > 0 {
         walk_commits_reachable_excluding_ancestors_of(
             repo,
             std::slice::from_ref(&head),
             &[target],
             ReachableWalkLimit::CountAllRetainNewest(retain_newest_ahead),
         )?
+    } else {
+        let ahead = count_commits_reachable_excluding_ancestors_of(
+            repo,
+            std::slice::from_ref(&head),
+            &[target],
+            default_count_filter,
+        )?;
+        (ahead, Vec::new())
     };
 
     let behind = if target_is_ancestor && !head_is_ancestor {
         0
     } else {
-        walk_commits_reachable_excluding_ancestors_of(
+        count_commits_reachable_excluding_ancestors_of(
             repo,
             std::slice::from_ref(&target),
             &[head],
-            ReachableWalkLimit::CountAllRetainNewest(0),
+            default_count_filter,
         )?
-        .0
     };
     Ok((ahead, behind, ahead_oids))
 }
@@ -668,6 +682,31 @@ impl ReachableWalkState {
         Ok(())
     }
 
+    /// True when some heap commit might still be emitted under `--since` (non-hidden, in range).
+    fn heap_has_emit_candidate_above_since(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<bool> {
+        let Some(since) = cutoffs.since else {
+            return Ok(!self.heap.is_empty());
+        };
+        let pending: Vec<WalkDateKey> = self.heap.iter().copied().collect();
+        for key in pending {
+            if key.time < since {
+                continue;
+            }
+            if self.is_hidden(cache, key.oid)? {
+                continue;
+            }
+            if cutoffs.until.is_some_and(|until| key.time > until) {
+                continue;
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     fn pop_next_emit(
         &mut self,
         cache: &mut CommitGraphCache<'_>,
@@ -683,12 +722,10 @@ impl ReachableWalkState {
             }
             if cutoffs.since.is_some_and(|since| key.time < since) {
                 self.after_processed(cache, oid)?;
-                let stop = self.heap.is_empty()
-                    || self
-                        .heap
-                        .iter()
-                        .all(|pending| pending.time < cutoffs.since.unwrap_or(i64::MIN));
-                if stop {
+                if self.heap.is_empty() {
+                    return Ok(None);
+                }
+                if !self.heap_has_emit_candidate_above_since(cache, cutoffs)? {
                     return Ok(None);
                 }
                 continue;
@@ -829,6 +866,9 @@ fn try_count_diff_via_stored_commit_bitmaps(
     tip: ObjectId,
     hide: ObjectId,
 ) -> Result<Option<usize>> {
+    use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery};
+    use crate::rev_list::MissingAction;
+
     let Some(index) = repo
         .odb()
         .with_pack_read_context(|| BitmapIndex::open(repo))
@@ -836,24 +876,24 @@ fn try_count_diff_via_stored_commit_bitmaps(
     else {
         return Ok(None);
     };
-    let Some(tip_bm) = index.commit_bitmap(&tip) else {
-        return Ok(None);
+    let query = ReachabilityQuery {
+        wants: &[tip],
+        haves: &[hide],
+        filter: None,
     };
-    let Some(hide_bm) = index.commit_bitmap(&hide) else {
-        return Ok(None);
+    let reachable = match index.reachability(repo, query, MissingAction::Allow) {
+        Ok(set) => set,
+        Err(BitmapWalkError::Unsupported(_)) => return Ok(None),
+        Err(BitmapWalkError::Bitmap(e)) => {
+            return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
+        }
+        Err(BitmapWalkError::Repository(e)) => return Err(e),
     };
-    let mut reachable = Bitmap::new();
-    tip_bm.or_into(&mut reachable);
-    let mut hidden = Bitmap::new();
-    hide_bm.or_into(&mut hidden);
-    reachable.and_not_assign(&hidden);
-    let mut commit_type = Bitmap::new();
-    index
-        .type_bitmap(ObjectKind::Commit)
-        .expand_into_bitmap(&mut commit_type)
-        .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
-    commit_type.and_assign(&reachable);
-    Ok(Some(commit_type.count_ones()))
+    Ok(Some(
+        reachable
+            .count_by_kind_popcount(ObjectKind::Commit)
+            .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?,
+    ))
 }
 
 /// Count commits reachable from `tips` that are not ancestors of any `hide` tip.
@@ -876,13 +916,16 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     }
     let mut cache = CommitGraphCache::new(repo);
 
-    if tips.len() == 1 && hide.len() == 1 {
-        let tip = tips[0];
-        let hide_tip = hide[0];
-        if tip != hide_tip
-            && try_direct_first_parent_chain_merge_base(&mut cache, tip, hide_tip)?.is_some()
-        {
-            return Ok(0);
+    if tips.len() == 1
+        && hide.len() == 1
+        && filter.min_parents.is_none()
+        && filter.max_parents.is_none()
+        && filter.since.is_none()
+        && filter.until.is_none()
+        && !filter.first_parent_only
+    {
+        if let Some(n) = try_count_diff_via_stored_commit_bitmaps(repo, tips[0], hide[0])? {
+            return Ok(n);
         }
     }
 
@@ -903,16 +946,17 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         }
     }
 
-    if tips.len() == 1
-        && hide.len() == 1
-        && filter.min_parents.is_none()
-        && filter.max_parents.is_none()
-        && filter.since.is_none()
-        && filter.until.is_none()
-        && !filter.first_parent_only
-    {
-        if let Some(n) = try_count_diff_via_stored_commit_bitmaps(repo, tips[0], hide[0])? {
-            return Ok(n);
+    if tips.len() == 1 && hide.len() == 1 {
+        let tip = tips[0];
+        let hide_tip = hide[0];
+        if tip != hide_tip {
+            let tip_time = cache.commit_time(tip)?;
+            let hide_time = cache.commit_time(hide_tip)?;
+            if tip_time <= hide_time
+                && try_direct_first_parent_chain_merge_base(&mut cache, tip, hide_tip)?.is_some()
+            {
+                return Ok(0);
+            }
         }
     }
 
@@ -1530,7 +1574,10 @@ fn walk_intersecting_histories(
             if *slot & MARK_BASE == 0 {
                 *slot |= MARK_BASE;
                 discovered.push(oid);
-                if !collect_every_base && tally.newest_rank_seen < tally.rank_stop {
+                if !collect_every_base
+                    && (tally.newest_rank_seen < tally.rank_stop
+                        || tally.newest_rank_seen == UNRANKED_COMMIT)
+                {
                     break;
                 }
             }
@@ -1916,6 +1963,7 @@ mod tests {
         }
         reset_intersect_walk_steps();
         reset_commit_parent_lookups();
+        repo.caches().clear_commit_linkage();
         let bases = merge_bases_first_vs_rest(&repo, tip, &[old])?;
         assert_eq!(bases, vec![old]);
         let parent_reads = commit_parent_lookups();
@@ -2099,6 +2147,60 @@ mod tests {
         let mb_idx = merge_base_for_diff_index(&repo, c2, c1).expect("mb idx");
         assert_eq!(mb_idx, c1);
         Ok(())
+    }
+
+    #[test]
+    fn deep_history_fixture_left_right_counts_are_fast() {
+        use std::path::Path;
+        use std::time::Instant;
+
+        use crate::environment::RepositoryOptions;
+        use crate::revwalk::queries::RevWalkListOptions;
+
+        let fixture = Path::new("/tmp/grit-bench-network-cache/deep-history-prod.git");
+        if !fixture.is_dir() {
+            return;
+        }
+        let repo = Repository::open(fixture, &RepositoryOptions::empty()).expect("open");
+        let start = Instant::now();
+        let counts = repo
+            .rev_walk()
+            .left_right_counts(&["HEAD~500...HEAD"], &RevWalkListOptions::default())
+            .expect("lr");
+        assert_eq!((counts.left, counts.right), (0, 500));
+        assert!(
+            start.elapsed().as_millis() < 250,
+            "left/right counts took {:?}",
+            start.elapsed()
+        );
+    }
+
+    fn deep_history_fixture_right_ahead_count_uses_bitmap() {
+        use std::path::Path;
+        use std::time::Instant;
+
+        use crate::environment::RepositoryOptions;
+
+        let fixture = Path::new("/tmp/grit-bench-network-cache/deep-history-prod.git");
+        if !fixture.is_dir() {
+            return;
+        }
+        let repo = Repository::open(fixture, &RepositoryOptions::empty()).expect("open");
+        let head = resolve_revision(&repo, "HEAD").expect("head");
+        let head = peel_to_commit_for_merge_base(&repo, head).expect("peel head");
+        let old = resolve_revision(&repo, "HEAD~500").expect("old");
+        let old = peel_to_commit_for_merge_base(&repo, old).expect("peel old");
+        repo.odb().with_pack_read_context(|| {
+            let filter = ReachableCountFilter::default();
+            let start = Instant::now();
+            let n = count_commits_reachable_excluding_ancestors_of(&repo, &[head], &[old], filter)
+                .expect("count");
+            assert_eq!(n, 500);
+            assert!(
+                start.elapsed().as_millis() < 50,
+                "expected bitmap-backed ahead count"
+            );
+        });
     }
 
     #[test]

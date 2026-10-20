@@ -2,7 +2,8 @@
 use crate::error::{Error, Result};
 use crate::merge_base::{
     count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
-    merge_bases_first_vs_rest, ReachableCountFilter,
+    merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of_cutoffs,
+    ReachableCountFilter, ReachableWalkCommitterCutoffs, ReachableWalkLimit,
 };
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
@@ -102,8 +103,9 @@ pub fn parse_rev_walk_tokens(repo: &Repository, tokens: &[&str]) -> Result<RevWa
         if let Some((left, right)) = split_triple_dot_range(token) {
             let left_spec = if left.is_empty() { "HEAD" } else { left };
             let right_spec = if right.is_empty() { "HEAD" } else { right };
-            let (pos, neg, left_oid, right_oid) =
-                symmetric_rev_list_specs(repo, left_spec, right_spec)?;
+            let (pos, neg, left_oid, right_oid) = repo
+                .odb()
+                .with_pack_read_context(|| symmetric_rev_list_specs(repo, left_spec, right_spec))?;
             positive.extend(pos);
             negative.extend(neg);
             symmetric_left = Some(left_oid);
@@ -253,9 +255,7 @@ impl<'repo> RevWalk<'repo> {
     /// Propagates rev-parse and rev-list errors.
     pub fn count(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<usize> {
         let repo = self.repository();
-        let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
-        if parsed.negative.is_empty()
-            && positive.len() == 1
+        if tokens.len() == 1
             && options.skip == 0
             && options.limit.is_some()
             && (options.since.is_some() || options.until.is_some())
@@ -264,20 +264,32 @@ impl<'repo> RevWalk<'repo> {
             && !options.reverse
             && options.merges == MergeFilter::Any
             && !options.first_parent
+            && options.refs.is_empty()
         {
-            let tip = crate::rev_parse::resolve_revision_for_range_end(repo, &positive[0])?;
-            let tip = crate::rev_parse::peel_to_commit_for_merge_base(repo, tip)?;
-            let need = options.limit.unwrap_or(usize::MAX);
-            let cutoffs = crate::merge_base::ReachableWalkCommitterCutoffs {
-                since: options.since,
-                until: options.until,
-            };
-            if let Some(list) =
-                crate::merge_base::try_linear_chain_commits_with_cutoffs(repo, tip, need, cutoffs)?
-            {
-                return Ok(list.len());
-            }
+            return repo.odb().with_pack_read_context(|| {
+                let tip = resolve_revision_for_range_end(repo, tokens[0])?;
+                let tip = peel_to_commit_for_merge_base(repo, tip)?;
+                let need = options.limit.unwrap_or(usize::MAX);
+                let cutoffs = ReachableWalkCommitterCutoffs {
+                    since: options.since,
+                    until: options.until,
+                };
+                if let Some(list) = crate::merge_base::try_linear_chain_commits_with_cutoffs(
+                    repo, tip, need, cutoffs,
+                )? {
+                    return Ok(list.len());
+                }
+                let (n, _) = walk_commits_reachable_excluding_ancestors_of_cutoffs(
+                    repo,
+                    std::slice::from_ref(&tip),
+                    &[],
+                    ReachableWalkLimit::StopAfter(need),
+                    cutoffs,
+                )?;
+                Ok(n)
+            });
         }
+        let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
         let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
         commit_count_from_result(result)
@@ -300,6 +312,62 @@ impl<'repo> RevWalk<'repo> {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         }
         let repo = self.repository();
+        if options.paths.is_empty()
+            && options.refs.is_empty()
+            && options.skip == 0
+            && options.limit.is_none()
+            && !options.reverse
+            && options.since.is_none()
+            && options.until.is_none()
+        {
+            if let Some((left_spec, right_spec)) = split_triple_dot_range(tokens[0]) {
+                let left_spec = if left_spec.is_empty() {
+                    "HEAD"
+                } else {
+                    left_spec
+                };
+                let right_spec = if right_spec.is_empty() {
+                    "HEAD"
+                } else {
+                    right_spec
+                };
+                let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
+                let filter = ReachableCountFilter {
+                    min_parents,
+                    max_parents,
+                    first_parent_only: options.first_parent,
+                    since: None,
+                    until: None,
+                };
+                return repo.odb().with_pack_read_context(|| {
+                    let left = peel_to_commit_for_merge_base(
+                        repo,
+                        resolve_revision_for_range_end(repo, left_spec)?,
+                    )?;
+                    let right = peel_to_commit_for_merge_base(
+                        repo,
+                        resolve_revision_for_range_end(repo, right_spec)?,
+                    )?;
+                    let left_count = count_commits_reachable_excluding_ancestors_of(
+                        repo,
+                        &[left],
+                        &[right],
+                        filter,
+                    )?;
+                    let right_count = count_commits_reachable_excluding_ancestors_of(
+                        repo,
+                        &[right],
+                        &[left],
+                        filter,
+                    )?;
+                    Ok(LeftRightCounts {
+                        left: left_count,
+                        right: right_count,
+                    })
+                });
+            }
+        }
+
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let (Some(left), Some(right)) = (parsed.symmetric_left, parsed.symmetric_right) else {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
@@ -319,13 +387,23 @@ impl<'repo> RevWalk<'repo> {
                 since: options.since,
                 until: options.until,
             };
-            let left_count =
-                count_commits_reachable_excluding_ancestors_of(repo, &[left], &[right], filter)?;
-            let right_count =
-                count_commits_reachable_excluding_ancestors_of(repo, &[right], &[left], filter)?;
-            return Ok(LeftRightCounts {
-                left: left_count,
-                right: right_count,
+            return repo.odb().with_pack_read_context(|| {
+                let left_count = count_commits_reachable_excluding_ancestors_of(
+                    repo,
+                    &[left],
+                    &[right],
+                    filter,
+                )?;
+                let right_count = count_commits_reachable_excluding_ancestors_of(
+                    repo,
+                    &[right],
+                    &[left],
+                    filter,
+                )?;
+                Ok(LeftRightCounts {
+                    left: left_count,
+                    right: right_count,
+                })
             });
         }
 

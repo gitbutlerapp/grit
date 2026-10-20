@@ -730,13 +730,35 @@ impl<'repo> NavParentCache<'repo> {
         if let Some(grafted) = self.grafts.get(&commit_oid) {
             return Ok(grafted.clone());
         }
-        let obj = self.repo.odb().read(&commit_oid)?;
+        if let Ok(guard) = self.repo.caches().commit_linkage().lock() {
+            if let Some(parents) = guard.parents.get(&commit_oid) {
+                return Ok(parents.clone());
+            }
+        }
+        let obj = match self.repo.odb().files_objects_dir() {
+            Some(objects_dir) => {
+                match crate::pack::pack_cache::try_read_object_via_single_pack_reader(
+                    objects_dir,
+                    &commit_oid,
+                ) {
+                    Ok(Some(object)) => object,
+                    Ok(None) | Err(_) => self.repo.odb().read(&commit_oid)?,
+                }
+            }
+            None => self.repo.odb().read(&commit_oid)?,
+        };
         if obj.kind != ObjectKind::Commit {
             return Err(Error::InvalidRef(format!(
                 "invalid ref: {commit_oid} is not a commit"
             )));
         }
-        Ok(crate::objects::parse_commit_linkage(&obj.data)?.parents)
+        let linkage = crate::objects::parse_commit_linkage(&obj.data)?;
+        if let Ok(mut guard) = self.repo.caches().commit_linkage().lock() {
+            let time = crate::ident::committer_timestamp_for_until_filter(&linkage.committer);
+            guard.times.insert(commit_oid, time);
+            guard.parents.insert(commit_oid, linkage.parents.clone());
+        }
+        Ok(linkage.parents)
     }
 }
 
