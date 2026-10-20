@@ -5240,6 +5240,344 @@ pub fn commit_visible_for_dense_pathspecs(
     Ok(false)
 }
 
+/// One commit from a rename-following walk with the file path at that revision.
+pub type FollowHistoryEntry = (ObjectId, String);
+
+/// Walk history for a single file path, following renames (Git `log --follow` semantics).
+///
+/// Returns commits in default date order (newest first), honoring `walk.limit`, `walk.skip`,
+/// committer date cutoffs, and `walk.first_parent`.
+pub fn follow_history_commits(
+    repo: &Repository,
+    tips: &[ObjectId],
+    excluded: &HashSet<ObjectId>,
+    initial_path: &str,
+    walk: &crate::revwalk::RevWalkListOptions,
+    rename_threshold: u32,
+) -> Result<Vec<FollowHistoryEntry>> {
+    let repo_config = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    let list_opts = RevListOptions {
+        paths: vec![initial_path.to_owned()],
+        first_parent: walk.first_parent,
+        max_count: walk.limit,
+        skip: walk.skip,
+        since_cutoff: walk.since,
+        until_cutoff: walk.until,
+        use_commit_graph: true,
+        use_commit_graph_bloom: true,
+        paths_resolved_from_argv: true,
+        ..RevListOptions::default()
+    };
+    let (bloom_chain, bloom_read_changed, bloom_version, bloom_cwd) =
+        dense_bloom_context_for_paths(repo, repo_config.as_ref(), &list_opts);
+    let bloom_ctx = DenseBloomCtx {
+        chain: bloom_chain.as_deref(),
+        read_changed_paths: bloom_read_changed,
+        changed_paths_version: bloom_version,
+        stats: None,
+        cwd: bloom_cwd.as_deref(),
+    };
+
+    let mut graph = CommitGraph::with_commit_graph(repo, walk.first_parent, true);
+    let excluded_set = if excluded.is_empty() {
+        HashSet::new()
+    } else {
+        let seeds: Vec<ObjectId> = excluded.iter().copied().collect();
+        walk_closure(&mut graph, &seeds)?
+    };
+
+    follow_history_heap(
+        repo,
+        &mut graph,
+        tips,
+        &excluded_set,
+        initial_path,
+        walk,
+        rename_threshold,
+        &bloom_ctx,
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FollowHeapKey {
+    oid: ObjectId,
+    date: i64,
+    seq: u64,
+}
+
+impl Ord for FollowHeapKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match self.date.cmp(&other.date) {
+            Ordering::Equal => match other.seq.cmp(&self.seq) {
+                Ordering::Equal => self.oid.cmp(&other.oid),
+                ord => ord,
+            },
+            ord => ord,
+        }
+    }
+}
+
+impl PartialOrd for FollowHeapKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn follow_history_heap(
+    repo: &Repository,
+    graph: &mut CommitGraph<'_>,
+    tips: &[ObjectId],
+    excluded: &HashSet<ObjectId>,
+    initial_path: &str,
+    walk: &crate::revwalk::RevWalkListOptions,
+    rename_threshold: u32,
+    bloom: &DenseBloomCtx<'_>,
+) -> Result<Vec<FollowHistoryEntry>> {
+    use std::collections::{BinaryHeap, HashMap, HashSet};
+    let path_vec = |p: &str| vec![p.to_owned()];
+    let mut heap = BinaryHeap::new();
+    let mut queued = HashSet::new();
+    let mut paths_at: HashMap<ObjectId, String> = HashMap::new();
+    let mut next_seq = 0u64;
+    for &tip in tips {
+        if excluded.contains(&tip) || !queued.insert(tip) {
+            continue;
+        }
+        paths_at.insert(tip, initial_path.to_owned());
+        heap.push(FollowHeapKey {
+            oid: tip,
+            date: graph.sort_key(tip, false),
+            seq: next_seq,
+        });
+        next_seq += 1;
+    }
+
+    let max_count = walk.limit.unwrap_or(usize::MAX);
+    let skip = walk.skip;
+    let mut cache = DenseWalkCache::default();
+    let mut visible_seen = 0usize;
+    let mut out = Vec::new();
+    let config = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    let thread_policy = crate::parallel::ThreadPolicy::default();
+
+    while let Some(item) = heap.pop() {
+        let oid = item.oid;
+        if excluded.contains(&oid) {
+            continue;
+        }
+        let path = paths_at
+            .get(&oid)
+            .cloned()
+            .unwrap_or_else(|| initial_path.to_owned());
+
+        if let Some(since) = walk.since {
+            if graph.committer_time(oid) < since {
+                continue;
+            }
+        }
+        if let Some(until) = walk.until {
+            if graph.committer_time(oid) > until {
+                continue;
+            }
+        }
+
+        let action = dense_path_limited_action(
+            repo,
+            graph,
+            oid,
+            &path_vec(&path),
+            false,
+            false,
+            Some(bloom),
+            &mut cache,
+        )?;
+
+        if action.visible {
+            visible_seen += 1;
+            if visible_seen > skip && out.len() < max_count {
+                out.push((oid, path.clone()));
+            }
+        }
+
+        if out.len() >= max_count {
+            break;
+        }
+
+        let parents = if walk.first_parent {
+            graph
+                .parents_of(oid)?
+                .into_iter()
+                .take(1)
+                .collect::<Vec<_>>()
+        } else {
+            graph.parents_of(oid)?
+        };
+
+        for parent in parents {
+            if excluded.contains(&parent) {
+                continue;
+            }
+            let parent_path = follow_path_into_parent(
+                repo,
+                parent,
+                oid,
+                &path,
+                rename_threshold,
+                config.as_ref(),
+                &thread_policy,
+            )?;
+            paths_at.entry(parent).or_insert(parent_path);
+            if queued.insert(parent) {
+                heap.push(FollowHeapKey {
+                    oid: parent,
+                    date: graph.sort_key(parent, false),
+                    seq: next_seq,
+                });
+                next_seq += 1;
+            }
+        }
+    }
+
+    if walk.reverse {
+        out.reverse();
+    }
+    Ok(out)
+}
+
+fn follow_path_into_parent(
+    repo: &Repository,
+    parent_oid: ObjectId,
+    commit_oid: ObjectId,
+    path: &str,
+    threshold: u32,
+    config: &ConfigSet,
+    thread_policy: &crate::parallel::ThreadPolicy,
+) -> Result<String> {
+    use crate::diff::{diff_trees, DiffStatus};
+    let odb = repo.odb();
+    let parent = load_commit(repo, parent_oid)?;
+    let commit = load_commit(repo, commit_oid)?;
+    if parent.tree == commit.tree {
+        return Ok(path.to_owned());
+    }
+
+    let entries = diff_trees(odb, Some(&parent.tree), Some(&commit.tree), "")?;
+    let touches_path = entries.iter().any(|e| follow_entry_matches_path(e, path));
+    if !touches_path {
+        return Ok(path.to_owned());
+    }
+
+    let might_be_rename = entries.len() == 1
+        && entries[0].status == DiffStatus::Added
+        && entries[0].new_path.as_deref() == Some(path);
+
+    if !might_be_rename && follow_tree_has_path(repo, parent.tree, path)? {
+        return Ok(path.to_owned());
+    }
+
+    if might_be_rename || !follow_tree_has_path(repo, parent.tree, path)? {
+        if let Some(old_path) = follow_find_rename_to_path(
+            odb,
+            &parent.tree,
+            &commit.tree,
+            path,
+            threshold,
+            config,
+            thread_policy,
+        )? {
+            return Ok(old_path);
+        }
+    }
+    Ok(path.to_owned())
+}
+
+fn follow_entry_matches_path(entry: &crate::diff::DiffEntry, path: &str) -> bool {
+    use crate::diff::DiffStatus;
+    match entry.status {
+        DiffStatus::Added | DiffStatus::Modified | DiffStatus::Renamed | DiffStatus::Copied => {
+            entry.new_path.as_deref() == Some(path)
+        }
+        DiffStatus::Deleted => entry.old_path.as_deref() == Some(path),
+        _ => entry.old_path.as_deref() == Some(path) || entry.new_path.as_deref() == Some(path),
+    }
+}
+
+fn follow_tree_has_path(repo: &Repository, tree_oid: ObjectId, path: &str) -> Result<bool> {
+    Ok(follow_tree_entry_mode(repo, tree_oid, path)?.is_some())
+}
+
+fn follow_tree_entry_mode(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    path: &str,
+) -> Result<Option<u32>> {
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return Ok(None);
+    }
+    let mut current = tree_oid;
+    for (i, part) in parts.iter().enumerate() {
+        let entries = read_parsed_tree(repo, current)?;
+        let Some(entry) = tree_entry_by_name(&entries, part, false) else {
+            return Ok(None);
+        };
+        if i + 1 == parts.len() {
+            return Ok(Some(entry.mode));
+        }
+        if entry.mode != 0o040000 {
+            return Ok(None);
+        }
+        current = entry.oid;
+    }
+    Ok(None)
+}
+
+fn follow_find_rename_to_path(
+    odb: &crate::odb::Odb,
+    parent_tree: &ObjectId,
+    commit_tree: &ObjectId,
+    new_path: &str,
+    threshold: u32,
+    config: &ConfigSet,
+    thread_policy: &crate::parallel::ThreadPolicy,
+) -> Result<Option<String>> {
+    use crate::diff::{detect_renames_with_policy, diff_trees, DiffStatus};
+    if threshold >= 100 {
+        return Ok(None);
+    }
+    let entries = diff_trees(odb, Some(parent_tree), Some(commit_tree), "")?;
+    let entries = detect_renames_with_policy(odb, None, entries, threshold, config, thread_policy);
+    Ok(entries
+        .into_iter()
+        .find(|e| e.status == DiffStatus::Renamed && e.new_path.as_deref() == Some(new_path))
+        .and_then(|e| e.old_path))
+}
+
+/// Validate that `path` is a single file (not a directory) at `tip`.
+pub fn validate_follow_file_path_at_tip(
+    repo: &Repository,
+    tip: ObjectId,
+    path: &str,
+) -> Result<()> {
+    use crate::rev_list_error::RevListError;
+    if path.is_empty() {
+        return Err(RevListError::FollowRequiresSingleFilePath.into());
+    }
+    let Some(mode) = follow_tree_entry_mode(repo, load_commit(repo, tip)?.tree, path)? else {
+        return Ok(());
+    };
+    if mode == 0o040000 {
+        return Err(RevListError::FollowRequiresSingleFilePath.into());
+    }
+    Ok(())
+}
+
 fn compute_cherry_patch_id(
     repo: &Repository,
     oid: &ObjectId,

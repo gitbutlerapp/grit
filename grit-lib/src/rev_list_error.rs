@@ -42,6 +42,14 @@ pub enum RevListError {
     #[error("symmetric revision range (A...B) required for left/right commit counts")]
     SymmetricRangeRequired,
 
+    /// Rename-following walks accept exactly one file path, not a directory or multiple paths.
+    #[error("rename-following log requires exactly one existing file path")]
+    FollowRequiresSingleFilePath,
+
+    /// More than one path was supplied for a follow walk.
+    #[error("rename-following log accepts only one path")]
+    FollowMultiplePaths,
+
     /// Object walk expected a tree, blob, commit, or tag but read another kind from the ODB (upstream `t6102`).
     #[error("object {input} is not a {expected}")]
     UnexpectedObjectKind {

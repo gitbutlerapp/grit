@@ -13,6 +13,9 @@ followup = "GitHub issue #1159"
 documented = "bounded path-limited log on git.git (#1159); ratio tracked, no hard gate yet"
 followup = "GitHub issue #1159"
 
+[scenario."git-dot-git/log-follow"]
+ratio = 1.5
+
 [scenario."git-dot-git/revs-path-documentation"]
 documented = "directory pathspec rev walk on git.git (#1159); ratio tracked, no hard gate yet"
 followup = "GitHub issue #1159"

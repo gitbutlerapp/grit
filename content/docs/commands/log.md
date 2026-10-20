@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit log [<REV>…] [-n <N>] [--cursor <token>] [--stat]
+grit log [<REV>…] [-n <N>] [--cursor <token>] [--stat] [--follow]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
@@ -21,9 +21,11 @@ Lists commits reachable from the selected revisions (default `HEAD`), newest fir
 
 Revision selection matches [`grit revs`](../revs/): plain tips, `A..B`, `A...B`, `^tip`, and the same ref-set flags (`--all`, `--branches`, and so on). Path operands after `--` limit to commits that touch those paths (same cwd rules as [`grit diff`](../diff/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `-n`, every matching commit is listed when paths are set (not capped at ten).
 
-When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
+When there's more history on a cursor-eligible walk, the last line shows the command for the next page. Path filters, `--follow`, `--reverse`, `--first-parent`, merge filters, `--skip`, and a one-shot `-n` without `--cursor` do not emit a continuation cursor.
 
 With `--stat`, each commit is followed by the files it changed and how many lines were added and removed in each, like [`grit show`](../show/). Merge commits show the change against their first parent.
+
+With `--follow` and exactly one path after `--`, history includes commits from before a rename (Git `log --follow`). Rename detection uses the default 50% similarity threshold. Follow walks do not emit a continuation cursor (`next` is always `null` in JSON).
 
 ## Options
 
@@ -45,6 +47,7 @@ With `--stat`, each commit is followed by the files it changed and how many line
 | `--tags[=<glob>]` | Tag tips, optionally filtered by glob under `refs/tags/`. |
 | `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob under `refs/remotes/`. |
 | `--stat` | Show which files each commit changed, with insertion and deletion counts. |
+| `--follow` | With exactly one `<path>`, follow renames backward through history (cannot combine with `--cursor`). |
 | `<path>…` | After `--`, limit to commits that touch these paths (cwd-relative under the work tree, like `grit diff`; all matches unless `-n` is set). |
 
 ## Examples
@@ -100,6 +103,12 @@ History of one file:
 $ grit log -- src/lib.rs
 ```
 
+Follow a file through renames:
+
+```console
+$ grit log --follow -- src/lib.rs
+```
+
 Commits on a range:
 
 ```console
@@ -115,8 +124,9 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry has `oid`, `subject`, `author` (`name`, `email`, `date` in RFC 3339 — same shape as [`grit show`](../show/)), and `relative_date` (e.g. `3 days ago`). |
+| `commits[].path` | string | With `--follow`: repository-relative path of the tracked file at that commit (omitted otherwise). |
 | `commits[].stat` | object | Only with `--stat`: `files` (each with `path`, `old_path` for renames, `status`, `insertions`, `deletions`, `binary`), `files_changed`, `insertions` and `deletions`. The same shape as `stat` in [`grit show`](../show/). |
-| `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--cursor` for the next page, or `null` when there is no more history or when the walk does not support paging (paths, `--reverse`, and similar). |
+| `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--cursor` for the next page, or `null` when there is no more history or when the walk does not support paging (paths, `--follow`, `--reverse`, and similar). |
 
 Example:
 

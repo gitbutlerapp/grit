@@ -1062,7 +1062,7 @@ fn append_git_dot_git_path_limited_rev_scenarios(
     fixture: &CampaignFixture,
     out: &mut Vec<ScenarioResult>,
 ) -> Result<()> {
-    let rows: [(&str, &str, Vec<&str>, Vec<&str>); 3] = [
+    let rows: [(&str, &str, Vec<&str>, Vec<&str>); 4] = [
         (
             "revs-path-builtin-add-c",
             "path-limited revs HEAD -- builtin/add.c (issue #1159)",
@@ -1094,6 +1094,12 @@ fn append_git_dot_git_path_limited_rev_scenarios(
             "path-limited revs HEAD -- Documentation (#1159)",
             vec!["revs", "HEAD", "--", "Documentation"],
             vec!["log", "--format=%H", "--", "Documentation"],
+        ),
+        (
+            "log-follow",
+            "rename-following log --follow on builtin/add.c",
+            vec!["log", "--follow", "--json", "--", "builtin/add.c"],
+            vec!["log", "--follow", "--format=%H", "--", "builtin/add.c"],
         ),
     ];
     for (suffix, description, grit_argv, git_argv) in rows {

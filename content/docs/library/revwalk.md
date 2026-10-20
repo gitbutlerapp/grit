@@ -27,6 +27,14 @@ Common helpers that do not need a full repository walk:
 
 For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). That matches `git rev-list main..feature`.
 
+## Follow renames (`log --follow`)
+
+[`RevWalk::follow`](rustdoc:grit_lib::revwalk::RevWalk::follow) walks history for **one file path**, switching to the rename source when a commit adds the path from a rename (Git `log --follow`). Each step yields [`FollowedCommit`](rustdoc:grit_lib::revwalk::follow::FollowedCommit) with the commit oid and the path name in that commit’s tree. Options live in [`FollowWalkOptions`](rustdoc:grit_lib::revwalk::follow::FollowWalkOptions) (limits, date cutoffs, `first_parent`, rename threshold).
+
+The CLI exposes this as [`grit log --follow`](../commands/log/) with exactly one path after `--`. JSON output adds a `path` field per commit.
+
+<!-- include: grit-examples/src/bin/guide_follow_log.rs -->
+
 ## Merge base
 
 [`merge_bases_first_vs_rest`](rustdoc:grit_lib::revwalk::merge_base::merge_bases_first_vs_rest) finds minimal common ancestors between one commit and one or more others — the library equivalent of `git merge-base A B`. For diff-style “pick exactly one base or fail”, see [`merge_base_for_diff_two_commits`](rustdoc:grit_lib::revwalk::merge_base::merge_base_for_diff_two_commits).

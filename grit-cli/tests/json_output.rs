@@ -1756,6 +1756,31 @@ fn log_json_filters_by_path() -> TestResult {
 }
 
 #[test]
+fn log_follow_json_paths() -> TestResult {
+    let scratch = Scratch::new("log-follow-json")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("old.txt"), "v1\n");
+    gs_ok(&repo, &["add", "old.txt"]);
+    gs_ok(&repo, &["commit", "add old"]);
+    gs_ok(&repo, &["mv", "old.txt", "new.txt"]);
+    gs_ok(&repo, &["commit", "rename"]);
+    write_file(&repo.join("new.txt"), "v2\n");
+    gs_ok(&repo, &["add", "new.txt"]);
+    gs_ok(&repo, &["commit", "edit new"]);
+
+    let v = gs_json(&repo, &["log", "--follow", "--json", "--", "new.txt"]);
+    assert_eq!(v["next"], Value::Null);
+    let commits = v["commits"].as_array().unwrap();
+    assert_eq!(commits.len(), 3);
+    assert_eq!(commits[0]["path"], "new.txt");
+    assert_eq!(commits[1]["path"], "new.txt");
+    assert_eq!(commits[2]["path"], "old.txt");
+    Ok(())
+}
+
+#[test]
 fn log_json_path_history_returns_all_matches_beyond_default_page() -> TestResult {
     let scratch = Scratch::new("log-path-page")?;
     let repo = scratch.child("repo");

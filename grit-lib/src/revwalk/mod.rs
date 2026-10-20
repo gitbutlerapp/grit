@@ -37,6 +37,10 @@ pub mod log_walk {
     //! Log-order revision walking helpers re-exported at this path.
     pub use crate::log_walk::*;
 }
+pub mod follow {
+    //! Rename-following file history walks (`log --follow`).
+    pub use crate::follow_walk::*;
+}
 pub mod commit_graph {
     //! Commit-graph read and write helpers.
     pub use crate::commit_graph_file::*;

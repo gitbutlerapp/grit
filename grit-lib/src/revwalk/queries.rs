@@ -253,7 +253,7 @@ pub fn resolve_log_walk_tips_and_hide(
     Ok((include, exclude))
 }
 
-fn positive_specs_for_walk(
+pub(crate) fn positive_specs_for_walk(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
@@ -416,6 +416,25 @@ impl<'repo> RevWalk<'repo> {
         let ancestor_commit = peel_to_commit_for_merge_base(repo, ancestor_tip)?;
         let descendant_commit = peel_to_commit_for_merge_base(repo, descendant_tip)?;
         merge_base_is_ancestor(repo, ancestor_commit, descendant_commit)
+    }
+
+    /// List commits that modified `path`, following renames backward (Git `log --follow`).
+    ///
+    /// `path` must be a single file path. Use [`FollowWalkOptions`] for limits, date filters,
+    /// and `--first-parent`. Yields [`FollowedCommit`] values in default date order (newest first).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RevListError::FollowRequiresSingleFilePath`] or
+    /// [`RevListError::FollowMultiplePaths`] when `path` is invalid, and propagates rev-parse
+    /// and rev-list errors from resolving `tokens`.
+    pub fn follow(
+        &self,
+        tokens: &[&str],
+        path: &str,
+        options: &crate::follow_walk::FollowWalkOptions,
+    ) -> Result<crate::follow_walk::FollowWalk> {
+        crate::follow_walk::follow_history(self.repository(), tokens, path, options)
     }
 }
 

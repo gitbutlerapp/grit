@@ -5,6 +5,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
+use grit_lib::revwalk::follow::{FollowWalkOptions, FollowedCommit};
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -63,6 +64,9 @@ impl HumanRender for LogOutcome {
 pub struct LogCommit {
     #[serde(flatten)]
     pub commit: CommitJson,
+    /// Tracked file path at this commit when `--follow` is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     /// The files the commit changed, only with `--stat`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stat: Option<DiffStat>,
@@ -83,7 +87,12 @@ impl MarkdownRender for LogOutcome {
     }
 }
 
-pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<LogOutcome> {
+pub fn run(
+    rev: RevSelectArgs,
+    cursor: Option<String>,
+    stat: bool,
+    follow: bool,
+) -> Result<LogOutcome> {
     let repo = context::discover()?;
     let env = repo.environment();
     let mut deprecated_cursor = None;
@@ -100,6 +109,34 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
         );
     }
     let continuation = cursor.or(deprecated_cursor);
+
+    if follow {
+        if continuation.is_some() {
+            bail!("`grit log --follow` cannot be combined with `--cursor`");
+        }
+        if rev.paths.len() != 1 {
+            bail!("`grit log --follow` requires exactly one path after `--`");
+        }
+        let path = repo
+            .resolve_rev_walk_pathspecs(&rev.paths)?
+            .into_iter()
+            .next()
+            .context("follow path")?;
+        let token_refs = rev.rev_tokens(&["HEAD"]);
+        let follow_opts = FollowWalkOptions {
+            walk: opts.clone(),
+            ..FollowWalkOptions::default()
+        };
+        let walked = repo
+            .rev_walk()
+            .follow(&token_refs, &path, &follow_opts)
+            .context("could not follow file history")?;
+        let followed: Vec<FollowedCommit> = walked.collect();
+        let oids: Vec<ObjectId> = followed.iter().map(|c| c.oid).collect();
+        let paths: Vec<Option<String>> = followed.into_iter().map(|c| Some(c.path)).collect();
+        return build_outcome_with_paths(&repo, &oids, &paths, stat, None);
+    }
+
     if let Some(token) = continuation.as_deref() {
         if !rev.paths.is_empty() {
             bail!(
@@ -153,6 +190,17 @@ fn build_outcome(
     stat: bool,
     next: Option<String>,
 ) -> Result<LogOutcome> {
+    let paths = vec![None; oids.len()];
+    build_outcome_with_paths(repo, oids, &paths, stat, next)
+}
+
+fn build_outcome_with_paths(
+    repo: &grit_lib::repo::Repository,
+    oids: &[ObjectId],
+    paths: &[Option<String>],
+    stat: bool,
+    next: Option<String>,
+) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
 
@@ -172,9 +220,11 @@ fn build_outcome(
         .collect::<Result<Vec<_>>>()?;
     let commits = commit_rows
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(i, row)| {
             Ok(LogCommit {
                 commit: CommitJson::from_summary(row, now),
+                path: paths.get(i).and_then(|p| p.clone()),
                 stat: if stat {
                     Some(diffstat(&diff_of_commit(repo, &row.oid)?))
                 } else {

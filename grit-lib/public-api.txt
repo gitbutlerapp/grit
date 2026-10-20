@@ -14070,6 +14070,7 @@ pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<usize>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::is_ancestor(&self, &str, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::queries::LeftRightCounts>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::follow(&self, &[&str], &str, &grit_lib::revwalk::follow::FollowWalkOptions) -> grit_lib::error::Result<grit_lib::revwalk::follow::FollowWalk>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_bases(&self, &str, &str, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::parse_tokens(&self, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
@@ -14685,6 +14686,49 @@ impl core::marker::Unpin for grit_lib::revwalk::log_walk::LogWalkPage
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::log_walk::LogWalkPage
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::log_walk::LogWalkPage
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::log_walk::LogWalkPage
+pub mod grit_lib::revwalk::follow
+pub struct grit_lib::revwalk::follow::FollowWalkOptions
+pub grit_lib::revwalk::follow::FollowWalkOptions::rename_threshold: u32
+pub grit_lib::revwalk::follow::FollowWalkOptions::walk: grit_lib::revwalk::queries::RevWalkListOptions
+impl core::clone::Clone for grit_lib::revwalk::follow::FollowWalkOptions
+pub fn grit_lib::revwalk::follow::FollowWalkOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::follow::FollowWalkOptions
+impl core::cmp::PartialEq for grit_lib::revwalk::follow::FollowWalkOptions
+pub fn grit_lib::revwalk::follow::FollowWalkOptions::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::revwalk::follow::FollowWalkOptions
+pub fn grit_lib::revwalk::follow::FollowWalkOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::default::Default for grit_lib::revwalk::follow::FollowWalkOptions
+pub fn grit_lib::revwalk::follow::FollowWalkOptions::default() -> Self
+impl core::marker::Freeze for grit_lib::revwalk::follow::FollowWalkOptions
+impl core::marker::Send for grit_lib::revwalk::follow::FollowWalkOptions
+impl core::marker::Sync for grit_lib::revwalk::follow::FollowWalkOptions
+impl core::marker::Unpin for grit_lib::revwalk::follow::FollowWalkOptions
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::follow::FollowWalkOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::follow::FollowWalkOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::follow::FollowWalkOptions
+pub struct grit_lib::revwalk::follow::FollowedCommit
+pub grit_lib::revwalk::follow::FollowedCommit::oid: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::follow::FollowedCommit::path: alloc::string::String
+impl core::clone::Clone for grit_lib::revwalk::follow::FollowedCommit
+pub fn grit_lib::revwalk::follow::FollowedCommit::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::follow::FollowedCommit
+impl core::cmp::PartialEq for grit_lib::revwalk::follow::FollowedCommit
+pub fn grit_lib::revwalk::follow::FollowedCommit::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::revwalk::follow::FollowedCommit
+pub fn grit_lib::revwalk::follow::FollowedCommit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::follow::FollowedCommit
+impl core::marker::Send for grit_lib::revwalk::follow::FollowedCommit
+impl core::marker::Sync for grit_lib::revwalk::follow::FollowedCommit
+impl core::marker::Unpin for grit_lib::revwalk::follow::FollowedCommit
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::follow::FollowedCommit
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::follow::FollowedCommit
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::follow::FollowedCommit
+pub struct grit_lib::revwalk::follow::FollowWalk
+impl grit_lib::revwalk::follow::FollowWalk
+pub fn grit_lib::revwalk::follow::FollowWalk::collect(self) -> alloc::vec::Vec<grit_lib::revwalk::follow::FollowedCommit>
+impl core::iter::traits::iterator::Iterator for grit_lib::revwalk::follow::FollowWalk
+pub type grit_lib::revwalk::follow::FollowWalk::Item = grit_lib::revwalk::follow::FollowedCommit
+pub fn grit_lib::revwalk::follow::FollowWalk::next(&mut self) -> core::option::Option<Self::Item>
 pub mod grit_lib::revwalk::merge_base
 pub enum grit_lib::revwalk::merge_base::MergeBaseForDiffError
 pub grit_lib::revwalk::merge_base::MergeBaseForDiffError::Multiple
@@ -15289,6 +15333,8 @@ pub grit_lib::revwalk::rev_list_error::RevListError::SparseBlobUnreadable::spec:
 pub grit_lib::revwalk::rev_list_error::RevListError::SparseFilterUnparsable
 pub grit_lib::revwalk::rev_list_error::RevListError::SparseFilterUnparsable::object_id: alloc::string::String
 pub grit_lib::revwalk::rev_list_error::RevListError::SymmetricRangeRequired
+pub grit_lib::revwalk::rev_list_error::RevListError::FollowMultiplePaths
+pub grit_lib::revwalk::rev_list_error::RevListError::FollowRequiresSingleFilePath
 pub grit_lib::revwalk::rev_list_error::RevListError::UnexpectedObjectKind
 pub grit_lib::revwalk::rev_list_error::RevListError::UnexpectedObjectKind::expected: &'static str
 pub grit_lib::revwalk::rev_list_error::RevListError::UnexpectedObjectKind::input: alloc::string::String
@@ -15569,6 +15615,7 @@ pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<usize>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::is_ancestor(&self, &str, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::queries::LeftRightCounts>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::follow(&self, &[&str], &str, &grit_lib::revwalk::follow::FollowWalkOptions) -> grit_lib::error::Result<grit_lib::revwalk::follow::FollowWalk>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_bases(&self, &str, &str, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::parse_tokens(&self, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>

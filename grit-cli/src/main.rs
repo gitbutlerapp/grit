@@ -438,6 +438,9 @@ enum Command {
         /// Show which files each commit changed, with insertion and deletion counts.
         #[arg(long)]
         stat: bool,
+        /// Follow renames when exactly one `--` path is given (Git `log --follow`).
+        #[arg(long)]
+        follow: bool,
     },
     /// List or count commits matching revision ranges.
     Revs {
@@ -1038,9 +1041,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 ctx,
             ),
         },
-        Command::Log { rev, cursor, stat } => {
-            emit(&commands::log::run(rev, cursor, stat)?, opts, ctx)
-        }
+        Command::Log {
+            rev,
+            cursor,
+            stat,
+            follow,
+        } => emit(&commands::log::run(rev, cursor, stat, follow)?, opts, ctx),
         Command::Revs {
             rev,
             count,
