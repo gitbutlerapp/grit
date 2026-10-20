@@ -110,8 +110,8 @@ pub fn emit<T: Serialize + HumanRender + MarkdownRender>(
     Ok(())
 }
 
-/// Render an outcome into an in-memory string (for tests and tooling).
-#[allow(dead_code)]
+/// Render an outcome into an in-memory string (for snapshot tests).
+#[cfg(test)]
 pub fn render_to_string<T: Serialize + HumanRender + MarkdownRender>(
     value: &T,
     mode: OutputMode,

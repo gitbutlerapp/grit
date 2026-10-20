@@ -22,21 +22,6 @@ pub fn filesystem_path_for_user(path: &Path) -> String {
     user_display_path(path)
 }
 
-/// Terminal width in columns for diffstat layout (`terminal_size`, then `COLUMNS`, then 80).
-#[must_use]
-#[allow(dead_code)]
-pub fn terminal_width_columns() -> usize {
-    terminal_size::terminal_size()
-        .map(|(w, _)| w.0 as usize)
-        .or_else(|| {
-            std::env::var("COLUMNS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .filter(|&w| w > 0)
-        })
-        .unwrap_or(80)
-}
-
 /// When the user runs `grit status` from a subdirectory, show paths relative to cwd
 /// (like Git) instead of from the repository root.
 #[derive(Clone, Debug)]
