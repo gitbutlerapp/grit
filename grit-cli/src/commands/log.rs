@@ -92,6 +92,7 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
     let mut deprecated_cursor = None;
     let mut deprecated_warning = false;
     let opts = rev.to_rev_walk_options(
+        &repo,
         env,
         &["HEAD"],
         &mut deprecated_cursor,
@@ -115,10 +116,16 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
                  continue with `--cursor` alone or start a new walk"
             );
         }
-        if rev.reverse || rev.first_parent || rev.merges || rev.no_merges || rev.skip > 0 {
+        if rev.reverse
+            || rev.first_parent
+            || rev.merges
+            || rev.no_merges
+            || rev.skip > 0
+            || rev.has_commit_filter_flags()
+        {
             bail!(
                 "`grit log` cannot combine `--cursor` with `--reverse`, `--first-parent`, \
-                 `--merges`, `--no-merges`, or `--skip`"
+                 `--merges`, `--no-merges`, `--skip`, or commit filters (`--author`, `--grep`, …)"
             );
         }
         let resume = LogWalkCursor::decode(token).context("invalid log continuation cursor")?;
@@ -135,7 +142,8 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
     let page_size = rev.max_count.unwrap_or(PAGE);
 
     let use_rev_walk = !rev.paths.is_empty()
-        || (rev.max_count.is_some() && continuation.is_none())
+        || rev.max_count.is_some()
+        || opts.commit_filter.as_ref().is_some_and(|f| f.is_active())
         || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
 
     if use_rev_walk {

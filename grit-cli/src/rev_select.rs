@@ -1,15 +1,23 @@
 //! Shared revision-selection flags for `grit log` and `grit revs`.
 
+use std::sync::Arc;
+
 use anyhow::{bail, Context, Result};
 use clap::Args;
 use grit_lib::config::environment::Environment;
+use grit_lib::config::mailmap::load_mailmap_table;
+use grit_lib::config::parse_bool;
+use grit_lib::repo::Repository;
+use grit_lib::revwalk::filter::{CommitFilter, CommitFilterBuilder, CommitFilterError};
 use grit_lib::revwalk::{
     committer_cutoff_from_date, MergeFilter, RefSelection, RevWalkListOptions,
 };
 
+use crate::json_error::invalid_commit_filter;
+
 const CURSOR_PREFIX: &str = "lw1.";
 
-/// Revision ranges, limits, dates, and ref sets shared by history-list commands.
+/// Revision ranges, limits, dates, ref sets, and commit filters shared by history-list commands.
 #[derive(Debug, Args, Clone)]
 pub struct RevSelectArgs {
     /// Revision tips and ranges (`A..B`, `A...B`, `^tip`, plain tips).
@@ -87,18 +95,57 @@ pub struct RevSelectArgs {
     )]
     pub remotes: Option<String>,
 
+    /// Limit to commits whose author matches this pattern (repeatable; OR together).
+    #[arg(long = "author", value_name = "PAT", action = clap::ArgAction::Append)]
+    pub author: Vec<String>,
+
+    /// Limit to commits whose committer matches this pattern (repeatable; OR together).
+    #[arg(long = "committer", value_name = "PAT", action = clap::ArgAction::Append)]
+    pub committer: Vec<String>,
+
+    /// Limit to commits whose message matches this pattern (repeatable; OR unless `--all-match`).
+    #[arg(long = "grep", value_name = "PAT", action = clap::ArgAction::Append)]
+    pub grep: Vec<String>,
+
+    /// Case-insensitive pattern matching for `--author`, `--committer`, and `--grep`.
+    #[arg(short = 'i', long = "regexp-ignore-case")]
+    pub regexp_ignore_case: bool,
+
+    /// Require every `--grep` pattern to match.
+    #[arg(long = "all-match")]
+    pub all_match: bool,
+
+    /// Invert `--grep` matching (commits that do not match the grep group).
+    #[arg(long = "invert-grep")]
+    pub invert_grep: bool,
+
+    /// Treat `--author`, `--committer`, and `--grep` patterns as fixed strings.
+    #[arg(short = 'F', long = "fixed-strings")]
+    pub fixed_strings: bool,
+
+    /// Do not apply `.mailmap` when matching `--author` or `--committer`.
+    #[arg(long = "no-mailmap")]
+    pub no_mailmap: bool,
+
     /// Limit to commits that touch these paths.
     #[arg(value_name = "PATH", last = true)]
     pub paths: Vec<String>,
 }
 
 impl RevSelectArgs {
+    /// True when author/committer/grep filters are set (disables log cursor paging).
+    #[must_use]
+    pub fn has_commit_filter_flags(&self) -> bool {
+        !self.author.is_empty() || !self.committer.is_empty() || !self.grep.is_empty()
+    }
+
     /// Convert CLI flags into [`RevWalkListOptions`].
     ///
     /// When `before` carries a deprecated `lw1.` log cursor, it is returned in
     /// `deprecated_cursor` instead of being parsed as a date.
     pub fn to_rev_walk_options(
         &self,
+        repo: &Repository,
         env: &Environment,
         default_revs: &[&str],
         deprecated_cursor: &mut Option<String>,
@@ -113,7 +160,7 @@ impl RevSelectArgs {
             Some(s) => Some(parse_cutoff(s, now_sec).context("invalid --since/--after date")?),
             None => None,
         };
-        let until = match self.until.as_deref() {
+        let mut until = match self.until.as_deref() {
             Some(s) => Some(parse_cutoff(s, now_sec).context("invalid --until date")?),
             None => None,
         };
@@ -126,21 +173,13 @@ impl RevSelectArgs {
                 if until.is_some() {
                     bail!("`--until` and `--before` cannot both set a date cutoff");
                 }
-                return Ok(RevWalkListOptions {
-                    limit: self.max_count,
-                    skip: self.skip,
-                    since,
-                    until: Some(cutoff),
-                    merges: merge_filter(self.merges, self.no_merges),
-                    reverse: self.reverse,
-                    refs: ref_selections(self),
-                    first_parent: self.first_parent,
-                    paths: self.paths.clone(),
-                    commit_filter: None,
-                });
+                until = Some(cutoff);
             }
         }
 
+        let commit_filter = self
+            .build_commit_filter(repo)
+            .map_err(invalid_commit_filter)?;
         let _ = default_revs;
         Ok(RevWalkListOptions {
             limit: self.max_count,
@@ -152,7 +191,7 @@ impl RevSelectArgs {
             refs: ref_selections(self),
             first_parent: self.first_parent,
             paths: self.paths.clone(),
-            commit_filter: None,
+            commit_filter,
         })
     }
 
@@ -183,6 +222,50 @@ impl RevSelectArgs {
         } else {
             self.revs.iter().map(String::as_str).collect()
         }
+    }
+
+    fn build_commit_filter(
+        &self,
+        repo: &Repository,
+    ) -> std::result::Result<Option<Arc<CommitFilter>>, CommitFilterError> {
+        if !self.has_commit_filter_flags() {
+            return Ok(None);
+        }
+        let mut builder = CommitFilterBuilder::new()
+            .ignore_case(self.regexp_ignore_case)
+            .all_match(self.all_match)
+            .invert_grep(self.invert_grep)
+            .fixed_strings(self.fixed_strings);
+        for pat in &self.author {
+            builder = builder.author(pat.as_str());
+        }
+        for pat in &self.committer {
+            builder = builder.committer(pat.as_str());
+        }
+        for pat in &self.grep {
+            builder = builder.grep(pat.as_str());
+        }
+        if log_mailmap_enabled(repo, self.no_mailmap) {
+            if let Ok(table) = load_mailmap_table(repo) {
+                if !table.is_empty() {
+                    builder = builder.mailmap(table);
+                }
+            }
+        }
+        builder.build().map(|f| Some(Arc::new(f)))
+    }
+}
+
+fn log_mailmap_enabled(repo: &Repository, no_mailmap: bool) -> bool {
+    if no_mailmap {
+        return false;
+    }
+    let Ok(config) = repo.config() else {
+        return true;
+    };
+    match config.get("log.mailmap") {
+        None => true,
+        Some(v) => parse_bool(&v).unwrap_or(true),
     }
 }
 

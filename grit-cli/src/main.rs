@@ -946,6 +946,10 @@ fn main() {
             .is_some_and(grit_lib::remote::clone::CloneError::is_remote_read_failure)
         {
             128
+        } else if crate::json_error::structured_json_payload(&err)
+            .is_some_and(|p| p.kind == "invalid_pattern")
+        {
+            crate::json_error::INVALID_COMMIT_FILTER_EXIT
         } else {
             1
         };
