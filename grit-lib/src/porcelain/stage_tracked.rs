@@ -27,7 +27,7 @@ use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
-    for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
+    collect_blob_lookups_for_plan, group_blob_entries_by_dir, stat_scan_thread_count,
     BlobDiskLookup, WorktreeBlobScanOptions,
 };
 
@@ -327,7 +327,7 @@ fn stage_tracked_modifications_in_index_body(
         .get_bool("core.preloadIndex")
         .and_then(|r| r.ok())
         .unwrap_or(true);
-    let blob_count: usize = blob_dirs.values().map(|v| v.len()).sum();
+    let blob_count = blob_dirs.len();
     let thread_policy = repo.thread_policy();
     let blob_scan_opts = WorktreeBlobScanOptions {
         preload_index,
@@ -348,10 +348,8 @@ fn stage_tracked_modifications_in_index_body(
         )
         .parallelism();
     let mut deferred_restage: Vec<DeferredRestageJob> = Vec::new();
-    let paths_by_entry_index =
-        crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
-    for_each_blob_by_directory_parallel(
-        &paths_by_entry_index,
+    let stage_lookups = collect_blob_lookups_for_plan(
+        index,
         &blob_dirs,
         blob_scan_opts,
         &thread_policy,
@@ -371,52 +369,54 @@ fn stage_tracked_modifications_in_index_body(
                     path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
                 }
         },
-        |_entry_index, rel_path, lookup| {
-            let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
-                return Ok(());
-            };
-            if idx_e.stage() != 0 {
-                return Ok(());
-            }
-            let raw_path = idx_e.path.clone();
-            let abs_path = abs_path_for_stage_tracked(work_tree, &raw_path, precompose_unicode);
-            match lookup {
-                BlobDiskLookup::Missing => {
-                    if idx_e.skip_worktree() {
-                        return Ok(());
-                    }
-                    if rel_path_has_symlink_parent(work_tree, rel_path) {
-                        if index.remove(&raw_path) {
-                            summary.removed.push(raw_path);
-                        }
-                        return Ok(());
-                    }
-                    if symlink_metadata_for_staging(&abs_path)?.is_none() && index.remove(&raw_path)
-                    {
+    )?;
+    for (entry_index, lookup) in stage_lookups {
+        let rel_path = match std::str::from_utf8(&index.entries[entry_index].path) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
+            continue;
+        };
+        if idx_e.stage() != 0 {
+            continue;
+        }
+        let raw_path = idx_e.path.clone();
+        let abs_path = abs_path_for_stage_tracked(work_tree, &raw_path, precompose_unicode);
+        match lookup {
+            BlobDiskLookup::Missing => {
+                if idx_e.skip_worktree() {
+                    continue;
+                }
+                if rel_path_has_symlink_parent(work_tree, rel_path) {
+                    if index.remove(&raw_path) {
                         summary.removed.push(raw_path);
                     }
+                    continue;
                 }
-                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                BlobDiskLookup::Present(meta) => {
-                    let ctx = PresentRefreshCtx {
-                        repo,
-                        index,
-                        raw_path: &raw_path,
-                        abs_path: &abs_path,
-                        idx_e: &idx_e,
-                        index_mtime,
-                        trust_filemode,
-                        rules,
-                    };
-                    let defer = parallel_restage.then_some(&mut deferred_restage);
-                    if refresh_present_tracked_path(ctx, &meta, defer)? {
-                        summary.modified.push(raw_path);
-                    }
+                if symlink_metadata_for_staging(&abs_path)?.is_none() && index.remove(&raw_path) {
+                    summary.removed.push(raw_path);
                 }
             }
-            Ok(())
-        },
-    )?;
+            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Present(meta) => {
+                let ctx = PresentRefreshCtx {
+                    repo,
+                    index,
+                    raw_path: &raw_path,
+                    abs_path: &abs_path,
+                    idx_e: &idx_e,
+                    index_mtime,
+                    trust_filemode,
+                    rules,
+                };
+                let defer = parallel_restage.then_some(&mut deferred_restage);
+                if refresh_present_tracked_path(ctx, &meta, defer)? {
+                    summary.modified.push(raw_path);
+                }
+            }
+        }
+    }
 
     if !deferred_restage.is_empty() {
         summary.modified.extend(restage_deferred_jobs(

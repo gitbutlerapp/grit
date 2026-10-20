@@ -3817,7 +3817,7 @@ fn diff_index_to_worktree_inner(
     }
 
     use crate::worktree_scan::{
-        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
+        collect_blob_lookups_for_plan, group_blob_entries_by_dir, stat_scan_thread_count,
         BlobDiskLookup, WorktreeBlobScanOptions, PARALLEL_STAT_MIN_ENTRIES,
     };
     let preload_index = config
@@ -3845,7 +3845,7 @@ fn diff_index_to_worktree_inner(
     let file_abs = move |rel: &str| {
         index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
     };
-    let blob_count: usize = blob_dirs.values().map(|v| v.len()).sum();
+    let blob_count = blob_dirs.len();
     let thread_policy = options.thread_policy.unwrap_or_default();
     let hash_threads = stat_scan_thread_count(&thread_policy, &config, blob_scan, blob_count);
     let parallel_blob_work = blob_count >= PARALLEL_STAT_MIN_ENTRIES
@@ -3853,192 +3853,202 @@ fn diff_index_to_worktree_inner(
         && (materialize_dirty_blobs || options.for_status);
     let mut staging_hash_jobs: Vec<StagingHashJob> = Vec::new();
     let mut stat_refresh_verified = vec![false; index.entries.len()];
-    let paths_by_entry_index =
-        crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
+    let scan_symlink_ancestors = config
+        .get_bool("core.symlinks")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
     // Parallel preload must lstat ancestor directories without following symlinks. When a
     // tracked directory is replaced by a symlink, indexed paths under it are deletions even if
     // the link target still holds a file at the same relative path with an unchanged stat.
-    for_each_blob_by_directory_parallel(
-        &paths_by_entry_index,
+    let blob_stat_lookups = collect_blob_lookups_for_plan(
+        index,
         &blob_dirs,
         blob_scan,
         &thread_policy,
         &config,
-        true,
+        scan_symlink_ancestors,
         dir_abs,
         file_abs,
         |rel_path| {
-            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+            scan_symlink_ancestors
+                && dir_symlinks.has_symlink_in_path(
+                    work_tree,
+                    rel_path,
+                    precompose_unicode,
+                    ignorecase,
+                )
         },
-        |entry_index, path_str_ref, lookup| {
-            if use_fsmonitor_stat_skip {
-                let ie_skip = &index.entries[entry_index];
-                if crate::fsmonitor::entry_skips_worktree_stat(ie_skip, index) {
-                    return Ok(());
-                }
+    )?;
+    for (entry_index, lookup) in blob_stat_lookups {
+        let path_owned = std::str::from_utf8(&index.entries[entry_index].path)
+            .unwrap_or("")
+            .to_owned();
+        let path_str_ref = path_owned.as_str();
+        if use_fsmonitor_stat_skip {
+            let ie_skip = &index.entries[entry_index];
+            if crate::fsmonitor::entry_skips_worktree_stat(ie_skip, index) {
+                continue;
             }
-            match lookup {
-                BlobDiskLookup::Missing => {
-                    let ie = &index.entries[entry_index];
-                    result.push(DiffEntry {
-                        status: DiffStatus::Deleted,
-                        old_path: Some(path_str_ref.to_owned()),
-                        new_path: None,
-                        old_mode: format_mode(ie.mode),
-                        new_mode: "000000".to_owned(),
-                        old_oid: ie.oid,
-                        new_oid: zero_oid(),
-                        score: None,
-                    });
+        }
+        match lookup {
+            BlobDiskLookup::Missing => {
+                let ie = &index.entries[entry_index];
+                result.push(DiffEntry {
+                    status: DiffStatus::Deleted,
+                    old_path: Some(path_str_ref.to_owned()),
+                    new_path: None,
+                    old_mode: format_mode(ie.mode),
+                    new_mode: "000000".to_owned(),
+                    old_oid: ie.oid,
+                    new_oid: zero_oid(),
+                    score: None,
+                });
+            }
+            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Present(meta) => {
+                if materialize_dirty_blobs {
+                    staging_stat_cache.insert(
+                        path_str_ref.to_owned(),
+                        crate::index::IndexStatFields::from_metadata(&meta),
+                    );
                 }
-                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                BlobDiskLookup::Present(meta) => {
-                    if materialize_dirty_blobs {
-                        staging_stat_cache.insert(
-                            path_str_ref.to_owned(),
-                            crate::index::IndexStatFields::from_metadata(&meta),
-                        );
+                if refresh_index_stat_in_pass {
+                    let ie_ref = &index.entries[entry_index];
+                    let stat_matches = stat_matches_with_policy(ie_ref, &meta, stat_policy);
+                    let worktree_size = u32::try_from(meta.len()).unwrap_or(u32::MAX);
+                    // When size changed, the status fast path skips content hashing for the
+                    // unstaged diff; skip the refresh pass's duplicate read here too.
+                    // Mtime-only bumps keep size and still refresh.
+                    let skip_refresh_for_status_diff = options.for_status
+                        && !stat_matches
+                        && worktree_size != ie_ref.size
+                        && !ie_ref.stat_cache_unset();
+                    let skip_refresh_clean_status = options.for_status
+                        && stat_matches
+                        && !entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
+                    if skip_refresh_clean_status && index_stat_cache_trustworthy(index_mtime) {
+                        stat_refresh_verified[entry_index] = true;
                     }
-                    if refresh_index_stat_in_pass {
-                        let ie_ref = &index.entries[entry_index];
-                        let stat_matches = stat_matches_with_policy(ie_ref, &meta, stat_policy);
-                        let worktree_size = u32::try_from(meta.len()).unwrap_or(u32::MAX);
-                        // When size changed, the status fast path skips content hashing for the
-                        // unstaged diff; skip the refresh pass's duplicate read here too.
-                        // Mtime-only bumps keep size and still refresh.
-                        let skip_refresh_for_status_diff = options.for_status
-                            && !stat_matches
-                            && worktree_size != ie_ref.size
-                            && !ie_ref.stat_cache_unset();
-                        let skip_refresh_clean_status = options.for_status
-                            && stat_matches
-                            && !entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
-                        if skip_refresh_clean_status && index_stat_cache_trustworthy(index_mtime) {
+                    if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
+                        let path_owned = path_str_ref.to_owned();
+                        let file_path = index_entry_worktree_abs(
+                            work_tree,
+                            &path_owned,
+                            precompose_unicode,
+                            ignorecase,
+                        );
+                        let ie = &mut index.entries[entry_index];
+                        let refresh = refresh_index_blob_stat_from_metadata(
+                            odb,
+                            ie,
+                            &meta,
+                            &path_owned,
+                            &file_path,
+                            index_mtime,
+                            &conv,
+                            &file_attrs_for,
+                            stat_policy,
+                            filter_fp,
+                        );
+                        if refresh.index_changed {
+                            index_stat_refresh_changed = true;
+                        }
+                        if refresh.content_verified {
                             stat_refresh_verified[entry_index] = true;
                         }
-                        if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
-                            let file_path = index_entry_worktree_abs(
-                                work_tree,
-                                path_str_ref,
-                                precompose_unicode,
-                                ignorecase,
-                            );
-                            let ie = &mut index.entries[entry_index];
-                            let refresh = refresh_index_blob_stat_from_metadata(
-                                odb,
-                                ie,
+                        if index.fsmonitor_last_update.is_some()
+                            && stat_matches_with_policy(
+                                &index.entries[entry_index],
                                 &meta,
-                                path_str_ref,
-                                &file_path,
-                                index_mtime,
-                                &conv,
-                                &file_attrs_for,
                                 stat_policy,
-                                filter_fp,
-                            );
-                            if refresh.index_changed {
-                                index_stat_refresh_changed = true;
-                            }
-                            if refresh.content_verified {
-                                stat_refresh_verified[entry_index] = true;
-                            }
-                            if index.fsmonitor_last_update.is_some()
-                                && stat_matches_with_policy(
-                                    &index.entries[entry_index],
-                                    &meta,
-                                    stat_policy,
-                                )
-                                && !refresh.index_changed
-                            {
-                                index.entries[entry_index].set_fsmonitor_valid(true);
-                            }
+                            )
+                            && !refresh.index_changed
+                        {
+                            index.entries[entry_index].set_fsmonitor_valid(true);
                         }
                     }
-                    let ie = &index.entries[entry_index];
-                    if parallel_blob_work {
-                        let worktree_mode = mode_from_metadata(&meta);
-                        let stat_same = stat_matches_with_policy(ie, &meta, stat_policy);
-                        let racy = entry_is_racy_with_policy(ie, index_mtime, stat_policy);
-                        if stat_same
-                            && !racy
-                            && (!trust_filemode || worktree_mode == ie.mode)
-                            && index_entry_skips_worktree_content_hash_after_stat_match(
-                                ie,
-                                index_mtime,
-                                stat_policy,
-                                trust_filemode,
-                            )
-                        {
-                            return Ok(());
-                        }
-                        if trust_filemode && stat_same && worktree_mode != ie.mode {
-                            let path_owned = path_str_ref.to_owned();
-                            result.push(DiffEntry {
-                                status: DiffStatus::Modified,
-                                old_path: Some(path_owned.clone()),
-                                new_path: Some(path_owned),
-                                old_mode: format_mode(ie.mode),
-                                new_mode: format_mode(worktree_mode),
-                                old_oid: ie.oid,
-                                new_oid: ie.oid,
-                                score: None,
-                            });
-                        } else if try_push_status_modified_on_size_mismatch(
+                }
+                let ie = &index.entries[entry_index];
+                if parallel_blob_work {
+                    let worktree_mode = mode_from_metadata(&meta);
+                    let stat_same = stat_matches_with_policy(ie, &meta, stat_policy);
+                    let racy = entry_is_racy_with_policy(ie, index_mtime, stat_policy);
+                    if stat_same
+                        && !racy
+                        && (!trust_filemode || worktree_mode == ie.mode)
+                        && index_entry_skips_worktree_content_hash_after_stat_match(
                             ie,
-                            path_str_ref,
-                            &meta,
-                            options.for_status,
-                            &mut result,
-                        ) {
-                        } else if !(stat_same
-                            && (!trust_filemode || worktree_mode == ie.mode)
-                            && !racy)
-                            && !stat_refresh_verified[entry_index]
-                        {
-                            let file_path = index_entry_worktree_abs(
-                                work_tree,
-                                path_str_ref,
-                                precompose_unicode,
-                                ignorecase,
-                            );
-                            staging_hash_jobs.push(StagingHashJob {
-                                entry_index,
-                                rel_path: path_str_ref.to_owned(),
-                                file_path,
-                                entry: ie.clone(),
-                                worktree_mode,
-                                file_attrs: file_attrs_for(path_str_ref),
-                            });
-                        }
-                    } else {
+                            index_mtime,
+                            stat_policy,
+                            trust_filemode,
+                        )
+                    {
+                        continue;
+                    }
+                    if trust_filemode && stat_same && worktree_mode != ie.mode {
+                        let path_owned = path_str_ref.to_owned();
+                        result.push(DiffEntry {
+                            status: DiffStatus::Modified,
+                            old_path: Some(path_owned.clone()),
+                            new_path: Some(path_owned),
+                            old_mode: format_mode(ie.mode),
+                            new_mode: format_mode(worktree_mode),
+                            old_oid: ie.oid,
+                            new_oid: ie.oid,
+                            score: None,
+                        });
+                    } else if try_push_status_modified_on_size_mismatch(
+                        ie,
+                        path_str_ref,
+                        &meta,
+                        options.for_status,
+                        &mut result,
+                    ) {
+                    } else if !(stat_same && (!trust_filemode || worktree_mode == ie.mode) && !racy)
+                        && !stat_refresh_verified[entry_index]
+                    {
                         let file_path = index_entry_worktree_abs(
                             work_tree,
                             path_str_ref,
                             precompose_unicode,
                             ignorecase,
                         );
-                        push_index_blob_worktree_diff(
-                            odb,
-                            ie,
-                            path_str_ref,
-                            &file_path,
-                            meta,
-                            index_mtime,
-                            trust_filemode,
-                            stat_policy,
-                            &file_attrs_for,
-                            &conv,
-                            materialize_dirty_blobs,
-                            options.for_status,
-                            filter_fp,
-                            &mut result,
-                        )?;
+                        staging_hash_jobs.push(StagingHashJob {
+                            entry_index,
+                            rel_path: path_str_ref.to_owned(),
+                            file_path,
+                            entry: ie.clone(),
+                            worktree_mode,
+                            file_attrs: file_attrs_for(path_str_ref),
+                        });
                     }
+                } else {
+                    let file_path = index_entry_worktree_abs(
+                        work_tree,
+                        path_str_ref,
+                        precompose_unicode,
+                        ignorecase,
+                    );
+                    push_index_blob_worktree_diff(
+                        odb,
+                        ie,
+                        path_str_ref,
+                        &file_path,
+                        meta,
+                        index_mtime,
+                        trust_filemode,
+                        stat_policy,
+                        &file_attrs_for,
+                        &conv,
+                        materialize_dirty_blobs,
+                        options.for_status,
+                        filter_fp,
+                        &mut result,
+                    )?;
                 }
             }
-            Ok(())
-        },
-    )?;
+        }
+    }
     if parallel_blob_work && !staging_hash_jobs.is_empty() {
         parallel_process_blob_worktree_jobs(
             odb,
@@ -4709,7 +4719,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
     use crate::config::ConfigSet;
     use crate::crlf;
     use crate::worktree_scan::{
-        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
+        collect_blob_lookups_for_plan, group_blob_entries_by_dir, BlobDiskLookup,
         WorktreeBlobScanOptions,
     };
 
@@ -4785,46 +4795,56 @@ pub fn refresh_index_stat_content_verified_with_rules(
     let mut changed = false;
     let filter_fp = rules_lock.as_ref().map(|r| r.filter_process());
     let thread_policy = crate::parallel::ThreadPolicy::default();
-    let paths_by_entry_index =
-        crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
-    for_each_blob_by_directory_parallel(
-        &paths_by_entry_index,
+    let scan_symlink_ancestors = config
+        .get_bool("core.symlinks")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    let refresh_lookups = collect_blob_lookups_for_plan(
+        index,
         &blob_dirs,
         blob_scan,
         &thread_policy,
         &config,
-        true,
+        scan_symlink_ancestors,
         dir_abs,
         file_abs,
         |rel_path| {
-            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
-        },
-        |entry_index, path_str_ref, lookup| {
-            let BlobDiskLookup::Present(meta) = lookup else {
-                return Ok(());
-            };
-            let file_path =
-                index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
-            let ie = &mut index.entries[entry_index];
-            if refresh_index_blob_stat_from_metadata(
-                odb,
-                ie,
-                &meta,
-                path_str_ref,
-                &file_path,
-                index_mtime,
-                &conv,
-                &file_attrs_for,
-                stat_policy,
-                filter_fp,
-            )
-            .index_changed
-            {
-                changed = true;
-            }
-            Ok(())
+            scan_symlink_ancestors
+                && dir_symlinks.has_symlink_in_path(
+                    work_tree,
+                    rel_path,
+                    precompose_unicode,
+                    ignorecase,
+                )
         },
     )?;
+    for (entry_index, lookup) in refresh_lookups {
+        let BlobDiskLookup::Present(meta) = lookup else {
+            continue;
+        };
+        let path_owned = std::str::from_utf8(&index.entries[entry_index].path)
+            .unwrap_or("")
+            .to_owned();
+        let file_path =
+            index_entry_worktree_abs(work_tree, &path_owned, precompose_unicode, ignorecase);
+        let ie = &mut index.entries[entry_index];
+        if refresh_index_blob_stat_from_metadata(
+            odb,
+            ie,
+            &meta,
+            &path_owned,
+            &file_path,
+            index_mtime,
+            &conv,
+            &file_attrs_for,
+            stat_policy,
+            filter_fp,
+        )
+        .index_changed
+        {
+            changed = true;
+        }
+    }
     Ok(changed)
 }
 

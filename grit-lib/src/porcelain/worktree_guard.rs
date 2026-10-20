@@ -291,7 +291,7 @@ fn worktree_clean_for_switch_paths(
     use crate::index::MODE_GITLINK;
     use crate::parallel::ParallelOp;
     use crate::worktree_scan::{
-        for_each_blob_by_directory, for_each_blob_by_directory_parallel,
+        collect_blob_lookups_for_plan, for_each_blob_by_directory,
         group_blob_entries_by_dir_for_paths, BlobDiskLookup, WorktreeBlobScanOptions,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -351,11 +351,12 @@ fn worktree_clean_for_switch_paths(
                 index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
             };
             for_each_blob_by_directory(
+                index,
                 &blob_dirs,
                 dir_abs,
                 file_abs,
                 |_| false,
-                |entry_index, _path, lookup| {
+                |entry_index, lookup| {
                     if !stat_clean {
                         return Ok(());
                     }
@@ -408,10 +409,8 @@ fn worktree_clean_for_switch_paths(
             index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
         };
         let matches = AtomicBool::new(true);
-        let paths_by_entry_index =
-            crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
-        for_each_blob_by_directory_parallel(
-            &paths_by_entry_index,
+        let guard_lookups = collect_blob_lookups_for_plan(
+            index,
             &blob_dirs,
             blob_scan,
             &Default::default(),
@@ -420,35 +419,34 @@ fn worktree_clean_for_switch_paths(
             dir_abs,
             file_abs,
             |_| false,
-            |entry_index, _path, lookup| {
-                if !matches.load(Ordering::Relaxed) {
-                    return Ok(());
+        )?;
+        for (entry_index, lookup) in guard_lookups {
+            if !matches.load(Ordering::Relaxed) {
+                break;
+            }
+            let ie = &index.entries[entry_index];
+            if !indexed_path_needs_worktree_stat_check(ie) {
+                continue;
+            }
+            match lookup {
+                BlobDiskLookup::Missing => {
+                    matches.store(false, Ordering::Relaxed);
                 }
-                let ie = &index.entries[entry_index];
-                if !indexed_path_needs_worktree_stat_check(ie) {
-                    return Ok(());
-                }
-                match lookup {
-                    BlobDiskLookup::Missing => {
+                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+                BlobDiskLookup::Present(meta) => {
+                    let mismatch = if ie.mode == MODE_GITLINK {
+                        !meta.is_dir()
+                    } else if !meta.is_file() && !meta.is_symlink() {
+                        true
+                    } else {
+                        !stat_matches_with_policy(ie, &meta, stat_policy)
+                    };
+                    if mismatch {
                         matches.store(false, Ordering::Relaxed);
                     }
-                    BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                    BlobDiskLookup::Present(meta) => {
-                        let mismatch = if ie.mode == MODE_GITLINK {
-                            !meta.is_dir()
-                        } else if !meta.is_file() && !meta.is_symlink() {
-                            true
-                        } else {
-                            !stat_matches_with_policy(ie, &meta, stat_policy)
-                        };
-                        if mismatch {
-                            matches.store(false, Ordering::Relaxed);
-                        }
-                    }
                 }
-                Ok(())
-            },
-        )?;
+            }
+        }
         stat_clean = matches.load(Ordering::Relaxed);
     }
     if !stat_clean {
