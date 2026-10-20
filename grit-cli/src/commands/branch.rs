@@ -1,7 +1,7 @@
 //! `grit branch` — list branches, or create / delete one.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::refs::branch_tracking::upstream_tracking_full_ref;
+use grit_lib::refs::branch_tracking::upstream_branch;
 use std::io::Write;
 
 use grit_lib::porcelain::branch::create_branch;
@@ -135,12 +135,9 @@ fn branch_delete_base_oid(
     branch_name: &str,
     head: &HeadState,
 ) -> Option<grit_lib::objects::ObjectId> {
-    if let Some(upstream_ref) = upstream_tracking_full_ref(repo, branch_name) {
-        if let Ok(oid) = refs::resolve_ref(repo.git_dir(), &upstream_ref) {
-            return Some(oid);
-        }
-    }
-    head.oid().copied()
+    upstream_branch(repo, branch_name)
+        .map(|upstream| upstream.oid)
+        .or_else(|| head.oid().copied())
 }
 
 fn delete_branch(repo: &Repository, name: &str, force_delete: bool) -> Result<BranchOutcome> {

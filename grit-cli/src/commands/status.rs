@@ -3,12 +3,13 @@
 
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
+use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::status::{
     status, untracked_mode_from_config, StatusOptions, UntrackedMode,
 };
 use grit_lib::progress::NullProgress;
-use grit_lib::refs;
-use grit_lib::refs::branch_tracking::{shorten_tracking_ref, upstream_tracking_full_ref};
+use grit_lib::refs::branch_tracking::{comparison_base, Standing, TipComparison};
+use grit_lib::repo::Repository;
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -28,10 +29,8 @@ const SHORTLOG_LIMIT: usize = 10;
 /// JSON fields below carry the same information in a flat, stable form).
 #[derive(Clone, Copy)]
 enum HeaderKind {
-    AheadOfTarget,
-    BehindTarget,
-    Diverged,
-    EvenWith,
+    /// On a branch with a base: even with, ahead of, behind or diverged from it.
+    Compared(Standing),
     NoTarget,
     Unborn,
     Detached,
@@ -113,16 +112,16 @@ impl StatusOutcome {
         let target = self.target.as_deref().unwrap_or_default();
         let now = ctx.now.unix_timestamp();
         match self.header {
-            HeaderKind::AheadOfTarget => {
+            HeaderKind::Compared(Standing::Ahead) => {
                 outln!(w, "On {branch}  ·  {} ahead of {target}", self.ahead);
                 outln!(w);
                 self.render_ahead_shortlog(w, now)?;
             }
-            HeaderKind::BehindTarget => {
+            HeaderKind::Compared(Standing::Behind) => {
                 outln!(w, "On {branch}  ·  {} behind {target}", self.behind);
                 outln!(w);
             }
-            HeaderKind::Diverged => {
+            HeaderKind::Compared(Standing::Diverged) => {
                 outln!(
                     w,
                     "On {branch}  ·  {} ahead, {} behind {target}",
@@ -132,7 +131,7 @@ impl StatusOutcome {
                 outln!(w);
                 self.render_ahead_shortlog(w, now)?;
             }
-            HeaderKind::EvenWith => {
+            HeaderKind::Compared(Standing::Even) => {
                 outln!(w, "On {branch}  ·  even with {target}");
                 outln!(w);
             }
@@ -250,7 +249,7 @@ impl StatusOutcome {
         let branch = self.branch.as_deref().unwrap_or_default();
         let target = self.target.as_deref().unwrap_or_default();
         match self.header {
-            HeaderKind::AheadOfTarget => {
+            HeaderKind::Compared(Standing::Ahead) => {
                 outln!(
                     w,
                     "On **`{branch}`** · **{}** ahead of `{target}`",
@@ -258,7 +257,7 @@ impl StatusOutcome {
                 );
                 self.render_markdown_ahead_shortlog(w, ctx)?;
             }
-            HeaderKind::BehindTarget => {
+            HeaderKind::Compared(Standing::Behind) => {
                 outln!(
                     w,
                     "On **`{branch}`** · **{}** behind `{target}`",
@@ -266,7 +265,7 @@ impl StatusOutcome {
                 );
                 outln!(w);
             }
-            HeaderKind::Diverged => {
+            HeaderKind::Compared(Standing::Diverged) => {
                 outln!(
                     w,
                     "On **`{branch}`** · **{}** ahead, **{}** behind `{target}`",
@@ -275,7 +274,7 @@ impl StatusOutcome {
                 );
                 self.render_markdown_ahead_shortlog(w, ctx)?;
             }
-            HeaderKind::EvenWith => {
+            HeaderKind::Compared(Standing::Even) => {
                 outln!(w, "On **`{branch}`** · even with `{target}`");
                 outln!(w);
             }
@@ -397,19 +396,14 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
     let model =
         status(&repo, &status_opts, &mut NullProgress).context("could not compute status")?;
 
-    let in_progress: Vec<String> = detect_in_progress(repo.git_dir())
-        .into_iter()
-        .map(in_progress_label)
-        .collect();
+    let operations = detect_in_progress(repo.git_dir());
     let merging = model.state.merge_in_progress;
     let conflicts = model.conflicts.clone();
 
-    let (branch, detached, head, target, ahead_total, behind_total, ahead_commits, header) =
-        resolve_header(&repo, &model.head, merging, &in_progress)?;
-    let ahead = ahead_total;
-    let behind = behind_total;
+    let summary = summarize_head(&repo, &model.head, in_progress_header(merging, &operations))?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let commits = ahead_commits
+    let commits = summary
+        .ahead_commits
         .iter()
         .map(|c| CommitJson::from_summary(c, now))
         .collect();
@@ -425,39 +419,50 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
     let path_display = PathDisplayOptions::from_repo(&repo).ok();
 
     Ok(StatusOutcome {
-        branch,
-        detached,
-        head,
-        target,
-        ahead,
-        behind,
+        branch: summary.branch,
+        detached: matches!(model.head, HeadState::Detached { .. }),
+        head: model.head.oid().map(ObjectId::to_hex),
+        target: summary.target,
+        ahead: summary.ahead,
+        behind: summary.behind,
         commits,
         staged,
         unstaged,
         untracked: model.untracked,
         clean,
         merging,
-        in_progress,
+        in_progress: operations.into_iter().map(in_progress_label).collect(),
         conflicts,
-        header,
-        commit_rows: ahead_commits,
+        header: summary.header,
+        commit_rows: summary.ahead_commits,
         staged_entries: model.staged,
         unstaged_entries: model.unstaged,
         path_display,
     })
 }
 
-/// Resolve the branch/target/ahead picture and the matching human header kind.
-type HeaderResult = (
-    Option<String>,
-    bool,
-    Option<String>,
-    Option<String>,
-    usize,
-    usize,
-    Vec<CommitSummary>,
-    HeaderKind,
-);
+/// Where HEAD stands: the current branch, and how it compares with its base.
+struct HeadSummary {
+    branch: Option<String>,
+    target: Option<String>,
+    ahead: usize,
+    behind: usize,
+    ahead_commits: Vec<CommitSummary>,
+    header: HeaderKind,
+}
+
+impl HeadSummary {
+    fn new(branch: Option<String>, header: HeaderKind) -> Self {
+        Self {
+            branch,
+            target: None,
+            ahead: 0,
+            behind: 0,
+            ahead_commits: Vec::new(),
+            header,
+        }
+    }
+}
 
 fn in_progress_label(op: InProgressOperation) -> String {
     match op {
@@ -471,109 +476,52 @@ fn in_progress_label(op: InProgressOperation) -> String {
     }
 }
 
-fn resolve_status_target(
-    repo: &grit_lib::repo::Repository,
-    branch_short: &str,
-) -> Result<Option<(String, grit_lib::objects::ObjectId)>> {
-    if let Some(upstream_ref) = upstream_tracking_full_ref(repo, branch_short) {
-        if let Ok(oid) = refs::resolve_ref(repo.git_dir(), &upstream_ref) {
-            return Ok(Some((shorten_tracking_ref(&upstream_ref), oid)));
-        }
-    }
-    Ok(context::find_target_branch(repo)?.map(|target| (target.display_name, target.oid)))
-}
-
-fn header_for_in_progress(merging: bool, in_progress: &[String]) -> Option<HeaderKind> {
-    if merging || in_progress.iter().any(|s| s == "merge") {
+fn in_progress_header(merging: bool, operations: &[InProgressOperation]) -> Option<HeaderKind> {
+    if merging || operations.contains(&InProgressOperation::Merge) {
         return Some(HeaderKind::MergeInProgress);
     }
-    if !in_progress.is_empty() {
+    if !operations.is_empty() {
         return Some(HeaderKind::OtherInProgress);
     }
     None
 }
 
-fn resolve_header(
-    repo: &grit_lib::repo::Repository,
+/// `in_progress` replaces the comparison header on a branch with commits; unborn, detached
+/// and invalid HEADs keep their own header.
+fn summarize_head(
+    repo: &Repository,
     head: &HeadState,
-    merging: bool,
-    in_progress: &[String],
-) -> Result<HeaderResult> {
-    Ok(match head {
+    in_progress: Option<HeaderKind>,
+) -> Result<HeadSummary> {
+    let (short_name, head_oid) = match head {
         HeadState::Branch {
             short_name,
-            oid: Some(head_oid),
+            oid: Some(oid),
             ..
-        } => {
-            let in_progress_header = header_for_in_progress(merging, in_progress);
-            let target = resolve_status_target(repo, short_name)?;
-            match target {
-                None => (
-                    Some(short_name.clone()),
-                    false,
-                    Some(head_oid.to_hex()),
-                    None,
-                    0,
-                    0,
-                    Vec::new(),
-                    in_progress_header.unwrap_or(HeaderKind::NoTarget),
-                ),
-                Some((display_name, target_oid)) => {
-                    let tracking = context::commits_ahead_behind_of(
-                        repo,
-                        *head_oid,
-                        target_oid,
-                        SHORTLOG_LIMIT,
-                    )?;
-                    let header =
-                        in_progress_header.unwrap_or(match (tracking.ahead, tracking.behind) {
-                            (0, 0) => HeaderKind::EvenWith,
-                            (a, 0) if a > 0 => HeaderKind::AheadOfTarget,
-                            (0, b) if b > 0 => HeaderKind::BehindTarget,
-                            (_, _) => HeaderKind::Diverged,
-                        });
-                    (
-                        Some(short_name.clone()),
-                        false,
-                        Some(head_oid.to_hex()),
-                        Some(display_name),
-                        tracking.ahead,
-                        tracking.behind,
-                        tracking.commits,
-                        header,
-                    )
-                }
-            }
+        } => (short_name, *oid),
+        HeadState::Branch { short_name, .. } => {
+            return Ok(HeadSummary::new(
+                Some(short_name.clone()),
+                HeaderKind::Unborn,
+            ));
         }
-        HeadState::Branch { short_name, .. } => (
-            Some(short_name.clone()),
-            false,
-            None,
-            None,
-            0,
-            0,
-            Vec::new(),
-            HeaderKind::Unborn,
-        ),
-        HeadState::Detached { oid } => (
-            None,
-            true,
-            Some(oid.to_hex()),
-            None,
-            0,
-            0,
-            Vec::new(),
-            HeaderKind::Detached,
-        ),
-        HeadState::Invalid => (
-            None,
-            false,
-            None,
-            None,
-            0,
-            0,
-            Vec::new(),
-            HeaderKind::Invalid,
-        ),
-    })
+        HeadState::Detached { .. } => return Ok(HeadSummary::new(None, HeaderKind::Detached)),
+        HeadState::Invalid => return Ok(HeadSummary::new(None, HeaderKind::Invalid)),
+    };
+    let mut summary = HeadSummary::new(
+        Some(short_name.clone()),
+        in_progress.unwrap_or(HeaderKind::NoTarget),
+    );
+    let Some(base) =
+        comparison_base(repo, short_name).context("could not resolve the target branch")?
+    else {
+        return Ok(summary);
+    };
+    let comparison = TipComparison::compute(repo, head_oid, base.oid, SHORTLOG_LIMIT)?;
+    summary.header = in_progress.unwrap_or(HeaderKind::Compared(comparison.standing()));
+    summary.target = Some(base.name);
+    summary.ahead = comparison.ahead;
+    summary.behind = comparison.behind;
+    summary.ahead_commits = context::commit_summaries(repo, &comparison.newest_ahead)?;
+    Ok(summary)
 }

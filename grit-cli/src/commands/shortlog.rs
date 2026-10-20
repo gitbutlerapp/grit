@@ -2,6 +2,8 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::branch_tracking::target_branch;
+use grit_lib::revwalk::merge_base::ahead_of_target_commits;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -78,7 +80,7 @@ pub fn run() -> Result<ShortlogOutcome> {
     let head = resolve_head(repo.git_dir()).context("could not resolve HEAD")?;
     let (branch_name, head_oid) = current_branch_and_oid(&head)?;
 
-    let Some(target) = context::find_target_branch(&repo)? else {
+    let Some(target) = target_branch(&repo).context("could not resolve the target branch")? else {
         return Ok(ShortlogOutcome {
             branch: branch_name.to_owned(),
             target: None,
@@ -88,18 +90,19 @@ pub fn run() -> Result<ShortlogOutcome> {
         });
     };
 
-    let ahead = context::commits_ahead_of(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
+    let (ahead, newest) =
+        ahead_of_target_commits(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
+    let commit_rows = context::commit_summaries(&repo, &newest)?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     Ok(ShortlogOutcome {
         branch: branch_name.to_owned(),
-        target: Some(target.display_name),
-        ahead: ahead.total,
-        commits: ahead
-            .commits
+        target: Some(target.name),
+        ahead,
+        commits: commit_rows
             .iter()
             .map(|c| CommitJson::from_summary(c, now))
             .collect(),
-        commit_rows: ahead.commits,
+        commit_rows,
     })
 }
 

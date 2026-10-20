@@ -9,7 +9,6 @@ use grit_lib::config::ident_resolve::{
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::refs;
 use grit_lib::repo::Repository;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -44,13 +43,6 @@ pub fn wall_clock_now(env: &Environment) -> OffsetDateTime {
     grit_lib::config::environment::offset_from_epoch_and_tz(epoch, env.tz.as_deref())
 }
 
-/// A resolved "target" branch (the trunk `grit` measures the current branch against).
-#[derive(Debug, Clone)]
-pub struct TargetBranch {
-    pub display_name: String,
-    pub oid: ObjectId,
-}
-
 /// A one-line summary of a commit, for shortlog-style output.
 #[derive(Debug, Clone)]
 pub struct CommitSummary {
@@ -79,144 +71,21 @@ pub fn discover_with_warnings(
     Ok((repo, sink))
 }
 
-/// Find the branch `grit` should measure the current branch against, trying
-/// `target.branch` from config first, then the usual trunk names.
-pub fn find_target_branch(repo: &Repository) -> Result<Option<TargetBranch>> {
-    for candidate in target_branch_candidates(repo)? {
-        if let Some(oid) = resolve_branch_candidate(repo, &candidate) {
-            return Ok(Some(TargetBranch {
-                display_name: candidate,
-                oid,
-            }));
-        }
-    }
-    Ok(None)
-}
-
-fn target_branch_candidates(repo: &Repository) -> Result<Vec<String>> {
-    let config = repo.config().context("could not load config")?;
-    let mut candidates = Vec::new();
-    if let Some(target) = config.as_ref().get("target.branch") {
-        let trimmed = target.trim();
-        if !trimmed.is_empty() {
-            candidates.push(trimmed.to_owned());
-        }
-    }
-    candidates.extend([
-        "origin/master".to_owned(),
-        "origin/main".to_owned(),
-        "master".to_owned(),
-        "main".to_owned(),
-    ]);
-    Ok(candidates)
-}
-
-fn resolve_branch_candidate(repo: &Repository, candidate: &str) -> Option<ObjectId> {
-    for refname in candidate_refnames(candidate) {
-        if let Ok(oid) = refs::resolve_ref(repo.git_dir(), &refname) {
-            return Some(oid);
-        }
-    }
-    None
-}
-
-fn candidate_refnames(candidate: &str) -> Vec<String> {
-    if candidate.starts_with("refs/") || candidate == "HEAD" {
-        return vec![candidate.to_owned()];
-    }
-
-    if let Some(remote_branch) = candidate.strip_prefix("origin/") {
-        return vec![
-            format!("refs/remotes/origin/{remote_branch}"),
-            format!("refs/heads/{candidate}"),
-        ];
-    }
-
-    vec![
-        format!("refs/heads/{candidate}"),
-        format!("refs/remotes/{candidate}"),
-    ]
-}
-
-/// Summary of how far `head` is ahead of `target` for status/shortlog.
-#[derive(Debug, Clone)]
-pub struct AheadOfTarget {
-    /// Total commits reachable from `head` but not from `target`.
-    pub total: usize,
-    /// Up to `summary_limit` newest such commits (newest first).
-    pub commits: Vec<CommitSummary>,
-}
-
-/// Commits on `head` not in `target`'s history: full ahead count plus bounded summaries.
-///
-/// Only the newest `summary_limit` commits are read and parsed; `total` reflects the
-/// full ahead count. JSON/Markdown status uses this so default `grit status` does not
-/// materialize unbounded ahead lists.
-pub fn commits_ahead_of(
-    repo: &Repository,
-    head: ObjectId,
-    target: ObjectId,
-    summary_limit: usize,
-) -> Result<AheadOfTarget> {
-    let (total, oids) =
-        grit_lib::revwalk::merge_base::ahead_of_target_commits(repo, head, target, summary_limit)?;
-    let mut commits = Vec::with_capacity(oids.len());
-    for oid in oids {
-        let commit = read_commit(repo, &oid)?;
-        let (author, timestamp) = author_and_time(&commit.author);
-        commits.push(CommitSummary {
-            oid,
-            subject: subject_line(&commit.message),
-            author,
-            author_ident: commit.author.clone(),
-            timestamp,
-        });
-    }
-
-    Ok(AheadOfTarget { total, commits })
-}
-
-/// Ahead/behind vs `target` plus bounded newest-ahead commit summaries for status.
-#[derive(Debug, Clone)]
-pub struct AheadBehindOfTarget {
-    pub ahead: usize,
-    pub behind: usize,
-    pub commits: Vec<CommitSummary>,
-}
-
-/// Symmetric ahead/behind between `head` and `target`, with a bounded ahead shortlog.
-///
-/// Uses a streaming rev walk (no full ancestor closures). When one tip is an ancestor of
-/// the other, the unnecessary direction is skipped.
-pub fn commits_ahead_behind_of(
-    repo: &Repository,
-    head: ObjectId,
-    target: ObjectId,
-    summary_limit: usize,
-) -> Result<AheadBehindOfTarget> {
-    let (ahead, behind, oids) = grit_lib::revwalk::merge_base::ahead_behind_of_target_commits(
-        repo,
-        head,
-        target,
-        summary_limit,
-    )?;
-    let mut commits = Vec::with_capacity(oids.len());
-    for oid in oids {
-        let commit = read_commit(repo, &oid)?;
-        let (author, timestamp) = author_and_time(&commit.author);
-        commits.push(CommitSummary {
-            oid,
-            subject: subject_line(&commit.message),
-            author,
-            author_ident: commit.author.clone(),
-            timestamp,
-        });
-    }
-    Ok(AheadBehindOfTarget {
-        ahead,
-        behind,
-        commits,
-    })
+/// One-line summaries for `oids`, in the given order.
+pub fn commit_summaries(repo: &Repository, oids: &[ObjectId]) -> Result<Vec<CommitSummary>> {
+    oids.iter()
+        .map(|oid| {
+            let commit = read_commit(repo, oid)?;
+            let (author, timestamp) = author_and_time(&commit.author);
+            Ok(CommitSummary {
+                oid: *oid,
+                subject: subject_line(&commit.message),
+                author,
+                author_ident: commit.author,
+                timestamp,
+            })
+        })
+        .collect()
 }
 
 /// Parsed fields from a Git commit identity line (`Name <email> <epoch> <tz>`).
