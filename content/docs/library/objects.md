@@ -19,7 +19,7 @@ When you only need type and size (for example listing objects without loading bl
 
 ## Peeling tags
 
-A ref tip can name an annotated tag, or a tag of a tag. `Odb::peel_tags` (on [`Odb`](rustdoc:grit_lib::objects::odb::Odb)) follows the chain and returns the id and kind of the first non-tag object; `Odb::peel_to_commit` returns `Some(commit)` when that object is a commit and `None` for a tree or blob. Only tag objects are read in full; the final object's kind comes from `read_info`. A missing object, an unparsable tag, or a chain of more than 64 tags is an error, not `None`, so you can tell "not a commit" apart from a broken repository. Revision walks, fetch negotiation, upload-pack ref advertisement, bundles, commit-graph tips, `packed-refs` peel lines, tag listing and log decorations all peel through these two methods.
+A ref tip can name an annotated tag, or a tag of a tag. `Odb::peel_tags` (on [`Odb`](rustdoc:grit_lib::objects::odb::Odb)) follows the chain and returns the id and kind of the first non-tag object; `Odb::peel_to_commit` returns `Some(commit)` when that object is a commit and `None` for a tree or blob. Only tag objects are read in full, and only their `object` header is parsed, so tags with non-UTF-8 messages peel fine; the final object's kind comes from `read_info`. A missing object, a tag without a valid `object` header, or a chain of more than 64 tags is an error, not `None`, so you can tell "not a commit" apart from a broken repository. Revision walks, fetch negotiation, upload-pack ref advertisement, bundles, commit-graph tips, `packed-refs` peel lines, tag listing and log decorations all peel through these two methods.
 
 ## Pack read caching
 

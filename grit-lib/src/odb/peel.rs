@@ -5,7 +5,7 @@
 //! [`Odb`] methods instead of its own tag loop.
 
 use crate::error::{Error, Result};
-use crate::objects::{parse_tag, ObjectId, ObjectKind};
+use crate::objects::{tag_object_line_oid, ObjectId, ObjectKind};
 
 use super::Odb;
 
@@ -18,9 +18,10 @@ const MAX_TAG_CHAIN: usize = 64;
 impl Odb {
     /// Follow annotated tags starting at `oid` until reaching an object that is not a tag.
     ///
-    /// A non-tag `oid` is returned unchanged. Only tag objects are fully read; the final
-    /// object's kind comes from [`Self::read_info`], so peeling to a large blob or tree does not
-    /// inflate it.
+    /// A non-tag `oid` is returned unchanged. Only tag objects are fully read, and only their
+    /// `object` header is parsed (other headers and the message may be absent or not UTF-8);
+    /// the final object's kind comes from [`Self::read_info`], so peeling to a large blob or
+    /// tree does not inflate it.
     ///
     /// # Parameters
     ///
@@ -33,8 +34,8 @@ impl Odb {
     /// # Errors
     ///
     /// - [`Error::ObjectNotFound`] when `oid` or any object the chain names is missing.
-    /// - [`Error::CorruptObject`] when a tag cannot be parsed, or the chain is longer than
-    ///   64 tags.
+    /// - [`Error::CorruptObject`] when a tag has no valid `object` header, or the chain is
+    ///   longer than 64 tags.
     /// - Any other error [`Self::read`] / [`Self::read_info`] reports for the objects read.
     pub fn peel_tags(&self, oid: ObjectId) -> Result<(ObjectId, ObjectKind)> {
         let mut current = oid;
@@ -43,7 +44,10 @@ impl Odb {
             if kind != ObjectKind::Tag {
                 return Ok((current, kind));
             }
-            current = parse_tag(&self.read(&current)?.data)?.object;
+            let tag = self.read(&current)?;
+            current = tag_object_line_oid(&tag.data).ok_or_else(|| {
+                Error::CorruptObject(format!("tag {current} has no valid object header"))
+            })?;
         }
         Err(Error::CorruptObject(format!(
             "tag chain from {oid} is longer than {MAX_TAG_CHAIN} tags"
@@ -137,6 +141,17 @@ mod tests {
             odb.peel_to_commit(dangling),
             Err(Error::ObjectNotFound(_))
         ));
+    }
+
+    #[test]
+    fn only_the_object_header_is_required() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let c = commit(&odb);
+        let mut body = format!("object {c}\ntype commit\n\n").into_bytes();
+        body.extend_from_slice(b"latin-1 message \xe9\n");
+        let bare = odb.write(ObjectKind::Tag, &body).unwrap();
+        assert_eq!(odb.peel_to_commit(bare).unwrap(), Some(c));
     }
 
     #[test]
