@@ -55,7 +55,9 @@ use crate::porcelain::tree_merge_checkout::{
     apply_clean_tree_merge_to_worktree, ensure_worktree_clean_for_touched_paths,
     ensure_worktree_clean_for_tree_changes,
 };
-use crate::porcelain::worktree_guard::{prepare_tree_checkout, prepare_tree_checkout_with_changes};
+use crate::porcelain::worktree_guard::{
+    ensure_worktree_clean_for_merge, prepare_tree_checkout, prepare_tree_checkout_with_changes,
+};
 use crate::refs;
 use crate::repo::Repository;
 use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
@@ -291,13 +293,8 @@ pub fn integrate_branch(
     let other_tree = commit_tree(repo, &other_oid)?;
 
     if is_ancestor(repo, into_oid, other_oid)? {
+        ensure_worktree_clean_for_merge(repo)?;
         let ff_changes = diff_trees(repo.odb(), Some(&into_tree), Some(&other_tree), "")?;
-        ensure_worktree_clean_for_tree_changes(
-            repo,
-            &ff_changes,
-            "you have uncommitted changes — commit them before merging",
-            true,
-        )?;
         prepare_tree_checkout_with_changes(repo, &ff_changes)?;
         checkout_between_trees(repo, Some(&into_tree), &other_tree)?;
         move_branch(
