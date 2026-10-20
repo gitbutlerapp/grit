@@ -5,32 +5,8 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::commit_graph_file::CommitGraphChain;
 use crate::error::{Error, Result};
-use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, ObjectId};
 use crate::repo::Repository;
-
-/// Maximum annotated-tag chain depth to follow when peeling a ref tip to a
-/// commit. Tag-of-tag chains are rare and shallow; this guards against a cycle.
-const MAX_PEEL_DEPTH: usize = 16;
-
-/// Peel `oid` through any chain of annotated tags to the commit it points at.
-///
-/// Returns `None` when it does not resolve to a commit (e.g. a ref pointing
-/// straight at a tree or blob), which negotiation simply skips — matching Git's
-/// `deref_tag` followed by commit-only negotiation. Ref tips handed to the
-/// negotiator are not always commits: an annotated tag ref (`refs/tags/v1`)
-/// points at a tag object, which has no `author` header and must be peeled
-/// before [`commit_date`] / [`read_parents`] parse it as a commit.
-fn peel_to_commit(repo: &Repository, mut oid: ObjectId) -> Result<Option<ObjectId>> {
-    for _ in 0..MAX_PEEL_DEPTH {
-        let obj = repo.odb().read(&oid)?;
-        match obj.kind {
-            ObjectKind::Commit => return Ok(Some(oid)),
-            ObjectKind::Tag => oid = parse_tag(&obj.data)?.object,
-            _ => return Ok(None),
-        }
-    }
-    Ok(None)
-}
 
 const COMMON: u8 = 1 << 2;
 const ADVERTISED: u8 = 1 << 3;
@@ -199,7 +175,7 @@ impl SkippingNegotiator {
     /// Server-advertised commit (ref tip). Annotated-tag tips are peeled to the
     /// commit they reference; a tip that does not resolve to a commit is ignored.
     pub fn known_common(&mut self, oid: ObjectId) -> Result<()> {
-        let Some(oid) = peel_to_commit(&self.repo, oid)? else {
+        let Some(oid) = self.repo.odb().peel_to_commit(oid)? else {
             return Ok(());
         };
         if self.f(oid) & SEEN != 0 {
@@ -212,7 +188,7 @@ impl SkippingNegotiator {
     /// Local negotiation tip. Annotated-tag tips are peeled to the commit they
     /// reference; a tip that does not resolve to a commit is ignored.
     pub fn add_tip(&mut self, oid: ObjectId) -> Result<()> {
-        let Some(oid) = peel_to_commit(&self.repo, oid)? else {
+        let Some(oid) = self.repo.odb().peel_to_commit(oid)? else {
             return Ok(());
         };
         if self.f(oid) & SEEN != 0 {

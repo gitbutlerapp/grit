@@ -21,7 +21,7 @@ pub use receive_pack::{
 };
 pub use upload_pack::upload_pack;
 
-use crate::objects::{ObjectId, ObjectKind};
+use crate::objects::ObjectId;
 use crate::repo::Repository;
 
 /// Errors produced while serving a fetch or a push.
@@ -151,7 +151,7 @@ pub(crate) fn advertised_refs(repo: &Repository, hidden: &[String]) -> Result<Ve
         {
             continue;
         }
-        let Ok(peeled) = peel_tag(repo, oid) else {
+        let Ok(peeled) = repo.odb().peel_tags(oid).map(|(p, _)| p) else {
             continue;
         };
         out.push(AdvertisedRef {
@@ -161,23 +161,6 @@ pub(crate) fn advertised_refs(repo: &Repository, hidden: &[String]) -> Result<Ve
         });
     }
     Ok(out)
-}
-
-/// Follow annotated tags until a non-tag object is reached.
-///
-/// # Errors
-///
-/// Fails when an object in the chain is missing or a tag cannot be parsed.
-pub(crate) fn peel_tag(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
-    // Bound the walk so a corrupt tag cycle cannot loop forever.
-    for _ in 0..64 {
-        let obj = repo.odb().read(&oid)?;
-        if obj.kind != ObjectKind::Tag {
-            return Ok(oid);
-        }
-        oid = crate::objects::parse_tag(&obj.data)?.object;
-    }
-    Err(ServeError::Protocol(format!("tag chain too deep at {oid}")))
 }
 
 /// Where `HEAD` points: its symbolic target (if any) and resolved object (if born).

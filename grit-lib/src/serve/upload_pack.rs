@@ -838,7 +838,7 @@ fn commit_closure(
     let mut seen = HashSet::new();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     for tip in tips {
-        let Ok(oid) = super::peel_tag(repo, *tip) else {
+        let Ok(oid) = repo.odb().peel_tags(*tip).map(|(p, _)| p) else {
             continue;
         };
         queue.push_back(oid);

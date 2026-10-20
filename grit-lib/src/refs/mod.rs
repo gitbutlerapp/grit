@@ -2354,7 +2354,7 @@ fn pack_refs_files(
             continue;
         }
         let peel = if refname.starts_with("refs/tags/") {
-            crate::commit_graph_write::peel_fully_for_packed_tag(odb, oid)
+            packed_ref_peel(odb, oid)
         } else {
             None
         };
@@ -3056,6 +3056,13 @@ fn normalize_list_refs_prefix(git_dir: &Path, prefix: &str) -> String {
     }
 }
 
+/// The `^` line of a `fully-peeled` `packed-refs` entry: the innermost non-tag object when `oid`
+/// is an annotated tag. Lightweight refs, and tags whose chain cannot be read, get no peel line.
+fn packed_ref_peel(odb: &crate::odb::Odb, oid: ObjectId) -> Option<ObjectId> {
+    let (peeled, _) = odb.peel_tags(oid).ok()?;
+    (peeled != oid).then_some(peeled)
+}
+
 /// After the first clone fetch, batch remote-tracking refs into `packed-refs`
 /// (Git's post-clone layout). Leaves `refs/remotes/{remote}/HEAD` as a loose
 /// symbolic ref.
@@ -3121,15 +3128,7 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
     }
 
     for (name, oid) in &entries {
-        let mut peel = None;
-        if let Ok(obj) = odb.read(oid) {
-            if obj.kind == crate::objects::ObjectKind::Tag {
-                if let Ok(tag) = crate::objects::parse_tag(&obj.data) {
-                    peel = Some(tag.object);
-                }
-            }
-        }
-        merged.insert(name.clone(), (*oid, peel));
+        merged.insert(name.clone(), (*oid, packed_ref_peel(&odb, *oid)));
     }
 
     let mut names: Vec<String> = merged.keys().cloned().collect();

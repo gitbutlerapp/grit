@@ -136,24 +136,6 @@ fn read_sideband_pack(
     crate::pack_receive::read_sideband_pack_to(r, target, progress)
 }
 
-/// Peel `oid` to the commit usable as a negotiation tip; `None` if it is not a
-/// commit (or is missing). Mirrors the CLI's `peel_commit_oid_for_negotiation`
-/// but tolerates missing/non-commit objects by returning `None`.
-fn peel_to_commit(repo: &crate::repo::Repository, oid: ObjectId) -> Option<ObjectId> {
-    let mut current = oid;
-    for _ in 0..16 {
-        let obj = repo.odb().read(&current).ok()?;
-        match obj.kind {
-            crate::objects::ObjectKind::Commit => return Some(current),
-            crate::objects::ObjectKind::Tag => {
-                current = crate::objects::parse_tag(&obj.data).ok()?.object;
-            }
-            _ => return None,
-        }
-    }
-    None
-}
-
 /// New shallow boundaries the server reported during a fetch, captured from the
 /// `shallow-info` section so [`fetch_remote`] (and the HTTP fetch paths) can
 /// update the local `shallow` file and surface them in [`FetchOutcome`].
@@ -277,7 +259,7 @@ fn negotiate_pack(
     for prefix in ["refs/heads/", "refs/tags/"] {
         if let Ok(entries) = crate::refs::list_refs(local_git_dir, prefix) {
             for (_, oid) in entries {
-                if let Some(c) = peel_to_commit(negotiator.repo(), oid) {
+                if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(oid) {
                     if !want_set.contains(&c) && seen_tip.insert(c) {
                         tips.push(c);
                     }
@@ -286,7 +268,7 @@ fn negotiate_pack(
         }
     }
     if let Ok(h) = crate::refs::resolve_ref(local_git_dir, "HEAD") {
-        if let Some(c) = peel_to_commit(negotiator.repo(), h) {
+        if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(h) {
             if !want_set.contains(&c) && seen_tip.insert(c) {
                 tips.push(c);
             }
@@ -319,7 +301,7 @@ fn negotiate_pack(
             if local_oid != oid {
                 continue;
             }
-            if let Some(c) = peel_to_commit(negotiator.repo(), *oid) {
+            if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(*oid) {
                 negotiator.known_common(c)?;
             }
         }
@@ -677,7 +659,7 @@ pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result
     for prefix in ["refs/heads/", "refs/tags/"] {
         if let Ok(entries) = crate::refs::list_refs(local_git_dir, prefix) {
             for (_, oid) in entries {
-                if let Some(c) = peel_to_commit(negotiator.repo(), oid) {
+                if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(oid) {
                     if !want_set.contains(&c) && seen_tip.insert(c) {
                         tips.push(c);
                     }
@@ -686,7 +668,7 @@ pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result
         }
     }
     if let Ok(h) = crate::refs::resolve_ref(local_git_dir, "HEAD") {
-        if let Some(c) = peel_to_commit(negotiator.repo(), h) {
+        if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(h) {
             if !want_set.contains(&c) && seen_tip.insert(c) {
                 tips.push(c);
             }
@@ -1809,7 +1791,7 @@ pub(crate) fn retain_following_tags(
         }
         let peeled = m
             .advertised_peel
-            .unwrap_or_else(|| peel_tag_target(local_odb, m.oid));
+            .unwrap_or_else(|| local_odb.peel_tags(m.oid).map_or(m.oid, |(oid, _)| oid));
         let reachable = commit_reach.contains(&peeled) || pack_reach.contains(&peeled);
         if !reachable {
             return false;
@@ -1934,24 +1916,6 @@ pub(crate) fn reachable_commits(
         }
     }
     seen
-}
-
-/// Peel an (annotated) tag to its ultimate non-tag target using the local odb.
-fn peel_tag_target(odb: &crate::odb::Odb, oid: ObjectId) -> ObjectId {
-    let mut current = oid;
-    for _ in 0..16 {
-        let Ok(obj) = odb.read(&current) else {
-            return current;
-        };
-        if obj.kind != crate::objects::ObjectKind::Tag {
-            return current;
-        }
-        match crate::objects::parse_tag(&obj.data) {
-            Ok(t) => current = t.object,
-            Err(_) => return current,
-        }
-    }
-    current
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use std::io::IsTerminal;
 use std::io::Write;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::objects::{parse_tag, ObjectId, ObjectKind};
+use grit_lib::objects::{parse_tag, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
@@ -113,7 +113,10 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
     let resolved =
         grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, &target)
             .with_context(|| format!("could not resolve '{target}'"))?;
-    let commit_oid = peel_to_commit(&repo, resolved)?;
+    let (commit_oid, peeled_kind) = repo.odb().peel_tags(resolved)?;
+    if peeled_kind != ObjectKind::Commit {
+        bail!("'{}' does not resolve to a commit", commit_oid.to_hex());
+    }
     let data = context::read_commit(&repo, &commit_oid)?;
 
     let commit = CommitInfo {
@@ -214,18 +217,6 @@ fn classify(
     }
 
     Ok((ShowKind::Commit, None, None))
-}
-
-/// Follow tag objects until reaching a commit.
-fn peel_to_commit(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
-    loop {
-        let object = repo.odb().read(&oid)?;
-        match object.kind {
-            ObjectKind::Commit => return Ok(oid),
-            ObjectKind::Tag => oid = parse_tag(&object.data)?.object,
-            _ => bail!("'{}' does not resolve to a commit", oid.to_hex()),
-        }
-    }
 }
 
 // --- Human rendering --------------------------------------------------------

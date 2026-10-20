@@ -16,7 +16,7 @@ use crate::commit_pretty::message_subject;
 use crate::connectivity::bundle_prerequisites_connected_to_refs;
 use crate::error::{Error, Result};
 use crate::index_pack::{ingest_received_pack_path_with_progress, IngestPackOptions};
-use crate::objects::{parse_commit, parse_tag, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
@@ -647,21 +647,11 @@ fn parse_oid_field(
 }
 
 fn peel_to_commit(odb: &Odb, oid: ObjectId) -> Result<ObjectId> {
-    let mut current = oid;
-    loop {
-        let obj = odb.read(&current)?;
-        match obj.kind {
-            ObjectKind::Commit => return Ok(current),
-            ObjectKind::Tag => {
-                let tag = parse_tag(&obj.data)?;
-                current = tag.object;
-            }
-            _ => {
-                return Err(Error::CorruptObject(format!(
-                    "object {current} is not commit or tag"
-                )))
-            }
-        }
+    match odb.peel_tags(oid)? {
+        (commit, ObjectKind::Commit) => Ok(commit),
+        (other, _) => Err(Error::CorruptObject(format!(
+            "object {other} is not commit or tag"
+        ))),
     }
 }
 

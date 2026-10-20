@@ -176,12 +176,12 @@ pub(crate) fn validate_wants(
 fn repository_tip_commits(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let mut tips = HashSet::new();
     for (_, oid) in crate::refs::list_refs(repo.git_dir(), "refs/")? {
-        if let Ok(p) = super::peel_tag(repo, oid) {
+        if let Ok(p) = repo.odb().peel_tags(oid).map(|(p, _)| p) {
             tips.insert(p);
         }
     }
     if let Ok(head) = crate::refs::resolve_ref(repo.git_dir(), "HEAD") {
-        if let Ok(p) = super::peel_tag(repo, head) {
+        if let Ok(p) = repo.odb().peel_tags(head).map(|(p, _)| p) {
             tips.insert(p);
         }
     }

@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
-use crate::objects::{ObjectId, ObjectKind};
+use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -217,7 +217,7 @@ pub fn collect_decorations_inner(
         }
 
         if refname == "refs/stash" || refname.starts_with("refs/stash/") {
-            let hex = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
+            let hex = peeled_commit_hex(odb, &oid);
             prepend_decoration(
                 map.entry(hex).or_default(),
                 DecorationItem {
@@ -235,7 +235,7 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let hex = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
+            let hex = peeled_commit_hex(odb, &oid);
             prepend_decoration(
                 map.entry(hex).or_default(),
                 DecorationItem {
@@ -253,7 +253,7 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
+            let peeled = peeled_commit_hex(odb, &oid);
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -271,7 +271,7 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
+            let peeled = peeled_commit_hex(odb, &oid);
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -291,7 +291,7 @@ pub fn collect_decorations_inner(
         // list is dropped and every ref that passes the filter is decorated with its full
         // name and `DECORATION_NONE` (reset) color (log-tree.c `add_ref_decoration`).
         if clear_decorations || !filter.is_empty() {
-            let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
+            let peeled = peeled_commit_hex(odb, &oid);
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -353,23 +353,26 @@ pub fn collect_decorations_inner(
 }
 
 /// Peel an object (possibly a tag) down to a commit and return its hex.
+///
+/// Returns `None` when `hex` is not an object id, the object is missing or unreadable, or it
+/// peels to a tree or blob. Typed callers should use
+/// [`Odb::peel_to_commit`](crate::odb::Odb::peel_to_commit) directly.
 pub fn peel_to_commit_hex(odb: &Odb, hex: &str) -> Option<String> {
     let oid: ObjectId = hex.parse().ok()?;
-    let obj = odb.read(&oid).ok()?;
-    match obj.kind {
-        ObjectKind::Commit => Some(hex.to_owned()),
-        ObjectKind::Tag => {
-            let text = std::str::from_utf8(&obj.data).ok()?;
-            for line in text.lines() {
-                if let Some(target) = line.strip_prefix("object ") {
-                    let target_hex = target.trim();
-                    return peel_to_commit_hex(odb, target_hex);
-                }
-            }
-            None
-        }
-        _ => None,
-    }
+    odb.peel_to_commit(oid)
+        .ok()
+        .flatten()
+        .map(|commit| commit.to_hex())
+}
+
+/// Decoration key for a ref tip: the commit it peels to, or the tip itself when it does not
+/// peel to a commit.
+fn peeled_commit_hex(odb: &Odb, oid: &ObjectId) -> String {
+    odb.peel_to_commit(*oid)
+        .ok()
+        .flatten()
+        .unwrap_or(*oid)
+        .to_hex()
 }
 
 /// Index of the branch decoration that should fold into `HEAD -> branch`, if any.

@@ -3317,38 +3317,20 @@ fn resolve_specs_for_objects_with_options(
 /// Returns `true` when `oid` is a readable object that peels (through any tag chain) to a blob or
 /// tree rather than a commit. Used to mirror `git rev-list`'s tolerance of a non-commit positive
 /// tip: such a tip is silently ignored, whereas a genuinely missing/corrupt object is an error.
-fn object_peels_to_non_commit(repo: &Repository, mut oid: ObjectId) -> bool {
-    loop {
-        let Ok(object) = repo.odb().read(&oid) else {
-            return false;
-        };
-        match object.kind {
-            ObjectKind::Commit => return false,
-            ObjectKind::Blob | ObjectKind::Tree => return true,
-            ObjectKind::Tag => match parse_tag(&object.data) {
-                Ok(tag) => oid = tag.object,
-                Err(_) => return false,
-            },
-        }
-    }
+fn object_peels_to_non_commit(repo: &Repository, oid: ObjectId) -> bool {
+    matches!(
+        repo.odb().peel_tags(oid),
+        Ok((_, ObjectKind::Blob | ObjectKind::Tree))
+    )
 }
 
 /// Peel an object (possibly a tag) to the underlying commit.
-fn peel_to_commit(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
-    loop {
-        let object = repo.odb().read(&oid)?;
-        match object.kind {
-            ObjectKind::Commit => return Ok(oid),
-            ObjectKind::Tag => {
-                let tag = parse_tag(&object.data)?;
-                oid = tag.object;
-            }
-            other => {
-                return Err(Error::CorruptObject(format!(
-                    "object {oid} is a {other:?}, not a commit"
-                )));
-            }
-        }
+fn peel_to_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
+    match repo.odb().peel_tags(oid)? {
+        (commit, ObjectKind::Commit) => Ok(commit),
+        (other_oid, other) => Err(Error::CorruptObject(format!(
+            "object {other_oid} is a {other:?}, not a commit"
+        ))),
     }
 }
 

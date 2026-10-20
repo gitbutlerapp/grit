@@ -32,7 +32,7 @@ use crate::branch_tracking;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
-use crate::objects::{parse_tag, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::pkt_line::{self, Packet};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::transfer::{
@@ -928,25 +928,6 @@ fn demux_sideband_report(input: &[u8], mut progress: Option<&mut dyn Progress>) 
 /// than directly to stderr (the public API must not assume stdout/stderr).
 fn demux_report_and_remote_messages(input: &[u8], progress: &mut dyn Progress) -> Result<Vec<u8>> {
     demux_sideband_report(input, Some(progress))
-}
-
-/// Peel `oid` to the commit it ultimately names, following annotated tags, using
-/// the local odb. Returns `None` if it is not a commit (or is missing). Provided
-/// for symmetry with the CLI's `peel_advertised_commits`; the wire `build_pack`
-/// uses the advertised ref/`.have` oids directly as `haves`, so this is exposed
-/// for callers that need commit tips.
-#[allow(dead_code)]
-fn peel_to_commit(odb: &crate::odb::Odb, oid: ObjectId) -> Option<ObjectId> {
-    let mut current = oid;
-    for _ in 0..16 {
-        let obj = odb.read(&current).ok()?;
-        match obj.kind {
-            ObjectKind::Commit => return Some(current),
-            ObjectKind::Tag => current = parse_tag(&obj.data).ok()?.object,
-            _ => return None,
-        }
-    }
-    None
 }
 
 #[cfg(test)]

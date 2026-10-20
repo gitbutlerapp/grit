@@ -797,48 +797,11 @@ pub fn count_referenced_commit_tips(
     // are ignored, exactly like Git's OBJ_COMMIT check.
     let mut commits: HashSet<ObjectId> = HashSet::new();
     for tip in tips {
-        if let Some(commit_oid) = peel_to_commit(odb, tip) {
+        if let Ok(Some(commit_oid)) = odb.peel_to_commit(tip) {
             commits.insert(commit_oid);
         }
     }
     Ok(commits.len())
-}
-
-fn tag_object_target(data: &[u8]) -> Option<ObjectId> {
-    let text = std::str::from_utf8(data).ok()?;
-    text.lines()
-        .find_map(|line| line.strip_prefix("object "))
-        .and_then(|rest| ObjectId::from_hex(rest.trim()).ok())
-}
-
-/// Peel `oid` through annotated tags until a non-tag object is reached.
-pub(crate) fn peel_through_annotated_tags(odb: &Odb, oid: ObjectId) -> Option<ObjectId> {
-    let mut current = oid;
-    for _ in 0..16 {
-        let obj = odb.read(&current).ok()?;
-        if obj.kind != ObjectKind::Tag {
-            return Some(current);
-        }
-        current = tag_object_target(&obj.data)?;
-    }
-    None
-}
-
-/// Peel line for `packed-refs` when `oid` is an annotated tag object (`^` target in Git's
-/// `fully-peeled` format). Lightweight tags (ref points at a non-tag) yield `None`.
-pub(crate) fn peel_fully_for_packed_tag(odb: &Odb, oid: ObjectId) -> Option<ObjectId> {
-    let obj = odb.read(&oid).ok()?;
-    if obj.kind != ObjectKind::Tag {
-        return None;
-    }
-    peel_through_annotated_tags(odb, oid)
-}
-
-/// Peel `oid` through annotated tags until a commit is reached. Returns `None` if it does not
-/// resolve to a commit.
-pub(crate) fn peel_to_commit(odb: &Odb, oid: ObjectId) -> Option<ObjectId> {
-    peel_through_annotated_tags(odb, oid)
-        .and_then(|peeled| (odb.read(&peeled).ok()?.kind == ObjectKind::Commit).then_some(peeled))
 }
 
 #[cfg(test)]
