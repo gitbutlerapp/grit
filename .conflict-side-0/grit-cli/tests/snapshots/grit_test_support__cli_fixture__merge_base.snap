@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "72934dedd47ecaf7e340fd6c5ef46620187fb317\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"merge_bases\":[\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"],\"is_ancestor\":null}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "# Merge bases\n\n- `72934dedd47ecaf7e340fd6c5ef46620187fb317`\n",
+    "stderr": ""
+  }
+}

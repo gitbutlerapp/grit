@@ -1,0 +1,199 @@
+//! Scenario registry: repo shapes, functional areas, and headline scenario descriptors.
+
+use serde::{Deserialize, Serialize};
+
+/// Cached fixture identity for the daily matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RepoShape {
+    Small,
+    #[serde(rename = "synth-10k")]
+    Synth10k,
+    #[serde(rename = "synth-100k")]
+    Synth100k,
+    #[serde(rename = "git-git")]
+    GitGit,
+    #[serde(rename = "many-refs")]
+    ManyRefs,
+    #[serde(rename = "many-refs-loose")]
+    ManyRefsLoose,
+    #[serde(rename = "big-blobs")]
+    BigBlobs,
+    #[serde(rename = "deep-tree")]
+    DeepTree,
+}
+
+impl RepoShape {
+    /// Stable string id used in scenario ids (`@<repo>` suffix).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Synth10k => "synth-10k",
+            Self::Synth100k => "synth-100k",
+            Self::GitGit => "git-git",
+            Self::ManyRefs => "many-refs",
+            Self::ManyRefsLoose => "many-refs-loose",
+            Self::BigBlobs => "big-blobs",
+            Self::DeepTree => "deep-tree",
+        }
+    }
+}
+
+/// Functional area label for matrix grouping and `--area` filters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Area {
+    Odb,
+    Packs,
+    Refs,
+    Index,
+    Worktree,
+    Diff,
+    Revwalk,
+    Blame,
+    Branching,
+    Remotes,
+    Maintenance,
+    Config,
+    Ignore,
+    Hooks,
+    Notes,
+    Bundles,
+    Worktrees,
+}
+
+/// Static descriptor for one benchmark scenario (registry entry, not a timed result).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScenarioSpec {
+    pub id: &'static str,
+    pub area: Area,
+    pub headline: bool,
+    pub name: Option<&'static str>,
+    pub description: &'static str,
+}
+
+/// Headline scenario on the cooking page (roadmap item 2347).
+pub type HeadlineScenario = ScenarioSpec;
+
+/// The 17 headline scenarios: ids and short names fixed by the performance census roadmap.
+pub const HEADLINE_SCENARIOS: [HeadlineScenario; 17] = [
+    ScenarioSpec {
+        id: "status/clean@synth-10k",
+        area: Area::Worktree,
+        headline: true,
+        name: Some("status-clean"),
+        description: "Clean worktree status vs git status -s",
+    },
+    ScenarioSpec {
+        id: "status/dirty@synth-10k",
+        area: Area::Worktree,
+        headline: true,
+        name: Some("status-dirty"),
+        description: "Dirty worktree status vs git status -s",
+    },
+    ScenarioSpec {
+        id: "add/modified@synth-10k",
+        area: Area::Worktree,
+        headline: true,
+        name: Some("add"),
+        description: "Stage modified files vs git add -A",
+    },
+    ScenarioSpec {
+        id: "commit/small@synth-10k",
+        area: Area::Worktree,
+        headline: true,
+        name: Some("commit"),
+        description: "Commit staged changes vs git commit",
+    },
+    ScenarioSpec {
+        id: "diff/worktree@synth-10k",
+        area: Area::Diff,
+        headline: true,
+        name: Some("diff"),
+        description: "Worktree diff vs git diff",
+    },
+    ScenarioSpec {
+        id: "log/oneline-100@git-git",
+        area: Area::Revwalk,
+        headline: true,
+        name: Some("log"),
+        description: "Last 100 commits one line each vs git log --oneline",
+    },
+    ScenarioSpec {
+        id: "show/head@git-git",
+        area: Area::Revwalk,
+        headline: true,
+        name: Some("show"),
+        description: "Show HEAD commit vs git show",
+    },
+    ScenarioSpec {
+        id: "blame/file@git-git",
+        area: Area::Blame,
+        headline: true,
+        name: Some("blame"),
+        description: "Blame one tracked file vs git blame",
+    },
+    ScenarioSpec {
+        id: "switch/branch@synth-10k",
+        area: Area::Worktree,
+        headline: true,
+        name: Some("switch"),
+        description: "Switch branch vs git switch",
+    },
+    ScenarioSpec {
+        id: "branch/list@many-refs",
+        area: Area::Branching,
+        headline: true,
+        name: Some("branch"),
+        description: "List branches vs git branch",
+    },
+    ScenarioSpec {
+        id: "merge/clean@synth-10k",
+        area: Area::Branching,
+        headline: true,
+        name: Some("merge"),
+        description: "Merge branch vs git merge",
+    },
+    ScenarioSpec {
+        id: "pick/one@synth-10k",
+        area: Area::Branching,
+        headline: true,
+        name: Some("pick"),
+        description: "Cherry-pick one commit vs git cherry-pick",
+    },
+    ScenarioSpec {
+        id: "stash/push-pop@synth-10k",
+        area: Area::Worktree,
+        headline: true,
+        name: Some("stash"),
+        description: "Stash push and pop vs git stash",
+    },
+    ScenarioSpec {
+        id: "fetch/incremental@git-git",
+        area: Area::Remotes,
+        headline: true,
+        name: Some("fetch"),
+        description: "Incremental fetch vs git fetch",
+    },
+    ScenarioSpec {
+        id: "pull/fast-forward@git-git",
+        area: Area::Remotes,
+        headline: true,
+        name: Some("pull"),
+        description: "Fast-forward pull vs git pull --ff-only",
+    },
+    ScenarioSpec {
+        id: "push/incremental@git-git",
+        area: Area::Remotes,
+        headline: true,
+        name: Some("push"),
+        description: "Incremental push vs git push",
+    },
+    ScenarioSpec {
+        id: "clone/local@synth-10k",
+        area: Area::Remotes,
+        headline: true,
+        name: Some("clone"),
+        description: "Local clone vs git clone",
+    },
+];

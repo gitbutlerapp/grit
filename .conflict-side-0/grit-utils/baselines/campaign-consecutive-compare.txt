@@ -1,0 +1,2 @@
+All scenario ratios within tolerance 0.1
+Compared 33 scenario rows; skipped 10 grit hyperfine failures, 4 git median drift, 4 grit median drift; 0 missing in candidate

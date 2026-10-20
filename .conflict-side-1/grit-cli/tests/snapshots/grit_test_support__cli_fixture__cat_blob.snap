@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "tracked v2\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"spec\":\"HEAD:tracked.txt\",\"oid\":\"b641243fee370fbfe093daae08234ecc4b993d52\",\"kind\":\"blob\",\"size\":11,\"content\":{\"kind\":\"blob\",\"encoding\":\"utf-8\",\"text\":\"tracked v2\\n\"}}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Cat\n\n- **spec:** `HEAD:tracked.txt`\n- **oid:** `b641243fee370fbfe093daae08234ecc4b993d52`\n- **kind:** blob\n- **size:** 11\n\n```text\ntracked v2\n\n```\n",
+    "stderr": ""
+  }
+}
