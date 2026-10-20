@@ -8,7 +8,9 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 use crate::error::{Error, Result};
+use crate::ewah_bitmap::Bitmap;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
 use crate::repo::Repository;
@@ -822,6 +824,38 @@ pub struct ReachableCountFilter {
     pub until: Option<i64>,
 }
 
+fn try_count_diff_via_stored_commit_bitmaps(
+    repo: &Repository,
+    tip: ObjectId,
+    hide: ObjectId,
+) -> Result<Option<usize>> {
+    let Some(index) = repo
+        .odb()
+        .with_pack_read_context(|| BitmapIndex::open(repo))
+        .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?
+    else {
+        return Ok(None);
+    };
+    let Some(tip_bm) = index.commit_bitmap(&tip) else {
+        return Ok(None);
+    };
+    let Some(hide_bm) = index.commit_bitmap(&hide) else {
+        return Ok(None);
+    };
+    let mut reachable = Bitmap::new();
+    tip_bm.or_into(&mut reachable);
+    let mut hidden = Bitmap::new();
+    hide_bm.or_into(&mut hidden);
+    reachable.and_not_assign(&hidden);
+    let mut commit_type = Bitmap::new();
+    index
+        .type_bitmap(ObjectKind::Commit)
+        .expand_into_bitmap(&mut commit_type)
+        .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
+    commit_type.and_assign(&reachable);
+    Ok(Some(commit_type.count_ones()))
+}
+
 /// Count commits reachable from `tips` that are not ancestors of any `hide` tip.
 ///
 /// Traverses through commits filtered out by parent count (Git `rev-list` parent
@@ -843,10 +877,12 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     let mut cache = CommitGraphCache::new(repo);
 
     if tips.len() == 1 && hide.len() == 1 {
-        if let Some(n) =
-            try_count_on_first_parent_chain_excluding_hide(&mut cache, tips[0], hide[0], filter)?
+        let tip = tips[0];
+        let hide_tip = hide[0];
+        if tip != hide_tip
+            && try_direct_first_parent_chain_merge_base(&mut cache, tip, hide_tip)?.is_some()
         {
-            return Ok(n);
+            return Ok(0);
         }
     }
 
@@ -864,6 +900,27 @@ pub fn count_commits_reachable_excluding_ancestors_of(
             ) {
                 return Ok(n);
             }
+        }
+    }
+
+    if tips.len() == 1
+        && hide.len() == 1
+        && filter.min_parents.is_none()
+        && filter.max_parents.is_none()
+        && filter.since.is_none()
+        && filter.until.is_none()
+        && !filter.first_parent_only
+    {
+        if let Some(n) = try_count_diff_via_stored_commit_bitmaps(repo, tips[0], hide[0])? {
+            return Ok(n);
+        }
+    }
+
+    if tips.len() == 1 && hide.len() == 1 {
+        if let Some(n) =
+            try_count_on_first_parent_chain_excluding_hide(&mut cache, tips[0], hide[0], filter)?
+        {
+            return Ok(n);
         }
     }
 
@@ -898,6 +955,43 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         }
     }
     Ok(count)
+}
+
+/// Like [`first_parent_commits_with_cutoffs`] but only when every visited commit has at most
+/// one parent (linear history). Returns `None` when a merge is encountered so callers can
+/// fall back to a full-graph bounded walk.
+pub fn try_linear_chain_commits_with_cutoffs(
+    repo: &Repository,
+    tip: ObjectId,
+    limit: usize,
+    cutoffs: ReachableWalkCommitterCutoffs,
+) -> Result<Option<Vec<ObjectId>>> {
+    let mut cache = CommitGraphCache::new(repo);
+    let mut out = Vec::with_capacity(limit.min(64));
+    let mut stack = vec![tip];
+    while let Some(cur) = stack.pop() {
+        if out.len() >= limit {
+            break;
+        }
+        let parents = cache.parents_of(cur)?;
+        if parents.len() > 1 {
+            return Ok(None);
+        }
+        let time = cache.commit_time(cur)?;
+        let below_since = cutoffs.since.is_some_and(|since| time < since);
+        let above_until = cutoffs.until.is_some_and(|until| time > until);
+        if !below_since && !above_until {
+            out.push(cur);
+        }
+        if below_since {
+            stack.extend(parents);
+            continue;
+        }
+        if let Some(&parent) = parents.first() {
+            stack.push(parent);
+        }
+    }
+    Ok(Some(out))
 }
 
 /// Newest-first commits on the first-parent chain from `tip`, applying committer-date
@@ -1500,17 +1594,15 @@ fn reduce_to_best(
 
 struct CommitGraphCache<'r> {
     repo: &'r Repository,
-    parents: HashMap<ObjectId, Vec<ObjectId>>,
     closures: HashMap<ObjectId, HashSet<ObjectId>>,
     promisor_stop: std::collections::HashSet<ObjectId>,
     shallow_boundaries: HashSet<ObjectId>,
-    /// Committer timestamp (unix seconds) per visited oid, recorded alongside
-    /// parents so the date-pruned [`Self::is_ancestor`] walk needs no extra reads.
-    times: HashMap<ObjectId, i64>,
     /// Commit-graph file, when present: supplies parents + committer time without
     /// decompressing commit objects. Commits absent from it (or octopus merges)
     /// fall back to [`Self::parents_of`]'s object read.
     graph: Option<crate::commit_graph_file::CommitGraphChain>,
+    /// Monotonic pack cursor for single-pack repos (deep-history benchmarks).
+    single_pack: Option<crate::pack::SingleLocalPackReader>,
 }
 
 impl<'r> CommitGraphCache<'r> {
@@ -1538,12 +1630,35 @@ impl<'r> CommitGraphCache<'r> {
         let shallow_boundaries = load_shallow_boundaries(repo.git_dir());
         Self {
             repo,
-            parents: HashMap::new(),
             closures: HashMap::new(),
             promisor_stop,
             shallow_boundaries,
-            times: HashMap::new(),
             graph,
+            single_pack: None,
+        }
+    }
+
+    fn with_linkage<R>(
+        &self,
+        f: impl FnOnce(&mut crate::repo_caches::CommitLinkageCache) -> R,
+    ) -> R {
+        let mut guard = self
+            .repo
+            .caches()
+            .commit_linkage()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        f(&mut guard)
+    }
+
+    fn ensure_single_pack_reader(&mut self) {
+        if self.single_pack.is_some() {
+            return;
+        }
+        let objects_dir = self.repo.git_dir().join("objects");
+        if let Ok(Some(reader)) = crate::pack::SingleLocalPackReader::open_allow_loose(&objects_dir)
+        {
+            self.single_pack = Some(reader);
         }
     }
 
@@ -1568,14 +1683,16 @@ impl<'r> CommitGraphCache<'r> {
     }
 
     fn parents_of(&mut self, oid: ObjectId) -> Result<Vec<ObjectId>> {
-        if let Some(parents) = self.parents.get(&oid) {
-            return Ok(parents.clone());
+        if let Some(parents) = self.with_linkage(|link| link.parents.get(&oid).cloned()) {
+            return Ok(parents);
         }
         #[cfg(test)]
         intersect_walk_test_hooks::record_commit_parent_lookup();
         if self.promisor_stop.contains(&oid) {
-            self.parents.insert(oid, Vec::new());
-            self.times.insert(oid, 0);
+            self.with_linkage(|link| {
+                link.parents.insert(oid, Vec::new());
+                link.times.insert(oid, 0);
+            });
             return Ok(Vec::new());
         }
         if self.shallow_boundaries.contains(&oid) {
@@ -1591,18 +1708,17 @@ impl<'r> CommitGraphCache<'r> {
                 )));
             }
             let commit = parse_commit(&object.data)?;
-            self.times.insert(
-                oid,
-                crate::ident::committer_timestamp_for_until_filter(&commit.committer),
-            );
-            self.parents.insert(oid, Vec::new());
+            let time = crate::ident::committer_timestamp_for_until_filter(&commit.committer);
+            self.with_linkage(|link| {
+                link.times.insert(oid, time);
+                link.parents.insert(oid, Vec::new());
+            });
             return Ok(Vec::new());
         }
         // Fast path: parents + committer time from the commit-graph file (no
         // object decompression). Misses (not in graph / octopus) fall through.
         if let Some(graph) = &self.graph {
             if let Some((parents, ctime)) = graph.graph_commit(&oid) {
-                self.times.insert(oid, ctime);
                 let parents = if self.shallow_boundaries.contains(&oid) {
                     Vec::new()
                 } else {
@@ -1611,7 +1727,10 @@ impl<'r> CommitGraphCache<'r> {
                         .filter(|p| !self.promisor_stop.contains(p))
                         .collect()
                 };
-                self.parents.insert(oid, parents.clone());
+                self.with_linkage(|link| {
+                    link.times.insert(oid, ctime);
+                    link.parents.insert(oid, parents.clone());
+                });
                 return Ok(parents);
             }
         }
@@ -1619,17 +1738,25 @@ impl<'r> CommitGraphCache<'r> {
             Error::InvalidRef(msg) => Error::CorruptObject(msg),
             other => other,
         })?;
-        let object = self.repo.odb().read(&commit_oid)?;
-        if object.kind != ObjectKind::Commit {
-            return Err(Error::CorruptObject(format!(
-                "object {commit_oid} is not a commit"
-            )));
-        }
-        let linkage = crate::objects::parse_commit_linkage(&object.data)?;
-        self.times.insert(
-            oid,
-            crate::ident::committer_timestamp_for_until_filter(&linkage.committer),
-        );
+        self.ensure_single_pack_reader();
+        let linkage = if let Some(reader) = self.single_pack.as_mut() {
+            let object = reader.read_object(&commit_oid)?;
+            if object.kind != ObjectKind::Commit {
+                return Err(Error::CorruptObject(format!(
+                    "object {commit_oid} is not a commit"
+                )));
+            }
+            crate::objects::parse_commit_linkage(&object.data)?
+        } else {
+            let object = self.repo.odb().read(&commit_oid)?;
+            if object.kind != ObjectKind::Commit {
+                return Err(Error::CorruptObject(format!(
+                    "object {commit_oid} is not a commit"
+                )));
+            }
+            crate::objects::parse_commit_linkage(&object.data)?
+        };
+        let time = crate::ident::committer_timestamp_for_until_filter(&linkage.committer);
         let parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&commit_oid) {
             Vec::new()
         } else {
@@ -1640,7 +1767,10 @@ impl<'r> CommitGraphCache<'r> {
                 .filter(|p| !self.promisor_stop.contains(p))
                 .collect()
         };
-        self.parents.insert(oid, parents.clone());
+        self.with_linkage(|link| {
+            link.times.insert(oid, time);
+            link.parents.insert(oid, parents.clone());
+        });
         Ok(parents)
     }
 
@@ -1648,11 +1778,13 @@ impl<'r> CommitGraphCache<'r> {
     /// Populated as a side effect of [`Self::parents_of`]; missing/unreadable
     /// objects report `0` (treated as oldest, so they prune away).
     fn commit_time(&mut self, oid: ObjectId) -> Result<i64> {
-        if let Some(t) = self.times.get(&oid) {
-            return Ok(*t);
+        if let Some(t) = self.with_linkage(|link| link.times.get(&oid).copied()) {
+            return Ok(t);
         }
         self.parents_of(oid)?;
-        Ok(self.times.get(&oid).copied().unwrap_or(0))
+        Ok(self
+            .with_linkage(|link| link.times.get(&oid).copied())
+            .unwrap_or(0))
     }
 
     /// Whether `ancestor` is an ancestor of (or equal to) `descendant`.

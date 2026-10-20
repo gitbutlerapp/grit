@@ -254,6 +254,30 @@ impl<'repo> RevWalk<'repo> {
     pub fn count(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<usize> {
         let repo = self.repository();
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
+        if parsed.negative.is_empty()
+            && positive.len() == 1
+            && options.skip == 0
+            && options.limit.is_some()
+            && (options.since.is_some() || options.until.is_some())
+            && options.paths.is_empty()
+            && options.refs.is_empty()
+            && !options.reverse
+            && options.merges == MergeFilter::Any
+            && !options.first_parent
+        {
+            let tip = crate::rev_parse::resolve_revision_for_range_end(repo, &positive[0])?;
+            let tip = crate::rev_parse::peel_to_commit_for_merge_base(repo, tip)?;
+            let need = options.limit.unwrap_or(usize::MAX);
+            let cutoffs = crate::merge_base::ReachableWalkCommitterCutoffs {
+                since: options.since,
+                until: options.until,
+            };
+            if let Some(list) =
+                crate::merge_base::try_linear_chain_commits_with_cutoffs(repo, tip, need, cutoffs)?
+            {
+                return Ok(list.len());
+            }
+        }
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
         let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
         commit_count_from_result(result)

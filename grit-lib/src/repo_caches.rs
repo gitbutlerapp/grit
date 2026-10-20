@@ -31,6 +31,13 @@ use crate::precompose_config::{
 use crate::ref_storage::RefStorageFormat;
 use crate::repo::Repository;
 
+/// Parents and committer timestamps reused across rev-parse and revwalk on one handle.
+#[derive(Default)]
+pub(crate) struct CommitLinkageCache {
+    pub parents: HashMap<ObjectId, Vec<ObjectId>>,
+    pub times: HashMap<ObjectId, i64>,
+}
+
 /// Per-repository cache arena (held behind [`Arc`] on [`Repository`]).
 pub struct RepoCaches {
     config_cache: Mutex<HashMap<ConfigCacheKey, crate::config::ConfigCacheEntry>>,
@@ -45,6 +52,7 @@ pub struct RepoCaches {
     bare_worktree_warn_seen: Mutex<HashSet<String>>,
     commit_graph_warn_seen: Mutex<HashSet<String>>,
     commit_graph: Mutex<Option<Arc<CommitGraphChain>>>,
+    commit_linkage: Mutex<CommitLinkageCache>,
     bitmap_index: BitmapIndexCache,
     diagnostics: Mutex<DiagnosticsHandle>,
 }
@@ -81,6 +89,7 @@ impl RepoCaches {
             bare_worktree_warn_seen: Mutex::new(HashSet::new()),
             commit_graph_warn_seen: Mutex::new(HashSet::new()),
             commit_graph: Mutex::new(None),
+            commit_linkage: Mutex::new(CommitLinkageCache::default()),
             bitmap_index: BitmapIndexCache::default(),
             diagnostics: Mutex::new(diagnostics),
         })
@@ -89,6 +98,11 @@ impl RepoCaches {
     /// Cached [`crate::pack_bitmap::BitmapIndex`] for this repository handle.
     pub(crate) fn bitmap_index(&self) -> &BitmapIndexCache {
         &self.bitmap_index
+    }
+
+    /// Shared commit parent/timestamp cache for merge-base and revwalk.
+    pub(crate) fn commit_linkage(&self) -> &Mutex<CommitLinkageCache> {
+        &self.commit_linkage
     }
 
     /// Return the diagnostic sink for this cache arena.

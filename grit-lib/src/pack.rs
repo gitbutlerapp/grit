@@ -147,6 +147,8 @@ pub(crate) mod pack_cache {
         static THREAD_WARM_STORE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         static PACK_MONOTONIC_CURSOR: std::cell::RefCell<Option<(PathBuf, usize)>> =
             const { std::cell::RefCell::new(None) };
+        static SINGLE_PACK_READER: std::cell::RefCell<Option<(PathBuf, super::SingleLocalPackReader)>> =
+            const { std::cell::RefCell::new(None) };
     }
 
     fn store_thread_local_key(store: &crate::pack_store::PackStore) -> usize {
@@ -165,6 +167,33 @@ pub(crate) mod pack_cache {
         THREAD_WARM_STORE.set(0);
         super::clear_pack_read_info_cache();
         PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = None);
+        SINGLE_PACK_READER.with(|cell| *cell.borrow_mut() = None);
+    }
+
+    pub(crate) fn try_read_object_via_single_pack_reader(
+        objects_dir: &Path,
+        oid: &crate::objects::ObjectId,
+    ) -> Result<Option<crate::objects::Object>> {
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return Ok(None);
+        }
+        SINGLE_PACK_READER.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.as_ref().is_none_or(|(dir, _)| dir != objects_dir) {
+                *slot = super::SingleLocalPackReader::open_allow_loose(objects_dir)
+                    .ok()
+                    .flatten()
+                    .map(|reader| (objects_dir.to_path_buf(), reader));
+            }
+            let Some((_, reader)) = slot.as_mut() else {
+                return Ok(None);
+            };
+            match reader.read_object(oid) {
+                Ok(obj) => Ok(Some(obj)),
+                Err(Error::ObjectNotFound(_)) => Ok(None),
+                Err(err) => Err(err),
+            }
+        })
     }
 
     /// Drop thread-local pack caches after invalidation on this or another thread.
@@ -309,6 +338,26 @@ pub(crate) mod pack_cache {
         });
     }
 
+    pub(crate) fn find_offset_in_pack_read_context(
+        objects_dir: &Path,
+        idx: &PackIndex,
+        oid: &crate::objects::ObjectId,
+    ) -> Option<u64> {
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return idx.find_offset(oid);
+        }
+        PACK_MONOTONIC_CURSOR.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.as_ref().is_none_or(|(dir, _)| dir != objects_dir) {
+                *slot = Some((objects_dir.to_path_buf(), 0));
+            }
+            let Some((_, cursor)) = slot.as_mut() else {
+                return idx.find_offset(oid);
+            };
+            idx.find_offset_monotonic(oid, cursor)
+        })
+    }
+
     pub(crate) fn try_read_from_hinted_pack(
         objects_dir: &Path,
         oid: &crate::objects::ObjectId,
@@ -324,7 +373,7 @@ pub(crate) mod pack_cache {
         let Some(idx) = idx else {
             return Ok(None);
         };
-        let Some(offset) = idx.find_offset(oid) else {
+        let Some(offset) = find_offset_in_pack_read_context(objects_dir, &idx, oid) else {
             return Ok(None);
         };
         match super::read_object_from_pack_at_offset(&idx, offset) {
@@ -3374,12 +3423,21 @@ impl SingleLocalPackReader {
     ///
     /// Propagates pack directory read failures from index loading.
     pub fn open(objects_dir: &Path) -> Result<Option<Self>> {
+        Self::open_with_options(objects_dir, false)
+    }
+
+    /// Open when one local pack exists, optionally ignoring loose objects (commit parent walks).
+    pub fn open_allow_loose(objects_dir: &Path) -> Result<Option<Self>> {
+        Self::open_with_options(objects_dir, true)
+    }
+
+    fn open_with_options(objects_dir: &Path, allow_loose: bool) -> Result<Option<Self>> {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
             return Ok(None);
         }
         pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
         let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
-        if indexes.len() != 1 || objects_dir_has_loose_objects(objects_dir) {
+        if indexes.len() != 1 || (!allow_loose && objects_dir_has_loose_objects(objects_dir)) {
             return Ok(None);
         }
         let idx = Arc::clone(&indexes[0]);
@@ -3638,13 +3696,17 @@ pub(crate) fn try_read_object_from_packs_with_options(
     if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
         pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
     }
+    if let Some(obj) = pack_cache::try_read_object_via_single_pack_reader(objects_dir, oid)? {
+        return Ok(obj);
+    }
     if let Some(obj) = pack_cache::try_read_from_hinted_pack(objects_dir, oid)? {
         return Ok(obj);
     }
     let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
-        let Some(offset) = idx.find_offset(oid) else {
+        let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)
+        else {
             continue;
         };
         match read_object_from_pack_at_offset(idx, offset) {

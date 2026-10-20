@@ -568,6 +568,32 @@ fn left_right_counts_no_merges_match_git() {
 }
 
 #[test]
+fn since_bounded_merge_dag_count_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let base = support::commit_labeled_with_dates(wt, "base", &[], "@100 +0000", "@100 +0000");
+    let left = support::commit_labeled_with_dates(wt, "left", &[base], "@300 +0000", "@300 +0000");
+    let right =
+        support::commit_labeled_with_dates(wt, "right", &[base], "@400 +0000", "@400 +0000");
+    let merge =
+        support::commit_labeled_with_dates(wt, "merge", &[left, right], "@500 +0000", "@500 +0000");
+    git(wt, &["update-ref", "refs/heads/main", &merge.to_hex()]);
+    let repo = open_grit(wt);
+    let opts = RevWalkListOptions {
+        since: Some(200),
+        limit: Some(20),
+        ..RevWalkListOptions::default()
+    };
+    let git_n = git_rev_list_count(
+        wt,
+        &["--since=1970-01-01 00:03:20 +0000", "-n", "20", "main"],
+    );
+    let grit_n = grit_rev_list_count(&repo, &["main"], &opts);
+    assert_eq!(grit_n, git_n);
+    assert_eq!(git_n, 3);
+}
+
+#[test]
 fn since_skew_bounded_limit_match_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
