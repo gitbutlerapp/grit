@@ -7,7 +7,7 @@ Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain modul
 
 ## Selecting what to diff
 
-Porcelain and the CLI resolve user arguments into a [`DiffTarget`](rustdoc:grit_lib::diff::DiffTarget) with [`resolve_diff_arguments`](rustdoc:grit_lib::diff::resolve_diff_arguments): uncommitted changes (`WorktreeVsHead`), `--staged` (`IndexVsHead`), `--unstaged` (`WorktreeVsIndex`), `--against <ref>` (`WorktreeVsTree`), a single commit (`Commit`), or a commit range (`Trees`). Call [`Diff::files`](rustdoc:grit_lib::diff::Diff::files) with normalized pathspecs and [`DiffOptions`](rustdoc:grit_lib::diff::DiffOptions) to obtain [`FileDiff`](rustdoc:grit_lib::diff::FileDiff) rows (structured hunks plus paths, modes, and OIDs).
+Porcelain and the CLI resolve user arguments into a [`DiffTarget`](rustdoc:grit_lib::diff::DiffTarget) with [`resolve_diff_arguments`](rustdoc:grit_lib::diff::resolve_diff_arguments): uncommitted changes (`WorktreeVsHead`), `--staged` (`IndexVsHead`), `--unstaged` (`WorktreeVsIndex`), `--against <ref>` (`WorktreeVsTree`), a single commit (`Commit`), or a commit range (`Trees`). Call [`Diff::files`](rustdoc:grit_lib::diff::handle::Diff::files) with normalized pathspecs and [`DiffOptions`](rustdoc:grit_lib::diff::DiffOptions) to obtain [`FileDiff`](rustdoc:grit_lib::diff::FileDiff) rows (structured hunks plus paths, modes, and OIDs).
 
 ## Tree-to-tree
 

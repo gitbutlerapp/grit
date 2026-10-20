@@ -623,8 +623,8 @@ enum FixturesCmd {
         /// Fail when `git.git` is missing instead of cloning from GitHub
         #[arg(long)]
         offline: bool,
-        /// Restrict to these fixtures (default: all)
-        #[arg(long, value_enum)]
+        /// Restrict to these fixtures (default: all; comma-separated)
+        #[arg(long, value_delimiter = ',', value_enum)]
         only: Vec<FixtureKind>,
     },
 }
