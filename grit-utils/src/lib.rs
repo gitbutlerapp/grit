@@ -12,6 +12,7 @@ pub mod capped_run;
 pub mod chromium_synth;
 pub mod compare;
 pub mod criterion_summary;
+pub mod daily;
 pub mod fixture;
 pub mod fixture_registry;
 pub mod fsck_suite;

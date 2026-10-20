@@ -52,6 +52,132 @@ pub struct CappedRunOutcome {
     pub peak_rss_bytes: u64,
 }
 
+/// Run `program` with `args` directly (no shell) under optional timeout and peak-RSS enforcement.
+pub fn run_capped_argv_command(
+    program: &Path,
+    args: &[&str],
+    cwd: &Path,
+    timeout: Option<Duration>,
+    max_rss_bytes: Option<u64>,
+) -> Result<CappedRunOutcome> {
+    run_capped_argv_command_with(program, args, cwd, timeout, max_rss_bytes, |_| {})
+}
+
+/// Like [`run_capped_argv_command`], but allows configuring the child `Command` before spawn.
+#[cfg(unix)]
+pub fn run_capped_argv_command_with(
+    program: &Path,
+    args: &[&str],
+    cwd: &Path,
+    timeout: Option<Duration>,
+    max_rss_bytes: Option<u64>,
+    configure: impl FnOnce(&mut std::process::Command),
+) -> Result<CappedRunOutcome> {
+    use std::process::{Command, Stdio};
+    use std::thread;
+
+    let mut child_cmd = Command::new(program);
+    child_cmd
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    configure(&mut child_cmd);
+    let mut child = child_cmd
+        .spawn()
+        .with_context(|| format!("spawn capped argv command {}", program.display()))?;
+
+    let pid = child.id();
+    let start = Instant::now();
+    let mut peak_rss_bytes = 0u64;
+    let poll = Duration::from_millis(50);
+
+    loop {
+        if let Some(limit) = timeout {
+            if start.elapsed() >= limit {
+                kill_process_tree(pid);
+                let _ = child.wait();
+                peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
+                return Ok(CappedRunOutcome {
+                    termination: TerminationKind::Timeout,
+                    peak_rss_bytes,
+                });
+            }
+        }
+
+        let rss = process_tree_rss_bytes(pid)?;
+        peak_rss_bytes = peak_rss_bytes.max(rss);
+        if let Some(cap) = max_rss_bytes {
+            if rss > cap {
+                kill_process_tree(pid);
+                let _ = child.wait();
+                peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
+                return Ok(CappedRunOutcome {
+                    termination: TerminationKind::MemoryCap {
+                        peak_rss_bytes,
+                        cap_bytes: cap,
+                    },
+                    peak_rss_bytes,
+                });
+            }
+        }
+
+        match child.try_wait().context("poll capped argv command")? {
+            Some(status) => {
+                peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
+                let termination = if status.success() {
+                    TerminationKind::Success
+                } else {
+                    TerminationKind::CommandFailed {
+                        code: status.code().unwrap_or(-1),
+                    }
+                };
+                return Ok(CappedRunOutcome {
+                    termination,
+                    peak_rss_bytes,
+                });
+            }
+            None => thread::sleep(poll),
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn run_capped_argv_command_with(
+    program: &Path,
+    args: &[&str],
+    cwd: &Path,
+    _timeout: Option<Duration>,
+    _max_rss_bytes: Option<u64>,
+    configure: impl FnOnce(&mut std::process::Command),
+) -> Result<CappedRunOutcome> {
+    use std::process::{Command, Stdio};
+
+    let mut child_cmd = Command::new(program);
+    child_cmd
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    configure(&mut child_cmd);
+    let status = child_cmd
+        .status()
+        .with_context(|| format!("run capped argv command {}", program.display()))?;
+    let termination = if status.success() {
+        TerminationKind::Success
+    } else {
+        TerminationKind::CommandFailed {
+            code: status.code().unwrap_or(-1),
+        }
+    };
+    Ok(CappedRunOutcome {
+        termination,
+        peak_rss_bytes: 0,
+    })
+}
+
 /// Run `command` under `/bin/sh -c` with optional timeout and peak-RSS enforcement.
 ///
 /// When `max_rss_bytes` is `Some`, a parent polls `/proc/<pid>/status` and sends

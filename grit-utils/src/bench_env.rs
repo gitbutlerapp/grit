@@ -25,6 +25,17 @@ pub fn empty_global_config_path() -> &'static Path {
     })
 }
 
+/// Apply isolated Git/grit config and author identity to a subprocess.
+pub fn apply_isolated_env(cmd: &mut Command) {
+    cmd.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", empty_global_config_path())
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "Bench")
+        .env("GIT_AUTHOR_EMAIL", "b@example.com")
+        .env("GIT_COMMITTER_NAME", "Bench")
+        .env("GIT_COMMITTER_EMAIL", "b@example.com");
+}
+
 /// Environment prefix prepended to hyperfine benchmark shell commands.
 pub fn isolated_env_prefix() -> String {
     let global = shell_quote(&empty_global_config_path().to_string_lossy());
