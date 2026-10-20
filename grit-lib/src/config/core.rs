@@ -542,7 +542,7 @@ fn entry_line_value_has_unclosed_quote(line: &str) -> bool {
                 in_quote = !in_quote;
                 last_was_backslash = false;
             }
-            '\\' if in_quote && !last_was_backslash => {
+            '\\' if !last_was_backslash => {
                 last_was_backslash = true;
                 continue;
             }
@@ -601,23 +601,32 @@ fn value_line_continues(line: &str) -> bool {
 /// Strip an inline comment (`#` or `;`) that is not inside quotes.
 fn strip_inline_comment(s: &str) -> String {
     let mut in_quote = false;
+    let mut last_was_backslash = false;
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
-            '"' => {
+            '"' if !last_was_backslash => {
                 in_quote = !in_quote;
                 result.push(ch);
+                last_was_backslash = false;
             }
-            '\\' if in_quote => {
+            '\\' if !last_was_backslash => {
+                last_was_backslash = true;
                 result.push(ch);
-                if let Some(&next) = chars.peek() {
-                    result.push(next);
-                    chars.next();
+                if in_quote {
+                    if let Some(&next) = chars.peek() {
+                        result.push(next);
+                        chars.next();
+                        last_was_backslash = false;
+                    }
                 }
             }
-            '#' | ';' if !in_quote => break,
-            _ => result.push(ch),
+            '#' | ';' if !in_quote && !last_was_backslash => break,
+            _ => {
+                last_was_backslash = false;
+                result.push(ch);
+            }
         }
     }
     // Trim trailing whitespace that was before the comment

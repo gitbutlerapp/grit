@@ -75,6 +75,22 @@ fn t1300_whitespace_corpus_matches_git() {
 }
 
 #[test]
+fn unquoted_escaped_quotes_in_value_match_git() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("config");
+    let cases: &[(&str, &str)] = &[
+        ("[s]\n\tk = !\\\"path\\\"\n", "s.k"),
+        (
+            "[credential]\n\thelper = !\\\"D:/PortableApps/Scoop/ScoopUser/apps/git/2.56.0.2/ucrt64/bin/git-credential-manager.exe\\\"\n",
+            "credential.helper",
+        ),
+    ];
+    for (content, key) in cases {
+        assert_file_get_matches_git(&path, content, key);
+    }
+}
+
+#[test]
 fn unquoted_backslash_t_and_b_escapes_match_git() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config");
