@@ -1506,17 +1506,22 @@ mod git_xdiff {
         let mut action1 = vec![0u8; nrec1 + 1];
         let mut action2 = vec![0u8; nrec2 + 1];
 
-        let mut mlim = bogosqrt(nrec1 as i64);
-        if mlim > XDL_MAX_EQLIMIT {
-            mlim = XDL_MAX_EQLIMIT;
-        }
+        let mlim1 = if need_min {
+            i64::MAX
+        } else {
+            let mut mlim = bogosqrt(nrec1 as i64);
+            if mlim > XDL_MAX_EQLIMIT {
+                mlim = XDL_MAX_EQLIMIT;
+            }
+            mlim
+        };
         let mut idx = xdf1.dstart;
         while idx <= xdf1.dend {
             let id = ids1[idx as usize];
             let nm = *count2.get(&id).unwrap_or(&0);
             action1[idx as usize] = if nm == 0 {
                 DISCARD
-            } else if nm >= mlim {
+            } else if nm >= mlim1 {
                 INVESTIGATE
             } else {
                 KEEP
@@ -1524,17 +1529,22 @@ mod git_xdiff {
             idx += 1;
         }
 
-        let mut mlim = bogosqrt(nrec2 as i64);
-        if mlim > XDL_MAX_EQLIMIT {
-            mlim = XDL_MAX_EQLIMIT;
-        }
+        let mlim2 = if need_min {
+            i64::MAX
+        } else {
+            let mut mlim = bogosqrt(nrec2 as i64);
+            if mlim > XDL_MAX_EQLIMIT {
+                mlim = XDL_MAX_EQLIMIT;
+            }
+            mlim
+        };
         let mut idx = xdf2.dstart;
         while idx <= xdf2.dend {
             let id = ids2[idx as usize];
             let nm = *count1.get(&id).unwrap_or(&0);
             action2[idx as usize] = if nm == 0 {
                 DISCARD
-            } else if nm >= mlim {
+            } else if nm >= mlim2 {
                 INVESTIGATE
             } else {
                 KEEP
@@ -11876,12 +11886,31 @@ mod annotate_no_newline_tests {
 mod blob_diff_algorithm_smoke {
     use super::{
         anchored_unified_diff, count_changes_with_algorithm, unified_diff_histogram_hunks_only,
-        unified_diff_with_prefix_and_funcname_and_algorithm,
+        unified_diff_with_prefix_and_funcname_and_algorithm, unified_hunk_body_for_diff_options,
     };
     use similar::Algorithm;
 
     const OLD: &str = "alpha\nbeta\ngamma\n";
     const NEW: &str = "alpha\nBETA\ngamma\ndelta\n";
+
+    #[test]
+    fn t4071_minimal_u0_splits_at_repeated_anchor() {
+        use crate::diff::options::{DiffAlgorithm, DiffOptions};
+        let old = "x\nx\nx\nx\n";
+        let new = "x\nx\nx\nA\nB\nC\nD\nx\nE\nF\nG\n";
+        let opts = DiffOptions {
+            context_lines: 0,
+            algorithm: DiffAlgorithm::Minimal,
+            indent_heuristic: false,
+            ..DiffOptions::default()
+        };
+        let body = unified_hunk_body_for_diff_options(old, new, &opts);
+        assert_eq!(
+            body.matches("@@ ").count(),
+            2,
+            "minimal u0 should split at the repeated anchor line"
+        );
+    }
 
     #[test]
     fn myers_patience_histogram_minimal_emit_unified_hunks() {
