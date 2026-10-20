@@ -467,6 +467,8 @@ pub(crate) struct CheckoutApplyOptions {
     pub skip_bulk_checkout_fast_path: bool,
     /// When set, the index should match this tree after checkout (updates cache-tree root).
     pub checkout_result_tree: Option<crate::objects::ObjectId>,
+    /// Worktree-only apply: skip index mutations and intermediate index writes (merge index apply follows).
+    pub skip_index_updates: bool,
 }
 
 /// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk.
@@ -869,6 +871,7 @@ fn remove_wholesale_directories_on_disk(
     Ok(wholesale_dirs_removed)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn checkout_commit_index_update(
     repo: &Repository,
     index_mut: &mut Index,
@@ -877,7 +880,11 @@ fn checkout_commit_index_update(
     new_entries: Vec<IndexEntry>,
     bulk_index_rewrite: bool,
     checkout_result_tree: Option<crate::objects::ObjectId>,
+    skip_index_updates: bool,
 ) -> Result<()> {
+    if skip_index_updates {
+        return Ok(());
+    }
     let change_count = paths_to_remove.len() + new_entries.len();
     let pre_mtime_max = crate::index::stage0_mtime_max(&index_mut.entries);
     let new_mtime_max = crate::index::stage0_mtime_max(&new_entries);
@@ -1087,6 +1094,7 @@ fn checkout_bulk_added_tree_changes(
         new_entries,
         true,
         apply.checkout_result_tree,
+        apply.skip_index_updates,
     )?;
     progress.finish();
     Ok(())
@@ -1277,6 +1285,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         new_entries,
         true,
         apply.checkout_result_tree,
+        apply.skip_index_updates,
     )?;
     progress.finish();
     Ok(())
@@ -1293,6 +1302,7 @@ fn checkout_bulk_deleted_tree_changes(
     deleted_abs_paths: &mut Vec<PathBuf>,
     progress: &mut dyn ProgressSink,
     checkout_result_tree: Option<crate::objects::ObjectId>,
+    skip_index_updates: bool,
 ) -> Result<()> {
     let mut parallel_deleted_paths: HashSet<String> = HashSet::new();
     let mut per_file_deletes: Vec<String> = Vec::new();
@@ -1363,6 +1373,7 @@ fn checkout_bulk_deleted_tree_changes(
         Vec::new(),
         true,
         checkout_result_tree,
+        skip_index_updates,
     )?;
     progress.finish();
     Ok(())
@@ -1518,6 +1529,7 @@ fn checkout_tree_changes_with_progress(
                 &mut deleted_abs_paths,
                 progress,
                 apply.checkout_result_tree,
+                apply.skip_index_updates,
             );
         }
     }
@@ -1836,6 +1848,7 @@ fn checkout_tree_changes_with_progress(
         new_entries,
         bulk_index_rewrite,
         apply.checkout_result_tree,
+        apply.skip_index_updates,
     )?;
     progress.finish();
     Ok(())
@@ -3261,6 +3274,7 @@ mod tests {
                 wholesale_safety_precomputed: true,
                 skip_bulk_checkout_fast_path: false,
                 checkout_result_tree: None,
+                skip_index_updates: false,
             },
             None,
         )
@@ -3340,6 +3354,7 @@ mod tests {
                 wholesale_safety_precomputed: true,
                 skip_bulk_checkout_fast_path: false,
                 checkout_result_tree: None,
+                skip_index_updates: false,
             },
             None,
         )

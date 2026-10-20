@@ -12,15 +12,15 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    merge_trees_three_way, touched_paths_for_three_way_merge, TreeMergeConflictPresentation,
-    WhitespaceMergeOptions,
+    merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::revert::merge_commit_message_for_revert;
-use crate::porcelain::tree_merge_checkout::{
-    apply_clean_tree_merge_to_worktree, ensure_worktree_clean_for_touched_paths,
+use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
+use crate::porcelain::worktree_guard::{
+    ensure_worktree_clean_for_pick, ensure_worktree_clean_for_revert,
 };
 use crate::refs::{
     resolve_ref, should_autocreate_reflog_with_config, update_branch_for_commit_with_config,
@@ -113,12 +113,10 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
     let (base_tree, ours_tree, theirs_tree) =
         merge_trees_for_direction(repo, req.direction, &source, head_tree)?;
 
-    let touched = touched_paths_for_three_way_merge(repo, base_tree, ours_tree, theirs_tree)?;
-    let dirty_message = match req.direction {
-        ReplayDirection::Pick => "you have uncommitted changes — commit them before picking",
-        ReplayDirection::Revert => "you have uncommitted changes — commit them before reverting",
+    match req.direction {
+        ReplayDirection::Pick => ensure_worktree_clean_for_pick(repo)?,
+        ReplayDirection::Revert => ensure_worktree_clean_for_revert(repo)?,
     };
-    ensure_worktree_clean_for_touched_paths(repo, &head_tree, &touched, dirty_message, false)?;
 
     if req.direction == ReplayDirection::Pick && base_tree == source.tree {
         return Ok(ReplayOutcome::Empty);
