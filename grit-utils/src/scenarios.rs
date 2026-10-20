@@ -1267,7 +1267,7 @@ pub(crate) fn pick_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
     )
 }
 
-fn revert_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+pub(crate) fn revert_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
     (
         vec!["revert".into(), meta.pick_commit.clone()],
         vec![

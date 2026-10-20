@@ -2,6 +2,7 @@
 
 pub mod areas;
 pub mod helpers;
+pub mod matrix_helpers;
 pub mod plan;
 pub mod registry;
 pub mod run;
@@ -11,7 +12,10 @@ pub mod validate;
 
 pub use run::{run_daily, DailyRunOptions};
 
-pub use registry::{Area, HeadlineScenario, RepoShape, ScenarioSpec, HEADLINE_SCENARIOS};
+pub use registry::{
+    scenario_spec, Area, HeadlineScenario, RepoShape, ScenarioSpec, HEADLINE_SCENARIOS,
+    MATRIX_SCENARIOS,
+};
 pub use schema::{
     DailyBenchReport, DailyScenarioResult, DailyToolRun, DailyToolVersions, ScenarioId, SCHEMA_TAG,
 };

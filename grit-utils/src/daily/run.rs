@@ -111,6 +111,9 @@ fn select_plans(opts: &DailyRunOptions) -> Vec<DailyHeadlinePlan> {
     let mut plans = areas::all_headline_plans();
     if opts.smoke {
         plans.retain(|p| !p.pending);
+        if opts.only.is_none() && opts.area.is_none() {
+            plans.retain(|p| p.spec.headline);
+        }
     }
     if let Some(area) = opts.area {
         plans.retain(|p| p.spec.area == area);
@@ -126,6 +129,7 @@ fn prepare_argv(prepare_bin: &Path, git: &Path, prepare: &DailyPrepare) -> Optio
     match prepare {
         DailyPrepare::None => None,
         DailyPrepare::Hook(kind) => Some(prepare_bench_argv(prepare_bin, git, *kind)),
+        DailyPrepare::Shell(argv) => Some(argv.clone()),
     }
 }
 
@@ -182,7 +186,13 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
         std::env::set_var("GRIT_BENCH_CAMPAIGN_CWD", &repo);
         let git_cmd = (plan.build_git)(&headline_ctx);
         let grit_cmd = (plan.build_grit)(&headline_ctx);
-        let prepare = prepare_argv(&opts.measure_helper, &opts.git, &plan.prepare);
+        let prepare_spec = (plan.prepare)(&headline_ctx);
+        let prepare = prepare_argv(&opts.measure_helper, &opts.git, &prepare_spec);
+
+        if let Some(check) = plan.correctness {
+            check(&headline_ctx)
+                .with_context(|| format!("correctness check before timing {}", plan.spec.id))?;
+        }
 
         let outcome = run_ab_bench(&AbBenchRequest {
             cwd: &repo,

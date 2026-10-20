@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
-use grit_utils::daily::registry::HEADLINE_SCENARIOS;
+use grit_utils::daily::registry::{Area, HEADLINE_SCENARIOS, MATRIX_SCENARIOS};
 use grit_utils::fixture_registry::FixtureKind;
 use tempfile::TempDir;
 
@@ -116,6 +116,138 @@ fn smoke_report_validates() {
         assert!(row.git.peak_rss_bytes > 0, "{id} git peak rss");
         assert!(row.grit.peak_rss_bytes > 0, "{id} grit peak rss");
     }
+}
+
+const BRANCHING_MAINTENANCE_MISC_MATRIX_IDS: [&str; 28] = [
+    "switch/branch@synth-100k",
+    "branch/create@many-refs",
+    "branch/delete@many-refs",
+    "branch/list@many-refs-loose",
+    "tag/list@many-refs",
+    "tag/create@many-refs",
+    "merge/clean@synth-100k",
+    "revert/one@synth-10k",
+    "pick/one@synth-100k",
+    "history/reword@synth-10k",
+    "stash/list@synth-10k",
+    "gc/pack-refs@synth-10k",
+    "gc/default@synth-10k",
+    "repack/full@git-git",
+    "fsck/full@git-git",
+    "fsck/full@big-blobs",
+    "repack/commit-graph@git-git",
+    "config/get@small",
+    "config/set@small",
+    "ignore/check-1000@synth-10k",
+    "hooks/list@small",
+    "notes/add@synth-10k",
+    "notes/list@synth-10k",
+    "bundle/create@synth-10k",
+    "bundle/verify@synth-10k",
+    "worktree/add@synth-10k",
+    "worktree/remove@synth-10k",
+    "remote/list@small",
+];
+
+#[test]
+fn branching_maintenance_misc_smoke() {
+    let _guard = lock_e2e();
+    let git = resolve_git();
+    let grit = build_grit_executable();
+    let cache = TempDir::new().expect("cache");
+    std::env::set_var("GRIT_BENCH_CACHE", cache.path());
+    prepare_fixtures(
+        &git,
+        &[
+            FixtureKind::Synth10kSmoke,
+            FixtureKind::Synth100kSmoke,
+            FixtureKind::SmallSmoke,
+            FixtureKind::ManyRefsSmoke,
+            FixtureKind::ManyRefsLooseSmoke,
+            FixtureKind::GitGitWt,
+            FixtureKind::BigBlobsSmoke,
+        ],
+    );
+
+    for area in [
+        "branching",
+        "refs",
+        "maintenance",
+        "config",
+        "ignore",
+        "hooks",
+        "notes",
+        "bundles",
+        "worktrees",
+        "diff",
+        "remotes",
+    ] {
+        let out_path = cache.path().join(format!("daily-smoke-{area}.json"));
+        let out = run_daily_smoke(&git, &grit, &out_path, &["--area", area]);
+        assert!(
+            out.status.success(),
+            "daily --area {area} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let report = grit_utils::validate_daily_report(&out_path)
+            .unwrap_or_else(|e| panic!("validate {area}: {e}"));
+        assert!(!report.scenarios.is_empty(), "empty area {area}");
+    }
+
+    let out_path = cache.path().join("daily-matrix-branching-misc.json");
+    let mut only: Vec<String> = BRANCHING_MAINTENANCE_MISC_MATRIX_IDS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    only.sort();
+    let only_args: Vec<String> = only
+        .iter()
+        .flat_map(|id| ["--only".into(), id.clone()])
+        .collect();
+    let mut cmd = Command::new(bench_exe());
+    cmd.arg("daily")
+        .arg("--smoke")
+        .arg("--offline")
+        .arg("--output")
+        .arg(&out_path)
+        .arg("--git")
+        .arg(&git)
+        .arg("--grit")
+        .arg(&grit);
+    for arg in &only_args {
+        cmd.arg(arg);
+    }
+    let out = cmd.output().expect("spawn matrix only run");
+    assert!(
+        out.status.success(),
+        "matrix ids run failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = grit_utils::validate_daily_report(&out_path).expect("validate matrix ids");
+    assert_eq!(
+        report.scenarios.len(),
+        BRANCHING_MAINTENANCE_MISC_MATRIX_IDS.len()
+    );
+    for id in BRANCHING_MAINTENANCE_MISC_MATRIX_IDS {
+        let row = report
+            .scenarios
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("missing matrix id {id}"));
+        let spec = MATRIX_SCENARIOS
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("registry missing {id}"));
+        assert_eq!(row.area, spec.area);
+        assert!(!row.headline);
+        assert!(row.git.peak_rss_bytes > 0, "{id} git rss");
+        assert!(row.grit.peak_rss_bytes > 0, "{id} grit rss");
+    }
+    assert_eq!(
+        MATRIX_SCENARIOS.len(),
+        BRANCHING_MAINTENANCE_MISC_MATRIX_IDS.len()
+    );
+    let _ = Area::Branching;
 }
 
 #[test]

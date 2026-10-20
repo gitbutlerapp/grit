@@ -11,7 +11,7 @@ use crate::fixture_registry::{self, FixtureKind};
 use crate::hot_path_fixture::{
     setup_pick_merge_fixture, setup_switch_fixture, touch_paths_for_size, HotPathRepoSpec,
 };
-use crate::scenarios::{merge_argv, pick_argv, switch_argv};
+use crate::scenarios::{merge_argv, pick_argv, switch_argv, PrepareKind};
 use crate::worktree_fixture::{
     ensure_worktree_bench_repo, set_worktree_bench_cwd, shell_git_add_modified_set,
     shell_git_add_modified_set_and_commit, shell_grit_add_modified_set, shell_redirect_devnull,
@@ -62,7 +62,7 @@ pub fn pin_daily_scratch_root() {
     std::env::set_var("GRIT_BENCH_DAILY_ROOT", &root);
 }
 
-fn with_scratch<T, F>(label: &str, f: F) -> Result<T>
+pub(crate) fn with_scratch<T, F>(label: &str, f: F) -> Result<T>
 where
     F: FnOnce(&Path) -> Result<T>,
 {
@@ -279,16 +279,69 @@ pub fn prepare_bench_argv(
         PrepareKind::WorktreeAdd => "prepare-worktree-add",
         PrepareKind::WorktreeCommit => "prepare-worktree-commit",
         PrepareKind::WorktreeDiff => "prepare-worktree-diff",
+        PrepareKind::HistoryRewriteReset => "prepare-history-rewrite",
+        PrepareKind::RevertReset => "prepare-revert",
         _ => "prepare-worktree-status-clean",
     };
     BenchArgv::new(prepare_bin, [sub, "--git", &git.display().to_string()])
 }
 
 pub fn headline_spec(id: &str) -> &'static super::registry::HeadlineScenario {
-    super::registry::HEADLINE_SCENARIOS
-        .iter()
-        .find(|s| s.id == id)
-        .unwrap_or_else(|| panic!("unknown headline id {id}"))
+    super::registry::scenario_spec(id)
+}
+
+pub fn prepare_none(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::None
+}
+
+pub fn prepare_switch_reset(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::SwitchReset)
+}
+
+pub fn prepare_pick_reset(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::PickReset)
+}
+
+pub fn prepare_merge_reset(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::MergeReset)
+}
+
+pub fn prepare_revert_reset(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::RevertReset)
+}
+
+pub fn prepare_stash_reset(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::StashReset)
+}
+
+pub fn prepare_history_rewrite_reset(
+    _: &super::plan::DailyHeadlineContext,
+) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::HistoryRewriteReset)
+}
+
+pub fn prepare_worktree_status_clean(
+    _: &super::plan::DailyHeadlineContext,
+) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::WorktreeStatusClean)
+}
+
+pub fn prepare_worktree_status_dirty(
+    _: &super::plan::DailyHeadlineContext,
+) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::WorktreeStatusDirty)
+}
+
+pub fn prepare_worktree_add(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::WorktreeAdd)
+}
+
+pub fn prepare_worktree_commit(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::WorktreeCommit)
+}
+
+pub fn prepare_worktree_diff(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::WorktreeDiff)
 }
 
 #[cfg(test)]

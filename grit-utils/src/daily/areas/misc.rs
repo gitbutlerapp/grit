@@ -1,25 +1,137 @@
-//! Non-worktree local scenarios (diff on synth-10k).
+//! Misc matrix scenarios (config, ignore, hooks, notes, bundles, worktrees, remotes) and diff headline.
 
 use super::super::helpers::{
-    ctx, diff_worktree_bench, headline_spec, setup_registry_worktree, synth10k_kind,
+    diff_worktree_bench, headline_spec, prepare_worktree_diff, setup_registry_worktree,
+    synth10k_kind,
 };
-use super::super::plan::{DailyHeadlinePlan, DailyPrepare, DailySetup};
-use crate::scenarios::PrepareKind;
+use super::super::matrix_helpers::{
+    bundle_create_bench, bundle_verify_bench, config_get_bench, config_set_bench,
+    correctness_bundle_create, hooks_list_bench, ignore_check_bench, notes_add_bench,
+    notes_list_bench, prepare_bundle_create, prepare_bundle_verify, prepare_config_set,
+    prepare_notes_add, prepare_worktree_add, prepare_worktree_remove, remote_list_bench,
+    setup_ignore_check, setup_notes_list, setup_remote_list, setup_small, setup_synth10k_bundle,
+    setup_synth10k_linked_worktree, setup_worktree_remove, worktree_add_bench,
+    worktree_remove_bench,
+};
+use super::super::plan::{DailyHeadlinePlan, DailySetup};
 
 fn setup_synth10k(
     setup: &DailySetup<'_>,
 ) -> anyhow::Result<super::super::plan::DailyHeadlineContext> {
     let repo = setup_registry_worktree(setup, synth10k_kind(setup.smoke))?;
-    Ok(ctx(repo, setup))
+    crate::worktree_fixture::set_worktree_bench_cwd(&repo)?;
+    Ok(super::super::helpers::ctx(repo, setup))
 }
 
 pub fn plans() -> Vec<DailyHeadlinePlan> {
-    vec![DailyHeadlinePlan {
-        spec: headline_spec("diff/worktree@synth-10k"),
-        pending: false,
-        setup: setup_synth10k,
-        prepare: DailyPrepare::Hook(PrepareKind::WorktreeDiff),
-        build_git: |c| diff_worktree_bench(c).1,
-        build_grit: |c| diff_worktree_bench(c).0,
-    }]
+    vec![
+        DailyHeadlinePlan {
+            spec: headline_spec("diff/worktree@synth-10k"),
+            pending: false,
+            setup: setup_synth10k,
+            prepare: prepare_worktree_diff,
+            build_git: |c| diff_worktree_bench(c).1,
+            build_grit: |c| diff_worktree_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("config/get@small"),
+            pending: false,
+            setup: setup_small,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| config_get_bench(c).1,
+            build_grit: |c| config_get_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("config/set@small"),
+            pending: false,
+            setup: setup_small,
+            prepare: prepare_config_set,
+            build_git: |c| config_set_bench(c).1,
+            build_grit: |c| config_set_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("ignore/check-1000@synth-10k"),
+            pending: false,
+            setup: setup_ignore_check,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| ignore_check_bench(c).1,
+            build_grit: |c| ignore_check_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("hooks/list@small"),
+            pending: false,
+            setup: setup_small,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| hooks_list_bench(c).1,
+            build_grit: |c| hooks_list_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("notes/add@synth-10k"),
+            pending: false,
+            setup: setup_synth10k,
+            prepare: prepare_notes_add,
+            build_git: |c| notes_add_bench(c).1,
+            build_grit: |c| notes_add_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("notes/list@synth-10k"),
+            pending: false,
+            setup: setup_notes_list,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| notes_list_bench(c).1,
+            build_grit: |c| notes_list_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("bundle/create@synth-10k"),
+            pending: false,
+            setup: setup_synth10k_bundle,
+            prepare: prepare_bundle_create,
+            build_git: |c| bundle_create_bench(c).1,
+            build_grit: |c| bundle_create_bench(c).0,
+            correctness: Some(correctness_bundle_create),
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("bundle/verify@synth-10k"),
+            pending: false,
+            setup: setup_synth10k_bundle,
+            prepare: prepare_bundle_verify,
+            build_git: |c| bundle_verify_bench(c).1,
+            build_grit: |c| bundle_verify_bench(c).0,
+            correctness: Some(super::super::matrix_helpers::verify_bundle),
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("worktree/add@synth-10k"),
+            pending: false,
+            setup: setup_synth10k_linked_worktree,
+            prepare: prepare_worktree_add,
+            build_git: |c| worktree_add_bench(c).1,
+            build_grit: |c| worktree_add_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("worktree/remove@synth-10k"),
+            pending: false,
+            setup: setup_worktree_remove,
+            prepare: prepare_worktree_remove,
+            build_git: |c| worktree_remove_bench(c).1,
+            build_grit: |c| worktree_remove_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("remote/list@small"),
+            pending: false,
+            setup: setup_remote_list,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| remote_list_bench(c).1,
+            build_grit: |c| remote_list_bench(c).0,
+            correctness: None,
+        },
+    ]
 }

@@ -493,6 +493,16 @@ enum Cmd {
         git: PathBuf,
     },
     #[command(hide = true)]
+    PrepareDailyReset {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareDailyGcSeed {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
     PrepareParallelCheckout {
         #[arg(long)]
         git: PathBuf,
@@ -1241,6 +1251,14 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_diff(&git);
         }
+        Cmd::PrepareDailyReset { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return grit_utils::daily::matrix_helpers::run_prepare_daily_reset(&git);
+        }
+        Cmd::PrepareDailyGcSeed { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return grit_utils::daily::matrix_helpers::run_prepare_daily_gc_seed(&git);
+        }
         Cmd::PrepareParallelCheckout { git, url, dest } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_parallel_checkout(&git, url, dest.as_path());
@@ -1723,6 +1741,8 @@ fn main() -> Result<()> {
         | Cmd::PrepareWorktreeAdd { .. }
         | Cmd::PrepareWorktreeCommit { .. }
         | Cmd::PrepareWorktreeDiff { .. }
+        | Cmd::PrepareDailyReset { .. }
+        | Cmd::PrepareDailyGcSeed { .. }
         | Cmd::Render { .. }
         | Cmd::CriterionSummary { .. }
         | Cmd::PrepareParallelCheckout { .. }

@@ -26,9 +26,10 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         spec: headline_spec(id),
         pending: true,
         setup: pending_setup,
-        prepare: DailyPrepare::None,
+        prepare: |_| DailyPrepare::None,
         build_git: pending_argv,
         build_grit: pending_argv,
+        correctness: None,
     })
     .collect()
 }
