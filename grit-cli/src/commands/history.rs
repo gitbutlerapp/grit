@@ -1,6 +1,5 @@
 //! `grit history` — stateless history rewrite helpers.
 
-use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use anyhow::{bail, Context, Result};
@@ -8,6 +7,7 @@ use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
     move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
@@ -15,7 +15,6 @@ use grit_lib::revwalk::history::{
     RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
-use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -65,37 +64,6 @@ impl From<EmptyPolicyArg> for EmptyPolicy {
     }
 }
 
-fn squash_message_from_cli(
-    message: Option<String>,
-    message_file: Option<String>,
-    combine: bool,
-) -> Result<SquashMessage> {
-    if combine && (message.is_some() || message_file.is_some()) {
-        bail!("use either -m/--message, --message-file, or --combine, not more than one");
-    }
-    if combine {
-        return Ok(SquashMessage::Combine);
-    }
-    match (message, message_file) {
-        (None, None) => Ok(SquashMessage::Oldest),
-        (Some(_), Some(_)) => bail!("use either -m/--message or --message-file, not both"),
-        (Some(m), None) => Ok(SquashMessage::Custom(m)),
-        (None, Some(path)) => {
-            let raw = if path == "-" {
-                let mut buf = String::new();
-                io::stdin()
-                    .read_to_string(&mut buf)
-                    .context("could not read message from stdin")?;
-                buf
-            } else {
-                std::fs::read_to_string(&path)
-                    .with_context(|| format!("could not read message file '{path}'"))?
-            };
-            Ok(SquashMessage::Custom(raw))
-        }
-    }
-}
-
 /// Shared flags for history rewrite subcommands.
 #[derive(Debug, clap::Args)]
 pub struct HistoryRewriteArgs {
@@ -107,10 +75,10 @@ pub struct HistoryRewriteArgs {
     pub update_refs: UpdateRefs,
 }
 
-/// Result of `grit history move`.
+/// Result of `grit history drop`, `move`, `reword`, `fixup` and `squash`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct HistoryMoveOutcome {
-    /// Operation name (`move`).
+pub struct HistoryRewriteOutcome {
+    /// Operation name (`drop`, `move`, `reword`, `fixup` or `squash`).
     pub operation: String,
     /// Original and replacement commit OIDs for every rewritten commit.
     pub rewritten: Vec<RewrittenPair>,
@@ -122,19 +90,34 @@ pub struct HistoryMoveOutcome {
     pub dry_run: bool,
 }
 
-/// Result of `grit history reword`.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct HistoryRewordOutcome {
-    /// Operation name (`reword`).
-    pub operation: String,
-    /// Original and replacement commit OIDs for every rewritten commit.
-    pub rewritten: Vec<RewrittenPair>,
-    /// Planned or applied ref tip updates.
-    pub refs: Vec<RefPair>,
-    /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged.
-    pub head: Option<HeadPair>,
-    /// Whether refs were left unchanged (`true` for `--dry-run`).
-    pub dry_run: bool,
+impl HistoryRewriteOutcome {
+    fn new(operation: &str, plan: &RewritePlan, dry_run: bool) -> Self {
+        Self {
+            operation: operation.into(),
+            rewritten: plan
+                .commits
+                .iter()
+                .map(|row| RewrittenPair {
+                    old: row.old.to_hex(),
+                    new: row.new.map(|new| new.to_hex()),
+                })
+                .collect(),
+            refs: plan
+                .ref_updates
+                .iter()
+                .map(|u| RefPair {
+                    name: u.name.clone(),
+                    old: u.old.to_hex(),
+                    new: u.new.to_hex(),
+                })
+                .collect(),
+            head: plan.head_change().map(|(old, new)| HeadPair {
+                old: old.to_hex(),
+                new: new.to_hex(),
+            }),
+            dry_run,
+        }
+    }
 }
 
 /// One commit OID before and after rewrite.
@@ -166,7 +149,34 @@ pub struct HeadPair {
     pub new: String,
 }
 
-impl HumanRender for HistoryRewordOutcome {
+fn short(hex: &str) -> &str {
+    hex.get(..7).unwrap_or(hex)
+}
+
+fn render_rewrite_rows(
+    w: &mut dyn Write,
+    rewritten: &[RewrittenPair],
+    refs: &[RefPair],
+) -> Result<()> {
+    for pair in rewritten {
+        match &pair.new {
+            Some(new) => outln!(w, "  commit {} → {}", short(&pair.old), short(new)),
+            None => outln!(w, "  commit {} → (dropped)", short(&pair.old)),
+        }
+    }
+    for update in refs {
+        outln!(
+            w,
+            "  {} {} → {}",
+            update.name,
+            short(&update.old),
+            short(&update.new)
+        );
+    }
+    Ok(())
+}
+
+impl HumanRender for HistoryRewriteOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.dry_run {
             outln!(w, "Dry run — refs would change:");
@@ -184,74 +194,71 @@ impl HumanRender for HistoryRewordOutcome {
             };
             outln!(w, "{verb} {} commit(s)", self.rewritten.len());
         }
-        for pair in &self.rewritten {
-            let old_short = pair.old.get(..7).unwrap_or(&pair.old);
-            match &pair.new {
-                Some(new) => {
-                    let new_short = new.get(..7).unwrap_or(new);
-                    outln!(w, "  commit {old_short} → {new_short}");
-                }
-                None => outln!(w, "  commit {old_short} → (dropped)"),
-            }
-        }
-        for update in &self.refs {
-            let old_short = update.old.get(..7).unwrap_or(&update.old);
-            let new_short = update.new.get(..7).unwrap_or(&update.new);
-            outln!(w, "  {} {old_short} → {new_short}", update.name);
-        }
-        Ok(())
+        render_rewrite_rows(w, &self.rewritten, &self.refs)
     }
 }
 
-fn history_rewrite_markdown_title(operation: &str) -> &'static str {
-    match operation {
-        "drop" => "History drop",
-        "fixup" => "History fixup",
-        "squash" => "History squash",
-        "reword" => "History reword",
-        _ => "History rewrite",
-    }
-}
-
-impl MarkdownRender for HistoryRewordOutcome {
+impl MarkdownRender for HistoryRewriteOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_history_rewrite_outcome(
-            w,
-            history_rewrite_markdown_title(&self.operation),
-            self,
+        let title = match self.operation.as_str() {
+            "drop" => "History drop",
+            "move" => "History move",
+            "fixup" => "History fixup",
+            "squash" => "History squash",
+            "reword" => "History reword",
+            _ => "History rewrite",
+        };
+        markdown::print_history_rewrite_outcome(w, title, self)
+    }
+}
+
+/// Repository, config and rewrite options shared by every history subcommand.
+struct Rewrite {
+    repo: Repository,
+    config: ConfigSet,
+    options: RewriteOptions,
+}
+
+impl Rewrite {
+    fn new(repo: Repository, shared: &HistoryRewriteArgs) -> Result<Self> {
+        let env = repo.environment();
+        let config =
+            ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+        let committer = context::identity(
+            env,
+            &config,
+            IdentRole::Committer,
+            "GIT_COMMITTER_DATE",
+            context::wall_clock_now(env),
         )?;
-        Ok(())
-    }
-}
-
-impl HumanRender for HistoryMoveOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        HistoryRewordOutcome {
-            operation: self.operation.clone(),
-            rewritten: self.rewritten.clone(),
-            refs: self.refs.clone(),
-            head: self.head.clone(),
-            dry_run: self.dry_run,
-        }
-        .render_human(w, ctx)
-    }
-}
-
-impl MarkdownRender for HistoryMoveOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_history_rewrite_outcome(
-            w,
-            "History move",
-            &HistoryRewordOutcome {
-                operation: self.operation.clone(),
-                rewritten: self.rewritten.clone(),
-                refs: self.refs.clone(),
-                head: self.head.clone(),
-                dry_run: self.dry_run,
+        Ok(Self {
+            repo,
+            config,
+            options: RewriteOptions {
+                scope: shared.update_refs.into(),
+                empty: EmptyPolicy::Drop,
+                committer,
+                preserve_committer: false,
             },
-        )?;
-        Ok(())
+        })
     }
+
+    fn apply_options(&self, reflog_message: String) -> Result<ApplyOptions> {
+        Ok(ApplyOptions {
+            identity: context::committer_reflog_identity(self.repo.environment(), &self.config)?,
+            reflog_message,
+        })
+    }
+
+    fn subject(&self, oid: ObjectId) -> Result<String> {
+        let commit = context::read_commit(&self.repo, &oid)?;
+        Ok(context::subject_line(&commit.message))
+    }
+}
+
+fn resolve_commit(repo: &Repository, rev: &str, what: &str) -> Result<ObjectId> {
+    resolve_revision_as_commit(repo, rev)
+        .with_context(|| format!("could not resolve {what} '{rev}'"))
 }
 
 /// Reorder `commit` relative to `--before` or `--after` on the first-parent chain of `HEAD`.
@@ -260,107 +267,45 @@ pub fn run_move(
     before: Option<String>,
     after: Option<String>,
     shared: &HistoryRewriteArgs,
-) -> Result<HistoryMoveOutcome> {
-    if before.is_some() && after.is_some() {
-        bail!("use either --before or --after, not both");
-    }
-    let use_before = before.is_some();
-    let anchor = before
-        .or(after)
-        .ok_or_else(|| anyhow::anyhow!("--before or --after is required"))?;
-    let repo = context::discover()?;
-    let commit_oid = resolve_revision_as_commit(&repo, commit)
-        .with_context(|| format!("could not resolve commit '{commit}'"))?;
-    let anchor_oid = resolve_revision_as_commit(&repo, &anchor)
-        .with_context(|| format!("could not resolve anchor commit '{anchor}'"))?;
-    let placement = if use_before {
-        Placement::Before(anchor_oid)
-    } else {
-        Placement::After(anchor_oid)
+) -> Result<HistoryRewriteOutcome> {
+    let (anchor, placement): (String, fn(ObjectId) -> Placement) = match (before, after) {
+        (Some(rev), _) => (rev, Placement::Before),
+        (None, Some(rev)) => (rev, Placement::After),
+        (None, None) => bail!("--before or --after is required"),
     };
-    let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    let committer = context::identity(
-        env,
-        &config,
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        context::wall_clock_now(env),
-    )?;
+    let on_err = history_error("history move");
+    let repo = context::discover()?;
+    let commit_oid = resolve_commit(&repo, commit, "commit")?;
+    let anchor_oid = resolve_commit(&repo, &anchor, "anchor commit")?;
+    let rewrite = Rewrite::new(repo, shared)?;
     let plan = move_commit(
-        &repo,
+        &rewrite.repo,
         commit_oid,
-        placement,
-        &RewriteOptions {
-            scope: shared.update_refs.into(),
-            empty: EmptyPolicy::Drop,
-            committer,
-            preserve_committer: false,
-        },
+        placement(anchor_oid),
+        &rewrite.options,
     )
-    .map_err(map_move_error)?;
-    let short = &commit_oid.to_hex()[..7];
-    let mut outcome = move_outcome_from_plan(&repo, &plan, shared.dry_run)?;
+    .map_err(on_err)?;
     if !shared.dry_run {
-        let identity = context::committer_reflog_identity(env, &config)?;
-        apply_rewrite(
-            &repo,
-            &plan,
-            &ApplyOptions {
-                identity,
-                reflog_message: format!("history move: {short}"),
-            },
-        )
-        .map_err(map_move_error)?;
+        let message = format!("history move: {}", short(&commit_oid.to_hex()));
+        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
     }
-    outcome.dry_run = shared.dry_run;
-    Ok(outcome)
+    Ok(HistoryRewriteOutcome::new("move", &plan, shared.dry_run))
 }
 
 /// Remove `commit` from history and replay descendants onto its parent.
-pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewordOutcome> {
+pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewriteOutcome> {
+    let on_err = history_error("history drop");
     let repo = context::discover()?;
-    let commit_oid = resolve_revision_as_commit(&repo, commit)
-        .with_context(|| format!("could not resolve commit '{commit}'"))?;
-    let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    let committer = context::identity(
-        env,
-        &config,
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        context::wall_clock_now(env),
-    )?;
-    let plan = history_drop(
-        &repo,
-        commit_oid,
-        &RewriteOptions {
-            scope: shared.update_refs.into(),
-            empty: EmptyPolicy::Drop,
-            committer,
-            preserve_committer: false,
-        },
-    )
-    .map_err(map_history_error_reword)?;
-    verify_rewrite_plan(&repo, &plan).map_err(map_history_error_drop)?;
-    let subject = dropped_subject(&repo, commit_oid)?;
-    let mut outcome = drop_outcome_from_plan(&repo, &plan, shared.dry_run)?;
+    let commit_oid = resolve_commit(&repo, commit, "commit")?;
+    let rewrite = Rewrite::new(repo, shared)?;
+    let plan = history_drop(&rewrite.repo, commit_oid, &rewrite.options)
+        .map_err(history_error("history reword"))?;
+    verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
-        let identity = context::committer_reflog_identity(env, &config)?;
-        apply_rewrite(
-            &repo,
-            &plan,
-            &ApplyOptions {
-                identity,
-                reflog_message: format!("history drop: {subject}"),
-            },
-        )
-        .map_err(map_history_error_drop)?;
+        let message = format!("history drop: {}", rewrite.subject(commit_oid)?);
+        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
     }
-    outcome.dry_run = shared.dry_run;
-    Ok(outcome)
+    Ok(HistoryRewriteOutcome::new("drop", &plan, shared.dry_run))
 }
 
 /// Rewrite `commit`'s message to `message` and replay descendants.
@@ -369,50 +314,24 @@ pub fn run_reword(
     message: Option<String>,
     message_file: Option<String>,
     shared: &HistoryRewriteArgs,
-) -> Result<HistoryRewordOutcome> {
-    let message = read_message(message, message_file)?;
+) -> Result<HistoryRewriteOutcome> {
+    let Some(message) = read_message(message, message_file)? else {
+        bail!("a new message is required (-m/--message or --message-file)");
+    };
+    let on_err = history_error("history reword");
     let repo = context::discover()?;
-    let commit_oid = resolve_revision_as_commit(&repo, commit)
-        .with_context(|| format!("could not resolve commit '{commit}'"))?;
-    let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    let committer = context::identity(
-        env,
-        &config,
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        context::wall_clock_now(env),
-    )?;
-    let plan = reword(
-        &repo,
-        commit_oid,
-        message,
-        &RewriteOptions {
-            scope: shared.update_refs.into(),
-            empty: EmptyPolicy::Drop,
-            committer,
-            preserve_committer: false,
-        },
-    )
-    .map_err(map_history_error_reword)?;
-    verify_rewrite_plan(&repo, &plan).map_err(map_history_error_reword)?;
-    let subject = rewritten_subject(&repo, &plan, commit_oid)?;
-    let mut outcome = outcome_from_plan(&repo, &plan, shared.dry_run)?;
+    let commit_oid = resolve_commit(&repo, commit, "commit")?;
+    let rewrite = Rewrite::new(repo, shared)?;
+    let plan = reword(&rewrite.repo, commit_oid, message, &rewrite.options).map_err(on_err)?;
+    verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
+    let new_oid = plan
+        .replacement(commit_oid)
+        .ok_or_else(|| anyhow::anyhow!("rewritten commit missing from plan"))?;
     if !shared.dry_run {
-        let identity = context::committer_reflog_identity(env, &config)?;
-        apply_rewrite(
-            &repo,
-            &plan,
-            &ApplyOptions {
-                identity,
-                reflog_message: format!("history reword: {subject}"),
-            },
-        )
-        .map_err(map_history_error_reword)?;
+        let message = format!("history reword: {}", rewrite.subject(new_oid)?);
+        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
     }
-    outcome.dry_run = shared.dry_run;
-    Ok(outcome)
+    Ok(HistoryRewriteOutcome::new("reword", &plan, shared.dry_run))
 }
 
 /// Apply staged changes onto `commit` and replay descendants.
@@ -422,54 +341,77 @@ pub fn run_fixup(
     message_file: Option<String>,
     empty: EmptyPolicyArg,
     shared: &HistoryRewriteArgs,
-) -> Result<HistoryRewordOutcome> {
-    let message = read_optional_message(message, message_file)?;
+) -> Result<HistoryRewriteOutcome> {
+    let message = read_message(message, message_file)?;
+    let on_err = history_error("history fixup");
     let repo = context::discover()?;
-    let commit_oid = resolve_revision_as_commit(&repo, commit)
-        .with_context(|| format!("could not resolve commit '{commit}'"))?;
-    let staged_paths = staged_fixup_paths(&repo).map_err(map_history_error_fixup)?;
-    let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    let committer = context::identity(
-        env,
-        &config,
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        context::wall_clock_now(env),
-    )?;
+    let commit_oid = resolve_commit(&repo, commit, "commit")?;
+    let staged_paths = staged_fixup_paths(&repo).map_err(on_err)?;
+    let rewrite = Rewrite::new(repo, shared)?;
     let plan = fixup(
-        &repo,
+        &rewrite.repo,
         commit_oid,
         &FixupOptions {
             message,
             empty: empty.into(),
             rewrite: RewriteOptions {
-                scope: shared.update_refs.into(),
                 empty: empty.into(),
-                committer,
-                preserve_committer: false,
+                ..rewrite.options.clone()
             },
         },
     )
-    .map_err(map_history_error_fixup)?;
-    let subject = fixup_reflog_subject(&repo, &plan, commit_oid, commit)?;
-    let mut outcome = outcome_from_plan_fixup(&repo, &plan, shared.dry_run)?;
+    .map_err(on_err)?;
     if !shared.dry_run {
-        let identity = context::committer_reflog_identity(env, &config)?;
+        let subject = match plan.replacement(commit_oid) {
+            Some(new_oid) => rewrite.subject(new_oid)?,
+            None => commit.to_owned(),
+        };
         apply_fixup_rewrite(
-            &repo,
+            &rewrite.repo,
             &plan,
-            &ApplyOptions {
-                identity,
-                reflog_message: format!("history fixup: {subject}"),
-            },
+            &rewrite.apply_options(format!("history fixup: {subject}"))?,
             &staged_paths,
         )
-        .map_err(map_history_error_fixup)?;
+        .map_err(on_err)?;
     }
-    outcome.dry_run = shared.dry_run;
-    Ok(outcome)
+    Ok(HistoryRewriteOutcome::new("fixup", &plan, shared.dry_run))
+}
+
+/// Squash a revision range into the oldest commit and replay descendants.
+pub fn run_squash(
+    range: &[String],
+    message: Option<String>,
+    message_file: Option<String>,
+    combine: bool,
+    shared: &HistoryRewriteArgs,
+) -> Result<HistoryRewriteOutcome> {
+    let message = if combine {
+        SquashMessage::Combine
+    } else {
+        read_message(message, message_file)?.map_or(SquashMessage::Oldest, SquashMessage::Custom)
+    };
+    let on_err = history_error("history squash");
+    let range_refs: Vec<&str> = range.iter().map(String::as_str).collect();
+    let rewrite = Rewrite::new(context::discover()?, shared)?;
+    let plan = squash(
+        &rewrite.repo,
+        &range_refs,
+        &SquashOptions {
+            message,
+            rewrite: rewrite.options.clone(),
+        },
+    )
+    .map_err(on_err)?;
+    verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
+    if !shared.dry_run {
+        let subject = match plan.commits.first() {
+            Some(first) => rewrite.subject(first.new.unwrap_or(first.old))?,
+            None => "squash".into(),
+        };
+        let message = format!("history squash: {subject}");
+        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
+    }
+    Ok(HistoryRewriteOutcome::new("squash", &plan, shared.dry_run))
 }
 
 /// JSON/markdown assignment row for `grit history absorb`.
@@ -494,6 +436,37 @@ pub struct HunkRangeOut {
     pub new_start: usize,
     /// New side line count.
     pub new_lines: usize,
+}
+
+impl From<&HunkRange> for HunkRangeOut {
+    fn from(range: &HunkRange) -> Self {
+        Self {
+            old_start: range.old_start,
+            old_lines: range.old_lines,
+            new_start: range.new_start,
+            new_lines: range.new_lines,
+        }
+    }
+}
+
+impl From<&HunkAssignment> for AbsorbAssignmentOut {
+    fn from(row: &HunkAssignment) -> Self {
+        Self {
+            path: row.path.clone(),
+            hunk_range: (&row.hunk_range).into(),
+            commit: row.commit.to_hex(),
+        }
+    }
+}
+
+impl From<&UnassignedHunk> for UnassignedHunkOut {
+    fn from(row: &UnassignedHunk) -> Self {
+        Self {
+            path: row.path.clone(),
+            hunk_range: (&row.hunk_range).into(),
+            reason: row.reason.as_str().into(),
+        }
+    }
 }
 
 /// JSON/markdown unassigned hunk row.
@@ -543,28 +516,12 @@ impl HumanRender for HistoryAbsorbOutcome {
             );
         }
         for row in &self.assignments {
-            let short = row.commit.get(..7).unwrap_or(&row.commit);
-            outln!(w, "  {} → commit {short}", row.path);
+            outln!(w, "  {} → commit {}", row.path, short(&row.commit));
         }
         for row in &self.unassigned {
             outln!(w, "  {} stays staged ({})", row.path, row.reason);
         }
-        for pair in &self.rewritten {
-            let old_short = pair.old.get(..7).unwrap_or(&pair.old);
-            match &pair.new {
-                Some(new) => {
-                    let new_short = new.get(..7).unwrap_or(new);
-                    outln!(w, "  commit {old_short} → {new_short}");
-                }
-                None => outln!(w, "  commit {old_short} → (dropped)"),
-            }
-        }
-        for update in &self.refs {
-            let old_short = update.old.get(..7).unwrap_or(&update.old);
-            let new_short = update.new.get(..7).unwrap_or(&update.new);
-            outln!(w, "  {} {old_short} → {new_short}", update.name);
-        }
-        Ok(())
+        render_rewrite_rows(w, &self.rewritten, &self.refs)
     }
 }
 
@@ -574,389 +531,63 @@ impl MarkdownRender for HistoryAbsorbOutcome {
     }
 }
 
-/// Squash a revision range into the oldest commit and replay descendants.
-pub fn run_squash(
-    range: &[String],
-    message: Option<String>,
-    message_file: Option<String>,
-    combine: bool,
-    shared: &HistoryRewriteArgs,
-) -> Result<HistoryRewordOutcome> {
-    if range.is_empty() {
-        bail!("revision range is required");
-    }
-    let message_policy = squash_message_from_cli(message, message_file, combine)?;
-    let range_refs: Vec<&str> = range.iter().map(String::as_str).collect();
-    let repo = context::discover()?;
-    let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    let committer = context::identity(
-        env,
-        &config,
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        context::wall_clock_now(env),
-    )?;
-    let plan = squash(
-        &repo,
-        &range_refs,
-        &SquashOptions {
-            message: message_policy,
-            rewrite: RewriteOptions {
-                scope: shared.update_refs.into(),
-                empty: EmptyPolicy::Drop,
-                committer,
-                preserve_committer: false,
-            },
-        },
-    )
-    .map_err(map_history_error_squash)?;
-    verify_rewrite_plan(&repo, &plan).map_err(map_history_error_squash)?;
-    let subject = squash_reflog_subject(&repo, &plan)?;
-    let mut outcome = outcome_from_plan_squash(&repo, &plan, shared.dry_run)?;
-    if !shared.dry_run {
-        let identity = context::committer_reflog_identity(env, &config)?;
-        apply_rewrite(
-            &repo,
-            &plan,
-            &ApplyOptions {
-                identity,
-                reflog_message: format!("history squash: {subject}"),
-            },
-        )
-        .map_err(map_history_error_squash)?;
-    }
-    outcome.dry_run = shared.dry_run;
-    Ok(outcome)
-}
-
 /// Assign staged hunks into history and replay descendants once.
 pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<HistoryAbsorbOutcome> {
+    let on_err = history_error("history absorb");
     let repo = context::discover()?;
-    let base_oid = match base {
-        Some(rev) => Some(
-            resolve_revision_as_commit(&repo, rev)
-                .with_context(|| format!("could not resolve base commit '{rev}'"))?,
-        ),
-        None => None,
-    };
-    let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    let committer = context::identity(
-        env,
-        &config,
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        context::wall_clock_now(env),
-    )?;
+    let base = base
+        .map(|rev| resolve_commit(&repo, rev, "base commit"))
+        .transpose()?;
+    let rewrite = Rewrite::new(repo, shared)?;
     let absorb_plan = absorb(
-        &repo,
+        &rewrite.repo,
         &AbsorbOptions {
-            base: base_oid,
-            rewrite: RewriteOptions {
-                scope: shared.update_refs.into(),
-                empty: EmptyPolicy::Drop,
-                committer,
-                preserve_committer: false,
-            },
+            base,
+            rewrite: rewrite.options.clone(),
         },
     )
-    .map_err(map_history_error_absorb)?;
-    let mut outcome = outcome_from_absorb_plan(&repo, &absorb_plan, shared.dry_run)?;
+    .map_err(on_err)?;
     if !shared.dry_run && !absorb_plan.plan.commits.is_empty() {
-        let identity = context::committer_reflog_identity(env, &config)?;
         apply_absorb_rewrite(
-            &repo,
+            &rewrite.repo,
             &absorb_plan,
-            &ApplyOptions {
-                identity,
-                reflog_message: "history absorb".into(),
-            },
+            &rewrite.apply_options("history absorb".into())?,
         )
-        .map_err(map_history_error_absorb)?;
+        .map_err(on_err)?;
     }
-    outcome.dry_run = shared.dry_run;
-    Ok(outcome)
-}
-
-fn outcome_from_absorb_plan(
-    repo: &grit_lib::repo::Repository,
-    plan: &grit_lib::revwalk::history::AbsorbPlan,
-    dry_run: bool,
-) -> Result<HistoryAbsorbOutcome> {
-    let base = outcome_from_plan(repo, &plan.plan, dry_run)?;
+    let summary = HistoryRewriteOutcome::new("absorb", &absorb_plan.plan, shared.dry_run);
     Ok(HistoryAbsorbOutcome {
-        operation: "absorb".into(),
-        assignments: plan.assignments.iter().map(map_assignment_out).collect(),
-        unassigned: plan.unassigned.iter().map(map_unassigned_out).collect(),
-        rewritten: base.rewritten,
-        refs: base.refs,
-        head: base.head,
-        dry_run: base.dry_run,
+        operation: summary.operation,
+        assignments: absorb_plan.assignments.iter().map(Into::into).collect(),
+        unassigned: absorb_plan.unassigned.iter().map(Into::into).collect(),
+        rewritten: summary.rewritten,
+        refs: summary.refs,
+        head: summary.head,
+        dry_run: summary.dry_run,
     })
 }
 
-fn map_assignment_out(row: &HunkAssignment) -> AbsorbAssignmentOut {
-    AbsorbAssignmentOut {
-        path: row.path.clone(),
-        hunk_range: map_hunk_range(&row.hunk_range),
-        commit: row.commit.to_hex(),
-    }
-}
-
-fn map_unassigned_out(row: &UnassignedHunk) -> UnassignedHunkOut {
-    UnassignedHunkOut {
-        path: row.path.clone(),
-        hunk_range: map_hunk_range(&row.hunk_range),
-        reason: row.reason.as_str().into(),
-    }
-}
-
-fn map_hunk_range(range: &HunkRange) -> HunkRangeOut {
-    HunkRangeOut {
-        old_start: range.old_start,
-        old_lines: range.old_lines,
-        new_start: range.new_start,
-        new_lines: range.new_lines,
-    }
-}
-
-fn map_history_error_absorb(err: HistoryError) -> anyhow::Error {
-    map_history_error(err, "history absorb")
-}
-
-fn read_optional_message(
-    message: Option<String>,
-    message_file: Option<String>,
-) -> Result<Option<String>> {
+/// Message from `-m` or `--message-file` (`-` reads stdin); clap rejects passing both.
+fn read_message(message: Option<String>, message_file: Option<String>) -> Result<Option<String>> {
     match (message, message_file) {
-        (Some(_), Some(_)) => bail!("use either -m/--message or --message-file, not both"),
+        (Some(message), _) => Ok(Some(message)),
         (None, None) => Ok(None),
-        (Some(m), None) => Ok(Some(m)),
-        (None, Some(path)) => {
-            if path == "-" {
-                let mut buf = String::new();
-                io::stdin()
-                    .read_to_string(&mut buf)
-                    .context("could not read message from stdin")?;
-                Ok(Some(buf))
-            } else {
-                Ok(Some(std::fs::read_to_string(&path).with_context(|| {
-                    format!("could not read message file '{path}'")
-                })?))
-            }
+        (None, Some(path)) if path == "-" => {
+            let mut buf = String::new();
+            io::stdin()
+                .read_to_string(&mut buf)
+                .context("could not read message from stdin")?;
+            Ok(Some(buf))
         }
+        (None, Some(path)) => std::fs::read_to_string(&path)
+            .map(Some)
+            .with_context(|| format!("could not read message file '{path}'")),
     }
 }
 
-fn fixup_reflog_subject(
-    repo: &grit_lib::repo::Repository,
-    plan: &RewritePlan,
-    target: ObjectId,
-    rev: &str,
-) -> Result<String> {
-    if let Some(row) = plan.commits.iter().find(|r| r.old == target) {
-        if let Some(new) = row.new {
-            let commit = context::read_commit(repo, &new)?;
-            return Ok(context::subject_line(&commit.message));
-        }
-    }
-    Ok(rev.to_owned())
-}
-
-fn outcome_from_plan_fixup(
-    repo: &grit_lib::repo::Repository,
-    plan: &RewritePlan,
-    dry_run: bool,
-) -> Result<HistoryRewordOutcome> {
-    let mut outcome = outcome_from_plan(repo, plan, dry_run)?;
-    outcome.operation = "fixup".into();
-    Ok(outcome)
-}
-
-fn outcome_from_plan_squash(
-    repo: &grit_lib::repo::Repository,
-    plan: &RewritePlan,
-    dry_run: bool,
-) -> Result<HistoryRewordOutcome> {
-    let mut outcome = outcome_from_plan(repo, plan, dry_run)?;
-    outcome.operation = "squash".into();
-    Ok(outcome)
-}
-
-fn squash_reflog_subject(repo: &grit_lib::repo::Repository, plan: &RewritePlan) -> Result<String> {
-    let Some(first) = plan.commits.first() else {
-        return Ok("squash".into());
-    };
-    if let Some(new) = first.new {
-        let commit = context::read_commit(repo, &new)?;
-        return Ok(context::subject_line(&commit.message));
-    }
-    let commit = context::read_commit(repo, &first.old)?;
-    Ok(context::subject_line(&commit.message))
-}
-
-fn read_message(message: Option<String>, message_file: Option<String>) -> Result<String> {
-    match (message, message_file) {
-        (Some(_), Some(_)) => bail!("use either -m/--message or --message-file, not both"),
-        (None, None) => bail!("a new message is required (-m/--message or --message-file)"),
-        (Some(m), None) => Ok(m),
-        (None, Some(path)) => {
-            if path == "-" {
-                let mut buf = String::new();
-                io::stdin()
-                    .read_to_string(&mut buf)
-                    .context("could not read message from stdin")?;
-                Ok(buf)
-            } else {
-                std::fs::read_to_string(&path)
-                    .with_context(|| format!("could not read message file '{path}'"))
-            }
-        }
-    }
-}
-
-fn dropped_subject(repo: &grit_lib::repo::Repository, dropped: ObjectId) -> Result<String> {
-    let commit = context::read_commit(repo, &dropped)?;
-    Ok(context::subject_line(&commit.message))
-}
-
-fn drop_outcome_from_plan(
-    repo: &grit_lib::repo::Repository,
-    plan: &RewritePlan,
-    dry_run: bool,
-) -> Result<HistoryRewordOutcome> {
-    Ok(HistoryRewordOutcome {
-        operation: "drop".into(),
-        rewritten: rewritten_pairs(plan),
-        refs: ref_pairs(plan),
-        head: head_pair(repo, plan)?,
-        dry_run,
-    })
-}
-
-fn rewritten_subject(
-    repo: &grit_lib::repo::Repository,
-    plan: &RewritePlan,
-    target: ObjectId,
-) -> Result<String> {
-    let new_oid = plan
-        .commits
-        .iter()
-        .find(|r| r.old == target)
-        .and_then(|r| r.new)
-        .ok_or_else(|| anyhow::anyhow!("rewritten commit missing from plan"))?;
-    let commit = context::read_commit(repo, &new_oid)?;
-    Ok(context::subject_line(&commit.message))
-}
-
-fn move_outcome_from_plan(
-    repo: &grit_lib::repo::Repository,
-    plan: &RewritePlan,
-    dry_run: bool,
-) -> Result<HistoryMoveOutcome> {
-    let head = head_pair(repo, plan)?;
-    Ok(HistoryMoveOutcome {
-        operation: "move".into(),
-        rewritten: rewritten_pairs(plan),
-        refs: ref_pairs(plan),
-        head,
-        dry_run,
-    })
-}
-
-fn outcome_from_plan(
-    repo: &grit_lib::repo::Repository,
-    plan: &RewritePlan,
-    dry_run: bool,
-) -> Result<HistoryRewordOutcome> {
-    Ok(HistoryRewordOutcome {
-        operation: "reword".into(),
-        rewritten: rewritten_pairs(plan),
-        refs: ref_pairs(plan),
-        head: head_pair(repo, plan)?,
-        dry_run,
-    })
-}
-
-fn rewritten_pairs(plan: &RewritePlan) -> Vec<RewrittenPair> {
-    plan.commits
-        .iter()
-        .map(|row| RewrittenPair {
-            old: row.old.to_hex(),
-            new: row.new.map(|new| new.to_hex()),
-        })
-        .collect()
-}
-
-fn ref_pairs(plan: &RewritePlan) -> Vec<RefPair> {
-    plan.ref_updates
-        .iter()
-        .map(|u| RefPair {
-            name: u.name.clone(),
-            old: u.old.to_hex(),
-            new: u.new.to_hex(),
-        })
-        .collect()
-}
-
-fn head_pair(repo: &grit_lib::repo::Repository, plan: &RewritePlan) -> Result<Option<HeadPair>> {
-    if !plan.head.commit_changes {
-        return Ok(None);
-    }
-    let old_oid = plan.head.old_commit.or_else(|| head_commit_oid(repo).ok());
-    let Some(old_oid) = old_oid else {
-        return Ok(None);
-    };
-    let new_oid = plan
-        .ref_updates
-        .iter()
-        .find(|u| u.old == old_oid)
-        .map(|u| u.new)
-        .or_else(|| {
-            let mapping: HashMap<ObjectId, ObjectId> = plan
-                .commits
-                .iter()
-                .filter_map(|r| r.new.map(|n| (r.old, n)))
-                .collect();
-            mapping.get(&old_oid).copied()
-        })
-        .unwrap_or(old_oid);
-    Ok(Some(HeadPair {
-        old: old_oid.to_hex(),
-        new: new_oid.to_hex(),
-    }))
-}
-
-fn head_commit_oid(repo: &grit_lib::repo::Repository) -> Result<ObjectId> {
-    match resolve_head(repo.git_dir())? {
-        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
-        HeadState::Branch { oid: None, .. } | HeadState::Invalid => {
-            bail!("HEAD does not point at a commit")
-        }
-    }
-}
-
-fn map_move_error(err: HistoryError) -> anyhow::Error {
-    map_history_error(err, "history move")
-}
-
-fn map_history_error_drop(err: HistoryError) -> anyhow::Error {
-    map_history_error(err, "history drop")
-}
-
-fn map_history_error_reword(err: HistoryError) -> anyhow::Error {
-    map_history_error(err, "history reword")
-}
-
-fn map_history_error_fixup(err: HistoryError) -> anyhow::Error {
-    map_history_error(err, "history fixup")
-}
-
-fn map_history_error_squash(err: HistoryError) -> anyhow::Error {
-    map_history_error(err, "history squash")
+/// Error mapper for `operation` (for example `history drop`), for use with `map_err`.
+fn history_error(operation: &'static str) -> impl Fn(HistoryError) -> anyhow::Error + Copy {
+    move |err| map_history_error(err, operation)
 }
 
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {

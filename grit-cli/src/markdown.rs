@@ -8,7 +8,9 @@ use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{file_diff_status_label, FileDiff, Hunk, Line, LineKind, Segment};
-use crate::commands::history::{HistoryAbsorbOutcome, HistoryRewordOutcome};
+use crate::commands::history::{
+    HeadPair, HistoryAbsorbOutcome, HistoryRewriteOutcome, RefPair, RewrittenPair,
+};
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
 use crate::commands::revert::RevertOutcome;
@@ -502,25 +504,27 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
     Ok(())
 }
 
-/// Result of `grit history reword` or `grit history move`.
+/// Result of `grit history drop`, `move`, `reword`, `fixup` or `squash`.
 pub fn print_history_rewrite_outcome(
     w: &mut dyn Write,
     title: &str,
-    outcome: &HistoryRewordOutcome,
+    outcome: &HistoryRewriteOutcome,
 ) -> anyhow::Result<()> {
     outln!(w, "## {title}");
     outln!(w);
     if outcome.dry_run {
         outln!(w, "- Dry run (refs unchanged)");
     }
-    print_history_rewrite_outcome_body(w, outcome)
+    print_history_rewrite_rows(w, &outcome.rewritten, &outcome.refs, outcome.head.as_ref())
 }
 
-fn print_history_rewrite_outcome_body(
+fn print_history_rewrite_rows(
     w: &mut dyn Write,
-    outcome: &HistoryRewordOutcome,
+    rewritten: &[RewrittenPair],
+    refs: &[RefPair],
+    head: Option<&HeadPair>,
 ) -> anyhow::Result<()> {
-    for pair in &outcome.rewritten {
+    for pair in rewritten {
         match &pair.new {
             Some(new) => outln!(
                 w,
@@ -531,7 +535,7 @@ fn print_history_rewrite_outcome_body(
             None => outln!(w, "- commit `{}` → (dropped)", short_hex(&pair.old)),
         }
     }
-    for update in &outcome.refs {
+    for update in refs {
         outln!(
             w,
             "- `{}` `{}` → `{}`",
@@ -540,7 +544,7 @@ fn print_history_rewrite_outcome_body(
             short_hex(&update.new)
         );
     }
-    if let Some(head) = &outcome.head {
+    if let Some(head) = head {
         outln!(
             w,
             "- HEAD `{}` → `{}`",
@@ -573,16 +577,7 @@ pub fn print_history_absorb_outcome(
     for row in &outcome.unassigned {
         outln!(w, "- unassigned `{}` ({})", row.path, row.reason);
     }
-    print_history_rewrite_outcome_body(
-        w,
-        &HistoryRewordOutcome {
-            operation: outcome.operation.clone(),
-            rewritten: outcome.rewritten.clone(),
-            refs: outcome.refs.clone(),
-            head: outcome.head.clone(),
-            dry_run: outcome.dry_run,
-        },
-    )
+    print_history_rewrite_rows(w, &outcome.rewritten, &outcome.refs, outcome.head.as_ref())
 }
 
 /// Result of `grit switch`.
