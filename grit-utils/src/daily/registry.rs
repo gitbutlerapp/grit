@@ -40,7 +40,7 @@ impl RepoShape {
 }
 
 /// Functional area label for matrix grouping and `--area` filters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum Area {
     Odb,

@@ -118,6 +118,9 @@ pub struct DailyScenarioResult {
     pub baseline_grit: Option<DailyToolRun>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_grit_ratio: Option<f64>,
+    /// Remote or not-yet-implemented scenario (no timing fields required).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pending: bool,
 }
 
 /// Full daily census report (`grit-daily-bench/1`).
@@ -191,6 +194,7 @@ mod tests {
                 ratio: 13.0 / 8.0,
                 baseline_grit: None,
                 baseline_grit_ratio: None,
+                pending: false,
             }],
         }
     }

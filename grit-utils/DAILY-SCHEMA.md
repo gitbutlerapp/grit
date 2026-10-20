@@ -48,6 +48,7 @@ export interface DailyScenarioResult {
   ratio: number; // grit.median_wall_ms / git.median_wall_ms
   baseline_grit?: DailyToolRun;
   baseline_grit_ratio?: number;
+  pending?: boolean;
 }
 
 export interface DailyToolRun {

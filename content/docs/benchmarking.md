@@ -83,3 +83,24 @@ cargo build --release -p grit-cli -p grit-http-server -p grit-utils
 ```
 
 See also [Benchmarks](benchmarks.md) for committed baselines and acceptance ratios.
+
+## `grit-bench daily` (factory census)
+
+Headline scenarios compare **`grit`** and system **`git`** with the direct-spawn runner (wall time + peak RSS per run). Reports use the [`grit-daily-bench/1`](../grit-utils/DAILY-SCHEMA.md) schema (distinct from hyperfine v1).
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench fixtures prepare --only synth-10k-smoke,many-refs-smoke,git-git-wt
+./target/release/grit-bench daily run --smoke --offline --output target/bench/daily-smoke.json
+./target/release/grit-bench daily validate target/bench/daily-smoke.json
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--smoke` | Smoke fixtures, **0** warmups, **1** timed run per tool |
+| `--only id,...` | Run a subset of scenario ids |
+| `--area <area>` | Filter by functional area (`worktree`, `branching`, `remotes`, …) |
+| `--baseline-grit <path>` | Also time a second grit binary on headline rows |
+| `--offline` | Do not clone `git.git` (fixtures must already be cached) |
+
+The **13 local headline** ids run end-to-end today; the four **remote** headlines (`fetch`, `pull`, `push`, `clone`) are emitted as **`pending`** on full (non-smoke) runs until the remote matrix lands. CI job **`bench-daily-smoke`** runs the smoke command above; timings are not gated.
