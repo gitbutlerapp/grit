@@ -2333,6 +2333,17 @@ impl Index {
         self.merge_replacements_into_sorted_index(replacements);
     }
 
+    /// Append sorted `replacements` to a sorted index and merge in one linear pass.
+    fn merge_sorted_replacements_into_entries(&mut self, mut replacements: Vec<IndexEntry>) {
+        if replacements.is_empty() {
+            return;
+        }
+        self.entries.reserve(replacements.len());
+        let mid = self.entries.len();
+        self.entries.append(&mut replacements);
+        merge_sorted_index_adjacent_halves(&mut self.entries, mid);
+    }
+
     /// Merge sorted `replacements` into a sorted index in one linear pass.
     fn merge_replacements_into_sorted_index(&mut self, replacements: Vec<IndexEntry>) {
         if replacements.is_empty() {
@@ -2350,9 +2361,7 @@ impl Index {
             .filter(|e| e.stage() == 0)
             .map(|e| e.path.clone())
             .collect();
-        let kept = std::mem::take(&mut self.entries);
-        self.entries = merge_sorted_index_entries(kept, replacements);
-        self.entries_sorted = true;
+        self.merge_sorted_replacements_into_entries(replacements);
         if self.defer_untracked_cache_invalidation {
             // Campaign-scale tracked restage: merge in bulk but keep UNTR and invalidate only
             // touched cache-tree paths (issue #1184).
@@ -3005,42 +3014,70 @@ fn dedup_sorted_replacement_entries(replacements: &mut Vec<IndexEntry>) {
     *replacements = out;
 }
 
-fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) -> Vec<IndexEntry> {
-    let mut kept = kept.into_iter().peekable();
-    let mut insert = insert.into_iter().peekable();
-    let mut out = Vec::with_capacity(kept.size_hint().0.saturating_add(insert.size_hint().0));
-    loop {
-        match (kept.peek(), insert.peek()) {
-            (None, None) => break,
-            (Some(_), None) => {
-                out.extend(kept);
-                break;
+fn index_entry_path_stage_cmp(a: &IndexEntry, b: &IndexEntry) -> std::cmp::Ordering {
+    a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage()))
+}
+
+/// Merge sorted `insert` into sorted `kept` without holding a third full-length copy at peak.
+///
+/// `insert` is appended to `kept` and consumed, then two deques merge back into `kept` by move.
+fn merge_sorted_index_entries(
+    mut kept: Vec<IndexEntry>,
+    mut insert: Vec<IndexEntry>,
+) -> Vec<IndexEntry> {
+    if insert.is_empty() {
+        return kept;
+    }
+    if kept.is_empty() {
+        return insert;
+    }
+    kept.reserve(insert.len());
+    let mid = kept.len();
+    kept.append(&mut insert);
+    merge_sorted_index_adjacent_halves(&mut kept, mid);
+    kept
+}
+
+fn merge_sorted_index_adjacent_halves(v: &mut Vec<IndexEntry>, mid: usize) {
+    use std::collections::VecDeque;
+
+    let right_len = v.len().saturating_sub(mid);
+    if mid == 0 || right_len == 0 {
+        return;
+    }
+
+    let mut left: VecDeque<IndexEntry> = v.drain(..mid).collect();
+    let mut right: VecDeque<IndexEntry> = v.drain(..).collect();
+    debug_assert!(v.is_empty());
+
+    v.reserve(mid + right_len);
+    while let (Some(l), Some(r)) = (left.front(), right.front()) {
+        match index_entry_path_stage_cmp(l, r) {
+            std::cmp::Ordering::Less => {
+                if let Some(entry) = left.pop_front() {
+                    v.push(entry);
+                }
             }
-            (None, Some(_)) => {
-                out.extend(insert);
-                break;
+            std::cmp::Ordering::Equal => {
+                let Some(mut entry) = right.pop_front() else {
+                    break;
+                };
+                let Some(old) = left.pop_front() else {
+                    v.push(entry);
+                    break;
+                };
+                entry.base_index_pos = old.base_index_pos;
+                v.push(entry);
             }
-            (Some(k), Some(i)) => {
-                let ord = (&k.path, k.stage()).cmp(&(&i.path, i.stage()));
-                if ord == std::cmp::Ordering::Less {
-                    if let Some(entry) = kept.next() {
-                        out.push(entry);
-                    }
-                } else if ord == std::cmp::Ordering::Equal {
-                    let old = kept.next();
-                    if let Some(mut entry) = insert.next() {
-                        if let Some(old) = old {
-                            entry.base_index_pos = old.base_index_pos;
-                        }
-                        out.push(entry);
-                    }
-                } else if let Some(entry) = insert.next() {
-                    out.push(entry);
+            std::cmp::Ordering::Greater => {
+                if let Some(entry) = right.pop_front() {
+                    v.push(entry);
                 }
             }
         }
     }
-    out
+    v.extend(left);
+    v.extend(right);
 }
 
 fn prefix_under_or_equal(prefix: &[u8], path: &[u8]) -> bool {

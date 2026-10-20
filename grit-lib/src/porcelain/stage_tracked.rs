@@ -373,7 +373,7 @@ fn stage_tracked_modifications_in_index_body(
                     path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
                 }
         },
-        |_entry_index, rel_path, lookup| {
+        |entry_index, rel_path, lookup| {
             let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
                 return Ok(());
             };
@@ -412,7 +412,7 @@ fn stage_tracked_modifications_in_index_body(
                         rules,
                     };
                     let defer = parallel_restage.then_some(&mut deferred_restage);
-                    if refresh_present_tracked_path(ctx, &meta, defer)? {
+                    if refresh_present_tracked_path(ctx, &meta, defer, entry_index)? {
                         summary.modified.push(raw_path);
                     }
                 }
@@ -422,12 +422,19 @@ fn stage_tracked_modifications_in_index_body(
     )?;
 
     if !deferred_restage.is_empty() {
+        let restage_ctx = DeferredRestageContext {
+            work_tree,
+            paths_by_entry_index: &paths_by_entry_index,
+            precompose_unicode,
+            ignorecase,
+        };
         summary.modified.extend(restage_deferred_jobs(
             repo,
             index,
             rules,
             trust_filemode,
             parallelism,
+            restage_ctx,
             &deferred_restage,
         )?);
     }
@@ -552,7 +559,7 @@ fn stage_tracked_path_individual(
                 trust_filemode,
                 rules,
             };
-            if refresh_present_tracked_path(ctx, &meta, None)? {
+            if refresh_present_tracked_path(ctx, &meta, None, 0)? {
                 summary.modified.push(raw_path.to_vec());
             }
         }
@@ -566,17 +573,23 @@ fn stage_tracked_path_individual(
     Ok(())
 }
 
+/// Deferred blob restage: index slot from the pre-scan path table (stable across removals).
 struct DeferredRestageJob {
-    raw_path: Vec<u8>,
-    abs_path: PathBuf,
-    /// Worktree metadata from the directory stat scan (avoids a second `stat` during restage).
-    meta: fs::Metadata,
+    entry_index: u32,
+}
+
+struct DeferredRestageContext<'a> {
+    work_tree: &'a Path,
+    paths_by_entry_index: &'a [&'a str],
+    precompose_unicode: bool,
+    ignorecase: bool,
 }
 
 fn refresh_present_tracked_path(
     ctx: PresentRefreshCtx<'_>,
     meta: &fs::Metadata,
     defer_restage: Option<&mut Vec<DeferredRestageJob>>,
+    entry_index: usize,
 ) -> Result<bool> {
     let PresentRefreshCtx {
         repo,
@@ -632,9 +645,8 @@ fn refresh_present_tracked_path(
         Ok(rel_path) => {
             if let Some(deferred) = defer_restage {
                 deferred.push(DeferredRestageJob {
-                    raw_path: raw_path.to_vec(),
-                    abs_path: abs_path.to_path_buf(),
-                    meta: meta.clone(),
+                    entry_index: u32::try_from(entry_index)
+                        .map_err(|_| Error::Message("index entry index exceeds u32::MAX".into()))?,
                 });
                 return Ok(false);
             }
@@ -679,21 +691,36 @@ fn restage_deferred_jobs(
     rules: &mut WorktreeRules,
     trust_filemode: bool,
     parallelism: Parallelism,
+    ctx: DeferredRestageContext<'_>,
     jobs: &[DeferredRestageJob],
 ) -> Result<Vec<Vec<u8>>> {
+    let DeferredRestageContext {
+        work_tree,
+        paths_by_entry_index,
+        precompose_unicode,
+        ignorecase,
+    } = ctx;
     let mut batch_inputs = Vec::with_capacity(jobs.len());
     for job in jobs {
-        let Some(idx_e) = index.get(&job.raw_path, 0) else {
+        let entry_index = job.entry_index as usize;
+        let Some(rel_path) = paths_by_entry_index.get(entry_index).copied() else {
             continue;
         };
-        let rel_path = std::str::from_utf8(&job.raw_path)
-            .map_err(|_| Error::Message("deferred restage requires utf-8 index paths".into()))?;
+        if rel_path.is_empty() {
+            continue;
+        }
+        let raw_path = rel_path.as_bytes();
+        let Some(idx_e) = index.get(raw_path, 0) else {
+            continue;
+        };
+        let abs_path =
+            abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
         batch_inputs.push(WorktreeBlobReadInput {
-            abs: job.abs_path.clone(),
+            abs: abs_path,
             index_relpath: rel_path.to_owned(),
             index_entry: Some(idx_e.clone()),
             file_attrs: rules.file_attrs(rel_path, false),
-            cached_meta: Some(job.meta.clone()),
+            cached_meta: None,
         });
     }
     if !batch_inputs.is_empty() {
@@ -711,21 +738,25 @@ fn restage_deferred_jobs(
     let mut replacements = Vec::new();
     let mut modified = Vec::new();
     for (job, prep) in jobs.iter().zip(prepared.iter()) {
-        let Some(idx_e) = index.get(&job.raw_path, 0) else {
+        let entry_index = job.entry_index as usize;
+        let Some(rel_path) = paths_by_entry_index.get(entry_index).copied() else {
             continue;
         };
-        debug_assert_eq!(
-            std::str::from_utf8(&job.raw_path).ok(),
-            Some(prep.index_relpath.as_str())
-        );
+        let raw_path = rel_path.as_bytes();
+        let Some(idx_e) = index.get(raw_path, 0) else {
+            continue;
+        };
+        debug_assert_eq!(Some(rel_path), Some(prep.index_relpath.as_str()));
         let idx_mode = idx_e.mode;
         let idx_oid = idx_e.oid;
         let mode_for_index = if trust_filemode { prep.mode } else { idx_mode };
         if prep.oid == idx_oid && (mode_for_index == idx_mode || !trust_filemode) {
             continue;
         }
-        let entry = entry_from_stat(&job.abs_path, &job.raw_path, prep.oid, mode_for_index)?;
-        modified.push(job.raw_path.clone());
+        let abs_path =
+            abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
+        let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
+        modified.push(raw_path.to_vec());
         replacements.push(entry);
     }
     if !replacements.is_empty() {
