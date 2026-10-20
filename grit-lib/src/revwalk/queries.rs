@@ -431,7 +431,6 @@ impl<'repo> RevWalk<'repo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repo::{InitOptions, Repository};
 
     #[test]
     fn split_double_dot_token_without_repo() {

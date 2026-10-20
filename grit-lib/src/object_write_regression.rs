@@ -5,7 +5,6 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
 
 use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;

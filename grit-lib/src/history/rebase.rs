@@ -181,12 +181,9 @@ fn library_err(err: crate::error::Error) -> HistoryError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::environment::RepositoryOptions;
-    use crate::history::types::{EmptyPolicy, RefScope};
     use crate::index::write_tree::write_tree_from_index;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
-    use crate::refs::write_ref;
 
     fn ident(n: i64) -> String {
         format!("T <t@grit.test> {n} +0000")

@@ -1479,7 +1479,6 @@ mod inject_and_apply_tests {
     use std::ops::ControlFlow;
     use std::sync::Arc;
 
-    use crate::config::environment::RepositoryOptions;
     use crate::history::{
         plan_rewrite, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
     };
@@ -1488,7 +1487,7 @@ mod inject_and_apply_tests {
     use crate::refs::store::{
         MemoryRefStore, PreparedRefTransaction, RawRef, RefStore, RefStoreError, RefTransaction,
     };
-    use crate::repo::{init_repository, Repository};
+    use crate::repo::init_repository;
     use crate::RefStorageFormat;
 
     use super::*;
@@ -1564,7 +1563,7 @@ mod inject_and_apply_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
-        let empty = repo.odb().write(ObjectKind::Tree, &[]).expect("tree");
+        repo.odb().write(ObjectKind::Tree, &[]).expect("tree");
         let blob = repo.odb().write(ObjectKind::Blob, b"file\n").expect("blob");
         let mut index = crate::index::Index::new();
         index.hash_algo = repo.odb().hash_algo();

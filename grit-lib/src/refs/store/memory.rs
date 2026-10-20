@@ -240,7 +240,6 @@ impl Drop for MemoryPrepared<'_> {
 mod tests {
     use super::*;
     use crate::objects::ObjectId;
-    use crate::refs::store::RefTransaction;
 
     fn oid(byte: u8) -> ObjectId {
         let mut bytes = [0u8; 20];

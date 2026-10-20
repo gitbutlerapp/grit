@@ -55,7 +55,7 @@ pub(crate) fn open_ref_store_uncached(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::refs::store::{RefStorageFormat, RefStore};
+    use crate::refs::store::RefStorageFormat;
     use filetime::FileTime;
     use std::fs;
     use tempfile::TempDir;
