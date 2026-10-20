@@ -67,7 +67,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `kind` | string | `commit`, `branch`, `tag`, or `annotated_tag`. |
 | `ref_name` | string | Branch or tag name when you named a ref; omitted for a raw commit id. |
 | `tag` | object | For an annotated tag: `name`, `tagger`, and `message`. |
-| `commit` | object | Commit id, parents, author, committer, subject, and full message. |
+| `commit` | object | Shared [`CommitJson`](../README.md#commit-json-object-commitjson): `oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, optional `relative_date`. |
 | `stat` | object | Change stats with `files`, `files_changed`, `insertions`, and `deletions`. |
 
 Example:
@@ -90,7 +90,12 @@ Example:
       "date": "2026-10-07T14:54:02Z"
     },
     "subject": "second",
-    "message": "second"
+    "message": "second",
+    "refs": [
+      { "name": "feature", "kind": "branch" },
+      { "name": "HEAD", "kind": "head" }
+    ],
+    "relative_date": "2 days ago"
   },
   "stat": {
     "files": [

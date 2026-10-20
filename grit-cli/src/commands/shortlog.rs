@@ -11,6 +11,7 @@ use crate::context::{self, CommitSummary};
 
 /// Maximum commits to load for `grit shortlog` display (full ahead count is still reported).
 const SHORTLOG_LIST_LIMIT: usize = 100;
+use crate::commits_json::CommitJsonLoader;
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui;
@@ -23,6 +24,10 @@ pub struct ShortlogOutcome {
     pub target: Option<String>,
     pub ahead: usize,
     pub commits: Vec<CommitJson>,
+    /// True when more ahead commits exist than listed (`ahead` exceeds `commits.len()`).
+    pub truncated: bool,
+    /// Continuation cursor when the list is resumable; always `null` for `shortlog` today.
+    pub next: Option<String>,
     #[serde(skip)]
     #[schemars(skip)]
     commit_rows: Vec<CommitSummary>,
@@ -84,22 +89,26 @@ pub fn run() -> Result<ShortlogOutcome> {
             target: None,
             ahead: 0,
             commits: Vec::new(),
+            truncated: false,
+            next: None,
             commit_rows: Vec::new(),
         });
     };
 
     let ahead = context::commits_ahead_of(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
+    let oids: Vec<ObjectId> = ahead.commits.iter().map(|c| c.oid).collect();
+    let loader = CommitJsonLoader::new(&repo)?;
+    let (commits, commit_rows) = loader.load_with_summaries(&repo, &oids, now)?;
+    let truncated = ahead.total > commits.len();
     Ok(ShortlogOutcome {
         branch: branch_name.to_owned(),
         target: Some(target.display_name),
         ahead: ahead.total,
-        commits: ahead
-            .commits
-            .iter()
-            .map(|c| CommitJson::from_summary(c, now))
-            .collect(),
-        commit_rows: ahead.commits,
+        commits,
+        truncated,
+        next: None,
+        commit_rows,
     })
 }
 

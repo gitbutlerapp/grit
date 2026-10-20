@@ -42,11 +42,30 @@ pub fn print_commit_list(
     Ok(())
 }
 
-fn commit_bullet(c: &CommitSummary, now: i64) -> String {
+/// One commit bullet with optional `--decorate` parenthetical after the short oid.
+pub fn commit_bullet_with_decorations(
+    c: &CommitSummary,
+    refs: &[crate::output::CommitRefJson],
+    head_branch: Option<&str>,
+    now: i64,
+) -> String {
     let full = c.oid.to_hex();
     let short = full.get(..7).unwrap_or(&full);
     let date = context::relative_date_from(c.timestamp, now);
-    format!("- `{short}` {} ({}, {date})", c.subject, c.author)
+    let deco = crate::log_display::format_decorations_folded(refs, head_branch);
+    let decoration = if deco.is_empty() {
+        String::new()
+    } else {
+        format!(" {deco}")
+    };
+    format!(
+        "- `{short}`{decoration} {} ({}, {date})",
+        c.subject, c.author
+    )
+}
+
+fn commit_bullet(c: &CommitSummary, now: i64) -> String {
+    commit_bullet_with_decorations(c, &[], None, now)
 }
 
 /// Print a titled group of index/worktree changes.

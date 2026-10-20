@@ -17,9 +17,10 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
-use crate::context::{self, subject_line};
+use crate::commits_json::CommitJsonLoader;
+use crate::context;
 use crate::markdown;
-use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, ChangeStatus, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui::PathDisplayOptions;
 
 /// Width budget for the `+`/`-` change bars in the diffstat.
@@ -51,7 +52,7 @@ pub struct ShowOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub tag: Option<TagInfo>,
-    pub commit: CommitInfo,
+    pub commit: CommitJson,
     /// A summary (diffstat) of the change the commit introduced — not the full patch.
     pub stat: DiffStat,
     #[serde(skip)]
@@ -81,16 +82,6 @@ pub struct FileStat {
 }
 
 #[derive(Serialize, JsonSchema)]
-pub struct CommitInfo {
-    pub oid: String,
-    pub parents: Vec<String>,
-    pub author: Person,
-    pub committer: Person,
-    pub subject: String,
-    pub message: String,
-}
-
-#[derive(Serialize, JsonSchema)]
 pub struct TagInfo {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,20 +108,9 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
     if peeled_kind != ObjectKind::Commit {
         bail!("'{}' does not resolve to a commit", commit_oid.to_hex());
     }
-    let data = context::read_commit(&repo, &commit_oid)?;
-
-    let commit = CommitInfo {
-        oid: commit_oid.to_hex(),
-        parents: data
-            .parents
-            .iter()
-            .map(grit_lib::objects::ObjectId::to_hex)
-            .collect(),
-        author: Person::from_identity_line(&data.author),
-        committer: Person::from_identity_line(&data.committer),
-        subject: subject_line(&data.message),
-        message: data.message.trim_end().to_owned(),
-    };
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
+    let loader = CommitJsonLoader::new(&repo)?;
+    let commit = loader.load_one(&repo, &commit_oid, now)?;
 
     let stat = diffstat(&diff_of_commit(&repo, &commit_oid)?);
 

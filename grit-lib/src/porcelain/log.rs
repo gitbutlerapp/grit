@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
-use crate::objects::ObjectId;
+use crate::objects::{parse_commit, ObjectId};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -60,6 +60,32 @@ pub struct DecorationItem {
 
 /// Per-commit-hex decoration lists, keyed by 40-char commit hex.
 pub type DecorationMap = HashMap<String, Vec<DecorationItem>>;
+
+/// One ref label attached to a commit for structured log/show JSON.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitRefDecoration {
+    /// Display name (short branch/tag label or full ref when `--decorate=full`).
+    pub name: String,
+    /// Decoration category (`branch`, `tag`, `HEAD`, …).
+    pub kind: DecorationKind,
+}
+
+/// Commit metadata loaded once per oid for porcelain JSON (`log`, `show`, `revs`, …).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoadedCommit {
+    /// Commit object id.
+    pub oid: ObjectId,
+    /// Parent commit ids (empty for root commits).
+    pub parents: Vec<ObjectId>,
+    /// Raw author identity line.
+    pub author: String,
+    /// Raw committer identity line.
+    pub committer: String,
+    /// Full commit message body (headers excluded).
+    pub message: String,
+    /// Ref decorations pointing at this commit.
+    pub refs: Vec<CommitRefDecoration>,
+}
 
 /// The `--decorate-refs` / `--decorate-refs-exclude` / `log.excludeDecoration`
 /// ref filter. The CLI builds this from clap args + config (`build_decoration_filter`);
@@ -164,6 +190,49 @@ fn prepend_decoration(items: &mut Vec<DecorationItem>, item: DecorationItem) {
 /// `other/HEAD`).
 pub fn collect_decorations(repo: &Repository, full: bool) -> Result<DecorationMap> {
     collect_decorations_inner(repo, full, false, &DecorationFilter::default())
+}
+
+/// Load commit metadata for `oids`, attaching decorations from a pre-built [`DecorationMap`].
+///
+/// Reads each commit object at most once. Call [`collect_decorations`] once per command
+/// and reuse the map across all rows.
+///
+/// # Errors
+///
+/// Returns ODB and commit-parse errors when an oid is missing or corrupt.
+pub fn load_commits_with_decorations(
+    repo: &Repository,
+    oids: &[ObjectId],
+    decorations: &DecorationMap,
+) -> Result<Vec<LoadedCommit>> {
+    let odb = repo.odb();
+    let mut out = Vec::with_capacity(oids.len());
+    for oid in oids {
+        let obj = odb.read(oid)?;
+        let data = parse_commit(&obj.data)?;
+        let hex = oid.to_hex();
+        let refs = decorations
+            .get(&hex)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| CommitRefDecoration {
+                        name: item.display.clone(),
+                        kind: item.kind,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(LoadedCommit {
+            oid: *oid,
+            parents: data.parents,
+            author: data.author,
+            committer: data.committer,
+            message: data.message,
+            refs,
+        });
+    }
+    Ok(out)
 }
 
 /// Like [`collect_decorations`], but `clear_decorations` removes the default ref

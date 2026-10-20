@@ -32,13 +32,33 @@
       "type": "string"
     },
     "CommitJson": {
-      "description": "A commit in JSON output: full hex `oid`, subject, author, and dates.",
+      "description": "Shared commit object in JSON output (`log`, `show`, `revs`, `shortlog`, …).",
       "properties": {
         "author": {
           "$ref": "#/definitions/Person"
         },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "description": "Full message body with trailing whitespace trimmed.",
+          "type": "string"
+        },
         "oid": {
           "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "refs": {
+          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
+          "items": {
+            "$ref": "#/definitions/CommitRefJson"
+          },
+          "type": "array"
         },
         "relative_date": {
           "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
@@ -53,10 +73,43 @@
       },
       "required": [
         "author",
+        "committer",
+        "message",
         "oid",
+        "parents",
+        "refs",
         "subject"
       ],
       "type": "object"
+    },
+    "CommitRefJson": {
+      "description": "Ref decoration attached to a commit in JSON output.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/CommitRefKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CommitRefKind": {
+      "description": "Decoration category in JSON (`--json` contract).",
+      "enum": [
+        "branch",
+        "remote_branch",
+        "tag",
+        "stash",
+        "head",
+        "grafted",
+        "other"
+      ],
+      "type": "string"
     },
     "Person": {
       "description": "A parsed identity line (`Name <email> <epoch> <tz>`) for stable `--json` output.",

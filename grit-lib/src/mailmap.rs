@@ -8,6 +8,7 @@ use crate::error::Error;
 use crate::objects::ObjectKind;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
 #[cfg(unix)]
@@ -61,10 +62,23 @@ impl MailmapTable {
     ///
     /// Returns `(mapped_name, mapped_email)` after applying the same rules as Git's `map_user`.
     #[must_use]
-    pub fn map_user(&self, mut name: String, mut email: String) -> (String, String) {
-        let key = email.to_ascii_lowercase();
-        let Some(bucket) = self.buckets.get(&key) else {
-            return (name, email);
+    pub fn map_user(&self, name: String, email: String) -> (String, String) {
+        self.map_user_str(name.as_str(), email.as_str())
+    }
+
+    /// Like [`Self::map_user`] but takes string slices (avoids cloning when nothing matches).
+    #[must_use]
+    pub fn map_user_str(&self, name: &str, email: &str) -> (String, String) {
+        let (name, email) = self.map_user_cow(name, email);
+        (name.into_owned(), email.into_owned())
+    }
+
+    /// Borrowed name/email when the mailmap does not remap this identity.
+    #[must_use]
+    pub fn map_user_cow<'a>(&self, name: &'a str, email: &'a str) -> (Cow<'a, str>, Cow<'a, str>) {
+        let key = email_lookup_key(email);
+        let Some(bucket) = self.buckets.get(key.as_ref()) else {
+            return (Cow::Borrowed(name), Cow::Borrowed(email));
         };
 
         let info = if !bucket.by_name.is_empty() {
@@ -83,18 +97,28 @@ impl MailmapTable {
         };
 
         let Some(info) = info else {
-            return (name, email);
+            return (Cow::Borrowed(name), Cow::Borrowed(email));
         };
         if info.name.is_none() && info.email.is_none() {
-            return (name, email);
+            return (Cow::Borrowed(name), Cow::Borrowed(email));
         }
+        let mut out_name = name.to_owned();
+        let mut out_email = email.to_owned();
         if let Some(ref e) = info.email {
-            email.clone_from(e);
+            out_email.clone_from(e);
         }
         if let Some(ref n) = info.name {
-            name.clone_from(n);
+            out_name.clone_from(n);
         }
-        (name, email)
+        (Cow::Owned(out_name), Cow::Owned(out_email))
+    }
+}
+
+fn email_lookup_key(email: &str) -> Cow<'_, str> {
+    if email.as_bytes().iter().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(email.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(email)
     }
 }
 

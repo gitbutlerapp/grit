@@ -27,6 +27,7 @@ use crate::json_error::structured_json_payload;
 use crate::json_filter::apply_json_filter;
 use crate::stdio;
 use crate::ui::entry_path;
+use grit_lib::porcelain::log::DecorationKind;
 
 /// Wall-clock instant captured once per process invocation for relative dates.
 #[derive(Clone, Copy, Debug)]
@@ -224,12 +225,52 @@ impl Person {
     }
 }
 
-/// A commit in JSON output: full hex `oid`, subject, author, and dates.
+/// Ref decoration attached to a commit in JSON output.
+#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct CommitRefJson {
+    pub name: String,
+    pub kind: CommitRefKind,
+}
+
+/// Decoration category in JSON (`--json` contract).
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitRefKind {
+    Branch,
+    RemoteBranch,
+    Tag,
+    Stash,
+    Head,
+    Grafted,
+    Other,
+}
+
+impl From<DecorationKind> for CommitRefKind {
+    fn from(kind: DecorationKind) -> Self {
+        match kind {
+            DecorationKind::Branch => Self::Branch,
+            DecorationKind::RemoteBranch => Self::RemoteBranch,
+            DecorationKind::Tag => Self::Tag,
+            DecorationKind::Stash => Self::Stash,
+            DecorationKind::Head => Self::Head,
+            DecorationKind::Grafted => Self::Grafted,
+            DecorationKind::Other => Self::Other,
+        }
+    }
+}
+
+/// Shared commit object in JSON output (`log`, `show`, `revs`, `shortlog`, …).
 #[derive(Serialize, JsonSchema)]
 pub struct CommitJson {
     pub oid: String,
-    pub subject: String,
+    pub parents: Vec<String>,
     pub author: Person,
+    pub committer: Person,
+    pub subject: String,
+    /// Full message body with trailing whitespace trimmed.
+    pub message: String,
+    /// Ref decorations (branches, tags, `HEAD`, …) for this commit.
+    pub refs: Vec<CommitRefJson>,
     /// Relative author date (e.g. `3 days ago`), when `now` is supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -237,12 +278,16 @@ pub struct CommitJson {
 }
 
 impl CommitJson {
-    /// Build from a [`CommitSummary`] (status/shortlog ahead-lists).
+    /// Build from a [`CommitSummary`] when ref decorations were not loaded.
     pub fn from_summary(commit: &CommitSummary, now: i64) -> Self {
         Self {
             oid: commit.oid.to_hex(),
-            subject: commit.subject.clone(),
+            parents: Vec::new(),
             author: Person::from_identity_line(&commit.author_ident),
+            committer: Person::from_identity_line(&commit.author_ident),
+            subject: commit.subject.clone(),
+            message: commit.subject.clone(),
+            refs: Vec::new(),
             relative_date: Some(crate::context::relative_date_from(commit.timestamp, now)),
         }
     }

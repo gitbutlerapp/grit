@@ -18,6 +18,8 @@ Shows the current branch, its target branch, and every commit on the current bra
 
 The target branch is found the same way as for [`grit status`](../status/#the-target-branch): the `target.branch` setting, then `origin/master`, `origin/main`, `master` and `main`. Unlike `grit status`, which shows at most ten commits, `grit shortlog` lists all of them.
 
+For author commit counts over an arbitrary revision range (Git's `shortlog -sne` shape), use [`grit log --group-by author`](log.md#options) instead — `grit shortlog` means commits ahead of the target branch, not author grouping.
+
 ## Options
 
 `grit shortlog` takes no options beyond the [global ones](../global-options/).
@@ -50,7 +52,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `branch` | string | Current branch name. |
 | `target` | string or null | Target branch used for comparison, or `null` when none was found. |
 | `ahead` | number | How many commits are on the branch but not on the target. |
-| `commits` | array | Those commits, newest first, each with `oid`, `subject`, and `author` (`name`, `email`, `date` — same shape as [`grit show`](../show/)). |
+| `commits` | array | Those commits, newest first, each using the shared [`CommitJson`](../README.md#commit-json-object-commitjson) shape (bounded list; see `truncated`). |
+| `truncated` | boolean | `true` when `ahead` exceeds the number of commits listed. |
+| `next` | null | Reserved for future paging; always `null` today. |
 
 Example:
 
