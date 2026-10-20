@@ -47,6 +47,7 @@ fn file_diff_name_only(entry: &DiffEntry) -> FileDiff {
         similarity: entry.rename_similarity(),
         stat: None,
         structured: None,
+        combined: None,
     }
 }
 
@@ -62,6 +63,7 @@ fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
         similarity: t.entry.rename_similarity(),
         stat: None,
         structured: Some(t.structured),
+        combined: None,
     }
 }
 
@@ -77,6 +79,7 @@ fn file_diff_from_stat(entry: DiffEntry, binary: bool, stat: Option<LineStat>) -
         similarity: entry.rename_similarity(),
         stat,
         structured: None,
+        combined: None,
     }
 }
 

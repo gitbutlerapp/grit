@@ -16,6 +16,7 @@ mod core;
 mod detail;
 mod files;
 pub mod handle;
+mod merge_commit;
 mod options;
 mod patch_log;
 mod tree_content;
@@ -25,6 +26,7 @@ pub use core::*;
 pub use detail::{line_change_counts, DiffDetail, DiffTarget, DiffTotals, FileDiff, LineStat};
 pub use files::{build_file_diffs, name_status_line, DiffFilesOutput};
 pub use handle::Diff;
+pub use merge_commit::{combined_structured_patch_body, commit_diff_files, DiffMerges};
 pub use options::{
     renames_from_config, DiffAlgorithm, DiffOptions, RenameDetection, UnknownDiffAlgorithm,
     WORD_LEVEL_INLINE_MAX_CHANGED_FILES,

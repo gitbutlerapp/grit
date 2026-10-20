@@ -524,8 +524,12 @@ enum Command {
     },
     /// Show information about a commit, tag, or branch (defaults to HEAD).
     Show {
-        /// The commit, tag, or branch to show.
-        object: Option<String>,
+        /// Commits, tags, branches, or `rev:path` specs to show.
+        #[arg(value_name = "OBJECT")]
+        objects: Vec<String>,
+        /// Merge commit diffs: `combined` (default) or `first-parent`.
+        #[arg(long = "diff-merges", value_name = "MODE", default_value = "combined")]
+        diff_merges: String,
         /// Limit the diff to these paths (after `--`).
         #[arg(value_name = "PATH", last = true)]
         paths: Vec<String>,
@@ -1139,20 +1143,26 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Show {
-            object,
+            objects,
+            diff_merges,
             paths,
             format,
-        } => emit(
-            &commands::show::run(commands::show::ShowRunOptions {
-                object,
-                paths,
-                format,
-                word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
-                    && commands::diff::diff_word_level_inline_for_output(),
-            })?,
-            opts,
-            ctx,
-        ),
+        } => {
+            let diff_merges =
+                grit_lib::diff::DiffMerges::parse(&diff_merges).map_err(|e| anyhow::anyhow!(e))?;
+            emit(
+                &commands::show::run(commands::show::ShowRunOptions {
+                    objects,
+                    paths,
+                    format,
+                    word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
+                        && commands::diff::diff_word_level_inline_for_output(),
+                    diff_merges,
+                })?,
+                opts,
+                ctx,
+            )
+        }
         Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add {

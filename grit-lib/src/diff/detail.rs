@@ -97,6 +97,8 @@ pub struct FileDiff {
     pub stat: Option<LineStat>,
     /// Structured hunks when [`DiffDetail::Patch`] was requested.
     pub structured: Option<StructuredFileDiff>,
+    /// Combined (`--cc`) hunks for merge commits; mutually exclusive with [`Self::structured`].
+    pub combined: Option<crate::combined_diff_patch::CombinedStructuredTextDiff>,
 }
 
 impl DiffEntry {

@@ -8,7 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
-grit show [<object>] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U[n]] [-W] [-- <path>…]
+grit show [<object>…] [--diff-merges first-parent|combined] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U[n]] [-W] [-- <path>…]
 ```
 
 ## Description
@@ -17,15 +17,20 @@ Shows a commit's id, author, date and full message, followed by the change that 
 
 `<object>` can be a commit id (full or short), an expression like `HEAD~2`, a branch or a tag. For a branch or tag, the first line names it. For an annotated tag, the tag's own author, date and message come before the commit it points at.
 
-**Merge commits** use first-parent diff semantics (the same as `git show` without `--diff-merges`): only the diff against the first parent is shown. Combined parent diffs are not supported here.
+**Merge commits** default to **combined** parent diffs (`--diff-merges=combined`, like `git show --cc`). Use `--diff-merges=first-parent` for a diff against the first parent only.
 
-Use `--stat` (or other diff format flags below) instead of the default patch. Limit output to paths with `-- <path>…` after the commit argument.
+Pass several `<object>` values to show more than one commit (human and markdown output are concatenated). With `--json`, multiple objects are wrapped as `{ "objects": [ … ] }`; a single object keeps the usual top-level shape.
+
+`revision:path` specs (same resolution as [`grit cat`](cat.md)) show blob contents or list tree entries without commit metadata.
+
+Use `--stat` (or other diff format flags below) instead of the default patch. Limit output to paths with `-- <path>…` after the commit arguments.
 
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `<object>` | The commit, branch or tag to show. Defaults to the current commit. |
+| `<object>…` | Commits, branches, tags, or `rev:path` specs. Defaults to `HEAD`. |
+| `--diff-merges` | `combined` (default) or `first-parent` for merge commits. |
 | `--stat` | Summary with change bars per file instead of a full patch. |
 | `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines. |
 | `--shortstat` | Only the summary line (`N files changed, …`). |
@@ -99,6 +104,8 @@ Pass `--json` for stable, scripting-friendly output:
 | `files` | array | Per-file diff rows (same shape as [`grit diff`](diff.md) `--json`). |
 | `totals` | object | Aggregate line counts when a stat-style format is selected; omitted for patch-only output unless the library computed totals. |
 | `stat` | object | Summary diffstat with `files`, `files_changed`, `insertions`, and `deletions` (always present). |
+
+With more than one `<object>`, `--json` wraps each result in a top-level `objects` array instead of the fields above. Combined merge hunks may attach a `parents` array on each patch line in `files[].hunks[].lines[]`.
 
 Example:
 

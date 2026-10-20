@@ -16,15 +16,16 @@
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    apply_rename_detection_to_diff_entries, build_file_diffs, diff_commits_with_renames_and_policy,
-    diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames,
-    diff_trees_with_renames_and_policy, line_change_counts, read_submodule_head_oid,
-    read_worktree_side_bytes_for_diff,
+    apply_rename_detection_to_diff_entries, build_file_diffs, commit_diff_files,
+    diff_commits_with_renames_and_policy, diff_index_to_tree_with_renames,
+    diff_index_to_worktree_with_renames, diff_trees_with_renames_and_policy, line_change_counts,
+    read_submodule_head_oid, read_worktree_side_bytes_for_diff,
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
     submodule_porcelain_flags, tree_diff_structured_parallel, DiffDetail, DiffEntry,
-    DiffFilesOutput, DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
+    DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, DiffStatus,
+    TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -176,6 +177,10 @@ pub struct Hunk {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Combined (`--cc`) hunk header; when set, [`Self::old_start`] / range fields are omitted from human output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub combined_header: Option<String>,
     pub lines: Vec<Line>,
 }
 
@@ -199,6 +204,9 @@ struct LineJsonSchema {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[schemars(default)]
     no_newline_at_eof: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    parents: Option<Vec<String>>,
 }
 
 impl JsonSchema for Line {
@@ -222,6 +230,8 @@ pub struct Line {
     pub segments: Vec<Segment>,
     /// Missing newline at end of file on this side (Git `\ No newline at end of file`).
     pub no_newline_at_eof: bool,
+    /// Combined merge parent columns (`+`, `-`, or space), one entry per parent.
+    pub parents: Option<Vec<String>>,
 }
 
 impl Serialize for Line {
@@ -234,6 +244,7 @@ impl Serialize for Line {
             + usize::from(self.old.is_some())
             + usize::from(self.new.is_some())
             + usize::from(self.no_newline_at_eof)
+            + usize::from(self.parents.is_some())
             + 1;
         let mut state = serializer.serialize_struct("Line", field_count)?;
         state.serialize_field("kind", &self.kind)?;
@@ -250,6 +261,9 @@ impl Serialize for Line {
         }
         if self.no_newline_at_eof {
             state.serialize_field("no_newline_at_eof", &true)?;
+        }
+        if let Some(parents) = &self.parents {
+            state.serialize_field("parents", parents)?;
         }
         state.end()
     }
@@ -435,41 +449,75 @@ fn lib_file_to_cli(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff 
         .as_ref()
         .map(|s| s.new_encoding_lossy)
         .unwrap_or(false);
-    let hunks = f.structured.map(|structured| {
-        structured
-            .hunks
-            .into_iter()
-            .map(|h| Hunk {
-                old_start: h.old_start,
-                new_start: h.new_start,
-                old_lines: h.old_lines,
-                new_lines: h.new_lines,
-                context: h.context,
-                lines: h
-                    .lines
-                    .into_iter()
-                    .map(|l| Line {
-                        kind: match l.kind {
-                            StructuredLineKind::Context => LineKind::Context,
-                            StructuredLineKind::Add => LineKind::Add,
-                            StructuredLineKind::Del => LineKind::Del,
-                        },
-                        old: l.old,
-                        new: l.new,
-                        segments: l
-                            .segments
-                            .into_iter()
-                            .map(|s| Segment {
-                                text: s.text,
-                                emphasis: s.emphasis,
-                            })
-                            .collect(),
-                        no_newline_at_eof: l.no_newline_at_eof,
-                    })
-                    .collect(),
-            })
-            .collect()
-    });
+    let hunks = if let Some(combined) = f.combined {
+        Some(
+            combined
+                .hunks
+                .into_iter()
+                .map(|h| Hunk {
+                    old_start: 0,
+                    new_start: 0,
+                    old_lines: 0,
+                    new_lines: 0,
+                    context: None,
+                    combined_header: Some(h.header),
+                    lines: h
+                        .lines
+                        .into_iter()
+                        .map(|l| Line {
+                            kind: LineKind::Context,
+                            old: None,
+                            new: None,
+                            segments: vec![Segment {
+                                text: l.text,
+                                emphasis: false,
+                            }],
+                            no_newline_at_eof: false,
+                            parents: Some(l.parents.iter().map(|c| c.to_string()).collect()),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        )
+    } else {
+        f.structured.map(|structured| {
+            structured
+                .hunks
+                .into_iter()
+                .map(|h| Hunk {
+                    old_start: h.old_start,
+                    new_start: h.new_start,
+                    old_lines: h.old_lines,
+                    new_lines: h.new_lines,
+                    context: h.context,
+                    combined_header: None,
+                    lines: h
+                        .lines
+                        .into_iter()
+                        .map(|l| Line {
+                            kind: match l.kind {
+                                StructuredLineKind::Context => LineKind::Context,
+                                StructuredLineKind::Add => LineKind::Add,
+                                StructuredLineKind::Del => LineKind::Del,
+                            },
+                            old: l.old,
+                            new: l.new,
+                            segments: l
+                                .segments
+                                .into_iter()
+                                .map(|s| Segment {
+                                    text: s.text,
+                                    emphasis: s.emphasis,
+                                })
+                                .collect(),
+                            no_newline_at_eof: l.no_newline_at_eof,
+                            parents: None,
+                        })
+                        .collect(),
+                })
+                .collect()
+        })
+    };
     FileDiff {
         path: f.path,
         old_path: f.old_path,
@@ -704,6 +752,8 @@ pub struct CommitDiffOptions {
     pub paths: Vec<String>,
     pub format: DiffFormatArgs,
     pub word_level_inline: bool,
+    /// Merge commit parent diff mode (`first-parent` or `combined`).
+    pub diff_merges: DiffMerges,
 }
 
 /// Diff the change one commit introduced (first-parent tree vs commit tree).
@@ -721,16 +771,20 @@ pub fn diff_for_commit(
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
-    let entries = filter_diff_entries(
-        commit_entries(repo, oid, &config, &thread_policy)?,
+    let output = commit_diff_files(
         repo,
+        oid,
+        opts.diff_merges,
+        detail,
+        &diff_options,
         &pathspecs,
-    );
-    diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
+        config.as_ref(),
+        &thread_policy,
+    )?;
     Ok(finish_outcome(
         repo,
         format,
-        tree_diff_outcome(repo, entries, detail, diff_options, format)?,
+        outcome_from_lib(output, format, detail),
     ))
 }
 
@@ -742,6 +796,7 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
             paths: Vec::new(),
             format: DiffFormatArgs::default(),
             word_level_inline: false,
+            diff_merges: DiffMerges::Combined,
         },
     )
 }
@@ -811,6 +866,7 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
             old_lines: h.old_lines,
             new_lines: h.new_lines,
             context: h.context,
+            combined_header: None,
             lines: h
                 .lines
                 .into_iter()
@@ -831,6 +887,7 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
                         })
                         .collect(),
                     no_newline_at_eof: l.no_newline_at_eof,
+                    parents: None,
                 })
                 .collect(),
         })
@@ -1697,6 +1754,7 @@ fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
             old_lines: h.old_lines,
             new_lines: h.new_lines,
             context: h.context,
+            combined_header: None,
             lines: h
                 .lines
                 .into_iter()
@@ -1717,6 +1775,7 @@ fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
                         })
                         .collect(),
                     no_newline_at_eof: l.no_newline_at_eof,
+                    parents: None,
                 })
                 .collect(),
         })
@@ -1918,6 +1977,20 @@ fn render_file(
 }
 
 fn render_hunk(w: &mut dyn Write, hunk: &Hunk, width: usize, color: bool) -> Result<()> {
+    if let Some(header) = &hunk.combined_header {
+        outln!(w, "{header}");
+        for line in &hunk.lines {
+            let mut prefix = String::new();
+            if let Some(parents) = &line.parents {
+                for p in parents {
+                    prefix.push_str(p);
+                }
+            }
+            let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
+            outln!(w, "{prefix}{text}");
+        }
+        return Ok(());
+    }
     let old_rng = format_hunk_range(hunk.old_start, hunk.old_lines);
     let new_rng = format_hunk_range(hunk.new_start, hunk.new_lines);
     let range = format!("@@ -{old_rng} +{new_rng} @@");

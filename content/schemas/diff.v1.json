@@ -124,6 +124,13 @@
     "Hunk": {
       "description": "A contiguous run of changes plus surrounding context.",
       "properties": {
+        "combined_header": {
+          "description": "Combined (`--cc`) hunk header; when set, [`Self::old_start`] / range fields are omitted from human output.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "context": {
           "description": "The enclosing definition line (function/struct/…), when found.",
           "type": [
@@ -192,6 +199,15 @@
           "minimum": 0.0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
             "null"
           ]
         },
