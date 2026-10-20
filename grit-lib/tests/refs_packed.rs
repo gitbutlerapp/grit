@@ -387,6 +387,31 @@ fn pack_remote_tracking_refs_for_clone_matches_git() {
 }
 
 #[test]
+fn pack_remote_tracking_refs_for_clone_fully_peels_nested_tags() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    let commit = git_empty_commit_oid(wt);
+    git(wt, &["tag", "-a", "inner", "-m", "inner"]);
+    git(wt, &["tag", "-a", "outer", "inner", "-m", "outer"]);
+    let outer: ObjectId = git(wt, &["rev-parse", "outer"]).trim().parse().unwrap();
+    write_ref(&git_dir, "refs/remotes/origin/nested", &outer).unwrap();
+
+    pack_remote_tracking_refs_for_clone(&git_dir, "origin").expect("pack remote-tracking");
+
+    let packed = fs::read_to_string(git_dir.join("packed-refs")).unwrap();
+    assert!(
+        packed.contains(&format!("{outer} refs/remotes/origin/nested\n^{commit}\n")),
+        "fully-peeled entry must name the innermost commit:\n{packed}"
+    );
+    assert_eq!(
+        git(wt, &["show-ref", "-d", "refs/remotes/origin/nested"]),
+        format!("{outer} refs/remotes/origin/nested\n{commit} refs/remotes/origin/nested^{{}}\n")
+    );
+    assert!(git_fsck_strict(wt));
+}
+
+#[test]
 fn resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs() {
     let repo = files_repo();
     let wt = wt_path(&repo);
