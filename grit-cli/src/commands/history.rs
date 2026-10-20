@@ -298,8 +298,7 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
     let repo = context::discover()?;
     let commit_oid = resolve_commit(&repo, commit, "commit")?;
     let rewrite = Rewrite::new(repo, shared)?;
-    let plan = history_drop(&rewrite.repo, commit_oid, &rewrite.options)
-        .map_err(history_error("history reword"))?;
+    let plan = history_drop(&rewrite.repo, commit_oid, &rewrite.options).map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
         let message = format!("history drop: {}", rewrite.subject(commit_oid)?);

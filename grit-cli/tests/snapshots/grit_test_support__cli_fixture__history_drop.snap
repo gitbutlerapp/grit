@@ -6,16 +6,16 @@ expression: payload
   "human": {
     "exit": 1,
     "stdout": "",
-    "stderr": "error: history reword has conflicts in:\n  tracked.txt\n\nNothing was changed. grit can't resolve conflicts yet.\n"
+    "stderr": "error: history drop has conflicts in:\n  tracked.txt\n\nNothing was changed. grit can't resolve conflicts yet.\n"
   },
   "json": {
     "exit": 1,
-    "stdout": "{\"conflicts\":[\"tracked.txt\"],\"error\":\"history reword has conflicts\",\"kind\":\"conflict\"}\n",
+    "stdout": "{\"conflicts\":[\"tracked.txt\"],\"error\":\"history drop has conflicts\",\"kind\":\"conflict\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 1,
-    "stdout": "**Error:** history reword has conflicts in:\n  tracked.txt\n\nNothing was changed. grit can't resolve conflicts yet.\n",
+    "stdout": "**Error:** history drop has conflicts in:\n  tracked.txt\n\nNothing was changed. grit can't resolve conflicts yet.\n",
     "stderr": ""
   }
 }
