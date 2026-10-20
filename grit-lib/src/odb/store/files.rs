@@ -401,20 +401,19 @@ impl ObjectStore for FilesSource {
 
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
         let prefix_norm = super::normalize_oid_prefix(prefix, self.hash_algo())?;
+        let start_len = out.len();
         let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
         PackStore::with_context(self.packs.pack_store().clone(), || {
             if self.use_midx {
-                merge_prefix_matches(&self.midx, prefix_norm.as_str(), limit, out, &mut seen)?;
-                if limit != 0 && out.len() >= limit {
-                    return Ok(());
-                }
+                merge_prefix_matches(&self.midx, prefix_norm.as_str(), 0, out, &mut seen)?;
             }
-            merge_prefix_matches(&self.packs, prefix_norm.as_str(), limit, out, &mut seen)?;
-            if limit != 0 && out.len() >= limit {
-                return Ok(());
-            }
-            merge_prefix_matches(&self.loose, prefix_norm.as_str(), limit, out, &mut seen)
-        })
+            merge_prefix_matches(&self.packs, prefix_norm.as_str(), 0, out, &mut seen)?;
+            merge_prefix_matches(&self.loose, prefix_norm.as_str(), 0, out, &mut seen)
+        })?;
+        if limit != 0 && out.len() > start_len + limit {
+            out.truncate(start_len + limit);
+        }
+        Ok(())
     }
 
     fn refresh(&self) -> Result<bool> {

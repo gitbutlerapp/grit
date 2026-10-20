@@ -1,7 +1,8 @@
 //! Per-batch memoization for collision-aware object-id abbreviation (`core.abbrev`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use crate::commit_pretty::abbrev_hex;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
@@ -31,6 +32,26 @@ impl OidAbbrevCache {
         let abbrev = abbreviate_object_id(repo, *oid, self.min_len)?;
         self.memo.insert(*oid, abbrev.clone());
         Ok(abbrev)
+    }
+
+    /// Precompute index-line abbreviations for OIDs appearing together in one patch.
+    ///
+    /// Uses the object database for collision detection (same as `git diff` index lines), including
+    /// pack/MIDX/loose overlaps and objects not listed in the patch batch.
+    pub(crate) fn warm_for_patch_batch<I>(&mut self, repo: &Repository, oids: I) -> Result<()>
+    where
+        I: IntoIterator<Item = ObjectId>,
+    {
+        let unique: HashSet<ObjectId> = oids.into_iter().collect();
+        for oid in unique {
+            if oid.is_zero() {
+                self.memo.insert(oid, abbrev_hex(&oid, self.min_len));
+                continue;
+            }
+            let abbrev = abbreviate_object_id(repo, oid, self.min_len)?;
+            self.memo.insert(oid, abbrev);
+        }
+        Ok(())
     }
 }
 
