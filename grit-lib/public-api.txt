@@ -130,6 +130,33 @@ pub fn grit_lib::apply::materialize_binary_patch_section(&grit_lib::apply::Binar
 pub fn grit_lib::apply::parse_patch(&str, usize, &str, bool, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>>
 pub fn grit_lib::apply::write_git_binary_patch(&[u8], &[u8], &str, &str) -> grit_lib::error::Result<alloc::string::String>
 pub mod grit_lib::bench_fixture
+pub mod grit_lib::bench_fixture::daily_special
+pub enum grit_lib::bench_fixture::daily_special::DailySpecialShape
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::BigBlobs
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::DeepTree
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::ManyRefs
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::ManyRefsLoose
+impl grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::expected_ref_count(self, bool) -> usize
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::tree_depth_range(self, bool) -> core::option::Option<(usize, usize)>
+impl core::clone::Clone for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::bench_fixture::daily_special::generate_daily_special_repo(&std::path::Path, grit_lib::objects::bench_fixture::daily_special::DailySpecialShape, bool) -> grit_lib::error::Result<grit_lib::objects::bench_fixture::synth::SynthReport>
+pub fn grit_lib::bench_fixture::daily_special::max_path_depth_in_head(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
 pub mod grit_lib::bench_fixture::synth
 pub enum grit_lib::bench_fixture::synth::PathLayout
 pub grit_lib::bench_fixture::synth::PathLayout::TierDefault
@@ -5284,6 +5311,33 @@ pub fn grit_lib::object_inspect::tree_entry_cat_file_type(&grit_lib::repo::Repos
 pub fn grit_lib::object_inspect::tree_entry_mode_cat_file_p(u32) -> alloc::string::String
 pub mod grit_lib::objects
 pub mod grit_lib::objects::bench_fixture
+pub mod grit_lib::objects::bench_fixture::daily_special
+pub enum grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::BigBlobs
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::DeepTree
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::ManyRefs
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::ManyRefsLoose
+impl grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::expected_ref_count(self, bool) -> usize
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::tree_depth_range(self, bool) -> core::option::Option<(usize, usize)>
+impl core::clone::Clone for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::generate_daily_special_repo(&std::path::Path, grit_lib::objects::bench_fixture::daily_special::DailySpecialShape, bool) -> grit_lib::error::Result<grit_lib::objects::bench_fixture::synth::SynthReport>
+pub fn grit_lib::objects::bench_fixture::daily_special::max_path_depth_in_head(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
 pub mod grit_lib::objects::bench_fixture::synth
 pub enum grit_lib::objects::bench_fixture::synth::PathLayout
 pub grit_lib::objects::bench_fixture::synth::PathLayout::TierDefault
