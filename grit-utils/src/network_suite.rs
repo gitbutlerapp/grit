@@ -556,7 +556,8 @@ fn shell_quote_path(p: &Path) -> String {
     crate::shell::shell_quote(&p.to_string_lossy())
 }
 
-fn network_http_root(bare: &Path) -> PathBuf {
+/// Docroot sibling used by grit-http and `prepare-network-*` mirror refresh.
+pub fn network_http_root(bare: &Path) -> PathBuf {
     let stem = bare
         .file_name()
         .map(|s| s.to_string_lossy())
@@ -651,19 +652,58 @@ pub fn configure_remote(git: &Path, client: &Path, url: &str, default_branch: &s
     Ok(())
 }
 
-fn run_git_cmd(git: &Path, cwd: Option<&Path>, args: &[&str]) -> Result<()> {
-    let mut cmd = Command::new(git);
-    cmd.args(args);
-    if let Some(d) = cwd {
-        cmd.current_dir(d);
-    }
-    crate::bench_env::isolated_env_prefix(); // ensure config exists
+const BENCH_COMMIT_EPOCH_SECS: i64 = 1_000_000_000;
+
+fn bench_commit_date(index: u32) -> String {
+    let secs = BENCH_COMMIT_EPOCH_SECS + i64::from(index);
+    format!("{secs} +0000")
+}
+
+fn apply_isolated_git_config(cmd: &mut Command) {
+    crate::bench_env::isolated_env_prefix();
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
         .env(
             "GIT_CONFIG_GLOBAL",
             crate::bench_env::empty_global_config_path(),
         )
         .env("GIT_CONFIG_SYSTEM", "/dev/null");
+}
+
+fn run_git_cmd(git: &Path, cwd: Option<&Path>, args: &[&str]) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(args);
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
+    apply_isolated_git_config(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("git {}", args.join(" ")))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn run_git_cmd_with_bench_commit_dates(
+    git: &Path,
+    cwd: Option<&Path>,
+    args: &[&str],
+    commit_index: u32,
+) -> Result<()> {
+    let date = bench_commit_date(commit_index);
+    let mut cmd = Command::new(git);
+    cmd.args(args);
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
+    apply_isolated_git_config(&mut cmd);
+    cmd.env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date);
     let out = cmd
         .output()
         .with_context(|| format!("git {}", args.join(" ")))?;
@@ -746,7 +786,7 @@ pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
         &["reset", "--hard", &meta.fetch_base_oid],
     )?;
     for i in 0..meta.push_commits {
-        run_git_cmd(
+        run_git_cmd_with_bench_commit_dates(
             git,
             Some(&meta.client_repo),
             &[
@@ -756,6 +796,7 @@ pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
                 "-m",
                 &format!("bench-push-{i}"),
             ],
+            u32::try_from(i).context("push commit index")?,
         )?;
     }
     refresh_http_mirror(git, bare)

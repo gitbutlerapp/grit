@@ -205,6 +205,22 @@ mod tests {
     }
 
     #[test]
+    fn grit_http_docroot_matches_network_prepare_mirror() {
+        use std::path::PathBuf;
+
+        use crate::network_suite::network_http_root;
+
+        let bare = PathBuf::from("/tmp/daily-scratch/remote.git");
+        let legacy_daily = bare.parent().unwrap().join("http-root");
+        let aligned = network_http_root(&bare);
+        assert_eq!(
+            aligned,
+            PathBuf::from("/tmp/daily-scratch/remote.git-http-root")
+        );
+        assert_ne!(legacy_daily, aligned);
+    }
+
+    #[test]
     fn remote_matrix_ids_distinct() {
         let mut seen = std::collections::HashSet::new();
         for spec in REMOTE_MATRIX_SCENARIOS {

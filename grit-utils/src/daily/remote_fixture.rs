@@ -17,7 +17,7 @@ use crate::network_fixture::{
 };
 use crate::network_http::GritHttpServer;
 use crate::network_suite::{
-    configure_remote, ensure_network_client_repo, prepare_network_clone,
+    configure_remote, ensure_network_client_repo, network_http_root, prepare_network_clone,
     prepare_network_fetch_incr, prepare_network_fetch_noop, prepare_network_push,
 };
 use crate::network_verify::{verify_client_fetch_tip, verify_clone_against_bare};
@@ -193,12 +193,6 @@ fn configure_client_remote(git: &Path, client: &Path, remote: &DailyRemoteState)
     configure_remote(git, client, &remote.remote_url, &remote.meta.default_branch)
 }
 
-fn http_root_for(bare: &Path) -> PathBuf {
-    bare.parent()
-        .map(|p| p.join("http-root"))
-        .unwrap_or_else(|| PathBuf::from("/tmp/http-root"))
-}
-
 pub fn setup_git_git_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     with_remote_scratch("git-git", |scratch| {
         let bare = scratch.join("remote.git");
@@ -318,7 +312,7 @@ fn setup_git_git_grit_http_remote_label(
         copy_cached_bare(setup.git, setup, FixtureKind::GitGit, &bare)?;
         let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
         clear_network_sidecars(&meta);
-        let http_root = scratch.join("http-root");
+        let http_root = network_http_root(&bare);
         install_http_repo(setup.git, &bare, &http_root)?;
         let grit_http = GritHttpServer::start(setup.grit, None, http_root.clone())?;
         let remote_url = grit_http.url(REPO_NAME);
@@ -354,7 +348,7 @@ pub fn setup_synth10k_grit_http_remote(setup: &DailySetup<'_>) -> Result<DailyHe
         let bare = scratch.join("remote.git");
         worktree_to_bare(setup.git, &worktree, &bare)?;
         let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
-        let http_root = scratch.join("http-root");
+        let http_root = network_http_root(&bare);
         install_http_repo(setup.git, &bare, &http_root)?;
         let grit_http = GritHttpServer::start(setup.grit, None, http_root)?;
         let remote_url = grit_http.url(REPO_NAME);
@@ -440,6 +434,11 @@ pub fn verify_pull_fast_forward(ctx: &DailyHeadlineContext, cwd: &Path) -> Resul
         bail!("git pull HEAD {git_head} != bare {bare_tip}");
     }
     prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    let bare_tip = ref_oid(
+        &ctx.git,
+        &remote.bare,
+        &format!("refs/heads/{}", remote.meta.default_branch),
+    )?;
     run_grit(&ctx.grit, cwd, &["pull"])?;
     let grit_head = ref_oid(&ctx.git, cwd, "HEAD")?;
     if grit_head != bare_tip {
@@ -520,11 +519,11 @@ pub fn verify_fetch_incremental_http(ctx: &DailyHeadlineContext, cwd: &Path) -> 
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
     prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
-    install_http_repo(&ctx.git, &remote.bare, &http_root_for(&remote.bare))?;
+    install_http_repo(&ctx.git, &remote.bare, &network_http_root(&remote.bare))?;
     run_git(&ctx.git, cwd, &["fetch", "-q", "origin"])?;
     verify_client_fetch_tip(&ctx.git, &remote.bare, cwd, &remote.meta.default_branch)?;
     prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
-    install_http_repo(&ctx.git, &remote.bare, &http_root_for(&remote.bare))?;
+    install_http_repo(&ctx.git, &remote.bare, &network_http_root(&remote.bare))?;
     run_grit(&ctx.grit, cwd, &["fetch", "origin"])?;
     verify_client_fetch_tip(&ctx.git, &remote.bare, cwd, &remote.meta.default_branch)?;
     Ok(())
@@ -533,27 +532,38 @@ pub fn verify_fetch_incremental_http(ctx: &DailyHeadlineContext, cwd: &Path) -> 
 pub fn verify_push_incremental_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
-    let http_root = http_root_for(&remote.bare);
+    let http_root = network_http_root(&remote.bare);
     let http_bare = http_root.join(REPO_NAME);
     let branch_ref = format!("refs/heads/{}", remote.meta.default_branch);
 
     prepare_network_push(&ctx.git, &remote.bare)?;
     install_http_repo(&ctx.git, &remote.bare, &http_root)?;
+    let client_tip_git = ref_oid(&ctx.git, cwd, &branch_ref)?;
     run_git(
         &ctx.git,
         cwd,
         &["push", "-q", "origin", remote.meta.default_branch.as_str()],
     )?;
-    let tip_after_git = ref_oid(&ctx.git, &http_bare, &branch_ref)?;
+    let http_tip_after_git = ref_oid(&ctx.git, &http_bare, &branch_ref)?;
+    if http_tip_after_git != client_tip_git {
+        bail!("http push after git: served remote {http_tip_after_git} != client {client_tip_git}");
+    }
 
     prepare_network_push(&ctx.git, &remote.bare)?;
     install_http_repo(&ctx.git, &remote.bare, &http_root)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
+    let client_tip_grit = ref_oid(&ctx.git, cwd, &branch_ref)?;
     run_grit(&ctx.grit, cwd, &["push"])?;
-    let tip_after_grit = ref_oid(&ctx.git, &http_bare, &branch_ref)?;
-
-    if tip_after_git != tip_after_grit {
-        bail!("http push tip mismatch after git vs grit");
+    let http_tip_after_grit = ref_oid(&ctx.git, &http_bare, &branch_ref)?;
+    if http_tip_after_grit != client_tip_grit {
+        bail!(
+            "http push after grit: served remote {http_tip_after_grit} != client {client_tip_grit}"
+        );
+    }
+    if client_tip_git != client_tip_grit {
+        bail!(
+            "http push parity: git client tip {client_tip_git} != grit client tip {client_tip_grit}"
+        );
     }
     Ok(())
 }
@@ -617,10 +627,7 @@ pub fn clone_bench_script(tool: &Path, url: &str, dest: &Path) -> String {
     let tool_q = shell_quote(&tool.to_string_lossy());
     let url_q = shell_quote(url);
     let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("clone");
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
     format!("rm -rf {dest_q} && {tool_q} clone -q {url_q} {dest_name}")
 }
 
@@ -632,7 +639,7 @@ pub fn refresh_grit_http_server(ctx: &mut DailyHeadlineContext) -> Result<()> {
     if !remote.remote_url.starts_with("http://") {
         return Ok(());
     }
-    let http_root = http_root_for(&remote.bare);
+    let http_root = network_http_root(&remote.bare);
     install_http_repo(&ctx.git, &remote.bare, &http_root)?;
     let server = GritHttpServer::start(&ctx.grit, None, http_root)?;
     remote.remote_url = server.url(REPO_NAME);
@@ -647,9 +654,6 @@ pub fn clone_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
     let tool_q = shell_quote(&tool.to_string_lossy());
     let url_q = shell_quote(url);
     let dest_q = shell_quote(&dest.to_string_lossy());
-    let dest_name = dest
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("clone");
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
     format!("rm -rf {dest_q} && {tool_q} clone {url_q} {dest_name}")
 }
