@@ -21,7 +21,9 @@ pub use objects::{
     write_loose_object, BatchCheckOutcome, FsckOutcome, GitToolOutcome, HashAlgo, ObjectKind,
     PackBuilder, RepoFixture,
 };
-pub use parallel::{forced_parallel_options, forced_parallel_policy, forced_parallelism};
+pub use parallel::{
+    forced_parallel_options, forced_parallel_policy, forced_parallelism, heavy_disk_serial_guard,
+};
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;

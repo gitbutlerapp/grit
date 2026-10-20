@@ -12,7 +12,10 @@ use grit_lib::objects::HashAlgo;
 use grit_lib::objects::ObjectKind;
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
-const ENTRY_COUNT: usize = 25_000;
+use grit_test_support::heavy_disk_serial_guard;
+
+/// Just above `2 * INDEX_LOAD_THREAD_COST` so parallel IEOT load is exercised with fewer files.
+const ENTRY_COUNT: usize = 20_001;
 
 fn git_init(repo: &Path) {
     assert!(
@@ -71,6 +74,7 @@ fn assert_entries_match(a: &Index, b: &Index) {
 }
 
 fn git_writes_index_grit_reads(version: u32) {
+    let _disk = heavy_disk_serial_guard();
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     populate_files(root, ENTRY_COUNT);
@@ -131,6 +135,7 @@ fn git_eoie_ieot_index_v4_grit_reads_match_serial() {
 }
 
 fn grit_write_git_accepts(version: u32) {
+    let _disk = heavy_disk_serial_guard();
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     populate_files(root, ENTRY_COUNT);
@@ -256,6 +261,7 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
 
 #[test]
 fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
+    let _disk = heavy_disk_serial_guard();
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     populate_files(root, ENTRY_COUNT);
@@ -321,6 +327,7 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
 
 #[test]
 fn invalid_eoie_falls_back_to_serial_parse() {
+    let _disk = heavy_disk_serial_guard();
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     populate_files(root, ENTRY_COUNT);

@@ -12,6 +12,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+use grit_test_support::heavy_disk_serial_guard;
 use support::git;
 
 const ENTRIES: usize = 81_000;
@@ -72,6 +73,7 @@ fn remove_first_n_files(repo_dir: &Path, n: usize) {
 
 #[test]
 fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
+    let _disk = heavy_disk_serial_guard();
     assert!(
         ENTRIES >= LARGE_THRESHOLD,
         "fixture must start at or above 80k entries"
