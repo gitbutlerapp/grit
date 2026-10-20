@@ -2141,7 +2141,10 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
-    fn schema_top_level_field_names(schema: &serde_json::Value, root: &serde_json::Value) -> HashSet<String> {
+    fn schema_top_level_field_names(
+        schema: &serde_json::Value,
+        root: &serde_json::Value,
+    ) -> HashSet<String> {
         if let Some(ref_name) = schema
             .get("$ref")
             .and_then(|r| r.as_str())

@@ -370,18 +370,23 @@ fn filtered_worktree_file_changes(
 
 /// Uncommitted file list for default `grit diff` (no commit arguments).
 ///
-/// Patch output with no path limit uses HEAD↔worktree (full uncommitted tree). Format flags
-/// (`--numstat`, `--stat`, …) and path-limited diffs match Git's index↔worktree default.
+/// Patch and `--stat` / `--shortstat` with no path limit use HEAD↔worktree (full uncommitted
+/// tree, matching default patch file coverage). `--numstat`, `--name-only`, and `--name-status`
+/// match Git's index↔worktree scope; path-limited diffs always use index↔worktree.
 fn uncommitted_changes_for_default_diff(
     repo: &grit_lib::repo::Repository,
     against: Option<&str>,
     pathspecs: &[String],
-    detail: DiffDetail,
+    format: DiffFormatArgs,
 ) -> Result<Vec<FileChange>> {
     if against.is_some() {
         return filtered_worktree_file_changes(repo, against, pathspecs);
     }
-    if detail == DiffDetail::Patch && pathspecs.is_empty() {
+    if pathspecs.is_empty()
+        && (format.detail() == DiffDetail::Patch
+            || format.human_stat_block()
+            || format.human_shortstat_only())
+    {
         return filtered_worktree_file_changes(repo, None, pathspecs);
     }
     Ok(filter_file_changes(
@@ -661,7 +666,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
             let against_ref = opts.against.as_deref();
             let changes =
-                uncommitted_changes_for_default_diff(&repo, against_ref, &pathspecs, detail)?;
+                uncommitted_changes_for_default_diff(&repo, against_ref, &pathspecs, format)?;
             let outcome = match detail {
                 DiffDetail::NameOnly | DiffDetail::NameStatus => {
                     outcome_from_change_names(changes, format)

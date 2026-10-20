@@ -12,7 +12,7 @@ use crate::diff::detail::{DiffDetail, DiffTotals, FileDiff, LineStat};
 use crate::diff::files::{build_file_diffs, DiffFilesOutput};
 use crate::diff::merge_diff::{
     blob_text_for_diff, enrich_combined_path_renames, format_combined_binary,
-    format_combined_textconv_patch, read_blob_at_path,
+    format_combined_textconv_patch, is_binary_for_diff, read_blob_at_path,
 };
 use crate::diff::{DiffEntry, DiffOptions, DiffStatus};
 use crate::error::Result;
@@ -245,7 +245,10 @@ fn combined_commit_diff_files(
             false,
         );
 
-        let binary = patch.is_none();
+        let binary = combined_path_is_binary(git_dir, odb, &path.path, &parent_trees, result_tree)
+            || patch
+                .as_ref()
+                .is_some_and(|p| p.contains("Binary files differ"));
         if binary {
             let parent_oids: Vec<ObjectId> = path.parents.iter().map(|s| s.oid).collect();
             let _patch = format_combined_binary(&path.path, &parent_oids, &path.merge_oid, 7, true);
@@ -307,6 +310,31 @@ fn combined_commit_diff_files(
         None
     };
     Ok(DiffFilesOutput { files, totals })
+}
+
+fn combined_path_is_binary(
+    git_dir: &Path,
+    odb: &Odb,
+    path: &str,
+    parent_trees: &[ObjectId],
+    result_tree: &ObjectId,
+) -> bool {
+    let Some(result_blob) = read_blob_at_path(odb, result_tree, path) else {
+        return false;
+    };
+    if is_binary_for_diff(git_dir, path, &result_blob) {
+        return true;
+    }
+    for tree in parent_trees {
+        if let Some(oid) = crate::merge_diff::blob_oid_at_path(odb, tree, path) {
+            if let Ok(obj) = odb.read(&oid) {
+                if is_binary_for_diff(git_dir, path, &obj.data) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn parent_blob_texts(

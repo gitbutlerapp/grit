@@ -112,6 +112,9 @@ pub struct StashShowOutcome {
 impl HumanRender for StashShowOutcome {
     fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if let Some(patch) = &self.patch {
+            if !patch.files.is_empty() {
+                outln!(w);
+            }
             patch.render_human(w, ctx)?;
             return Ok(());
         }
