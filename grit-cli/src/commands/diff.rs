@@ -17,10 +17,11 @@
 use anyhow::{Context, Result};
 use grit_lib::diff::{
     apply_rename_detection_to_diff_entries, diff_commits_with_renames_and_policy,
-    diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames,
+    diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames, diff_paths,
     diff_trees_with_renames_and_policy, read_submodule_head_oid, read_worktree_side_bytes_for_diff,
     structured::{
-        format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
+        format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredHunk,
+        StructuredLineKind,
     },
     submodule_porcelain_flags, tree_diff_structured_parallel, DiffEntry,
     DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
@@ -85,6 +86,10 @@ const FG_ON_DIFF: &str = "38;5;231";
 #[derive(Serialize, JsonSchema)]
 pub struct DiffOutcome {
     pub files: Vec<FileDiff>,
+    /// Present for `--no-index` (and `--exit-code`): true when any file differs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub changed: Option<bool>,
     #[serde(skip)]
     #[schemars(skip)]
     path_display: Option<PathDisplayOptions>,
@@ -243,14 +248,26 @@ pub struct Segment {
 
 /// Inputs for `grit diff` (flags and revision arguments).
 pub struct DiffRunOptions {
+    pub no_index: bool,
     pub staged: bool,
     pub unstaged: bool,
     pub against: Option<String>,
     pub commits: Vec<String>,
     /// Pathspecs from trailing `PATH` arguments (after `--`).
     pub paths: Vec<String>,
+    pub format: crate::diff_args::DiffFormatArgs,
     /// Intra-line word highlights in structured hunks (human TTY output only).
     pub word_level_inline: bool,
+}
+
+/// Process exit code for `grit diff --no-index` (Git: 1 when there are differences).
+#[must_use]
+pub fn no_index_exit_code(outcome: &DiffOutcome) -> i32 {
+    if outcome.files.is_empty() {
+        0
+    } else {
+        1
+    }
 }
 
 /// Whether human diff output should compute word-level inline emphasis.
@@ -267,12 +284,17 @@ fn attach_path_display(repo: &grit_lib::repo::Repository, mut outcome: DiffOutco
 }
 
 pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
+    if opts.no_index {
+        return run_no_index(&opts);
+    }
     let repo = context::discover()?;
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     let (commits, path_args) =
         disambiguate_diff_revision_and_paths(&repo, opts.commits, opts.paths);
-    let mut diff_options = DiffOptions::from_config(config.as_ref());
+    let mut diff_options = opts
+        .format
+        .to_options(DiffOptions::from_config(config.as_ref()));
     diff_options.context_lines = CONTEXT_LINES;
     diff_options.word_level_inline = opts.word_level_inline;
     if opts.staged && opts.unstaged {
@@ -472,7 +494,82 @@ fn outcome_from_tree_structured(items: Vec<TreeDiffStructured>) -> DiffOutcome {
             .into_iter()
             .map(file_diff_from_tree_structured)
             .collect(),
+        changed: None,
         path_display: None,
+    }
+}
+
+fn run_no_index(opts: &DiffRunOptions) -> Result<DiffOutcome> {
+    if opts.staged || opts.unstaged || opts.against.is_some() {
+        anyhow::bail!("--no-index cannot be combined with repository diff modes");
+    }
+    let mut specs = opts.paths.clone();
+    if specs.len() < 2 {
+        specs.extend(opts.commits.clone());
+    }
+    if specs.len() != 2 {
+        anyhow::bail!("--no-index requires exactly two paths");
+    }
+    let left = Path::new(&specs[0]);
+    let right = Path::new(&specs[1]);
+    let mut diff_options = opts.format.to_options(DiffOptions::default());
+    if opts.format.unified.is_none() {
+        diff_options.context_lines = CONTEXT_LINES;
+    }
+    diff_options.word_level_inline = opts.word_level_inline;
+    let files = diff_paths(left, right, &diff_options).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let cli_files: Vec<FileDiff> = files.into_iter().map(file_diff_from_lib).collect();
+    Ok(DiffOutcome {
+        changed: Some(!cli_files.is_empty()),
+        files: cli_files,
+        path_display: None,
+    })
+}
+
+fn file_diff_from_lib(f: grit_lib::diff::FileDiff) -> FileDiff {
+    FileDiff {
+        path: f.path,
+        old_path: f.old_path,
+        status: f.status.into(),
+        old_mode: f.old_mode,
+        new_mode: f.new_mode,
+        old_encoding_lossy: f.old_encoding_lossy,
+        new_encoding_lossy: f.new_encoding_lossy,
+        binary: f.binary,
+        content_changed: f.content_changed,
+        hunks: f.hunks.into_iter().map(hunk_from_structured).collect(),
+    }
+}
+
+fn hunk_from_structured(h: StructuredHunk) -> Hunk {
+    Hunk {
+        old_start: h.old_start,
+        new_start: h.new_start,
+        old_lines: h.old_lines,
+        new_lines: h.new_lines,
+        context: h.context,
+        lines: h
+            .lines
+            .into_iter()
+            .map(|l| Line {
+                kind: match l.kind {
+                    StructuredLineKind::Context => LineKind::Context,
+                    StructuredLineKind::Add => LineKind::Add,
+                    StructuredLineKind::Del => LineKind::Del,
+                },
+                old: l.old,
+                new: l.new,
+                segments: l
+                    .segments
+                    .into_iter()
+                    .map(|s| Segment {
+                        text: s.text,
+                        emphasis: s.emphasis,
+                    })
+                    .collect(),
+                no_newline_at_eof: l.no_newline_at_eof,
+            })
+            .collect(),
     }
 }
 
@@ -548,6 +645,7 @@ fn outcome_from_changes(
     });
     DiffOutcome {
         files,
+        changed: None,
         path_display: None,
     }
 }

@@ -10,9 +10,12 @@ order: 3
 ```text
 grit diff [--staged] [--unstaged] [--against <ref>] [<commit> [<commit>]] [-- <path>…]
 grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>] [-- <path>…]
+grit diff --no-index <path> <path>
 ```
 
 ## Description
+
+With `--no-index`, compares two filesystem paths without opening a repository: two files, two directories (recursive, sorted), or one file and one directory (the file is compared to `directory/basename(file)`, matching Git). Symlink targets are diffed as text; executable-bit-only changes show as mode updates. The command exits with status **1** when anything differs (Git `--exit-code` semantics). Pass `--json` for a `changed` boolean plus the usual `files` list.
 
 With no argument, shows every uncommitted change: the working tree and index together, compared with the last commit (`HEAD`). Pass `--staged` to compare only the index to `HEAD` (staged changes). Pass `--unstaged` to compare only the working tree to the index (changes not yet staged). Pass `--against <ref>` to compare the working tree to another ref’s tree instead of `HEAD` (useful for “what changed since `main`?” while keeping a single commit argument as “show this commit’s patch”).
 
@@ -28,13 +31,22 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 | Option | Description |
 | --- | --- |
+| `--no-index` | Compare two paths outside any repository. Requires exactly two path arguments; cannot be combined with `--staged`, `--unstaged`, `--against`, or commit arguments. Exits **1** when there are differences. |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
+| `-U`, `--unified [<n>]` | Lines of context around each change (default 3). |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
 | `<commit>` | One commit (that commit’s patch), two commits (tree diff), or a range `A..B` / `A...B`. Omit for uncommitted changes. |
 | `<path>…` | After `--`, limit the diff to these paths (all forms above, including `--staged`). |
 
 ## Examples
+
+Compare two trees on disk (no repo):
+
+```console
+$ grit diff --no-index ./old ./new
+$ grit diff --no-index --json ./a.txt ./b.txt
+```
 
 What have I changed since the last commit?
 
@@ -105,6 +117,7 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `files` | array | Changed files, each with `path`, `status`, `binary`, optional `old_mode` / `new_mode`, optional `old_encoding_lossy` / `new_encoding_lossy`, and `hunks`. |
+| `changed` | boolean | With `--no-index`, whether any file differs (same as exit code **1** vs **0**). |
 
 Nested fields include `files[].status` (`added`, `modified`, `deleted`, `renamed`, and so on), optional `files[].old_path` when `status` is `renamed`, `hunks[].old_start` / `new_start` / `old_lines` / `new_lines`, optional `hunks[].context` (enclosing definition line), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, a compact `text` string per line (or `segments` with optional `emphasis` only when intra-line word highlights are present), and `no_newline_at_eof` when that side lacks a trailing newline (Git’s `\ No newline at end of file`). JSON is written in compact form (no pretty-printing). When `files[].binary` is true, `hunks` is always an empty array — blob bytes are never included in JSON (use human or `--markdown` output for the “Binary file differs” note). For unstaged and other worktree-sourced sides, line text is normalized to repository form (`.gitattributes` / `core.autocrlf`) before diffing, so trailing `\r` from CRLF checkouts does not appear in line `text`. Commit and staged diffs compare stored blobs and may still show carriage returns when the on-disk object bytes differ. When file bytes are not valid UTF-8 and the file is treated as text, `old_encoding_lossy` or `new_encoding_lossy` is true and non-UTF-8 bytes appear as U+FFFD in text fields.
 

@@ -14,6 +14,7 @@
 //! ```
 mod core;
 pub mod handle;
+mod no_index;
 mod options;
 mod patch_log;
 mod tree_content;
@@ -21,6 +22,7 @@ mod unified_emit;
 
 pub use core::*;
 pub use handle::Diff;
+pub use no_index::{diff_paths, FileDiff, NoIndexError};
 pub use options::{
     renames_from_config, DiffAlgorithm, DiffOptions, RenameDetection, UnknownDiffAlgorithm,
     WORD_LEVEL_INLINE_MAX_CHANGED_FILES,

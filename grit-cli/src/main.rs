@@ -10,6 +10,7 @@ mod commands;
 mod context;
 mod dates;
 mod diagnostics;
+mod diff_args;
 mod json_error;
 mod json_filter;
 #[cfg(test)]
@@ -502,6 +503,9 @@ enum Command {
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
     Diff {
+        /// Compare two filesystem paths outside any repository (Git `--no-index`).
+        #[arg(long = "no-index")]
+        no_index: bool,
         /// Staged changes only (index vs HEAD).
         #[arg(short = 'S', long = "staged")]
         staged: bool,
@@ -514,9 +518,11 @@ enum Command {
         /// One commit (that commit's patch), two commits (tree diff), or a range `A..B` / `A...B`.
         #[arg(value_name = "COMMIT")]
         commits: Vec<String>,
-        /// Limit the diff to these paths (after `--`, like `grit log`).
+        /// With `--no-index`, exactly two paths. Otherwise limit the diff (after `--`, like `grit log`).
         #[arg(value_name = "PATH", last = true)]
         paths: Vec<String>,
+        #[command(flatten)]
+        format: diff_args::DiffFormatArgs,
     },
     /// Show information about a commit, tag, or branch (defaults to HEAD).
     Show {
@@ -1109,24 +1115,34 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Diff {
+            no_index,
             staged,
             unstaged,
             against,
             commits,
             paths,
-        } => emit(
-            &commands::diff::run(commands::diff::DiffRunOptions {
+            format,
+        } => {
+            let outcome = commands::diff::run(commands::diff::DiffRunOptions {
+                no_index,
                 staged,
                 unstaged,
                 against,
                 commits,
                 paths,
+                format,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
-            })?,
-            opts,
-            ctx,
-        ),
+            })?;
+            emit(&outcome, opts, ctx)?;
+            if no_index {
+                let code = commands::diff::no_index_exit_code(&outcome);
+                if code != 0 {
+                    std::process::exit(code);
+                }
+            }
+            Ok(())
+        }
         Command::Show { object } => emit(&commands::show::run(object)?, opts, ctx),
         Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
