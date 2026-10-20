@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn matcher_author_or_and_grep() {
         let filter = CommitFilterBuilder::new()
-            .author("alice")
+            .author("Alice")
             .grep("fix")
             .build()
             .unwrap();
@@ -529,7 +529,7 @@ mod tests {
             .unwrap();
         let msg = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\nfix bug\n";
         assert!(both.matches_bytes(msg));
-        let partial = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\nfix only\n";
+        let partial = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\nother only\n";
         assert!(!both.matches_bytes(partial));
 
         let invert = CommitFilterBuilder::new()
