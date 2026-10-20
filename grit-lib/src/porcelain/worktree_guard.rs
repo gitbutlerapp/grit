@@ -534,7 +534,7 @@ fn head_tree_sides_from_changes(tree_changes: &[DiffEntry]) -> HashMap<String, H
     map
 }
 
-fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String> {
+pub(crate) fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
     for change in tree_changes {
         if let Some(path) = &change.old_path {
@@ -1443,14 +1443,56 @@ pub fn prepare_tree_checkout(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> Result<()> {
-    let mut snapshot = load_worktree_snapshot(repo)?;
     let tree_changes = diff_trees(repo.odb(), from_tree, Some(to_tree), "")?;
+    prepare_tree_checkout_with_changes(repo, &tree_changes)
+}
+
+/// Untracked guard for a precomputed tree-to-tree diff (avoids a second full-tree diff).
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when an untracked path would be overwritten.
+pub fn prepare_tree_checkout_with_changes(
+    repo: &Repository,
+    tree_changes: &[DiffEntry],
+) -> Result<()> {
+    let mut snapshot = load_worktree_snapshot(repo)?;
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let untracked =
-        collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, &tree_changes)?;
-    ensure_no_untracked_overwrite(&untracked, &tree_changes)
+        collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, tree_changes)?;
+    ensure_no_untracked_overwrite(&untracked, tree_changes)
+}
+
+/// Stat-only unstaged check on tracked paths outside `tree_changes` (index already matches HEAD).
+pub(crate) fn worktree_clean_outside_tree_change_paths(
+    repo: &Repository,
+    index: &Index,
+    tree_changes: &[DiffEntry],
+) -> Result<bool> {
+    let touched = paths_touched_by_tree_changes(tree_changes);
+    let mut outside = BTreeSet::new();
+    for entry in &index.entries {
+        if entry.stage() != 0 {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        if touched.contains(&path) {
+            continue;
+        }
+        if !indexed_path_needs_worktree_stat_check(entry) {
+            continue;
+        }
+        outside.insert(path);
+    }
+    if outside.is_empty() {
+        return Ok(true);
+    }
+    let index_path = repo.index_path_for_env()?;
+    let index_mtime = index_mtime_for_diff(index, index_file_mtime(&index_path));
+    let stat_policy = StatMatchPolicy::from_config(repo.config().ok().as_deref());
+    worktree_clean_for_switch_paths(repo, index, &outside, index_mtime, stat_policy)
 }
 
 #[cfg(test)]
