@@ -103,7 +103,7 @@ pub struct LineStatJson {
 }
 
 /// Result of `grit diff`.
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize, JsonSchema, Clone)]
 pub struct DiffOutcome {
     pub files: Vec<FileDiff>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -118,7 +118,7 @@ pub struct DiffOutcome {
 }
 
 /// One changed file.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct FileDiff {
     /// Display path (the new path, or the old path for a deletion).
     pub path: String,
@@ -163,7 +163,7 @@ pub struct FileDiff {
 }
 
 /// A contiguous run of changes plus surrounding context.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct Hunk {
     /// 1-based first old/new line numbers in the hunk.
     pub old_start: usize,
@@ -212,6 +212,7 @@ impl JsonSchema for Line {
 }
 
 /// One rendered line of a hunk.
+#[derive(Clone)]
 pub struct Line {
     pub kind: LineKind,
     /// 1-based old/new line numbers (absent on the side where the line is new/gone).
@@ -271,7 +272,7 @@ pub enum LineKind {
 }
 
 /// A run of text within a line, flagged if it's part of the word-level change.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct Segment {
     pub text: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -377,6 +378,50 @@ fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -
         format,
         path_display: None,
     }
+}
+
+/// Build a [`DiffOutcome`] from library [`DiffFilesOutput`] (for `grit log` per commit).
+pub fn cli_outcome_from_lib(
+    repo: &grit_lib::repo::Repository,
+    output: DiffFilesOutput,
+    detail: DiffDetail,
+    format: DiffFormatArgs,
+) -> Result<DiffOutcome> {
+    Ok(finish_outcome(
+        repo,
+        format,
+        outcome_from_lib(output, format, detail),
+    ))
+}
+
+/// Human diff detail under one `grit log` commit row (no placeholder when empty).
+pub fn render_log_commit_diff(w: &mut dyn Write, outcome: &DiffOutcome) -> Result<()> {
+    if outcome.files.is_empty() {
+        return Ok(());
+    }
+    let color = diff_render::use_color();
+    let fmt = outcome.format;
+    if fmt.human_numstat() {
+        return render_numstat(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_only() {
+        return render_name_only(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_status() {
+        return render_name_status(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_shortstat_only() {
+        let stat = diffstat_from_files(&outcome.files);
+        return render_shortstat(w, &stat);
+    }
+    if fmt.human_stat_block() {
+        let stat = diffstat_from_files(&outcome.files);
+        return render_stat(w, &stat, color, outcome.path_display.as_ref());
+    }
+    for file in &outcome.files {
+        render_file(w, file, color, outcome.path_display.as_ref())?;
+    }
+    Ok(())
 }
 
 fn outcome_from_lib(
@@ -946,7 +991,7 @@ fn pathspec_resolution_root(repo: &grit_lib::repo::Repository) -> &Path {
 }
 
 /// Worktree diffs: paths must exist in the index, `HEAD`, or on disk.
-fn resolve_worktree_diff_pathspecs(
+pub(crate) fn resolve_worktree_diff_pathspecs(
     repo: &grit_lib::repo::Repository,
     raw_paths: &[String],
 ) -> Result<Vec<String>> {

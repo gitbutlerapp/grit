@@ -28,6 +28,7 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 | Option | Description |
 | --- | --- |
+| `-p`, `--patch` | Full unified patch (default when no other format flag is set). |
 | `--stat` | Per-file change counts with `+`/`-` bars and a summary line (like `git diff --stat`). Mutually exclusive with the other format flags below. |
 | `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines (`-<TAB>-` for binary). |
 | `--shortstat` | Only the summary line (`N files changed, …`). |

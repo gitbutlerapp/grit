@@ -2527,6 +2527,7 @@ pub mod grit_lib::diff::handle
 pub struct grit_lib::diff::handle::Diff<'repo>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
 pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffDetail, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
+pub fn grit_lib::diff::handle::Diff<'repo>::commit_files_many(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::diff::handle::Diff<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
@@ -3218,6 +3219,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::WorktreeAddRefresh
 pub struct grit_lib::diff::Diff<'repo>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
 pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffDetail, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
+pub fn grit_lib::diff::handle::Diff<'repo>::commit_files_many(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::diff::handle::Diff<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
@@ -3264,6 +3266,13 @@ impl core::marker::Unpin for grit_lib::diff::DiffEntry
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffEntry
+pub struct grit_lib::diff::CommitFilesManyOptions
+pub grit_lib::diff::CommitFilesManyOptions::detail: grit_lib::diff::DiffDetail
+pub grit_lib::diff::CommitFilesManyOptions::diff_options: grit_lib::diff::DiffOptions
+pub grit_lib::diff::CommitFilesManyOptions::skip_merge_patches: bool
+pub struct grit_lib::diff::CommitFilesResult
+pub grit_lib::diff::CommitFilesResult::output: grit_lib::diff::DiffFilesOutput
+pub grit_lib::diff::CommitFilesResult::parent_count: usize
 pub struct grit_lib::diff::DiffFilesOutput
 pub grit_lib::diff::DiffFilesOutput::files: alloc::vec::Vec<grit_lib::diff::FileDiff>
 pub grit_lib::diff::DiffFilesOutput::totals: core::option::Option<grit_lib::diff::DiffTotals>
