@@ -102,6 +102,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeStatusDirty),
         build_git: |c| add_all_bench(c).1,
         build_grit: |c| add_all_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("add/modified@big-blobs"),
@@ -110,6 +111,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeAdd),
         build_git: |c| add_modified_bench(c).1,
         build_grit: |c| add_modified_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("commit/small@synth-100k"),
@@ -118,6 +120,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeCommit),
         build_git: |c| commit_small_bench(c).1,
         build_grit: |c| commit_small_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("commit/small@small"),
@@ -126,6 +129,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeCommit),
         build_git: |c| commit_small_bench(c).1,
         build_grit: |c| commit_small_bench(c).0,
+        verify: None,
     });
 
     plans.push(DailyHeadlinePlan {
@@ -135,6 +139,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeRestorePaths),
         build_git: |c| restore_paths_bench(c).1,
         build_grit: |c| restore_paths_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("reset/hard@synth-10k"),
@@ -143,6 +148,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeStatusDirty),
         build_git: |c| reset_hard_bench(c).1,
         build_grit: |c| reset_hard_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("reset/mixed@synth-10k"),
@@ -151,6 +157,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeStatusDirty),
         build_git: |c| reset_mixed_bench(c).1,
         build_grit: |c| reset_mixed_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("rm/dir@synth-10k"),
@@ -159,6 +166,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeRmDir),
         build_git: |c| rm_dir_bench(c).1,
         build_grit: |c| rm_dir_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("mv/file@synth-10k"),
@@ -167,6 +175,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeMvFile),
         build_git: |c| mv_file_bench(c).1,
         build_grit: |c| mv_file_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("clean/untracked@synth-10k"),
@@ -175,6 +184,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeCleanUntracked),
         build_git: |c| clean_untracked_bench(c).1,
         build_grit: |c| clean_untracked_bench(c).0,
+        verify: None,
     });
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("init/empty@small"),
@@ -183,6 +193,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: DailyPrepare::Hook(PrepareKind::WorktreeInitEmpty),
         build_git: |c| init_empty_bench(c).1,
         build_grit: |c| init_empty_bench(c).0,
+        verify: None,
     });
 
     plans
@@ -206,6 +217,7 @@ fn matrix_status(
             prepare,
             build_git: |c| status_clean_bench(c).1,
             build_grit: |c| status_clean_bench(c).0,
+            verify: None,
         }
     } else {
         DailyHeadlinePlan {
@@ -215,6 +227,7 @@ fn matrix_status(
             prepare,
             build_git: |c| status_dirty_bench(c).1,
             build_grit: |c| status_dirty_bench(c).0,
+            verify: None,
         }
     }
 }

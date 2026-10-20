@@ -81,6 +81,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| log_oneline_bench(c).1,
             build_grit: |c| log_oneline_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("log/all@git-git"),
@@ -89,6 +90,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| log_all_bench(c).1,
             build_grit: |c| log_all_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("log/path@git-git"),
@@ -97,6 +99,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| log_path_bench(c).1,
             build_grit: |c| log_path_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("log/author@git-git"),
@@ -105,6 +108,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| log_oneline_bench(c).1,
             build_grit: |c| log_oneline_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("show/head@synth-10k"),
@@ -113,6 +117,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| show_head_bench(c).1,
             build_grit: |c| show_head_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("show/head@big-blobs"),
@@ -121,6 +126,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| show_head_bench(c).1,
             build_grit: |c| show_head_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("blame/file@deep-tree"),
@@ -135,6 +141,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
                 let path = c.blame_path.as_deref().unwrap_or("README.md");
                 blame_file_bench(c, path).0
             },
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("revs/count@git-git"),
@@ -143,6 +150,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| revs_count_bench(c).1,
             build_grit: |c| revs_count_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("merge-base/branches@git-git"),
@@ -151,6 +159,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| merge_base_bench(c).1,
             build_grit: |c| merge_base_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("resolve/head-n@git-git"),
@@ -159,6 +168,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| resolve_head_bench(c).1,
             build_grit: |c| resolve_head_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("cat/blob@git-git"),
@@ -167,6 +177,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| cat_blob_bench(c).1,
             build_grit: |c| cat_blob_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("reflog/list@synth-10k"),
@@ -175,6 +186,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| reflog_list_bench(c).1,
             build_grit: |c| reflog_list_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("shortlog/ahead@git-git"),
@@ -183,6 +195,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| shortlog_ahead_bench(c).1,
             build_grit: |c| shortlog_ahead_bench(c).0,
+            verify: None,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("patch-id/commit@git-git"),
@@ -191,6 +204,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: DailyPrepare::None,
             build_git: |c| patch_id_head_bench(c).1,
             build_grit: |c| patch_id_head_bench(c).0,
+            verify: None,
         },
     ]
 }

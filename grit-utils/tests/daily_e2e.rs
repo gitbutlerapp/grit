@@ -97,7 +97,7 @@ fn smoke_report_validates() {
     );
 
     let out_path = cache.path().join("daily-smoke.json");
-    let only = LOCAL_HEADLINE_IDS.join(",");
+    let only = ALL_HEADLINE_IDS.join(",");
     let out = run_daily_smoke(&git, &grit, &out_path, &["--only", &only]);
     assert!(
         out.status.success(),

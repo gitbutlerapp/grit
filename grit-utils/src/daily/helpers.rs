@@ -581,6 +581,11 @@ pub fn scenario_spec(id: &str) -> &'static ScenarioSpec {
         .iter()
         .find(|s| s.id == id)
         .or_else(|| MATRIX_SCENARIOS.iter().find(|s| s.id == id))
+        .or_else(|| {
+            super::registry::REMOTE_MATRIX_SCENARIOS
+                .iter()
+                .find(|s| s.id == id)
+        })
         .unwrap_or_else(|| panic!("unknown scenario id {id}"))
 }
 
@@ -589,15 +594,7 @@ pub fn headline_spec(id: &str) -> &'static HeadlineScenario {
 }
 
 pub fn matrix_spec(id: &str) -> &'static super::registry::ScenarioSpec {
-    super::registry::REMOTE_MATRIX_SCENARIOS
-        .iter()
-        .find(|s| s.id == id)
-        .or_else(|| {
-            super::registry::HEADLINE_SCENARIOS
-                .iter()
-                .find(|s| s.id == id)
-        })
-        .unwrap_or_else(|| panic!("unknown matrix id {id}"))
+    scenario_spec(id)
 }
 
 #[cfg(test)]

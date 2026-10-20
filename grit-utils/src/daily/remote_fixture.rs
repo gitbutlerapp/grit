@@ -23,6 +23,16 @@ use crate::network_suite::{
 use crate::network_verify::{verify_client_fetch_tip, verify_clone_against_bare};
 use crate::shell::shell_quote;
 
+fn context_with_remote(
+    repo: PathBuf,
+    setup: &DailySetup<'_>,
+    remote: DailyRemoteState,
+) -> DailyHeadlineContext {
+    let mut ctx = DailyHeadlineContext::new(repo, setup.git, setup.grit, setup.smoke);
+    ctx.remote = Some(remote);
+    ctx
+}
+
 fn with_remote_scratch<T, F>(label: &str, f: F) -> Result<T>
 where
     F: FnOnce(&Path) -> Result<T>,
@@ -212,20 +222,17 @@ pub fn setup_git_git_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadline
             },
         )?;
         configure_remote(setup.git, &client, &remote_url, &meta.default_branch)?;
-        Ok(DailyHeadlineContext {
-            repo: client,
-            git: setup.git.to_path_buf(),
-            grit: setup.grit.to_path_buf(),
-            blame_path: None,
-            hot_path_meta: None,
-            remote: Some(DailyRemoteState {
+        Ok(context_with_remote(
+            client,
+            setup,
+            DailyRemoteState {
                 bare,
                 meta,
                 remote_url,
                 grit_http: None,
                 git_http: None,
-            }),
-        })
+            },
+        ))
     })
 }
 
@@ -242,20 +249,17 @@ pub fn setup_synth10k_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlin
         let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
         let remote_url = file_url(&bare)?;
         std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
-        Ok(DailyHeadlineContext {
-            repo: scratch.to_path_buf(),
-            git: setup.git.to_path_buf(),
-            grit: setup.grit.to_path_buf(),
-            blame_path: None,
-            hot_path_meta: None,
-            remote: Some(DailyRemoteState {
+        Ok(context_with_remote(
+            scratch.to_path_buf(),
+            setup,
+            DailyRemoteState {
                 bare,
                 meta,
                 remote_url,
                 grit_http: None,
                 git_http: None,
-            }),
-        })
+            },
+        ))
     })
 }
 
@@ -272,20 +276,17 @@ pub fn setup_many_refs_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadli
         let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
         let remote_url = file_url(&bare)?;
         std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
-        Ok(DailyHeadlineContext {
-            repo: scratch.to_path_buf(),
-            git: setup.git.to_path_buf(),
-            grit: setup.grit.to_path_buf(),
-            blame_path: None,
-            hot_path_meta: None,
-            remote: Some(DailyRemoteState {
+        Ok(context_with_remote(
+            scratch.to_path_buf(),
+            setup,
+            DailyRemoteState {
                 bare,
                 meta,
                 remote_url,
                 grit_http: None,
                 git_http: None,
-            }),
-        })
+            },
+        ))
     })
 }
 
@@ -326,14 +327,7 @@ fn setup_git_git_grit_http_remote_label(
         };
         let client = ensure_client(setup.git, &remote)?;
         configure_remote(setup.git, &client, &remote_url, &meta.default_branch)?;
-        Ok(DailyHeadlineContext {
-            repo: client,
-            git: setup.git.to_path_buf(),
-            grit: setup.grit.to_path_buf(),
-            blame_path: None,
-            hot_path_meta: None,
-            remote: Some(remote),
-        })
+        Ok(context_with_remote(client, setup, remote))
     })
 }
 
@@ -353,20 +347,17 @@ pub fn setup_synth10k_grit_http_remote(setup: &DailySetup<'_>) -> Result<DailyHe
         let grit_http = GritHttpServer::start(setup.grit, None, http_root)?;
         let remote_url = grit_http.url(REPO_NAME);
         std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
-        Ok(DailyHeadlineContext {
-            repo: scratch.to_path_buf(),
-            git: setup.git.to_path_buf(),
-            grit: setup.grit.to_path_buf(),
-            blame_path: None,
-            hot_path_meta: None,
-            remote: Some(DailyRemoteState {
+        Ok(context_with_remote(
+            scratch.to_path_buf(),
+            setup,
+            DailyRemoteState {
                 bare,
                 meta,
                 remote_url,
                 grit_http: Some(grit_http),
                 git_http: None,
-            }),
-        })
+            },
+        ))
     })
 }
 
