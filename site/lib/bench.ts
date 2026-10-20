@@ -45,6 +45,10 @@ function isCampaignBaseline(rel: string): boolean {
   return rel.endsWith("campaign-before.json") || rel.endsWith("campaign-after.json");
 }
 
+function isRevisionSelectionRefresh(rel: string): boolean {
+  return rel.endsWith("revision-selection.json");
+}
+
 function loadBundle(baselines: string[]): Bundle {
   const scenarios: Scenario[] = [];
   const seen = new Map<string, { index: number; rel: string }>();
@@ -79,6 +83,14 @@ function loadBundle(baselines: string[]): Bundle {
         const prev = seen.get(id)!;
         if (isCampaignBaseline(rel) && isCampaignBaseline(prev.rel)) {
           scenarios[prev.index] = row;
+          return;
+        }
+        if (isRevisionSelectionRefresh(rel)) {
+          scenarios[prev.index] = row;
+          seen.set(id, { index: prev.index, rel });
+          return;
+        }
+        if (isRevisionSelectionRefresh(prev.rel)) {
           return;
         }
         fail(`duplicate scenario id ${id}`);

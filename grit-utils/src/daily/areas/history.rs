@@ -102,15 +102,6 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             build_grit: |c| log_path_bench(c).0,
         },
         DailyHeadlinePlan {
-            spec: scenario_spec("log/author@git-git"),
-            pending: true,
-            setup: setup_git_git_history,
-            prepare: prepare_none,
-            correctness: None,
-            build_git: |c| log_oneline_bench(c).1,
-            build_grit: |c| log_oneline_bench(c).0,
-        },
-        DailyHeadlinePlan {
             spec: scenario_spec("show/head@synth-10k"),
             pending: false,
             setup: setup_synth10k,

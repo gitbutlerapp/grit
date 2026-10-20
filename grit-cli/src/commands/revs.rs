@@ -111,7 +111,7 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
     let env = repo.environment();
     let mut deprecated = None;
     let mut warn = false;
-    let opts = rev.to_rev_walk_options(env, &[], &mut deprecated, &mut warn)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &[], &mut deprecated, &mut warn)?;
     if deprecated.is_some() {
         bail!("`grit revs` does not support log continuation cursors");
     }

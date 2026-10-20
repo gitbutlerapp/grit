@@ -89,6 +89,7 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
     let mut deprecated_cursor = None;
     let mut deprecated_warning = false;
     let opts = rev.to_rev_walk_options(
+        &repo,
         env,
         &["HEAD"],
         &mut deprecated_cursor,
@@ -126,6 +127,7 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
 
     let use_rev_walk = !rev.paths.is_empty()
         || (rev.max_count.is_some() && continuation.is_none())
+        || opts.commit_filter.as_ref().is_some_and(|f| f.is_active())
         || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
 
     if use_rev_walk {

@@ -9,6 +9,7 @@ use anyhow::{bail, Context, Result};
 use super::matrix_registry::MATRIX_SCENARIOS;
 use super::plan::{DailyHeadlineContext, DailySetup};
 use super::registry::{HeadlineScenario, RepoShape, ScenarioSpec, HEADLINE_SCENARIOS};
+use super::revision_selection_matrix_registry::REVISION_SELECTION_MATRIX_SCENARIOS;
 use super::runner::BenchArgv;
 use crate::fixture::scratch_dir;
 use crate::fixture_registry::{self, FixtureKind};
@@ -583,6 +584,11 @@ pub fn scenario_spec(id: &str) -> &'static ScenarioSpec {
         .iter()
         .find(|s| s.id == id)
         .or_else(|| MATRIX_SCENARIOS.iter().find(|s| s.id == id))
+        .or_else(|| {
+            REVISION_SELECTION_MATRIX_SCENARIOS
+                .iter()
+                .find(|s| s.id == id)
+        })
         .unwrap_or_else(|| panic!("unknown scenario id {id}"))
 }
 

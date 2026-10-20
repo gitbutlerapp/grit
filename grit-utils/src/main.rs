@@ -36,6 +36,7 @@ use grit_utils::refs_driver;
 use grit_utils::refs_fixture::{run_prepare_refs, RefsWorkMode};
 use grit_utils::refs_suite::{run_refs_suite, RefsRunConfig};
 use grit_utils::render::{render_markdown, render_text};
+use grit_utils::revision_selection_suite::run_revision_selection_suite;
 use grit_utils::revwalk_suite::run_revwalk_suite;
 use grit_utils::scenario_suite::{self, ScenarioSuiteOptions};
 use grit_utils::scenarios::{
@@ -154,6 +155,11 @@ enum Cmd {
     },
     /// `grit revs --count` and `grit merge-base` vs git on deep-history and pick fixtures
     Revwalk {
+        #[arg(long)]
+        smoke: bool,
+    },
+    /// Revwalk filters, author log, and related revision-selection scenarios
+    RevisionSelection {
         #[arg(long)]
         smoke: bool,
     },
@@ -1571,6 +1577,14 @@ fn main() -> Result<()> {
                 let bench_exe = std::env::current_exe().context("current exe")?;
                 run_revwalk_suite(&hyperfine, &bench_exe, &git, &grit, &cfg, *smoke, timestamp)?
             }
+        }
+        Cmd::RevisionSelection { smoke } => {
+            eprintln!("Running revision-selection benchmarks...");
+            let cfg = run_config(&cli, true);
+            let bench_exe = std::env::current_exe().context("current exe")?;
+            run_revision_selection_suite(
+                &hyperfine, &bench_exe, &git, &grit, &cfg, *smoke, timestamp,
+            )?
         }
         Cmd::Fsck { smoke } => {
             eprintln!("Running fsck benchmarks...");

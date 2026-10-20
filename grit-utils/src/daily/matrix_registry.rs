@@ -183,13 +183,6 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "History for one path: grit log -- <path> vs git log --oneline -- <path>",
     },
     ScenarioSpec {
-        id: "log/author@git-git",
-        area: Area::Revwalk,
-        headline: false,
-        name: None,
-        description: "GAP: grit log has no --author; git log --author=<name> (pending until roadmap filter lands)",
-    },
-    ScenarioSpec {
         id: "show/head@synth-10k",
         area: Area::Revwalk,
         headline: false,

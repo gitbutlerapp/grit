@@ -937,6 +937,10 @@ fn main() {
             .is_some()
         {
             commands::bundle::MISSING_PREREQUISITE_EXIT
+        } else if json_error::structured_json_payload(&err)
+            .is_some_and(|p| p.kind == "invalid_pattern")
+        {
+            129
         } else if err
             .downcast_ref::<grit_lib::remote::clone::CloneError>()
             .is_some_and(grit_lib::remote::clone::CloneError::is_remote_read_failure)

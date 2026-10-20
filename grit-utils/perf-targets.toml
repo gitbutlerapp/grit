@@ -56,6 +56,28 @@ owned_by_item_14 = true
 [scenario."revs-left-right-count-no-graph"]
 owned_by_item_14 = true
 
+[scenario."revs-count-author-no-graph"]
+owned_by_item_14 = true
+
+[scenario."revs-count-author-commit-graph"]
+owned_by_item_14 = true
+
+[scenario."revs-author-n50-no-graph"]
+owned_by_item_14 = true
+
+[scenario."revs-author-n50-commit-graph"]
+owned_by_item_14 = true
+
+[scenario."log-author-n50-no-graph"]
+owned_by_item_14 = true
+
+[scenario."log-author-n50-commit-graph"]
+owned_by_item_14 = true
+
+[scenario."merge-base-pick-fixture"]
+documented = "grit merge-base on 10k-file pick fixture remains far above 1.1× git on factory VM"
+followup = "ROADMAP item 7"
+
 [scenario."git-dot-git/merge-base"]
 documented = "grit merge-base exceeds VM memory on git.git until revwalk item 7 lands"
 followup = "ROADMAP item 7"

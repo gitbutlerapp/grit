@@ -343,7 +343,7 @@ const MATRIX_SMOKE_IDS: [&str; 35] = [
     "patch-id/commit@git-git",
 ];
 
-const MATRIX_GAP_IDS: [&str; 1] = ["log/author@git-git"];
+const MATRIX_GAP_IDS: [&str; 0] = [];
 
 const GIT_GIT_HEADLINE_IDS: [&str; 3] = [
     "log/oneline-100@git-git",

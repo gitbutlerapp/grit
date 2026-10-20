@@ -6,6 +6,7 @@ pub mod maintenance;
 pub mod misc;
 pub mod refs;
 pub mod remotes;
+pub mod revision_selection;
 pub mod worktree;
 
 use super::plan::DailyHeadlinePlan;
@@ -16,6 +17,7 @@ pub fn all_daily_plans() -> Vec<DailyHeadlinePlan> {
     plans.extend(worktree::plans());
     plans.extend(misc::plans());
     plans.extend(history::plans());
+    plans.extend(revision_selection::plans());
     plans.extend(branching::plans());
     plans.extend(remotes::plans());
     plans.extend(refs::plans());

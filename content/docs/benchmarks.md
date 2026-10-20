@@ -185,6 +185,13 @@ cargo bench -p grit-lib --bench hash
 - **Ratios** are **Grit median ÷ Git median** (stored in each scenario’s `ratio` field; hyperfine also records mean and spread). Values below `1.00×` mean Grit is faster; values above `2.00×` are highlighted as regressions worth investigating.
 - **Spread** shows Grit’s standard deviation across timed runs (hyperfine `--min-runs` / warmup settings from the baseline capture).
 
+**Revision-selection filters (`grit-bench revision-selection`).** Baseline **`grit-utils/baselines/revision-selection.json`** captures the deep-history network fixture with and without a reachable **commit-graph**: bounded **`--since`** counts, symmetric-range **left/right** counts, **`--author`** counting and **`-n 50`** listing (library **`lib-op`** drivers for rev-list-shaped workloads; **`grit log --author`** / **`grit revs --author`** for CLI rows), plus **`log-author-n50`** on the same fixture. Daily census registers the same workloads under **`REVISION_SELECTION_MATRIX_SCENARIOS`** (ids such as **`revs/count-since@deep-history`**, **`log/author-n50@deep-history-cg`**, and **`log/author@git-git`**). Pickaxe, **`--group-by author`**, **`--follow`**, and **`--cherry-pick`** scenarios join this baseline when their roadmap steps land.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench revision-selection --format json --output grit-utils/baselines/revision-selection.json
+```
+
 ### Maintenance (`grit-bench maintenance`)
 
 Baseline **`grit-utils/baselines/maintenance-medium.json`** compares full **`grit gc`**, **`grit gc repack --bitmaps`**, and **`grit gc commit-graph`** against **`git gc`**, **`git repack -adb`**, and **`git commit-graph write --reachable --changed-paths`** on the deep-history network fixture with a worktree seeded with extra loose objects. Each hyperfine run uses **`prepare-maintenance`** to restore that worktree so timings are not skewed by mutating the same checkout across iterations.

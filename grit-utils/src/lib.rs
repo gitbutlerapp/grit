@@ -49,6 +49,7 @@ pub mod refs_suite;
 pub mod render;
 pub mod resolve_cat_suite;
 pub mod resource;
+pub mod revision_selection_suite;
 pub mod revwalk_suite;
 pub mod scenario_suite;
 pub mod scenarios;
