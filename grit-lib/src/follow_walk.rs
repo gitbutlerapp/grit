@@ -71,9 +71,6 @@ pub fn follow_history(
     if options.walk.paths.len() > 1 {
         return Err(Error::RevList(RevListError::FollowMultiplePaths));
     }
-    if !options.walk.paths.is_empty() && options.walk.paths[0] != path {
-        return Err(Error::RevList(RevListError::FollowMultiplePaths));
-    }
 
     let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, &options.walk)?;
     let mut include = resolve_revision_specs_to_commits(repo, &positive)?;

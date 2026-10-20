@@ -5300,9 +5300,10 @@ pub fn follow_history_commits(
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct FollowHeapKey {
     oid: ObjectId,
+    path: String,
     date: i64,
     seq: u64,
 }
@@ -5312,7 +5313,10 @@ impl Ord for FollowHeapKey {
         use std::cmp::Ordering;
         match self.date.cmp(&other.date) {
             Ordering::Equal => match other.seq.cmp(&self.seq) {
-                Ordering::Equal => self.oid.cmp(&other.oid),
+                Ordering::Equal => match self.oid.cmp(&other.oid) {
+                    Ordering::Equal => self.path.cmp(&other.path),
+                    ord => ord,
+                },
                 ord => ord,
             },
             ord => ord,
@@ -5337,19 +5341,17 @@ fn follow_history_heap(
     rename_threshold: u32,
     bloom: &DenseBloomCtx<'_>,
 ) -> Result<Vec<FollowHistoryEntry>> {
-    use std::collections::{BinaryHeap, HashMap, HashSet};
-    let path_vec = |p: &str| vec![p.to_owned()];
+    use std::collections::{BinaryHeap, HashSet};
     let mut heap = BinaryHeap::new();
-    let mut queued = HashSet::new();
-    let mut paths_at: HashMap<ObjectId, String> = HashMap::new();
+    let mut seen_states: HashSet<(ObjectId, String)> = HashSet::new();
     let mut next_seq = 0u64;
     for &tip in tips {
-        if excluded.contains(&tip) || !queued.insert(tip) {
+        if excluded.contains(&tip) {
             continue;
         }
-        paths_at.insert(tip, initial_path.to_owned());
         heap.push(FollowHeapKey {
             oid: tip,
+            path: initial_path.to_owned(),
             date: graph.sort_key(tip, false),
             seq: next_seq,
         });
@@ -5365,29 +5367,24 @@ fn follow_history_heap(
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
     let thread_policy = crate::parallel::ThreadPolicy::default();
+    let path_vec = |p: &str| vec![p.to_owned()];
 
     while let Some(item) = heap.pop() {
         let oid = item.oid;
         if excluded.contains(&oid) {
             continue;
         }
-        let path = paths_at
-            .get(&oid)
-            .cloned()
-            .unwrap_or_else(|| initial_path.to_owned());
-
-        if let Some(since) = walk.since {
-            if graph.committer_time(oid) < since {
-                continue;
-            }
-        }
-        if let Some(until) = walk.until {
-            if graph.committer_time(oid) > until {
-                continue;
-            }
+        let path = follow_resolve_path_at_commit(repo, graph.commit_tree(oid)?, &item.path)?;
+        if !seen_states.insert((oid, path.clone())) {
+            continue;
         }
 
-        let action = dense_path_limited_action(
+        let passes_date_cutoff = {
+            let ts = graph.committer_time(oid);
+            walk.since.is_none_or(|since| ts >= since) && walk.until.is_none_or(|until| ts <= until)
+        };
+
+        let dense = dense_path_limited_action(
             repo,
             graph,
             oid,
@@ -5397,8 +5394,30 @@ fn follow_history_heap(
             Some(bloom),
             &mut cache,
         )?;
+        let follow = follow_path_limited_action(
+            repo,
+            graph,
+            oid,
+            &path,
+            rename_threshold,
+            config.as_ref(),
+            &thread_policy,
+        )?;
 
-        if action.visible {
+        let parent_count = graph.parents_of(oid)?.len();
+        let passes_merge_filter = match walk.merges {
+            crate::revwalk::MergeFilter::Any => true,
+            crate::revwalk::MergeFilter::OnlyMerges => parent_count >= 2,
+            crate::revwalk::MergeFilter::NoMerges => parent_count <= 1,
+        };
+
+        let path_visible = if parent_count > 1 {
+            follow.visible
+        } else {
+            dense.visible || follow.visible
+        };
+
+        if path_visible && passes_date_cutoff && passes_merge_filter {
             visible_seen += 1;
             if visible_seen > skip && out.len() < max_count {
                 out.push((oid, path.clone()));
@@ -5415,8 +5434,10 @@ fn follow_history_heap(
                 .into_iter()
                 .take(1)
                 .collect::<Vec<_>>()
-        } else {
+        } else if parent_count > 1 {
             graph.parents_of(oid)?
+        } else {
+            dense.parents_to_walk.clone()
         };
 
         for parent in parents {
@@ -5432,15 +5453,13 @@ fn follow_history_heap(
                 config.as_ref(),
                 &thread_policy,
             )?;
-            paths_at.entry(parent).or_insert(parent_path);
-            if queued.insert(parent) {
-                heap.push(FollowHeapKey {
-                    oid: parent,
-                    date: graph.sort_key(parent, false),
-                    seq: next_seq,
-                });
-                next_seq += 1;
-            }
+            heap.push(FollowHeapKey {
+                oid: parent,
+                path: parent_path,
+                date: graph.sort_key(parent, false),
+                seq: next_seq,
+            });
+            next_seq += 1;
         }
     }
 
@@ -5448,6 +5467,119 @@ fn follow_history_heap(
         out.reverse();
     }
     Ok(out)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FollowFileEntry {
+    mode: u32,
+    oid: ObjectId,
+}
+
+fn follow_file_entry_at(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    path: &str,
+) -> Result<Option<FollowFileEntry>> {
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return Ok(None);
+    }
+    let mut current = tree_oid;
+    for (i, part) in parts.iter().enumerate() {
+        let entries = read_parsed_tree(repo, current)?;
+        let Some(entry) = tree_entry_by_name(&entries, part, false) else {
+            return Ok(None);
+        };
+        if i + 1 == parts.len() {
+            if entry.mode == 0o040000 {
+                return Ok(None);
+            }
+            return Ok(Some(FollowFileEntry {
+                mode: entry.mode,
+                oid: entry.oid,
+            }));
+        }
+        if entry.mode != 0o040000 {
+            return Ok(None);
+        }
+        current = entry.oid;
+    }
+    Ok(None)
+}
+
+fn follow_file_entries_same(left: Option<FollowFileEntry>, right: Option<FollowFileEntry>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.mode == b.mode && a.oid == b.oid,
+        _ => false,
+    }
+}
+
+struct FollowPathAction {
+    visible: bool,
+    parents_to_walk: Vec<ObjectId>,
+}
+
+fn follow_path_limited_action(
+    repo: &Repository,
+    graph: &mut CommitGraph<'_>,
+    oid: ObjectId,
+    path: &str,
+    rename_threshold: u32,
+    config: &ConfigSet,
+    thread_policy: &crate::parallel::ThreadPolicy,
+) -> Result<FollowPathAction> {
+    let parents = graph.parents_of(oid)?;
+    if parents.is_empty() {
+        let commit_tree = graph.commit_tree(oid)?;
+        let visible = follow_tree_has_path(repo, commit_tree, path)?;
+        return Ok(FollowPathAction {
+            visible,
+            parents_to_walk: Vec::new(),
+        });
+    }
+
+    let commit_tree = graph.commit_tree(oid)?;
+    let commit_entry = follow_file_entry_at(repo, commit_tree, path)?;
+
+    let mut treesame = Vec::new();
+    for parent_oid in &parents {
+        let parent_path = follow_path_into_parent(
+            repo,
+            *parent_oid,
+            oid,
+            path,
+            rename_threshold,
+            config,
+            thread_policy,
+        )?;
+        let parent_tree = graph.commit_tree(*parent_oid)?;
+        let parent_entry = follow_file_entry_at(repo, parent_tree, &parent_path)?;
+        let same = parent_path == path && follow_file_entries_same(commit_entry, parent_entry);
+        if same {
+            treesame.push(*parent_oid);
+        }
+    }
+
+    let parents_to_walk = if parents.len() > 1 {
+        match treesame.first().copied() {
+            Some(parent) => vec![parent],
+            None => parents.clone(),
+        }
+    } else {
+        parents.clone()
+    };
+
+    let visible = if parents.len() > 1 {
+        treesame.is_empty()
+    } else {
+        treesame.is_empty()
+    };
+
+    Ok(FollowPathAction {
+        visible,
+        parents_to_walk,
+    })
 }
 
 fn follow_path_into_parent(
@@ -5459,7 +5591,6 @@ fn follow_path_into_parent(
     config: &ConfigSet,
     thread_policy: &crate::parallel::ThreadPolicy,
 ) -> Result<String> {
-    use crate::diff::{diff_trees, DiffStatus};
     let odb = repo.odb();
     let parent = load_commit(repo, parent_oid)?;
     let commit = load_commit(repo, commit_oid)?;
@@ -5467,45 +5598,56 @@ fn follow_path_into_parent(
         return Ok(path.to_owned());
     }
 
-    let entries = diff_trees(odb, Some(&parent.tree), Some(&commit.tree), "")?;
-    let touches_path = entries.iter().any(|e| follow_entry_matches_path(e, path));
-    if !touches_path {
+    if follow_tree_has_path(repo, parent.tree, path)? {
         return Ok(path.to_owned());
     }
 
-    let might_be_rename = entries.len() == 1
-        && entries[0].status == DiffStatus::Added
-        && entries[0].new_path.as_deref() == Some(path);
-
-    if !might_be_rename && follow_tree_has_path(repo, parent.tree, path)? {
+    let commit_has_path = follow_tree_has_path(repo, commit.tree, path)?;
+    if !commit_has_path {
         return Ok(path.to_owned());
     }
 
-    if might_be_rename || !follow_tree_has_path(repo, parent.tree, path)? {
-        if let Some(old_path) = follow_find_rename_to_path(
-            odb,
-            &parent.tree,
-            &commit.tree,
-            path,
-            threshold,
-            config,
-            thread_policy,
-        )? {
-            return Ok(old_path);
+    if let Some(old_path) = follow_find_rename_to_path(
+        odb,
+        &parent.tree,
+        &commit.tree,
+        path,
+        threshold,
+        config,
+        thread_policy,
+    )? {
+        return Ok(old_path);
+    }
+    if let Some(dash_path) = follow_legacy_dash_path(path) {
+        if follow_tree_has_path(repo, parent.tree, &dash_path)? {
+            return Ok(dash_path);
         }
     }
     Ok(path.to_owned())
 }
 
-fn follow_entry_matches_path(entry: &crate::diff::DiffEntry, path: &str) -> bool {
-    use crate::diff::DiffStatus;
-    match entry.status {
-        DiffStatus::Added | DiffStatus::Modified | DiffStatus::Renamed | DiffStatus::Copied => {
-            entry.new_path.as_deref() == Some(path)
-        }
-        DiffStatus::Deleted => entry.old_path.as_deref() == Some(path),
-        _ => entry.old_path.as_deref() == Some(path) || entry.new_path.as_deref() == Some(path),
+fn follow_legacy_dash_path(path: &str) -> Option<String> {
+    let (dir, file) = path.rsplit_once('/')?;
+    if dir.is_empty() || file.is_empty() {
+        return None;
     }
+    Some(format!("{dir}-{file}"))
+}
+
+fn follow_resolve_path_at_commit(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    path: &str,
+) -> Result<String> {
+    if follow_tree_has_path(repo, tree_oid, path)? {
+        return Ok(path.to_owned());
+    }
+    if let Some(dash_path) = follow_legacy_dash_path(path) {
+        if follow_tree_has_path(repo, tree_oid, &dash_path)? {
+            return Ok(dash_path);
+        }
+    }
+    Ok(path.to_owned())
 }
 
 fn follow_tree_has_path(repo: &Repository, tree_oid: ObjectId, path: &str) -> Result<bool> {

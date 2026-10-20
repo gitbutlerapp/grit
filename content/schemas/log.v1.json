@@ -94,6 +94,13 @@
         "oid": {
           "type": "string"
         },
+        "path": {
+          "description": "Tracked file path at this commit when `--follow` is used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "relative_date": {
           "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
           "type": [
