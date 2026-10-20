@@ -102,6 +102,16 @@ pub struct DiffOptions {
     pub renames: RenameDetection,
     /// When false, skip intra-line word emphasis (line-level hunks only).
     pub word_level_inline: bool,
+    /// Ignore whitespace when comparing blob content (`-b` / `diff.ignoreSpaceChange`).
+    pub ignore_space_change: bool,
+    /// Ignore all whitespace when comparing blob content (`-w`).
+    pub ignore_all_space: bool,
+    /// Ignore whitespace at end of line (`--ignore-space-at-eol`).
+    pub ignore_space_at_eol: bool,
+    /// Ignore blank lines when comparing blob content (`--ignore-blank-lines`).
+    pub ignore_blank_lines: bool,
+    /// Ignore carriage return before line feed (`--ignore-cr-at-eol`).
+    pub ignore_cr_at_eol: bool,
 }
 
 impl Default for DiffOptions {
@@ -113,6 +123,11 @@ impl Default for DiffOptions {
             indent_heuristic: true,
             renames: RenameDetection::default(),
             word_level_inline: true,
+            ignore_space_change: false,
+            ignore_all_space: false,
+            ignore_space_at_eol: false,
+            ignore_blank_lines: false,
+            ignore_cr_at_eol: false,
         }
     }
 }
@@ -193,6 +208,13 @@ impl DiffOptions {
         }
         opts.indent_heuristic = indent_heuristic_from_config(config);
         opts.renames = renames_from_config(config);
+        if config
+            .get_bool("diff.ignoreSpaceChange")
+            .and_then(|r| r.ok())
+            .unwrap_or(false)
+        {
+            opts.ignore_space_change = true;
+        }
         opts
     }
 

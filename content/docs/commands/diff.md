@@ -8,8 +8,8 @@ order: 3
 ## Synopsis
 
 ```text
-grit diff [--staged] [--unstaged] [--against <ref>] [<commit> [<commit>]] [-- <path>…]
-grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>] [-- <path>…]
+grit diff [--staged | --cached] [--unstaged] [--exit-code] [--quiet] [--against <ref>] [<commit> [<commit>]] [-- <path>…]
+grit diff [--staged | --cached] [--unstaged] [--exit-code] [--quiet] [--against <ref>] [<base>..<tip>] [-- <path>…]
 ```
 
 ## Description
@@ -28,8 +28,10 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 | Option | Description |
 | --- | --- |
-| `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
+| `--staged`, `-S`, `--cached` | Staged changes only (index vs `HEAD`). `--cached` is a visible alias of `--staged`. Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
+| `--exit-code` | Exit with status **1** when there are changes, **0** when the selected diff is empty. Errors exit **2**. |
+| `--quiet` | Print nothing (implies `--exit-code`). Useful for scripts that only need the exit status. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
 | `<commit>` | One commit (that commit’s patch), two commits (tree diff), or a range `A..B` / `A...B`. Omit for uncommitted changes. |
 | `<path>…` | After `--`, limit the diff to these paths (all forms above, including `--staged`). |
@@ -48,6 +50,14 @@ main.rs
     2 │ +     println!("hi");
     3 │ + }
 ```
+
+Is the tree clean?
+
+```console
+$ grit diff --quiet
+```
+
+Exit **0** when there are no uncommitted changes, **1** when something changed (same idea as `git diff --quiet`).
 
 What is staged but not yet committed?
 
@@ -104,6 +114,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
+| `changed` | boolean | Always present. `true` when the selected diff has any real change (matches `--exit-code` / `--quiet`). |
 | `files` | array | Changed files, each with `path`, `status`, `binary`, optional `old_mode` / `new_mode`, optional `old_encoding_lossy` / `new_encoding_lossy`, and `hunks`. |
 
 Nested fields include `files[].status` (`added`, `modified`, `deleted`, `renamed`, and so on), optional `files[].old_path` when `status` is `renamed`, `hunks[].old_start` / `new_start` / `old_lines` / `new_lines`, optional `hunks[].context` (enclosing definition line), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, a compact `text` string per line (or `segments` with optional `emphasis` only when intra-line word highlights are present), and `no_newline_at_eof` when that side lacks a trailing newline (Git’s `\ No newline at end of file`). JSON is written in compact form (no pretty-printing). When `files[].binary` is true, `hunks` is always an empty array — blob bytes are never included in JSON (use human or `--markdown` output for the “Binary file differs” note). For unstaged and other worktree-sourced sides, line text is normalized to repository form (`.gitattributes` / `core.autocrlf`) before diffing, so trailing `\r` from CRLF checkouts does not appear in line `text`. Commit and staged diffs compare stored blobs and may still show carriage returns when the on-disk object bytes differ. When file bytes are not valid UTF-8 and the file is treated as text, `old_encoding_lossy` or `new_encoding_lossy` is true and non-UTF-8 bytes appear as U+FFFD in text fields.
@@ -112,6 +123,7 @@ Example:
 
 ```json
 {
+  "changed": true,
   "files": [
     {
       "path": "main.rs",

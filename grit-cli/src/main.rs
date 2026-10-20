@@ -503,7 +503,7 @@ enum Command {
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
     Diff {
         /// Staged changes only (index vs HEAD).
-        #[arg(short = 'S', long = "staged")]
+        #[arg(short = 'S', long = "staged", visible_aliases = ["cached"])]
         staged: bool,
         /// Unstaged changes only (worktree vs index).
         #[arg(long = "unstaged")]
@@ -511,6 +511,12 @@ enum Command {
         /// Compare the worktree to this ref's tree instead of HEAD (no commit arguments).
         #[arg(long = "against", value_name = "REF")]
         against: Option<String>,
+        /// Exit with 1 when there are changes (errors exit 2).
+        #[arg(long = "exit-code")]
+        exit_code: bool,
+        /// Print nothing; implies `--exit-code`.
+        #[arg(long = "quiet")]
+        quiet: bool,
         /// One commit (that commit's patch), two commits (tree diff), or a range `A..B` / `A...B`.
         #[arg(value_name = "COMMIT")]
         commits: Vec<String>,
@@ -1112,10 +1118,13 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             staged,
             unstaged,
             against,
+            exit_code,
+            quiet,
             commits,
             paths,
-        } => emit(
-            &commands::diff::run(commands::diff::DiffRunOptions {
+        } => {
+            let exit_code = exit_code || quiet;
+            match commands::diff::run(commands::diff::DiffRunOptions {
                 staged,
                 unstaged,
                 against,
@@ -1123,10 +1132,28 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 paths,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
-            })?,
-            opts,
-            ctx,
-        ),
+                exit_code,
+                quiet,
+            }) {
+                Ok(outcome) => {
+                    if !quiet {
+                        emit(&outcome, opts, ctx)?;
+                    }
+                    if exit_code {
+                        std::process::exit(commands::diff::exit_code(&outcome));
+                    }
+                    Ok(())
+                }
+                Err(err) => {
+                    output::emit_error(&err, opts);
+                    std::process::exit(if exit_code {
+                        commands::diff::DIFF_ERROR_EXIT
+                    } else {
+                        1
+                    });
+                }
+            }
+        }
         Command::Show { object } => emit(&commands::show::run(object)?, opts, ctx),
         Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),

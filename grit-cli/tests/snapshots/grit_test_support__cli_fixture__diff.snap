@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"files\":[{\"path\":\"staged.txt\",\"status\":\"added\",\"new_mode\":\"100644\",\"binary\":false,\"hunks\":[{\"old_start\":0,\"new_start\":1,\"old_lines\":0,\"new_lines\":1,\"lines\":[{\"kind\":\"add\",\"new\":1,\"text\":\"staged contents\"}]}]},{\"path\":\"tracked.txt\",\"status\":\"modified\",\"old_mode\":\"100644\",\"new_mode\":\"100644\",\"binary\":false,\"hunks\":[{\"old_start\":1,\"new_start\":1,\"old_lines\":1,\"new_lines\":1,\"lines\":[{\"kind\":\"del\",\"old\":1,\"text\":\"tracked v2\"},{\"kind\":\"add\",\"new\":1,\"text\":\"tracked modified\"}]}]}]}\n",
+    "stdout": "{\"changed\":true,\"files\":[{\"path\":\"staged.txt\",\"status\":\"added\",\"new_mode\":\"100644\",\"binary\":false,\"hunks\":[{\"old_start\":0,\"new_start\":1,\"old_lines\":0,\"new_lines\":1,\"lines\":[{\"kind\":\"add\",\"new\":1,\"text\":\"staged contents\"}]}]},{\"path\":\"tracked.txt\",\"status\":\"modified\",\"old_mode\":\"100644\",\"new_mode\":\"100644\",\"binary\":false,\"hunks\":[{\"old_start\":1,\"new_start\":1,\"old_lines\":1,\"new_lines\":1,\"lines\":[{\"kind\":\"del\",\"old\":1,\"text\":\"tracked v2\"},{\"kind\":\"add\",\"new\":1,\"text\":\"tracked modified\"}]}]}]}\n",
     "stderr": ""
   },
   "markdown": {

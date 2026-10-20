@@ -23,7 +23,7 @@ use grit_lib::diff::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
     submodule_porcelain_flags, tree_diff_structured_parallel, DiffEntry,
-    DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
+    DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, DiffTarget, TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -84,6 +84,8 @@ const FG_ON_DIFF: &str = "38;5;231";
 /// Result of `grit diff`.
 #[derive(Serialize, JsonSchema)]
 pub struct DiffOutcome {
+    /// Whether any selected change exists (matches `grit diff --quiet` / `--exit-code`).
+    pub changed: bool,
     pub files: Vec<FileDiff>,
     #[serde(skip)]
     #[schemars(skip)]
@@ -251,6 +253,24 @@ pub struct DiffRunOptions {
     pub paths: Vec<String>,
     /// Intra-line word highlights in structured hunks (human TTY output only).
     pub word_level_inline: bool,
+    /// Exit with status 1 when there are changes (Git `--exit-code`).
+    #[allow(dead_code)]
+    pub exit_code: bool,
+    /// Print nothing; implies [`Self::exit_code`].
+    pub quiet: bool,
+}
+
+/// Exit status when `grit diff` fails while `--exit-code` or `--quiet` is set.
+pub const DIFF_ERROR_EXIT: i32 = 2;
+
+/// Process exit code for `--exit-code` / `--quiet`: 0 when clean, 1 when changed.
+#[must_use]
+pub fn exit_code(outcome: &DiffOutcome) -> i32 {
+    if outcome.changed {
+        1
+    } else {
+        0
+    }
 }
 
 /// Whether human diff output should compute word-level inline emphasis.
@@ -266,101 +286,167 @@ fn attach_path_display(repo: &grit_lib::repo::Repository, mut outcome: DiffOutco
     outcome
 }
 
+fn finish_diff_outcome(
+    repo: &grit_lib::repo::Repository,
+    quiet: bool,
+    target: DiffTarget,
+    pathspecs: &[String],
+    diff_options: DiffOptions,
+    build: impl FnOnce() -> Result<DiffOutcome>,
+) -> Result<DiffOutcome> {
+    let changed = repo
+        .diff()
+        .has_changes(target, pathspecs, diff_options)
+        .context("could not check for diff changes")?;
+    if quiet {
+        return Ok(attach_path_display(
+            repo,
+            DiffOutcome {
+                changed,
+                files: Vec::new(),
+                path_display: None,
+            },
+        ));
+    }
+    let mut outcome = build()?;
+    outcome.changed = changed;
+    Ok(attach_path_display(repo, outcome))
+}
+
 pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let repo = context::discover()?;
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
-    let (commits, path_args) =
-        disambiguate_diff_revision_and_paths(&repo, opts.commits, opts.paths);
+    let DiffRunOptions {
+        staged,
+        unstaged,
+        against,
+        commits,
+        paths,
+        word_level_inline,
+        exit_code: _,
+        quiet,
+    } = opts;
+    let (commits, path_args) = disambiguate_diff_revision_and_paths(&repo, commits, paths);
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
-    diff_options.word_level_inline = opts.word_level_inline;
-    if opts.staged && opts.unstaged {
+    diff_options.word_level_inline = word_level_inline;
+    if staged && unstaged {
         anyhow::bail!("--staged and --unstaged cannot be combined");
     }
-    if opts.staged {
-        if !commits.is_empty() || opts.against.is_some() {
+    if staged {
+        if !commits.is_empty() || against.is_some() {
             anyhow::bail!("--staged cannot be combined with revision arguments or --against");
         }
         let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
-        return Ok(attach_path_display(
+        return finish_diff_outcome(
             &repo,
-            outcome_from_changes(
-                filter_file_changes(staged_changes(&repo)?, &repo, &pathspecs),
-                &config,
-                &thread_policy,
-                diff_options,
-            ),
-        ));
+            quiet,
+            DiffTarget::Staged,
+            &pathspecs,
+            diff_options,
+            || {
+                Ok(outcome_from_changes(
+                    filter_file_changes(staged_changes(&repo)?, &repo, &pathspecs),
+                    &config,
+                    &thread_policy,
+                    diff_options,
+                ))
+            },
+        );
     }
-    if opts.unstaged {
-        if !commits.is_empty() || opts.against.is_some() {
+    if unstaged {
+        if !commits.is_empty() || against.is_some() {
             anyhow::bail!("--unstaged cannot be combined with revision arguments or --against");
         }
         let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
-        return Ok(attach_path_display(
+        return finish_diff_outcome(
             &repo,
-            outcome_from_changes(
-                filter_file_changes(unstaged_changes(&repo)?, &repo, &pathspecs),
-                &config,
-                &thread_policy,
-                diff_options,
-            ),
-        ));
+            quiet,
+            DiffTarget::Unstaged,
+            &pathspecs,
+            diff_options,
+            || {
+                Ok(outcome_from_changes(
+                    filter_file_changes(unstaged_changes(&repo)?, &repo, &pathspecs),
+                    &config,
+                    &thread_policy,
+                    diff_options,
+                ))
+            },
+        );
     }
     if commits.len() > 2 {
         anyhow::bail!("at most two commits, or one two-dot range such as A..B");
     }
-    if opts.against.is_some() && !commits.is_empty() {
+    if against.is_some() && !commits.is_empty() {
         anyhow::bail!("--against compares the worktree to a ref and takes no commit arguments");
     }
     let changes = match commits.len() {
         0 => {
             let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
-            let changes = if let Some(spec) = opts.against {
-                against_ref_changes(&repo, &spec)?
+            let target = if let Some(spec) = against.as_ref() {
+                let commit = resolve_diff_commit(&repo, spec)?;
+                let tree = context::commit_tree(&repo, &commit)?;
+                DiffTarget::WorktreeAgainst { tree }
             } else {
-                worktree_changes(&repo)?
+                DiffTarget::Uncommitted
             };
-            return Ok(attach_path_display(
-                &repo,
-                outcome_from_changes(
+            return finish_diff_outcome(&repo, quiet, target, &pathspecs, diff_options, || {
+                let changes = if let Some(spec) = against.as_ref() {
+                    against_ref_changes(&repo, spec)?
+                } else {
+                    worktree_changes(&repo)?
+                };
+                Ok(outcome_from_changes(
                     filter_file_changes(changes, &repo, &pathspecs),
                     &config,
                     &thread_policy,
                     diff_options,
-                ),
-            ));
+                ))
+            });
         }
         1 => {
             let spec = &commits[0];
             if let Some((base, tip)) = parse_commit_range(&repo, spec)? {
                 let pathspecs = resolve_commit_diff_pathspecs(&repo, &path_args)?;
-                return Ok(attach_path_display(
+                return finish_diff_outcome(
                     &repo,
-                    outcome_from_tree_structured(filter_tree_diff(
-                        tree_commit_changes(
+                    quiet,
+                    DiffTarget::Commits { base, tip },
+                    &pathspecs,
+                    diff_options,
+                    || {
+                        Ok(outcome_from_tree_structured(filter_tree_diff(
+                            tree_commit_changes(
+                                &repo,
+                                &base,
+                                &tip,
+                                &config,
+                                &thread_policy,
+                                diff_options,
+                            )?,
                             &repo,
-                            &base,
-                            &tip,
-                            &config,
-                            &thread_policy,
-                            diff_options,
-                        )?,
-                        &repo,
-                        &pathspecs,
-                    )),
-                ));
+                            &pathspecs,
+                        )))
+                    },
+                );
             } else if let Ok(oid) = resolve_diff_commit(&repo, spec) {
                 let pathspecs = resolve_commit_diff_pathspecs(&repo, &path_args)?;
-                return Ok(attach_path_display(
+                return finish_diff_outcome(
                     &repo,
-                    outcome_from_tree_structured(filter_tree_diff(
-                        commit_changes(&repo, &oid, &config, &thread_policy, diff_options)?,
-                        &repo,
-                        &pathspecs,
-                    )),
-                ));
+                    quiet,
+                    DiffTarget::Commit { commit: oid },
+                    &pathspecs,
+                    diff_options,
+                    || {
+                        Ok(outcome_from_tree_structured(filter_tree_diff(
+                            commit_changes(&repo, &oid, &config, &thread_policy, diff_options)?,
+                            &repo,
+                            &pathspecs,
+                        )))
+                    },
+                );
             } else if path_args.is_empty() {
                 single_argument_path_unstaged_diff(&repo, spec)?
             } else {
@@ -373,21 +459,27 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 if token_is_known_worktree_pathspec(&repo, &commits[1]) {
                     let pathspecs =
                         resolve_commit_diff_pathspecs(&repo, std::slice::from_ref(&commits[1]))?;
-                    return Ok(attach_path_display(
+                    return finish_diff_outcome(
                         &repo,
-                        outcome_from_tree_structured(filter_tree_diff(
-                            tree_commit_changes(
+                        quiet,
+                        DiffTarget::Commits { base, tip },
+                        &pathspecs,
+                        diff_options,
+                        || {
+                            Ok(outcome_from_tree_structured(filter_tree_diff(
+                                tree_commit_changes(
+                                    &repo,
+                                    &base,
+                                    &tip,
+                                    &config,
+                                    &thread_policy,
+                                    diff_options,
+                                )?,
                                 &repo,
-                                &base,
-                                &tip,
-                                &config,
-                                &thread_policy,
-                                diff_options,
-                            )?,
-                            &repo,
-                            &pathspecs,
-                        )),
-                    ));
+                                &pathspecs,
+                            )))
+                        },
+                    );
                 }
                 match resolve_diff_commit(&repo, &commits[1]) {
                     Ok(_) => anyhow::bail!(
@@ -399,27 +491,46 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             let pathspecs = resolve_commit_diff_pathspecs(&repo, &path_args)?;
             let base = resolve_diff_commit(&repo, &commits[0])?;
             let tip = resolve_diff_commit(&repo, &commits[1])?;
-            return Ok(attach_path_display(
+            return finish_diff_outcome(
                 &repo,
-                outcome_from_tree_structured(filter_tree_diff(
-                    tree_commit_changes(&repo, &base, &tip, &config, &thread_policy, diff_options)?,
-                    &repo,
-                    &pathspecs,
-                )),
-            ));
+                quiet,
+                DiffTarget::Commits { base, tip },
+                &pathspecs,
+                diff_options,
+                || {
+                    Ok(outcome_from_tree_structured(filter_tree_diff(
+                        tree_commit_changes(
+                            &repo,
+                            &base,
+                            &tip,
+                            &config,
+                            &thread_policy,
+                            diff_options,
+                        )?,
+                        &repo,
+                        &pathspecs,
+                    )))
+                },
+            );
         }
         _ => unreachable!("checked above"),
     };
     let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
-    Ok(attach_path_display(
+    finish_diff_outcome(
         &repo,
-        outcome_from_changes(
-            filter_file_changes(changes, &repo, &pathspecs),
-            &config,
-            &thread_policy,
-            diff_options,
-        ),
-    ))
+        quiet,
+        DiffTarget::Unstaged,
+        &pathspecs,
+        diff_options,
+        || {
+            Ok(outcome_from_changes(
+                filter_file_changes(changes, &repo, &pathspecs),
+                &config,
+                &thread_policy,
+                diff_options,
+            ))
+        },
+    )
 }
 
 /// The diff a single commit introduced, as a [`DiffOutcome`]. Reused by `grit show`.
@@ -429,7 +540,7 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     diff_options.word_level_inline = false;
-    Ok(attach_path_display(
+    let mut outcome = attach_path_display(
         repo,
         outcome_from_tree_structured(commit_changes(
             repo,
@@ -438,7 +549,12 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
             &thread_policy,
             diff_options,
         )?),
-    ))
+    );
+    outcome.changed = repo
+        .diff()
+        .has_changes(DiffTarget::Commit { commit: *oid }, &[], diff_options)
+        .context("could not check for diff changes")?;
+    Ok(outcome)
 }
 
 /// Build a full patch-style [`DiffOutcome`] from tree diff entries (e.g. stash W vs base).
@@ -467,11 +583,13 @@ pub fn outcome_from_tree_entries(
 }
 
 fn outcome_from_tree_structured(items: Vec<TreeDiffStructured>) -> DiffOutcome {
+    let files: Vec<_> = items
+        .into_iter()
+        .map(file_diff_from_tree_structured)
+        .collect();
     DiffOutcome {
-        files: items
-            .into_iter()
-            .map(file_diff_from_tree_structured)
-            .collect(),
+        changed: !files.is_empty(),
+        files,
         path_display: None,
     }
 }
@@ -547,6 +665,7 @@ fn outcome_from_changes(
         build_file_diff(fc, diff_options)
     });
     DiffOutcome {
+        changed: !files.is_empty(),
         files,
         path_display: None,
     }

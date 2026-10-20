@@ -14,13 +14,16 @@
 //! ```
 mod core;
 pub mod handle;
+mod has_changes;
 mod options;
 mod patch_log;
+pub mod target;
 mod tree_content;
 mod unified_emit;
 
 pub use core::*;
 pub use handle::Diff;
+pub use has_changes::{text_sides_differ, WORKTREE_HAS_CHANGES_ENTRIES_SCANNED};
 pub use options::{
     renames_from_config, DiffAlgorithm, DiffOptions, RenameDetection, UnknownDiffAlgorithm,
     WORD_LEVEL_INLINE_MAX_CHANGED_FILES,
@@ -29,6 +32,7 @@ pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
     write_diff_entry_log_patch, LogPatchCommitHeader, LogPatchOptions,
 };
+pub use target::DiffTarget;
 pub use tree_content::{
     tree_diff_contents_parallel, tree_diff_structured_parallel, TreeDiffContent, TreeDiffStructured,
 };

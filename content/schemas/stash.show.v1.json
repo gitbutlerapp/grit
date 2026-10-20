@@ -18,6 +18,10 @@
     "DiffOutcome": {
       "description": "Result of `grit diff`.",
       "properties": {
+        "changed": {
+          "description": "Whether any selected change exists (matches `grit diff --quiet` / `--exit-code`).",
+          "type": "boolean"
+        },
         "files": {
           "items": {
             "$ref": "#/definitions/FileDiff"
@@ -26,6 +30,7 @@
         }
       },
       "required": [
+        "changed",
         "files"
       ],
       "type": "object"
