@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::mem;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -35,10 +36,9 @@ pub fn find_position_by_pack_offset(idx: &PackIndex, offset: u64) -> Option<usiz
 fn find_position_by_pack_offset_rev(idx: &PackIndex, offset: u64) -> Option<usize> {
     use crate::pack_rev::{rev_path_for_index, try_rev_positions_in_pack_order};
     use std::cmp::Ordering;
-    use std::fs;
     let rev_path = rev_path_for_index(&idx.idx_path);
-    let data = fs::read(rev_path).ok()?;
-    let positions = try_rev_positions_in_pack_order(&data, idx.len())?;
+    let data = PackData::open_with_min_len(&rev_path, 12).ok()?;
+    let positions = try_rev_positions_in_pack_order(data.deref(), idx.len())?;
     let mut lo = 0usize;
     let mut hi = positions.len();
     while lo < hi {
@@ -1736,8 +1736,7 @@ pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Re
 ///
 /// Returns [`Error::CorruptObject`] when format checks fail.
 pub fn read_pack_index(idx_path: &Path) -> Result<PackIndex> {
-    let bytes = fs::read(idx_path).map_err(Error::Io)?;
-    parse_pack_index_bytes(idx_path, bytes, true)
+    crate::pack_index::open_pack_index_file(idx_path, true)
 }
 
 /// Parse a pack index file without verifying the SHA-1 trailer checksum.
@@ -1746,8 +1745,7 @@ pub fn read_pack_index(idx_path: &Path) -> Result<PackIndex> {
 /// write path (`midx-write.c`/`packfile.c` `open_pack_index`), so a deliberately
 /// corrupted-but-structurally-valid idx (t5319 64-bit offset tests) still loads.
 pub fn read_pack_index_no_verify(idx_path: &Path) -> Result<PackIndex> {
-    let bytes = fs::read(idx_path).map_err(Error::Io)?;
-    parse_pack_index_bytes(idx_path, bytes, false)
+    crate::pack_index::open_pack_index_file(idx_path, false)
 }
 
 /// A pack object type as encoded in the packed stream header.

@@ -167,6 +167,10 @@ name = "pack_write"
 harness = false
 
 [[bench]]
+name = "pack_index_open"
+harness = false
+
+[[bench]]
 name = "refs_files"
 harness = false
 

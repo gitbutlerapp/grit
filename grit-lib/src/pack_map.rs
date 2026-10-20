@@ -48,6 +48,21 @@ pub struct PackData {
     storage: Storage,
 }
 
+impl std::fmt::Debug for PackData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PackData")
+            .field("len", &self.len())
+            .field(
+                "backing",
+                &match &self.storage {
+                    Storage::Mapped(_) => "mapped",
+                    Storage::Owned(_) => "owned",
+                },
+            )
+            .finish()
+    }
+}
+
 impl Deref for PackData {
     type Target = [u8];
 
@@ -67,15 +82,20 @@ impl PackData {
     /// Returns [`Error::Io`] when the file cannot be opened or read, and
     /// [`Error::CorruptObject`] when the file is shorter than a pack header.
     pub(crate) fn open(path: &Path) -> Result<Arc<Self>> {
-        let file = File::open(path).map_err(Error::Io)?;
-        Self::open_from_file(file)
+        Self::open_with_min_len(path, HEADER_LEN as u64)
     }
 
-    fn open_from_file(file: File) -> Result<Arc<Self>> {
+    /// Map or read `path`, requiring at least `min_len` bytes (pack header vs index fanout).
+    pub(crate) fn open_with_min_len(path: &Path, min_len: u64) -> Result<Arc<Self>> {
+        let file = File::open(path).map_err(Error::Io)?;
+        Self::open_from_file(file, min_len)
+    }
+
+    fn open_from_file(file: File, min_len: u64) -> Result<Arc<Self>> {
         let len = file.metadata().map_err(Error::Io)?.len();
-        if len < HEADER_LEN as u64 {
+        if len < min_len {
             return Err(Error::CorruptObject(format!(
-                "pack file is too small ({len} bytes)"
+                "file is too small ({len} bytes, need at least {min_len})"
             )));
         }
         let len_usize = usize::try_from(len).map_err(|_| {
@@ -107,8 +127,7 @@ impl PackData {
         }
     }
 
-    /// Wrap an owned buffer (tests and stale-byte injection).
-    #[cfg(test)]
+    /// Wrap an owned buffer (tests, small index files, and stale-byte injection).
     #[must_use]
     pub(crate) fn from_owned(data: Vec<u8>) -> Arc<Self> {
         Arc::new(Self {

@@ -3,15 +3,28 @@
 use crate::error::{Error, Result};
 use crate::hash::verify_trailer;
 use crate::objects::{HashAlgo, ObjectId};
+use crate::pack_map::PackData;
 use std::cmp::Ordering;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 type OffsetLookupCache = Arc<Mutex<Option<Vec<(u64, u32)>>>>;
 
-/// Raw bytes backing a parsed pack index (mmap-friendly hook for later work).
+/// Minimum bytes for a v1 fanout table (256 × u32).
+const IDX_MIN_LEN: u64 = 256 * 4;
+
+/// Raw bytes backing a parsed pack index (memory-mapped or owned).
 #[derive(Debug, Clone)]
-struct PackIndexStorage(Arc<[u8]>);
+struct PackIndexStorage(Arc<PackData>);
+
+impl Deref for PackIndexStorage {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        self.0.deref()
+    }
+}
 
 /// Version-1 (legacy) or version-2 pack index on-disk layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,7 +173,7 @@ impl PackIndex {
             PackIndexVersion::V2 => self.layout.oid_base + i * self.layout.hash_bytes,
         };
         let end = start + self.layout.hash_bytes;
-        &self.storage.0[start..end]
+        &self.storage[start..end]
     }
 
     /// Pack byte offset at sorted position `i`.
@@ -170,17 +183,18 @@ impl PackIndex {
         match self.layout.version {
             PackIndexVersion::V1 => {
                 let start = self.layout.oid_base + i * (4 + self.layout.hash_bytes);
-                read_u32_be_slice(&self.storage.0, start) as u64
+                read_u32_be_slice(&self.storage, start) as u64
             }
             PackIndexVersion::V2 => {
                 let start = self.layout.off32_base + i * 4;
-                let raw = read_u32_be_slice(&self.storage.0, start);
+                let raw = read_u32_be_slice(&self.storage, start);
                 if (raw & 0x8000_0000) == 0 {
                     u64::from(raw)
                 } else {
                     let slot = (raw & 0x7fff_ffff) as usize;
+                    debug_assert!(slot < self.layout.large_off_count);
                     let loff = self.layout.large_off_base + slot * 8;
-                    read_u64_be_slice(&self.storage.0, loff)
+                    read_u64_be_slice(&self.storage, loff)
                 }
             }
         }
@@ -194,7 +208,7 @@ impl PackIndex {
             return None;
         }
         let start = self.layout.crc_base + i * 4;
-        Some(read_u32_be_slice(&self.storage.0, start))
+        Some(read_u32_be_slice(&self.storage, start))
     }
 
     /// Sorted-table position for `oid`, or `None` when absent or hash width mismatches.
@@ -449,12 +463,36 @@ pub fn parse_pack_index_bytes(idx_path: &Path, bytes: Vec<u8>, verify: bool) -> 
             idx_path.display()
         )));
     }
-    let storage = PackIndexStorage(Arc::from(bytes));
-    let magic = &storage.0[0..4];
+    let storage = PackIndexStorage(PackData::from_owned(bytes));
+    parse_pack_index_storage(idx_path, &storage, verify)
+}
+
+/// Memory-map or read a pack index from disk and parse it (lazy structural checks when `verify` is false).
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] or [`Error::CorruptObject`] on failure.
+pub fn open_pack_index_file(idx_path: &Path, verify: bool) -> Result<PackIndex> {
+    let storage = PackIndexStorage(PackData::open_with_min_len(idx_path, IDX_MIN_LEN)?);
+    parse_pack_index_storage(idx_path, &storage, verify)
+}
+
+fn parse_pack_index_storage(
+    idx_path: &Path,
+    storage: &PackIndexStorage,
+    verify: bool,
+) -> Result<PackIndex> {
+    if storage.len() < 8 {
+        return Err(Error::CorruptObject(format!(
+            "index file {} is too small",
+            idx_path.display()
+        )));
+    }
+    let magic = &storage[0..4];
     if magic == [0xff, b't', b'O', b'c'] {
-        read_pack_index_v2(idx_path, &storage, verify)
+        read_pack_index_v2(idx_path, storage, verify)
     } else {
-        read_pack_index_v1(idx_path, &storage, verify)
+        read_pack_index_v1(idx_path, storage, verify)
     }
 }
 
@@ -463,7 +501,7 @@ fn read_pack_index_v1(
     storage: &PackIndexStorage,
     verify: bool,
 ) -> Result<PackIndex> {
-    let bytes = &storage.0;
+    let bytes = storage.deref();
     let mut pos = 0usize;
     if bytes.len() < 256 * 4 + 20 {
         return Err(Error::CorruptObject(format!(
@@ -488,16 +526,18 @@ fn read_pack_index_v1(
         )));
     }
     let oid_base = pos;
-    for i in 0..object_count {
-        let off_start = oid_base + i * record_size;
-        let oid_start = off_start + 4;
-        if i > 0 {
-            let prev_start = oid_base + (i - 1) * record_size + 4;
-            if bytes[prev_start..prev_start + 20] > bytes[oid_start..oid_start + 20] {
-                return Err(Error::CorruptObject(format!(
-                    "oid lookup out of order in {}",
-                    idx_path.display()
-                )));
+    if verify {
+        for i in 0..object_count {
+            let off_start = oid_base + i * record_size;
+            let oid_start = off_start + 4;
+            if i > 0 {
+                let prev_start = oid_base + (i - 1) * record_size + 4;
+                if bytes[prev_start..prev_start + 20] > bytes[oid_start..oid_start + 20] {
+                    return Err(Error::CorruptObject(format!(
+                        "oid lookup out of order in {}",
+                        idx_path.display()
+                    )));
+                }
             }
         }
     }
@@ -532,7 +572,7 @@ fn read_pack_index_v2(
     storage: &PackIndexStorage,
     verify: bool,
 ) -> Result<PackIndex> {
-    let bytes = &storage.0;
+    let bytes = storage.deref();
     if bytes.len() < 8 + 256 * 4 + 40 {
         return Err(Error::CorruptObject(format!(
             "index file {} is too small",
@@ -565,39 +605,53 @@ fn read_pack_index_v2(
             idx_path.display()
         )));
     }
-    pos = off32_base;
-    let mut large_off_count = 0usize;
-    let mut next_large = 0usize;
-    for i in 0..object_count {
-        let v = read_u32_be(bytes, &mut pos)?;
-        if (v & 0x8000_0000) != 0 {
-            let slot = (v & 0x7fff_ffff) as usize;
-            if slot != next_large {
-                return Err(Error::CorruptObject(format!(
-                    "inconsistent 64b offset index at entry {i} in {}",
-                    idx_path.display()
-                )));
-            }
-            next_large += 1;
-            large_off_count += 1;
-        }
-    }
     let large_off_base = off32_base + object_count * 4;
+    let large_off_count = if verify {
+        pos = off32_base;
+        let mut count = 0usize;
+        let mut next_large = 0usize;
+        for i in 0..object_count {
+            let v = read_u32_be(bytes, &mut pos)?;
+            if (v & 0x8000_0000) != 0 {
+                let slot = (v & 0x7fff_ffff) as usize;
+                if slot != next_large {
+                    return Err(Error::CorruptObject(format!(
+                        "inconsistent 64b offset index at entry {i} in {}",
+                        idx_path.display()
+                    )));
+                }
+                next_large += 1;
+                count += 1;
+            }
+        }
+        count
+    } else {
+        let tail = hash_bytes * 2;
+        if bytes.len() < large_off_base + tail {
+            return Err(Error::CorruptObject(format!(
+                "truncated idx file {}",
+                idx_path.display()
+            )));
+        }
+        (bytes.len() - large_off_base - tail) / 8
+    };
     if bytes.len() < large_off_base + large_off_count * 8 + 2 * hash_bytes {
         return Err(Error::CorruptObject(format!(
             "truncated large offset table in {}",
             idx_path.display()
         )));
     }
-    for i in 0..object_count {
-        let start = oid_base + i * hash_bytes;
-        if i > 0 {
-            let prev = oid_base + (i - 1) * hash_bytes;
-            if bytes[prev..prev + hash_bytes] > bytes[start..start + hash_bytes] {
-                return Err(Error::CorruptObject(format!(
-                    "oid lookup out of order in {}",
-                    idx_path.display()
-                )));
+    if verify {
+        for i in 0..object_count {
+            let start = oid_base + i * hash_bytes;
+            if i > 0 {
+                let prev = oid_base + (i - 1) * hash_bytes;
+                if bytes[prev..prev + hash_bytes] > bytes[start..start + hash_bytes] {
+                    return Err(Error::CorruptObject(format!(
+                        "oid lookup out of order in {}",
+                        idx_path.display()
+                    )));
+                }
             }
         }
     }
@@ -757,7 +811,7 @@ mod tests {
         let idx = PackIndex {
             idx_path: PathBuf::from("t.idx"),
             pack_path: PathBuf::from("t.pack"),
-            storage: PackIndexStorage(Arc::from(Vec::<u8>::new())),
+            storage: PackIndexStorage(PackData::from_owned(Vec::new())),
             layout: PackIndexLayout {
                 version: PackIndexVersion::V1,
                 hash_bytes: 20,
@@ -899,7 +953,9 @@ mod tests {
         body.extend_from_slice(&1000u64.to_be_bytes());
         body.extend_from_slice(&pack_trailer);
         body.extend_from_slice(&pack_trailer);
-        let err = parse_pack_index_bytes(Path::new("bad-large.idx"), body, false).unwrap_err();
+        parse_pack_index_bytes(Path::new("bad-large.idx"), body.clone(), false)
+            .expect("lazy open skips large-slot assignment scan");
+        let err = parse_pack_index_bytes(Path::new("bad-large.idx"), body, true).unwrap_err();
         assert!(matches!(err, Error::CorruptObject(_)));
     }
 
