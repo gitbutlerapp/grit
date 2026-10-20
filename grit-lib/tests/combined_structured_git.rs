@@ -5,7 +5,7 @@ mod support;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::combined_diff_patch::{
     format_combined_diff_body, format_combined_structured_body, structured_combined_diff_body,
-    CombinedDiffWsOptions,
+    CombinedDiffWsOptions, CombinedStructuredLineKind,
 };
 use grit_lib::diff::combined_tree_diff::{combined_diff_paths_filtered, CombinedTreeDiffOptions};
 use grit_lib::diff::merge_diff::{
@@ -162,4 +162,20 @@ fn combined_structured_hunks_match_git_cc() {
     let structured =
         structured_combined_diff_body(&parents, "c\n", 3, true, CombinedDiffWsOptions::default());
     assert_eq!(direct, format_combined_structured_body(&structured));
+    assert!(
+        structured
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .any(|l| l.kind == CombinedStructuredLineKind::Add),
+        "structured combined diff should tag added lines"
+    );
+    assert!(
+        structured
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .all(|l| { l.kind == CombinedStructuredLineKind::from_parent_markers(&l.parents) }),
+        "line kind must match parent-column markers"
+    );
 }

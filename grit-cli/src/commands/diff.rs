@@ -444,16 +444,6 @@ fn outcome_from_lib(
     }
 }
 
-fn combined_line_kind(parents: &[char]) -> LineKind {
-    if parents.contains(&'-') {
-        LineKind::Del
-    } else if parents.contains(&'+') {
-        LineKind::Add
-    } else {
-        LineKind::Context
-    }
-}
-
 fn lib_file_to_cli(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff {
     let content_changed = f
         .stat
@@ -485,7 +475,17 @@ fn lib_file_to_cli(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff 
                         .lines
                         .into_iter()
                         .map(|l| Line {
-                            kind: combined_line_kind(&l.parents),
+                            kind: match l.kind {
+                                grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Context => {
+                                    LineKind::Context
+                                }
+                                grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Add => {
+                                    LineKind::Add
+                                }
+                                grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Del => {
+                                    LineKind::Del
+                                }
+                            },
                             old: None,
                             new: None,
                             segments: vec![Segment {
@@ -1328,9 +1328,7 @@ fn tree_commit_entries(
         thread_policy,
     )
     .context("could not diff commits")?;
-    if rename_threshold(config) >= 100 {
-        sort_entries(&mut entries);
-    }
+    sort_entries(&mut entries);
     Ok(entries)
 }
 

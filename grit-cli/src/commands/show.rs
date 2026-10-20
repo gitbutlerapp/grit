@@ -390,7 +390,7 @@ fn rev_path_suffix(spec: &str) -> String {
 }
 
 fn is_rev_path_spec(spec: &str) -> bool {
-    let Some((rev, _path)) = spec.split_once(':') else {
+    let Some((rev, _path)) = grit_lib::revwalk::rev_parse::split_treeish_colon(spec) else {
         return false;
     };
     !rev.is_empty() && !rev.contains('\\')
@@ -429,7 +429,18 @@ fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
 impl HumanRender for ShowPathOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            ShowPathOutcome::Blob { spec, .. } => {
+            ShowPathOutcome::Blob {
+                binary, text, spec, ..
+            } => {
+                if *binary {
+                    outln!(w, "Binary file");
+                    return Ok(());
+                }
+                if let Some(t) = text {
+                    w.write_all(t.as_bytes())
+                        .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
+                    return Ok(());
+                }
                 let (repo, _) = context::discover_with_warnings()?;
                 let resolved = repo.resolve(spec)?;
                 let obj = repo.read_object_raw_for_display(&resolved.oid)?;
@@ -454,11 +465,19 @@ impl MarkdownRender for ShowPathOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             ShowPathOutcome::Blob {
-                spec, oid, text, ..
+                spec,
+                oid,
+                size,
+                binary,
+                text,
+                ..
             } => {
                 outln!(w, "## `{}`\n", spec);
-                outln!(w, "**Oid:** `{oid}`\n");
-                if let Some(t) = text {
+                outln!(w, "**Oid:** `{oid}`");
+                outln!(w, "**Size:** {size} bytes\n");
+                if *binary {
+                    outln!(w, "_binary blob (see `data_base64` in JSON)_");
+                } else if let Some(t) = text {
                     outln!(w, "```text");
                     outln!(w, "{t}");
                     outln!(w, "```");

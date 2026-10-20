@@ -442,6 +442,31 @@ fn show_parent_lno(slines: &[Sline], l0: usize, l1: usize, n: usize, null_ctx: u
     format!(" -{a},{}", b.saturating_sub(a).saturating_sub(null_ctx))
 }
 
+/// Line role in a combined (`--cc`) hunk (derived from parent-column markers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombinedStructuredLineKind {
+    /// Unchanged relative to all parents that have the line.
+    Context,
+    /// Present on the merge result but not on at least one parent (`+` column).
+    Add,
+    /// Removed from at least one parent (`-` column).
+    Del,
+}
+
+impl CombinedStructuredLineKind {
+    /// Classify a combined line from Git parent-column markers.
+    #[must_use]
+    pub fn from_parent_markers(parents: &[char]) -> Self {
+        if parents.contains(&'-') {
+            Self::Del
+        } else if parents.contains(&'+') {
+            Self::Add
+        } else {
+            Self::Context
+        }
+    }
+}
+
 /// One line in a combined (`--cc`) hunk: parent-column markers plus text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CombinedStructuredLine {
@@ -449,6 +474,8 @@ pub struct CombinedStructuredLine {
     pub parents: Vec<char>,
     /// Line text without parent-column prefixes.
     pub text: String,
+    /// Add / delete / context for JSON and CLI rendering.
+    pub kind: CombinedStructuredLineKind,
 }
 
 /// A combined hunk (`@@@` header and body lines).
@@ -534,6 +561,7 @@ fn dump_slines_structured(
                     });
                 }
                 lines.push(CombinedStructuredLine {
+                    kind: CombinedStructuredLineKind::from_parent_markers(&parents),
                     parents,
                     text: seg.text.clone(),
                 });
@@ -552,6 +580,7 @@ fn dump_slines_structured(
                 p_mask <<= 1;
             }
             lines.push(CombinedStructuredLine {
+                kind: CombinedStructuredLineKind::from_parent_markers(&parents),
                 parents,
                 text: sl.bol.clone(),
             });

@@ -18,6 +18,7 @@ use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
 use super::DiffOptions;
 
+// hygiene: optional integration-test counter for blob reads in stat/name-only modes
 thread_local! {
     static DIFF_BLOB_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
 }

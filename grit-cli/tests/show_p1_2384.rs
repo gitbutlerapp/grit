@@ -103,7 +103,7 @@ fn show_rev_path_tree_lists_entries() {
 }
 
 #[test]
-fn show_rev_path_binary_blob_human_bytes() {
+fn show_rev_path_binary_blob_human_and_json() {
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init"]);
     std::fs::write(
@@ -115,19 +115,24 @@ fn show_rev_path_binary_blob_human_bytes() {
     git(dir.path(), &["commit", "-m", "binary"]);
     grit(dir.path(), &["init"]).expect_ok();
 
-    let git_out = Command::new("git")
-        .current_dir(dir.path())
-        .args(["show", "HEAD:binary.dat"])
-        .output()
-        .expect("git show");
-    assert!(git_out.status.success());
-    let grit_out = Command::new(env!("CARGO_BIN_EXE_grit"))
+    let grit_human = Command::new(env!("CARGO_BIN_EXE_grit"))
         .current_dir(dir.path())
         .args(["show", "HEAD:binary.dat"])
         .output()
         .expect("grit show");
-    assert!(grit_out.status.success());
-    assert_eq!(grit_out.stdout, git_out.stdout);
+    assert!(grit_human.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&grit_human.stdout).trim(),
+        "Binary file"
+    );
+
+    let json = gs_json(dir.path(), &["show", "HEAD:binary.dat"]);
+    assert_eq!(json["kind"], "blob");
+    assert_eq!(json["binary"], true);
+    assert_eq!(json["path"], "binary.dat");
+    assert!(json["data_base64"].is_string());
+    assert_eq!(json["size"], 5);
+    assert!(json.get("text").is_none() || json["text"].is_null());
 }
 
 #[test]
@@ -142,6 +147,23 @@ fn show_rev_path_colon_in_path_json() {
     let json = gs_json(dir.path(), &["show", "HEAD:a:b"]);
     assert_eq!(json["kind"], "blob");
     assert_eq!(json["path"], "a:b");
+}
+
+#[test]
+fn show_merge_combined_json_line_kinds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    let merge = two_parent_merge(dir.path());
+    grit(dir.path(), &["init"]).expect_ok();
+
+    let json = gs_json(dir.path(), &["show", &merge.to_hex()]);
+    let lines = json["files"][0]["hunks"][0]["lines"]
+        .as_array()
+        .expect("combined hunk lines");
+    assert!(
+        lines.iter().any(|l| l["kind"] == "add"),
+        "combined JSON lines should include add kind: {lines:?}"
+    );
 }
 
 #[test]
