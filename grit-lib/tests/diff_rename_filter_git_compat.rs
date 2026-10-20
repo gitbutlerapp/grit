@@ -88,10 +88,7 @@ fn rename_threshold_matches_git_m() {
         } else {
             format!("-M{threshold}")
         };
-        let git_lines = git_name_status(
-            wt,
-            &[&git_m, &parent.to_hex(), &commit.to_hex()],
-        );
+        let git_lines = git_name_status(wt, &[&git_m, &parent.to_hex(), &commit.to_hex()]);
         let grit_entries =
             diff_trees_with_renames(dr.repo.odb(), Some(&parent), Some(&commit), "", threshold)
                 .expect("diff");
