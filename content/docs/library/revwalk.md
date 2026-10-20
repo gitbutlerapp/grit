@@ -24,8 +24,15 @@ Common helpers that do not need a full repository walk:
 | `first_parent` | Follow only the first parent at merges. |
 | `max_count` / `skip` | Limit how many commits are returned. |
 | `reverse` | Reverse the selected list after sorting. |
+| `commit_filter` | Optional [`CommitFilter`](rustdoc:grit_lib::revwalk::filter::CommitFilter) (`--author`, `--committer`, `--grep`, mailmap). |
 
 For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). That matches `git rev-list main..feature`.
+
+### Commit filters
+
+[`CommitFilter`](rustdoc:grit_lib::revwalk::filter::CommitFilter) mirrors `git rev-list` / `git log` identity and message filtering. Build one with [`CommitFilterBuilder`](rustdoc:grit_lib::revwalk::filter::CommitFilterBuilder): author and committer patterns OR together; `--grep` patterns OR together unless `all_match` is set; `invert_grep` negates only the grep group; `-i` applies to all. Patterns default to Git’s POSIX BRE rules (use `fixed_strings` for literal `-F` mode). Load a [`MailmapTable`](rustdoc:grit_lib::config::mailmap::MailmapTable) with [`load_mailmap_table`](rustdoc:grit_lib::config::mailmap::load_mailmap_table) and pass it to the builder — the filter never reads config on its own. Set [`RevListOptions::commit_filter`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) or [`RevWalkListOptions::commit_filter`](rustdoc:grit_lib::revwalk::RevWalkListOptions); filtered commits stay traversable (like `--no-merges`), and `-n` / `--count` apply after filtering.
+
+<!-- include: grit-examples/src/bin/log_by_author.rs -->
 
 ## Merge base
 

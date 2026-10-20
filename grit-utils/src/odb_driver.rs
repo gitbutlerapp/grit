@@ -15,8 +15,10 @@ use grit_lib::objects::pack::{
 use grit_lib::objects::{parse_commit, Object, ObjectId};
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions, RevListResult};
 use grit_lib::revwalk::RevWalkListOptions;
+use std::sync::Arc;
 
 /// Parse one stdin line for `git cat-file --batch` / `--batch-check` (hex OID, optional trailing fields).
 pub(crate) fn parse_cat_file_batch_oid_line(line: &[u8]) -> Result<ObjectId> {
@@ -281,6 +283,43 @@ pub fn rev_walk_left_right_count(repo: &Repository, range: &str) -> Result<()> {
 }
 
 /// `rev-list --count HEAD` (commits reachable from `HEAD`).
+fn author_filter(pattern: &str) -> Result<Arc<grit_lib::revwalk::filter::CommitFilter>> {
+    Ok(Arc::new(
+        CommitFilterBuilder::new()
+            .author(pattern)
+            .build()
+            .map_err(|e| anyhow::anyhow!("{e}"))?,
+    ))
+}
+
+/// `rev-list --count --author=<pattern> HEAD`.
+pub fn rev_list_count_author_head(repo: &Repository, author: &str) -> Result<()> {
+    let opts = RevListOptions {
+        count: true,
+        commit_filter: Some(author_filter(author)?),
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let result = rev_list(repo, &["HEAD".to_string()], &[], &opts)
+        .context("rev-list --count --author HEAD")?;
+    println!("{}", result.commit_count());
+    Ok(())
+}
+
+/// First `--max-count` commits on `HEAD` with `--author`.
+pub fn rev_list_author_n_head(repo: &Repository, author: &str, max_count: usize) -> Result<()> {
+    let opts = RevListOptions {
+        max_count: Some(max_count),
+        commit_filter: Some(author_filter(author)?),
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let result =
+        rev_list(repo, &["HEAD".to_string()], &[], &opts).context("rev-list --author -n HEAD")?;
+    println!("{}", result.commits.len());
+    Ok(())
+}
+
 pub fn rev_list_count_head(repo: &Repository) -> Result<()> {
     let opts = RevListOptions {
         count: true,
