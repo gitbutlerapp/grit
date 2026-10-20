@@ -22,7 +22,9 @@ grit worktree prune
 
 ## Description
 
-Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`). Linked rows whose working tree directory is gone are marked `prunable`, matching `git worktree list`.
+Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`). Detached checkouts are labeled `(detached HEAD)` in human output (same idea as `git worktree list`). Linked rows whose working tree directory is gone are marked `prunable`, matching `git worktree list`.
+
+Paths in human, `--json`, and `--markdown` output use normal absolute paths (no Windows `\\?\` verbatim prefix) with forward slashes, so scripts can pass them to `cd` or `grit worktree remove` unchanged.
 
 `grit worktree add` creates the admin directory under `.git/worktrees/`, writes the `gitdir` / `commondir` files, checks out the tree, and registers the new worktree. With only a path, grit creates a new branch named after the directory basename at `HEAD`. With a `<rev>` that names an existing branch, that branch is checked out (it must not already be checked out elsewhere). Use `-b` to create a new branch at `<rev>` (default `HEAD`). Use `--detach` for a detached HEAD at the resolved commit.
 

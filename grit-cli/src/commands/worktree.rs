@@ -1,7 +1,7 @@
 //! `grit worktree` — list, add, remove, lock, and unlock linked worktrees.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::config::git_path::path_for_disk_compare;
+use grit_lib::config::git_path::{path_for_disk_compare, user_display_path};
 use grit_lib::refs::check_ref_format::validate_branch_short_name;
 use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
@@ -71,7 +71,13 @@ impl HumanRender for WorktreeOutcome {
                         .branch
                         .as_deref()
                         .map(|b| format!(" [{b}]"))
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| {
+                            if wt.detached {
+                                " (detached HEAD)".to_owned()
+                            } else {
+                                String::new()
+                            }
+                        });
                     let lock = if wt.locked { " (locked)" } else { "" };
                     let prunable = if wt.prunable { " prunable" } else { "" };
                     outln!(w, "  {}{branch}{lock}{prunable}", wt.path);
@@ -224,7 +230,7 @@ fn map_row(entry: grit_lib::worktree::WorktreeEntry) -> WorktreeRow {
         HeadState::Invalid => (None, String::new(), false),
     };
     WorktreeRow {
-        path: entry.path.display().to_string(),
+        path: user_display_path(&entry.path),
         head: head_hex,
         branch,
         detached,

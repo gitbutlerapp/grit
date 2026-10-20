@@ -204,16 +204,16 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
 
     let bare = is_bare_repository(&common);
     let main_path = if bare {
-        common.clone()
+        path_for_disk_compare(&common)
     } else if let Some(wt) = repo.work_tree() {
         // When opened from the main worktree, use the discovered work tree path.
         if repo.git_dir() == common || !repo.git_dir().starts_with(common.join("worktrees")) {
             path_for_disk_compare(wt)
         } else {
-            common.parent().unwrap_or(&common).to_path_buf()
+            path_for_disk_compare(common.parent().unwrap_or(&common))
         }
     } else {
-        common.parent().unwrap_or(&common).to_path_buf()
+        path_for_disk_compare(common.parent().unwrap_or(&common))
     };
 
     let main_head = resolve_head(&common).unwrap_or(HeadState::Invalid);
@@ -1173,6 +1173,61 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::Message(_)));
+    }
+
+    #[test]
+    fn list_worktrees_from_linked_checkout_normalizes_main_path() {
+        use std::process::Command;
+        let tmp = TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        fs::create_dir_all(&main).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .env("GIT_AUTHOR_NAME", "Test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "Test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .current_dir(&main)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        git(&["init", "-q", "-b", "main"]);
+        fs::write(main.join("t"), b"1\n").unwrap();
+        git(&["add", "t"]);
+        git(&["commit", "-qm", "init"]);
+
+        let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
+        let linked = tmp.path().join("linked");
+        add_linked_worktree(
+            &repo,
+            &AddLinkedWorktreeOptions {
+                path: linked.clone(),
+                branch: Some("wt".into()),
+                new_branch: true,
+                detach: false,
+                start_point: Some("HEAD".into()),
+                force: false,
+            },
+        )
+        .unwrap();
+
+        let linked_repo =
+            Repository::discover(Some(linked.as_path()), &RepositoryOptions::empty()).unwrap();
+        let list = list_worktrees(&linked_repo).unwrap();
+        assert_eq!(list.len(), 2);
+        let expected_main = path_for_disk_compare(&main);
+        assert_eq!(list[0].path, expected_main);
+        #[cfg(windows)]
+        {
+            let displayed = list[0].path.display().to_string();
+            assert!(
+                !displayed.starts_with(r"\\?\"),
+                "main worktree path must not use the verbatim prefix: {displayed}"
+            );
+        }
     }
 
     #[test]
