@@ -319,7 +319,8 @@ pub fn relative_date_from(timestamp: i64, now: i64) -> String {
 
 /// The tree OID recorded by a commit.
 pub fn commit_tree(repo: &Repository, oid: &ObjectId) -> Result<ObjectId> {
-    Ok(read_commit(repo, oid)?.tree)
+    grit_lib::diff::tree_oid_of_commit_in_repo(repo, oid)
+        .with_context(|| format!("could not read tree for commit {oid}"))
 }
 
 /// Read and parse a commit object.

@@ -719,17 +719,31 @@ pub fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
 struct NavParentCache<'repo> {
     repo: &'repo Repository,
     grafts: HashMap<ObjectId, Vec<ObjectId>>,
+    graph: Option<crate::commit_graph_file::CommitGraphChain>,
 }
 
 impl<'repo> NavParentCache<'repo> {
     fn new(repo: &'repo Repository) -> Self {
         let grafts = load_graft_parents(repo.git_dir());
-        Self { repo, grafts }
+        let graph = repo
+            .caches()
+            .commit_graph_chain(repo.odb().objects_dir())
+            .map(|arc| (*arc).clone());
+        Self {
+            repo,
+            grafts,
+            graph,
+        }
     }
 
     fn parents_of(&self, commit_oid: ObjectId) -> Result<Vec<ObjectId>> {
         if let Some(grafted) = self.grafts.get(&commit_oid) {
             return Ok(grafted.clone());
+        }
+        if let Some(graph) = &self.graph {
+            if let Some((parents, _)) = graph.graph_commit(&commit_oid) {
+                return Ok(parents);
+            }
         }
         let obj = self.repo.odb().read(&commit_oid)?;
         if obj.kind != ObjectKind::Commit {

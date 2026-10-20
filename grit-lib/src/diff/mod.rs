@@ -21,7 +21,6 @@ mod patch_log;
 mod tree_content;
 mod unified_emit;
 
-pub use core::set_diff_entry_scan_hook_for_tests;
 pub use core::*;
 pub use detail::{line_change_counts, DiffDetail, DiffTarget, DiffTotals, FileDiff, LineStat};
 pub use files::{build_file_diffs, name_status_line, DiffFilesOutput};
@@ -35,8 +34,8 @@ pub use patch_log::{
     write_diff_entry_log_patch, LogPatchCommitHeader, LogPatchOptions,
 };
 pub use tree_content::{
-    set_diff_blob_read_hook_for_tests, tree_diff_contents_parallel, tree_diff_stat_parallel,
-    tree_diff_structured_parallel, TreeDiffContent, TreeDiffStructured,
+    tree_diff_contents_parallel, tree_diff_stat_parallel, tree_diff_structured_parallel,
+    TreeDiffContent, TreeDiffStructured,
 };
 
 pub mod bloom {

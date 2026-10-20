@@ -16,7 +16,7 @@
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    apply_rename_detection_to_diff_entries, build_file_diffs, diff_commits_with_renames_and_policy,
+    apply_rename_detection_to_diff_entries, build_file_diffs,
     diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames,
     diff_trees_with_renames_and_policy, line_change_counts, read_submodule_head_oid,
     read_worktree_side_bytes_for_diff,
@@ -323,6 +323,13 @@ fn finish_outcome(
             insertions: stat.insertions,
             deletions: stat.deletions,
         });
+    }
+    if matches!(
+        format.detail(),
+        DiffDetail::NameOnly | DiffDetail::NameStatus
+    ) {
+        outcome.format = format;
+        return outcome;
     }
     attach_path_display(repo, format, outcome)
 }
@@ -1232,10 +1239,15 @@ fn tree_commit_entries(
     config: &grit_lib::config::ConfigSet,
     thread_policy: &grit_lib::parallel::ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
-    let mut entries = diff_commits_with_renames_and_policy(
+    let base_tree = grit_lib::diff::tree_oid_of_commit_in_repo(repo, base)
+        .context("could not read base commit tree")?;
+    let tip_tree = grit_lib::diff::tree_oid_of_commit_in_repo(repo, tip)
+        .context("could not read tip commit tree")?;
+    let mut entries = grit_lib::diff::diff_trees_with_renames_and_policy(
         repo.odb(),
-        base,
-        tip,
+        Some(&base_tree),
+        Some(&tip_tree),
+        "",
         rename_threshold(config),
         config,
         thread_policy,

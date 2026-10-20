@@ -8,33 +8,12 @@ use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::parallel::{try_par_map_with_local, ParallelHashError};
 use crate::parallel::{ParallelOp, ThreadPolicy};
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::detail::{line_change_counts, LineStat};
 use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
 use super::DiffOptions;
-
-thread_local! {
-    static DIFF_BLOB_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
-}
-
-/// Test hook: count blob ODB reads during diff content loading.
-#[doc(hidden)]
-pub fn set_diff_blob_read_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
-    DIFF_BLOB_READ_HOOK.with(|cell| *cell.borrow_mut() = hook);
-}
-
-fn note_blob_read() {
-    DIFF_BLOB_READ_HOOK.with(|cell| {
-        if let Some(counter) = cell.borrow().as_ref() {
-            counter.fetch_add(1, Ordering::Relaxed);
-        }
-    });
-}
 
 /// Tree diff entry with structured line hunks ready for CLI rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,7 +256,8 @@ fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
     if *oid == ObjectId::zero() {
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
-    note_blob_read();
+    #[cfg(test)]
+    odb.hot_path_metrics().record_blob_content_read();
     let data = odb.read(oid)?.data;
     Ok(bytes_for_diff(&data))
 }
@@ -351,5 +331,52 @@ mod tests {
         assert!(serial
             .iter()
             .any(|c| c.entry.status == DiffStatus::Added || c.entry.status == DiffStatus::Deleted));
+    }
+
+    #[test]
+    fn name_only_does_not_read_blobs_for_tree_to_tree() {
+        use crate::config::ConfigSet;
+        use crate::diff::{build_file_diffs, DiffDetail, DiffOptions};
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let a = odb.write(ObjectKind::Blob, b"alpha\n").expect("write a");
+        let b = odb.write(ObjectKind::Blob, b"beta\n").expect("write b");
+        let old = odb
+            .write(
+                ObjectKind::Tree,
+                &serialize_tree(&[TreeEntry {
+                    mode: 0o100644,
+                    name: b"f.txt".to_vec(),
+                    oid: a,
+                }]),
+            )
+            .expect("old tree");
+        let new = odb
+            .write(
+                ObjectKind::Tree,
+                &serialize_tree(&[TreeEntry {
+                    mode: 0o100644,
+                    name: b"f.txt".to_vec(),
+                    oid: b,
+                }]),
+            )
+            .expect("new tree");
+        let entries = diff_trees(odb, Some(&old), Some(&new), "").expect("entries");
+        let metrics = odb.hot_path_metrics();
+        metrics.set_blob_counting(true);
+        metrics.reset_blob_content_reads();
+        let config = ConfigSet::new();
+        let _ = build_file_diffs(
+            odb,
+            entries,
+            DiffDetail::NameOnly,
+            DiffOptions::default(),
+            &config,
+            &ThreadPolicy::default(),
+        )
+        .expect("name-only");
+        metrics.set_blob_counting(false);
+        assert_eq!(metrics.blob_content_reads(), 0);
     }
 }

@@ -226,6 +226,8 @@ pub struct Odb {
     alternates_enabled: bool,
     /// Avoid re-reading the same loose object repeatedly during one repository session.
     session_loose_reads: Arc<std::sync::Mutex<std::collections::HashMap<ObjectId, Object>>>,
+    /// Parsed tree entries reused for the lifetime of this [`Odb`] handle (Git object cache).
+    session_tree_entries: Arc<Mutex<HashMap<ObjectId, Arc<Vec<crate::objects::TreeEntry>>>>>,
 }
 
 const _: () = {
@@ -315,6 +317,7 @@ impl Odb {
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
             session_loose_reads: Arc::new(Mutex::new(HashMap::new())),
+            session_tree_entries: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -365,11 +368,40 @@ impl Odb {
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
             session_loose_reads: Arc::new(Mutex::new(HashMap::new())),
+            session_tree_entries: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
             hot_path_test_metrics: crate::hot_path_test_metrics::HotPathTestMetrics::new(),
         }
+    }
+
+    /// Parsed tree entries for `oid`, cached on this [`Odb`] handle.
+    pub(crate) fn cached_tree_entries(
+        &self,
+        oid: &ObjectId,
+    ) -> Result<Arc<Vec<crate::objects::TreeEntry>>> {
+        if let Ok(guard) = self.session_tree_entries.lock() {
+            if let Some(entries) = guard.get(oid) {
+                return Ok(Arc::clone(entries));
+            }
+        }
+        let obj = self.read(oid)?;
+        if obj.kind != ObjectKind::Tree {
+            return Err(Error::CorruptObject(format!(
+                "expected tree, got {}",
+                obj.kind.as_str()
+            )));
+        }
+        let parsed = crate::objects::parse_tree(&obj.data)?;
+        let arc = Arc::new(parsed);
+        if let Ok(mut guard) = self.session_tree_entries.lock() {
+            if guard.len() > 4096 {
+                guard.clear();
+            }
+            guard.insert(*oid, Arc::clone(&arc));
+        }
+        Ok(arc)
     }
 
     fn session_cached_loose_read(&self, oid: &ObjectId) -> Option<Object> {

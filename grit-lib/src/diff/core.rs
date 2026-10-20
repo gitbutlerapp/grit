@@ -22,6 +22,7 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::sync::Arc;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -2303,6 +2304,23 @@ pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> 
     Ok(commit.tree)
 }
 
+/// Like [`tree_oid_of_commit`], but reads the root tree from the commit-graph when indexed.
+///
+/// # Errors
+///
+/// Same as [`tree_oid_of_commit`] when the commit is not in the graph or graph is absent.
+pub fn tree_oid_of_commit_in_repo(
+    repo: &crate::repo::Repository,
+    commit_oid: &ObjectId,
+) -> Result<ObjectId> {
+    if let Some(chain) = repo.caches().commit_graph_chain(repo.odb().objects_dir()) {
+        if let Some(tree) = chain.graph_commit_tree(commit_oid) {
+            return Ok(tree);
+        }
+    }
+    tree_oid_of_commit(repo.odb(), commit_oid)
+}
+
 /// Diff the trees recorded at two commits (`base` is the old side, `tip` the new side).
 ///
 /// # Errors
@@ -2370,8 +2388,31 @@ pub fn diff_trees_show_tree_entries(
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, true, None)
 }
 
+struct TreeReadCache<'a> {
+    odb: &'a Odb,
+    parsed: std::collections::HashMap<ObjectId, Arc<Vec<TreeEntry>>>,
+}
+
+impl<'a> TreeReadCache<'a> {
+    fn new(odb: &'a Odb) -> Self {
+        Self {
+            odb,
+            parsed: std::collections::HashMap::new(),
+        }
+    }
+
+    fn entries_arc(&mut self, oid: &ObjectId) -> Result<Arc<Vec<TreeEntry>>> {
+        if let Some(e) = self.parsed.get(oid) {
+            return Ok(Arc::clone(e));
+        }
+        let arc = self.odb.cached_tree_entries(oid)?;
+        self.parsed.insert(*oid, Arc::clone(&arc));
+        Ok(arc)
+    }
+}
+
 fn diff_subtrees_in_place(
-    odb: &Odb,
+    cache: &mut TreeReadCache<'_>,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
     prefix: &str,
@@ -2386,18 +2427,19 @@ fn diff_subtrees_in_place(
             }
         }
     }
+    let empty: Arc<Vec<TreeEntry>> = Arc::new(Vec::new());
     let old_entries = match old_tree_oid {
-        Some(oid) => read_tree(odb, oid)?,
-        None => Vec::new(),
+        Some(oid) => cache.entries_arc(oid)?,
+        None => Arc::clone(&empty),
     };
     let new_entries = match new_tree_oid {
-        Some(oid) => read_tree(odb, oid)?,
-        None => Vec::new(),
+        Some(oid) => cache.entries_arc(oid)?,
+        None => Arc::clone(&empty),
     };
     diff_tree_entries_opts(
-        odb,
-        &old_entries,
-        &new_entries,
+        cache,
+        old_entries.as_slice(),
+        new_entries.as_slice(),
         prefix,
         show_trees,
         index_hint,
@@ -2414,8 +2456,9 @@ fn diff_trees_opts(
     index_hint: Option<&DiffTreesIndexHint<'_>>,
 ) -> Result<Vec<DiffEntry>> {
     let mut result = Vec::new();
+    let mut cache = TreeReadCache::new(odb);
     diff_subtrees_in_place(
-        odb,
+        &mut cache,
         old_tree_oid,
         new_tree_oid,
         prefix,
@@ -2426,8 +2469,11 @@ fn diff_trees_opts(
     Ok(result)
 }
 
+#[cfg(test)]
 use std::cell::RefCell;
+#[cfg(test)]
 use std::rc::Rc;
+#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(test)]
@@ -2435,30 +2481,13 @@ thread_local! {
     static DIFF_TREE_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
 }
 
-thread_local! {
-    static DIFF_ENTRY_SCAN_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
+#[cfg(test)]
+fn note_diff_entry_scan(odb: &Odb) {
+    odb.hot_path_metrics().record_diff_entry_scan();
 }
 
-/// Install a per-thread counter for index/worktree diff entry scans (cleared when `hook` is `None`).
-#[doc(hidden)]
-pub fn set_diff_entry_scan_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
-    DIFF_ENTRY_SCAN_HOOK.with(|cell| *cell.borrow_mut() = hook);
-}
-
-fn note_diff_entry_scan() {
-    DIFF_ENTRY_SCAN_HOOK.with(|cell| {
-        if let Some(counter) = cell.borrow().as_ref() {
-            counter.fetch_add(1, Ordering::Relaxed);
-        }
-    });
-    if let Ok(path) = std::env::var("GRIT_TEST_DIFF_ENTRY_SCAN_FILE") {
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .and_then(|mut f| std::io::Write::write_all(&mut f, b"1\n"));
-    }
-}
+#[cfg(not(test))]
+fn note_diff_entry_scan(_odb: &Odb) {}
 
 /// Install a per-thread tree read counter for unit tests (cleared when `hook` is `None`).
 #[cfg(test)]
@@ -2466,20 +2495,18 @@ pub(crate) fn set_diff_tree_read_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
     DIFF_TREE_READ_HOOK.with(|cell| *cell.borrow_mut() = hook);
 }
 
-/// Read and parse a tree object from the ODB.
-fn read_tree(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
+/// Read and parse a tree object from the ODB (no session cache).
+fn read_tree_from_odb(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
     #[cfg(test)]
     if let Some(counter) = DIFF_TREE_READ_HOOK.with(|cell| cell.borrow().clone()) {
         counter.fetch_add(1, Ordering::Relaxed);
     }
-    let obj = odb.read(oid)?;
-    if obj.kind != ObjectKind::Tree {
-        return Err(Error::CorruptObject(format!(
-            "expected tree, got {}",
-            obj.kind.as_str()
-        )));
-    }
-    parse_tree(&obj.data)
+    Ok((*odb.cached_tree_entries(oid)?).clone())
+}
+
+/// Read and parse a tree object from the ODB.
+fn read_tree(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
+    read_tree_from_odb(odb, oid)
 }
 
 fn diff_tree_entries_count(
@@ -2594,7 +2621,7 @@ fn emit_added_count(
 
 /// Compare two sorted lists of tree entries, recursing into subtrees.
 fn diff_tree_entries_opts(
-    odb: &Odb,
+    cache: &mut TreeReadCache<'_>,
     old: &[TreeEntry],
     new: &[TreeEntry],
     prefix: &str,
@@ -2617,12 +2644,12 @@ fn diff_tree_entries_opts(
                 match cmp {
                     std::cmp::Ordering::Less => {
                         // Old entry not in new → deleted
-                        emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
+                        emit_deleted_opts(cache, o, prefix, show_trees, index_hint, result)?;
                         oi += 1;
                     }
                     std::cmp::Ordering::Greater => {
                         // New entry not in old → added
-                        emit_added_opts(odb, n, prefix, show_trees, result)?;
+                        emit_added_opts(cache, n, prefix, show_trees, result)?;
                         ni += 1;
                     }
                     std::cmp::Ordering::Equal => {
@@ -2645,7 +2672,7 @@ fn diff_tree_entries_opts(
                                     });
                                 }
                                 diff_subtrees_in_place(
-                                    odb,
+                                    cache,
                                     Some(&o.oid),
                                     Some(&n.oid),
                                     &path,
@@ -2655,12 +2682,12 @@ fn diff_tree_entries_opts(
                                 )?;
                             } else if is_tree_mode(o.mode) && !is_tree_mode(n.mode) {
                                 // Tree → blob: delete tree contents, add blob
-                                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
-                                emit_added_opts(odb, n, prefix, show_trees, result)?;
+                                emit_deleted_opts(cache, o, prefix, show_trees, index_hint, result)?;
+                                emit_added_opts(cache, n, prefix, show_trees, result)?;
                             } else if !is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 // Blob → tree: delete blob, add tree contents
-                                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
-                                emit_added_opts(odb, n, prefix, show_trees, result)?;
+                                emit_deleted_opts(cache, o, prefix, show_trees, index_hint, result)?;
+                                emit_added_opts(cache, n, prefix, show_trees, result)?;
                             } else {
                                 // Both blobs — modified.
                                 // A mode-only change (e.g. chmod) is Modified.
@@ -2689,11 +2716,11 @@ fn diff_tree_entries_opts(
                 }
             }
             (Some(o), None) => {
-                emit_deleted_opts(odb, o, prefix, show_trees, index_hint, result)?;
+                emit_deleted_opts(cache, o, prefix, show_trees, index_hint, result)?;
                 oi += 1;
             }
             (None, Some(n)) => {
-                emit_added_opts(odb, n, prefix, show_trees, result)?;
+                emit_added_opts(cache, n, prefix, show_trees, result)?;
                 ni += 1;
             }
             (None, None) => break,
@@ -2773,7 +2800,7 @@ fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Ve
 }
 
 fn emit_deleted_opts(
-    odb: &Odb,
+    cache: &mut TreeReadCache<'_>,
     entry: &TreeEntry,
     prefix: &str,
     show_trees: bool,
@@ -2799,7 +2826,15 @@ fn emit_deleted_opts(
             emit_deleted_tree_from_index(hint.index, &path, result);
             return Ok(());
         }
-        diff_subtrees_in_place(odb, Some(&entry.oid), None, &path, show_trees, None, result)?;
+        diff_subtrees_in_place(
+            cache,
+            Some(&entry.oid),
+            None,
+            &path,
+            show_trees,
+            None,
+            result,
+        )?;
     } else {
         result.push(DiffEntry {
             status: DiffStatus::Deleted,
@@ -2816,7 +2851,7 @@ fn emit_deleted_opts(
 }
 
 fn emit_added_opts(
-    odb: &Odb,
+    cache: &mut TreeReadCache<'_>,
     entry: &TreeEntry,
     prefix: &str,
     show_trees: bool,
@@ -2837,7 +2872,15 @@ fn emit_added_opts(
                 score: None,
             });
         }
-        diff_subtrees_in_place(odb, None, Some(&entry.oid), &path, show_trees, None, result)?;
+        diff_subtrees_in_place(
+            cache,
+            None,
+            Some(&entry.oid),
+            &path,
+            show_trees,
+            None,
+            result,
+        )?;
     } else {
         result.push(DiffEntry {
             status: DiffStatus::Added,
@@ -2878,7 +2921,7 @@ pub fn diff_index_to_tree(
     tree_oid: Option<&ObjectId>,
     ignore_submodules: bool,
 ) -> Result<Vec<DiffEntry>> {
-    note_diff_entry_scan();
+    note_diff_entry_scan(odb);
     match index_cache_tree_walk(index, tree_oid) {
         CacheTreeWalk::Fast {
             head_tree,
@@ -4335,7 +4378,7 @@ fn diff_index_to_worktree_inner(
     bool,
     std::collections::BTreeMap<String, crate::index::IndexStatFields>,
 )> {
-    note_diff_entry_scan();
+    note_diff_entry_scan(odb);
     use crate::config::ConfigSet;
     use crate::crlf;
     use std::collections::BTreeMap;
@@ -12637,6 +12680,58 @@ mod line_coverage_tests {
                 &opts,
             )?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn diff_staged_patch_single_index_scan() -> Result<()> {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let metrics = odb.hot_path_metrics();
+        metrics.set_diff_entry_scan_counting(true);
+        metrics.reset_diff_entry_scans();
+
+        let b_base = odb.write(ObjectKind::Blob, b"base\n")?;
+        let b_staged = odb.write(ObjectKind::Blob, b"staged\n")?;
+        let mut index = Index::new();
+        index.add_or_replace(index_entry("f.txt", MODE_REGULAR, b_staged));
+        let head = write_tree_from_index(&odb, &index, "")?;
+        index.entries_mut()[0].oid = b_base;
+
+        let config = ConfigSet::new();
+        let policy = ThreadPolicy::default();
+        let _ = diff_index_to_tree_with_renames(
+            &odb,
+            &index,
+            Some(&head),
+            false,
+            100,
+            &config,
+            &policy,
+        )?;
+        metrics.set_diff_entry_scan_counting(false);
+        assert_eq!(metrics.diff_entry_scans(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn diff_unstaged_patch_single_worktree_scan() -> Result<()> {
+        let td = TempDir::new().expect("tempdir");
+        let wt = td.path();
+        std::fs::write(wt.join("f.txt"), b"base\n")?;
+        let git_dir = wt.join(".git");
+        std::fs::create_dir_all(git_dir.join("objects"))?;
+        let odb = Odb::new(&git_dir.join("objects"));
+        let metrics = odb.hot_path_metrics();
+        metrics.set_diff_entry_scan_counting(true);
+        metrics.reset_diff_entry_scans();
+        let oid = odb.write(ObjectKind::Blob, b"base\n")?;
+        let mut index = Index::new();
+        index.add_or_replace(index_entry("f.txt", MODE_REGULAR, oid));
+        std::fs::write(wt.join("f.txt"), b"dirty\n")?;
+        let _ = diff_index_to_worktree(&odb, &mut index, wt, false, false)?;
+        metrics.set_diff_entry_scan_counting(false);
+        assert_eq!(metrics.diff_entry_scans(), 1);
         Ok(())
     }
 }

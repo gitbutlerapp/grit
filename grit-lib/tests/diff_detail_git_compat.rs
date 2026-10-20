@@ -1,11 +1,8 @@
 //! `--stat` / `--name-only` / `--name-status` compatibility with system `git`.
 
-use std::rc::Rc;
-use std::sync::atomic::AtomicUsize;
-
 use grit_lib::diff::{
-    build_file_diffs, diff_trees_with_renames_and_policy, set_diff_blob_read_hook_for_tests,
-    DiffDetail, DiffOptions, DiffStatus, DiffTarget,
+    build_file_diffs, diff_trees_with_renames_and_policy, DiffDetail, DiffOptions, DiffStatus,
+    DiffTarget,
 };
 use grit_lib::objects::{ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
@@ -80,32 +77,6 @@ fn diff_stat_counts_match_git_numstat_trees_text_and_binary() {
     assert!(grit
         .iter()
         .any(|(i, d, p)| p == "bin.dat" && *i == 0 && *d == 0));
-    let _target = DiffTarget::Trees;
-}
-
-#[test]
-fn name_only_does_not_read_blobs_for_tree_to_tree() {
-    let (_dir, repo) = init_repo();
-    let old = tree_with(&repo, &[("f.txt", b"alpha\n")]);
-    let new = tree_with(&repo, &[("f.txt", b"beta\n")]);
-    let entries = repo
-        .diff()
-        .tree_to_tree(Some(&old), Some(&new))
-        .expect("entries");
-    let counter = Rc::new(AtomicUsize::new(0));
-    set_diff_blob_read_hook_for_tests(Some(Rc::clone(&counter)));
-    let config = repo.config().expect("config");
-    let _ = build_file_diffs(
-        repo.odb(),
-        entries,
-        DiffDetail::NameOnly,
-        DiffOptions::default(),
-        config.as_ref(),
-        &ThreadPolicy::default(),
-    )
-    .expect("name-only");
-    set_diff_blob_read_hook_for_tests(None);
-    assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
     let _target = DiffTarget::Trees;
 }
 
