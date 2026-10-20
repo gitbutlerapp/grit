@@ -8,8 +8,8 @@ use std::process::Command;
 use grit_utils::binary::{require_hyperfine, resolve_binary};
 use grit_utils::fixture::{create_repo_with_history, remove_dir_robust, scratch_dir};
 use grit_utils::scenarios::{
-    log_bench_expected_grit_invocations, log_bench_grit_shell, validate_log_bench_grit_shell,
-    LOG_BENCH_COMMIT_COUNT, LOG_BENCH_GRIT_PAGE_COUNT,
+    log_bench_expected_grit_invocations, log_bench_grit_argv, log_bench_grit_shell,
+    validate_log_bench_grit_shell, LOG_BENCH_COMMIT_COUNT, LOG_BENCH_GRIT_PAGE_COUNT,
 };
 
 fn build_grit_executable() -> PathBuf {
@@ -56,6 +56,15 @@ fn run_bench(subcmd: &str, id: &str) {
         serde_json::from_slice(&output.stdout).expect("parse JSON report");
     assert_eq!(report["schema_version"], 1);
     assert_eq!(report["scenarios"][0]["id"], id);
+    if subcmd == "log" {
+        let description = report["scenarios"][0]["description"]
+            .as_str()
+            .expect("description");
+        assert!(
+            description.contains("grit log --limit"),
+            "expected fair single-process log scenario, got: {description}"
+        );
+    }
     assert!(report["scenarios"][0]["git"]["median_ms"].as_f64().unwrap() > 0.0);
     assert!(
         report["scenarios"][0]["grit"]["median_ms"]
@@ -131,7 +140,7 @@ fn run_log_workload_in_repo(grit: &Path, repo: &Path) -> std::process::Output {
         .expect("run log workload shell")
 }
 
-fn log_bench_workload_cardinality_and_invocations() {
+fn log_pages_shell_workload_cardinality_and_invocations() {
     let git = resolve_binary("git", None).expect("git");
     let grit = build_grit_executable();
     remove_dir_robust(&scratch_dir());
@@ -186,10 +195,45 @@ fn log_bench_workload_cardinality_and_invocations() {
     remove_dir_robust(&scratch_dir());
 }
 
+fn log_limit_workload_cardinality_and_single_invocation() {
+    let git = resolve_binary("git", None).expect("git");
+    let grit = build_grit_executable();
+    remove_dir_robust(&scratch_dir());
+    let repo = create_repo_with_history(&git, 100, LOG_BENCH_COMMIT_COUNT).expect("fixture");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let counter = tmp.path().join("invocations");
+    let wrapper = write_grit_wrapper(&grit, &counter, None);
+    let out = Command::new(&wrapper)
+        .args(log_bench_grit_argv())
+        .current_dir(&repo)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("grit log --limit");
+    assert!(
+        out.status.success(),
+        "grit log --limit failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        count_commit_lines(&String::from_utf8_lossy(&out.stdout)),
+        LOG_BENCH_COMMIT_COUNT
+    );
+    let n: u32 = fs::read_to_string(&counter)
+        .expect("counter")
+        .trim()
+        .parse()
+        .expect("parse count");
+    assert_eq!(n, 1);
+
+    remove_dir_robust(&scratch_dir());
+}
+
 #[test]
 fn diff_and_log_scenarios_end_to_end() {
     // `/tmp/grit-bench-scratch` is shared; keep workloads sequential.
-    log_bench_workload_cardinality_and_invocations();
+    log_pages_shell_workload_cardinality_and_invocations();
+    log_limit_workload_cardinality_and_single_invocation();
     run_bench("diff", "diff-100");
     run_bench("log", "log-100");
 }

@@ -278,7 +278,9 @@ pub fn run_fixture_cli_matrix(
             id: sid(fixture.id, "log"),
             group: "log".into(),
             fixture: fixture.label.clone(),
-            description: format!("last {log_limit} commits one line each"),
+            description: format!(
+                "last {log_limit} commits one line each (paged grit log, {log_pages} pages)"
+            ),
             grit_argv: grit_log,
             git_argv: vec!["log".into(), format!("-{log_limit}"), "--oneline".into()],
             driver: Driver::Cli,

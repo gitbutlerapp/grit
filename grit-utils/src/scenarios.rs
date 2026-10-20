@@ -753,7 +753,17 @@ pub fn log_bench_grit_shell(grit: &Path) -> String {
     grit_log_pages_shell(grit, LOG_BENCH_GRIT_PAGE_COUNT)
 }
 
-/// Last 100 commits, one line each (`git log -100 --oneline` vs paged `grit log`).
+/// Grit argv for the dashboard `log-{size}` scenario (one process, capped history).
+#[must_use]
+pub fn log_bench_grit_argv() -> Vec<String> {
+    vec![
+        "log".into(),
+        "--limit".into(),
+        LOG_BENCH_COMMIT_COUNT.to_string(),
+    ]
+}
+
+/// Last 100 commits, one line each (`git log -100 --oneline` vs `grit log --limit 100`).
 pub fn run_log_suite(
     hyperfine: &Path,
     git: &Path,
@@ -765,7 +775,6 @@ pub fn run_log_suite(
     let mut scenarios = Vec::new();
     for &size in sizes {
         let repo = create_repo_with_history(git, size, LOG_BENCH_COMMIT_COUNT)?;
-        let grit_cmd = log_bench_grit_shell(grit);
         scenarios.push(run_scenario(
             hyperfine,
             git,
@@ -776,13 +785,13 @@ pub fn run_log_suite(
                 group: "log".into(),
                 fixture: format!("synthetic-{size}"),
                 description: format!(
-                    "last {LOG_BENCH_COMMIT_COUNT} commits one line each (git log -100 --oneline, grit log pages)"
+                    "last {LOG_BENCH_COMMIT_COUNT} commits one line each (git log -100 --oneline, grit log --limit {LOG_BENCH_COMMIT_COUNT})"
                 ),
-                grit_argv: sh_script(grit_cmd),
+                grit_argv: log_bench_grit_argv(),
                 git_argv: vec!["log".into(), "-100".into(), "--oneline".into()],
                 driver: Driver::Cli,
                 prepare_kind: None,
-                grit_via_shell: true,
+                grit_via_shell: false,
                 git_via_shell: false,
             },
             &repo,
@@ -822,6 +831,18 @@ mod log_bench_tests {
         assert_eq!(
             log_bench_expected_grit_invocations(),
             LOG_BENCH_GRIT_PAGE_COUNT
+        );
+    }
+
+    #[test]
+    fn log_dashboard_grit_argv_is_single_limit_invocation() {
+        assert_eq!(
+            log_bench_grit_argv(),
+            vec![
+                "log".to_string(),
+                "--limit".to_string(),
+                LOG_BENCH_COMMIT_COUNT.to_string(),
+            ]
         );
     }
 
