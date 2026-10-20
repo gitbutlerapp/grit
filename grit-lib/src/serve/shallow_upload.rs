@@ -6,7 +6,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::rev_list::{
     shallow_boundary_oids, shallow_grafts_for_upload_pack_deepen,
-    shallow_grafts_for_upload_pack_rev_list,
+    shallow_grafts_for_upload_pack_rev_list, shallow_grafts_for_upload_pack_target_depth,
 };
 use crate::shallow::INFINITE_DEPTH;
 
@@ -77,8 +77,11 @@ pub(crate) fn compute_shallow_response(
         } else {
             depth
         };
-        new_shallow =
-            shallow_grafts_for_upload_pack_deepen(repo, wants, &req.client_shallow, depth);
+        new_shallow = if req.deepen_relative {
+            shallow_grafts_for_upload_pack_target_depth(repo, wants, &req.client_shallow, depth)
+        } else {
+            shallow_grafts_for_upload_pack_deepen(repo, wants, &req.client_shallow, depth)
+        };
     } else if req.deepen_since.is_some() || !req.deepen_not.is_empty() {
         new_shallow = shallow_grafts_for_upload_pack_rev_list(
             repo,
