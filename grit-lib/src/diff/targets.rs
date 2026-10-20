@@ -295,7 +295,15 @@ pub(crate) fn file_diffs_from_entries(
     Ok(structured
         .into_iter()
         .map(file_diff_from_tree_structured)
+        .filter(|f| include_file_in_diff(f, opts))
         .collect())
+}
+
+fn include_file_in_diff(file: &FileDiff, opts: DiffOptions) -> bool {
+    if opts.whitespace.is_active() && !file.binary && file.hunks.is_empty() {
+        return false;
+    }
+    true
 }
 
 pub(crate) fn collect_files_for_target(
@@ -343,7 +351,7 @@ pub(crate) fn collect_files_for_target(
         }
         DiffTarget::Commit(oid) => {
             let items = commit_changes(repo, oid, &config, &thread_policy, opts, rename_threshold)?;
-            filter_and_map_tree_structured(items, repo, pathspecs)
+            filter_and_map_tree_structured(items, repo, pathspecs, opts)
         }
         DiffTarget::Trees { old, new } => {
             let items = if let Some(base) = old {
@@ -359,7 +367,7 @@ pub(crate) fn collect_files_for_target(
             } else {
                 commit_changes(repo, new, &config, &thread_policy, opts, rename_threshold)?
             };
-            filter_and_map_tree_structured(items, repo, pathspecs)
+            filter_and_map_tree_structured(items, repo, pathspecs, opts)
         }
     };
     Ok(files)
@@ -369,10 +377,12 @@ fn filter_and_map_tree_structured(
     items: Vec<TreeDiffStructured>,
     repo: &Repository,
     pathspecs: &[String],
+    opts: DiffOptions,
 ) -> Vec<FileDiff> {
     filter_tree_diff(items, repo, pathspecs)
         .into_iter()
         .map(file_diff_from_tree_structured)
+        .filter(|f| include_file_in_diff(f, opts))
         .collect()
 }
 
@@ -433,7 +443,10 @@ fn file_diffs_from_worktree_changes(
     let est_bytes = changes.len().saturating_mul(8192);
     Ok(par_map(&changes, par_opts, est_bytes, |fc| {
         build_file_diff(fc, opts)
-    }))
+    })
+    .into_iter()
+    .filter(|f| include_file_in_diff(f, opts))
+    .collect())
 }
 
 fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {

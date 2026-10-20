@@ -43,6 +43,20 @@ impl LineInterner {
         }
         out
     }
+
+    /// Intern normalized keys for diff comparison while preserving display via original line slices.
+    pub fn intern_all_normalized<'a>(
+        &mut self,
+        lines: &[&'a str],
+        normalize: impl Fn(&'a str) -> std::borrow::Cow<'a, str>,
+    ) -> Vec<u32> {
+        let mut out = Vec::with_capacity(lines.len());
+        for line in lines {
+            let key = normalize(line);
+            out.push(self.intern(key.as_ref()));
+        }
+        out
+    }
 }
 
 #[cfg(test)]

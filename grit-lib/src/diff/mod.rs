@@ -19,6 +19,7 @@ mod patch_log;
 mod targets;
 mod tree_content;
 mod unified_emit;
+mod whitespace_mode;
 
 pub use core::*;
 pub use handle::Diff;
@@ -26,6 +27,17 @@ pub use options::{
     renames_from_config, DiffAlgorithm, DiffOptions, RenameDetection, UnknownDiffAlgorithm,
     WORD_LEVEL_INLINE_MAX_CHANGED_FILES,
 };
+pub use whitespace_mode::{normalize_ignore_space_change_line, WhitespaceMode};
+
+/// Unified hunk bodies (`@@` …) for two text sides using [`DiffOptions`].
+#[must_use]
+pub fn line_diff_unified_hunk_body(
+    old_content: &str,
+    new_content: &str,
+    options: &DiffOptions,
+) -> String {
+    core::unified_hunk_body_for_diff_options(old_content, new_content, options)
+}
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
     write_diff_entry_log_patch, LogPatchCommitHeader, LogPatchOptions,
