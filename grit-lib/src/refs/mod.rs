@@ -155,7 +155,7 @@ pub fn update_direct_ref_on_store(
     )
 }
 
-fn store_write_value_on_store(
+pub(crate) fn store_write_value_on_store(
     store: &dyn RefStore,
     git_dir: &Path,
     refname: &str,

@@ -1,4 +1,4 @@
-//! Attach a note to a commit with [`RepositoryNotes`](grit_lib::repo_handles::RepositoryNotes).
+//! Attach a note to a commit and list notes with [`RepositoryNotes`](grit_lib::repo_handles::RepositoryNotes).
 //!
 //! Source for the library guide "Notes" page (included in the docs site).
 
@@ -6,7 +6,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::repo_handles::NotesWriteOptions;
+use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
 use grit_lib::state::resolve_head;
 use std::path::{Path, PathBuf};
 
@@ -45,7 +45,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
 
     let notes_ref = NotesRef::commits();
-    repo.notes().add(
+    let outcome = repo.notes().add(
         &notes_ref,
         &commit,
         b"library guide note\n",
@@ -56,10 +56,19 @@ fn main() -> Result<(), grit_lib::error::Error> {
         },
         false,
     )?;
+    println!("added={}", outcome == NoteAddOutcome::Added);
 
     let body = repo.notes().read(&notes_ref, &commit)?.unwrap_or_default();
     let text = String::from_utf8_lossy(&body);
     println!("note={text}");
+
+    for note in repo.notes().list_with_bodies(&notes_ref)? {
+        println!(
+            "{} {}",
+            note.object.to_hex(),
+            String::from_utf8_lossy(&note.body).trim_end()
+        );
+    }
 
     Ok(())
 }

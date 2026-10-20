@@ -3885,6 +3885,18 @@ pub grit_lib::error::Error::NotARepository(alloc::string::String)
 pub grit_lib::error::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::error::Error::NoteAlreadyExists
 pub grit_lib::error::Error::NoteAlreadyExists::object: grit_lib::objects::ObjectId
+pub grit_lib::error::Error::NotesMergeBothEmpty
+pub grit_lib::error::Error::NotesMergeBothEmpty::local: alloc::string::String
+pub grit_lib::error::Error::NotesMergeBothEmpty::remote: alloc::string::String
+pub grit_lib::error::Error::NotesMergeInProgress
+pub grit_lib::error::Error::NotesMergeInProgress::path: std::path::PathBuf
+pub grit_lib::error::Error::NotesObjectKind
+pub grit_lib::error::Error::NotesObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::error::Error::NotesObjectKind::found: grit_lib::objects::ObjectKind
+pub grit_lib::error::Error::NotesObjectKind::oid: grit_lib::objects::ObjectId
+pub grit_lib::error::Error::NotesRefNotCommit
+pub grit_lib::error::Error::NotesRefNotCommit::found: grit_lib::objects::ObjectKind
+pub grit_lib::error::Error::NotesRefNotCommit::notes_ref: alloc::string::String
 pub grit_lib::error::Error::NothingToCommit
 pub grit_lib::error::Error::ObjectHeaderTooLong
 pub grit_lib::error::Error::ObjectHeaderTooLong::oid: alloc::string::String
@@ -5468,6 +5480,12 @@ pub grit_lib::notes::NotesTreeEntry::oid: grit_lib::objects::ObjectId
 pub grit_lib::notes::NotesTreeEntry::path: alloc::vec::Vec<u8>
 impl core::clone::Clone for grit_lib::notes::NotesTreeEntry
 pub fn grit_lib::notes::NotesTreeEntry::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::notes::NotesTreeEntry
+impl core::cmp::PartialEq for grit_lib::notes::NotesTreeEntry
+pub fn grit_lib::notes::NotesTreeEntry::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::notes::NotesTreeEntry
+pub fn grit_lib::notes::NotesTreeEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::notes::NotesTreeEntry
 impl core::marker::Freeze for grit_lib::notes::NotesTreeEntry
 impl core::marker::Send for grit_lib::notes::NotesTreeEntry
 impl core::marker::Sync for grit_lib::notes::NotesTreeEntry
@@ -5475,24 +5493,13 @@ impl core::marker::Unpin for grit_lib::notes::NotesTreeEntry
 impl core::marker::UnsafeUnpin for grit_lib::notes::NotesTreeEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::notes::NotesTreeEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::notes::NotesTreeEntry
-pub const grit_lib::notes::NOTES_MERGE_WORKTREE: &str
-pub fn grit_lib::notes::combine_notes_cat_sort_uniq(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::notes::combine_notes_concatenate(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::notes::display_note_path(&grit_lib::notes::NotesTreeEntry) -> alloc::borrow::Cow<'_, str>
-pub fn grit_lib::notes::expand_notes_ref(&str) -> alloc::string::String
 pub fn grit_lib::notes::note_object_name(&[u8]) -> core::option::Option<alloc::string::String>
-pub fn grit_lib::notes::notes_merge_git_dir(&grit_lib::repo::Repository) -> std::path::PathBuf
 pub fn grit_lib::notes::notes_merge_inner(&grit_lib::repo::Repository, &str, &str, grit_lib::notes::NotesMergeStrategy) -> grit_lib::error::Result<core::result::Result<grit_lib::objects::ObjectId, grit_lib::objects::ObjectId>>
-pub fn grit_lib::notes::notes_merge_worktree_nonempty(&std::path::Path) -> bool
-pub fn grit_lib::notes::notes_merge_worktree_path(&grit_lib::repo::Repository) -> std::path::PathBuf
-pub fn grit_lib::notes::parse_notes_merge_strategy_value(&str) -> core::option::Option<grit_lib::notes::NotesMergeStrategy>
 pub fn grit_lib::notes::read_notes_tree(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::notes::NotesTreeEntry>>
 pub fn grit_lib::notes::remove_note_entry(&mut alloc::vec::Vec<grit_lib::notes::NotesTreeEntry>, &str) -> bool
 pub fn grit_lib::notes::resolve_configured_notes_ref<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<grit_lib::notes::NotesRef>
 pub fn grit_lib::notes::upsert_note_entry(&mut alloc::vec::Vec<grit_lib::notes::NotesTreeEntry>, &str, grit_lib::objects::ObjectId)
 pub fn grit_lib::notes::write_notes_commit(&grit_lib::repo::Repository, &str, &[grit_lib::notes::NotesTreeEntry], &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::notes::write_notes_commit_idents(&grit_lib::repo::Repository, &str, &[grit_lib::notes::NotesTreeEntry], &str, &str, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::notes::write_notes_commit_with_parents(&grit_lib::repo::Repository, &str, &[grit_lib::notes::NotesTreeEntry], &str, &[grit_lib::objects::ObjectId], bool) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub mod grit_lib::object_inspect
 pub enum grit_lib::object_inspect::ObjectContents
 pub grit_lib::object_inspect::ObjectContents::Blob(alloc::vec::Vec<u8>)
@@ -9935,6 +9942,18 @@ pub grit_lib::prelude::Error::NotARepository(alloc::string::String)
 pub grit_lib::prelude::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::prelude::Error::NoteAlreadyExists
 pub grit_lib::prelude::Error::NoteAlreadyExists::object: grit_lib::objects::ObjectId
+pub grit_lib::prelude::Error::NotesMergeBothEmpty
+pub grit_lib::prelude::Error::NotesMergeBothEmpty::local: alloc::string::String
+pub grit_lib::prelude::Error::NotesMergeBothEmpty::remote: alloc::string::String
+pub grit_lib::prelude::Error::NotesMergeInProgress
+pub grit_lib::prelude::Error::NotesMergeInProgress::path: std::path::PathBuf
+pub grit_lib::prelude::Error::NotesObjectKind
+pub grit_lib::prelude::Error::NotesObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::prelude::Error::NotesObjectKind::found: grit_lib::objects::ObjectKind
+pub grit_lib::prelude::Error::NotesObjectKind::oid: grit_lib::objects::ObjectId
+pub grit_lib::prelude::Error::NotesRefNotCommit
+pub grit_lib::prelude::Error::NotesRefNotCommit::found: grit_lib::objects::ObjectKind
+pub grit_lib::prelude::Error::NotesRefNotCommit::notes_ref: alloc::string::String
 pub grit_lib::prelude::Error::NothingToCommit
 pub grit_lib::prelude::Error::ObjectHeaderTooLong
 pub grit_lib::prelude::Error::ObjectHeaderTooLong::oid: alloc::string::String
@@ -14161,6 +14180,25 @@ impl core::marker::Unpin for grit_lib::repo_handles::HookSource
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::HookSource
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::HookSource
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::HookSource
+pub enum grit_lib::repo_handles::NoteAddOutcome
+pub grit_lib::repo_handles::NoteAddOutcome::Added
+pub grit_lib::repo_handles::NoteAddOutcome::Replaced
+impl core::clone::Clone for grit_lib::repo_handles::NoteAddOutcome
+pub fn grit_lib::repo_handles::NoteAddOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::NoteAddOutcome
+impl core::cmp::PartialEq for grit_lib::repo_handles::NoteAddOutcome
+pub fn grit_lib::repo_handles::NoteAddOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::NoteAddOutcome
+pub fn grit_lib::repo_handles::NoteAddOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::repo_handles::NoteAddOutcome
+impl core::marker::StructuralPartialEq for grit_lib::repo_handles::NoteAddOutcome
+impl core::marker::Freeze for grit_lib::repo_handles::NoteAddOutcome
+impl core::marker::Send for grit_lib::repo_handles::NoteAddOutcome
+impl core::marker::Sync for grit_lib::repo_handles::NoteAddOutcome
+impl core::marker::Unpin for grit_lib::repo_handles::NoteAddOutcome
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::NoteAddOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::NoteAddOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::NoteAddOutcome
 pub struct grit_lib::repo_handles::ExpireOptions
 pub grit_lib::repo_handles::ExpireOptions::all: bool
 pub grit_lib::repo_handles::ExpireOptions::expire: core::option::Option<alloc::string::String>
@@ -14230,6 +14268,43 @@ impl core::marker::Unpin for grit_lib::repo_handles::LockWorktreeOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::LockWorktreeOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::LockWorktreeOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::LockWorktreeOptions
+pub struct grit_lib::repo_handles::Note
+pub grit_lib::repo_handles::Note::body: alloc::vec::Vec<u8>
+pub grit_lib::repo_handles::Note::note_blob: grit_lib::objects::ObjectId
+pub grit_lib::repo_handles::Note::object: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::repo_handles::Note
+pub fn grit_lib::repo_handles::Note::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::Note
+impl core::cmp::PartialEq for grit_lib::repo_handles::Note
+pub fn grit_lib::repo_handles::Note::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::Note
+pub fn grit_lib::repo_handles::Note::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo_handles::Note
+impl core::marker::Freeze for grit_lib::repo_handles::Note
+impl core::marker::Send for grit_lib::repo_handles::Note
+impl core::marker::Sync for grit_lib::repo_handles::Note
+impl core::marker::Unpin for grit_lib::repo_handles::Note
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::Note
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::Note
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::Note
+pub struct grit_lib::repo_handles::NoteListing
+pub grit_lib::repo_handles::NoteListing::note_blob: grit_lib::objects::ObjectId
+pub grit_lib::repo_handles::NoteListing::object: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::repo_handles::NoteListing
+pub fn grit_lib::repo_handles::NoteListing::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::NoteListing
+impl core::cmp::PartialEq for grit_lib::repo_handles::NoteListing
+pub fn grit_lib::repo_handles::NoteListing::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::NoteListing
+pub fn grit_lib::repo_handles::NoteListing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo_handles::NoteListing
+impl core::marker::Freeze for grit_lib::repo_handles::NoteListing
+impl core::marker::Send for grit_lib::repo_handles::NoteListing
+impl core::marker::Sync for grit_lib::repo_handles::NoteListing
+impl core::marker::Unpin for grit_lib::repo_handles::NoteListing
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::NoteListing
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::NoteListing
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::NoteListing
 pub struct grit_lib::repo_handles::NotesWriteOptions
 pub grit_lib::repo_handles::NotesWriteOptions::author: core::option::Option<alloc::string::String>
 pub grit_lib::repo_handles::NotesWriteOptions::committer: alloc::string::String
@@ -14301,8 +14376,9 @@ impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles:
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RepositoryHooks<'repo>
 pub struct grit_lib::repo_handles::RepositoryNotes<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryNotes<'repo>
-pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::add(&self, &grit_lib::notes::NotesRef, &grit_lib::objects::ObjectId, &[u8], &grit_lib::repo_handles::NotesWriteOptions, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::list(&self, &grit_lib::notes::NotesRef) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::repo_handles::notes::NoteListing>>
+pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::add(&self, &grit_lib::notes::NotesRef, &grit_lib::objects::ObjectId, &[u8], &grit_lib::repo_handles::NotesWriteOptions, bool) -> grit_lib::error::Result<grit_lib::repo_handles::NoteAddOutcome>
+pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::list(&self, &grit_lib::notes::NotesRef) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::repo_handles::NoteListing>>
+pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::list_with_bodies(&self, &grit_lib::notes::NotesRef) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::repo_handles::Note>>
 pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::read(&self, &grit_lib::notes::NotesRef, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<alloc::vec::Vec<u8>>>
 pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::remove(&self, &grit_lib::notes::NotesRef, &grit_lib::objects::ObjectId, &grit_lib::repo_handles::NotesWriteOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryNotes<'repo>::remove_many(&self, &grit_lib::notes::NotesRef, &[grit_lib::objects::ObjectId], &grit_lib::repo_handles::NotesWriteOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>

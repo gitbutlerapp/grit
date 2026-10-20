@@ -750,6 +750,46 @@ pub enum Error {
     #[error("notes ref '{0}' must start with 'refs/notes/'")]
     InvalidNotesRef(String),
 
+    /// A notes ref resolves to an object that cannot hold notes (notes reads accept a commit or
+    /// a tree; notes merges require a commit).
+    #[error("notes ref '{notes_ref}' points to a {found}, not a notes commit")]
+    NotesRefNotCommit {
+        /// Notes ref (or revision) that was read.
+        notes_ref: String,
+        /// Kind of object the ref resolved to.
+        found: crate::objects::ObjectKind,
+    },
+
+    /// An object reached while reading a notes tree has the wrong kind (for example a note
+    /// entry that is not a blob).
+    #[error("notes object {oid} is a {found}, expected a {expected}")]
+    NotesObjectKind {
+        /// Object that was read.
+        oid: crate::objects::ObjectId,
+        /// Kind the notes layout requires at this position.
+        expected: crate::objects::ObjectKind,
+        /// Kind actually stored.
+        found: crate::objects::ObjectKind,
+    },
+
+    /// [`notes_merge_inner`](crate::notes::notes_merge_inner) was asked to merge two notes refs
+    /// that both have no notes commit.
+    #[error("cannot merge notes: neither '{local}' nor '{remote}' has any notes")]
+    NotesMergeBothEmpty {
+        /// Local notes ref (merge destination).
+        local: String,
+        /// Remote notes ref (merge source).
+        remote: String,
+    },
+
+    /// A manual notes merge was started while an earlier one still has conflict files in the
+    /// notes merge worktree.
+    #[error("unfinished notes merge: conflict files remain in {}", path.display())]
+    NotesMergeInProgress {
+        /// The notes merge worktree directory.
+        path: std::path::PathBuf,
+    },
+
     /// Multi-pack-index load or write failure.
     #[error(transparent)]
     Midx(#[from] MidxError),

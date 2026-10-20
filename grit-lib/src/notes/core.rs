@@ -9,33 +9,37 @@
 //! the notes tree into a flat entry list, computing the fanout layout, writing a
 //! new notes tree + commit, combining note blobs (concatenate / cat_sort_uniq),
 //! and the notes-merge data model (pairing local/remote/base changes and applying
-//! a merge strategy). The `grit` binary keeps argument parsing, editor launch,
-//! stdin reading, output, and exit-code mapping.
+//! a merge strategy). Notes refs are read and updated through the repository's
+//! [`RefStore`](crate::refs::store::RefStore), so every ref backend (loose/packed,
+//! reftable, or an injected store) sees the same notes.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 
+use time::{OffsetDateTime, UtcOffset};
+
 use crate::commit::{assemble_identity, identity_now_from_epoch};
 use crate::config::ConfigSet;
-use crate::diff::zero_oid;
 use crate::error::{Error, Result};
-use crate::ident_resolve::IdentityEnv;
+use crate::ident::parse_signature_times;
+use crate::ident_resolve::{IdentRole, IdentityEnv};
 use crate::merge_base::merge_bases_first_vs_rest;
 use crate::objects::{
     parse_commit, parse_tree, serialize_commit, serialize_tree, tree_entry_cmp, CommitData,
     ObjectId, ObjectKind, TreeEntry,
 };
-use crate::refs::{append_reflog, resolve_ref, should_autocreate_reflog, write_ref};
+use crate::refs::should_autocreate_reflog_with_config;
+use crate::refs::store::{Expected, RawRef, ReflogUpdate};
+use crate::refs::store_write_value_on_store;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
 use merge3::{Merge3, StandardMarkers};
 
 /// Per-worktree subdirectory holding the conflicted note blobs during a notes merge.
-pub const NOTES_MERGE_WORKTREE: &str = "NOTES_MERGE_WORKTREE";
+const NOTES_MERGE_WORKTREE: &str = "NOTES_MERGE_WORKTREE";
 
 /// One leaf entry in a notes fanout tree (blob pointing at a note object).
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NotesTreeEntry {
     /// Git tree entry mode for the note blob (typically `100644`).
     pub mode: u32,
@@ -69,15 +73,6 @@ pub fn note_object_name(path: &[u8]) -> Option<String> {
         .map(|name| name.to_ascii_lowercase())
 }
 
-/// Format a notes tree entry path for display (compact hex when the path is a valid object name).
-pub fn display_note_path(entry: &NotesTreeEntry) -> Cow<'_, str> {
-    if let Some(name) = note_object_name(&entry.path) {
-        Cow::Owned(name)
-    } else {
-        String::from_utf8_lossy(&entry.path)
-    }
-}
-
 fn collect_notes_tree_entries(
     repo: &Repository,
     tree_oid: &ObjectId,
@@ -86,7 +81,11 @@ fn collect_notes_tree_entries(
 ) -> Result<()> {
     let tree_obj = repo.odb().read(tree_oid)?;
     if tree_obj.kind != ObjectKind::Tree {
-        return Err(Error::Message("notes commit has invalid tree".into()));
+        return Err(Error::NotesObjectKind {
+            oid: *tree_oid,
+            expected: ObjectKind::Tree,
+            found: tree_obj.kind,
+        });
     }
 
     for entry in parse_tree(&tree_obj.data)? {
@@ -110,37 +109,45 @@ fn collect_notes_tree_entries(
     Ok(())
 }
 
-/// Read the notes tree entries from the notes ref.  Returns an empty vec if
-/// the ref doesn't exist yet.
+/// Current target of `notes_ref` in the repository's ref store, or `None` when the ref is absent.
+fn notes_ref_tip(repo: &Repository, notes_ref: &str) -> Result<Option<ObjectId>> {
+    match repo.refs().read_raw(notes_ref)? {
+        None => Ok(None),
+        Some(RawRef::Direct(oid)) => Ok(Some(oid)),
+        Some(RawRef::Symbolic(_)) => repo.refs().resolve(notes_ref).map(Some),
+    }
+}
+
+/// Read the notes tree entries from the notes ref.
+///
+/// `notes_ref` is looked up in the repository's ref store; when no such ref exists it is
+/// resolved as a revision instead (so a notes commit or tree id works too). The target may be a
+/// notes commit or a bare tree.
+///
+/// # Errors
+///
+/// - [`Error::NotesRefNotCommit`] when the target is neither a commit nor a tree.
+/// - [`Error::NotesObjectKind`] when a subtree entry is not a tree.
+/// - Ref store and object read failures.
+///
+/// Returns an empty vec when neither a ref nor a revision named `notes_ref` exists.
 pub fn read_notes_tree(repo: &Repository, notes_ref: &str) -> Result<Vec<NotesTreeEntry>> {
-    let tree_oid = match resolve_ref(repo.git_dir(), notes_ref) {
-        Ok(oid) => {
-            let obj = repo.odb().read(&oid)?;
-            match obj.kind {
-                ObjectKind::Commit => parse_commit(&obj.data)?.tree,
-                ObjectKind::Tree => oid,
-                _ => {
-                    return Err(Error::Message(format!(
-                        "{notes_ref} does not point to a commit or tree"
-                    )))
-                }
-            }
-        }
-        Err(_) => {
-            let oid = match resolve_revision(repo, notes_ref) {
-                Ok(o) => o,
-                Err(_) => return Ok(Vec::new()),
-            };
-            let obj = repo.odb().read(&oid)?;
-            match obj.kind {
-                ObjectKind::Commit => parse_commit(&obj.data)?.tree,
-                ObjectKind::Tree => oid,
-                _ => {
-                    return Err(Error::Message(format!(
-                        "{notes_ref} does not point to a commit or tree"
-                    )))
-                }
-            }
+    let tip = match notes_ref_tip(repo, notes_ref)? {
+        Some(oid) => oid,
+        None => match resolve_revision(repo, notes_ref) {
+            Ok(oid) => oid,
+            Err(_) => return Ok(Vec::new()),
+        },
+    };
+    let obj = repo.odb().read(&tip)?;
+    let tree_oid = match obj.kind {
+        ObjectKind::Commit => parse_commit(&obj.data)?.tree,
+        ObjectKind::Tree => tip,
+        found => {
+            return Err(Error::NotesRefNotCommit {
+                notes_ref: notes_ref.to_owned(),
+                found,
+            })
         }
     };
     let mut entries = Vec::new();
@@ -226,13 +233,8 @@ fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<
     repo.odb().write(ObjectKind::Tree, &tree_data)
 }
 
-/// Write a new notes tree and commit, updating the notes ref.
-pub fn write_notes_commit(
-    repo: &Repository,
-    notes_ref: &str,
-    entries: &[NotesTreeEntry],
-    message: &str,
-) -> Result<()> {
+/// Write `entries` as a notes tree, re-laying out note paths with the fanout their count needs.
+fn write_notes_tree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<ObjectId> {
     let fanout = notes_fanout(entries);
     let rewritten_entries: Vec<_> = entries
         .iter()
@@ -244,64 +246,136 @@ pub fn write_notes_commit(
             oid: entry.oid,
         })
         .collect();
-    let tree_oid = write_notes_subtree(repo, &rewritten_entries)?;
+    write_notes_subtree(repo, &rewritten_entries)
+}
 
-    // Get existing notes commit as parent (if any)
-    let parent = resolve_ref(repo.git_dir(), notes_ref).ok();
+/// Identity lines and message for one notes commit.
+struct NotesCommit<'a> {
+    message: &'a str,
+    /// Full author line (`Name <email> unix tz`).
+    author: &'a str,
+    /// Full committer line (`Name <email> unix tz`).
+    committer: &'a str,
+}
 
-    // Build committer/author ident
-    let config = repo.config()?;
-    let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
-    let author = build_ident_role(repo.environment(), config.as_ref(), "AUTHOR", now);
-    let committer = build_ident_role(repo.environment(), config.as_ref(), "COMMITTER", now);
-
-    let commit = CommitData {
-        tree: tree_oid,
-        parents: parent.into_iter().collect(),
-        author,
-        committer: committer.clone(),
+/// Write the notes tree for `entries` and a commit on top of `parents`; returns the commit id.
+fn write_notes_commit_object(
+    repo: &Repository,
+    entries: &[NotesTreeEntry],
+    commit: &NotesCommit<'_>,
+    parents: Vec<ObjectId>,
+) -> Result<ObjectId> {
+    let tree = write_notes_tree(repo, entries)?;
+    let message = if commit.message.ends_with('\n') {
+        commit.message.to_owned()
+    } else {
+        format!("{}\n", commit.message)
+    };
+    let data = CommitData {
+        tree,
+        parents,
+        author: commit.author.to_owned(),
+        committer: commit.committer.to_owned(),
         author_raw: Vec::new(),
         committer_raw: Vec::new(),
         encoding: None,
-        message: if message.ends_with('\n') {
-            message.to_owned()
-        } else {
-            format!("{message}\n")
-        },
+        message,
         raw_message: None,
         extra_headers: Vec::new(),
     };
+    repo.odb()
+        .write(ObjectKind::Commit, &serialize_commit(&data))
+}
 
-    let commit_data = serialize_commit(&commit);
-    let commit_oid = repo.odb().write(ObjectKind::Commit, &commit_data)?;
+/// Timestamp of a full identity line, for the reflog entry written next to it.
+fn signature_time(ident: &str) -> OffsetDateTime {
+    parse_signature_times(ident)
+        .and_then(|times| {
+            let offset =
+                UtcOffset::from_whole_seconds(i32::try_from(times.tz_offset_secs).ok()?).ok()?;
+            let at = OffsetDateTime::from_unix_timestamp(times.unix_seconds).ok()?;
+            Some(at.to_offset(offset))
+        })
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
 
-    let old_oid = resolve_ref(repo.git_dir(), notes_ref).unwrap_or_else(|_| zero_oid());
-    write_ref(repo.git_dir(), notes_ref, &commit_oid)?;
-    if should_autocreate_reflog(repo.git_dir(), notes_ref) {
-        let msg = message.trim_end_matches('\n');
-        let reflog_msg = format!("notes: {msg}");
-        let _ = append_reflog(
-            repo.git_dir(),
-            notes_ref,
-            &old_oid,
-            &commit_oid,
-            &committer,
-            &reflog_msg,
-            false,
-        );
-    }
+/// Move `notes_ref` from `old` (`None`: the ref must not exist yet) to `new`, logging the update
+/// in the same ref transaction when the ref has or may auto-create a reflog.
+fn update_notes_ref(
+    repo: &Repository,
+    notes_ref: &str,
+    old: Option<ObjectId>,
+    new: ObjectId,
+    commit: &NotesCommit<'_>,
+) -> Result<()> {
+    let config = repo.config()?;
+    let log = should_autocreate_reflog_with_config(config.as_ref(), repo.git_dir(), notes_ref)
+        || repo.refs().reflog_exists(notes_ref)?;
+    let reflog = log.then(|| ReflogUpdate {
+        identity: commit.committer.to_owned(),
+        message: format!("notes: {}", commit.message.trim_end_matches('\n')),
+        time: signature_time(commit.committer),
+        old_oid: None,
+        new_oid: None,
+    });
+    store_write_value_on_store(
+        repo.refs(),
+        repo.git_dir(),
+        notes_ref,
+        Some(RawRef::Direct(new)),
+        old.map_or(Expected::Missing, Expected::Oid),
+        reflog,
+    )
+}
+
+/// Commit `entries` on top of the current `notes_ref` tip and advance the ref.
+fn commit_notes_tree(
+    repo: &Repository,
+    notes_ref: &str,
+    entries: &[NotesTreeEntry],
+    commit: &NotesCommit<'_>,
+) -> Result<ObjectId> {
+    let parent = notes_ref_tip(repo, notes_ref)?;
+    let oid = write_notes_commit_object(repo, entries, commit, parent.into_iter().collect())?;
+    update_notes_ref(repo, notes_ref, parent, oid, commit)?;
+    Ok(oid)
+}
+
+/// Write a new notes tree and commit, updating the notes ref.
+///
+/// Author and committer come from `GIT_{AUTHOR,COMMITTER}_{NAME,EMAIL,DATE}` and `user.*`
+/// config, timestamped with the repository's wall clock. Use
+/// [`RepositoryNotes`](crate::repo_handles::RepositoryNotes) to pass explicit identities.
+///
+/// # Errors
+///
+/// - Ref store errors, including a compare-and-swap failure when `notes_ref` moved since it
+///   was read.
+/// - Object write and config load failures.
+pub fn write_notes_commit(
+    repo: &Repository,
+    notes_ref: &str,
+    entries: &[NotesTreeEntry],
+    message: &str,
+) -> Result<()> {
+    let (author, committer) = wall_clock_notes_idents(repo)?;
+    commit_notes_tree(
+        repo,
+        notes_ref,
+        entries,
+        &NotesCommit {
+            message,
+            author: &author,
+            committer: &committer,
+        },
+    )?;
     Ok(())
 }
 
 /// Write a notes tree commit using explicit author and committer identity lines.
 ///
-/// Identity strings must already include timestamp and timezone
-/// (`Name <email> unix tz`), matching [`crate::porcelain::stash::StashCreateOptions::identity`].
-///
-/// # Errors
-///
-/// Propagates object write, ref update, and reflog failures.
-pub fn write_notes_commit_idents(
+/// Identity strings must already include timestamp and timezone (`Name <email> unix tz`).
+pub(crate) fn write_notes_commit_idents(
     repo: &Repository,
     notes_ref: &str,
     entries: &[NotesTreeEntry],
@@ -309,56 +383,16 @@ pub fn write_notes_commit_idents(
     author: &str,
     committer: &str,
 ) -> Result<()> {
-    let fanout = notes_fanout(entries);
-    let rewritten_entries: Vec<_> = entries
-        .iter()
-        .map(|entry| NotesTreeEntry {
-            mode: entry.mode,
-            path: note_object_name(&entry.path)
-                .map(|name| path_with_fanout(&name, fanout))
-                .unwrap_or_else(|| entry.path.clone()),
-            oid: entry.oid,
-        })
-        .collect();
-    let tree_oid = write_notes_subtree(repo, &rewritten_entries)?;
-
-    let parent = resolve_ref(repo.git_dir(), notes_ref).ok();
-
-    let commit = CommitData {
-        tree: tree_oid,
-        parents: parent.into_iter().collect(),
-        author: author.to_owned(),
-        committer: committer.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: if message.ends_with('\n') {
-            message.to_owned()
-        } else {
-            format!("{message}\n")
-        },
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
-
-    let commit_data = serialize_commit(&commit);
-    let commit_oid = repo.odb().write(ObjectKind::Commit, &commit_data)?;
-
-    let old_oid = resolve_ref(repo.git_dir(), notes_ref).unwrap_or_else(|_| zero_oid());
-    write_ref(repo.git_dir(), notes_ref, &commit_oid)?;
-    if should_autocreate_reflog(repo.git_dir(), notes_ref) {
-        let msg = message.trim_end_matches('\n');
-        let reflog_msg = format!("notes: {msg}");
-        let _ = append_reflog(
-            repo.git_dir(),
-            notes_ref,
-            &old_oid,
-            &commit_oid,
+    commit_notes_tree(
+        repo,
+        notes_ref,
+        entries,
+        &NotesCommit {
+            message,
+            author,
             committer,
-            &reflog_msg,
-            false,
-        );
-    }
+        },
+    )?;
     Ok(())
 }
 
@@ -370,53 +404,52 @@ pub fn remove_note_entry(entries: &mut Vec<NotesTreeEntry>, object_hex: &str) ->
     entries.len() < before
 }
 
-/// Build a Git ident string from config.
-/// Build an identity line for the notes commit, honoring the
-/// `GIT_{AUTHOR,COMMITTER}_{NAME,EMAIL,DATE}` environment variables exactly like
-/// `git notes` (and `git commit-tree`). `prefix` is either "AUTHOR" or "COMMITTER".
-fn build_ident_role<E: IdentityEnv>(
-    env: &E,
-    config: &ConfigSet,
-    prefix: &str,
-    now: time::OffsetDateTime,
-) -> String {
-    let name_key = format!("GIT_{prefix}_NAME");
-    let email_key = format!("GIT_{prefix}_EMAIL");
-    let date_key = format!("GIT_{prefix}_DATE");
-
-    let name = env
-        .var(&name_key)
-        .filter(|n| !n.trim().is_empty())
-        .or_else(|| {
-            if prefix == "COMMITTER" {
-                env.var("GIT_AUTHOR_NAME").filter(|n| !n.trim().is_empty())
-            } else {
-                None
-            }
-        })
-        .or_else(|| config.get("user.name"))
-        .unwrap_or_else(|| "Unknown".to_owned());
-
-    let email = env
-        .var(&email_key)
-        .filter(|e| !e.trim().is_empty())
-        .or_else(|| {
-            if prefix == "COMMITTER" {
-                env.var("GIT_AUTHOR_EMAIL").filter(|e| !e.trim().is_empty())
-            } else {
-                None
-            }
-        })
-        .or_else(|| config.get("user.email"))
-        .unwrap_or_default();
-
-    let date_override = env.var(&date_key).filter(|d| !d.trim().is_empty());
-    assemble_identity(&name, &email, date_override.as_deref(), now)
+/// Author and committer lines for notes commits written without explicit identities.
+fn wall_clock_notes_idents(repo: &Repository) -> Result<(String, String)> {
+    let config = repo.config()?;
+    let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
+    Ok((
+        notes_ident(repo.environment(), config.as_ref(), IdentRole::Author, now),
+        notes_ident(
+            repo.environment(),
+            config.as_ref(),
+            IdentRole::Committer,
+            now,
+        ),
+    ))
 }
 
-/// Per-worktree git directory for `NOTES_MERGE_*` (main: `.git/`, linked: `.git/worktrees/<id>/`).
-pub fn notes_merge_git_dir(repo: &Repository) -> std::path::PathBuf {
-    repo.git_dir().to_path_buf()
+/// Identity line for a notes commit from `GIT_<ROLE>_{NAME,EMAIL,DATE}` (the committer also
+/// falls back to the author variables), then `user.name` / `user.email`.
+fn notes_ident<E: IdentityEnv>(
+    env: &E,
+    config: &ConfigSet,
+    role: IdentRole,
+    now: OffsetDateTime,
+) -> String {
+    let (name_key, email_key, date_key) = match role {
+        IdentRole::Author => ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE"),
+        IdentRole::Committer => (
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+            "GIT_COMMITTER_DATE",
+        ),
+    };
+    let non_blank = |key: &str| env.var(key).filter(|v| !v.trim().is_empty());
+    let author_fallback = |key: &str| match role {
+        IdentRole::Committer => non_blank(key),
+        IdentRole::Author => None,
+    };
+
+    let name = non_blank(name_key)
+        .or_else(|| author_fallback("GIT_AUTHOR_NAME"))
+        .or_else(|| config.get("user.name"))
+        .unwrap_or_else(|| "Unknown".to_owned());
+    let email = non_blank(email_key)
+        .or_else(|| author_fallback("GIT_AUTHOR_EMAIL"))
+        .or_else(|| config.get("user.email"))
+        .unwrap_or_default();
+    assemble_identity(&name, &email, non_blank(date_key).as_deref(), now)
 }
 
 /// How to combine conflicting note blobs during a notes merge.
@@ -447,6 +480,19 @@ struct NotesMergePair {
     base_blob: Option<ObjectId>,
     remote_blob: Option<ObjectId>,
     local: LocalNoteState,
+}
+
+impl NotesMergePair {
+    /// The local side's note relative to the merge base: `None` when local left the note as it
+    /// was at the base, `Some(None)` when local deleted it, `Some(Some(blob))` when local set it.
+    fn local_change(&self) -> Option<Option<ObjectId>> {
+        match self.local {
+            LocalNoteState::Unset => None,
+            LocalNoteState::Present(blob) if Some(blob) == self.base_blob => None,
+            LocalNoteState::Present(blob) => Some(Some(blob)),
+            LocalNoteState::Deleted => Some(None),
+        }
+    }
 }
 
 /// Full ref name for a Git notes namespace (`refs/notes/…`).
@@ -481,7 +527,8 @@ impl NotesRef {
         Ok(Self(full.to_owned()))
     }
 
-    /// Parse a short or full notes ref the same way Git's `--ref` flag does.
+    /// Parse a short or full notes ref the same way Git's `--ref` flag does: `name` and
+    /// `notes/name` both become `refs/notes/name`; a name already under `refs/notes/` is kept.
     #[must_use]
     pub fn parse(short_or_full: &str) -> Self {
         Self(expand_notes_ref(short_or_full))
@@ -523,8 +570,8 @@ pub fn resolve_configured_notes_ref<E: IdentityEnv>(
     Ok(NotesRef::commits())
 }
 
-/// Match Git's `expand_notes_ref` (`notes.c`): only `--ref` uses this; env/config refs are verbatim.
-pub fn expand_notes_ref(short_or_full: &str) -> String {
+/// Expansion behind [`NotesRef::parse`]; configured refs are used verbatim instead.
+fn expand_notes_ref(short_or_full: &str) -> String {
     if short_or_full.starts_with("refs/notes/") {
         short_or_full.to_owned()
     } else if short_or_full.starts_with("notes/") {
@@ -535,12 +582,12 @@ pub fn expand_notes_ref(short_or_full: &str) -> String {
 }
 
 /// Path to the per-merge worktree directory under the repository git dir.
-pub fn notes_merge_worktree_path(repo: &Repository) -> std::path::PathBuf {
-    notes_merge_git_dir(repo).join(NOTES_MERGE_WORKTREE)
+fn notes_merge_worktree_path(repo: &Repository) -> std::path::PathBuf {
+    repo.git_dir().join(NOTES_MERGE_WORKTREE)
 }
 
-/// True when `NOTES_MERGE_WORKTREE` exists and is not empty (matches Git `is_empty_dir`).
-pub fn notes_merge_worktree_nonempty(worktree: &std::path::Path) -> bool {
+/// True when `NOTES_MERGE_WORKTREE` exists and holds at least one entry.
+fn notes_merge_worktree_nonempty(worktree: &std::path::Path) -> bool {
     if !worktree.is_dir() {
         return false;
     }
@@ -548,18 +595,6 @@ pub fn notes_merge_worktree_nonempty(worktree: &std::path::Path) -> bool {
         return false;
     };
     entries.flatten().next().is_some()
-}
-
-/// Parse a notes merge strategy keyword (`manual`, `ours`, `theirs`, `union`, `cat_sort_uniq`).
-pub fn parse_notes_merge_strategy_value(s: &str) -> Option<NotesMergeStrategy> {
-    match s {
-        "manual" => Some(NotesMergeStrategy::Manual),
-        "ours" => Some(NotesMergeStrategy::Ours),
-        "theirs" => Some(NotesMergeStrategy::Theirs),
-        "union" => Some(NotesMergeStrategy::Union),
-        "cat_sort_uniq" => Some(NotesMergeStrategy::CatSortUniq),
-        _ => None,
-    }
 }
 
 /// Map annotated object → note blob OID for one notes tree (any fanout layout).
@@ -574,9 +609,7 @@ fn notes_tree_blob_by_object(
         let Some(hex) = note_object_name(&entry.path) else {
             continue;
         };
-        let obj = ObjectId::from_hex(&hex)
-            .map_err(|e| Error::Message(format!("invalid note object id in tree: {e}")))?;
-        map.insert(obj, entry.oid);
+        map.insert(ObjectId::from_hex(&hex)?, entry.oid);
     }
     Ok(map)
 }
@@ -657,16 +690,25 @@ fn build_merge_pairs(
     Ok(v)
 }
 
-fn read_blob_bytes(repo: &Repository, oid: &ObjectId) -> Result<Vec<u8>> {
+/// Bytes of the note blob `oid`.
+///
+/// # Errors
+///
+/// [`Error::NotesObjectKind`] when `oid` is not a blob, or object read failures.
+pub(crate) fn read_blob_bytes(repo: &Repository, oid: &ObjectId) -> Result<Vec<u8>> {
     let obj = repo.odb().read(oid)?;
     if obj.kind != ObjectKind::Blob {
-        return Err(Error::Message("expected blob for note".into()));
+        return Err(Error::NotesObjectKind {
+            oid: *oid,
+            expected: ObjectKind::Blob,
+            found: obj.kind,
+        });
     }
     Ok(obj.data)
 }
 
-/// Matches Git's `combine_notes_concatenate`: join two note blobs with a blank line between them.
-pub fn combine_notes_concatenate(
+/// Join two note blobs with a blank line between them (Git's `concatenate` notes combiner).
+fn combine_notes_concatenate(
     repo: &Repository,
     cur: Option<&ObjectId>,
     new_oid: Option<&ObjectId>,
@@ -727,8 +769,8 @@ fn note_blob_lines(data: &[u8]) -> Vec<String> {
     s.split('\n').map(|l| l.to_owned()).collect()
 }
 
-/// Matches Git's `combine_notes_cat_sort_uniq`: all lines from both blobs, de-duplicated and sorted.
-pub fn combine_notes_cat_sort_uniq(
+/// All lines from both blobs, de-duplicated and sorted (Git's `cat_sort_uniq` notes combiner).
+fn combine_notes_cat_sort_uniq(
     repo: &Repository,
     cur: Option<&ObjectId>,
     new_oid: Option<&ObjectId>,
@@ -787,38 +829,23 @@ fn merge_note_blobs_conflict_markers(
     Ok(merged.into_bytes())
 }
 
-fn write_note_conflict_file(
-    path: &std::path::Path,
-    repo: &Repository,
-    pair: &NotesMergePair,
-    local_ref: &str,
-    remote_ref: &str,
-) -> Result<()> {
-    let data = match (&pair.local, &pair.remote_blob) {
-        (LocalNoteState::Deleted, Some(r)) => read_blob_bytes(repo, r)?,
-        (LocalNoteState::Present(l), None) => read_blob_bytes(repo, l)?,
-        (LocalNoteState::Present(l), Some(r)) => merge_note_blobs_conflict_markers(
-            repo,
-            pair.base_blob.as_ref(),
-            l,
-            r,
-            local_ref,
-            remote_ref,
-        )?,
-        _ => {
-            return Err(Error::Message(
-                "unexpected notes merge conflict shape".into(),
-            ))
-        }
-    };
-    fs::write(path, data)?;
-    Ok(())
+/// Note blobs on each side of one conflicting note in a notes merge (`None`: no note).
+struct NoteConflict {
+    base: Option<ObjectId>,
+    local: Option<ObjectId>,
+    remote: Option<ObjectId>,
 }
 
+fn remove_entry(entries: &mut Vec<NotesTreeEntry>, obj_hex: &str) {
+    entries.retain(|e| note_object_name(&e.path).as_deref() != Some(obj_hex));
+}
+
+/// Resolve one note changed on both sides; returns `true` when it is left as a conflict file.
 #[expect(clippy::too_many_arguments)]
 fn merge_one_note_change(
     repo: &Repository,
-    pair: &NotesMergePair,
+    obj: &ObjectId,
+    sides: &NoteConflict,
     strategy: NotesMergeStrategy,
     local_ref: &str,
     remote_ref: &str,
@@ -827,94 +854,67 @@ fn merge_one_note_change(
     entries: &mut Vec<NotesTreeEntry>,
     has_worktree: &mut bool,
 ) -> Result<bool> {
-    let obj_hex = pair.obj.to_hex();
-    let path = worktree.join(&obj_hex);
-    match strategy {
+    let obj_hex = obj.to_hex();
+    let combine = match strategy {
+        NotesMergeStrategy::Ours => return Ok(false),
+        NotesMergeStrategy::Theirs => {
+            match sides.remote {
+                Some(r) => upsert_note_entry(entries, &obj_hex, r),
+                None => remove_entry(entries, &obj_hex),
+            }
+            return Ok(false);
+        }
+        NotesMergeStrategy::Union => combine_notes_concatenate,
+        NotesMergeStrategy::CatSortUniq => combine_notes_cat_sort_uniq,
         NotesMergeStrategy::Manual => {
-            if !*has_worktree && notes_merge_worktree_nonempty(worktree) {
-                return Err(Error::Message(
-                    "You have not concluded your previous notes merge (.git/NOTES_MERGE_* exists).\n\
-Please, use 'git notes merge --commit' or 'git notes merge --abort' to commit/abort the \
-previous merge before you start a new notes merge."
-                        .into(),
-                ));
+            let data = match (&sides.local, &sides.remote) {
+                (None, None) => {
+                    remove_entry(entries, &obj_hex);
+                    return Ok(false);
+                }
+                (None, Some(r)) => read_blob_bytes(repo, r)?,
+                (Some(l), None) => read_blob_bytes(repo, l)?,
+                (Some(l), Some(r)) => merge_note_blobs_conflict_markers(
+                    repo,
+                    sides.base.as_ref(),
+                    l,
+                    r,
+                    local_ref,
+                    remote_ref,
+                )?,
+            };
+            if !*has_worktree {
+                if notes_merge_worktree_nonempty(worktree) {
+                    return Err(Error::NotesMergeInProgress {
+                        path: worktree.to_path_buf(),
+                    });
+                }
+                fs::create_dir_all(worktree)?;
+                *has_worktree = true;
             }
             if !commit_msg.contains("Conflicts:") {
                 commit_msg.push_str("\n\nConflicts:\n");
             }
             commit_msg.push_str(&format!("\t{obj_hex}\n"));
-            if !*has_worktree {
-                let test = worktree.join(".test");
-                fs::create_dir_all(worktree)?;
-                fs::write(&test, b"")?;
-                let _ = fs::remove_file(test);
-                *has_worktree = true;
-            }
-            write_note_conflict_file(&path, repo, pair, local_ref, remote_ref)?;
-            entries.retain(|e| note_object_name(&e.path).as_deref() != Some(obj_hex.as_str()));
-            Ok(true)
+            fs::write(worktree.join(&obj_hex), data)?;
+            remove_entry(entries, &obj_hex);
+            return Ok(true);
         }
-        NotesMergeStrategy::Ours => Ok(false),
-        NotesMergeStrategy::Theirs => {
-            if let Some(r) = pair.remote_blob {
-                upsert_note_entry(entries, &obj_hex, r);
-            } else {
-                entries.retain(|e| note_object_name(&e.path).as_deref() != Some(obj_hex.as_str()));
-            }
-            Ok(false)
-        }
-        NotesMergeStrategy::Union => {
-            match (&pair.local, &pair.remote_blob) {
-                (LocalNoteState::Deleted, None) => {
-                    entries
-                        .retain(|e| note_object_name(&e.path).as_deref() != Some(obj_hex.as_str()));
-                }
-                (LocalNoteState::Deleted, Some(r)) => {
-                    let out = combine_notes_concatenate(repo, None, Some(r))?;
-                    upsert_note_entry(entries, &obj_hex, out);
-                }
-                (LocalNoteState::Present(_), None) => {}
-                (LocalNoteState::Present(l), Some(r)) => {
-                    let out = combine_notes_concatenate(repo, Some(l), Some(r))?;
-                    upsert_note_entry(entries, &obj_hex, out);
-                }
-                (LocalNoteState::Unset, _) => {
-                    return Err(Error::Message(
-                        "unexpected notes merge pair: local unset in union strategy".into(),
-                    ));
-                }
-            }
-            Ok(false)
-        }
-        NotesMergeStrategy::CatSortUniq => {
-            match (&pair.local, &pair.remote_blob) {
-                (LocalNoteState::Deleted, None) => {
-                    entries
-                        .retain(|e| note_object_name(&e.path).as_deref() != Some(obj_hex.as_str()));
-                }
-                (LocalNoteState::Deleted, Some(r)) => {
-                    let out = combine_notes_cat_sort_uniq(repo, None, Some(r))?;
-                    upsert_note_entry(entries, &obj_hex, out);
-                }
-                (LocalNoteState::Present(_), None) => {}
-                (LocalNoteState::Present(l), Some(r)) => {
-                    let out = combine_notes_cat_sort_uniq(repo, Some(l), Some(r))?;
-                    upsert_note_entry(entries, &obj_hex, out);
-                }
-                (LocalNoteState::Unset, _) => {
-                    return Err(Error::Message(
-                        "unexpected notes merge pair: local unset in cat_sort_uniq strategy".into(),
-                    ));
-                }
-            }
-            Ok(false)
+    };
+    match (&sides.local, &sides.remote) {
+        (None, None) => remove_entry(entries, &obj_hex),
+        (Some(_), None) => {}
+        (local, Some(r)) => {
+            let out = combine(repo, local.as_ref(), Some(r))?;
+            upsert_note_entry(entries, &obj_hex, out);
         }
     }
+    Ok(false)
 }
 
 /// Replace or insert the note entry for `hex` in a flat notes entry list.
 pub fn upsert_note_entry(entries: &mut Vec<NotesTreeEntry>, hex: &str, blob: ObjectId) {
-    entries.retain(|e| note_object_name(&e.path).as_deref() != Some(hex));
+    remove_entry(entries, hex);
     entries.push(NotesTreeEntry {
         mode: 0o100644,
         path: hex.as_bytes().to_vec(),
@@ -940,18 +940,10 @@ fn same_change_local_remote(p: &NotesMergePair) -> bool {
     }
 }
 
-fn no_local_change(local: &LocalNoteState, base: Option<ObjectId>) -> bool {
-    match local {
-        LocalNoteState::Unset => true,
-        LocalNoteState::Present(l) => Some(*l) == base,
-        LocalNoteState::Deleted => false,
-    }
-}
-
 fn adopt_remote_note(entries: &mut Vec<NotesTreeEntry>, obj_hex: &str, remote: Option<ObjectId>) {
     match remote {
         Some(oid) => upsert_note_entry(entries, obj_hex, oid),
-        None => entries.retain(|e| note_object_name(&e.path).as_deref() != Some(obj_hex)),
+        None => remove_entry(entries, obj_hex),
     }
 }
 
@@ -975,13 +967,19 @@ fn merge_changes_into_entries(
         if same_change_local_remote(p) {
             continue;
         }
-        if no_local_change(&p.local, p.base_blob) {
+        let Some(local) = p.local_change() else {
             adopt_remote_note(entries, &p.obj.to_hex(), p.remote_blob);
             continue;
-        }
+        };
+        let sides = NoteConflict {
+            base: p.base_blob,
+            local,
+            remote: p.remote_blob,
+        };
         if merge_one_note_change(
             repo,
-            p,
+            &p.obj,
+            &sides,
             strategy,
             local_ref,
             remote_ref,
@@ -999,28 +997,32 @@ fn merge_changes_into_entries(
 fn resolve_commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
     let obj = repo.odb().read(commit_oid)?;
     if obj.kind != ObjectKind::Commit {
-        return Err(Error::Message("expected commit".into()));
+        return Err(Error::NotesObjectKind {
+            oid: *commit_oid,
+            expected: ObjectKind::Commit,
+            found: obj.kind,
+        });
     }
     Ok(parse_commit(&obj.data)?.tree)
 }
 
 fn resolve_notes_commit_optional(repo: &Repository, notes_ref: &str) -> Result<Option<ObjectId>> {
-    let oid = match resolve_ref(repo.git_dir(), notes_ref) {
-        Ok(o) => o,
-        Err(_) => return Ok(None),
+    let Some(oid) = notes_ref_tip(repo, notes_ref)? else {
+        return Ok(None);
     };
-    let obj = repo.odb().read(&oid)?;
-    if obj.kind != ObjectKind::Commit {
-        return Err(Error::Message(format!(
-            "{notes_ref} does not point to a commit"
-        )));
+    let kind = repo.odb().read(&oid)?.kind;
+    if kind != ObjectKind::Commit {
+        return Err(Error::NotesRefNotCommit {
+            notes_ref: notes_ref.to_owned(),
+            found: kind,
+        });
     }
     Ok(Some(oid))
 }
 
-/// Write a notes merge commit. When `update_ref` is false the commit is stored in
-/// the ODB only (manual merge conflicts keep the live notes ref at the local tip).
-pub fn write_notes_commit_with_parents(
+/// Write a notes merge commit with `parents`. When `update_ref` is false the commit is stored
+/// in the ODB only (manual merge conflicts keep the live notes ref at the local tip).
+fn write_notes_commit_with_parents(
     repo: &Repository,
     notes_ref: &str,
     entries: &[NotesTreeEntry],
@@ -1028,66 +1030,29 @@ pub fn write_notes_commit_with_parents(
     parents: &[ObjectId],
     update_ref: bool,
 ) -> Result<ObjectId> {
-    let fanout = notes_fanout(entries);
-    let rewritten_entries: Vec<_> = entries
-        .iter()
-        .map(|entry| NotesTreeEntry {
-            mode: entry.mode,
-            path: note_object_name(&entry.path)
-                .map(|name| path_with_fanout(&name, fanout))
-                .unwrap_or_else(|| entry.path.clone()),
-            oid: entry.oid,
-        })
-        .collect();
-    let tree_oid = write_notes_subtree(repo, &rewritten_entries)?;
-    let config = repo.config()?;
-    let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
-    let author = build_ident_role(repo.environment(), config.as_ref(), "AUTHOR", now);
-    let committer = build_ident_role(repo.environment(), config.as_ref(), "COMMITTER", now);
-    let commit = CommitData {
-        tree: tree_oid,
-        parents: parents.to_vec(),
-        author,
-        committer,
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: if message.ends_with('\n') {
-            message.to_owned()
-        } else {
-            format!("{message}\n")
-        },
-        raw_message: None,
-        extra_headers: Vec::new(),
+    let (author, committer) = wall_clock_notes_idents(repo)?;
+    let commit = NotesCommit {
+        message,
+        author: &author,
+        committer: &committer,
     };
-    let commit_data = serialize_commit(&commit);
-    let commit_oid = repo.odb().write(ObjectKind::Commit, &commit_data)?;
+    let old = notes_ref_tip(repo, notes_ref)?;
+    let oid = write_notes_commit_object(repo, entries, &commit, parents.to_vec())?;
     if update_ref {
-        let old_oid = resolve_ref(repo.git_dir(), notes_ref).unwrap_or_else(|_| zero_oid());
-        write_ref(repo.git_dir(), notes_ref, &commit_oid)?;
-        if should_autocreate_reflog(repo.git_dir(), notes_ref) {
-            let msg = message.trim_end_matches('\n');
-            let reflog_msg = format!("notes: {msg}");
-            let _ = append_reflog(
-                repo.git_dir(),
-                notes_ref,
-                &old_oid,
-                &commit_oid,
-                &commit.committer,
-                &reflog_msg,
-                false,
-            );
-        }
+        update_notes_ref(repo, notes_ref, old, oid, &commit)?;
     }
-    Ok(commit_oid)
+    Ok(oid)
 }
 
 /// Merge two notes refs and return the resulting notes commit, or a conflict commit oid.
 ///
 /// # Errors
 ///
-/// Returns [`Error`] when refs cannot be read, merge bases cannot be computed, or the
-/// chosen strategy fails while combining blobs.
+/// - [`Error::NotesMergeBothEmpty`] when neither ref has a notes commit.
+/// - [`Error::NotesRefNotCommit`] when either ref points at something other than a commit.
+/// - [`Error::NotesMergeInProgress`] when [`NotesMergeStrategy::Manual`] finds conflict files
+///   left by an earlier merge.
+/// - Ref store, object, and merge-base failures, or a failure while combining blobs.
 pub fn notes_merge_inner(
     repo: &Repository,
     local_ref: &str,
@@ -1097,9 +1062,10 @@ pub fn notes_merge_inner(
     let local_commit = resolve_notes_commit_optional(repo, local_ref)?;
     let remote_commit = resolve_notes_commit_optional(repo, remote_ref)?;
     match (local_commit, remote_commit) {
-        (None, None) => Err(Error::Message(format!(
-            "Cannot merge empty notes ref ({remote_ref}) into empty notes ref ({local_ref})"
-        ))),
+        (None, None) => Err(Error::NotesMergeBothEmpty {
+            local: local_ref.to_owned(),
+            remote: remote_ref.to_owned(),
+        }),
         (None, Some(r)) => Ok(Ok(r)),
         (Some(l), None) => Ok(Ok(l)),
         (Some(local_oid), Some(remote_oid)) => {
@@ -1200,16 +1166,14 @@ mod tests {
     }
 
     #[test]
-    fn note_object_name_and_display_path() {
+    fn note_object_name_parses_flat_and_fanout_paths() {
         let full = "0123456789abcdef0123456789abcdef01234567";
         assert_eq!(note_object_name(full.as_bytes()), Some(full.to_owned()));
+        assert_eq!(
+            note_object_name(b"01/23/456789abcdef0123456789abcdef01234567"),
+            Some(full.to_owned())
+        );
         assert!(note_object_name(b"not-a-note").is_none());
-        let entry = NotesTreeEntry {
-            mode: 0o100644,
-            path: full.as_bytes().to_vec(),
-            oid: zero_oid(),
-        };
-        assert_eq!(display_note_path(&entry), full);
     }
 
     #[test]
@@ -1245,15 +1209,11 @@ mod tests {
     }
 
     #[test]
-    fn expand_notes_ref_and_merge_strategy_parse() {
+    fn expand_notes_ref_and_parse() {
         assert_eq!(expand_notes_ref("commits"), "refs/notes/commits");
         assert_eq!(expand_notes_ref("notes/foo"), "refs/notes/foo");
         assert_eq!(expand_notes_ref("refs/notes/bar"), "refs/notes/bar");
-        assert_eq!(
-            parse_notes_merge_strategy_value("cat_sort_uniq"),
-            Some(NotesMergeStrategy::CatSortUniq)
-        );
-        assert!(parse_notes_merge_strategy_value("invalid").is_none());
+        assert_eq!(NotesRef::parse("review").as_str(), "refs/notes/review");
     }
 
     #[test]
@@ -1442,6 +1402,18 @@ mod tests {
         assert!(notes_merge_worktree_nonempty(&notes_merge_worktree_path(
             &repo
         )));
+
+        let err = notes_merge_inner(
+            &repo,
+            "refs/notes/commits",
+            "refs/notes/remote",
+            NotesMergeStrategy::Manual,
+        )
+        .expect_err("earlier conflicts are still unresolved");
+        assert!(matches!(
+            err,
+            Error::NotesMergeInProgress { ref path } if *path == notes_merge_worktree_path(&repo)
+        ));
     }
 
     #[test]
@@ -1474,5 +1446,98 @@ mod tests {
         )
         .expect("merge");
         assert_eq!(result.expect("ok"), local);
+    }
+
+    #[test]
+    fn notes_merge_of_two_empty_refs_is_typed() {
+        let tmp = TempDir::new().unwrap();
+        let repo = open_repo(tmp.path());
+        let err = notes_merge_inner(
+            &repo,
+            "refs/notes/commits",
+            "refs/notes/missing",
+            NotesMergeStrategy::Union,
+        )
+        .expect_err("nothing to merge");
+        assert!(matches!(
+            err,
+            Error::NotesMergeBothEmpty { ref local, ref remote }
+                if local == "refs/notes/commits" && remote == "refs/notes/missing"
+        ));
+    }
+
+    #[test]
+    fn read_notes_tree_rejects_blob_tip() {
+        let tmp = TempDir::new().unwrap();
+        let repo = open_repo(tmp.path());
+        let blob = repo.odb().write(ObjectKind::Blob, b"not notes\n").unwrap();
+        git(
+            tmp.path(),
+            &["update-ref", "refs/notes/blob", &blob.to_hex()],
+        );
+        let err = read_notes_tree(&repo, "refs/notes/blob").expect_err("blob tip");
+        assert!(matches!(
+            err,
+            Error::NotesRefNotCommit { ref notes_ref, found: ObjectKind::Blob }
+                if notes_ref == "refs/notes/blob"
+        ));
+        let err = notes_merge_inner(
+            &repo,
+            "refs/notes/commits",
+            "refs/notes/blob",
+            NotesMergeStrategy::Ours,
+        )
+        .expect_err("blob remote");
+        assert!(matches!(
+            err,
+            Error::NotesRefNotCommit {
+                found: ObjectKind::Blob,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn write_notes_commit_goes_through_injected_ref_store() {
+        let tmp = TempDir::new().unwrap();
+        let repo = open_repo(tmp.path()).with_ref_store(std::sync::Arc::new(
+            crate::refs::store::MemoryRefStore::new(),
+        ));
+        let blob = repo.odb().write(ObjectKind::Blob, b"in memory\n").unwrap();
+        let mut entries = Vec::new();
+        upsert_note_entry(&mut entries, &"ab".repeat(20), blob);
+        write_notes_commit(&repo, "refs/notes/commits", &entries, "first").unwrap();
+        let first = repo.refs().resolve("refs/notes/commits").unwrap();
+        write_notes_commit(&repo, "refs/notes/commits", &[], "second").unwrap();
+        let second = repo.refs().resolve("refs/notes/commits").unwrap();
+
+        let commit = parse_commit(&repo.odb().read(&second).unwrap().data).unwrap();
+        assert_eq!(commit.parents, vec![first]);
+        assert!(read_notes_tree(&repo, "refs/notes/commits")
+            .unwrap()
+            .is_empty());
+        assert!(
+            !tmp.path().join(".git/refs/notes/commits").exists(),
+            "notes ref must live in the injected store, not on disk"
+        );
+    }
+
+    #[test]
+    fn local_change_distinguishes_unchanged_deleted_and_set() {
+        let base = ObjectId::from_hex(&"11".repeat(20)).unwrap();
+        let other = ObjectId::from_hex(&"22".repeat(20)).unwrap();
+        let pair = |local| NotesMergePair {
+            obj: other,
+            base_blob: Some(base),
+            remote_blob: None,
+            local,
+        };
+        assert_eq!(pair(LocalNoteState::Unset).local_change(), None);
+        assert_eq!(pair(LocalNoteState::Present(base)).local_change(), None);
+        assert_eq!(
+            pair(LocalNoteState::Present(other)).local_change(),
+            Some(Some(other))
+        );
+        assert_eq!(pair(LocalNoteState::Deleted).local_change(), Some(None));
     }
 }

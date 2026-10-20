@@ -2,8 +2,8 @@
 
 use crate::error::Result;
 use crate::notes::{
-    note_object_name, read_notes_tree, remove_note_entry, upsert_note_entry,
-    write_notes_commit_idents, NotesRef,
+    note_object_name, read_blob_bytes, read_notes_tree, remove_note_entry, upsert_note_entry,
+    write_notes_commit_idents, NotesRef, NotesTreeEntry,
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
@@ -26,6 +26,37 @@ pub struct NoteListing {
     pub object: ObjectId,
     /// Blob object id holding note bytes.
     pub note_blob: ObjectId,
+}
+
+/// One note with its contents, from [`RepositoryNotes::list_with_bodies`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
+    /// Object the note is attached to.
+    pub object: ObjectId,
+    /// Blob object id holding the note bytes.
+    pub note_blob: ObjectId,
+    /// Note bytes exactly as stored (Git notes are usually UTF-8 text ending in `\n`).
+    pub body: Vec<u8>,
+}
+
+/// What [`RepositoryNotes::add`] did to the annotated object's note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteAddOutcome {
+    /// The object had no note; one was attached.
+    Added,
+    /// The object already had a note and `force` replaced it.
+    Replaced,
+}
+
+/// Note entries of a notes tree whose path names an object (other entries are skipped).
+fn listings(entries: Vec<NotesTreeEntry>) -> impl Iterator<Item = NoteListing> {
+    entries.into_iter().filter_map(|e| {
+        let object = note_object_name(&e.path)?.parse().ok()?;
+        Some(NoteListing {
+            object,
+            note_blob: e.oid,
+        })
+    })
 }
 
 /// Notes read/write for one open repository (default ref: [`NotesRef::commits`]).
@@ -66,23 +97,38 @@ impl<'repo> RepositoryNotes<'repo> {
     /// ```
     pub fn list(&self, notes_ref: &NotesRef) -> Result<Vec<NoteListing>> {
         let entries = read_notes_tree(self.repo, notes_ref.as_str())?;
-        Ok(entries
-            .into_iter()
-            .filter_map(|e| {
-                let object = note_object_name(&e.path)?.parse().ok()?;
-                Some(NoteListing {
-                    object,
-                    note_blob: e.oid,
-                })
-            })
-            .collect())
+        Ok(listings(entries).collect())
+    }
+
+    /// List notes under `notes_ref` together with their contents, sorted by annotated object.
+    ///
+    /// # Errors
+    ///
+    /// - Notes tree read failures (see [`Self::list`]).
+    /// - [`Error::NotesObjectKind`](crate::error::Error::NotesObjectKind) when a note entry is
+    ///   not a blob, and object read failures (a missing note blob is an error, not an empty
+    ///   note).
+    pub fn list_with_bodies(&self, notes_ref: &NotesRef) -> Result<Vec<Note>> {
+        let entries = read_notes_tree(self.repo, notes_ref.as_str())?;
+        let mut notes = Vec::with_capacity(entries.len());
+        for listing in listings(entries) {
+            notes.push(Note {
+                body: read_blob_bytes(self.repo, &listing.note_blob)?,
+                object: listing.object,
+                note_blob: listing.note_blob,
+            });
+        }
+        notes.sort_by_key(|note| note.object);
+        Ok(notes)
     }
 
     /// Read note bytes for `object`, if present.
     ///
     /// # Errors
     ///
-    /// Propagates object read failures.
+    /// Propagates notes tree and object read failures;
+    /// [`Error::NotesObjectKind`](crate::error::Error::NotesObjectKind) when the note entry is
+    /// not a blob.
     pub fn read(&self, notes_ref: &NotesRef, object: &ObjectId) -> Result<Option<Vec<u8>>> {
         let hex = object.to_hex();
         let entries = read_notes_tree(self.repo, notes_ref.as_str())?;
@@ -92,19 +138,24 @@ impl<'repo> RepositoryNotes<'repo> {
         else {
             return Ok(None);
         };
-        let blob = self.repo.odb().read(&entry.oid)?;
-        Ok(Some(blob.data))
+        read_blob_bytes(self.repo, &entry.oid).map(Some)
     }
 
-    /// Add or replace the note on `object`.
+    /// Add or replace the note on `object`; `content` is stored exactly as given.
     ///
     /// When `force` is false and a note already exists, returns
     /// [`Error::NoteAlreadyExists`](crate::error::Error::NoteAlreadyExists).
     ///
+    /// # Returns
+    ///
+    /// Whether the note was newly [`Added`](NoteAddOutcome::Added) or
+    /// [`Replaced`](NoteAddOutcome::Replaced).
+    ///
     /// # Errors
     ///
     /// Propagates notes tree read errors (invalid existing notes ref), blob write,
-    /// and notes commit failures.
+    /// and notes commit failures (including a ref store compare-and-swap failure when the
+    /// notes ref moved concurrently).
     ///
     /// # Examples
     ///
@@ -132,7 +183,7 @@ impl<'repo> RepositoryNotes<'repo> {
         content: &[u8],
         options: &NotesWriteOptions,
         force: bool,
-    ) -> Result<()> {
+    ) -> Result<NoteAddOutcome> {
         let hex = object.to_hex();
         let mut entries = read_notes_tree(self.repo, notes_ref.as_str())?;
         let exists = entries
@@ -150,7 +201,12 @@ impl<'repo> RepositoryNotes<'repo> {
             &options.message,
             options.author.as_deref().unwrap_or(&options.committer),
             &options.committer,
-        )
+        )?;
+        Ok(if exists {
+            NoteAddOutcome::Replaced
+        } else {
+            NoteAddOutcome::Added
+        })
     }
 
     /// Remove the note on `object` when present.

@@ -4,8 +4,12 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::notes::{read_notes_tree, resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::ObjectId;
-use grit_lib::repo::Repository;
-use grit_lib::repo_handles::NotesWriteOptions;
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::progress::NullProgress;
+use grit_lib::refs::ref_storage::RefStorageFormat;
+use grit_lib::refs::store::RefName;
+use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
 use grit_test_support::git;
 
 const IDENT: &str = "Notes Test <notes@grit-scm.com> 1700000000 +0000";
@@ -305,4 +309,212 @@ fn custom_notes_ref() {
         "custom ref note"
     );
     assert_fsck_strict(dir.path());
+}
+
+#[test]
+fn list_with_bodies_matches_git_notes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    let first = seed_commit(dir.path(), "f", "1\n", "first");
+    let second = seed_commit(dir.path(), "f", "2\n", "second");
+    git_cmd(dir.path(), &["notes", "add", "-m", "one", &first.to_hex()]);
+    git_cmd(
+        dir.path(),
+        &["notes", "add", "-m", "two\n\nmore", &second.to_hex()],
+    );
+
+    let repo = open_grit(dir.path());
+    let notes = repo
+        .notes()
+        .list_with_bodies(&NotesRef::commits())
+        .expect("list with bodies");
+
+    let mut expected: Vec<(ObjectId, ObjectId)> = git_cmd(dir.path(), &["notes", "list"])
+        .lines()
+        .map(|line| {
+            let (blob, object) = line.split_once(' ').expect("blob and object");
+            (object.parse().expect("object"), blob.parse().expect("blob"))
+        })
+        .collect();
+    expected.sort();
+    let listed: Vec<(ObjectId, ObjectId)> = notes.iter().map(|n| (n.object, n.note_blob)).collect();
+    assert_eq!(listed, expected, "objects, blobs and order must match git");
+    for note in &notes {
+        assert_eq!(
+            String::from_utf8_lossy(&note.body),
+            git_cmd(dir.path(), &["notes", "show", &note.object.to_hex()]),
+            "note body must match git notes show"
+        );
+    }
+}
+
+#[test]
+fn list_with_bodies_reports_missing_note_blob() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    let commit = seed_commit(dir.path(), "f", "x\n", "init");
+    let missing_blob = "1111111111111111111111111111111111111111";
+
+    let mut mktree = std::process::Command::new("git")
+        .current_dir(dir.path())
+        .args(["mktree", "--missing"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn mktree");
+    {
+        use std::io::Write;
+        let stdin = mktree.stdin.as_mut().expect("stdin");
+        writeln!(stdin, "100644 blob {missing_blob}\t{}", commit.to_hex()).expect("tree line");
+    }
+    let tree =
+        String::from_utf8(mktree.wait_with_output().expect("mktree").stdout).expect("utf8 tree id");
+    let notes_commit = git_cmd(dir.path(), &["commit-tree", "-m", "broken", tree.trim()]);
+    git_cmd(
+        dir.path(),
+        &["update-ref", "refs/notes/commits", notes_commit.trim()],
+    );
+
+    let repo = open_grit(dir.path());
+    assert_eq!(
+        repo.notes().list(&NotesRef::commits()).expect("list").len(),
+        1,
+        "listing without bodies only reads the tree"
+    );
+    let err = repo
+        .notes()
+        .list_with_bodies(&NotesRef::commits())
+        .expect_err("a missing note blob must not read as an empty note");
+    assert!(
+        matches!(err, Error::ObjectNotFound(_)),
+        "expected ObjectNotFound for the note blob, got {err:?}"
+    );
+}
+
+#[test]
+fn add_reports_added_then_replaced_and_logs_like_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    let commit = seed_commit(dir.path(), "f", "x\n", "init");
+
+    let repo = open_grit(dir.path());
+    let notes = repo.notes();
+    let first = notes
+        .add(
+            &NotesRef::commits(),
+            &commit,
+            b"first\n",
+            &write_opts("Notes added by grit"),
+            false,
+        )
+        .expect("add");
+    assert_eq!(first, NoteAddOutcome::Added);
+    let second = notes
+        .add(
+            &NotesRef::commits(),
+            &commit,
+            b"second\n",
+            &write_opts("Notes replaced by grit"),
+            true,
+        )
+        .expect("force add");
+    assert_eq!(second, NoteAddOutcome::Replaced);
+
+    assert_fsck_strict(dir.path());
+    assert_eq!(
+        git_cmd(dir.path(), &["notes", "show", &commit.to_hex()]),
+        "second\n"
+    );
+    let reflog = git_cmd(
+        dir.path(),
+        &["reflog", "show", "--format=%gs", "refs/notes/commits"],
+    );
+    assert_eq!(
+        reflog.lines().collect::<Vec<_>>(),
+        vec![
+            "notes: Notes replaced by grit",
+            "notes: Notes added by grit"
+        ],
+        "git must read the notes reflog grit wrote"
+    );
+    let tip = git_cmd(dir.path(), &["rev-parse", "refs/notes/commits"]);
+    let parent = git_cmd(dir.path(), &["rev-parse", "refs/notes/commits^"]);
+    let entries = repo
+        .references()
+        .reflog(&RefName::try_from("refs/notes/commits").expect("ref name"))
+        .expect("grit reflog");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1].new_oid.to_hex(), tip.trim());
+    assert_eq!(entries[1].old_oid.to_hex(), parent.trim());
+    assert!(entries[0].old_oid.is_zero());
+}
+
+#[test]
+fn notes_on_reftable_repository_use_the_ref_store() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Reftable),
+    )
+    .expect("init reftable");
+    let commit = create_commit(
+        &repo,
+        &CommitRequest {
+            message: "init".into(),
+            author: IDENT.into(),
+            committer: IDENT.into(),
+            allow_empty: true,
+            sign_override: None,
+            amend: false,
+            assume_worktree_synced: false,
+            skip_pre_commit_tree_match: false,
+            staged_change_count: None,
+        },
+        &mut NullProgress,
+    )
+    .expect("commit")
+    .oid;
+
+    let notes_ref = NotesRef::parse("review");
+    let notes = repo.notes();
+    assert_eq!(
+        notes
+            .add(&notes_ref, &commit, b"lgtm\n", &write_opts("review"), false)
+            .expect("add on reftable"),
+        NoteAddOutcome::Added
+    );
+    assert_eq!(
+        notes.read(&notes_ref, &commit).expect("read"),
+        Some(b"lgtm\n".to_vec())
+    );
+    let listed = notes.list_with_bodies(&notes_ref).expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].object, commit);
+    assert_eq!(listed[0].body, b"lgtm\n");
+
+    let tip = repo
+        .references()
+        .resolve(&RefName::try_from("refs/notes/review").expect("ref name"))
+        .expect("notes ref in reftable");
+    assert!(
+        !repo.git_dir().join("refs/notes/review").exists(),
+        "a reftable repository must not grow a loose notes ref"
+    );
+    assert_eq!(
+        notes
+            .remove_many(&notes_ref, &[commit], &write_opts("drop"))
+            .expect("remove"),
+        vec![commit]
+    );
+    let after = repo
+        .references()
+        .resolve(&RefName::try_from("refs/notes/review").expect("ref name"))
+        .expect("notes ref after remove");
+    let parents = grit_lib::objects::parse_commit(&repo.odb().read(&after).expect("read").data)
+        .expect("parse")
+        .parents;
+    assert_eq!(parents, vec![tip]);
+    assert!(notes.list(&notes_ref).expect("list").is_empty());
 }
