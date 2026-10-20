@@ -31,7 +31,7 @@ pub struct DailyRunOptions {
     pub smoke: bool,
     pub offline: bool,
     pub only: Option<Vec<String>>,
-    pub area: Option<Area>,
+    pub areas: Option<Vec<Area>>,
     pub output: Option<PathBuf>,
 }
 
@@ -109,15 +109,16 @@ fn baseline_grit_argv(grit_cmd: &BenchArgv, grit: &Path, baseline: &Path) -> Ben
 }
 
 fn select_plans(opts: &DailyRunOptions) -> Vec<DailyHeadlinePlan> {
-    let mut plans = areas::all_headline_plans();
+    let mut plans = areas::all_daily_plans();
     if opts.smoke {
         plans.retain(|p| !p.pending);
-        if opts.only.is_none() {
+        if opts.only.is_none() && opts.areas.is_none() {
             plans.retain(|p| p.spec.headline);
         }
     }
-    if let Some(area) = opts.area {
-        plans.retain(|p| p.spec.area == area);
+    if let Some(areas) = &opts.areas {
+        let set: std::collections::HashSet<_> = areas.iter().copied().collect();
+        plans.retain(|p| set.contains(&p.spec.area));
     }
     if let Some(only) = &opts.only {
         let set: std::collections::HashSet<_> = only.iter().map(String::as_str).collect();
@@ -137,6 +138,7 @@ fn prepare_argv(prepare_bin: &Path, git: &Path, prepare: &DailyPrepare) -> Optio
                 [sub, "--git", &git.display().to_string(), "--bare", &bare],
             ))
         }
+        DailyPrepare::Shell(argv) => Some(argv.clone()),
     }
 }
 
@@ -305,7 +307,7 @@ mod tests {
             smoke: true,
             offline: true,
             only: Some(vec!["status/clean@synth-10k".into()]),
-            area: None,
+            areas: None,
             output: None,
         };
         let plans = select_plans(&opts);
@@ -323,7 +325,7 @@ mod tests {
             smoke: true,
             offline: true,
             only: None,
-            area: Some(Area::Worktree),
+            areas: Some(vec![Area::Worktree]),
             output: None,
         };
         let plans = select_plans(&opts);

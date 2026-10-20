@@ -249,6 +249,16 @@ mod tests {
     }
 
     #[test]
+    fn matrix_ids_are_unique_and_non_headline() {
+        use super::super::matrix_registry::MATRIX_SCENARIOS;
+        let mut seen = std::collections::HashSet::new();
+        for spec in MATRIX_SCENARIOS {
+            assert!(!spec.headline);
+            assert!(seen.insert(spec.id), "duplicate matrix id {}", spec.id);
+        }
+    }
+
+    #[test]
     fn headline_ids_match_roadmap() {
         let expected: [(&str, &str); 17] = [
             ("status/clean@synth-10k", "status-clean"),

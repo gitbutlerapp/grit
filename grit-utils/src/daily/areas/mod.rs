@@ -10,8 +10,8 @@ pub mod worktree;
 
 use super::plan::DailyHeadlinePlan;
 
-/// All local and remote headline plans in stable id order.
-pub fn all_headline_plans() -> Vec<DailyHeadlinePlan> {
+/// All executable daily plans (headlines + matrix) in stable id order.
+pub fn all_daily_plans() -> Vec<DailyHeadlinePlan> {
     let mut plans = Vec::new();
     plans.extend(worktree::plans());
     plans.extend(misc::plans());
@@ -21,4 +21,12 @@ pub fn all_headline_plans() -> Vec<DailyHeadlinePlan> {
     plans.extend(refs::plans());
     plans.extend(maintenance::plans());
     plans
+}
+
+/// Headline-only subset (17 cooking-page rows).
+pub fn all_headline_plans() -> Vec<DailyHeadlinePlan> {
+    all_daily_plans()
+        .into_iter()
+        .filter(|p| p.spec.headline)
+        .collect()
 }
