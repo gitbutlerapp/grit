@@ -736,12 +736,8 @@ pub fn parse_reflog_expire_spec(raw: &str, now: i64) -> Result<i64> {
     if s.eq_ignore_ascii_case("now") || s.eq_ignore_ascii_case("all") {
         return Ok(i64::MAX);
     }
-    let mut err = 0;
-    let ts = crate::git_date::approx::approxidate_careful_at(s, now, Some(&mut err));
-    if err != 0 {
-        return Err(Error::Message(format!("invalid reflog expiry: {raw:?}")));
-    }
-    i64::try_from(ts).map_err(|_| Error::Message(format!("reflog expiry out of range: {raw:?}")))
+    crate::git_date::parse_date_cutoff(s, now)
+        .map_err(|_| Error::Message(format!("invalid reflog expiry: {raw:?}")))
 }
 
 /// Default `gc.reflogExpire`: reachable reflog entries older than this are dropped.

@@ -1389,6 +1389,27 @@ pub unsafe fn grit_lib::config::git_date::tm::time_to_tm_local(u64, *mut libc::u
 pub fn grit_lib::config::git_date::tm::tm_to_time_t(&libc::unix::linux_like::tm) -> libc::unix::linux_like::linux::gnu::b64::time_t
 pub type grit_lib::config::git_date::tm::Timestamp = u64
 pub type grit_lib::config::git_date::tm::TzHhmm = i32
+pub enum grit_lib::config::git_date::DateSpecError
+pub grit_lib::config::git_date::DateSpecError::Unparseable
+pub grit_lib::config::git_date::DateSpecError::Unparseable::spec: alloc::string::String
+impl core::clone::Clone for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::config::git_date::DateSpecError
+impl core::cmp::PartialEq for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::config::git_date::DateSpecError
+impl core::fmt::Debug for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::config::git_date::DateSpecError
+impl core::marker::Freeze for grit_lib::config::git_date::DateSpecError
+impl core::marker::Send for grit_lib::config::git_date::DateSpecError
+impl core::marker::Sync for grit_lib::config::git_date::DateSpecError
+impl core::marker::Unpin for grit_lib::config::git_date::DateSpecError
+impl core::marker::UnsafeUnpin for grit_lib::config::git_date::DateSpecError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::DateSpecError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::DateSpecError
 pub enum grit_lib::config::git_date::TestToolDateResult
 pub grit_lib::config::git_date::TestToolDateResult::Exit(i32)
 pub grit_lib::config::git_date::TestToolDateResult::Output(alloc::vec::Vec<alloc::string::String>)
@@ -1399,6 +1420,7 @@ impl core::marker::Unpin for grit_lib::config::git_date::TestToolDateResult
 impl core::marker::UnsafeUnpin for grit_lib::config::git_date::TestToolDateResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::TestToolDateResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::TestToolDateResult
+pub fn grit_lib::config::git_date::parse_date_cutoff(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::DateSpecError>
 pub fn grit_lib::config::git_date::test_tool_date(&grit_lib::config::environment::Environment, &[alloc::string::String]) -> core::result::Result<grit_lib::config::git_date::TestToolDateResult, alloc::string::String>
 pub mod grit_lib::config::git_path
 pub enum grit_lib::config::git_path::GitPathError
@@ -2774,10 +2796,10 @@ impl core::marker::Unpin for grit_lib::diff::structured::SideBytes
 impl core::marker::UnsafeUnpin for grit_lib::diff::structured::SideBytes
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::structured::SideBytes
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::structured::SideBytes
-pub const grit_lib::diff::structured::WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize
 pub struct grit_lib::diff::structured::StructuredDiffOptions
 pub grit_lib::diff::structured::StructuredDiffOptions::context_lines: usize
 pub grit_lib::diff::structured::StructuredDiffOptions::word_level_inline: bool
+impl grit_lib::diff::structured::StructuredDiffOptions
 pub fn grit_lib::diff::structured::StructuredDiffOptions::cap_word_level_inline_for_changed_files(self, usize) -> Self
 impl core::clone::Clone for grit_lib::diff::structured::StructuredDiffOptions
 pub fn grit_lib::diff::structured::StructuredDiffOptions::clone(&self) -> Self
@@ -2896,6 +2918,7 @@ impl core::marker::Unpin for grit_lib::diff::structured::StructuredTextDiff
 impl core::marker::UnsafeUnpin for grit_lib::diff::structured::StructuredTextDiff
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::structured::StructuredTextDiff
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::structured::StructuredTextDiff
+pub const grit_lib::diff::structured::WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize
 pub fn grit_lib::diff::structured::format_hunk_range(usize, usize) -> alloc::string::String
 pub fn grit_lib::diff::structured::structured_file_diff(&str, &str, &grit_lib::diff::structured::SideBytes, &grit_lib::diff::structured::SideBytes, grit_lib::diff::structured::StructuredDiffOptions) -> grit_lib::diff::structured::StructuredFileDiff
 pub fn grit_lib::diff::structured::structured_text_diff(&str, &str, grit_lib::diff::structured::StructuredDiffOptions) -> grit_lib::diff::structured::StructuredTextDiff
