@@ -131,6 +131,28 @@ pub fn grit_lib::apply::parse_patch(&str, usize, &str, bool, core::option::Optio
 pub fn grit_lib::apply::write_git_binary_patch(&[u8], &[u8], &str, &str) -> grit_lib::error::Result<alloc::string::String>
 pub mod grit_lib::bench_fixture
 pub mod grit_lib::bench_fixture::synth
+pub enum grit_lib::bench_fixture::synth::RepoShape
+pub grit_lib::bench_fixture::synth::RepoShape::Small
+pub grit_lib::bench_fixture::synth::RepoShape::Synth10k
+pub grit_lib::bench_fixture::synth::RepoShape::Synth100k
+impl grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::spec(self, bool) -> grit_lib::objects::bench_fixture::synth::TierSpec
+impl core::clone::Clone for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
 pub enum grit_lib::bench_fixture::synth::SynthTier
 pub grit_lib::bench_fixture::synth::SynthTier::L
 pub grit_lib::bench_fixture::synth::SynthTier::M
@@ -5241,6 +5263,28 @@ pub fn grit_lib::object_inspect::tree_entry_mode_cat_file_p(u32) -> alloc::strin
 pub mod grit_lib::objects
 pub mod grit_lib::objects::bench_fixture
 pub mod grit_lib::objects::bench_fixture::synth
+pub enum grit_lib::objects::bench_fixture::synth::RepoShape
+pub grit_lib::objects::bench_fixture::synth::RepoShape::Small
+pub grit_lib::objects::bench_fixture::synth::RepoShape::Synth10k
+pub grit_lib::objects::bench_fixture::synth::RepoShape::Synth100k
+impl grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::spec(self, bool) -> grit_lib::objects::bench_fixture::synth::TierSpec
+impl core::clone::Clone for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
 pub enum grit_lib::objects::bench_fixture::synth::SynthTier
 pub grit_lib::objects::bench_fixture::synth::SynthTier::L
 pub grit_lib::objects::bench_fixture::synth::SynthTier::M

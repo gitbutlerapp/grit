@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::bench_fixture::synth::{generate_synth_repo, SynthTier};
+use grit_lib::bench_fixture::synth::{
+    generate_synth_repo, generate_synth_repo_with_spec, RepoShape, SynthTier,
+};
 
 use crate::fixture::remove_dir_robust;
 use crate::real_repo_fixture::{git_env, run_git, DEFAULT_GIT_GIT_TAG};
@@ -22,8 +24,26 @@ pub const DEFAULT_GIT_GIT_HEAD: &str = "777489f9e09c8d0dd6b12f9d90de6376330577a2
 #[value(rename_all = "kebab-case")]
 pub enum FixtureKind {
     /// Upstream git.git at the pinned tag (bare).
-    #[value(alias = "git.git")]
+    #[value(name = "git-git", alias = "git.git")]
     GitGit,
+    /// Worktree checkout of [`Self::GitGit`] at the pinned tag.
+    #[value(name = "git-git-wt")]
+    GitGitWt,
+    /// ~100 files, ~50 commits.
+    Small,
+    /// [`Self::Small`] scaled to ~1/20 (smoke).
+    #[value(name = "small-smoke")]
+    SmallSmoke,
+    /// 10k files in ~100 dirs, ~1000 commits.
+    #[value(name = "synth-10k")]
+    Synth10k,
+    #[value(name = "synth-10k-smoke")]
+    Synth10kSmoke,
+    /// 100k-file wide layout, ~1000 dirs.
+    #[value(name = "synth-100k")]
+    Synth100k,
+    #[value(name = "synth-100k-smoke")]
+    Synth100kSmoke,
     /// Synthetic tier S (grit-lib generator).
     #[value(alias = "synth-S")]
     SynthS,
@@ -35,18 +55,45 @@ pub enum FixtureKind {
 
 impl FixtureKind {
     /// All fixtures the registry can prepare.
-    pub const ALL: [Self; 4] = [Self::GitGit, Self::SynthS, Self::SynthM, Self::SynthL];
+    pub const ALL: [Self; 11] = [
+        Self::GitGit,
+        Self::GitGitWt,
+        Self::Small,
+        Self::SmallSmoke,
+        Self::Synth10k,
+        Self::Synth10kSmoke,
+        Self::Synth100k,
+        Self::Synth100kSmoke,
+        Self::SynthS,
+        Self::SynthM,
+        Self::SynthL,
+    ];
 
     fn synth_tier(self) -> Option<SynthTier> {
         match self {
-            Self::GitGit => None,
+            Self::GitGit | Self::GitGitWt => None,
+            Self::Small | Self::SmallSmoke => Some(SynthTier::S),
+            Self::Synth10k | Self::Synth10kSmoke => Some(SynthTier::M),
+            Self::Synth100k | Self::Synth100kSmoke => Some(SynthTier::L),
             Self::SynthS => Some(SynthTier::S),
             Self::SynthM => Some(SynthTier::M),
             Self::SynthL => Some(SynthTier::L),
         }
     }
 
-    /// Stable cache directory name (`synth-s`, `git.git`, …).
+    fn repo_shape(self) -> Option<(RepoShape, bool)> {
+        match self {
+            Self::Small => Some((RepoShape::Small, false)),
+            Self::SmallSmoke => Some((RepoShape::Small, true)),
+            Self::Synth10k => Some((RepoShape::Synth10k, false)),
+            Self::Synth10kSmoke => Some((RepoShape::Synth10k, true)),
+            Self::Synth100k => Some((RepoShape::Synth100k, false)),
+            Self::Synth100kSmoke => Some((RepoShape::Synth100k, true)),
+            _ => None,
+        }
+    }
+
+    /// Stable cache directory name (`synth-s`, `git-git`, …).
     pub fn cache_name(self) -> &'static str {
         self.public_cache_name()
     }
@@ -54,7 +101,14 @@ impl FixtureKind {
     /// Stable cache directory name for reports and paths (same as [`Self::cache_name`]).
     pub fn public_cache_name(self) -> &'static str {
         match self {
-            Self::GitGit => "git.git",
+            Self::GitGit => "git-git",
+            Self::GitGitWt => "git-git-wt",
+            Self::Small => "small",
+            Self::SmallSmoke => "small-smoke",
+            Self::Synth10k => "synth-10k",
+            Self::Synth10kSmoke => "synth-10k-smoke",
+            Self::Synth100k => "synth-100k",
+            Self::Synth100kSmoke => "synth-100k-smoke",
             Self::SynthS => "synth-s",
             Self::SynthM => "synth-m",
             Self::SynthL => "synth-l",
@@ -129,7 +183,14 @@ pub fn cache_root() -> PathBuf {
 }
 
 fn cache_path(kind: FixtureKind) -> PathBuf {
-    cache_root().join(kind.cache_name())
+    let path = cache_root().join(kind.cache_name());
+    if kind == FixtureKind::GitGit {
+        let legacy = cache_root().join("git.git");
+        if !path.exists() && legacy.is_dir() {
+            return legacy;
+        }
+    }
+    path
 }
 
 fn pinned_git_git_tag() -> String {
@@ -317,9 +378,16 @@ pub fn ensure_cached(
     let dest = cache_path(kind);
     match kind {
         FixtureKind::GitGit => ensure_git_git_cached(git, &dest, offline),
+        FixtureKind::GitGitWt => ensure_git_git_worktree_cached(git, &dest, offline),
         FixtureKind::SynthS | FixtureKind::SynthM | FixtureKind::SynthL => {
             ensure_synth_cached(kind, &dest)
         }
+        FixtureKind::Small
+        | FixtureKind::SmallSmoke
+        | FixtureKind::Synth10k
+        | FixtureKind::Synth10kSmoke
+        | FixtureKind::Synth100k
+        | FixtureKind::Synth100kSmoke => ensure_shape_cached(kind, &dest),
     }
 }
 
@@ -396,6 +464,77 @@ fn ensure_synth_cached(kind: FixtureKind, dest: &Path) -> Result<(PathBuf, Fixtu
     Ok((dest.to_path_buf(), collect_identity(&git, kind, dest)?))
 }
 
+fn ensure_shape_cached(kind: FixtureKind, dest: &Path) -> Result<(PathBuf, FixtureRecord)> {
+    let Some((shape, smoke)) = kind.repo_shape() else {
+        bail!("internal: ensure_shape_cached called for {kind:?}");
+    };
+    let git = crate::binary::resolve_binary("git", None)?;
+    if dest.join(".git").is_dir() {
+        if let Some(stored) = read_ready_marker(dest)? {
+            let head = git_head_oid(&git, dest)?;
+            if stored == head {
+                return Ok((dest.to_path_buf(), collect_identity(&git, kind, dest)?));
+            }
+        }
+        remove_dir_robust(dest);
+    } else if dest.exists() {
+        remove_dir_robust(dest);
+    }
+    fs::create_dir_all(cache_root()).context("create cache root")?;
+    let spec = shape.spec(smoke);
+    let report = generate_synth_repo_with_spec(dest, spec)?;
+    write_ready_marker(dest, &report.head)?;
+    Ok((dest.to_path_buf(), collect_identity(&git, kind, dest)?))
+}
+
+fn ensure_git_git_worktree_cached(
+    git: &Path,
+    dest: &Path,
+    offline: bool,
+) -> Result<(PathBuf, FixtureRecord)> {
+    let expected = expected_git_git_head();
+    if dest.join(".git").is_dir() {
+        if let Some(stored) = read_ready_marker(dest)? {
+            if stored == expected {
+                verify_pinned_head(dest, &expected)?;
+                return Ok((
+                    dest.to_path_buf(),
+                    collect_identity(git, FixtureKind::GitGitWt, dest)?,
+                ));
+            }
+        }
+        remove_dir_robust(dest);
+    } else if dest.exists() {
+        remove_dir_robust(dest);
+    }
+    let (bare, _) = ensure_cached(git, FixtureKind::GitGit, offline)?;
+    if offline && !bare.is_dir() {
+        bail!(
+            "git-git-wt fixture missing at {} (--offline)",
+            dest.display()
+        );
+    }
+    let parent = dest.parent().context("worktree cache parent")?;
+    fs::create_dir_all(parent)?;
+    let name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .context("worktree cache dir name")?;
+    let bare_str = bare.to_str().context("bare path utf-8")?;
+    eprintln!(
+        "Cloning bare {} into worktree {} …",
+        bare.display(),
+        dest.display()
+    );
+    run_git(git, parent, &["clone", "-q", "--local", bare_str, name])?;
+    verify_pinned_head(dest, &expected)?;
+    write_ready_marker(dest, &expected)?;
+    Ok((
+        dest.to_path_buf(),
+        collect_identity(git, FixtureKind::GitGitWt, dest)?,
+    ))
+}
+
 /// List fixtures present in the cache (partial entries when markers are missing).
 pub fn list_cached(git: &Path) -> Result<Vec<FixtureRecord>> {
     let root = cache_root();
@@ -411,7 +550,13 @@ pub fn list_cached(git: &Path) -> Result<Vec<FixtureRecord>> {
         if kind == FixtureKind::GitGit && !path.join("HEAD").is_file() {
             continue;
         }
-        if kind != FixtureKind::GitGit && !path.join(".git").is_dir() {
+        if kind == FixtureKind::GitGitWt && !path.join(".git").is_dir() {
+            continue;
+        }
+        if kind != FixtureKind::GitGit
+            && kind != FixtureKind::GitGitWt
+            && !path.join(".git").is_dir()
+        {
             continue;
         }
         out.push(collect_identity(git, kind, &path)?);
