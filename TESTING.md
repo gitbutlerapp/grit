@@ -28,6 +28,10 @@ cargo test --workspace
 cargo test -p grit-lib --lib --release
 ```
 
+### Release and benchmark binaries
+
+The workspace root [`Cargo.toml`](Cargo.toml) sets **`[profile.release]`** with **`lto = "fat"`**, **`codegen-units = 1`**, and **`panic = "unwind"`**. That profile is what **`cargo build --release`**, the GitHub **Release** workflow, and **`grit-bench`** use. Fat LTO lengthens clean builds compared with the default profile but keeps text size and dynamic relocations down so cold-start CLI work (for example `grit status` in an empty repo) maps less of the binary at startup. **`make gate`** and day-to-day library tests still use the **`dev`** profile unless you pass **`--release`** explicitly.
+
 ### CLI output snapshots
 
 `grit-cli/tests/output_snapshots.rs` exercises human, `--json`, and `--markdown` output together via [`CliFixture`](grit-test-support/src/cli_fixture.rs) in **`grit-test-support`**. Each scenario runs the built `grit` binary three times and compares stdout, stderr, and exit status against committed [insta](https://insta.rs/) snapshots under `grit-cli/tests/snapshots/`.

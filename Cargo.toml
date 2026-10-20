@@ -62,3 +62,10 @@ opt-level = 3
 
 [profile.dev.package.sha2]
 opt-level = 3
+
+# Release binaries: link-time optimization shrinks text and dynamic relocations so
+# cold-start commands spend less time in the loader (see factory step 2370).
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "unwind"

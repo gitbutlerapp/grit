@@ -182,6 +182,7 @@ cargo bench -p grit-lib --bench hash
 
 ### Methodology
 
+- **Build profile:** Command-level numbers use a release **`grit`** built with the workspace **`[profile.release]`** in the root **`Cargo.toml`**: **`lto = "fat"`**, **`codegen-units = 1`**, **`panic = "unwind"`**. That matches shipped release artifacts and keeps loader work (text size and dynamic relocations) low for cold-start scenarios. Rebuild **`grit-cli`** and **`grit-utils`** after profile changes before re-running **`grit-bench`**.
 - **Fixtures** use synthetic repos at large file counts and deep history, built deterministically in a scratch directory.
 - **Drivers** are CLI invocations of `grit` and `git` with equivalent semantics (not argv-for-argv compatibility). Dashboard scenarios `log-{size}` time a single `grit log --limit 100` against `git log -100 --oneline` on the synthetic history fixture; the production **campaign** matrix still has a separate **`log`** row that deliberately shells through paged `grit log --before=` cursors (census agent may rename that id when refreshing baselines).
 - **Ratios** are **Grit median ÷ Git median** (stored in each scenario’s `ratio` field; hyperfine also records mean and spread). Values below `1.00×` mean Grit is faster; values above `2.00×` are highlighted as regressions worth investigating.
@@ -214,6 +215,8 @@ cargo build --release -p grit-cli -p grit-utils
 # Example: hot-path scenarios at L/H tiers (switch, pick, merge)
 ./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output /tmp/grit-bench-hot-paths.json
 ```
+
+**LTO release profile (factory step 2370, factory VM):** Before adding **`[profile.release]`**, a default release **`grit`** had ~**19.2 MiB** of `.text`, **28 642** dynamic relocations, ~**6.5 MiB** peak RSS on **`grit status`** in an empty repo, and a **~184 s** clean **`cargo build --release -p grit-cli`**. With **`lto = "thin"`** and **`codegen-units = 1`**, text fell to ~**17.3 MiB**, relocations to **22 401**, and clean build time to **~218 s**. With **`lto = "fat"`** (chosen for release), text is ~**16.5 MiB**, relocations **17 188**, trivial status RSS unchanged, and clean build **~256 s** (~**1.4×** the pre-LTO build, below the **2×** threshold that would have split a separate **`dist`** profile).
 
 When roadmap item 2 adds more baseline JSON files on `main`, list their paths under `[benchmarks].baseline` in `content/docs/site.toml` and regenerate the site.
 
