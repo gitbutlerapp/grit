@@ -847,7 +847,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "similar 3.2.0",
  "tempfile",
  "terminal_size",
  "time",

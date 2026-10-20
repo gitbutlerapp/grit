@@ -32,8 +32,6 @@ jaq-core = "3.1"
 jaq-json = "2.0"
 jaq-std = "3.0"
 terminal_size.workspace = true
-# `inline` enables word-level intra-line highlighting for `grit diff`.
-similar = { workspace = true, features = ["inline"] }
 libc.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
