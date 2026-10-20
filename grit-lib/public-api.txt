@@ -11960,6 +11960,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::credentials::
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::credentials::Credential
 pub struct grit_lib::remote::credentials::HelperCredentialProvider
 impl grit_lib::remote::credentials::HelperCredentialProvider
+pub fn grit_lib::remote::credentials::HelperCredentialProvider::helpers_for(&self, &grit_lib::remote::credentials::Credential) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::new(grit_lib::config::ConfigSet) -> Self
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::credentials::HelperCredentialProvider
@@ -12030,6 +12031,137 @@ impl core::marker::Unpin for grit_lib::remote::fetch_negotiator::SkippingNegotia
 impl core::marker::UnsafeUnpin for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::fetch_negotiator::SkippingNegotiator
+pub mod grit_lib::remote::github_auth
+#[non_exhaustive] pub enum grit_lib::remote::github_auth::DeviceFlowError
+pub grit_lib::remote::github_auth::DeviceFlowError::AccessDenied
+pub grit_lib::remote::github_auth::DeviceFlowError::DeviceCodeRejected(alloc::string::String)
+pub grit_lib::remote::github_auth::DeviceFlowError::Expired
+pub grit_lib::remote::github_auth::DeviceFlowError::Http
+pub grit_lib::remote::github_auth::DeviceFlowError::Http::source: grit_lib::error::Error
+pub grit_lib::remote::github_auth::DeviceFlowError::Http::step: grit_lib::remote::github_auth::DeviceFlowStep
+pub grit_lib::remote::github_auth::DeviceFlowError::MissingField(&'static str)
+pub grit_lib::remote::github_auth::DeviceFlowError::TimedOut
+pub grit_lib::remote::github_auth::DeviceFlowError::TokenRejected(alloc::string::String)
+pub grit_lib::remote::github_auth::DeviceFlowError::UnexpectedResponse
+impl core::error::Error for grit_lib::remote::github_auth::DeviceFlowError
+pub fn grit_lib::remote::github_auth::DeviceFlowError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::remote::github_auth::DeviceFlowError
+pub fn grit_lib::remote::github_auth::DeviceFlowError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::github_auth::DeviceFlowError
+pub fn grit_lib::remote::github_auth::DeviceFlowError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::Send for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::Sync for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::Unpin for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceFlowError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceFlowError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceFlowError
+pub enum grit_lib::remote::github_auth::DeviceFlowStep
+pub grit_lib::remote::github_auth::DeviceFlowStep::PollToken
+pub grit_lib::remote::github_auth::DeviceFlowStep::RequestDeviceCode
+impl core::clone::Clone for grit_lib::remote::github_auth::DeviceFlowStep
+pub fn grit_lib::remote::github_auth::DeviceFlowStep::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::cmp::PartialEq for grit_lib::remote::github_auth::DeviceFlowStep
+pub fn grit_lib::remote::github_auth::DeviceFlowStep::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::github_auth::DeviceFlowStep
+pub fn grit_lib::remote::github_auth::DeviceFlowStep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::StructuralPartialEq for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Freeze for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Send for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Sync for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Unpin for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceFlowStep
+pub enum grit_lib::remote::github_auth::PollStatus
+pub grit_lib::remote::github_auth::PollStatus::Authorized(alloc::string::String)
+pub grit_lib::remote::github_auth::PollStatus::Pending
+pub grit_lib::remote::github_auth::PollStatus::SlowDown
+pub grit_lib::remote::github_auth::PollStatus::SlowDown::interval: core::time::Duration
+impl core::clone::Clone for grit_lib::remote::github_auth::PollStatus
+pub fn grit_lib::remote::github_auth::PollStatus::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::github_auth::PollStatus
+impl core::cmp::PartialEq for grit_lib::remote::github_auth::PollStatus
+pub fn grit_lib::remote::github_auth::PollStatus::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::github_auth::PollStatus
+pub fn grit_lib::remote::github_auth::PollStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Freeze for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Send for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Sync for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Unpin for grit_lib::remote::github_auth::PollStatus
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::PollStatus
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::PollStatus
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::PollStatus
+pub struct grit_lib::remote::github_auth::DeviceAuthorization
+pub grit_lib::remote::github_auth::DeviceAuthorization::device_code: alloc::string::String
+pub grit_lib::remote::github_auth::DeviceAuthorization::expires_in: core::time::Duration
+pub grit_lib::remote::github_auth::DeviceAuthorization::interval: core::time::Duration
+pub grit_lib::remote::github_auth::DeviceAuthorization::user_code: alloc::string::String
+pub grit_lib::remote::github_auth::DeviceAuthorization::verification_uri: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::github_auth::DeviceAuthorization
+pub fn grit_lib::remote::github_auth::DeviceAuthorization::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::cmp::PartialEq for grit_lib::remote::github_auth::DeviceAuthorization
+pub fn grit_lib::remote::github_auth::DeviceAuthorization::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::github_auth::DeviceAuthorization
+pub fn grit_lib::remote::github_auth::DeviceAuthorization::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Freeze for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Send for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Sync for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Unpin for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceAuthorization
+pub struct grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> grit_lib::remote::github_auth::DeviceFlow<'a>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::new(&'a dyn grit_lib::remote::transport::http::HttpClient, &'a str) -> Self
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::poll(&self, &grit_lib::remote::github_auth::DeviceAuthorization, core::time::Duration) -> core::result::Result<grit_lib::remote::github_auth::PollStatus, grit_lib::remote::github_auth::DeviceFlowError>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::request_device_code(&self) -> core::result::Result<grit_lib::remote::github_auth::DeviceAuthorization, grit_lib::remote::github_auth::DeviceFlowError>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::wait_for_token(&self, &grit_lib::remote::github_auth::DeviceAuthorization, &mut dyn grit_lib::remote::github_auth::PollClock) -> core::result::Result<alloc::string::String, grit_lib::remote::github_auth::DeviceFlowError>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::with_scope(self, &'a str) -> Self
+impl<'a> core::marker::Freeze for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::Send for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::Sync for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::Unpin for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceFlow<'a>
+pub struct grit_lib::remote::github_auth::SystemPollClock
+impl core::clone::Clone for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::clone(&self) -> Self
+impl core::default::Default for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::github_auth::SystemPollClock
+impl grit_lib::remote::github_auth::PollClock for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::now(&self) -> std::time::Instant
+pub fn grit_lib::remote::github_auth::SystemPollClock::sleep(&mut self, core::time::Duration)
+impl core::marker::Freeze for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::Send for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::Sync for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::Unpin for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::SystemPollClock
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::SystemPollClock
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::SystemPollClock
+pub const grit_lib::remote::github_auth::ACCESS_TOKEN_URL: &str
+pub const grit_lib::remote::github_auth::DEFAULT_SCOPE: &str
+pub const grit_lib::remote::github_auth::DEVICE_CODE_URL: &str
+pub const grit_lib::remote::github_auth::GITHUB_HOST: &str
+pub const grit_lib::remote::github_auth::TOKEN_USERNAME: &str
+pub const grit_lib::remote::github_auth::VERIFICATION_URL: &str
+pub trait grit_lib::remote::github_auth::PollClock
+pub fn grit_lib::remote::github_auth::PollClock::now(&self) -> std::time::Instant
+pub fn grit_lib::remote::github_auth::PollClock::sleep(&mut self, core::time::Duration)
+impl grit_lib::remote::github_auth::PollClock for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::now(&self) -> std::time::Instant
+pub fn grit_lib::remote::github_auth::SystemPollClock::sleep(&mut self, core::time::Duration)
+pub fn grit_lib::remote::github_auth::github_token_credential(core::option::Option<&str>) -> grit_lib::remote::credentials::Credential
+pub fn grit_lib::remote::github_auth::is_github_https_url(&str) -> bool
 pub mod grit_lib::remote::http_client
 pub struct grit_lib::remote::http_client::UreqHttpClient
 impl grit_lib::remote::transport::http::ureq_client::UreqHttpClient

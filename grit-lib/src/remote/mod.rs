@@ -28,6 +28,10 @@ pub mod credentials {
     //! credentials API (re-exported at this path).
     pub use crate::credentials::*;
 }
+pub mod github_auth {
+    //! github_auth API (re-exported at this path).
+    pub use crate::github_auth::*;
+}
 pub mod url_rewrite {
     //! url_rewrite API (re-exported at this path).
     pub use crate::url_rewrite::*;

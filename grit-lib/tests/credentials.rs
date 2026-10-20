@@ -26,6 +26,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::remote::credentials::{
     Credential, CredentialProvider, HelperCredentialProvider, NON_INTERACTIVE_MESSAGE,
 };
+use grit_lib::remote::github_auth::{github_token_credential, TOKEN_USERNAME};
 
 /// Run `git` in `dir`; returns `None` if git is unavailable.
 fn git(dir: &Path, args: &[&str]) -> Option<std::process::Output> {
@@ -300,6 +301,118 @@ fn url_scoped_helper_applies_only_to_matching_target() {
         .fill(&other)
         .expect_err("non-matching scope yields no creds");
     assert!(err.to_string().contains(NON_INTERACTIVE_MESSAGE));
+}
+
+/// Append one `key=value` to the repo config with `git config --add`, so
+/// multi-valued keys keep their load order.
+fn git_config_add(dir: &Path, key: &str, value: &str) {
+    let out = git(dir, &["config", "--local", "--add", key, value]).expect("git config");
+    assert!(
+        out.status.success(),
+        "git config --add {key} failed: {out:?}"
+    );
+}
+
+#[test]
+fn helpers_for_lists_applicable_helpers_in_load_order_with_reset() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    if !init_repo(dir) {
+        eprintln!("skipping: system git unavailable");
+        return;
+    }
+    let token = github_token_credential(None);
+
+    git_config_add(dir, "credential.helper", "first");
+    git_config_add(dir, "credential.https://github.com.helper", "github-only");
+    git_config_add(dir, "credential.https://example.com.helper", "elsewhere");
+    let provider = HelperCredentialProvider::new(load_config(dir));
+    assert_eq!(provider.helpers_for(&token), ["first", "github-only"]);
+    assert_eq!(
+        provider.helpers_for(&sample_input()),
+        ["first", "elsewhere"]
+    );
+
+    git_config_add(dir, "credential.https://github.com.helper", "");
+    let provider = HelperCredentialProvider::new(load_config(dir));
+    assert!(provider.helpers_for(&token).is_empty());
+    assert_eq!(
+        provider.helpers_for(&sample_input()),
+        ["first", "elsewhere"]
+    );
+
+    // `--add` writes into the existing `[credential]` section, which precedes
+    // the URL-scoped sections in the file, so the later reset still wins.
+    git_config_add(dir, "credential.helper", "second");
+    let provider = HelperCredentialProvider::new(load_config(dir));
+    assert!(provider.helpers_for(&token).is_empty());
+    assert_eq!(
+        provider.helpers_for(&sample_input()),
+        ["first", "second", "elsewhere"]
+    );
+}
+
+#[test]
+fn github_token_stored_by_grit_is_filled_and_erased_for_system_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    if !init_repo(dir) {
+        eprintln!("skipping: system git unavailable");
+        return;
+    }
+    let store = dir.join("token-store");
+    git_config_add(
+        dir,
+        "credential.helper",
+        &format!("store --file={}", store.display()),
+    );
+    let provider = HelperCredentialProvider::new(load_config(dir));
+    assert_eq!(
+        provider.helpers_for(&github_token_credential(None)).len(),
+        1
+    );
+
+    provider
+        .approve(&github_token_credential(Some("gho_roundtrip")))
+        .expect("store token");
+
+    let git_fill = || {
+        let mut child = Command::new("git")
+            .current_dir(dir)
+            .args(["credential", "fill"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env_remove("GIT_ASKPASS")
+            .env_remove("SSH_ASKPASS")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn git credential fill");
+        std::io::Write::write_all(
+            child.stdin.as_mut().expect("stdin"),
+            b"protocol=https\nhost=github.com\nusername=x-access-token\n\n",
+        )
+        .expect("write fill input");
+        let out = child.wait_with_output().expect("git credential fill");
+        Credential::parse_bytes(&out.stdout)
+    };
+
+    let filled = git_fill();
+    assert_eq!(filled.username.as_deref(), Some(TOKEN_USERNAME));
+    assert_eq!(filled.password.as_deref(), Some("gho_roundtrip"));
+
+    provider
+        .reject(&github_token_credential(None))
+        .expect("erase token");
+    assert!(
+        !fs::read_to_string(&store)
+            .unwrap_or_default()
+            .contains("gho_roundtrip"),
+        "erase must remove the stored token"
+    );
+    assert_eq!(git_fill().password, None);
 }
 
 #[test]
