@@ -1,5 +1,6 @@
 //! Stash apply/pop with `core.autocrlf=true` and CRLF worktree bytes (issue #958).
 //! Issue #1111: inherited system `core.autocrlf` without a repo-local override.
+//! Issue #1305: apply/pop must smudge restored bytes (tracked and `-u` untracked).
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::stash::{apply_stash, pop_stash, push_stash, StashCreateOptions};
@@ -23,6 +24,24 @@ fn stash_options() -> StashCreateOptions {
         include_untracked: false,
         identity: "T <t@e.com> 1000000000 +0000".to_owned(),
     }
+}
+
+fn stash_options_untracked() -> StashCreateOptions {
+    StashCreateOptions {
+        message: None,
+        include_untracked: true,
+        identity: "T <t@e.com> 1000000000 +0000".to_owned(),
+    }
+}
+
+fn assert_worktree_bytes(path: &std::path::Path, expected: &[u8]) {
+    let got = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    assert_eq!(
+        got,
+        expected,
+        "worktree bytes for {}",
+        path.file_name().unwrap().to_string_lossy()
+    );
 }
 
 fn open_grit(root: &std::path::Path) -> Repository {
@@ -92,6 +111,16 @@ fn ensure_crlf_worktree_lf_index(root: &std::path::Path) {
     assert!(
         porcelain.trim().is_empty(),
         "git must treat CRLF worktree as clean with autocrlf and LF index, got:\n{porcelain}"
+    );
+}
+
+/// After stash push reset, HEAD version of `f.txt` should be CRLF on disk and clean in status.
+fn ensure_stash_reset_f_txt_crlf_clean(root: &std::path::Path) {
+    assert_worktree_bytes(&root.join("f.txt"), b"a\r\nb\r\n");
+    let porcelain = git_cmd(root, &["status", "--porcelain"]);
+    assert!(
+        porcelain.trim().is_empty(),
+        "worktree must be clean after stash push with autocrlf, got:\n{porcelain}"
     );
 }
 
@@ -248,4 +277,102 @@ fn pop_stash_succeeds_with_system_inherited_autocrlf_only() {
         list.trim().is_empty(),
         "pop must drop stash entry, got:\n{list}"
     );
+}
+
+#[test]
+fn pop_stash_writes_crlf_worktree_bytes_for_tracked_and_untracked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f.txt"), b"a\r\nb\r\n").expect("write");
+    git_cmd(dir.path(), &["add", "f.txt"]);
+    git_cmd(dir.path(), &["commit", "-qm", "base"]);
+
+    std::fs::write(dir.path().join("f.txt"), b"a\r\nb\r\nc\r\n").expect("modify tracked");
+    std::fs::write(dir.path().join("u.txt"), b"x\r\ny\r\n").expect("untracked");
+
+    let repo = open_grit(dir.path());
+    push_stash(&repo, &stash_options_untracked())
+        .expect("push")
+        .expect("had changes");
+
+    ensure_stash_reset_f_txt_crlf_clean(dir.path());
+
+    pop_stash(&repo, dir.path(), 0, false, "T <t@e.com> 0 +0000").expect("pop");
+
+    assert_worktree_bytes(&dir.path().join("f.txt"), b"a\r\nb\r\nc\r\n");
+    assert_worktree_bytes(&dir.path().join("u.txt"), b"x\r\ny\r\n");
+    let eol = git_cmd(dir.path(), &["ls-files", "--eol", "f.txt"]);
+    assert!(
+        eol.contains("i/lf") && eol.contains("w/crlf"),
+        "git ls-files --eol must show LF index and CRLF worktree, got:\n{eol}"
+    );
+}
+
+#[test]
+fn apply_stash_writes_crlf_worktree_bytes_matching_git_stash_apply() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f.txt"), b"a\r\nb\r\n").expect("write");
+    git_cmd(dir.path(), &["add", "f.txt"]);
+    git_cmd(dir.path(), &["commit", "-qm", "base"]);
+
+    std::fs::write(dir.path().join("f.txt"), b"a\r\nb\r\nc\r\n").expect("modify tracked");
+    std::fs::write(dir.path().join("u.txt"), b"x\r\ny\r\n").expect("untracked");
+
+    let repo = open_grit(dir.path());
+    push_stash(&repo, &stash_options_untracked())
+        .expect("push")
+        .expect("had changes");
+
+    ensure_stash_reset_f_txt_crlf_clean(dir.path());
+
+    let stash_oid = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/stash").expect("stash ref");
+
+    let grit_dir = tempfile::tempdir().expect("grit copy");
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", dir.path().display()),
+            &grit_dir.path().to_string_lossy(),
+        ])
+        .status()
+        .expect("cp")
+        .success()
+        .then_some(())
+        .expect("cp failed");
+    let grit_repo = open_grit(grit_dir.path());
+    apply_stash(
+        &grit_repo,
+        grit_dir.path(),
+        &stash_oid,
+        false,
+        "T <t@e.com> 0 +0000",
+    )
+    .expect("apply");
+
+    let git_dir = tempfile::tempdir().expect("git copy");
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", dir.path().display()),
+            &git_dir.path().to_string_lossy(),
+        ])
+        .status()
+        .expect("cp")
+        .success()
+        .then_some(())
+        .expect("cp failed");
+    git_cmd(git_dir.path(), &["stash", "apply", "stash@{0}"]);
+
+    for name in ["f.txt", "u.txt"] {
+        let grit_bytes = std::fs::read(grit_dir.path().join(name)).expect("read grit");
+        let git_bytes = std::fs::read(git_dir.path().join(name)).expect("read git");
+        assert_eq!(
+            grit_bytes, git_bytes,
+            "{name} bytes must match git stash apply"
+        );
+    }
+    let grit_eol = git_cmd(grit_dir.path(), &["ls-files", "--eol", "f.txt"]);
+    let git_eol = git_cmd(git_dir.path(), &["ls-files", "--eol", "f.txt"]);
+    assert_eq!(grit_eol, git_eol, "ls-files --eol for f.txt must match git");
 }

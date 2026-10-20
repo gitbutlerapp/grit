@@ -846,9 +846,32 @@ pub fn stash_diff(repo: &Repository, n: usize) -> Result<Vec<DiffEntry>> {
 }
 
 /// Write one flattened tree entry into the worktree (blob, symlink, or gitlink).
+fn write_smudged_regular_file_replacing_symlink(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    rel_path: &str,
+    file_path: &Path,
+    mode: u32,
+    blob: &[u8],
+    oid: &ObjectId,
+) -> Result<()> {
+    let worktree_bytes = smudge_bytes_for_worktree_path(repo, rules, rel_path, mode, blob, oid)?;
+    write_regular_file_replacing_symlink(file_path, &worktree_bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if mode == MODE_EXECUTABLE {
+            let perms = fs::Permissions::from_mode(0o755);
+            fs::set_permissions(file_path, perms)?;
+        }
+    }
+    Ok(())
+}
+
 fn materialize_flat_entry_in_worktree(
     repo: &Repository,
     work_tree: &Path,
+    rules: &WorktreeRules,
     entry: &FlatTreeEntry,
 ) -> Result<()> {
     let file_path = work_tree.join(&entry.path);
@@ -885,15 +908,15 @@ fn materialize_flat_entry_in_worktree(
         #[cfg(not(unix))]
         fs::write(&file_path, target.as_bytes())?;
     } else {
-        write_regular_file_replacing_symlink(&file_path, &blob.data)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if entry.mode == MODE_EXECUTABLE {
-                let perms = fs::Permissions::from_mode(0o755);
-                fs::set_permissions(&file_path, perms)?;
-            }
-        }
+        write_smudged_regular_file_replacing_symlink(
+            repo,
+            rules,
+            &entry.path,
+            &file_path,
+            entry.mode,
+            &blob.data,
+            &entry.oid,
+        )?;
     }
     Ok(())
 }
@@ -1227,10 +1250,29 @@ pub fn apply_stash(
 
                     // If ours == base, no conflict (only stash changed this file)
                     if ours_content == base_content {
-                        write_regular_file_replacing_symlink(&file_path, &theirs_content)?;
+                        write_smudged_regular_file_replacing_symlink(
+                            repo,
+                            &worktree_rules,
+                            path,
+                            &file_path,
+                            entry.mode,
+                            &theirs_content,
+                            &entry.oid,
+                        )?;
                     } else if ours_content == theirs_content {
                         // Both changed the same way, no conflict
-                        write_regular_file_replacing_symlink(&file_path, &ours_content)?;
+                        let smudge_oid = flat_tree_lookup(current_head_entries, path)
+                            .map(|e| e.oid)
+                            .unwrap_or(entry.oid);
+                        write_smudged_regular_file_replacing_symlink(
+                            repo,
+                            &worktree_rules,
+                            path,
+                            &file_path,
+                            entry.mode,
+                            &ours_content,
+                            &smudge_oid,
+                        )?;
                     } else {
                         // Both sides changed differently — try content merge
                         use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
@@ -1303,15 +1345,15 @@ pub fn apply_stash(
                         }
                     }
                 } else {
-                    write_regular_file_replacing_symlink(&file_path, &stash_blob.data)?;
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        if entry.mode == MODE_EXECUTABLE {
-                            let perms = std::fs::Permissions::from_mode(0o755);
-                            fs::set_permissions(&file_path, perms)?;
-                        }
-                    }
+                    write_smudged_regular_file_replacing_symlink(
+                        repo,
+                        &worktree_rules,
+                        path,
+                        &file_path,
+                        entry.mode,
+                        &stash_blob.data,
+                        &entry.oid,
+                    )?;
                 }
             }
             None => {
@@ -1506,7 +1548,7 @@ pub fn apply_stash(
         let ut_commit = parse_commit(&ut_obj.data)?;
         let ut_entries = flatten_tree_full(repo.odb(), &ut_commit.tree, "")?;
         for entry in &ut_entries {
-            materialize_flat_entry_in_worktree(repo, work_tree, entry)?;
+            materialize_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
         }
     }
 
