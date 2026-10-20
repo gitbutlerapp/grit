@@ -2,8 +2,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 use super::matrix_registry::MATRIX_SCENARIOS;
 use super::plan::{DailyHeadlineContext, DailySetup};
@@ -14,15 +15,18 @@ use crate::fixture_registry::{self, FixtureKind};
 use crate::hot_path_fixture::{
     setup_pick_merge_fixture, setup_switch_fixture, touch_paths_for_size, HotPathRepoSpec,
 };
+use crate::real_repo_fixture::{git_env, run_git};
 use crate::scenarios::{merge_argv, pick_argv, switch_argv};
+use crate::shell::shell_quote;
 use crate::worktree_fixture::{
-    ensure_worktree_bench_repo, set_worktree_bench_cwd, shell_git_add_modified_set,
-    shell_git_add_modified_set_and_commit, shell_grit_add_modified_set, shell_redirect_devnull,
-};
-use crate::worktree_fixture::{
-    record_matrix_path_targets, shell_mv_file, shell_restore_modified_set, shell_rm_dir_git,
+    ensure_worktree_bench_repo, record_matrix_path_targets, set_worktree_bench_cwd,
+    shell_git_add_modified_set, shell_git_add_modified_set_and_commit, shell_grit_add_modified_set,
+    shell_mv_file, shell_redirect_devnull, shell_restore_modified_set, shell_rm_dir_git,
     shell_rm_dir_grit,
 };
+
+/// Shortlog/compare target for git-git matrix rows (tag present on pinned git.git).
+pub const GIT_GIT_SHORTLOG_TARGET: &str = "v2.46.0";
 
 pub fn synth10k_kind(smoke: bool) -> FixtureKind {
     if smoke {
@@ -123,8 +127,42 @@ pub fn setup_init_empty(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> 
             crate::fixture::remove_dir_robust(&repo);
         }
         fs::create_dir_all(&repo).context("init empty dir")?;
+        set_worktree_bench_cwd(&repo)?;
         Ok(ctx(repo, setup))
     })
+}
+
+fn git_rev_parse(git: &Path, repo: &Path, spec: &str) -> Result<String> {
+    let mut cmd = Command::new(git);
+    cmd.args(["rev-parse", spec]).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("git rev-parse {spec}"))?;
+    if !out.status.success() {
+        bail!(
+            "git rev-parse {spec} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Pin git-git matrix defaults: shortlog target and a stable HEAD blob for `cat/blob`.
+pub fn finish_git_git_matrix_ctx(headline: &mut DailyHeadlineContext, git: &Path) -> Result<()> {
+    let path = headline
+        .matrix_path
+        .as_deref()
+        .or(headline.blame_path.as_deref())
+        .unwrap_or("README.md");
+    let blob_spec = format!("HEAD:{path}");
+    headline.cat_blob = Some(git_rev_parse(git, &headline.repo, &blob_spec)?);
+    run_git(
+        git,
+        &headline.repo,
+        &["config", "target.branch", GIT_GIT_SHORTLOG_TARGET],
+    )?;
+    Ok(())
 }
 
 pub fn setup_git_git_history(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
@@ -137,7 +175,8 @@ pub fn setup_git_git_history(setup: &DailySetup<'_>) -> Result<DailyHeadlineCont
     headline.matrix_path = headline.blame_path.clone();
     headline.merge_base_a = Some("v2.46.0".into());
     headline.merge_base_b = Some("v2.47.0".into());
-    headline.shortlog_git_range = Some("v2.46.0..HEAD".into());
+    headline.shortlog_git_range = Some(format!("{GIT_GIT_SHORTLOG_TARGET}..HEAD"));
+    finish_git_git_matrix_ctx(&mut headline, setup.git)?;
     Ok(headline)
 }
 
@@ -450,11 +489,19 @@ pub fn resolve_head_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     )
 }
 
-pub fn cat_head_tree_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+pub fn cat_blob_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let Some(blob) = ctx.cat_blob.as_deref() else {
+        return noop_bench();
+    };
     (
-        sh_devnull(&ctx.grit, &["cat", "HEAD^{tree}"]),
-        sh_devnull(&ctx.git, &["cat-file", "-p", "HEAD^{tree}"]),
+        sh_devnull(&ctx.grit, &["cat", blob]),
+        sh_devnull(&ctx.git, &["cat-file", "-p", blob]),
     )
+}
+
+pub fn shell_git_patch_id_stable_from_head(git: &Path) -> String {
+    let git_q = shell_quote(&git.to_string_lossy());
+    format!("set -eu; {git_q} show HEAD | {git_q} patch-id --stable > /dev/null 2>&1")
 }
 
 pub fn reflog_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
@@ -481,7 +528,7 @@ pub fn shortlog_ahead_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv
 pub fn patch_id_head_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["patch-id", "HEAD"]),
-        sh_devnull(&ctx.git, &["patch-id", "--stable", "HEAD"]),
+        sh_script(shell_git_patch_id_stable_from_head(&ctx.git)),
     )
 }
 
@@ -522,6 +569,7 @@ pub fn prepare_bench_argv(
         PrepareKind::WorktreeRmDir => "prepare-worktree-rm-dir",
         PrepareKind::WorktreeMvFile => "prepare-worktree-mv-file",
         PrepareKind::WorktreeCleanUntracked => "prepare-worktree-clean-untracked",
+        PrepareKind::WorktreeInitEmpty => "prepare-worktree-init-empty",
         PrepareKind::RestoreReset => "prepare-restore",
         _ => "prepare-worktree-status-clean",
     };
@@ -568,5 +616,61 @@ mod tests {
         assert_eq!(second, "/tmp/grit-bench-scratch/daily-second");
         assert!(!second.contains("daily-first/daily-second"));
         std::env::remove_var("GRIT_BENCH_DAILY_ROOT");
+    }
+
+    fn sample_ctx() -> DailyHeadlineContext {
+        let mut ctx = DailyHeadlineContext::new(
+            PathBuf::from("/tmp/sample-repo"),
+            Path::new("/usr/bin/git"),
+            Path::new("/usr/bin/grit"),
+            false,
+        );
+        ctx.cat_blob = Some("deadbeef".into());
+        ctx.shortlog_git_range = Some(format!("{GIT_GIT_SHORTLOG_TARGET}..HEAD"));
+        ctx
+    }
+
+    #[test]
+    fn git_patch_id_bench_pipes_show_to_patch_id() {
+        let ctx = sample_ctx();
+        let (_grit, git) = patch_id_head_bench(&ctx);
+        assert_eq!(git.program, PathBuf::from("/bin/sh"));
+        let script = git.args.last().expect("shell script");
+        assert!(script.contains("show HEAD"));
+        assert!(script.contains("patch-id --stable"));
+        assert!(!script.contains("patch-id --stable HEAD"));
+    }
+
+    #[test]
+    fn cat_blob_bench_uses_resolved_blob_oid() {
+        let ctx = sample_ctx();
+        let (grit, git) = cat_blob_bench(&ctx);
+        let grit_script = grit.args.last().expect("grit shell");
+        let git_script = git.args.last().expect("git shell");
+        assert!(grit_script.contains("deadbeef"));
+        assert!(grit_script.contains("cat"));
+        assert!(git_script.contains("deadbeef"));
+        assert!(git_script.contains("cat-file"));
+        assert!(!grit_script.contains("HEAD^{tree}"));
+    }
+
+    #[test]
+    fn shortlog_git_range_matches_target_branch_config() {
+        let ctx = sample_ctx();
+        let (_grit, git) = shortlog_ahead_bench(&ctx);
+        let script = git.args.last().expect("git shell");
+        assert!(script.contains("log"));
+        assert!(script.contains("--oneline"));
+        assert!(script.contains(&format!("{GIT_GIT_SHORTLOG_TARGET}..HEAD")));
+    }
+
+    #[test]
+    fn init_empty_prepare_hook_is_wired() {
+        let argv = prepare_bench_argv(
+            Path::new("/usr/bin/grit-bench"),
+            Path::new("/usr/bin/git"),
+            crate::scenarios::PrepareKind::WorktreeInitEmpty,
+        );
+        assert_eq!(argv.args[0], "prepare-worktree-init-empty");
     }
 }

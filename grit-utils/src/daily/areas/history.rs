@@ -1,9 +1,9 @@
 //! Revwalk and blame headlines plus history matrix scenarios.
 
 use super::super::helpers::{
-    blame_file_bench, cat_head_tree_bench, ctx, headline_spec, log_all_bench, log_oneline_bench,
-    log_path_bench, merge_base_bench, patch_id_head_bench, reflog_list_bench, resolve_head_bench,
-    revs_count_bench, scenario_spec, setup_big_blobs, setup_git_git_history,
+    blame_file_bench, cat_blob_bench, ctx, finish_git_git_matrix_ctx, headline_spec, log_all_bench,
+    log_oneline_bench, log_path_bench, merge_base_bench, patch_id_head_bench, reflog_list_bench,
+    resolve_head_bench, revs_count_bench, scenario_spec, setup_big_blobs, setup_git_git_history,
     setup_git_git_worktree, setup_registry_worktree, setup_shape_worktree, setup_synth100k,
     shortlog_ahead_bench, show_head_bench, synth10k_kind,
 };
@@ -17,6 +17,8 @@ fn setup_git_git(
     let repo = setup_git_git_worktree(setup)?;
     let mut headline = ctx(repo, setup);
     headline.blame_path = Some(blame_target_path(setup.git, &headline.repo)?);
+    headline.matrix_path = headline.blame_path.clone();
+    finish_git_git_matrix_ctx(&mut headline, setup.git)?;
     Ok(headline)
 }
 
@@ -163,8 +165,8 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             pending: false,
             setup: setup_git_git,
             prepare: DailyPrepare::None,
-            build_git: |c| cat_head_tree_bench(c).1,
-            build_grit: |c| cat_head_tree_bench(c).0,
+            build_git: |c| cat_blob_bench(c).1,
+            build_grit: |c| cat_blob_bench(c).0,
         },
         DailyHeadlinePlan {
             spec: scenario_spec("reflog/list@synth-10k"),

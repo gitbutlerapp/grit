@@ -236,7 +236,7 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         area: Area::Revwalk,
         headline: false,
         name: None,
-        description: "Print HEAD tree: grit cat HEAD^{tree} vs git cat-file -p HEAD^{tree}",
+        description: "Print one blob at HEAD:<path>: grit cat <oid> vs git cat-file -p <oid> (oid from git rev-parse HEAD:<path>)",
     },
     ScenarioSpec {
         id: "reflog/list@synth-10k",

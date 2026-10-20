@@ -47,6 +47,8 @@ pub struct DailyHeadlineContext {
     pub merge_base_a: Option<String>,
     pub merge_base_b: Option<String>,
     pub shortlog_git_range: Option<String>,
+    /// Blob object id for `cat/blob@git-git` (from `git rev-parse HEAD:<path>`).
+    pub cat_blob: Option<String>,
 }
 
 impl DailyHeadlineContext {
@@ -63,6 +65,7 @@ impl DailyHeadlineContext {
             merge_base_a: None,
             merge_base_b: None,
             shortlog_git_range: None,
+            cat_blob: None,
         }
     }
 }

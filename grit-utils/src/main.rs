@@ -51,8 +51,9 @@ use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
 use grit_utils::worktree_fixture::{
     prepare_add as prepare_worktree_add, prepare_clean_untracked as prepare_worktree_clean,
     prepare_commit as prepare_worktree_commit, prepare_diff as prepare_worktree_diff,
-    prepare_mv_file as prepare_worktree_mv, prepare_restore_paths as prepare_worktree_restore,
-    prepare_rm_dir as prepare_worktree_rm, prepare_staged_diff as prepare_worktree_staged_diff,
+    prepare_init_empty as prepare_worktree_init_empty, prepare_mv_file as prepare_worktree_mv,
+    prepare_restore_paths as prepare_worktree_restore, prepare_rm_dir as prepare_worktree_rm,
+    prepare_staged_diff as prepare_worktree_staged_diff,
     prepare_status_clean as prepare_worktree_status_clean,
     prepare_status_dirty as prepare_worktree_status_dirty,
 };
@@ -517,6 +518,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareWorktreeCleanUntracked {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareWorktreeInitEmpty {
         #[arg(long)]
         git: PathBuf,
     },
@@ -1289,6 +1295,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_clean(&git);
         }
+        Cmd::PrepareWorktreeInitEmpty { git } => {
+            let _git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_init_empty(_git.as_path());
+        }
         Cmd::PrepareParallelCheckout { git, url, dest } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_parallel_checkout(&git, url, dest.as_path());
@@ -1776,6 +1786,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareWorktreeRmDir { .. }
         | Cmd::PrepareWorktreeMvFile { .. }
         | Cmd::PrepareWorktreeCleanUntracked { .. }
+        | Cmd::PrepareWorktreeInitEmpty { .. }
         | Cmd::Render { .. }
         | Cmd::CriterionSummary { .. }
         | Cmd::PrepareParallelCheckout { .. }

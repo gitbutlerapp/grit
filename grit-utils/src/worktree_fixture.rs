@@ -339,6 +339,15 @@ pub fn prepare_mv_file(git: &Path) -> Result<()> {
     reset_worktree_clean(git, &active_worktree_repo())
 }
 
+pub fn prepare_init_empty(_git: &Path) -> Result<()> {
+    let repo = active_worktree_repo();
+    if repo.exists() {
+        remove_dir_robust(&repo);
+    }
+    fs::create_dir_all(&repo).context("recreate empty init directory")?;
+    Ok(())
+}
+
 pub fn prepare_clean_untracked(git: &Path) -> Result<()> {
     let repo = active_worktree_repo();
     reset_worktree_clean(git, &repo)?;

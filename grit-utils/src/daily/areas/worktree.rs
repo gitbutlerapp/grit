@@ -180,7 +180,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         spec: scenario_spec("init/empty@small"),
         pending: false,
         setup: setup_init_empty,
-        prepare: DailyPrepare::None,
+        prepare: DailyPrepare::Hook(PrepareKind::WorktreeInitEmpty),
         build_git: |c| init_empty_bench(c).1,
         build_grit: |c| init_empty_bench(c).0,
     });

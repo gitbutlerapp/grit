@@ -88,6 +88,7 @@ pub enum PrepareKind {
     WorktreeRmDir,
     WorktreeMvFile,
     WorktreeCleanUntracked,
+    WorktreeInitEmpty,
     HistoryRewriteReset,
     CampaignStatusDirty,
 }
@@ -157,6 +158,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind, repo: &Path) 
         PrepareKind::WorktreeRmDir => "prepare-worktree-rm-dir",
         PrepareKind::WorktreeMvFile => "prepare-worktree-mv-file",
         PrepareKind::WorktreeCleanUntracked => "prepare-worktree-clean-untracked",
+        PrepareKind::WorktreeInitEmpty => "prepare-worktree-init-empty",
         PrepareKind::HistoryRewriteReset => "prepare-history-rewrite",
         PrepareKind::CampaignStatusDirty => "prepare-campaign-status-dirty",
     };

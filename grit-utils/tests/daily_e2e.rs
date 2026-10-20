@@ -217,6 +217,12 @@ const MATRIX_SMOKE_IDS: [&str; 35] = [
 
 const MATRIX_GAP_IDS: [&str; 1] = ["log/author@git-git"];
 
+const GIT_GIT_HEADLINE_IDS: [&str; 3] = [
+    "log/oneline-100@git-git",
+    "show/head@git-git",
+    "blame/file@git-git",
+];
+
 #[test]
 fn worktree_history_areas_smoke() {
     let _guard = lock_e2e();
@@ -270,6 +276,16 @@ fn worktree_history_areas_smoke() {
             row.pending,
             "{id} must stay pending until grit log --author exists"
         );
+    }
+    for id in GIT_GIT_HEADLINE_IDS {
+        let row = report
+            .scenarios
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("missing git-git headline {id}"));
+        assert!(row.headline, "{id} must be headline");
+        assert!(row.git.peak_rss_bytes > 0, "{id} git peak rss");
+        assert!(row.grit.peak_rss_bytes > 0, "{id} grit peak rss");
     }
 }
 
