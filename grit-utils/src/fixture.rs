@@ -10,9 +10,28 @@ use anyhow::{bail, Context, Result};
 
 /// Default scratch directory for benchmark repos.
 pub fn scratch_dir() -> PathBuf {
-    std::env::var("GRIT_BENCH_SCRATCH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-scratch"))
+    if let Ok(dir) = std::env::var("GRIT_BENCH_SCRATCH") {
+        return PathBuf::from(dir);
+    }
+    #[cfg(test)]
+    {
+        use std::cell::OnceCell;
+        std::thread_local! {
+            static TEST_SCRATCH: OnceCell<PathBuf> = const { OnceCell::new() };
+        }
+        return TEST_SCRATCH.with(|cell| {
+            cell.get_or_init(|| {
+                tempfile::tempdir()
+                    .expect("benchmark scratch tempdir")
+                    .keep()
+            })
+            .clone()
+        });
+    }
+    #[cfg(not(test))]
+    {
+        PathBuf::from("/tmp/grit-bench-scratch")
+    }
 }
 
 /// Active worktree for hyperfine prepare hooks (campaign sets `GRIT_BENCH_CAMPAIGN_CWD`).
