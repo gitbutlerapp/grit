@@ -309,6 +309,12 @@ enum Cmd {
         #[arg(long, default_value = "0.10")]
         tolerance: f64,
     },
+    /// Daily performance census (schema validation; full matrix in later steps)
+    #[command(hide = true)]
+    Daily {
+        #[command(subcommand)]
+        command: DailyCmd,
+    },
     /// Prepare and list cached benchmark fixtures (git.git + synthetic tiers)
     Fixtures {
         #[command(subcommand)]
@@ -526,6 +532,15 @@ impl From<SynthTierArg> for SynthTier {
             SynthTierArg::L => SynthTier::L,
         }
     }
+}
+
+#[derive(Subcommand)]
+enum DailyCmd {
+    /// Parse a report and verify schema tag, ids, and peak RSS fields
+    Validate {
+        /// Daily census JSON report path
+        report: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -906,6 +921,13 @@ fn main() -> Result<()> {
         }
         Cmd::RunLimited { cwd } => {
             return grit_utils::resource::run_limited_cli(cwd);
+        }
+        Cmd::Daily {
+            command: DailyCmd::Validate { report },
+        } => {
+            grit_utils::validate_daily_report(report)?;
+            eprintln!("daily report valid: {}", report.display());
+            return Ok(());
         }
         Cmd::Drive { workload } => {
             return run_drive(workload);
@@ -1556,6 +1578,7 @@ fn main() -> Result<()> {
             status
         }
         Cmd::Compare { .. }
+        | Cmd::Daily { .. }
         | Cmd::MeasureRss { .. }
         | Cmd::RunLimited { .. }
         | Cmd::Drive { .. }

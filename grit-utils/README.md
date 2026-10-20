@@ -2,6 +2,8 @@
 
 Utility crate for the Grit workspace. The primary binary is **`grit-bench`**, a scenario-based harness that compares **`grit`** and **`git`** using [hyperfine](https://github.com/sharkdp/hyperfine).
 
+Daily performance census reports use the [`grit-daily-bench/1`](DAILY-SCHEMA.md) JSON schema (`grit-bench daily validate`).
+
 ## Requirements
 
 - **`hyperfine`** on `PATH` (install via your package manager or `cargo install hyperfine`). If hyperfine is missing, `grit-bench` exits with an explicit error.
