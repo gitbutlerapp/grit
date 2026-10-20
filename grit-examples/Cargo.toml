@@ -40,6 +40,10 @@ name = "guide_revwalk"
 path = "src/bin/guide_revwalk.rs"
 
 [[bin]]
+name = "log_by_author"
+path = "src/bin/log_by_author.rs"
+
+[[bin]]
 name = "guide_network"
 path = "src/bin/guide_network.rs"
 

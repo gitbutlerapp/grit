@@ -12,9 +12,11 @@
 //! # Ok(())
 //! # }
 //! ```
+pub mod filter;
 pub mod handle;
 pub mod queries;
 
+pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError, Pattern};
 pub use handle::RevWalk;
 pub use queries::{parse_rev_walk_tokens, RevWalkListOptions, RevWalkParsedSpecs};
 

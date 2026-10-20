@@ -688,9 +688,28 @@ enum RefsDriveCmd {
 
 #[derive(Subcommand)]
 enum LibOpCmd {
-    RevListCountHead { repo: PathBuf },
-    BlamePorcelain { repo: PathBuf, path: String },
-    CatFileBatch { repo: PathBuf },
+    RevListCountHead {
+        repo: PathBuf,
+    },
+    RevListCountAuthorHead {
+        repo: PathBuf,
+        #[arg(long, default_value = ".")]
+        author: String,
+    },
+    RevListAuthorNHead {
+        repo: PathBuf,
+        #[arg(long, default_value = ".")]
+        author: String,
+        #[arg(long, default_value = "50")]
+        max_count: usize,
+    },
+    BlamePorcelain {
+        repo: PathBuf,
+        path: String,
+    },
+    CatFileBatch {
+        repo: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -818,6 +837,18 @@ fn run_lib_op(workload: &LibOpCmd) -> Result<()> {
         LibOpCmd::RevListCountHead { repo } => {
             let repo = open_repo(repo)?;
             odb_driver::rev_list_count_head(&repo)?;
+        }
+        LibOpCmd::RevListCountAuthorHead { repo, author } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_list_count_author_head(&repo, author)?;
+        }
+        LibOpCmd::RevListAuthorNHead {
+            repo,
+            author,
+            max_count,
+        } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_list_author_n_head(&repo, author, *max_count)?;
         }
         LibOpCmd::BlamePorcelain { repo, path } => {
             let repo = open_repo(repo)?;

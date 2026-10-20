@@ -76,6 +76,72 @@ pub fn run_revwalk_suite(
             }
             let _ = prep;
         }
+        let lib_prefix = vec!["lib-op".to_string()];
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("revs-count-author-{id_suffix}"),
+                group: "revs".into(),
+                fixture: bare.display().to_string(),
+                description: format!(
+                    "rev-list --count --author=. HEAD on deep-history ({id_suffix})"
+                ),
+                grit_argv: {
+                    let mut v = lib_prefix.clone();
+                    v.push("rev-list-count-author-head".into());
+                    v.push(worktree.display().to_string());
+                    v
+                },
+                git_argv: vec![
+                    "rev-list".into(),
+                    "--count".into(),
+                    "--author=.".into(),
+                    "HEAD".into(),
+                ],
+                driver: Driver::Lib,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &worktree,
+        )?);
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("revs-author-n50-{id_suffix}"),
+                group: "revs".into(),
+                fixture: bare.display().to_string(),
+                description: format!(
+                    "rev-list -n 50 --author=. HEAD on deep-history ({id_suffix})"
+                ),
+                grit_argv: {
+                    let mut v = lib_prefix;
+                    v.push("rev-list-author-n-head".into());
+                    v.push(worktree.display().to_string());
+                    v.push("--max-count".into());
+                    v.push("50".into());
+                    v
+                },
+                git_argv: vec![
+                    "rev-list".into(),
+                    "-n".into(),
+                    "50".into(),
+                    "--author=.".into(),
+                    "HEAD".into(),
+                ],
+                driver: Driver::Lib,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &worktree,
+        )?);
         scenarios.push(run_scenario(
             hyperfine,
             git,

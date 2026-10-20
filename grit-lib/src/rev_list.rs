@@ -31,6 +31,7 @@ use crate::refs;
 use crate::repo::Repository;
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
+use crate::revwalk::filter::CommitFilter;
 
 /// User-facing output mode for `rev-list`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -572,6 +573,9 @@ pub struct RevListOptions {
     /// When true, [`Self::paths`] were resolved from argv with cwd rules; Bloom checks must not
     /// prepend process cwd again.
     pub paths_resolved_from_argv: bool,
+    /// Author/committer/grep filter applied during the walk (output filter; traversable commits
+    /// remain reachable through non-matching commits).
+    pub commit_filter: Option<Arc<CommitFilter>>,
 }
 
 impl RevListOptions {
@@ -659,6 +663,7 @@ impl Default for RevListOptions {
             commit_graph_changed_paths_version: -1,
             bloom_stats: None,
             paths_resolved_from_argv: false,
+            commit_filter: None,
         }
     }
 }
@@ -987,6 +992,11 @@ pub fn rev_list(
         HashSet::new()
     };
 
+    if let Some(ordered) = try_bounded_commit_filter_limit_list(repo, &include, &exclude, options)?
+    {
+        return Ok(rev_list_result_from_commits(ordered));
+    }
+
     if let Some(ordered) = try_bounded_limit_list(repo, &include, &exclude, options)? {
         return Ok(rev_list_result_from_commits(ordered));
     }
@@ -1170,7 +1180,12 @@ pub fn rev_list(
     // commits must still be *traversable* (Git only suppresses them from output, never severs the
     // graph), so remember the full reachable set before narrowing `included` to the survivors.
     let parent_count_filter_active = options.min_parents.is_some() || options.max_parents.is_some();
-    let traversable = if parent_count_filter_active {
+    let commit_filter_active = options
+        .commit_filter
+        .as_ref()
+        .is_some_and(|f| f.is_active());
+    let output_filter_active = parent_count_filter_active || commit_filter_active;
+    let traversable = if output_filter_active {
         // The walk must be able to traverse *through* commits that path limiting already dropped
         // from `included` (e.g. a tip that does not touch the pathspec): Git never severs the graph
         // for path limiting, it only suppresses emission. When the dense path-limited closure ran it
@@ -1192,6 +1207,9 @@ pub fn rev_list(
             let count = graph.parents_of(*oid).map(|p| p.len()).unwrap_or(0);
             count >= min_p && count <= max_p
         });
+    }
+    if let Some(filter) = options.commit_filter.as_ref().filter(|f| f.is_active()) {
+        included.retain(|oid| filter.matches(repo, *oid).unwrap_or(false));
     }
 
     if options.maximal_only {
@@ -1223,7 +1241,7 @@ pub fn rev_list(
     let mut ordered = match options.ordering {
         OrderingMode::Default | OrderingMode::DateOrderWalk | OrderingMode::AuthorDateWalk => {
             let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
-            if parent_count_filter_active {
+            if output_filter_active {
                 // When parent-count filters (`--max-parents=1` / `--no-merges`, …) drop a commit
                 // (e.g. a merge under `--no-merges`), Git still walks *through* it: the dropped
                 // commit is simply not emitted, but its parents stay reachable. Seed from every
@@ -1732,6 +1750,12 @@ pub fn rev_list(
             .collect()
     };
 
+    let reachable_commit_count = if options.count {
+        Some(ordered.len())
+    } else {
+        None
+    };
+
     Ok(RevListResult {
         commits: ordered,
         objects,
@@ -1745,7 +1769,7 @@ pub fn rev_list(
         objects_print_commit,
         object_segments,
         bitmap_object_format,
-        reachable_commit_count: None,
+        reachable_commit_count,
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit,
     })
@@ -5037,6 +5061,9 @@ fn dense_path_limited_count_from_included(
     included: &mut HashSet<ObjectId>,
     options: &RevListOptions,
 ) -> Result<usize> {
+    if let Some(filter) = options.commit_filter.as_ref().filter(|f| f.is_active()) {
+        included.retain(|oid| filter.matches(repo, *oid).unwrap_or(false));
+    }
     if options.until_cutoff.is_some() || options.since_cutoff.is_some() {
         let until = options.until_cutoff;
         let since = options.since_cutoff;
@@ -5750,6 +5777,10 @@ fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
         && options.symmetric_right.is_none()
         && options.until_cutoff.is_none()
         && options.since_cutoff.is_none()
+        && options
+            .commit_filter
+            .as_ref()
+            .is_none_or(|f| !f.is_active())
         && !options.maximal_only
         && options.skip == 0
         && options.max_count.is_none()
@@ -5805,7 +5836,14 @@ fn try_commit_graph_count_only(
     exclude: &[ObjectId],
     options: &RevListOptions,
 ) -> Result<Option<RevListResult>> {
-    if !options.count || options.objects || !options.use_commit_graph {
+    if !options.count
+        || options.objects
+        || !options.use_commit_graph
+        || options
+            .commit_filter
+            .as_ref()
+            .is_some_and(|f| f.is_active())
+    {
         return Ok(None);
     }
     if !crate::rev_parse::load_graft_parents(repo.git_dir()).is_empty() {
@@ -5971,9 +6009,104 @@ fn bounded_limit_list_need(options: &RevListOptions) -> usize {
         .saturating_add(options.max_count.unwrap_or(usize::MAX))
 }
 
+fn can_use_bounded_commit_filter_list(options: &RevListOptions) -> bool {
+    options
+        .commit_filter
+        .as_ref()
+        .is_some_and(|f| f.is_active())
+        && (options.max_count.is_some() || options.skip > 0)
+        && bounded_limit_list_need(options) < BOUNDED_LIMIT_LIST_EARLY_STOP_MAX
+        && can_use_bounded_limit_list(&RevListOptions {
+            commit_filter: None,
+            ..options.clone()
+        })
+}
+
+fn try_bounded_commit_filter_limit_list(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<Vec<ObjectId>>> {
+    let Some(filter) = options.commit_filter.as_ref().filter(|f| f.is_active()) else {
+        return Ok(None);
+    };
+    if include.is_empty() || !can_use_bounded_commit_filter_list(options) {
+        return Ok(None);
+    }
+    let Some(max_count) = options.max_count else {
+        return Ok(None);
+    };
+
+    let mut graph =
+        CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
+    let excluded = if exclude.is_empty() {
+        HashSet::new()
+    } else {
+        walk_closure(&mut graph, exclude)?
+    };
+
+    let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
+    let mut heap = BinaryHeap::new();
+    let mut queued = HashSet::new();
+    let mut next_seq = 0u64;
+    for &tip in include {
+        if excluded.contains(&tip) || !queued.insert(tip) {
+            continue;
+        }
+        heap.push(CommitDateKey {
+            oid: tip,
+            date: graph.sort_key(tip, author_dates),
+            seq: next_seq,
+        });
+        next_seq += 1;
+    }
+
+    let mut matched_seen = 0usize;
+    let mut ordered = Vec::with_capacity(max_count.min(64));
+    while let Some(item) = heap.pop() {
+        let oid = item.oid;
+        if excluded.contains(&oid) {
+            continue;
+        }
+
+        if filter.matches(repo, oid)? {
+            matched_seen += 1;
+            if matched_seen > options.skip && ordered.len() < max_count {
+                ordered.push(oid);
+            }
+        }
+
+        if ordered.len() >= max_count {
+            break;
+        }
+
+        for parent in graph.parents_of(oid)? {
+            if excluded.contains(&parent) || !queued.insert(parent) {
+                continue;
+            }
+            heap.push(CommitDateKey {
+                oid: parent,
+                date: graph.sort_key(parent, author_dates),
+                seq: next_seq,
+            });
+            next_seq += 1;
+        }
+    }
+
+    if options.reverse {
+        ordered.reverse();
+    }
+    Ok(Some(ordered))
+}
+
 fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
     (options.max_count.is_some() || options.skip > 0)
         && bounded_limit_list_need(options) < BOUNDED_LIMIT_LIST_EARLY_STOP_MAX
+        && options
+            .commit_filter
+            .as_ref()
+            .is_none_or(|f| !f.is_active())
         && !options.all_refs
         && !options.first_parent
         && !options.objects
@@ -6163,7 +6296,14 @@ fn try_bounded_path_limit_list(
             &mut cache,
         )?;
 
-        if action.visible {
+        let filter_ok = options
+            .commit_filter
+            .as_ref()
+            .filter(|f| f.is_active())
+            .map(|f| f.matches(repo, oid))
+            .transpose()?
+            .unwrap_or(true);
+        if action.visible && filter_ok {
             visible_seen += 1;
             if visible_seen > options.skip && ordered.len() < max_count {
                 ordered.push(oid);
