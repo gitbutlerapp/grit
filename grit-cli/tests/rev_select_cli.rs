@@ -95,12 +95,13 @@ fn seed_linear_repo(dir: &Path, n: usize) {
 fn seed_diverged_repo(dir: &Path) {
     seed_linear_repo(dir, 3);
     assert!(grit_run(dir, &["branch", "side"]).status.success());
-    fs::write(dir.join("f.txt"), "side\n").expect("write");
-    assert!(grit_run(dir, &["add", "f.txt"]).status.success());
+    assert!(grit_run(dir, &["switch", "side"]).status.success());
+    fs::write(dir.join("side.txt"), "side\n").expect("write");
+    assert!(grit_run(dir, &["add", "side.txt"]).status.success());
     assert!(grit_run(dir, &["commit", "side-tip"]).status.success());
     assert!(grit_run(dir, &["switch", "main"]).status.success());
-    fs::write(dir.join("f.txt"), "main\n").expect("write");
-    assert!(grit_run(dir, &["add", "f.txt"]).status.success());
+    fs::write(dir.join("main.txt"), "main\n").expect("write");
+    assert!(grit_run(dir, &["add", "main.txt"]).status.success());
     assert!(grit_run(dir, &["commit", "main-tip"]).status.success());
     assert!(grit_run(dir, &["merge", "side"]).status.success());
 }
@@ -169,24 +170,28 @@ fn log_cursor_pages_through_range() -> TestResult {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
-    seed_linear_repo(&dir, 15);
-    let git = git_oids(&dir, &[]);
-    let mut paged = Vec::new();
-    let mut cursor: Option<String> = None;
-    for _ in 0..10 {
-        let v = if let Some(ref c) = cursor {
-            grit_json(&dir, &["log", &format!("--cursor={c}")])
-        } else {
-            grit_json(&dir, &["log"])
-        };
-        for c in v["commits"].as_array().expect("commits") {
-            paged.push(c["oid"].as_str().expect("oid").to_owned());
-        }
-        cursor = v["next"].as_str().map(str::to_owned);
-        if cursor.is_none() {
-            break;
-        }
+    seed_linear_repo(&dir, 3);
+    assert!(grit_run(&dir, &["branch", "base"]).status.success());
+    for i in 0..12 {
+        fs::write(dir.join("f.txt"), format!("main{i}\n")).expect("write");
+        assert!(grit_run(&dir, &["add", "f.txt"]).status.success());
+        assert!(grit_run(&dir, &["commit", &format!("m{i}")])
+            .status
+            .success());
     }
+    let git = git_oids(&dir, &["base..HEAD"]);
+    let page1 = grit_json(&dir, &["log", "base..HEAD"]);
+    assert_eq!(page1["commits"].as_array().expect("commits").len(), 10);
+    let cursor = page1["next"].as_str().expect("next cursor for range walk");
+    let page2 = grit_json(&dir, &["log", &format!("--cursor={cursor}")]);
+    assert!(page2["next"].is_null());
+    let paged: Vec<String> = page1["commits"]
+        .as_array()
+        .expect("commits")
+        .iter()
+        .chain(page2["commits"].as_array().expect("commits").iter())
+        .map(|c| c["oid"].as_str().expect("oid").to_owned())
+        .collect();
     assert_eq!(paged, git);
     Ok(())
 }
@@ -249,6 +254,21 @@ fn limit_hidden_alias_still_works() -> TestResult {
     let git = git_oids(&dir, &["-n", "3"]);
     let grit = grit_log_oids(&dir, &["log", "--limit", "3"]);
     assert_eq!(grit, git);
+    Ok(())
+}
+
+#[test]
+fn revs_n_zero_left_right_json_shape() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-rev-select-lr-zero-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_diverged_repo(&dir);
+    let v = grit_json(
+        &dir,
+        &["revs", "--count", "--left-right", "-n", "0", "main...side"],
+    );
+    assert!(v["count"].is_null());
+    assert_eq!(v["left_right"]["left"], 0);
+    assert_eq!(v["left_right"]["right"], 0);
     Ok(())
 }
 

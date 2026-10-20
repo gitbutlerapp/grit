@@ -78,6 +78,12 @@ pub struct LogWalkPage {
 }
 
 impl LogWalkCursor {
+    /// Revision tips, exclusions, and date cutoffs bound to this continuation token.
+    #[must_use]
+    pub fn query(&self) -> &LogWalkQuery {
+        &self.query
+    }
+
     /// Start or resume a date-order walk for `query`, emitting up to `limit` commits.
     ///
     /// Pass `cursor` from a previous page's [`LogWalkPage::next`]. When `cursor` is

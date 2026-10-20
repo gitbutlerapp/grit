@@ -689,6 +689,7 @@ impl ReachableWalkState {
                         .iter()
                         .all(|pending| pending.time < cutoffs.since.unwrap_or(i64::MIN));
                 if stop {
+                    self.heap.clear();
                     return Ok(None);
                 }
                 continue;
@@ -1916,6 +1917,15 @@ mod tests {
         }
         reset_intersect_walk_steps();
         reset_commit_parent_lookups();
+        {
+            let mut link = repo
+                .caches()
+                .commit_linkage()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            link.parents.clear();
+            link.times.clear();
+        }
         let bases = merge_bases_first_vs_rest(&repo, tip, &[old])?;
         assert_eq!(bases, vec![old]);
         let parent_reads = commit_parent_lookups();

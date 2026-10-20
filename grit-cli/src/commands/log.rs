@@ -100,17 +100,31 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
         );
     }
     let continuation = cursor.or(deprecated_cursor);
-    if continuation.is_some() && !rev.paths.is_empty() {
-        bail!(
-            "`grit log` cannot combine `--cursor` with path filters; drop the cursor or the paths"
-        );
+    if let Some(token) = continuation.as_deref() {
+        if !rev.paths.is_empty() {
+            bail!(
+                "`grit log` cannot combine `--cursor` with path filters; drop the cursor or the paths"
+            );
+        }
+        if rev.reverse || rev.first_parent || rev.merges || rev.no_merges || rev.skip > 0 {
+            bail!(
+                "`grit log` cannot combine `--cursor` with `--reverse`, `--first-parent`, \
+                 `--merges`, `--no-merges`, or `--skip`"
+            );
+        }
+        let resume = LogWalkCursor::decode(token).context("invalid log continuation cursor")?;
+        let page_size = rev.max_count.unwrap_or(PAGE);
+        let page = LogWalkCursor::step(&repo, resume.query(), Some(&resume), page_size)
+            .context("could not list commits")?;
+        let next = page.next.map(|c| c.encode()).transpose()?;
+        return build_outcome(&repo, &page.commits, stat, next);
     }
 
     let token_refs = rev.rev_tokens(&["HEAD"]);
     let page_size = rev.max_count.unwrap_or(PAGE);
 
     let use_rev_walk = !rev.paths.is_empty()
-        || (rev.max_count.is_some() && continuation.is_none())
+        || rev.max_count.is_some()
         || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
 
     if use_rev_walk {
@@ -126,14 +140,9 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
 
     let query = LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?
         .context("internal error: log walk query missing")?;
-    let cursor = continuation
-        .as_deref()
-        .map(LogWalkCursor::decode)
-        .transpose()
-        .context("invalid log continuation cursor")?;
 
-    let page = LogWalkCursor::step(&repo, &query, cursor.as_ref(), page_size)
-        .context("could not list commits")?;
+    let page =
+        LogWalkCursor::step(&repo, &query, None, page_size).context("could not list commits")?;
     let next = page.next.map(|c| c.encode()).transpose()?;
     build_outcome(&repo, &page.commits, stat, next)
 }

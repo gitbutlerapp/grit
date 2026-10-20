@@ -122,7 +122,7 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
         if rev.max_count == Some(0) {
             return Ok(RevsOutcome {
                 commits: Vec::new(),
-                count: Some(0),
+                count: if left_right { None } else { Some(0) },
                 left_right: left_right.then_some(RevsLeftRightCount { left: 0, right: 0 }),
             });
         }
