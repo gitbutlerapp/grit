@@ -28,7 +28,6 @@ fn push_fast_hide_window_is_incremental_not_full_history() {
         &[tip],
         &[base],
         ReachableWalkLimit::Unlimited,
-        Default::default(),
     )
     .expect("walk");
     assert!(

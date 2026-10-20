@@ -257,23 +257,27 @@ pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
 
 /// `RevWalk::count` for `HEAD` with a committer `--since` cutoff (bounded walk path).
 pub fn rev_walk_count_head_since(repo: &Repository, since: i64) -> Result<()> {
-    let opts = RevWalkListOptions {
-        since: Some(since),
-        limit: Some(20),
-        ..RevWalkListOptions::default()
-    };
-    let n = repo.rev_walk().count(&["HEAD"], &opts)?;
-    println!("{n}");
-    Ok(())
+    repo.odb().with_pack_read_context(|| {
+        let opts = RevWalkListOptions {
+            since: Some(since),
+            limit: Some(20),
+            ..RevWalkListOptions::default()
+        };
+        let n = repo.rev_walk().count(&["HEAD"], &opts)?;
+        println!("{n}");
+        Ok(())
+    })
 }
 
 /// Symmetric left/right counts (`rev-list --left-right --count`).
 pub fn rev_walk_left_right_count(repo: &Repository, range: &str) -> Result<()> {
-    let counts = repo
-        .rev_walk()
-        .left_right_counts(&[range], &RevWalkListOptions::default())?;
-    println!("{} {}", counts.left, counts.right);
-    Ok(())
+    repo.odb().with_pack_read_context(|| {
+        let counts = repo
+            .rev_walk()
+            .left_right_counts(&[range], &RevWalkListOptions::default())?;
+        println!("{} {}", counts.left, counts.right);
+        Ok(())
+    })
 }
 
 /// `rev-list --count HEAD` (commits reachable from `HEAD`).

@@ -282,7 +282,9 @@ fn t6099_criss_cross(wt: &Path) {
 
 fn git_rev_list_left_right_count(wt: &Path, args: &[&str]) -> LeftRightCounts {
     let mut argv = vec!["rev-list", "--left-right", "--count"];
-    argv.extend(args);
+    for arg in args {
+        argv.push(arg);
+    }
     let out = git(wt, &argv);
     let parts: Vec<&str> = out.split_whitespace().collect();
     assert_eq!(parts.len(), 2, "git left-right count: {:?}", parts);
@@ -524,6 +526,74 @@ fn branches_glob_matches_git() {
     };
     let git_oids = git_rev_list(wt, &["--branches=feature/*"]);
     let grit_oids = grit_rev_list_oids(&repo, &[], &opts);
+    assert_eq!(
+        grit_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
+        git_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn left_right_counts_no_merges_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let oids = build_commit_dag(
+        wt,
+        &[
+            ("base", "root"),
+            ("l1", "base"),
+            ("l2", "l1"),
+            ("r1", "base"),
+            ("merge", "l2"),
+            ("merge", "r1"),
+            ("ltip", "merge"),
+            ("rtip", "r1"),
+        ],
+        &[("ltip", "refs/heads/left"), ("rtip", "refs/heads/right")],
+    );
+    let _ = oids;
+    let repo = open_grit(wt);
+    let token = "left...right";
+    let git_counts = git_rev_list_left_right_count(wt, &[token, "--no-merges"]);
+    let grit_counts = repo
+        .rev_walk()
+        .left_right_counts(
+            &[token],
+            &RevWalkListOptions {
+                merges: MergeFilter::NoMerges,
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("no-merges counts");
+    assert_eq!(grit_counts, git_counts);
+}
+
+#[test]
+fn since_skew_bounded_limit_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let old = support::commit_labeled_with_dates(
+        wt,
+        "old",
+        &[],
+        "@1000000000 +0000",
+        "@1000000000 +0000",
+    );
+    let skewed = support::commit_labeled_with_dates(
+        wt,
+        "skewed",
+        &[old],
+        "@2000000000 +0000",
+        "@2000000000 +0000",
+    );
+    git(wt, &["update-ref", "refs/heads/main", &skewed.to_hex()]);
+    let repo = open_grit(wt);
+    let opts = RevWalkListOptions {
+        since: Some(1_500_000_000),
+        limit: Some(2),
+        ..RevWalkListOptions::default()
+    };
+    let git_oids = git_rev_list(wt, &["--since=1500000000", "-n", "2", "main"]);
+    let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
     assert_eq!(
         grit_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
         git_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>()

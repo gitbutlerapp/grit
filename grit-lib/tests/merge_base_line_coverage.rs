@@ -99,7 +99,6 @@ fn symmetric_ahead_behind_and_walk_limits() {
         &[d],
         &[a],
         ReachableWalkLimit::StopAfter(1),
-        Default::default(),
     )
     .expect("walk");
     assert_eq!(emitted, 1);

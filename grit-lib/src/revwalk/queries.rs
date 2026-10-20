@@ -1,6 +1,9 @@
 //! Typed revision-range parsing and high-level rev-walk queries on [`super::RevWalk`].
 use crate::error::{Error, Result};
-use crate::merge_base::{is_ancestor as merge_base_is_ancestor, merge_bases_first_vs_rest};
+use crate::merge_base::{
+    count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
+    merge_bases_first_vs_rest, ReachableCountFilter,
+};
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
@@ -267,32 +270,51 @@ impl<'repo> RevWalk<'repo> {
     pub fn left_right_counts(
         &self,
         tokens: &[&str],
-        _options: &RevWalkListOptions,
+        options: &RevWalkListOptions,
     ) -> Result<LeftRightCounts> {
         if tokens.len() != 1 {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         }
-        let parsed = parse_rev_walk_tokens(self.repository(), tokens)?;
+        let repo = self.repository();
+        let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let (Some(left), Some(right)) = (parsed.symmetric_left, parsed.symmetric_right) else {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         };
-        let repo = self.repository();
-        let base = RevListOptions {
-            left_right: true,
-            count: true,
-            symmetric_left: Some(left),
-            symmetric_right: Some(right),
-            use_commit_graph: true,
-            ..RevListOptions::default()
+
+        if options.paths.is_empty()
+            && options.refs.is_empty()
+            && options.skip == 0
+            && options.limit.is_none()
+            && !options.reverse
+        {
+            let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
+            let filter = ReachableCountFilter {
+                min_parents,
+                max_parents,
+                first_parent_only: options.first_parent,
+                since: options.since,
+                until: options.until,
+            };
+            let left_count =
+                count_commits_reachable_excluding_ancestors_of(repo, &[left], &[right], filter)?;
+            let right_count =
+                count_commits_reachable_excluding_ancestors_of(repo, &[right], &[left], filter)?;
+            return Ok(LeftRightCounts {
+                left: left_count,
+                right: right_count,
+            });
+        }
+
+        let mut opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
+        opts.left_right = true;
+        let left_count = {
+            let mut left_opts = opts.clone();
+            left_opts.left_only = true;
+            rev_list(repo, &positive, &parsed.negative, &left_opts)?.commit_count()
         };
-        let mut left_opts = base.clone();
-        left_opts.left_only = true;
-        let left_count =
-            rev_list(repo, &parsed.positive, &parsed.negative, &left_opts)?.commit_count();
-        let mut right_opts = base;
+        let mut right_opts = opts;
         right_opts.right_only = true;
-        let right_count =
-            rev_list(repo, &parsed.positive, &parsed.negative, &right_opts)?.commit_count();
+        let right_count = rev_list(repo, &positive, &parsed.negative, &right_opts)?.commit_count();
         Ok(LeftRightCounts {
             left: left_count,
             right: right_count,

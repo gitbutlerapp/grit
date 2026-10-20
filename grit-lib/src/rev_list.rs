@@ -20,7 +20,9 @@ use crate::error::{Error, Result};
 use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
 use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
-use crate::merge_base::{commits_reachable_excluding_ancestors_of, ReachableWalkCommitterCutoffs};
+use crate::merge_base::{
+    commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
+};
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -6021,8 +6023,21 @@ fn try_bounded_limit_list(
         since: options.since_cutoff,
         until: options.until_cutoff,
     };
-    let mut ordered =
-        commits_reachable_excluding_ancestors_of(repo, include, exclude, Some(need), cutoffs)?;
+    let mut ordered = if exclude.is_empty()
+        && include.len() == 1
+        && options.ordering == OrderingMode::Default
+        && (options.since_cutoff.is_some() || options.until_cutoff.is_some())
+    {
+        crate::merge_base::first_parent_commits_with_cutoffs(repo, include[0], need, cutoffs)?
+    } else {
+        commits_reachable_excluding_ancestors_of_cutoffs(
+            repo,
+            include,
+            exclude,
+            Some(need),
+            cutoffs,
+        )?
+    };
     if options.skip > 0 {
         ordered = ordered.into_iter().skip(options.skip).collect();
     }

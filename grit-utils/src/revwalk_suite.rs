@@ -57,9 +57,12 @@ pub fn run_revwalk_suite(
     let worktree = clone_deep_worktree(git, &bare)?;
     let bench_exe = std::env::current_exe().context("grit-bench exe")?;
     let mut scenarios = Vec::new();
-    // Deep-history synthetic commits use small committer timestamps (~50k); keep them all.
-    const SINCE_DEEP_HISTORY: i64 = 50_000;
+    // Committer timestamps are `1 + commit_index` (see `write_deep_history_fast_import`).
+    // Use a cutoff that leaves ~20 commits at the tip so `-n 20` matches grit's Unix `--since`.
+    const SINCE_DEEP_HISTORY: i64 = 49_980;
     const SINCE_LIMIT: &str = "20";
+    // Git parses `--since` as a date string, not a raw Unix seconds integer.
+    const SINCE_GIT: &str = "--since=1970-01-01 13:53:00 +0000";
 
     let env_prefix = cfg.isolated_config.then(isolated_env_prefix);
     for (id_suffix, prepare) in [
@@ -120,7 +123,7 @@ pub fn run_revwalk_suite(
             git_argv: vec![
                 "rev-list".into(),
                 "--count".into(),
-                format!("--since={SINCE_DEEP_HISTORY}"),
+                SINCE_GIT.into(),
                 "-n".into(),
                 SINCE_LIMIT.into(),
                 "HEAD".into(),
