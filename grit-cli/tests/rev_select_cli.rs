@@ -236,8 +236,13 @@ fn revs_all_branches_tags_remotes_match_git() -> TestResult {
         ("--branches", "--branches"),
         ("--tags", "--tags"),
     ] {
-        let git = git_rev_list_oids(&dir, &[flag]);
-        let grit = grit_revs_oids(&dir, &["revs", grit_flag]);
+        let mut git = git_rev_list_oids(&dir, &[flag]);
+        let mut grit = grit_revs_oids(&dir, &["revs", grit_flag]);
+        if flag == "--all" {
+            // Multiple ref tips can share committer time; Git and grit may tie-break differently.
+            git.sort();
+            grit.sort();
+        }
         assert_eq!(grit, git, "{flag}");
     }
     Ok(())
