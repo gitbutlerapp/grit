@@ -37,7 +37,7 @@ pub use index_harness::{
     git_ls_files_verbose_map, grit_skip_worktree_map, seed_multidir_repo,
 };
 pub use merge_harness::{
-    assert_merge_commits_match_git, assert_merge_output_matches_oracle, commit_tree,
+    assert_merge_commits_match_git, assert_merge_output_matches_oracle, commit_tree, empty_tree,
     git_commit_tree, git_hash_object, git_merge_tree_oracle, git_write_blob,
     grit_merge_result_tree, skip_merge_tree_git, CommitMergeLabels, GitMergeTreeOracle,
     GitUnmergedRow,

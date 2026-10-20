@@ -94,7 +94,8 @@
 //! | Feature | Default | Description |
 //! | ------- | ------- | ----------- |
 //! | *(none)* | — | Core library: ODB, refs, index, diff, merge, local transport |
-//! | `http-ureq` | disabled | [`ureq`](https://docs.rs/ureq) HTTP client for smart-HTTP fetch/push |
+//! | `http-ureq` | disabled | [`ureq`](https://docs.rs/ureq) HTTP client for smart-HTTP fetch/push (rustls) |
+//! | `http-ureq-native-tls` | disabled | Platform TLS for `http-ureq` (Secure Transport on macOS); use instead of rustls on Apple targets |
 //!
 //! Enable HTTP in `Cargo.toml`:
 //!
@@ -184,6 +185,7 @@ pub(crate) mod dotfile;
 pub(crate) mod environment;
 pub mod error;
 mod ewah_bitmap;
+pub(crate) mod github_auth;
 pub(crate) mod line_interner;
 pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
@@ -337,6 +339,9 @@ pub use objects::pack_write;
 pub use porcelain::quote_path;
 pub use revwalk::object_inspect;
 pub use worktree::fsmonitor;
+
+#[cfg(feature = "unstable-bench-helpers")]
+pub use pack_receive::{read_sideband_pack_to, PackReceiveTarget};
 
 #[cfg(test)]
 pub(crate) mod hot_path_test_metrics;

@@ -291,8 +291,9 @@ fn worktree_clean_for_switch_paths(
     use crate::index::MODE_GITLINK;
     use crate::parallel::ParallelOp;
     use crate::worktree_scan::{
-        for_each_blob_by_directory, for_each_blob_by_directory_parallel,
-        group_blob_entries_by_dir_for_paths, BlobDiskLookup, WorktreeBlobScanOptions,
+        collect_blob_lookup_batches, for_each_blob_by_directory,
+        group_blob_entries_by_dir_for_paths, visit_blob_lookup_batches, BlobDiskLookup,
+        BlobScanSparseMode, WorktreeBlobScanOptions,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -351,11 +352,12 @@ fn worktree_clean_for_switch_paths(
                 index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
             };
             for_each_blob_by_directory(
+                index,
                 &blob_dirs,
                 dir_abs,
                 file_abs,
                 |_| false,
-                |entry_index, _path, lookup| {
+                |entry_index, lookup| {
                     if !stat_clean {
                         return Ok(());
                     }
@@ -363,8 +365,8 @@ fn worktree_clean_for_switch_paths(
                     match lookup {
                         BlobDiskLookup::Missing => stat_clean = false,
                         BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                        BlobDiskLookup::Present(meta) => {
-                            if !stat_matches_with_policy(ie, &meta, stat_policy) {
+                        BlobDiskLookup::Present(stat) => {
+                            if !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy) {
                                 stat_clean = false;
                             }
                         }
@@ -408,47 +410,50 @@ fn worktree_clean_for_switch_paths(
             index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
         };
         let matches = AtomicBool::new(true);
-        let paths_by_entry_index =
-            crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
-        for_each_blob_by_directory_parallel(
-            &paths_by_entry_index,
+        let guard_batches = collect_blob_lookup_batches(
+            index,
             &blob_dirs,
             blob_scan,
             &Default::default(),
             config.as_deref().unwrap_or(&ConfigSet::new()),
             false,
+            None,
             dir_abs,
             file_abs,
             |_| false,
-            |entry_index, _path, lookup| {
-                if !matches.load(Ordering::Relaxed) {
-                    return Ok(());
+            BlobScanSparseMode::WorktreeGuard { stat_policy },
+        )?;
+        visit_blob_lookup_batches(guard_batches, |entry_index, lookup| {
+            if !matches.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let ie = &index.entries[entry_index];
+            if !indexed_path_needs_worktree_stat_check(ie) {
+                return Ok(());
+            }
+            match lookup {
+                BlobDiskLookup::Missing => {
+                    matches.store(false, Ordering::Relaxed);
                 }
-                let ie = &index.entries[entry_index];
-                if !indexed_path_needs_worktree_stat_check(ie) {
-                    return Ok(());
-                }
-                match lookup {
-                    BlobDiskLookup::Missing => {
+                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+                BlobDiskLookup::Present(stat) => {
+                    let mismatch = if ie.mode == MODE_GITLINK {
+                        !stat.is_dir
+                    } else if stat.git_mode != crate::index::MODE_SYMLINK
+                        && stat.git_mode != crate::index::MODE_REGULAR
+                        && stat.git_mode != crate::index::MODE_EXECUTABLE
+                    {
+                        true
+                    } else {
+                        !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy)
+                    };
+                    if mismatch {
                         matches.store(false, Ordering::Relaxed);
                     }
-                    BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                    BlobDiskLookup::Present(meta) => {
-                        let mismatch = if ie.mode == MODE_GITLINK {
-                            !meta.is_dir()
-                        } else if !meta.is_file() && !meta.is_symlink() {
-                            true
-                        } else {
-                            !stat_matches_with_policy(ie, &meta, stat_policy)
-                        };
-                        if mismatch {
-                            matches.store(false, Ordering::Relaxed);
-                        }
-                    }
                 }
-                Ok(())
-            },
-        )?;
+            }
+            Ok(())
+        })?;
         stat_clean = matches.load(Ordering::Relaxed);
     }
     if !stat_clean {
@@ -529,7 +534,7 @@ fn head_tree_sides_from_changes(tree_changes: &[DiffEntry]) -> HashMap<String, H
     map
 }
 
-fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String> {
+pub(crate) fn paths_touched_by_tree_changes(tree_changes: &[DiffEntry]) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
     for change in tree_changes {
         if let Some(path) = &change.old_path {
@@ -1438,14 +1443,26 @@ pub fn prepare_tree_checkout(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> Result<()> {
-    let mut snapshot = load_worktree_snapshot(repo)?;
     let tree_changes = diff_trees(repo.odb(), from_tree, Some(to_tree), "")?;
+    prepare_tree_checkout_with_changes(repo, &tree_changes)
+}
+
+/// Untracked guard for a precomputed tree-to-tree diff (avoids a second full-tree diff).
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when an untracked path would be overwritten.
+pub(crate) fn prepare_tree_checkout_with_changes(
+    repo: &Repository,
+    tree_changes: &[DiffEntry],
+) -> Result<()> {
+    let mut snapshot = load_worktree_snapshot(repo)?;
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let untracked =
-        collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, &tree_changes)?;
-    ensure_no_untracked_overwrite(&untracked, &tree_changes)
+        collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, tree_changes)?;
+    ensure_no_untracked_overwrite(&untracked, tree_changes)
 }
 
 #[cfg(test)]

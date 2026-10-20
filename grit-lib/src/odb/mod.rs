@@ -22,6 +22,7 @@
 //! Custom primary store — see [`OdbBuilder`] and [`crate::repo::RepositoryBuilder`].
 
 pub mod builder;
+mod peel;
 pub mod store;
 
 #[doc(inline)]
@@ -390,6 +391,7 @@ impl Odb {
         state: crate::repo::RepositoryConfigSnapshot,
         env: Arc<crate::environment::Environment>,
     ) -> Self {
+        self.pack_store.set_repo_caches(Arc::clone(&state));
         self.shared_config_state = Some(state);
         self.shared_environment = Some(env);
         self
@@ -1306,7 +1308,7 @@ impl Odb {
                 return false;
             };
             for idx in &indexes {
-                if idx.contains(oid) {
+                if idx.contains(oid).unwrap_or(false) {
                     return self.freshen_pack_once(&idx.pack_path, idx.is_cruft);
                 }
             }
@@ -2049,8 +2051,16 @@ fn append_lookup_prefix_layer(
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
 ) -> Result<()> {
+    if limit != 0 && out.len() >= limit {
+        return Ok(());
+    }
+    let sub_limit = if limit == 0 {
+        0
+    } else {
+        limit.saturating_sub(out.len())
+    };
     let mut scratch = Vec::new();
-    store.lookup_prefix(prefix, 0, &mut scratch)?;
+    store.lookup_prefix(prefix, sub_limit, &mut scratch)?;
     for oid in scratch {
         if seen.insert(oid) {
             out.push(oid);

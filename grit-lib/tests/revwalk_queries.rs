@@ -627,6 +627,61 @@ fn since_skew_bounded_limit_match_git() {
 }
 
 #[test]
+fn left_right_counts_since_and_limit_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let old = support::commit_labeled_with_dates(
+        wt,
+        "root",
+        &[],
+        "@1000000000 +0000",
+        "@1000000000 +0000",
+    );
+    let main_mid = support::commit_labeled_with_dates(
+        wt,
+        "main-mid",
+        &[old],
+        "@1500000000 +0000",
+        "@1500000000 +0000",
+    );
+    let main_tip = support::commit_labeled_with_dates(
+        wt,
+        "main-tip",
+        &[main_mid],
+        "@2000000000 +0000",
+        "@2000000000 +0000",
+    );
+    git(wt, &["update-ref", "refs/heads/main", &main_tip.to_hex()]);
+    git(wt, &["branch", "side", &main_mid.to_hex()]);
+    git(wt, &["checkout", "side"]);
+    let side_tip = support::commit_labeled_with_dates(
+        wt,
+        "side-tip",
+        &[main_mid],
+        "@2500000000 +0000",
+        "@2500000000 +0000",
+    );
+    git(wt, &["update-ref", "refs/heads/side", &side_tip.to_hex()]);
+    git(wt, &["checkout", "main"]);
+    let repo = open_grit(wt);
+    let walk = repo.rev_walk();
+    let token = "main...side";
+    let git_args = [token, "--since=1500000000", "-n", "2"];
+    let git_counts = git_rev_list_left_right_count(wt, &git_args);
+    let grit_counts = walk
+        .left_right_counts(
+            &[token],
+            &RevWalkListOptions {
+                since: Some(1_500_000_000),
+                limit: Some(2),
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("left/right counts with since and -n");
+    assert_eq!(grit_counts, git_counts);
+}
+
+#[test]
 fn left_right_counts_limit_one_match_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

@@ -215,7 +215,7 @@ fn assert_t5303_chain_metadata(fx: &T5303Pack) {
         if oid == fx.blob1 {
             continue;
         }
-        let off = entry.offset();
+        let off = entry.offset().expect("index offset");
         let dep = read_packed_delta_dependency(&pack_bytes, off, 20)
             .expect("dep parse")
             .expect("delta");
@@ -278,7 +278,10 @@ fn t5303_corrupt_first_object_data_then_recover_via_loose() {
         let fx = T5303Pack::build_ofs(algo);
         let idx = grit_lib::objects::pack::read_pack_index(&fx.pack_path.with_extension("idx"))
             .expect("idx");
-        let off1 = idx.find_offset(&fx.blob1).expect("blob1 off");
+        let off1 = idx
+            .find_offset(&fx.blob1)
+            .expect("lookup")
+            .expect("blob1 off");
         flip_byte_at(&fx.pack_path, off1 + 4).expect("corrupt blob1 zlib payload");
         clear_pack_cache();
         let odb = odb_at(&fx.objects());
@@ -304,7 +307,10 @@ fn t5303_corrupt_first_delta_zlib_then_recover_via_loose() {
             let idx = grit_lib::objects::pack::read_pack_index(&fx.pack_path.with_extension("idx"))
                 .expect("idx");
             let pack = std::fs::read(&fx.pack_path).expect("read pack");
-            let off2 = idx.find_offset(&fx.blob2).expect("blob2 off");
+            let off2 = idx
+                .find_offset(&fx.blob2)
+                .expect("lookup")
+                .expect("blob2 off");
             let zlib = delta_zlib_payload_offset(&pack, off2);
             flip_byte_at(&fx.pack_path, zlib + 2).expect("corrupt delta zlib");
             clear_pack_cache();
@@ -330,7 +336,10 @@ fn t5303_corrupt_ref_delta_base_oid_then_recover() {
         let idx = grit_lib::objects::pack::read_pack_index(&fx.pack_path.with_extension("idx"))
             .expect("idx");
         let pack = std::fs::read(&fx.pack_path).expect("read pack");
-        let off3 = idx.find_offset(&fx.blob3).expect("blob3 off");
+        let off3 = idx
+            .find_offset(&fx.blob3)
+            .expect("lookup")
+            .expect("blob3 off");
         let base_oid_off = ref_delta_base_oid_offset(&pack, off3);
         flip_byte_at(&fx.pack_path, base_oid_off).expect("flip ref base oid byte");
         flip_byte_at(&fx.pack_path, base_oid_off + 1).expect("flip ref base oid byte 2");
@@ -354,9 +363,13 @@ fn t5303_corrupt_first_delta_header_then_recover_partial_via_loose_blob2() {
         let fx = T5303Pack::build_ofs(algo);
         let idx = grit_lib::objects::pack::read_pack_index(&fx.pack_path.with_extension("idx"))
             .expect("idx");
-        let off2 = idx.find_offset(&fx.blob2).expect("blob2 off");
+        let off2 = idx
+            .find_offset(&fx.blob2)
+            .expect("lookup")
+            .expect("blob2 off");
         let end3 = idx
             .find_offset(&fx.blob3)
+            .expect("lookup")
             .map(|o| o as usize)
             .unwrap_or_else(|| std::fs::metadata(&fx.pack_path).unwrap().len() as usize - 20);
         for pos in (off2 as usize)..end3.min((off2 as usize) + 64) {
@@ -382,7 +395,10 @@ fn t5303_corrupt_ofs_delta_distance_variants_then_recover() {
             let idx = grit_lib::objects::pack::read_pack_index(&fx.pack_path.with_extension("idx"))
                 .expect("idx");
             let pack = std::fs::read(&fx.pack_path).expect("read pack");
-            let off2 = idx.find_offset(&fx.blob2).expect("blob2 off");
+            let off2 = idx
+                .find_offset(&fx.blob2)
+                .expect("lookup")
+                .expect("blob2 off");
             let dist = ofs_delta_distance_offset(&pack, off2);
             if byte == 0 {
                 flip_byte_at(&fx.pack_path, dist).expect("corrupt ofs distance");
@@ -425,7 +441,10 @@ fn t5303_corrupt_delta_base_to_wrong_object_then_recover_via_loose() {
         let idx = grit_lib::objects::pack::read_pack_index(&fx.pack_path.with_extension("idx"))
             .expect("idx");
         let pack = std::fs::read(&fx.pack_path).expect("read pack");
-        let off3 = idx.find_offset(&fx.blob3).expect("blob3 off");
+        let off3 = idx
+            .find_offset(&fx.blob3)
+            .expect("lookup")
+            .expect("blob3 off");
         let dist = ofs_delta_distance_offset(&pack, off3);
         overwrite_range(&fx.pack_path, dist, &[0x20, 0x33]).expect("wrong base ofs");
         clear_pack_cache();
@@ -470,7 +489,7 @@ fn t5303_redundant_pack_recovers_when_primary_corrupt() {
 
         let idx =
             grit_lib::objects::pack::read_pack_index(&primary.with_extension("idx")).expect("idx");
-        let off2 = idx.find_offset(&fx.blob2).expect("off2");
+        let off2 = idx.find_offset(&fx.blob2).expect("lookup").expect("off2");
         flip_byte_at(&primary, off2).expect("break primary delta");
         clear_pack_cache();
 

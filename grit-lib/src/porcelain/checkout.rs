@@ -467,6 +467,8 @@ pub(crate) struct CheckoutApplyOptions {
     pub skip_bulk_checkout_fast_path: bool,
     /// When set, the index should match this tree after checkout (updates cache-tree root).
     pub checkout_result_tree: Option<crate::objects::ObjectId>,
+    /// Apply checkout to the worktree but defer index disk writes until the caller finishes.
+    pub defer_index_disk_write: bool,
 }
 
 /// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk.
@@ -869,6 +871,7 @@ fn remove_wholesale_directories_on_disk(
     Ok(wholesale_dirs_removed)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn checkout_commit_index_update(
     repo: &Repository,
     index_mut: &mut Index,
@@ -877,6 +880,7 @@ fn checkout_commit_index_update(
     new_entries: Vec<IndexEntry>,
     bulk_index_rewrite: bool,
     checkout_result_tree: Option<crate::objects::ObjectId>,
+    defer_index_disk_write: bool,
 ) -> Result<()> {
     let change_count = paths_to_remove.len() + new_entries.len();
     let pre_mtime_max = crate::index::stage0_mtime_max(&index_mut.entries);
@@ -919,6 +923,9 @@ fn checkout_commit_index_update(
         }
     }
     index_mut.defer_untracked_cache_invalidation = false;
+    if defer_index_disk_write {
+        return Ok(());
+    }
     index_mut.suppress_pre_write_index_housekeeping = bulk_index_rewrite;
     index_mut.skip_racy_smudge_on_write = true;
     let result = repo.write_index_with_post_index_change(index_mut, true, false);
@@ -1087,6 +1094,7 @@ fn checkout_bulk_added_tree_changes(
         new_entries,
         true,
         apply.checkout_result_tree,
+        apply.defer_index_disk_write,
     )?;
     progress.finish();
     Ok(())
@@ -1277,6 +1285,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         new_entries,
         true,
         apply.checkout_result_tree,
+        apply.defer_index_disk_write,
     )?;
     progress.finish();
     Ok(())
@@ -1292,7 +1301,7 @@ fn checkout_bulk_deleted_tree_changes(
     wholesale_dirs_removed: &BTreeSet<String>,
     deleted_abs_paths: &mut Vec<PathBuf>,
     progress: &mut dyn ProgressSink,
-    checkout_result_tree: Option<crate::objects::ObjectId>,
+    apply: &CheckoutApplyOptions,
 ) -> Result<()> {
     let mut parallel_deleted_paths: HashSet<String> = HashSet::new();
     let mut per_file_deletes: Vec<String> = Vec::new();
@@ -1362,7 +1371,8 @@ fn checkout_bulk_deleted_tree_changes(
         &paths_to_remove,
         Vec::new(),
         true,
-        checkout_result_tree,
+        apply.checkout_result_tree,
+        apply.defer_index_disk_write,
     )?;
     progress.finish();
     Ok(())
@@ -1517,7 +1527,7 @@ fn checkout_tree_changes_with_progress(
                 &wholesale_dirs_removed,
                 &mut deleted_abs_paths,
                 progress,
-                apply.checkout_result_tree,
+                &apply,
             );
         }
     }
@@ -1836,6 +1846,7 @@ fn checkout_tree_changes_with_progress(
         new_entries,
         bulk_index_rewrite,
         apply.checkout_result_tree,
+        apply.defer_index_disk_write,
     )?;
     progress.finish();
     Ok(())
@@ -3261,6 +3272,7 @@ mod tests {
                 wholesale_safety_precomputed: true,
                 skip_bulk_checkout_fast_path: false,
                 checkout_result_tree: None,
+                defer_index_disk_write: false,
             },
             None,
         )
@@ -3340,6 +3352,7 @@ mod tests {
                 wholesale_safety_precomputed: true,
                 skip_bulk_checkout_fast_path: false,
                 checkout_result_tree: None,
+                defer_index_disk_write: false,
             },
             None,
         )

@@ -3,7 +3,7 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::error::Result;
-use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::refs;
 use crate::repo::Repository;
 
@@ -32,26 +32,13 @@ fn commit_closure_from_all_refs(repo: &Repository) -> Result<HashSet<ObjectId>> 
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
 
     for oid in seeds {
-        let obj = match repo.odb().read(&oid) {
-            Ok(o) => o,
-            Err(_) => continue,
-        };
-        match obj.kind {
-            ObjectKind::Commit => {
-                if seen.insert(oid) {
-                    queue.push_back(oid);
-                }
+        if repo.odb().read_info(&oid).is_err() {
+            continue;
+        }
+        if let Some(commit) = repo.odb().peel_to_commit(oid)? {
+            if seen.insert(commit) {
+                queue.push_back(commit);
             }
-            ObjectKind::Tag => {
-                if let Some(target) = peel_tag_to_object(repo, &obj.data)? {
-                    if let Ok(tobj) = repo.odb().read(&target) {
-                        if tobj.kind == ObjectKind::Commit && seen.insert(target) {
-                            queue.push_back(target);
-                        }
-                    }
-                }
-            }
-            _ => {}
         }
     }
 
@@ -69,21 +56,6 @@ fn commit_closure_from_all_refs(repo: &Repository) -> Result<HashSet<ObjectId>> 
     }
 
     Ok(seen)
-}
-
-fn peel_tag_to_object(repo: &Repository, tag_data: &[u8]) -> Result<Option<ObjectId>> {
-    let tag = parse_tag(tag_data)?;
-    let mut oid = tag.object;
-    loop {
-        let obj = repo.odb().read(&oid)?;
-        match obj.kind {
-            ObjectKind::Tag => {
-                let inner = parse_tag(&obj.data)?;
-                oid = inner.object;
-            }
-            _ => return Ok(Some(oid)),
-        }
-    }
 }
 
 /// Returns whether every bundle prerequisite commit is already reachable from existing refs.

@@ -402,19 +402,13 @@ impl ObjectStore for FilesSource {
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
         let prefix_norm = super::normalize_oid_prefix(prefix, self.hash_algo())?;
         let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
-        PackStore::with_context(self.packs.pack_store().clone(), || {
-            if self.use_midx {
-                merge_prefix_matches(&self.midx, prefix_norm.as_str(), limit, out, &mut seen)?;
-                if limit != 0 && out.len() >= limit {
-                    return Ok(());
-                }
-            }
-            merge_prefix_matches(&self.packs, prefix_norm.as_str(), limit, out, &mut seen)?;
-            if limit != 0 && out.len() >= limit {
-                return Ok(());
-            }
-            merge_prefix_matches(&self.loose, prefix_norm.as_str(), limit, out, &mut seen)
-        })
+        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+            files_lookup_prefix_layers(self, prefix_norm.as_str(), limit, out, &mut seen)
+        } else {
+            PackStore::with_context(self.packs.pack_store().clone(), || {
+                files_lookup_prefix_layers(self, prefix_norm.as_str(), limit, out, &mut seen)
+            })
+        }
     }
 
     fn refresh(&self) -> Result<bool> {
@@ -457,6 +451,26 @@ fn pack_directory_has_index_files(objects_dir: &Path) -> bool {
         .any(|ent| ent.path().extension().is_some_and(|ext| ext == "idx"))
 }
 
+fn files_lookup_prefix_layers(
+    src: &FilesSource,
+    prefix: &str,
+    limit: usize,
+    out: &mut Vec<ObjectId>,
+    seen: &mut HashSet<ObjectId>,
+) -> Result<()> {
+    if src.use_midx {
+        merge_prefix_matches(&src.midx, prefix, limit, out, seen)?;
+        if limit != 0 && out.len() >= limit {
+            return Ok(());
+        }
+    }
+    merge_prefix_matches(&src.packs, prefix, limit, out, seen)?;
+    if limit != 0 && out.len() >= limit {
+        return Ok(());
+    }
+    merge_prefix_matches(&src.loose, prefix, limit, out, seen)
+}
+
 fn merge_prefix_matches(
     store: &dyn ObjectStore,
     prefix: &str,
@@ -464,13 +478,23 @@ fn merge_prefix_matches(
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
 ) -> Result<()> {
-    store.for_each_object(&mut |oid| {
-        if super::oid_hex_has_prefix(oid, prefix) && seen.insert(*oid) {
-            out.push(*oid);
+    if limit != 0 && out.len() >= limit {
+        return Ok(());
+    }
+    let sub_limit = if limit == 0 {
+        0
+    } else {
+        limit.saturating_sub(out.len())
+    };
+    let mut scratch = Vec::new();
+    store.lookup_prefix(prefix, sub_limit, &mut scratch)?;
+    for oid in scratch {
+        if seen.insert(oid) {
+            out.push(oid);
             if limit != 0 && out.len() >= limit {
-                return ControlFlow::Break(());
+                return Ok(());
             }
         }
-        ControlFlow::Continue(())
-    })
+    }
+    Ok(())
 }

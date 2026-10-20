@@ -815,6 +815,9 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             retention,
         )?;
 
+        // Drop cached pack/index mmaps before deleting superseded pack artifacts (Windows).
+        odb.invalidate_packs();
+
         report.packs_removed = if opts.incremental {
             0
         } else {
@@ -823,8 +826,6 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
 
         prune_packed_loose =
             prune_packed_objects(objects_dir, PrunePackedOptions::default())?.len();
-
-        odb.invalidate_packs();
 
         if opts.write_commit_graph {
             write_commit_graph(repo, &CommitGraphOptions::with_changed_paths(true))?;
@@ -1825,9 +1826,11 @@ mod tests {
             t.prune_ms, stats.repack.unreachable_prune_ms,
             "prune_ms must track unreachable loose prune inside repack, not repack_ms"
         );
+        // Cached ref/config paths can finish pack-refs or commit-graph in under 1 ms (0 in
+        // millisecond buckets). Require repack timing plus evidence the other phases ran.
         assert!(
-            t.reflog_ms > 0 || t.pack_refs_ms > 0 || t.commit_graph_ms > 0,
-            "full gc must report more than one timed phase bucket, got {t:?}"
+            t.repack_ms > 0 && stats.pack_refs.is_some() && stats.commit_graph.is_some(),
+            "full gc must time repack and run pack-refs + commit-graph, got {t:?}"
         );
         assert!(stats.prune_ran, "full gc should run unreachable prune");
     }

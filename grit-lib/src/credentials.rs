@@ -296,6 +296,19 @@ impl HelperCredentialProvider {
         self
     }
 
+    /// The `credential.helper` programs this provider runs for `cred`, in the
+    /// order [`fill`](CredentialProvider::fill),
+    /// [`approve`](CredentialProvider::approve) and
+    /// [`reject`](CredentialProvider::reject) invoke them.
+    ///
+    /// Includes `credential.<url>.helper` entries whose URL pattern matches
+    /// [`Credential::target_url`]; an empty value resets the list, as in Git.
+    /// An empty result means storing `cred` would be a no-op.
+    #[must_use]
+    pub fn helpers_for(&self, cred: &Credential) -> Vec<String> {
+        self.helpers(cred.target_url().as_deref())
+    }
+
     /// The ordered helper list applicable to `target_url`.
     fn helpers(&self, target_url: Option<&str>) -> Vec<String> {
         credential_helpers(&self.config, target_url)

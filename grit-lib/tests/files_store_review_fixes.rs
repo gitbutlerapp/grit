@@ -526,3 +526,73 @@ fn files_store_observes_new_packed_refs_file_without_reopen() {
         Some(RawRef::Direct(oid))
     );
 }
+
+#[test]
+fn files_store_oid_prepare_abort_lists_all_packed_refs() {
+    let (_dir, git_dir) = bare_git_dir();
+    let oid = sample_oid();
+    let oid2 = other_oid();
+    let mut packed = String::from("# pack-refs with: peeled fully-peeled sorted\n");
+    for name in ["alpha", "beta", "gamma"] {
+        packed.push_str(&format!("{oid} refs/heads/{name}\n"));
+    }
+    fs::write(git_dir.join("packed-refs"), &packed).expect("packed-refs");
+
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
+    let txn = RefTransaction::new()
+        .update(RefUpdate {
+            name: "refs/heads/alpha".to_owned(),
+            new_value: Some(RawRef::Direct(oid2)),
+            expected: Expected::Oid(oid),
+            reflog: None,
+            flags: Default::default(),
+        })
+        .expect("txn");
+    store.prepare(txn).expect("prepare").abort().expect("abort");
+
+    let mut names = Vec::new();
+    store
+        .for_each_ref("refs/heads/", &mut |entry| {
+            names.push(entry.name.clone());
+            ControlFlow::Continue(())
+        })
+        .expect("for_each");
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            "refs/heads/alpha".to_owned(),
+            "refs/heads/beta".to_owned(),
+            "refs/heads/gamma".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn files_store_sees_external_packed_refs_rewrite() {
+    let (_dir, git_dir) = bare_git_dir();
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
+    let oid1 = sample_oid();
+    let oid2 = other_oid();
+    fs::write(
+        git_dir.join("packed-refs"),
+        format!("# pack-refs with: peeled fully-peeled sorted\n{oid1} refs/heads/main\n"),
+    )
+    .expect("packed v1");
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("main"),
+        Some(RawRef::Direct(oid1))
+    );
+
+    fs::write(
+        git_dir.join("packed-refs"),
+        format!(
+            "# pack-refs with: peeled fully-peeled sorted\n{oid1} refs/heads/main\n{oid2} refs/heads/other\n"
+        ),
+    )
+    .expect("packed v2");
+    assert_eq!(
+        store.read_raw("refs/heads/other").expect("other"),
+        Some(RawRef::Direct(oid2))
+    );
+}

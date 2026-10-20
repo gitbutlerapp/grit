@@ -12,9 +12,9 @@ use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
     lock_path_for_ref, loose_ref_list_walk_root, prune_empty_loose_ref_parents,
-    read_packed_refs_map, read_packed_refs_map_for_names, read_packed_refs_map_for_prefix,
-    read_ref_file, remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock,
-    LogRefsConfig, Ref,
+    read_packed_refs_file_view, read_packed_refs_map_for_prefix, read_ref_file,
+    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, LogRefsConfig,
+    Ref,
 };
 
 use super::apply::{
@@ -56,7 +56,7 @@ pub struct FilesRefStore {
     prepared: Mutex<Option<PreparedFilesBatch>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PackedRefsStamp {
     len: u64,
     modified: Option<std::time::SystemTime>,
@@ -66,7 +66,10 @@ struct PackedRefsStamp {
 struct PackedCacheEntry {
     stamp: PackedRefsStamp,
     loaded: bool,
-    map: BTreeMap<String, ObjectId>,
+    file: Option<crate::refs::PackedRefsFileView>,
+    /// Full packed-refs map; only valid when [`Self::map_is_complete`].
+    map: Option<BTreeMap<String, ObjectId>>,
+    map_is_complete: bool,
 }
 
 #[derive(Debug)]
@@ -96,7 +99,9 @@ impl FilesRefStore {
             packed_cache: Mutex::new(PackedCacheEntry {
                 stamp,
                 loaded: false,
-                map: BTreeMap::new(),
+                file: None,
+                map: None,
+                map_is_complete: false,
             }),
             prepared: Mutex::new(None),
         }
@@ -128,39 +133,64 @@ impl FilesRefStore {
         }
     }
 
+    fn invalidate_packed_cache_after_write(&self) {
+        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        guard.map = None;
+        guard.map_is_complete = false;
+    }
+
     fn refresh_packed_cache_if_stale(&self) -> Result<()> {
         let path = super::paths::packed_refs_path(&self.common_dir);
-        let stamp = Self::packed_refs_stamp(&path);
         let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let stamp = Self::packed_refs_stamp(&path);
         if guard.loaded && guard.stamp == stamp {
             return Ok(());
         }
-        guard.map = read_packed_refs_map(&self.common_dir)?
-            .into_iter()
-            .collect();
+        guard.file = read_packed_refs_file_view(&self.common_dir)?;
+        guard.map = None;
+        guard.map_is_complete = false;
         guard.stamp = stamp;
         guard.loaded = true;
         Ok(())
     }
 
-    /// Merge packed entries for `names` into the cache without dropping other cached lines.
+    fn ensure_full_packed_map(&self) -> Result<()> {
+        self.refresh_packed_cache_if_stale()?;
+        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.map.is_some() && guard.map_is_complete {
+            return Ok(());
+        }
+        let map = if let Some(ref file) = guard.file {
+            let path = super::paths::packed_refs_path(&self.common_dir);
+            crate::refs::parse_packed_refs_to_map(&path, file.data())?;
+            file.map_for_prefix(&path, None)?
+                .into_iter()
+                .collect::<BTreeMap<_, _>>()
+        } else {
+            BTreeMap::new()
+        };
+        guard.map = Some(map);
+        guard.map_is_complete = true;
+        Ok(())
+    }
+
+    fn lookup_packed_oid(&self, storage_name: &str) -> Result<Option<ObjectId>> {
+        self.refresh_packed_cache_if_stale()?;
+        let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(ref file) = guard.file else {
+            return Ok(None);
+        };
+        let path = super::paths::packed_refs_path(&self.common_dir);
+        file.lookup_oid(&path, storage_name)
+    }
+
+    /// Ensure the indexed file view is loaded before a CAS-only prepare batch.
     fn refresh_packed_cache_merge_names(&self, names: &HashSet<String>) -> Result<()> {
         if names.is_empty() {
             return Ok(());
         }
-        let path = super::paths::packed_refs_path(&self.common_dir);
-        let stamp = Self::packed_refs_stamp(&path);
-        let partial = read_packed_refs_map_for_names(&self.common_dir, names)?;
-        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-        if !guard.loaded || guard.stamp != stamp {
-            guard.map.clear();
-            guard.stamp = stamp;
-            guard.loaded = true;
-        }
-        for (storage, oid) in partial {
-            guard.map.insert(storage, oid);
-        }
-        Ok(())
+        let _ = names;
+        self.refresh_packed_cache_if_stale()
     }
 
     fn batch_may_create_ref(&self, updates: &[RefUpdate]) -> Result<bool> {
@@ -241,10 +271,8 @@ impl FilesRefStore {
             Err(Error::Io(ref e)) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
-        self.refresh_packed_cache_if_stale()?;
-        let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(oid) = cache.map.get(&route.storage_name) {
-            return Ok(Some(RawRef::Direct(*oid)));
+        if let Some(oid) = self.lookup_packed_oid(&route.storage_name)? {
+            return Ok(Some(RawRef::Direct(oid)));
         }
         Ok(None)
     }
@@ -273,14 +301,16 @@ impl FilesRefStore {
         let logical_prefix = logical_prefix.trim_end_matches('/');
         let mut map: BTreeMap<String, RawRef> = BTreeMap::new();
         if logical_prefix.is_empty() {
-            self.refresh_packed_cache_if_stale()?;
+            self.ensure_full_packed_map()?;
             let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-            for (storage, oid) in cache.map.iter() {
-                if !self.packed_storage_visible(storage) {
-                    continue;
+            if let Some(packed) = cache.map.as_ref() {
+                for (storage, oid) in packed.iter() {
+                    if !self.packed_storage_visible(storage) {
+                        continue;
+                    }
+                    let logical = self.logical_name(storage);
+                    map.insert(logical, RawRef::Direct(*oid));
                 }
-                let logical = self.logical_name(storage);
-                map.insert(logical, RawRef::Direct(*oid));
             }
             drop(cache);
         } else {
@@ -409,14 +439,12 @@ impl FilesRefStore {
     }
 
     fn needs_packed_lock(&self, updates: &[RefUpdate]) -> bool {
-        if self.refresh_packed_cache_if_stale().is_err() {
-            return false;
-        }
-        let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
         updates.iter().any(|u| {
-            u.new_value.is_none()
-                && !u.flags.log_only
-                && cache.map.contains_key(&self.route(&u.name).storage_name)
+            if u.new_value.is_some() || u.flags.log_only {
+                return false;
+            }
+            let storage = self.route(&u.name).storage_name;
+            self.lookup_packed_oid(&storage).ok().flatten().is_some()
         })
     }
 
@@ -725,7 +753,7 @@ impl FilesRefStore {
             }
             self.persist_one_ref_name(name, after, packed_lock_held, &mut persisted_refs)?;
         }
-        let _ = self.refresh_packed_cache_if_stale();
+        self.invalidate_packed_cache_after_write();
         Ok(())
     }
 }
@@ -1012,6 +1040,8 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
             return Ok(());
         };
 
+        self.store.invalidate_packed_cache_after_write();
+
         let packed_lock_held = batch.packed_lock.is_some();
 
         for lock in batch.ref_locks.values() {
@@ -1047,6 +1077,7 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
         if let Some(batch) = guard.take() {
             FilesRefStore::release_locks(&batch);
         }
+        self.store.invalidate_packed_cache_after_write();
         self.committed = true;
         Ok(())
     }
@@ -1062,6 +1093,7 @@ impl Drop for FilesPrepared<'_> {
                 FilesRefStore::release_locks(&batch);
             }
         }
+        self.store.invalidate_packed_cache_after_write();
     }
 }
 

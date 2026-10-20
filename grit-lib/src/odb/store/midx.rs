@@ -195,7 +195,9 @@ impl ObjectStore for MidxObjects {
 fn classify_midx_status(objects_dir: &std::path::Path) -> Result<MidxObjectsStatus> {
     match prepared_midx_chain_strict(objects_dir) {
         Ok(Some(_)) => Ok(MidxObjectsStatus::Active),
-        Ok(None) | Err(Error::Midx(_)) => Ok(MidxObjectsStatus::Unusable),
+        Ok(None) | Err(Error::Midx(_)) | Err(Error::CorruptObject(_)) => {
+            Ok(MidxObjectsStatus::Unusable)
+        }
         Err(err) => Err(err),
     }
 }

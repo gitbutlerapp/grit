@@ -19,6 +19,7 @@ use crate::porcelain::commit::{create_commit, CommitRequest};
 use crate::progress::NullProgress;
 use crate::repo::{init_repository, Repository};
 use crate::write_tree::{cache_tree_update, write_tree_update_index, WriteTreeFlags};
+use grit_test_support::heavy_disk_serial_guard;
 
 const INDEX_MTIME: (u32, u32) = (1_700_000_000, 123_456_789);
 const LARGE_INDEX_ENTRIES: usize = 10_000;
@@ -331,6 +332,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
 
 #[test]
 fn stage_one_modified_file_hashes_one_blob() {
+    let _disk = heavy_disk_serial_guard();
     let tmp = TempDir::new().unwrap();
     let repo = init_repository(
         tmp.path(),
@@ -374,6 +376,7 @@ fn stage_one_modified_file_hashes_one_blob() {
 
 #[test]
 fn pack_signature_not_restatted_per_object() {
+    let _disk = heavy_disk_serial_guard();
     let tmp = TempDir::new().unwrap();
     let repo = init_repository(
         tmp.path(),

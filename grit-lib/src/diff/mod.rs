@@ -13,16 +13,46 @@
 //! # }
 //! ```
 mod core;
+mod filter;
 pub mod handle;
+mod has_changes;
+mod no_index;
+mod options;
 mod patch_log;
+mod targets;
 mod tree_content;
 mod unified_emit;
+mod whitespace_mode;
 
 pub use core::*;
+pub use filter::{DiffFilter, InvalidDiffFilter};
 pub use handle::Diff;
+pub use has_changes::{
+    text_sides_differ, HAS_CHANGES_CALL_COUNT, WORKTREE_HAS_CHANGES_ENTRIES_SCANNED,
+};
+pub use no_index::{diff_paths, NoIndexError};
+pub use options::{
+    renames_from_config, DiffAlgorithm, DiffOptions, RenameDetection, UnknownDiffAlgorithm,
+    RENAME_DETECTION_DISABLED, WORD_LEVEL_INLINE_MAX_CHANGED_FILES,
+};
+pub use whitespace_mode::{normalize_ignore_space_change_line, WhitespaceMode};
+
+/// Unified hunk bodies (`@@` …) for two text sides using [`DiffOptions`].
+#[must_use]
+pub fn line_diff_unified_hunk_body(
+    old_content: &str,
+    new_content: &str,
+    options: &DiffOptions,
+) -> String {
+    core::unified_hunk_body_for_diff_options(old_content, new_content, options)
+}
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
-    write_diff_entry_log_patch, LogPatchCommitHeader, LogPatchDiffOptions, LogPatchOptions,
+    write_diff_entry_log_patch, write_patch, write_patch_resolved, write_patch_structured,
+    LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchTextOptions,
+};
+pub use targets::{
+    resolve_diff_arguments, DiffArguments, DiffTarget, FileDiff, ResolveDiffArgumentsError,
 };
 pub use tree_content::{
     tree_diff_contents_parallel, tree_diff_structured_parallel, TreeDiffContent, TreeDiffStructured,

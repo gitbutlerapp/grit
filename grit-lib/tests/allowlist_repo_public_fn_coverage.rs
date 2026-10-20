@@ -158,7 +158,7 @@ fn bundle_pack_odb_and_midx_paths() {
         .expect("idx");
     let idx = read_pack_index(&idx_path).expect("read idx");
     let pack_bytes = fs::read(&ingested.pack_path).expect("read pack");
-    if let Some(off) = idx.find_offset(&blob) {
+    if let Some(off) = idx.find_offset(&blob).expect("lookup") {
         let _ = read_object_from_pack_at_offset(&idx, off).expect("read at off");
         let _ = slice_one_pack_object(&pack_bytes, off, idx.hash_bytes());
     }

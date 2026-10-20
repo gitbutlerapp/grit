@@ -577,7 +577,7 @@ fn grit_idx_rev_bytes(
     }
     let idx_bytes = std::fs::read(&idx_path).expect("read idx");
     let index = read_pack_index(&idx_path).expect("parse idx");
-    let offsets: Vec<u64> = index.iter().map(|e| e.offset()).collect();
+    let offsets: Vec<u64> = index.iter().map(|e| e.offset().expect("offset")).collect();
     let rev_bytes = build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, trailer);
     (idx_bytes, rev_bytes)
 }
@@ -1249,9 +1249,12 @@ fn pack_rev_fsck_messages_cover_header_and_body_errors() {
         .iter()
         .any(|m| m.contains("invalid checksum")));
 
-    let _ = build_pack_rev_bytes(&index);
+    let _ = build_pack_rev_bytes(&index).expect("rev bytes");
     let _ = build_pack_rev_bytes_from_index_order_offsets(
-        &index.iter().map(|e| e.offset()).collect::<Vec<_>>(),
+        &index
+            .iter()
+            .map(|e| e.offset().expect("offset"))
+            .collect::<Vec<_>>(),
     );
     assert!(hashfile_checksum_valid_sha1(&git_rev));
     std::fs::write(rev_path_for_index(&idx_path), &git_rev).expect("write rev");

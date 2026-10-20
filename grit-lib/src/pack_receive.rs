@@ -487,6 +487,21 @@ fn create_private_spool_file(path: &Path) -> Result<File> {
     }
 }
 
+/// Ensure pack bytes are visible to a follow-up open in this process.
+///
+/// Git does not fsync in-progress receive spools; a single `fdatasync` on Unix at
+/// handoff is enough before [`assert_received_pack_durable`] and index-pack mmap/read.
+fn sync_spool_for_handoff(file: &File) -> Result<()> {
+    #[cfg(unix)]
+    {
+        file.sync_data().map_err(Error::Io)
+    }
+    #[cfg(not(unix))]
+    {
+        file.sync_all().map_err(Error::Io)
+    }
+}
+
 fn assert_received_pack_durable(path: &Path, expected_len: u64) -> Result<()> {
     const MAX_ATTEMPTS: u32 = 8;
     for attempt in 0..MAX_ATTEMPTS {
@@ -598,7 +613,6 @@ impl TempPackReceive {
         )?;
         self.seen_pack = seen;
         self.file.flush().map_err(Error::Io)?;
-        self.file.get_ref().sync_all().map_err(Error::Io)?;
         Ok(())
     }
 
@@ -610,7 +624,7 @@ impl TempPackReceive {
     /// Returns I/O errors from metadata or removal.
     pub fn finish(mut self) -> Result<Option<PathBuf>> {
         self.file.flush().map_err(Error::Io)?;
-        self.file.get_ref().sync_all().map_err(Error::Io)?;
+        sync_spool_for_handoff(self.file.get_ref())?;
         let len = self.file.get_ref().metadata().map_err(Error::Io)?.len();
         if !self.seen_pack || len == 0 {
             drop(self.file);

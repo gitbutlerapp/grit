@@ -218,7 +218,7 @@ fn stage_inner_on_index(
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
 
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
-    let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !ignorecase;
+    let use_tracked_scan = tracked_scan && !index.entries.is_empty();
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
         (Vec::new(), std::collections::BTreeMap::new())

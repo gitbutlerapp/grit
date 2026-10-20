@@ -137,7 +137,7 @@ fn run_git(dir: &Path, args: &[&str]) {
 fn lookup_all_packs(idxs: &[Arc<grit_lib::objects::pack::PackIndex>], oid: &ObjectId) -> bool {
     let mut found = false;
     for idx in idxs {
-        if idx.find_offset(oid).is_some() {
+        if idx.find_offset(oid).ok().flatten().is_some() {
             found = true;
         }
     }
@@ -145,7 +145,8 @@ fn lookup_all_packs(idxs: &[Arc<grit_lib::objects::pack::PackIndex>], oid: &Obje
 }
 
 fn lookup_all_packs_miss(idxs: &[Arc<grit_lib::objects::pack::PackIndex>], oid: &ObjectId) -> bool {
-    idxs.iter().all(|idx| idx.find_offset(oid).is_none())
+    idxs.iter()
+        .all(|idx| idx.find_offset(oid).ok().flatten().is_none())
 }
 
 fn bench_midx_lookup(c: &mut Criterion) {

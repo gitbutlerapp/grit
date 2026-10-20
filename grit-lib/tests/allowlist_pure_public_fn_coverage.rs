@@ -416,7 +416,7 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
     let seed = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("tree");
     grit_lib::refs::write_ref(git_dir.as_path(), "refs/heads/main", &seed).expect("seed main");
     let _ = collect_decorations(&repo, false);
-    let _ = collect_decorations_inner(&repo, true, true, &DecorationFilter::default(), None);
+    let _ = collect_decorations_inner(&repo, true, true, &DecorationFilter::default());
     let _ = normalize_glob_ref("heads/*");
     let odb = repo.odb();
     let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("resolve");

@@ -49,6 +49,11 @@ fn git_ok(dir: Option<&Path>, args: &[&str]) -> Output {
 }
 
 fn find_binary(name: &str) -> Option<PathBuf> {
+    if name == "grit-http-server" {
+        if let Some(path) = option_env!("CARGO_BIN_EXE_grit_http_server") {
+            return Some(PathBuf::from(path));
+        }
+    }
     let exe = std::env::current_exe().ok()?;
     let deps = exe.parent()?;
     let profile = deps.parent()?;

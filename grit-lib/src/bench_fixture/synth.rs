@@ -28,11 +28,102 @@ pub enum SynthTier {
     L,
 }
 
+/// How tracked file paths are laid out in the worktree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathLayout {
+    /// Layout derived from [`SynthTier`] (`S`/`M` grid or `L` wide+deep mix).
+    TierDefault,
+    /// Shallow `wide/w*/f*.txt` grid with a fixed number of files per leaf directory.
+    WideGrid {
+        /// Files in each `wide/w*` directory (directory count is `file_count / files_per_dir`).
+        files_per_dir: usize,
+    },
+}
+
+/// Core daily-benchmark repository shapes (deterministic via [`Self::spec`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoShape {
+    /// ~100 tracked files and ~50 commits.
+    Small,
+    /// 10k files in ~100 directories and ~1000 commits (hot-path 10k layout).
+    Synth10k,
+    /// 100k files in a wide layout with ~1000 directories and ~1000 commits.
+    Synth100k,
+}
+
+impl RepoShape {
+    /// Full-size parameters for this shape.
+    #[must_use]
+    pub fn spec(self, smoke: bool) -> TierSpec {
+        let base = self.base_spec();
+        if smoke {
+            scale_tier_spec(base, 20)
+        } else {
+            base
+        }
+    }
+
+    fn base_spec(self) -> TierSpec {
+        match self {
+            Self::Small => TierSpec {
+                tier: SynthTier::S,
+                layout: PathLayout::TierDefault,
+                file_count: 100,
+                commit_count: 50,
+                ref_count: 60,
+                edits_per_commit: 4,
+                blob_body_bytes: 48,
+                loose_after_pack: 8,
+                seed: 0x3122_3501,
+            },
+            Self::Synth10k => TierSpec {
+                tier: SynthTier::M,
+                layout: PathLayout::TierDefault,
+                file_count: 10_000,
+                commit_count: 1_000,
+                ref_count: 800,
+                edits_per_commit: 8,
+                blob_body_bytes: 64,
+                loose_after_pack: 16,
+                seed: 0x3122_3502,
+            },
+            Self::Synth100k => TierSpec {
+                tier: SynthTier::L,
+                layout: PathLayout::WideGrid { files_per_dir: 100 },
+                file_count: 100_000,
+                commit_count: 1_000,
+                ref_count: 1_200,
+                edits_per_commit: 4,
+                blob_body_bytes: 12_000,
+                loose_after_pack: 32,
+                seed: 0x3122_3503,
+            },
+        }
+    }
+}
+
+fn scale_tier_spec(spec: TierSpec, divisor: usize) -> TierSpec {
+    let scale = |n: usize| (n / divisor).max(1);
+    TierSpec {
+        tier: spec.tier,
+        layout: spec.layout,
+        file_count: scale(spec.file_count),
+        commit_count: scale(spec.commit_count),
+        ref_count: scale(spec.ref_count).max(3),
+        edits_per_commit: scale(spec.edits_per_commit),
+        blob_body_bytes: spec.blob_body_bytes,
+        loose_after_pack: scale(spec.loose_after_pack),
+        seed: spec.seed,
+    }
+}
+
 /// Resolved numeric targets for a tier.
 #[derive(Debug, Clone, Copy)]
 pub struct TierSpec {
     /// Tier label these numbers came from.
     pub tier: SynthTier,
+    /// Path layout (independent of blob sizing in [`Self::tier`]).
+    pub layout: PathLayout,
     /// Number of tracked file paths in the initial index.
     pub file_count: usize,
     /// Linear commit count on `refs/heads/main`.
@@ -72,6 +163,7 @@ impl SynthTier {
         match self {
             SynthTier::S => TierSpec {
                 tier: self,
+                layout: PathLayout::TierDefault,
                 file_count: 2_000,
                 commit_count: 500,
                 ref_count: 1_000,
@@ -82,6 +174,7 @@ impl SynthTier {
             },
             SynthTier::M => TierSpec {
                 tier: self,
+                layout: PathLayout::TierDefault,
                 file_count: 20_000,
                 commit_count: 5_000,
                 ref_count: 10_000,
@@ -92,6 +185,7 @@ impl SynthTier {
             },
             SynthTier::L => TierSpec {
                 tier: self,
+                layout: PathLayout::TierDefault,
                 file_count: 100_000,
                 commit_count: 50_000,
                 ref_count: 100_000,
@@ -152,6 +246,7 @@ impl DetRng {
 pub fn history_rewrite_bench_spec() -> TierSpec {
     TierSpec {
         tier: SynthTier::M,
+        layout: PathLayout::TierDefault,
         file_count: 10_000,
         commit_count: 5_000,
         ref_count: 51,
@@ -219,7 +314,7 @@ pub fn generate_synth_repo_with_spec(out: &Path, spec: TierSpec) -> Result<Synth
 
 fn generate_into_repo(repo: &Repository, spec: TierSpec) -> Result<ObjectId> {
     let mut rng = DetRng::new(spec.seed);
-    let paths = file_paths(spec.tier, spec.file_count);
+    let paths = file_paths_for_spec(spec);
     let mut file_oids: Vec<ObjectId> = Vec::with_capacity(paths.len());
     let mut index = Index::new();
     index.hash_algo = repo.odb().hash_algo();
@@ -381,7 +476,25 @@ fn synth_index_entry(path: &[u8], oid: ObjectId, size: usize) -> IndexEntry {
     }
 }
 
-fn file_paths(tier: SynthTier, count: usize) -> Vec<Vec<u8>> {
+fn file_paths_for_spec(spec: TierSpec) -> Vec<Vec<u8>> {
+    match spec.layout {
+        PathLayout::WideGrid { files_per_dir } => wide_grid_paths(spec.file_count, files_per_dir),
+        PathLayout::TierDefault => file_paths_tier_default(spec.tier, spec.file_count),
+    }
+}
+
+fn wide_grid_paths(count: usize, files_per_dir: usize) -> Vec<Vec<u8>> {
+    let files_per_dir = files_per_dir.max(1);
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let dir = i / files_per_dir;
+        let file = i % files_per_dir;
+        out.push(format!("wide/w{dir:05}/f{file:04}.txt").into_bytes());
+    }
+    out
+}
+
+fn file_paths_tier_default(tier: SynthTier, count: usize) -> Vec<Vec<u8>> {
     match tier {
         SynthTier::S | SynthTier::M => {
             let mut out = Vec::with_capacity(count);
@@ -449,14 +562,80 @@ fn blob_body(tier: SynthTier, file_id: u32, version: u32, body_bytes: usize) -> 
 #[cfg(test)]
 mod layout_tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn path_component_depth(path: &[u8]) -> usize {
         path.iter().filter(|&&b| b == b'/').count() + 1
     }
 
+    fn distinct_parent_directories(paths: &[Vec<u8>]) -> usize {
+        paths
+            .iter()
+            .filter_map(|p| {
+                let s = std::str::from_utf8(p).ok()?;
+                s.rfind('/').map(|idx| &s[..idx])
+            })
+            .collect::<HashSet<_>>()
+            .len()
+    }
+
+    fn assert_wide_grid_topology(spec: TierSpec) {
+        let paths = file_paths_for_spec(spec);
+        assert_eq!(paths.len(), spec.file_count);
+        let files_per_dir = match spec.layout {
+            PathLayout::WideGrid { files_per_dir } => files_per_dir,
+            PathLayout::TierDefault => panic!("expected wide grid layout"),
+        };
+        let expected_dirs = spec.file_count.div_ceil(files_per_dir);
+        assert_eq!(distinct_parent_directories(&paths), expected_dirs);
+        assert!(
+            paths
+                .iter()
+                .all(|p| path_component_depth(p) == 3 && p.starts_with(b"wide/w")),
+            "expected shallow wide/w*/f* paths only"
+        );
+    }
+
+    #[test]
+    fn repo_shape_synth100k_uses_wide_grid_directories() {
+        assert_wide_grid_topology(RepoShape::Synth100k.spec(false));
+        assert_eq!(
+            distinct_parent_directories(&file_paths_for_spec(RepoShape::Synth100k.spec(false))),
+            1_000
+        );
+    }
+
+    #[test]
+    fn repo_shape_synth100k_smoke_scales_directories() {
+        let smoke = RepoShape::Synth100k.spec(true);
+        assert_eq!(smoke.file_count, 5_000);
+        assert_eq!(smoke.commit_count, 50);
+        assert_wide_grid_topology(smoke);
+        assert_eq!(distinct_parent_directories(&file_paths_for_spec(smoke)), 50);
+    }
+
+    #[test]
+    fn repo_shape_daily_counts() {
+        let small = RepoShape::Small.spec(false);
+        assert_eq!(small.file_count, 100);
+        assert_eq!(small.commit_count, 50);
+
+        let ten_k = RepoShape::Synth10k.spec(false);
+        assert_eq!(ten_k.file_count, 10_000);
+        assert_eq!(ten_k.commit_count, 1_000);
+        assert_eq!(
+            distinct_parent_directories(&file_paths_for_spec(ten_k)),
+            100
+        );
+
+        let hundred_k = RepoShape::Synth100k.spec(false);
+        assert_eq!(hundred_k.file_count, 100_000);
+        assert_eq!(hundred_k.commit_count, 1_000);
+    }
+
     #[test]
     fn l_tier_paths_are_deep_and_wide() {
-        let paths = file_paths(SynthTier::L, 10_000);
+        let paths = file_paths_tier_default(SynthTier::L, 10_000);
         let max_depth = paths
             .iter()
             .map(|p| path_component_depth(p))
@@ -487,7 +666,15 @@ mod layout_tests {
 
     #[test]
     fn s_tier_keeps_shallow_layout() {
-        let paths = file_paths(SynthTier::S, 100);
+        let paths = file_paths_tier_default(SynthTier::S, 100);
         assert!(paths.iter().all(|p| path_component_depth(p) == 3));
+    }
+
+    #[test]
+    fn repo_shape_smoke_scales_down() {
+        let full = RepoShape::Synth10k.spec(false);
+        let smoke = RepoShape::Synth10k.spec(true);
+        assert_eq!(smoke.file_count, full.file_count / 20);
+        assert_eq!(smoke.commit_count, full.commit_count / 20);
     }
 }

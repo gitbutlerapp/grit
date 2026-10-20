@@ -758,7 +758,7 @@ mod tests {
         .expect("write idx");
         let idx = read_pack_index(&idx_path).expect("read idx");
         assert_eq!(idx.len(), 1);
-        assert_eq!(idx.offset_at(0), huge_off);
+        assert_eq!(idx.offset_at(0).expect("off"), huge_off);
     }
 
     fn pack_with_junk_before_trailer(valid: &[u8], junk: &[u8]) -> Vec<u8> {

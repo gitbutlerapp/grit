@@ -2333,6 +2333,17 @@ impl Index {
         self.merge_replacements_into_sorted_index(replacements);
     }
 
+    /// Append sorted `replacements` to a sorted index and merge in one linear pass.
+    fn merge_sorted_replacements_into_entries(&mut self, mut replacements: Vec<IndexEntry>) {
+        if replacements.is_empty() {
+            return;
+        }
+        self.entries.reserve(replacements.len());
+        let mid = self.entries.len();
+        self.entries.append(&mut replacements);
+        merge_sorted_index_adjacent_halves(&mut self.entries, mid);
+    }
+
     /// Merge sorted `replacements` into a sorted index in one linear pass.
     fn merge_replacements_into_sorted_index(&mut self, replacements: Vec<IndexEntry>) {
         if replacements.is_empty() {
@@ -2345,23 +2356,22 @@ impl Index {
             return;
         }
         const BULK_MERGE_MIN: usize = 64;
+        if self.defer_untracked_cache_invalidation {
+            // Campaign-scale tracked restage: merge in bulk but keep UNTR and invalidate only
+            // touched cache-tree paths (issue #1184).
+            for entry in replacements.iter().filter(|e| e.stage() == 0) {
+                self.invalidate_cache_tree_for_path(&entry.path);
+            }
+            self.merge_sorted_replacements_into_entries(replacements);
+            self.touch_fsmonitor_after_entry_change();
+            return;
+        }
         let repl_for_inval: Vec<Vec<u8>> = replacements
             .iter()
             .filter(|e| e.stage() == 0)
             .map(|e| e.path.clone())
             .collect();
-        let kept = std::mem::take(&mut self.entries);
-        self.entries = merge_sorted_index_entries(kept, replacements);
-        self.entries_sorted = true;
-        if self.defer_untracked_cache_invalidation {
-            // Campaign-scale tracked restage: merge in bulk but keep UNTR and invalidate only
-            // touched cache-tree paths (issue #1184).
-            for path in &repl_for_inval {
-                self.invalidate_cache_tree_for_path(path);
-            }
-            self.touch_fsmonitor_after_entry_change();
-            return;
-        }
+        self.merge_sorted_replacements_into_entries(replacements);
         if repl_for_inval.len() >= BULK_MERGE_MIN {
             self.cache_tree = None;
             self.cache_tree_root = None;
@@ -3005,42 +3015,184 @@ fn dedup_sorted_replacement_entries(replacements: &mut Vec<IndexEntry>) {
     *replacements = out;
 }
 
-fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) -> Vec<IndexEntry> {
-    let mut kept = kept.into_iter().peekable();
-    let mut insert = insert.into_iter().peekable();
-    let mut out = Vec::with_capacity(kept.size_hint().0.saturating_add(insert.size_hint().0));
-    loop {
-        match (kept.peek(), insert.peek()) {
-            (None, None) => break,
-            (Some(_), None) => {
-                out.extend(kept);
-                break;
+fn index_entry_path_stage_cmp(a: &IndexEntry, b: &IndexEntry) -> std::cmp::Ordering {
+    a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage()))
+}
+
+/// Merge sorted `insert` into sorted `kept` without holding a third full-length copy at peak.
+///
+/// `insert` is appended to `kept`, then the two adjacent sorted halves are merged in place.
+fn merge_sorted_index_entries(
+    mut kept: Vec<IndexEntry>,
+    mut insert: Vec<IndexEntry>,
+) -> Vec<IndexEntry> {
+    if insert.is_empty() {
+        return kept;
+    }
+    if kept.is_empty() {
+        return insert;
+    }
+    kept.reserve(insert.len());
+    let mid = kept.len();
+    kept.append(&mut insert);
+    merge_sorted_index_adjacent_halves(&mut kept, mid);
+    kept
+}
+
+/// Merge sorted `v[0..mid)` with `v[mid..]` in place; auxiliary storage holds only the shorter half.
+fn merge_sorted_index_adjacent_halves(v: &mut Vec<IndexEntry>, mid: usize) {
+    let n = v.len();
+    if mid == 0 || mid >= n {
+        return;
+    }
+    let right_len = n - mid;
+    let smaller_is_right = right_len <= mid;
+    let mut aux = if smaller_is_right {
+        v.drain(mid..).collect::<Vec<_>>()
+    } else {
+        v.drain(..mid).collect::<Vec<_>>()
+    };
+    let left_len = if smaller_is_right { v.len() } else { aux.len() };
+    let pad = aux.len();
+    v.reserve(pad);
+    for _ in 0..pad {
+        v.push(merge_padding_index_entry());
+    }
+    let total = v.len();
+    merge_backward_into_place(v, left_len, total, &mut aux, smaller_is_right);
+}
+
+/// Placeholder slot for backward merge scratch space (replaced before any read).
+fn merge_padding_index_entry() -> IndexEntry {
+    IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode: 0,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid: ObjectId::zero(),
+        flags: 0,
+        flags_extended: None,
+        path: Vec::new(),
+        base_index_pos: 0,
+    }
+}
+
+/// Backward merge into `v` using `aux` (copy of the shorter sorted run).
+fn merge_backward_into_place(
+    v: &mut Vec<IndexEntry>,
+    left_len: usize,
+    total: usize,
+    aux: &mut Vec<IndexEntry>,
+    smaller_is_right: bool,
+) {
+    let pad = aux.len();
+    let mut li = left_len;
+    let mut ri = if smaller_is_right {
+        aux.len()
+    } else {
+        total.saturating_sub(pad)
+    };
+    let mut k = total;
+    while li > 0 && ri > 0 {
+        k -= 1;
+        let ord = if smaller_is_right {
+            index_entry_path_stage_cmp(&v[li - 1], &aux[ri - 1])
+        } else {
+            index_entry_path_stage_cmp(&aux[li - 1], &v[ri - 1])
+        };
+        match ord {
+            std::cmp::Ordering::Greater => {
+                if smaller_is_right {
+                    let entry = std::mem::replace(&mut v[li - 1], merge_padding_index_entry());
+                    drop(std::mem::replace(&mut v[k], entry));
+                    li -= 1;
+                } else {
+                    let entry = std::mem::replace(&mut aux[li - 1], merge_padding_index_entry());
+                    li -= 1;
+                    drop(std::mem::replace(&mut v[k], entry));
+                }
             }
-            (None, Some(_)) => {
-                out.extend(insert);
-                break;
+            std::cmp::Ordering::Equal => {
+                let base = if smaller_is_right {
+                    v[li - 1].base_index_pos
+                } else {
+                    aux[li - 1].base_index_pos
+                };
+                let mut entry = if smaller_is_right {
+                    let Some(e) = aux.pop() else {
+                        break;
+                    };
+                    ri -= 1;
+                    e
+                } else {
+                    ri -= 1;
+                    std::mem::replace(&mut v[ri], merge_padding_index_entry())
+                };
+                entry.base_index_pos = base;
+                if smaller_is_right {
+                    drop(std::mem::replace(
+                        &mut v[li - 1],
+                        merge_padding_index_entry(),
+                    ));
+                    li -= 1;
+                } else {
+                    drop(std::mem::replace(
+                        &mut aux[li - 1],
+                        merge_padding_index_entry(),
+                    ));
+                    li -= 1;
+                }
+                drop(std::mem::replace(&mut v[k], entry));
             }
-            (Some(k), Some(i)) => {
-                let ord = (&k.path, k.stage()).cmp(&(&i.path, i.stage()));
-                if ord == std::cmp::Ordering::Less {
-                    if let Some(entry) = kept.next() {
-                        out.push(entry);
-                    }
-                } else if ord == std::cmp::Ordering::Equal {
-                    let old = kept.next();
-                    if let Some(mut entry) = insert.next() {
-                        if let Some(old) = old {
-                            entry.base_index_pos = old.base_index_pos;
-                        }
-                        out.push(entry);
-                    }
-                } else if let Some(entry) = insert.next() {
-                    out.push(entry);
+            std::cmp::Ordering::Less => {
+                if smaller_is_right {
+                    let Some(entry) = aux.pop() else {
+                        break;
+                    };
+                    ri -= 1;
+                    drop(std::mem::replace(&mut v[k], entry));
+                } else {
+                    ri -= 1;
+                    let entry = std::mem::replace(&mut v[ri], merge_padding_index_entry());
+                    drop(std::mem::replace(&mut v[k], entry));
                 }
             }
         }
     }
-    out
+    while ri > 0 {
+        k -= 1;
+        if smaller_is_right {
+            let Some(entry) = aux.pop() else {
+                break;
+            };
+            ri -= 1;
+            drop(std::mem::replace(&mut v[k], entry));
+        } else {
+            ri -= 1;
+            let entry = std::mem::replace(&mut v[ri], merge_padding_index_entry());
+            drop(std::mem::replace(&mut v[k], entry));
+        }
+    }
+    if !smaller_is_right && li > 0 {
+        for i in 0..li {
+            let entry = std::mem::replace(&mut aux[i], merge_padding_index_entry());
+            drop(std::mem::replace(&mut v[i], entry));
+        }
+    }
+    let tail_len = total - k;
+    if li < k && tail_len > 0 {
+        for offset in 0..tail_len {
+            let entry = std::mem::replace(&mut v[k + offset], merge_padding_index_entry());
+            drop(std::mem::replace(&mut v[li + offset], entry));
+        }
+    }
+    v.truncate(li + tail_len);
 }
 
 fn prefix_under_or_equal(prefix: &[u8], path: &[u8]) -> bool {
@@ -4027,6 +4179,12 @@ pub struct IndexStatFields {
 }
 
 impl IndexStatFields {
+    /// Munged size field stored in the index (see [`munge_index_size`]).
+    #[must_use]
+    pub(crate) fn index_size(&self) -> u32 {
+        self.size
+    }
+
     /// Capture stat fields from filesystem metadata.
     #[must_use]
     pub fn from_metadata(meta: &fs::Metadata) -> Self {
@@ -4089,6 +4247,34 @@ impl IndexStatFields {
 impl From<&fs::Metadata> for IndexStatFields {
     fn from(meta: &fs::Metadata) -> Self {
         Self::from_metadata(meta)
+    }
+}
+
+impl IndexStatFields {
+    /// Whether cached stat fields match a stage-0 index row (Git `ie_match_stat`).
+    #[must_use]
+    pub(crate) fn matches_index_entry(&self, ie: &IndexEntry, policy: StatMatchPolicy) -> bool {
+        if self.size != ie.size {
+            return false;
+        }
+        if self.mtime_sec != ie.mtime_sec {
+            return false;
+        }
+        if policy.use_nanosec && policy.check_stat && self.mtime_nsec != ie.mtime_nsec {
+            return false;
+        }
+        if policy.trust_ctime && policy.check_stat {
+            if self.ctime_sec != ie.ctime_sec {
+                return false;
+            }
+            if policy.use_nanosec && self.ctime_nsec != ie.ctime_nsec {
+                return false;
+            }
+        }
+        if policy.check_stat && self.ino != ie.ino {
+            return false;
+        }
+        true
     }
 }
 
@@ -5044,5 +5230,80 @@ mod tests {
         e.set_intent_to_add(true);
         idx.add_or_replace(e);
         crate::write_tree::write_tree_from_index(&odb, &idx, "").unwrap();
+    }
+
+    fn naive_merge_sorted(kept: &[IndexEntry], insert: &[IndexEntry]) -> Vec<IndexEntry> {
+        let mut out: Vec<IndexEntry> = kept.iter().chain(insert.iter()).cloned().collect();
+        out.sort_by(index_entry_path_stage_cmp);
+        let mut deduped = Vec::with_capacity(out.len());
+        for entry in out {
+            if deduped
+                .last()
+                .is_some_and(|last| index_entry_path_stage_cmp(last, &entry).is_eq())
+            {
+                *deduped.last_mut().unwrap() = entry;
+            } else {
+                deduped.push(entry);
+            }
+        }
+        deduped
+    }
+
+    #[test]
+    fn merge_sorted_index_halves_matches_naive_merge() {
+        let paths = [
+            ".gitattributes",
+            "a.txt",
+            "b.txt",
+            "f.txt",
+            "z.txt",
+            "dir/nested.txt",
+        ];
+        let mut kept = Vec::new();
+        let mut insert = Vec::new();
+        for (i, path) in paths.iter().enumerate() {
+            let mut e = make_entry(path);
+            e.oid = ObjectId::from_bytes(&[i as u8; 20]).unwrap();
+            kept.push(e);
+        }
+        for (i, path) in paths.iter().enumerate() {
+            if i % 2 == 0 {
+                continue;
+            }
+            let mut e = make_entry(path);
+            e.oid = ObjectId::from_bytes(&[(i + 100) as u8; 20]).unwrap();
+            insert.push(e);
+        }
+        kept.sort_by(index_entry_path_stage_cmp);
+        insert.sort_by(index_entry_path_stage_cmp);
+
+        let expected = naive_merge_sorted(&kept, &insert);
+        let merged = merge_sorted_index_entries(kept, insert);
+        assert_eq!(merged, expected, "fixed scenario merge mismatch");
+
+        for seed in 0u64..200 {
+            let mut kept = Vec::new();
+            let mut insert = Vec::new();
+            for n in 0..((seed % 7) + 1) {
+                let path = format!("p/{seed}/{n}.txt");
+                let mut e = make_entry(&path);
+                e.oid = ObjectId::from_bytes(&[(seed as u8).wrapping_add(n as u8); 20]).unwrap();
+                kept.push(e);
+            }
+            for n in 0..((seed % 5) + 1) {
+                let path = format!("p/{seed}/{n}.txt");
+                let mut e = make_entry(&path);
+                e.oid = ObjectId::from_bytes(
+                    &[(seed as u8).wrapping_add(n as u8).wrapping_add(50); 20],
+                )
+                .unwrap();
+                insert.push(e);
+            }
+            kept.sort_by(index_entry_path_stage_cmp);
+            insert.sort_by(index_entry_path_stage_cmp);
+            let expected = naive_merge_sorted(&kept, &insert);
+            let merged = merge_sorted_index_entries(kept, insert);
+            assert_eq!(merged, expected, "seed {seed} merge mismatch");
+        }
     }
 }

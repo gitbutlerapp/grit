@@ -10,6 +10,10 @@ publish = false
 [lints]
 workspace = true
 
+[lib]
+name = "grit_http_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "grit-http-server"
 path = "src/main.rs"

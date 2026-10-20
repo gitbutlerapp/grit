@@ -41,7 +41,7 @@
 //! those should implement [`HttpClient`] over their own stack.
 
 use std::env;
-use std::io::{self, BufReader, Read};
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -507,6 +507,22 @@ fn default_agent(proxy: Option<ureq::Proxy>) -> ureq::Agent {
     agent_from_timeouts(proxy, &HttpTransportTimeouts::default())
 }
 
+fn agent_tls_config() -> ureq::tls::TlsConfig {
+    #[cfg(feature = "http-ureq-native-tls")]
+    {
+        use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
+        TlsConfig::builder()
+            .provider(TlsProvider::NativeTls)
+            .root_certs(RootCerts::PlatformVerifier)
+            .build()
+    }
+    #[cfg(not(feature = "http-ureq-native-tls"))]
+    {
+        use ureq::tls::{TlsConfig, TlsProvider};
+        TlsConfig::builder().provider(TlsProvider::Rustls).build()
+    }
+}
+
 fn agent_from_timeouts(
     proxy: Option<ureq::Proxy>,
     timeouts: &HttpTransportTimeouts,
@@ -518,6 +534,7 @@ fn agent_from_timeouts(
         // status and `WWW-Authenticate` headers rather than treating them as hard
         // transport errors (ureq's default surfaces them as `Error::StatusCode`).
         .http_status_as_error(false)
+        .tls_config(agent_tls_config())
         .proxy(proxy)
         .build()
         .new_agent()
@@ -1025,7 +1042,8 @@ fn open_response_body(
     let www_authenticate = header_values(resp.headers(), "WWW-Authenticate");
     let set_cookie = header_values(resp.headers(), "Set-Cookie");
     let reader = resp.into_body().into_reader();
-    let buffered = BufReader::with_capacity(1024 * 1024, reader);
+    // Side-band demux already reads in 1 MiB chunks; skip an extra BufReader layer
+    // so large clone receives do not copy through two full buffers.
     Ok((
         RawResponseHead {
             status,
@@ -1033,7 +1051,7 @@ fn open_response_body(
             set_cookie,
             final_url,
         },
-        LowSpeedReader::new(Box::new(buffered) as Box<dyn Read + Send>, timeouts),
+        LowSpeedReader::new(Box::new(reader) as Box<dyn Read + Send>, timeouts),
     ))
 }
 
@@ -1576,6 +1594,28 @@ mod tests {
             Some("version=2"),
             "protocol.version=2 should set Git-Protocol header"
         );
+    }
+
+    #[cfg(feature = "http-ureq-native-tls")]
+    #[test]
+    fn agent_tls_provider_is_native_when_native_tls_feature_enabled() {
+        use ureq::tls::TlsProvider;
+
+        let agent = super::agent_from_timeouts(None, &HttpTransportTimeouts::default());
+        assert_eq!(
+            agent.config().tls_config().provider(),
+            TlsProvider::NativeTls,
+            "http-ureq-native-tls must select ureq NativeTls (Secure Transport on macOS)"
+        );
+    }
+
+    #[cfg(all(feature = "http-ureq", not(feature = "http-ureq-native-tls")))]
+    #[test]
+    fn agent_tls_provider_is_rustls_without_native_tls_feature() {
+        use ureq::tls::TlsProvider;
+
+        let agent = super::agent_from_timeouts(None, &HttpTransportTimeouts::default());
+        assert_eq!(agent.config().tls_config().provider(), TlsProvider::Rustls);
     }
 
     #[test]

@@ -2097,8 +2097,10 @@ pub(crate) fn apply_tag_mode(
             TagMode::Following => {
                 // Keep when the tag (or what it peels to) is in the fetched
                 // closure. Peel annotated tags to their target.
-                let peeled = peel_tag_target(remote_odb, *oid)?;
-                following_closure.contains(oid) || following_closure.contains(&peeled)
+                following_closure.contains(oid)
+                    || remote_odb
+                        .peel_tags(*oid)
+                        .is_ok_and(|(peeled, _)| following_closure.contains(&peeled))
             }
             TagMode::None => false,
         };
@@ -2126,27 +2128,9 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> bo
     } else {
         remote_odb
     };
-    let Ok(peeled) = peel_tag_target(peel_odb, tag_oid) else {
-        return local_odb.exists(&tag_oid);
-    };
-    local_odb.exists(&peeled)
-}
-
-/// Peel an (annotated) tag to the non-tag object it ultimately points at.
-/// Returns the input oid unchanged for non-tag objects or on read failure.
-fn peel_tag_target(odb: &Odb, oid: ObjectId) -> Result<ObjectId> {
-    let mut current = oid;
-    for _ in 0..16 {
-        let obj = match odb.read(&current) {
-            Ok(o) => o,
-            Err(_) => return Ok(current),
-        };
-        if obj.kind != ObjectKind::Tag {
-            return Ok(current);
-        }
-        current = parse_tag(&obj.data)?.object;
-    }
-    Ok(current)
+    peel_odb
+        .peel_tags(tag_oid)
+        .is_ok_and(|(peeled, _)| local_odb.exists(&peeled))
 }
 
 /// Classify a single ref update into an [`UpdateMode`].

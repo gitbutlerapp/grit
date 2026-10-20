@@ -112,10 +112,10 @@ fn write_graph_bytes(path: &Path, bytes: &[u8]) {
 
 fn expect_corrupt_load(objects: &Path, graph_path: &Path, bytes: Vec<u8>) {
     write_graph_bytes(graph_path, &bytes);
-    let err = CommitGraphChain::try_load(objects).unwrap_err();
+    let err = CommitGraphChain::verify_on_disk(objects).unwrap_err();
     assert!(
         matches!(err, Error::CorruptObject(_)),
-        "try_load: expected CorruptObject, got {err:?}"
+        "verify_on_disk: expected CorruptObject, got {err:?}"
     );
 }
 

@@ -334,6 +334,9 @@ pub fn resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
 /// git directory. Returns `None` when git_dir is already the common dir.
 pub fn common_dir(git_dir: &Path) -> Option<PathBuf> {
     let commondir_file = git_dir.join("commondir");
+    if !commondir_file.is_file() {
+        return None;
+    }
     let raw = fs::read_to_string(commondir_file).ok()?;
     let rel = raw.trim();
     // Match Git: `commondir` may be relative to this gitdir or an absolute path (see
@@ -1000,7 +1003,279 @@ fn parse_packed_ref_data_line(
 }
 
 /// Parse `packed-refs` bytes the way Git reads them for ref listing (strict).
-fn parse_packed_refs_to_map(path: &Path, data: &[u8]) -> Result<HashMap<String, ObjectId>> {
+/// In-memory view of a `packed-refs` file for indexed lookup without a full parse.
+#[derive(Debug, Clone)]
+pub(crate) struct PackedRefsFileView {
+    data: Vec<u8>,
+    sorted: bool,
+    data_line_starts: Vec<usize>,
+}
+
+impl PackedRefsFileView {
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    fn from_bytes(path: &Path, data: Vec<u8>) -> Result<Self> {
+        if data.is_empty() {
+            return Ok(Self {
+                data,
+                sorted: false,
+                data_line_starts: Vec::new(),
+            });
+        }
+        if data.contains(&b'\r') {
+            return Err(packed_refs_unexpected_line(
+                path,
+                "<contains carriage return>",
+            ));
+        }
+        if !data.ends_with(b"\n") {
+            let tail = std::str::from_utf8(&data)
+                .map(|s| s.rsplit('\n').next().unwrap_or(s))
+                .unwrap_or("<invalid utf-8>");
+            return Err(packed_refs_unterminated_line(path, tail));
+        }
+        let text = std::str::from_utf8(&data)
+            .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
+        let sorted = packed_refs_file_declares_sorted(text);
+        Ok(Self {
+            data_line_starts: packed_refs_data_line_starts(&data),
+            sorted,
+            data,
+        })
+    }
+
+    /// Object id stored for `refname`, and optional peeled tag target from the following `^` line.
+    fn lookup_entry(
+        &self,
+        path: &Path,
+        refname: &str,
+    ) -> Result<Option<(ObjectId, Option<ObjectId>)>> {
+        let ref_opts = RefNameOptions {
+            allow_onelevel: false,
+            refspec_pattern: false,
+            normalize: false,
+        };
+        let line_start = if self.sorted {
+            binary_search_packed_data_line(&self.data, &self.data_line_starts, refname)
+        } else {
+            self.data_line_starts.iter().copied().find(|&start| {
+                packed_line_refname_cmp(&self.data, start, refname) == std::cmp::Ordering::Equal
+            })
+        };
+        let Some(start) = line_start else {
+            return Ok(None);
+        };
+        let (name, oid) = parse_packed_line_at(path, &self.data, start, &ref_opts)?;
+        debug_assert_eq!(name, refname);
+        let line_end = packed_line_end(&self.data, start);
+        if line_end + 1 < self.data.len() && self.data[line_end + 1] == b'^' {
+            let peel_line = packed_line_as_str(&self.data, line_end + 1);
+            parse_packed_ref_peel_line(path, peel_line, true)?;
+        }
+        let peel = peel_oid_following_line(&self.data, start);
+        Ok(Some((oid, peel)))
+    }
+
+    fn lookup_oid(&self, path: &Path, refname: &str) -> Result<Option<ObjectId>> {
+        Ok(self.lookup_entry(path, refname)?.map(|(oid, _)| oid))
+    }
+
+    fn map_for_prefix(
+        &self,
+        path: &Path,
+        prefix: Option<&str>,
+    ) -> Result<HashMap<String, ObjectId>> {
+        let ref_opts = RefNameOptions {
+            allow_onelevel: false,
+            refspec_pattern: false,
+            normalize: false,
+        };
+        let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
+        let prefix_upper = if self.sorted {
+            prefix_trim.and_then(list_prefix_upper_bound)
+        } else {
+            None
+        };
+        let mut map = HashMap::new();
+        let (lo, hi) = if self.sorted {
+            if let Some(prefix) = prefix_trim {
+                let lo = lower_bound_packed_data_line(&self.data, &self.data_line_starts, prefix);
+                let hi = prefix_upper
+                    .as_ref()
+                    .map(|upper| {
+                        lower_bound_packed_data_line(
+                            &self.data,
+                            &self.data_line_starts,
+                            upper.as_str(),
+                        )
+                    })
+                    .unwrap_or(self.data_line_starts.len());
+                (lo, hi)
+            } else {
+                (0, self.data_line_starts.len())
+            }
+        } else {
+            (0, self.data_line_starts.len())
+        };
+        for &start in &self.data_line_starts[lo..hi] {
+            let (refname, oid) = parse_packed_line_at(path, &self.data, start, &ref_opts)?;
+            if let Some(prefix) = prefix_trim {
+                if !ref_name_matches_list_prefix(&refname, prefix) {
+                    continue;
+                }
+            }
+            map.insert(refname, oid);
+        }
+        Ok(map)
+    }
+
+    fn map_for_names(
+        &self,
+        path: &Path,
+        names: &HashSet<String>,
+    ) -> Result<HashMap<String, ObjectId>> {
+        let mut map = HashMap::with_capacity(names.len());
+        for name in names {
+            if let Some((oid, _)) = self.lookup_entry(path, name)? {
+                map.insert(name.clone(), oid);
+            }
+        }
+        Ok(map)
+    }
+}
+
+fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>> {
+    let packed_path = store::paths::packed_refs_path(store);
+    let data = match fs::read(&packed_path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    Ok(Some(PackedRefsFileView::from_bytes(&packed_path, data)?))
+}
+
+fn packed_refs_data_line_starts(data: &[u8]) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < data.len() {
+        match data[i] {
+            b'#' | b'^' => {
+                while i < data.len() && data[i] != b'\n' {
+                    i += 1;
+                }
+                if i < data.len() {
+                    i += 1;
+                }
+            }
+            b'\n' => i += 1,
+            _ => {
+                out.push(i);
+                while i < data.len() && data[i] != b'\n' {
+                    i += 1;
+                }
+                if i < data.len() {
+                    i += 1;
+                }
+            }
+        }
+    }
+    out
+}
+
+fn packed_line_end(data: &[u8], line_start: usize) -> usize {
+    data[line_start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|p| line_start + p)
+        .unwrap_or(data.len())
+}
+
+fn packed_line_as_str(data: &[u8], line_start: usize) -> &str {
+    std::str::from_utf8(&data[line_start..packed_line_end(data, line_start)]).unwrap_or("")
+}
+
+fn packed_line_refname(data: &[u8], line_start: usize) -> Option<&str> {
+    let line_end = packed_line_end(data, line_start);
+    let line = &data[line_start..line_end];
+    let mut j = 0usize;
+    while j < line.len() && line[j].is_ascii_hexdigit() {
+        j += 1;
+    }
+    if !ObjectId::is_hex_len(j) || j + 1 >= line.len() || line[j] != b' ' {
+        return None;
+    }
+    let refname = std::str::from_utf8(&line[j + 1..]).ok()?;
+    if refname.is_empty() || refname.as_bytes().iter().any(|b| b.is_ascii_whitespace()) {
+        return None;
+    }
+    Some(refname)
+}
+
+fn packed_line_refname_cmp(data: &[u8], line_start: usize, name: &str) -> std::cmp::Ordering {
+    match packed_line_refname(data, line_start) {
+        Some(found) => found.cmp(name),
+        None => std::cmp::Ordering::Less,
+    }
+}
+
+fn binary_search_packed_data_line(data: &[u8], starts: &[usize], refname: &str) -> Option<usize> {
+    let mut lo = 0usize;
+    let mut hi = starts.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        match packed_line_refname_cmp(data, starts[mid], refname) {
+            std::cmp::Ordering::Less => lo = mid + 1,
+            std::cmp::Ordering::Greater => hi = mid,
+            std::cmp::Ordering::Equal => return Some(starts[mid]),
+        }
+    }
+    None
+}
+
+fn lower_bound_packed_data_line(data: &[u8], starts: &[usize], refname: &str) -> usize {
+    let mut lo = 0usize;
+    let mut hi = starts.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if packed_line_refname_cmp(data, starts[mid], refname) == std::cmp::Ordering::Less {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+fn peel_oid_following_line(data: &[u8], line_start: usize) -> Option<ObjectId> {
+    let line_end = packed_line_end(data, line_start);
+    if line_end >= data.len() || data[line_end] != b'\n' {
+        return None;
+    }
+    let peel_start = line_end + 1;
+    if peel_start >= data.len() || data[peel_start] != b'^' {
+        return None;
+    }
+    let peel_end = packed_line_end(data, peel_start);
+    let inner = std::str::from_utf8(&data[peel_start + 1..peel_end]).ok()?;
+    ObjectId::from_hex(inner.trim()).ok()
+}
+
+fn parse_packed_line_at(
+    path: &Path,
+    data: &[u8],
+    line_start: usize,
+    ref_opts: &RefNameOptions,
+) -> Result<(String, ObjectId)> {
+    let line = packed_line_as_str(data, line_start);
+    parse_packed_ref_data_line(path, line, ref_opts)
+}
+
+pub(crate) fn parse_packed_refs_to_map(
+    path: &Path,
+    data: &[u8],
+) -> Result<HashMap<String, ObjectId>> {
     parse_packed_refs_to_map_with_prefix(path, data, None)
 }
 
@@ -1105,67 +1380,6 @@ fn parse_packed_refs_to_map_with_prefix(
     Ok(map)
 }
 
-fn parse_packed_refs_to_map_with_names(
-    path: &Path,
-    data: &[u8],
-    names: &HashSet<String>,
-) -> Result<HashMap<String, ObjectId>> {
-    if data.is_empty() {
-        return Ok(HashMap::new());
-    }
-    if data.contains(&b'\r') {
-        return Err(packed_refs_unexpected_line(
-            path,
-            "<contains carriage return>",
-        ));
-    }
-    if !data.ends_with(b"\n") {
-        let tail = std::str::from_utf8(data)
-            .map(|s| s.rsplit('\n').next().unwrap_or(s))
-            .unwrap_or("<invalid utf-8>");
-        return Err(packed_refs_unterminated_line(path, tail));
-    }
-    let text = std::str::from_utf8(data)
-        .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
-
-    let ref_opts = RefNameOptions {
-        allow_onelevel: false,
-        refspec_pattern: false,
-        normalize: false,
-    };
-
-    let mut map = HashMap::with_capacity(names.len());
-    let mut expect_peel = false;
-    let mut lines = text.split('\n').peekable();
-    while let Some(line) = lines.next() {
-        if line.is_empty() {
-            if lines.peek().is_none() {
-                break;
-            }
-            return Err(packed_refs_unexpected_line(path, line));
-        }
-        if line.starts_with('#') {
-            expect_peel = false;
-            continue;
-        }
-        if line.starts_with('^') {
-            parse_packed_ref_peel_line(path, line, expect_peel)?;
-            expect_peel = false;
-            continue;
-        }
-
-        let Some(refname) = packed_ref_data_line_refname(line) else {
-            return Err(packed_refs_unexpected_line(path, line));
-        };
-        if names.contains(refname) {
-            let (refname, oid) = parse_packed_ref_data_line(path, line, &ref_opts)?;
-            map.insert(refname, oid);
-        }
-        expect_peel = true;
-    }
-    Ok(map)
-}
-
 pub(crate) fn read_packed_refs_map(store: &Path) -> Result<HashMap<String, ObjectId>> {
     read_packed_refs_map_for_prefix(store, "")
 }
@@ -1177,31 +1391,28 @@ pub(crate) fn read_packed_refs_map_for_names(
     if names.is_empty() {
         return Ok(HashMap::new());
     }
-    let packed_path = store::paths::packed_refs_path(store);
-    let data = match fs::read(&packed_path) {
-        Ok(d) => d,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(e) => return Err(Error::Io(e)),
+    let Some(view) = read_packed_refs_file_view(store)? else {
+        return Ok(HashMap::new());
     };
-    parse_packed_refs_to_map_with_names(&packed_path, &data, names)
+    let packed_path = store::paths::packed_refs_path(store);
+    view.map_for_names(&packed_path, names)
 }
 
 pub(crate) fn read_packed_refs_map_for_prefix(
     store: &Path,
     prefix: &str,
 ) -> Result<HashMap<String, ObjectId>> {
-    let packed_path = store::paths::packed_refs_path(store);
-    let data = match fs::read(&packed_path) {
-        Ok(d) => d,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(e) => return Err(Error::Io(e)),
+    let Some(view) = read_packed_refs_file_view(store)? else {
+        return Ok(HashMap::new());
     };
+    let packed_path = store::paths::packed_refs_path(store);
+    parse_packed_refs_to_map(&packed_path, view.data())?;
     let filter = if prefix.is_empty() {
         None
     } else {
         Some(prefix)
     };
-    parse_packed_refs_to_map_with_prefix(&packed_path, &data, filter)
+    view.map_for_prefix(&packed_path, filter)
 }
 
 fn acquire_packed_refs_lock(git_dir: &Path, lock: &Path, lock_display: &Path) -> Result<()> {
@@ -1239,7 +1450,24 @@ fn acquire_packed_refs_lock(git_dir: &Path, lock: &Path, lock_display: &Path) ->
 
 /// Look up a refname in `packed-refs`.
 pub(crate) fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
-    Ok(read_packed_refs_map(git_dir)?.get(refname).copied())
+    let Some(view) = read_packed_refs_file_view(git_dir)? else {
+        return Ok(None);
+    };
+    let packed_path = store::paths::packed_refs_path(git_dir);
+    view.lookup_oid(&packed_path, refname)
+}
+
+/// Look up a refname and optional peeled tag oid in `packed-refs`.
+#[allow(dead_code)] // peel path exercised in `packed_refs_parse_tests`
+pub(crate) fn lookup_packed_ref_with_peel(
+    git_dir: &Path,
+    refname: &str,
+) -> Result<Option<(ObjectId, Option<ObjectId>)>> {
+    let Some(view) = read_packed_refs_file_view(git_dir)? else {
+        return Ok(None);
+    };
+    let packed_path = store::paths::packed_refs_path(git_dir);
+    view.lookup_entry(&packed_path, refname)
 }
 
 /// Write a symbolic ref (e.g. `NOTES_MERGE_REF` → `refs/notes/m`).
@@ -1535,15 +1763,7 @@ impl PackedRefs {
             return Ok(packed_refs_from_map(HashMap::new()));
         }
         let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
-        let packed_path = store::paths::packed_refs_path(&store);
-        let data = match fs::read(&packed_path) {
-            Ok(d) => d,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                return Ok(packed_refs_from_map(HashMap::new()));
-            }
-            Err(e) => return Err(Error::Io(e)),
-        };
-        let map = parse_packed_refs_to_map_with_names(&packed_path, &data, names)?;
+        let map = read_packed_refs_map_for_names(&store, names)?;
         Ok(packed_refs_from_map(map))
     }
 
@@ -1966,6 +2186,17 @@ pub fn read_symbolic_ref(git_dir: &Path, refname: &str) -> Result<Option<String>
     }
 }
 
+/// Like [`read_symbolic_ref`] but uses an open [`crate::repo::Repository`] ref store (no format re-detection).
+pub fn read_symbolic_ref_for_repository(
+    repo: &crate::repo::Repository,
+    refname: &str,
+) -> Result<Option<String>> {
+    match repo.refs().read_raw(refname)? {
+        Some(StoreRawRef::Symbolic(target)) => Ok(Some(target)),
+        Some(StoreRawRef::Direct(_)) | None => Ok(None),
+    }
+}
+
 /// Core `logAllRefUpdates` modes (after config lookup), matching Git's `log_refs_config`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogRefsConfig {
@@ -2354,7 +2585,7 @@ fn pack_refs_files(
             continue;
         }
         let peel = if refname.starts_with("refs/tags/") {
-            crate::commit_graph_write::peel_fully_for_packed_tag(odb, oid)
+            packed_ref_peel(odb, oid)
         } else {
             None
         };
@@ -3056,6 +3287,13 @@ fn normalize_list_refs_prefix(git_dir: &Path, prefix: &str) -> String {
     }
 }
 
+/// The `^` line of a `fully-peeled` `packed-refs` entry: the innermost non-tag object when `oid`
+/// is an annotated tag. Lightweight refs, and tags whose chain cannot be read, get no peel line.
+fn packed_ref_peel(odb: &crate::odb::Odb, oid: ObjectId) -> Option<ObjectId> {
+    let (peeled, _) = odb.peel_tags(oid).ok()?;
+    (peeled != oid).then_some(peeled)
+}
+
 /// After the first clone fetch, batch remote-tracking refs into `packed-refs`
 /// (Git's post-clone layout). Leaves `refs/remotes/{remote}/HEAD` as a loose
 /// symbolic ref.
@@ -3121,15 +3359,7 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
     }
 
     for (name, oid) in &entries {
-        let mut peel = None;
-        if let Ok(obj) = odb.read(oid) {
-            if obj.kind == crate::objects::ObjectKind::Tag {
-                if let Ok(tag) = crate::objects::parse_tag(&obj.data) {
-                    peel = Some(tag.object);
-                }
-            }
-        }
-        merged.insert(name.clone(), (*oid, peel));
+        merged.insert(name.clone(), (*oid, packed_ref_peel(&odb, *oid)));
     }
 
     let mut names: Vec<String> = merged.keys().cloned().collect();
@@ -4257,6 +4487,81 @@ mod packed_refs_parse_tests {
             parse_packed_refs_to_map(&path, &data),
             Err(Error::PackedRefsUnexpectedLine { .. })
         ));
+    }
+
+    #[test]
+    fn indexed_lookup_matches_full_parse_sorted_and_unsorted() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let peel = "2222222222222222222222222222222222222222";
+        let sorted_body = format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {oid} refs/heads/aaa\n\
+             {oid} refs/heads/main\n\
+             {oid} refs/heads/zzz\n\
+             {oid} refs/tags/v1\n\
+             ^{peel}\n"
+        );
+        fs::write(&path, &sorted_body).unwrap();
+        let data = fs::read(&path).unwrap();
+        let view = PackedRefsFileView::from_bytes(&path, data.clone()).unwrap();
+        let full = parse_packed_refs_to_map(&path, &data).unwrap();
+        for (name, want) in &full {
+            assert_eq!(view.lookup_oid(&path, name).unwrap(), Some(*want));
+        }
+        assert_eq!(
+            lookup_packed_ref_with_peel(dir.path(), "refs/tags/v1")
+                .unwrap()
+                .map(|(o, p)| (o, p.unwrap())),
+            Some((oid.parse().unwrap(), peel.parse().unwrap()))
+        );
+
+        let unsorted_body = format!(
+            "# pack-refs with: peeled\n{oid} refs/heads/zzz\n{oid} refs/heads/aaa\n{oid} refs/heads/main\n"
+        );
+        fs::write(&path, unsorted_body).unwrap();
+        let data = fs::read(&path).unwrap();
+        let view = PackedRefsFileView::from_bytes(&path, data.clone()).unwrap();
+        let full = parse_packed_refs_to_map(&path, &data).unwrap();
+        for (name, want) in &full {
+            assert_eq!(view.lookup_oid(&path, name).unwrap(), Some(*want));
+        }
+        assert_eq!(
+            view.map_for_prefix(&path, Some("refs/heads/a")).unwrap(),
+            parse_packed_refs_to_map_with_prefix(&path, &data, Some("refs/heads/a")).unwrap()
+        );
+    }
+
+    #[test]
+    fn sorted_prefix_without_upper_bound_filters_names() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let sorted_body = format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {oid} refs/heads/aaa\n\
+             {oid} refs/heads/zzz\n\
+             {oid} refs/tags/v1\n"
+        );
+        fs::write(&path, sorted_body).unwrap();
+        let data = fs::read(&path).unwrap();
+        let view = PackedRefsFileView::from_bytes(&path, data.clone()).unwrap();
+        assert_eq!(
+            view.map_for_prefix(&path, Some("refs/heads/a")).unwrap(),
+            parse_packed_refs_to_map_with_prefix(&path, &data, Some("refs/heads/a")).unwrap()
+        );
+        assert!(
+            !view
+                .map_for_prefix(&path, Some("refs/heads/a"))
+                .unwrap()
+                .contains_key("refs/heads/zzz"),
+            "prefix refs/heads/a must not include refs/heads/zzz"
+        );
+        assert_eq!(
+            view.map_for_prefix(&path, Some("refs")).unwrap(),
+            parse_packed_refs_to_map_with_prefix(&path, &data, Some("refs")).unwrap()
+        );
     }
 
     #[test]

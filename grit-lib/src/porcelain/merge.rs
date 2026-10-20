@@ -41,9 +41,8 @@ use crate::index::{Index, IndexEntry};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    apply_tree_merge_output_to_index, apply_tree_merge_output_to_worktree_index,
-    materialized_merge_result_tree, merge_trees_three_way, TreeMergeConflictPresentation,
-    TreeMergeOutput, WhitespaceMergeOptions,
+    apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_three_way,
+    TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout::{self, checkout_between_trees};
@@ -51,6 +50,7 @@ use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
 };
+use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
 use crate::refs;
 use crate::repo::Repository;
@@ -351,15 +351,10 @@ pub fn integrate_branch(
         "GIT_COMMITTER_DATE",
     )?;
 
-    let merged_tree = merged.result_tree;
-    prepare_tree_checkout(repo, Some(&into_tree), &merged_tree)?;
-    checkout_between_trees(repo, Some(&into_tree), &merged_tree)?;
-    let mut index = repo.load_index()?;
-    apply_tree_merge_output_to_worktree_index(repo, &mut index, &merged)?;
-    repo.write_index(&mut index)?;
+    apply_clean_tree_merge_to_worktree(repo, &into_tree, &merged)?;
 
     let commit = CommitData {
-        tree: merged_tree,
+        tree: merged.result_tree,
         parents: vec![into_oid, other_oid],
         author,
         committer,

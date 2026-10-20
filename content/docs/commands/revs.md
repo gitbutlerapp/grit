@@ -122,7 +122,9 @@ Example (`--count --left-right`):
   "left_right": {
     "left": 3,
     "right": 5
-  }
+  },
+  "truncated": false,
+  "next": null
 }
 ```
 

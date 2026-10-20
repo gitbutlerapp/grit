@@ -158,6 +158,55 @@ mod tests {
     }
 
     #[test]
+    fn repository_config_reloads_after_external_local_rewrite() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        assert!(repo.config().unwrap().get("grit.rewriteKey").is_none());
+
+        let config_path = repo.git_dir().join("config");
+        let existing = fs::read_to_string(&config_path).expect("read config");
+        let mut lines: Vec<&str> = existing.lines().collect();
+        lines.push("[grit]");
+        lines.push("\trewriteKey = replaced");
+        fs::write(&config_path, lines.join("\n")).expect("rewrite config");
+
+        assert_eq!(
+            repo.config().unwrap().get("grit.rewriteKey").as_deref(),
+            Some("replaced")
+        );
+    }
+
+    #[test]
+    fn repository_config_reloads_after_external_local_append() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        assert!(repo
+            .config()
+            .unwrap()
+            .get("grit.externalAppendKey")
+            .is_none());
+
+        let config_path = repo.git_dir().join("config");
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&config_path)
+            .expect("append config");
+        use std::io::Write;
+        file.write_all(b"\n[grit]\n\texternalAppendKey = seen\n")
+            .expect("write");
+
+        assert_eq!(
+            repo.config()
+                .unwrap()
+                .get("grit.externalAppendKey")
+                .as_deref(),
+            Some("seen")
+        );
+    }
+
+    #[test]
     fn repository_config_reload_after_write() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -412,6 +461,182 @@ mod tests {
         assert!(
             !RefStorageFormat::detect(&discovered.git_dir()).is_ok_and(|f| f.is_reftable()),
             "global refstorage must not enable reftable backend"
+        );
+    }
+
+    #[test]
+    fn config_set_local_visible_on_next_config_without_extra_reload() {
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repo(tmp.path());
+        repo.config_handle()
+            .set_local("grit.sessionKey", "one")
+            .unwrap();
+        assert_eq!(
+            repo.config().unwrap().get("grit.sessionKey"),
+            Some("one".to_string())
+        );
+    }
+
+    #[test]
+    fn hook_that_writes_config_is_visible_after_hook_returns() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        assert!(Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .status()
+            .unwrap()
+            .success());
+        let git_dir = root.join(".git");
+        let hook_body = format!(
+            r#"#!/bin/sh
+cfg="{}/config"
+printf '%s\n' '[grit]' >> "$cfg"
+printf '%s\n' '	hookKey = from-hook' >> "$cfg"
+"#,
+            git_dir.display()
+        );
+        let hooks = git_dir.join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(hooks.join("post-checkout"), hook_body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                hooks.join("post-checkout"),
+                fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n",
+        )
+        .unwrap();
+
+        let repo = Repository::open(
+            &git_dir,
+            &RepositoryOptions::empty().with_work_tree(root.to_path_buf()),
+        )
+        .unwrap();
+        assert!(repo.config().unwrap().get("grit.hookKey").is_none());
+
+        crate::hooks::run_hook(&repo, "post-checkout", &["a", "b", "c"], None);
+        assert_eq!(
+            repo.config().unwrap().get("grit.hookKey"),
+            Some("from-hook".to_string())
+        );
+    }
+
+    #[test]
+    fn replace_ref_created_by_git_honored_on_new_repository() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        assert!(Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(root)
+            .status()
+            .unwrap()
+            .success());
+        Command::new("git")
+            .args(["config", "user.email", "t@example.com"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "t"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        fs::write(root.join("f.txt"), b"x\n").unwrap();
+        Command::new("git")
+            .args(["add", "f.txt"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", "c"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        let head_hex = String::from_utf8_lossy(
+            &Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        fs::write(root.join("f.txt"), b"y\n").unwrap();
+        Command::new("git")
+            .args(["commit", "-am", "c2"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        let new_hex = String::from_utf8_lossy(
+            &Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+
+        Command::new("git")
+            .args(["replace", &head_hex, &new_hex])
+            .current_dir(root)
+            .status()
+            .unwrap();
+
+        let git_dir = root.join(".git");
+        let repo = Repository::open(
+            &git_dir,
+            &RepositoryOptions::empty().with_work_tree(root.to_path_buf()),
+        )
+        .unwrap();
+        let original: crate::objects::ObjectId = head_hex.parse().expect("parse oid");
+        let replacement: crate::objects::ObjectId = new_hex.parse().expect("parse new");
+        let resolved = repo.read_replaced(&original).expect("read replaced");
+        let direct = repo.odb().read(&replacement).expect("read replacement");
+        assert_eq!(resolved.data, direct.data);
+    }
+
+    #[test]
+    fn repository_open_succeeds_when_git_config_count_exceeds_fingerprint_limit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let git_dir = repo.git_dir().to_path_buf();
+
+        let mut env = crate::environment::Environment::empty();
+        env.cwd = root.to_path_buf();
+        env.git_config_count = Some("257".into());
+        for i in 0..257 {
+            env.git_config_pairs
+                .push((format!("section{i}.key"), format!("v{i}")));
+        }
+        assert!(env.config_fingerprint().is_none());
+
+        let opened = Repository::open(
+            &git_dir,
+            &RepositoryOptions::with_environment(env).with_work_tree(root.to_path_buf()),
+        )
+        .expect("open with many GIT_CONFIG pairs");
+        assert!(
+            opened
+                .config()
+                .expect("config session")
+                .get("user.name")
+                .is_some()
+                || opened
+                    .config()
+                    .expect("config")
+                    .get("core.repositoryformatversion")
+                    .is_some()
         );
     }
 

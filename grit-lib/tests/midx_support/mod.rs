@@ -448,7 +448,7 @@ pub fn assert_lookup_matches_idx(objects: &Path, oid: &ObjectId) {
         .expect("pack id")
         .clone();
     let idx = read_pack_index_cached(&pack_dir.join(idx_name)).expect("idx");
-    assert_eq!(idx.find_offset(oid), Some(off));
+    assert_eq!(idx.find_offset(oid).expect("lookup"), Some(off));
 }
 
 pub fn batch_check_hex(repo: &Path, oids: &[ObjectId]) -> BatchCheckOutcome {

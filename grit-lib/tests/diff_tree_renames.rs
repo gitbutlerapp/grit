@@ -21,7 +21,7 @@ use support::{
 
 fn default_opts() -> DiffPostprocessOptions {
     DiffPostprocessOptions {
-        rename_threshold: 100,
+        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
         ..Default::default()
     }
 }
@@ -202,7 +202,7 @@ fn t4008_break_rewrite_index_worktree_raw_matches_git() {
     let config = ConfigSet::new();
     let opts = DiffPostprocessOptions {
         break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: 100,
+        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
         ..Default::default()
     };
 
@@ -287,7 +287,7 @@ fn t4008_break_rewrite_tree_worktree_raw_matches_git() {
     let config = ConfigSet::new();
     let opts = DiffPostprocessOptions {
         break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: 100,
+        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
         materialize_break_worktree_new_oid: true,
         ..Default::default()
     };
@@ -328,7 +328,7 @@ fn t4008_break_rewrite_tree_worktree_eol_lf_crlf_raw_matches_git() {
     let config = ConfigSet::new();
     let opts = DiffPostprocessOptions {
         break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: 100,
+        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
         materialize_break_worktree_new_oid: true,
         ..Default::default()
     };
@@ -373,7 +373,7 @@ fn t4008_break_rewrite_matches_git() {
     let config = ConfigSet::new();
     let break_only = DiffPostprocessOptions {
         break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: 100,
+        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
         ..Default::default()
     };
     let git_b = git_raw_lines(

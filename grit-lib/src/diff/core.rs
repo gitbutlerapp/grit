@@ -42,15 +42,13 @@ use crate::userdiff::FuncnameMatcher;
 use crate::worktree_rules::WorktreeRules;
 
 use super::unified_emit::{
-    emit_unified_body_from_edits, line_ending_only_edits, write_patch_line, EditSpan, LineSide,
-    UnifiedEmitOptions,
+    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineSide, UnifiedEmitOptions,
 };
 
 #[path = "../structured_diff.rs"]
 pub mod structured;
 
-/// Splits imara-diff unified body (concatenated hunks) into per-hunk slices for post-processing.
-fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
+pub(crate) fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
     let mut starts: Vec<usize> = Vec::new();
     if body.starts_with("@@") {
         starts.push(0);
@@ -62,111 +60,123 @@ fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
     starts.windows(2).map(|w| &body[w[0]..w[1]]).collect()
 }
 
+/// Build line-oriented text whose lines are [`WhitespaceMode::normalize_line_for_compare`] keys,
+/// preserving the same logical line count and trailing-newline shape as `side`.
+fn normalized_line_keys_content(side: &LineSide, ws: super::WhitespaceMode) -> String {
+    use super::unified_emit::LineEnding;
+
+    let mut out = String::new();
+    for (i, line) in side.lines.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(&ws.normalize_line_for_compare(&line.body));
+    }
+    if let Some(last) = side.lines.last() {
+        match last.ending {
+            LineEnding::Lf | LineEnding::CrLf => out.push('\n'),
+            LineEnding::Missing => {}
+        }
+    }
+    out
+}
+
+/// Histogram line alignment from imara, then Git `xdl_change_compact` (and optional indent heuristic).
+pub(crate) fn histogram_compacted_line_ops(
+    old_content: &str,
+    new_content: &str,
+    indent_heuristic: bool,
+    ws: super::WhitespaceMode,
+) -> Vec<similar::DiffOp> {
+    use imara_diff::{Algorithm, Diff, InternedInput};
+
+    let before = LineSide::from_text(old_content);
+    let after = LineSide::from_text(new_content);
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let old_len = old_lines.len();
+    let new_len = new_lines.len();
+
+    let (old_diff, new_diff) = if ws.normalizes_line_compare() {
+        (
+            normalized_line_keys_content(&before, ws),
+            normalized_line_keys_content(&after, ws),
+        )
+    } else {
+        (old_content.to_string(), new_content.to_string())
+    };
+    let input = InternedInput::new(old_diff.as_str(), new_diff.as_str());
+    let mut diff = Diff::compute(Algorithm::Histogram, &input);
+    diff.postprocess_lines(&input);
+    let hunks: Vec<_> = diff.hunks().collect();
+    if hunks.is_empty() {
+        return Vec::new();
+    }
+
+    let mut changed1 = vec![false; old_len];
+    let mut changed2 = vec![false; new_len];
+    for h in &hunks {
+        for (i, flag) in changed1
+            .iter_mut()
+            .enumerate()
+            .take(h.before.end as usize)
+            .skip(h.before.start as usize)
+        {
+            if i < old_len {
+                *flag = true;
+            }
+        }
+        for (i, flag) in changed2
+            .iter_mut()
+            .enumerate()
+            .take(h.after.end as usize)
+            .skip(h.after.start as usize)
+        {
+            if i < new_len {
+                *flag = true;
+            }
+        }
+    }
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_len, new_len);
+    diff_indent_heuristic::apply_change_compact_to_ops(
+        &raw,
+        &old_lines,
+        &new_lines,
+        indent_heuristic,
+    )
+}
+
 pub(crate) fn histogram_unified_body_raw(
     old_content: &str,
     new_content: &str,
     context_lines: usize,
     inter_hunk_context: usize,
+    indent_heuristic: bool,
+    ws: super::WhitespaceMode,
 ) -> String {
-    use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
-    use std::fmt::Write as _;
-
-    let input = InternedInput::new(old_content, new_content);
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
     let before_side = LineSide::from_text(old_content);
     let after_side = LineSide::from_text(new_content);
-
-    // Assemble hunks ourselves: imara's `UnifiedDiff` printer starts the first
-    // hunk's context at line 0 whenever the first change is within
-    // `2 * context_len` of the file start, emitting more leading context than
-    // its own header claims (t4061), and its gap threshold cannot express
-    // Git's odd `2 * U + inter_hunk_context` fuse limits (t4032).
-    let hunks: Vec<Hunk> = diff.hunks().collect();
-    if hunks.is_empty() {
-        if old_content != new_content {
-            let edits = line_ending_only_edits(&before_side, &after_side);
-            if !edits.is_empty() {
-                return emit_unified_body_from_edits(
-                    &before_side,
-                    &after_side,
-                    &edits,
-                    UnifiedEmitOptions {
-                        context_lines,
-                        inter_hunk_context,
-                        function_context: false,
-                    },
-                    None,
-                );
-            }
+    let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic, ws);
+    let mut edits = diff_ops_to_edit_spans(&ops);
+    if edits.is_empty() {
+        if old_content != new_content && !ws.normalizes_line_compare() {
+            edits = line_ending_only_edits(&before_side, &after_side);
         }
-        return String::new();
-    }
-
-    let ctx = context_lines.min(u32::MAX as usize) as u32;
-    let max_gap = (2usize.saturating_mul(context_lines))
-        .saturating_add(inter_hunk_context)
-        .min(u32::MAX as usize) as u32;
-    let before_len = input.before.len() as u32;
-    let after_len = input.after.len() as u32;
-
-    // Fuse hunks whose unchanged gap is at most `max_gap` (Git xdl_get_hunk).
-    let mut groups: Vec<&[Hunk]> = Vec::new();
-    let mut group_start = 0usize;
-    for i in 1..hunks.len() {
-        if hunks[i].before.start - hunks[i - 1].before.end > max_gap {
-            groups.push(&hunks[group_start..i]);
-            group_start = i;
+        if edits.is_empty() {
+            return String::new();
         }
     }
-    groups.push(&hunks[group_start..]);
-
-    // Git hunk header range: 1-based start (the preceding line when the range
-    // is empty) with the `,count` part omitted when the count is exactly 1.
-    fn fmt_side(start: u32, count: u32) -> String {
-        let shown_start = if count == 0 { start } else { start + 1 };
-        if count == 1 {
-            format!("{shown_start}")
-        } else {
-            format!("{shown_start},{count}")
-        }
-    }
-
-    let mut out = String::new();
-    for group in groups {
-        let first = &group[0];
-        let last = &group[group.len() - 1];
-        let b_start = first.before.start.saturating_sub(ctx);
-        let a_start = first.after.start.saturating_sub(ctx);
-        let b_end = (last.before.end.saturating_add(ctx)).min(before_len);
-        let a_end = (last.after.end.saturating_add(ctx)).min(after_len);
-
-        let _ = writeln!(
-            out,
-            "@@ -{} +{} @@",
-            fmt_side(b_start, b_end - b_start),
-            fmt_side(a_start, a_end - a_start)
-        );
-
-        let mut pos = b_start;
-        for hunk in group {
-            for idx in pos..hunk.before.start {
-                write_patch_line(&mut out, ' ', before_side.line(idx as usize));
-            }
-            for idx in hunk.before.start..hunk.before.end {
-                write_patch_line(&mut out, '-', before_side.line(idx as usize));
-            }
-            for idx in hunk.after.start..hunk.after.end {
-                write_patch_line(&mut out, '+', after_side.line(idx as usize));
-            }
-            pos = hunk.before.end;
-        }
-        for idx in pos..b_end {
-            write_patch_line(&mut out, ' ', before_side.line(idx as usize));
-        }
-    }
-
-    out
+    emit_unified_body_from_edits(
+        &before_side,
+        &after_side,
+        &edits,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context: false,
+        },
+        None,
+    )
 }
 
 /// Build the unified-diff body (no `---`/`+++` header) using Git's histogram
@@ -185,6 +195,70 @@ pub(crate) fn histogram_unified_body_raw(
 /// Optional `--function-context` (`-W`) hunk expansion is applied *after*
 /// ignorable change-record pruning so the boundaries/funcname header match Git.
 #[allow(clippy::too_many_arguments)]
+fn diff_ops_to_ignorable_edit_spans<F>(
+    ops: &[similar::DiffOp],
+    old_lines: &[&str],
+    new_lines: &[&str],
+    is_ignorable_change: F,
+) -> Vec<EditSpan>
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
+    use similar::DiffOp;
+    let mut out = Vec::new();
+    for op in ops {
+        match *op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete {
+                old_index,
+                old_len,
+                new_index,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: 0,
+                    skip_in_output: is_ignorable_change(removed, &[]),
+                });
+            }
+            DiffOp::Insert {
+                old_index,
+                new_index,
+                new_len,
+            } => {
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: 0,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(&[], added),
+                });
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(removed, added),
+                });
+            }
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn histogram_unified_body_ignore_fc<F>(
     old_content: &str,
     new_content: &str,
@@ -192,66 +266,22 @@ pub(crate) fn histogram_unified_body_ignore_fc<F>(
     inter_hunk_context: usize,
     function_context: bool,
     funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
+    ws: super::WhitespaceMode,
     is_ignorable_change: F,
 ) -> String
 where
     F: Fn(&[&str], &[&str]) -> bool,
 {
-    use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
-
-    let input = InternedInput::new(old_content, new_content);
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
-
-    let raw_hunks: Vec<Hunk> = diff.hunks().collect();
-    if raw_hunks.is_empty() {
-        return String::new();
-    }
-
-    struct Change {
-        i1: i64,
-        chg1: i64,
-        i2: i64,
-        chg2: i64,
-        ignore: bool,
-    }
-
-    let mut changes: Vec<Change> = Vec::with_capacity(raw_hunks.len());
-    for h in &raw_hunks {
-        let i1 = h.before.start as i64;
-        let chg1 = (h.before.end - h.before.start) as i64;
-        let i2 = h.after.start as i64;
-        let chg2 = (h.after.end - h.after.start) as i64;
-        let removed: Vec<&str> = input.before[h.before.start as usize..h.before.end as usize]
-            .iter()
-            .map(|&t| input.interner[t])
-            .collect();
-        let added: Vec<&str> = input.after[h.after.start as usize..h.after.end as usize]
-            .iter()
-            .map(|&t| input.interner[t])
-            .collect();
-        let ignore = is_ignorable_change(&removed, &added);
-        changes.push(Change {
-            i1,
-            chg1,
-            i2,
-            chg2,
-            ignore,
-        });
-    }
-
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let edits: Vec<EditSpan> = changes
-        .into_iter()
-        .map(|c| EditSpan {
-            before_start: c.i1,
-            before_len: c.chg1,
-            after_start: c.i2,
-            after_len: c.chg2,
-            skip_in_output: c.ignore,
-        })
-        .collect();
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic, ws);
+    if ops.is_empty() {
+        return String::new();
+    }
+    let edits = diff_ops_to_ignorable_edit_spans(&ops, &old_lines, &new_lines, is_ignorable_change);
     emit_unified_body_from_edits(
         &before,
         &after,
@@ -265,17 +295,27 @@ where
     )
 }
 
-fn git_xdiff_compacted_line_ops(
+pub(crate) fn git_xdiff_compacted_line_ops(
     old_lines: &[&str],
     new_lines: &[&str],
     indent_heuristic: bool,
+    need_min: bool,
+    ws: super::WhitespaceMode,
 ) -> Vec<similar::DiffOp> {
     use crate::line_interner::LineInterner;
 
     let mut interner = LineInterner::default();
-    let ids1 = interner.intern_all(old_lines);
-    let ids2 = interner.intern_all(new_lines);
-    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2);
+    let ids1 = if ws.normalizes_line_compare() {
+        interner.intern_all_normalized(old_lines, |line| ws.normalize_line_for_compare(line))
+    } else {
+        interner.intern_all(old_lines)
+    };
+    let ids2 = if ws.normalizes_line_compare() {
+        interner.intern_all_normalized(new_lines, |line| ws.normalize_line_for_compare(line))
+    } else {
+        interner.intern_all(new_lines)
+    };
+    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2, need_min);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     diff_indent_heuristic::apply_change_compact_to_ops(&raw, old_lines, new_lines, indent_heuristic)
 }
@@ -325,8 +365,305 @@ fn diff_ops_to_edit_spans(ops: &[similar::DiffOp]) -> Vec<EditSpan> {
     out
 }
 
-/// Unified hunk body using Git's xdiff Myers engine (no `---` / `+++`).
-fn myers_git_xdiff_unified_body_raw(
+/// Unified hunk body using Git's xdiff engine (no `---` / `+++`).
+fn git_xdiff_unified_body_raw(
+    old_content: &str,
+    new_content: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    indent_heuristic: bool,
+    need_min: bool,
+    ws: super::WhitespaceMode,
+) -> String {
+    git_xdiff_unified_body_raw_with_ignorable(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+        need_min,
+        ws,
+        None::<fn(&[&str], &[&str]) -> bool>,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn git_xdiff_unified_body_raw_with_ignorable<F>(
+    old_content: &str,
+    new_content: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    indent_heuristic: bool,
+    need_min: bool,
+    ws: super::WhitespaceMode,
+    is_ignorable_change: Option<F>,
+) -> String
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
+    let before = LineSide::from_text(old_content);
+    let after = LineSide::from_text(new_content);
+    if before.is_empty() && after.is_empty() {
+        return String::new();
+    }
+    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let ops = git_xdiff_compacted_line_ops(&old_refs, &new_refs, indent_heuristic, need_min, ws);
+    let mut edits = if let Some(is_ignorable) = is_ignorable_change {
+        diff_ops_to_ignorable_edit_spans(&ops, &old_refs, &new_refs, is_ignorable)
+    } else {
+        diff_ops_to_edit_spans(&ops)
+    };
+    if edits.is_empty() {
+        if old_content != new_content && !ws.normalizes_line_compare() {
+            edits = line_ending_only_edits(&before, &after);
+        }
+        if edits.is_empty() {
+            return String::new();
+        }
+    }
+    emit_unified_body_from_edits(
+        &before,
+        &after,
+        &edits,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context: false,
+        },
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn git_patience_unified_body_raw_with_ignorable<F>(
+    old_content: &str,
+    new_content: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    indent_heuristic: bool,
+    ws: super::WhitespaceMode,
+    is_ignorable_change: Option<F>,
+) -> String
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
+    let before = LineSide::from_text(old_content);
+    let after = LineSide::from_text(new_content);
+    if before.is_empty() && after.is_empty() {
+        return String::new();
+    }
+    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let (changed1, changed2) = if ws.normalizes_line_compare() {
+        let norm_old: Vec<String> = old_refs
+            .iter()
+            .map(|l| ws.normalize_line_for_compare(l).into_owned())
+            .collect();
+        let norm_new: Vec<String> = new_refs
+            .iter()
+            .map(|l| ws.normalize_line_for_compare(l).into_owned())
+            .collect();
+        let cmp_old: Vec<&str> = norm_old.iter().map(String::as_str).collect();
+        let cmp_new: Vec<&str> = norm_new.iter().map(String::as_str).collect();
+        git_xdiff::patience_changed_flags(&cmp_old, &cmp_new)
+    } else {
+        git_xdiff::patience_changed_flags(&old_refs, &new_refs)
+    };
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
+    let ops = diff_indent_heuristic::apply_change_compact_to_ops(
+        &raw,
+        &old_refs,
+        &new_refs,
+        indent_heuristic,
+    );
+    let mut edits = if let Some(is_ignorable) = is_ignorable_change {
+        diff_ops_to_ignorable_edit_spans(&ops, &old_refs, &new_refs, is_ignorable)
+    } else {
+        diff_ops_to_edit_spans(&ops)
+    };
+    if edits.is_empty() {
+        if old_content != new_content && !ws.normalizes_line_compare() {
+            edits = line_ending_only_edits(&before, &after);
+        }
+        if edits.is_empty() {
+            return String::new();
+        }
+    }
+    emit_unified_body_from_edits(
+        &before,
+        &after,
+        &edits,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context: false,
+        },
+        None,
+    )
+}
+
+fn blank_line_ignorable(ws: super::WhitespaceMode) -> impl Fn(&[&str], &[&str]) -> bool + Copy {
+    move |removed: &[&str], added: &[&str]| {
+        ws.ignore_blank_lines
+            && removed.iter().all(|l| crate::ws::ws_blank_line(l))
+            && added.iter().all(|l| crate::ws::ws_blank_line(l))
+    }
+}
+
+/// Unified hunk bodies (`@@` …) for [`DiffOptions`], shared by structured and log-patch output.
+pub(crate) fn unified_hunk_body_for_diff_options(
+    old_content: &str,
+    new_content: &str,
+    options: &crate::diff::options::DiffOptions,
+) -> String {
+    use crate::diff::options::DiffAlgorithm;
+
+    let ws = options.whitespace;
+    if ws.is_active() {
+        let blank_only = blank_line_ignorable(ws);
+        if ws.normalizes_line_compare() {
+            let ignorable = ws.ignore_blank_lines.then_some(blank_only);
+            return match options.algorithm {
+                DiffAlgorithm::Myers => git_xdiff_unified_body_raw_with_ignorable(
+                    old_content,
+                    new_content,
+                    options.context_lines,
+                    options.inter_hunk_context,
+                    options.indent_heuristic,
+                    false,
+                    ws,
+                    ignorable,
+                ),
+                DiffAlgorithm::Minimal => git_xdiff_unified_body_raw_with_ignorable(
+                    old_content,
+                    new_content,
+                    options.context_lines,
+                    options.inter_hunk_context,
+                    options.indent_heuristic,
+                    true,
+                    ws,
+                    ignorable,
+                ),
+                DiffAlgorithm::Patience => git_patience_unified_body_raw_with_ignorable(
+                    old_content,
+                    new_content,
+                    options.context_lines,
+                    options.inter_hunk_context,
+                    options.indent_heuristic,
+                    ws,
+                    ignorable,
+                ),
+                DiffAlgorithm::Histogram => {
+                    if ws.ignore_blank_lines {
+                        histogram_unified_body_ignore_fc(
+                            old_content,
+                            new_content,
+                            options.context_lines,
+                            options.inter_hunk_context,
+                            false,
+                            None,
+                            options.indent_heuristic,
+                            ws,
+                            blank_only,
+                        )
+                    } else {
+                        histogram_unified_body_raw(
+                            old_content,
+                            new_content,
+                            options.context_lines,
+                            options.inter_hunk_context,
+                            options.indent_heuristic,
+                            ws,
+                        )
+                    }
+                }
+            };
+        }
+        if ws.ignore_blank_lines {
+            return match options.algorithm {
+                DiffAlgorithm::Myers => git_xdiff_unified_body_raw_with_ignorable(
+                    old_content,
+                    new_content,
+                    options.context_lines,
+                    options.inter_hunk_context,
+                    options.indent_heuristic,
+                    false,
+                    ws,
+                    Some(blank_only),
+                ),
+                DiffAlgorithm::Minimal => git_xdiff_unified_body_raw_with_ignorable(
+                    old_content,
+                    new_content,
+                    options.context_lines,
+                    options.inter_hunk_context,
+                    options.indent_heuristic,
+                    true,
+                    ws,
+                    Some(blank_only),
+                ),
+                DiffAlgorithm::Patience => git_patience_unified_body_raw_with_ignorable(
+                    old_content,
+                    new_content,
+                    options.context_lines,
+                    options.inter_hunk_context,
+                    options.indent_heuristic,
+                    ws,
+                    Some(blank_only),
+                ),
+                DiffAlgorithm::Histogram => histogram_unified_body_ignore_fc(
+                    old_content,
+                    new_content,
+                    options.context_lines,
+                    options.inter_hunk_context,
+                    false,
+                    None,
+                    options.indent_heuristic,
+                    ws,
+                    blank_only,
+                ),
+            };
+        }
+    }
+    match options.algorithm {
+        DiffAlgorithm::Myers => git_xdiff_unified_body_raw(
+            old_content,
+            new_content,
+            options.context_lines,
+            options.inter_hunk_context,
+            options.indent_heuristic,
+            false,
+            ws,
+        ),
+        DiffAlgorithm::Minimal => git_xdiff_unified_body_raw(
+            old_content,
+            new_content,
+            options.context_lines,
+            options.inter_hunk_context,
+            options.indent_heuristic,
+            true,
+            ws,
+        ),
+        DiffAlgorithm::Patience => git_patience_unified_body_raw(
+            old_content,
+            new_content,
+            options.context_lines,
+            options.inter_hunk_context,
+            options.indent_heuristic,
+        ),
+        DiffAlgorithm::Histogram => histogram_unified_body_raw(
+            old_content,
+            new_content,
+            options.context_lines,
+            options.inter_hunk_context,
+            options.indent_heuristic,
+            ws,
+        ),
+    }
+}
+
+/// Unified hunk body using Git's patience diff (no `---` / `+++`).
+fn git_patience_unified_body_raw(
     old_content: &str,
     new_content: &str,
     context_lines: usize,
@@ -340,7 +677,14 @@ fn myers_git_xdiff_unified_body_raw(
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
-    let ops = git_xdiff_compacted_line_ops(&old_refs, &new_refs, indent_heuristic);
+    let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_refs, &new_refs);
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
+    let ops = diff_indent_heuristic::apply_change_compact_to_ops(
+        &raw,
+        &old_refs,
+        &new_refs,
+        indent_heuristic,
+    );
     let mut edits = diff_ops_to_edit_spans(&ops);
     if edits.is_empty() {
         if old_content != new_content {
@@ -363,6 +707,96 @@ fn myers_git_xdiff_unified_body_raw(
     )
 }
 
+/// Parse `@@ -old +new @@` into 1-based starts and line counts (Git display form).
+pub(crate) fn unified_hunk_header_counts(
+    header_line: &str,
+) -> Option<(usize, usize, usize, usize)> {
+    let rest = header_line.strip_prefix("@@ ")?;
+    let (old_part, rest2) = rest.split_once(" +")?;
+    let old_tok = old_part.strip_prefix('-')?.split(' ').next()?;
+    let new_tok = rest2.split(" @@").next()?.split(' ').next()?;
+
+    fn parse_side(spec: &str) -> (usize, usize) {
+        if let Some((start, count)) = spec.split_once(',') {
+            (start.parse().unwrap_or(0), count.parse().unwrap_or(0))
+        } else {
+            (spec.parse().unwrap_or(0), 1)
+        }
+    }
+
+    let (os, ol) = parse_side(old_tok);
+    let (ns, nl) = parse_side(new_tok);
+    Some((os, ol, ns, nl))
+}
+
+/// Write `---` / `+++` and unified hunks using [`unified_hunk_body_for_diff_options`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_unified_diff_from_diff_options<W: std::io::Write>(
+    out: &mut W,
+    old_content: &str,
+    new_content: &str,
+    old_path: &str,
+    new_path: &str,
+    src_prefix: &str,
+    dst_prefix: &str,
+    funcname_matcher: Option<&FuncnameMatcher>,
+    options: &crate::diff::options::DiffOptions,
+    quote_path_fully: bool,
+) -> Result<()> {
+    use crate::quote_path::format_diff_path_with_prefix;
+
+    if old_path == "/dev/null" {
+        out.write_all(b"--- /dev/null\n")?;
+    } else if src_prefix.is_empty() {
+        writeln!(out, "--- {old_path}")?;
+    } else {
+        out.write_all(b"--- ")?;
+        out.write_all(
+            format_diff_path_with_prefix(src_prefix, old_path, quote_path_fully).as_bytes(),
+        )?;
+        out.write_all(b"\n")?;
+    }
+    if new_path == "/dev/null" {
+        out.write_all(b"+++ /dev/null\n")?;
+    } else if dst_prefix.is_empty() {
+        writeln!(out, "+++ {new_path}")?;
+    } else {
+        out.write_all(b"+++ ")?;
+        out.write_all(
+            format_diff_path_with_prefix(dst_prefix, new_path, quote_path_fully).as_bytes(),
+        )?;
+        out.write_all(b"\n")?;
+    }
+
+    let body = unified_hunk_body_for_diff_options(old_content, new_content, options);
+    if body.is_empty() {
+        return Ok(());
+    }
+    let old_lines: Vec<&str> = old_content.lines().collect();
+    for hunk_str in imara_unified_hunk_slices(&body) {
+        if hunk_str.is_empty() {
+            continue;
+        }
+        if let Some(first_newline) = hunk_str.find('\n') {
+            let header_line = &hunk_str[..first_newline];
+            let rest = &hunk_str[first_newline..];
+            if let Some(func_ctx) =
+                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
+            {
+                out.write_all(header_line.as_bytes())?;
+                out.write_all(b" ")?;
+                out.write_all(func_ctx.as_bytes())?;
+                out.write_all(rest.as_bytes())?;
+            } else {
+                out.write_all(hunk_str.as_bytes())?;
+            }
+        } else {
+            out.write_all(hunk_str.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
 #[expect(clippy::too_many_arguments)]
 fn unified_diff_git_myers_with_prefix_and_funcname(
     old_content: &str,
@@ -379,7 +813,167 @@ fn unified_diff_git_myers_with_prefix_and_funcname(
 ) -> String {
     use crate::quote_path::format_diff_path_with_prefix;
 
-    let body = myers_git_xdiff_unified_body_raw(
+    let body = git_xdiff_unified_body_raw(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+        false,
+        super::WhitespaceMode::default(),
+    );
+
+    let mut output = String::new();
+    if old_path == "/dev/null" {
+        output.push_str("--- /dev/null\n");
+    } else if src_prefix.is_empty() {
+        output.push_str(&format!("--- {old_path}\n"));
+    } else {
+        output.push_str("--- ");
+        output.push_str(&format_diff_path_with_prefix(
+            src_prefix,
+            old_path,
+            quote_path_fully,
+        ));
+        output.push('\n');
+    }
+    if new_path == "/dev/null" {
+        output.push_str("+++ /dev/null\n");
+    } else if dst_prefix.is_empty() {
+        output.push_str(&format!("+++ {new_path}\n"));
+    } else {
+        output.push_str("+++ ");
+        output.push_str(&format_diff_path_with_prefix(
+            dst_prefix,
+            new_path,
+            quote_path_fully,
+        ));
+        output.push('\n');
+    }
+
+    let old_lines: Vec<&str> = old_content.lines().collect();
+    for hunk_str in imara_unified_hunk_slices(&body) {
+        if hunk_str.is_empty() {
+            continue;
+        }
+        if let Some(first_newline) = hunk_str.find('\n') {
+            let header_line = &hunk_str[..first_newline];
+            let rest = &hunk_str[first_newline..];
+            if let Some(func_ctx) =
+                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
+            {
+                output.push_str(header_line);
+                output.push(' ');
+                output.push_str(&func_ctx);
+                output.push_str(rest);
+            } else {
+                output.push_str(hunk_str);
+            }
+        } else {
+            output.push_str(hunk_str);
+        }
+    }
+
+    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
+}
+
+#[expect(clippy::too_many_arguments)]
+fn unified_diff_git_minimal_with_prefix_and_funcname(
+    old_content: &str,
+    new_content: &str,
+    old_path: &str,
+    new_path: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    src_prefix: &str,
+    dst_prefix: &str,
+    funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
+    quote_path_fully: bool,
+) -> String {
+    use crate::quote_path::format_diff_path_with_prefix;
+
+    let body = git_xdiff_unified_body_raw(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+        true,
+        super::WhitespaceMode::default(),
+    );
+
+    let mut output = String::new();
+    if old_path == "/dev/null" {
+        output.push_str("--- /dev/null\n");
+    } else if src_prefix.is_empty() {
+        output.push_str(&format!("--- {old_path}\n"));
+    } else {
+        output.push_str("--- ");
+        output.push_str(&format_diff_path_with_prefix(
+            src_prefix,
+            old_path,
+            quote_path_fully,
+        ));
+        output.push('\n');
+    }
+    if new_path == "/dev/null" {
+        output.push_str("+++ /dev/null\n");
+    } else if dst_prefix.is_empty() {
+        output.push_str(&format!("+++ {new_path}\n"));
+    } else {
+        output.push_str("+++ ");
+        output.push_str(&format_diff_path_with_prefix(
+            dst_prefix,
+            new_path,
+            quote_path_fully,
+        ));
+        output.push('\n');
+    }
+
+    let old_lines: Vec<&str> = old_content.lines().collect();
+    for hunk_str in imara_unified_hunk_slices(&body) {
+        if hunk_str.is_empty() {
+            continue;
+        }
+        if let Some(first_newline) = hunk_str.find('\n') {
+            let header_line = &hunk_str[..first_newline];
+            let rest = &hunk_str[first_newline..];
+            if let Some(func_ctx) =
+                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
+            {
+                output.push_str(header_line);
+                output.push(' ');
+                output.push_str(&func_ctx);
+                output.push_str(rest);
+            } else {
+                output.push_str(hunk_str);
+            }
+        } else {
+            output.push_str(hunk_str);
+        }
+    }
+
+    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
+}
+
+#[expect(clippy::too_many_arguments)]
+fn unified_diff_git_patience_with_prefix_and_funcname(
+    old_content: &str,
+    new_content: &str,
+    old_path: &str,
+    new_path: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    src_prefix: &str,
+    dst_prefix: &str,
+    funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
+    quote_path_fully: bool,
+) -> String {
+    use crate::quote_path::format_diff_path_with_prefix;
+
+    let body = git_patience_unified_body_raw(
         old_content,
         new_content,
         context_lines,
@@ -450,8 +1044,16 @@ pub fn unified_diff_histogram_hunks_only(
     new_content: &str,
     context_lines: usize,
     inter_hunk_context: usize,
+    indent_heuristic: bool,
 ) -> String {
-    histogram_unified_body_raw(old_content, new_content, context_lines, inter_hunk_context)
+    histogram_unified_body_raw(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+        super::WhitespaceMode::default(),
+    )
 }
 #[expect(clippy::too_many_arguments)]
 /// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm.
@@ -466,12 +1068,48 @@ pub fn unified_diff_histogram_with_prefix_and_funcname(
     src_prefix: &str,
     dst_prefix: &str,
     funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
+    quote_path_fully: bool,
+) -> String {
+    unified_diff_histogram_with_prefix_and_funcname_indent(
+        old_content,
+        new_content,
+        old_path,
+        new_path,
+        context_lines,
+        inter_hunk_context,
+        src_prefix,
+        dst_prefix,
+        funcname_matcher,
+        indent_heuristic,
+        quote_path_fully,
+    )
+}
+
+#[expect(clippy::too_many_arguments)]
+fn unified_diff_histogram_with_prefix_and_funcname_indent(
+    old_content: &str,
+    new_content: &str,
+    old_path: &str,
+    new_path: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    src_prefix: &str,
+    dst_prefix: &str,
+    funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
     quote_path_fully: bool,
 ) -> String {
     use crate::quote_path::format_diff_path_with_prefix;
 
-    let body =
-        histogram_unified_body_raw(old_content, new_content, context_lines, inter_hunk_context);
+    let body = histogram_unified_body_raw(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+        super::WhitespaceMode::default(),
+    );
 
     let mut output = String::new();
     if old_path == "/dev/null" {
@@ -549,6 +1187,7 @@ pub fn unified_diff_histogram_ignore_with_prefix_and_funcname<F>(
     funcname_matcher: Option<&FuncnameMatcher>,
     quote_path_fully: bool,
     function_context: bool,
+    indent_heuristic: bool,
     is_ignorable_change: F,
 ) -> String
 where
@@ -563,6 +1202,8 @@ where
         inter_hunk_context,
         function_context,
         funcname_matcher,
+        indent_heuristic,
+        super::WhitespaceMode::default(),
         is_ignorable_change,
     );
     if body.is_empty() {
@@ -1072,10 +1713,11 @@ mod git_xdiff {
         rpdis1 * XDL_KPDIS_RUN < (rpdis1 + rdis1)
     }
 
-    /// Build the `changed` flags for both token streams using Git's xdiff Myers
-    /// pipeline. `ids1`/`ids2` are interned token ids (equal id <=> equal token).
+    /// Build the `changed` flags for both token streams using Git's xdiff engine.
+    /// When `need_min` is true, Git's minimal diff (`--minimal`) is used.
+    /// `ids1`/`ids2` are interned token ids (equal id <=> equal token).
     /// Returns `(changed1, changed2)`, one bool per original token.
-    pub fn changed_flags(ids1: &[u32], ids2: &[u32]) -> (Vec<bool>, Vec<bool>) {
+    pub fn changed_flags(ids1: &[u32], ids2: &[u32], need_min: bool) -> (Vec<bool>, Vec<bool>) {
         let nrec1 = ids1.len();
         let nrec2 = ids2.len();
 
@@ -1127,17 +1769,22 @@ mod git_xdiff {
         let mut action1 = vec![0u8; nrec1 + 1];
         let mut action2 = vec![0u8; nrec2 + 1];
 
-        let mut mlim = bogosqrt(nrec1 as i64);
-        if mlim > XDL_MAX_EQLIMIT {
-            mlim = XDL_MAX_EQLIMIT;
-        }
+        let mlim1 = if need_min {
+            i64::MAX
+        } else {
+            let mut mlim = bogosqrt(nrec1 as i64);
+            if mlim > XDL_MAX_EQLIMIT {
+                mlim = XDL_MAX_EQLIMIT;
+            }
+            mlim
+        };
         let mut idx = xdf1.dstart;
         while idx <= xdf1.dend {
             let id = ids1[idx as usize];
             let nm = *count2.get(&id).unwrap_or(&0);
             action1[idx as usize] = if nm == 0 {
                 DISCARD
-            } else if nm >= mlim {
+            } else if nm >= mlim1 {
                 INVESTIGATE
             } else {
                 KEEP
@@ -1145,17 +1792,22 @@ mod git_xdiff {
             idx += 1;
         }
 
-        let mut mlim = bogosqrt(nrec2 as i64);
-        if mlim > XDL_MAX_EQLIMIT {
-            mlim = XDL_MAX_EQLIMIT;
-        }
+        let mlim2 = if need_min {
+            i64::MAX
+        } else {
+            let mut mlim = bogosqrt(nrec2 as i64);
+            if mlim > XDL_MAX_EQLIMIT {
+                mlim = XDL_MAX_EQLIMIT;
+            }
+            mlim
+        };
         let mut idx = xdf2.dstart;
         while idx <= xdf2.dend {
             let id = ids2[idx as usize];
             let nm = *count1.get(&id).unwrap_or(&0);
             action2[idx as usize] = if nm == 0 {
                 DISCARD
-            } else if nm >= mlim {
+            } else if nm >= mlim2 {
                 INVESTIGATE
             } else {
                 KEEP
@@ -1209,10 +1861,180 @@ mod git_xdiff {
         let nreff1 = xdf1.nreff;
         let nreff2 = xdf2.nreff;
         xdl_recs_cmp(
-            &mut xdf1, 0, nreff1, &mut xdf2, 0, nreff2, kvdf_slice, kvdb_slice, koff, false, &xenv,
+            &mut xdf1, 0, nreff1, &mut xdf2, 0, nreff2, kvdf_slice, kvdb_slice, koff, need_min,
+            &xenv,
         );
 
         (xdf1.changed, xdf2.changed)
+    }
+
+    /// Patience diff: match unique lines, then recurse on gaps with xdiff Myers.
+    pub fn patience_changed_flags(lines1: &[&str], lines2: &[&str]) -> (Vec<bool>, Vec<bool>) {
+        let mut changed1 = vec![false; lines1.len()];
+        let mut changed2 = vec![false; lines2.len()];
+        patience_recurse(
+            lines1,
+            lines2,
+            &mut changed1,
+            &mut changed2,
+            0,
+            lines1.len(),
+            0,
+            lines2.len(),
+        );
+        (changed1, changed2)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn patience_recurse(
+        lines1: &[&str],
+        lines2: &[&str],
+        changed1: &mut [bool],
+        changed2: &mut [bool],
+        o_start: usize,
+        o_end: usize,
+        n_start: usize,
+        n_end: usize,
+    ) {
+        if o_start >= o_end && n_start >= n_end {
+            return;
+        }
+        if o_start >= o_end {
+            changed2[n_start..n_end].fill(true);
+            return;
+        }
+        if n_start >= n_end {
+            changed1[o_start..o_end].fill(true);
+            return;
+        }
+
+        let anchors = patience_anchors(lines1, lines2, o_start, o_end, n_start, n_end);
+        if anchors.is_empty() {
+            merge_myers_region(
+                lines1, lines2, changed1, changed2, o_start, o_end, n_start, n_end,
+            );
+            return;
+        }
+
+        let mut prev_o = o_start;
+        let mut prev_n = n_start;
+        for (ao, an) in anchors {
+            patience_recurse(lines1, lines2, changed1, changed2, prev_o, ao, prev_n, an);
+            prev_o = ao + 1;
+            prev_n = an + 1;
+        }
+        patience_recurse(
+            lines1, lines2, changed1, changed2, prev_o, o_end, prev_n, n_end,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn patience_anchors(
+        lines1: &[&str],
+        lines2: &[&str],
+        o_start: usize,
+        o_end: usize,
+        n_start: usize,
+        n_end: usize,
+    ) -> Vec<(usize, usize)> {
+        use std::collections::HashMap;
+
+        let old_slice = &lines1[o_start..o_end];
+        let new_slice = &lines2[n_start..n_end];
+        let mut old_pos: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut new_pos: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (i, line) in old_slice.iter().enumerate() {
+            old_pos.entry(*line).or_default().push(o_start + i);
+        }
+        for (i, line) in new_slice.iter().enumerate() {
+            new_pos.entry(*line).or_default().push(n_start + i);
+        }
+
+        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        for (line, o_indices) in &old_pos {
+            if o_indices.len() != 1 {
+                continue;
+            }
+            if let Some(n_indices) = new_pos.get(line) {
+                if n_indices.len() == 1 {
+                    pairs.push((o_indices[0], n_indices[0]));
+                }
+            }
+        }
+        pairs.sort_by_key(|p| p.0);
+        longest_increasing_by_second(&pairs)
+    }
+
+    fn longest_increasing_by_second(pairs: &[(usize, usize)]) -> Vec<(usize, usize)> {
+        if pairs.is_empty() {
+            return Vec::new();
+        }
+        let n = pairs.len();
+        let mut tails = vec![0usize; n];
+        let mut prev = vec![usize::MAX; n];
+        let mut len = 0usize;
+        for i in 0..n {
+            let v = pairs[i].1;
+            let mut lo = 0usize;
+            let mut hi = len;
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                if pairs[tails[mid]].1 < v {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            if lo > 0 {
+                prev[i] = tails[lo - 1];
+            }
+            tails[lo] = i;
+            if lo == len {
+                len += 1;
+            }
+        }
+        let mut out = Vec::with_capacity(len);
+        let mut k = tails[len.saturating_sub(1)];
+        while k != usize::MAX {
+            out.push(pairs[k]);
+            k = prev[k];
+        }
+        out.reverse();
+        out
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn merge_myers_region(
+        lines1: &[&str],
+        lines2: &[&str],
+        changed1: &mut [bool],
+        changed2: &mut [bool],
+        o_start: usize,
+        o_end: usize,
+        n_start: usize,
+        n_end: usize,
+    ) {
+        use crate::line_interner::LineInterner;
+
+        let old_slice = &lines1[o_start..o_end];
+        let new_slice = &lines2[n_start..n_end];
+        if old_slice.is_empty() && new_slice.is_empty() {
+            return;
+        }
+        let mut interner = LineInterner::default();
+        let ids1 = interner.intern_all(old_slice);
+        let ids2 = interner.intern_all(new_slice);
+        let (sub1, sub2) = changed_flags(&ids1, &ids2, false);
+        for (i, ch) in sub1.iter().enumerate() {
+            if *ch {
+                changed1[o_start + i] = true;
+            }
+        }
+        for (j, ch) in sub2.iter().enumerate() {
+            if *ch {
+                changed2[n_start + j] = true;
+            }
+        }
     }
 }
 
@@ -1304,7 +2126,7 @@ pub fn word_diff_ops_imara(old_words: &[&str], new_words: &[&str]) -> Vec<simila
         ids2.push(id);
     }
 
-    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2);
+    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2, false);
     let ops = changed_flags_to_ops(&changed1, &changed2, old_words.len(), new_words.len());
 
     // Slide changed runs to Git's canonical position (`xdl_change_compact`); the word
@@ -1362,7 +2184,7 @@ pub(crate) fn line_diff_ops_git_xdiff_compacted_ids(
     new_lines: &[&str],
     indent_heuristic: bool,
 ) -> Vec<similar::DiffOp> {
-    let (changed1, changed2) = git_xdiff::changed_flags(old_ids, new_ids);
+    let (changed1, changed2) = git_xdiff::changed_flags(old_ids, new_ids, false);
     let ops = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     diff_indent_heuristic::apply_change_compact_to_ops(&ops, old_lines, new_lines, indent_heuristic)
 }
@@ -1378,7 +2200,7 @@ pub(crate) fn xdiff_new_line_changed_flags(
     let mut interner = crate::line_interner::LineInterner::default();
     let ids1 = interner.intern_all(old_lines);
     let ids2 = interner.intern_all(new_lines);
-    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2);
+    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2, false);
     let ops = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     let compacted = diff_indent_heuristic::apply_change_compact_to_ops(
         &ops,
@@ -1613,7 +2435,8 @@ pub fn diff_tree_path_change_count(
 
 /// Diff two trees and pair deleted/added paths as renames when content is similar enough.
 ///
-/// `rename_threshold` is Git's `-M` percentage (default 50). Use `100` to skip rename detection.
+/// `rename_threshold` is Git's `-M` percentage (`0`–`100`, inclusive). Use
+/// [`RENAME_DETECTION_DISABLED`](crate::diff::RENAME_DETECTION_DISABLED) to skip rename detection.
 ///
 /// # Errors
 ///
@@ -1653,7 +2476,7 @@ pub fn diff_trees_with_renames_and_policy(
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
     let mut entries = diff_trees(odb, old_tree_oid, new_tree_oid, prefix)?;
-    if rename_threshold < 100 {
+    if rename_threshold <= 100 {
         entries =
             detect_renames_with_policy(odb, None, entries, rename_threshold, config, thread_policy);
     }
@@ -1689,7 +2512,8 @@ pub fn diff_commits(odb: &Odb, base: &ObjectId, tip: &ObjectId) -> Result<Vec<Di
 
 /// Diff the trees at two commits and pair deleted/added paths as renames when similar enough.
 ///
-/// `rename_threshold` is Git's `-M` percentage (default 50). Use `100` to skip rename detection.
+/// `rename_threshold` is Git's `-M` percentage (`0`–`100`, inclusive). Use
+/// [`RENAME_DETECTION_DISABLED`](crate::diff::RENAME_DETECTION_DISABLED) to skip rename detection.
 ///
 /// # Errors
 ///
@@ -2229,8 +3053,8 @@ pub fn diff_index_to_tree(
 
 /// Diff the index against a tree and pair deleted/added paths as renames when similar enough.
 ///
-/// `rename_threshold` is Git's `-M` percentage (50 is the usual default); pass `100` to skip
-/// rename detection.
+/// `rename_threshold` is Git's `-M` percentage (`0`–`100`). Pass
+/// [`RENAME_DETECTION_DISABLED`](crate::diff::RENAME_DETECTION_DISABLED) to skip rename detection.
 ///
 /// # Errors
 ///
@@ -2258,7 +3082,7 @@ pub fn diff_index_to_tree_with_renames(
 /// Apply Git `-M` rename detection to a flat diff (index↔tree, tree↔tree, or index↔worktree).
 ///
 /// Pass `work_root` when added sides may be read from the working tree (index↔worktree diffs).
-/// Use `rename_threshold` `100` to leave entries unchanged.
+/// Use a threshold above `100` (typically [`RENAME_DETECTION_DISABLED`](crate::diff::RENAME_DETECTION_DISABLED)) to leave entries unchanged.
 ///
 /// # Errors
 ///
@@ -2271,7 +3095,7 @@ pub fn apply_rename_detection_to_diff_entries(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
-    if entries.is_empty() || rename_threshold >= 100 {
+    if entries.is_empty() || rename_threshold > 100 {
         return Ok(entries);
     }
     if work_root.is_some() {
@@ -2459,7 +3283,7 @@ pub fn diff_index_to_worktree_with_renames(
     let (mut entries, changed) =
         diff_index_to_worktree_with_options(odb, index, work_tree, options)?;
     let mut synthetic_new_paths = HashSet::new();
-    if rename_threshold < 100 {
+    if rename_threshold <= 100 {
         if let Some(rules_arc) = rules_for_append {
             let rules = rules_arc
                 .lock()
@@ -3269,6 +4093,34 @@ fn try_push_status_modified_on_size_mismatch(
     true
 }
 
+fn try_push_status_modified_on_size_mismatch_stat(
+    ie: &IndexEntry,
+    path_str_ref: &str,
+    stat: &crate::worktree_scan::BlobDiskStat,
+    for_status: bool,
+    result: &mut Vec<DiffEntry>,
+) -> bool {
+    if ie.stat_cache_unset() {
+        return false;
+    }
+    if !for_status || stat.worktree_size() == ie.size {
+        return false;
+    }
+    let worktree_mode = stat.git_mode;
+    let path_owned = path_str_ref.to_owned();
+    result.push(DiffEntry {
+        status: DiffStatus::Modified,
+        old_path: Some(path_owned.clone()),
+        new_path: Some(path_owned),
+        old_mode: format_mode(ie.mode),
+        new_mode: format_mode(worktree_mode),
+        old_oid: ie.oid,
+        new_oid: ie.oid,
+        score: None,
+    });
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_index_blob_worktree_diff(
     odb: &Odb,
@@ -3817,8 +4669,9 @@ fn diff_index_to_worktree_inner(
     }
 
     use crate::worktree_scan::{
-        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
-        BlobDiskLookup, WorktreeBlobScanOptions, PARALLEL_STAT_MIN_ENTRIES,
+        blob_lookup_batch_entry_indices, collect_blob_lookup_batches, group_blob_entries_by_dir,
+        stat_scan_thread_count, visit_blob_lookup_batches, BlobDiskLookup, BlobScanSparseMode,
+        WorktreeBlobScanOptions, PARALLEL_STAT_MIN_ENTRIES,
     };
     let preload_index = config
         .get_bool("core.preloadIndex")
@@ -3845,7 +4698,7 @@ fn diff_index_to_worktree_inner(
     let file_abs = move |rel: &str| {
         index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
     };
-    let blob_count: usize = blob_dirs.values().map(|v| v.len()).sum();
+    let blob_count = blob_dirs.len();
     let thread_policy = options.thread_policy.unwrap_or_default();
     let hash_threads = stat_scan_thread_count(&thread_policy, &config, blob_scan, blob_count);
     let parallel_blob_work = blob_count >= PARALLEL_STAT_MIN_ENTRIES
@@ -3853,192 +4706,227 @@ fn diff_index_to_worktree_inner(
         && (materialize_dirty_blobs || options.for_status);
     let mut staging_hash_jobs: Vec<StagingHashJob> = Vec::new();
     let mut stat_refresh_verified = vec![false; index.entries.len()];
-    let paths_by_entry_index =
-        crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
     // Parallel preload must lstat ancestor directories without following symlinks. When a
     // tracked directory is replaced by a symlink, indexed paths under it are deletions even if
     // the link target still holds a file at the same relative path with an unchanged stat.
-    for_each_blob_by_directory_parallel(
-        &paths_by_entry_index,
+    // This is independent of `core.symlinks` (checkout support); detection must stay enabled.
+    let sparse = if parallel_blob_work {
+        BlobScanSparseMode::StatusDiff {
+            stat_policy,
+            index_mtime,
+            trust_filemode,
+            for_status: options.for_status,
+            refresh_index_stat_in_pass,
+            parallel_blob_work,
+            honor_fsmonitor_stat_skip: use_fsmonitor_stat_skip,
+        }
+    } else {
+        BlobScanSparseMode::Dense
+    };
+    let blob_stat_batches = collect_blob_lookup_batches(
+        index,
         &blob_dirs,
         blob_scan,
         &thread_policy,
         &config,
         true,
+        None,
         dir_abs,
         file_abs,
         |rel_path| {
             dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
         },
-        |entry_index, path_str_ref, lookup| {
-            if use_fsmonitor_stat_skip {
-                let ie_skip = &index.entries[entry_index];
-                if crate::fsmonitor::entry_skips_worktree_stat(ie_skip, index) {
-                    return Ok(());
-                }
+        sparse,
+    )?;
+    let retained_indices = blob_lookup_batch_entry_indices(&blob_stat_batches);
+    visit_blob_lookup_batches(blob_stat_batches, |entry_index, lookup| {
+        let path_owned = std::str::from_utf8(&index.entries[entry_index].path)
+            .unwrap_or("")
+            .to_owned();
+        let path_str_ref = path_owned.as_str();
+        if use_fsmonitor_stat_skip {
+            let ie_skip = &index.entries[entry_index];
+            if crate::fsmonitor::entry_skips_worktree_stat(ie_skip, index) {
+                return Ok(());
             }
-            match lookup {
-                BlobDiskLookup::Missing => {
-                    let ie = &index.entries[entry_index];
-                    result.push(DiffEntry {
-                        status: DiffStatus::Deleted,
-                        old_path: Some(path_str_ref.to_owned()),
-                        new_path: None,
-                        old_mode: format_mode(ie.mode),
-                        new_mode: "000000".to_owned(),
-                        old_oid: ie.oid,
-                        new_oid: zero_oid(),
-                        score: None,
-                    });
+        }
+        match lookup {
+            BlobDiskLookup::Missing => {
+                let ie = &index.entries[entry_index];
+                result.push(DiffEntry {
+                    status: DiffStatus::Deleted,
+                    old_path: Some(path_str_ref.to_owned()),
+                    new_path: None,
+                    old_mode: format_mode(ie.mode),
+                    new_mode: "000000".to_owned(),
+                    old_oid: ie.oid,
+                    new_oid: zero_oid(),
+                    score: None,
+                });
+            }
+            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Present(stat) => {
+                if materialize_dirty_blobs {
+                    staging_stat_cache.insert(path_str_ref.to_owned(), stat.fields);
                 }
-                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                BlobDiskLookup::Present(meta) => {
-                    if materialize_dirty_blobs {
-                        staging_stat_cache.insert(
-                            path_str_ref.to_owned(),
-                            crate::index::IndexStatFields::from_metadata(&meta),
-                        );
+                if refresh_index_stat_in_pass {
+                    let ie_ref = &index.entries[entry_index];
+                    let stat_matches = stat_matches_blob_stat(ie_ref, &stat, stat_policy);
+                    let worktree_size = stat.worktree_size();
+                    // When size changed, the status fast path skips content hashing for the
+                    // unstaged diff; skip the refresh pass's duplicate read here too.
+                    // Mtime-only bumps keep size and still refresh.
+                    let skip_refresh_for_status_diff = options.for_status
+                        && !stat_matches
+                        && worktree_size != ie_ref.size
+                        && !ie_ref.stat_cache_unset();
+                    let skip_refresh_clean_status = options.for_status
+                        && stat_matches
+                        && !entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
+                    if skip_refresh_clean_status && index_stat_cache_trustworthy(index_mtime) {
+                        stat_refresh_verified[entry_index] = true;
                     }
-                    if refresh_index_stat_in_pass {
-                        let ie_ref = &index.entries[entry_index];
-                        let stat_matches = stat_matches_with_policy(ie_ref, &meta, stat_policy);
-                        let worktree_size = u32::try_from(meta.len()).unwrap_or(u32::MAX);
-                        // When size changed, the status fast path skips content hashing for the
-                        // unstaged diff; skip the refresh pass's duplicate read here too.
-                        // Mtime-only bumps keep size and still refresh.
-                        let skip_refresh_for_status_diff = options.for_status
-                            && !stat_matches
-                            && worktree_size != ie_ref.size
-                            && !ie_ref.stat_cache_unset();
-                        let skip_refresh_clean_status = options.for_status
-                            && stat_matches
-                            && !entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
-                        if skip_refresh_clean_status && index_stat_cache_trustworthy(index_mtime) {
+                    if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
+                        let path_owned = path_str_ref.to_owned();
+                        let file_path = index_entry_worktree_abs(
+                            work_tree,
+                            &path_owned,
+                            precompose_unicode,
+                            ignorecase,
+                        );
+                        let ie = &mut index.entries[entry_index];
+                        let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
+                        let refresh = refresh_index_blob_stat_from_metadata(
+                            odb,
+                            ie,
+                            &meta,
+                            &path_owned,
+                            &file_path,
+                            index_mtime,
+                            &conv,
+                            &file_attrs_for,
+                            stat_policy,
+                            filter_fp,
+                        );
+                        if refresh.index_changed {
+                            index_stat_refresh_changed = true;
+                        }
+                        if refresh.content_verified {
                             stat_refresh_verified[entry_index] = true;
                         }
-                        if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
-                            let file_path = index_entry_worktree_abs(
-                                work_tree,
-                                path_str_ref,
-                                precompose_unicode,
-                                ignorecase,
-                            );
-                            let ie = &mut index.entries[entry_index];
-                            let refresh = refresh_index_blob_stat_from_metadata(
-                                odb,
-                                ie,
-                                &meta,
-                                path_str_ref,
-                                &file_path,
-                                index_mtime,
-                                &conv,
-                                &file_attrs_for,
+                        if index.fsmonitor_last_update.is_some()
+                            && stat_matches_blob_stat(
+                                &index.entries[entry_index],
+                                &stat,
                                 stat_policy,
-                                filter_fp,
-                            );
-                            if refresh.index_changed {
-                                index_stat_refresh_changed = true;
-                            }
-                            if refresh.content_verified {
-                                stat_refresh_verified[entry_index] = true;
-                            }
-                            if index.fsmonitor_last_update.is_some()
-                                && stat_matches_with_policy(
-                                    &index.entries[entry_index],
-                                    &meta,
-                                    stat_policy,
-                                )
-                                && !refresh.index_changed
-                            {
-                                index.entries[entry_index].set_fsmonitor_valid(true);
-                            }
+                            )
+                            && !refresh.index_changed
+                        {
+                            index.entries[entry_index].set_fsmonitor_valid(true);
                         }
                     }
-                    let ie = &index.entries[entry_index];
-                    if parallel_blob_work {
-                        let worktree_mode = mode_from_metadata(&meta);
-                        let stat_same = stat_matches_with_policy(ie, &meta, stat_policy);
-                        let racy = entry_is_racy_with_policy(ie, index_mtime, stat_policy);
-                        if stat_same
-                            && !racy
-                            && (!trust_filemode || worktree_mode == ie.mode)
-                            && index_entry_skips_worktree_content_hash_after_stat_match(
-                                ie,
-                                index_mtime,
-                                stat_policy,
-                                trust_filemode,
-                            )
-                        {
-                            return Ok(());
-                        }
-                        if trust_filemode && stat_same && worktree_mode != ie.mode {
-                            let path_owned = path_str_ref.to_owned();
-                            result.push(DiffEntry {
-                                status: DiffStatus::Modified,
-                                old_path: Some(path_owned.clone()),
-                                new_path: Some(path_owned),
-                                old_mode: format_mode(ie.mode),
-                                new_mode: format_mode(worktree_mode),
-                                old_oid: ie.oid,
-                                new_oid: ie.oid,
-                                score: None,
-                            });
-                        } else if try_push_status_modified_on_size_mismatch(
+                }
+                let ie = &index.entries[entry_index];
+                if parallel_blob_work {
+                    let worktree_mode = stat.git_mode;
+                    let stat_same = stat_matches_blob_stat(ie, &stat, stat_policy);
+                    let racy = entry_is_racy_with_policy(ie, index_mtime, stat_policy);
+                    if stat_same
+                        && !racy
+                        && (!trust_filemode || worktree_mode == ie.mode)
+                        && index_entry_skips_worktree_content_hash_after_stat_match(
                             ie,
-                            path_str_ref,
-                            &meta,
-                            options.for_status,
-                            &mut result,
-                        ) {
-                        } else if !(stat_same
-                            && (!trust_filemode || worktree_mode == ie.mode)
-                            && !racy)
-                            && !stat_refresh_verified[entry_index]
-                        {
-                            let file_path = index_entry_worktree_abs(
-                                work_tree,
-                                path_str_ref,
-                                precompose_unicode,
-                                ignorecase,
-                            );
-                            staging_hash_jobs.push(StagingHashJob {
-                                entry_index,
-                                rel_path: path_str_ref.to_owned(),
-                                file_path,
-                                entry: ie.clone(),
-                                worktree_mode,
-                                file_attrs: file_attrs_for(path_str_ref),
-                            });
-                        }
-                    } else {
+                            index_mtime,
+                            stat_policy,
+                            trust_filemode,
+                        )
+                    {
+                        return Ok(());
+                    }
+                    if trust_filemode && stat_same && worktree_mode != ie.mode {
+                        let path_owned = path_str_ref.to_owned();
+                        result.push(DiffEntry {
+                            status: DiffStatus::Modified,
+                            old_path: Some(path_owned.clone()),
+                            new_path: Some(path_owned),
+                            old_mode: format_mode(ie.mode),
+                            new_mode: format_mode(worktree_mode),
+                            old_oid: ie.oid,
+                            new_oid: ie.oid,
+                            score: None,
+                        });
+                    } else if try_push_status_modified_on_size_mismatch_stat(
+                        ie,
+                        path_str_ref,
+                        &stat,
+                        options.for_status,
+                        &mut result,
+                    ) {
+                    } else if !(stat_same && (!trust_filemode || worktree_mode == ie.mode) && !racy)
+                        && !stat_refresh_verified[entry_index]
+                    {
                         let file_path = index_entry_worktree_abs(
                             work_tree,
                             path_str_ref,
                             precompose_unicode,
                             ignorecase,
                         );
-                        push_index_blob_worktree_diff(
-                            odb,
-                            ie,
-                            path_str_ref,
-                            &file_path,
-                            meta,
-                            index_mtime,
-                            trust_filemode,
-                            stat_policy,
-                            &file_attrs_for,
-                            &conv,
-                            materialize_dirty_blobs,
-                            options.for_status,
-                            filter_fp,
-                            &mut result,
-                        )?;
+                        staging_hash_jobs.push(StagingHashJob {
+                            entry_index,
+                            rel_path: path_str_ref.to_owned(),
+                            file_path,
+                            entry: ie.clone(),
+                            worktree_mode,
+                            file_attrs: file_attrs_for(path_str_ref),
+                        });
                     }
+                } else {
+                    let file_path = index_entry_worktree_abs(
+                        work_tree,
+                        path_str_ref,
+                        precompose_unicode,
+                        ignorecase,
+                    );
+                    let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
+                    push_index_blob_worktree_diff(
+                        odb,
+                        ie,
+                        path_str_ref,
+                        &file_path,
+                        meta,
+                        index_mtime,
+                        trust_filemode,
+                        stat_policy,
+                        &file_attrs_for,
+                        &conv,
+                        materialize_dirty_blobs,
+                        options.for_status,
+                        filter_fp,
+                        &mut result,
+                    )?;
                 }
             }
-            Ok(())
-        },
-    )?;
+        }
+        Ok(())
+    })?;
+    if parallel_blob_work
+        && refresh_index_stat_in_pass
+        && options.for_status
+        && index_stat_cache_trustworthy(index_mtime)
+    {
+        for &entry_index in &blob_dirs.indices {
+            if retained_indices.contains(&entry_index) {
+                continue;
+            }
+            let ie = &index.entries[entry_index];
+            if !index_entry_needs_worktree_diff_pass1(ie) {
+                continue;
+            }
+            if !entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
+                stat_refresh_verified[entry_index] = true;
+            }
+        }
+    }
     if parallel_blob_work && !staging_hash_jobs.is_empty() {
         parallel_process_blob_worktree_jobs(
             odb,
@@ -4152,6 +5040,33 @@ pub fn index_mtime_for_diff(index: &Index, explicit: Option<(u32, u32)>) -> Opti
 }
 
 impl SymlinkDirCache {
+    /// Returns `true` when `prefix` itself is a symlink (and records the result).
+    fn probe_prefix(
+        &mut self,
+        work_tree: &Path,
+        prefix: &str,
+        precompose_unicode: bool,
+        ignorecase: bool,
+    ) -> bool {
+        if self.symlink.contains(prefix) {
+            return true;
+        }
+        if self.plain.contains(prefix) {
+            return false;
+        }
+        let abs = index_entry_worktree_abs(work_tree, prefix, precompose_unicode, ignorecase);
+        let is_symlink = match fs::symlink_metadata(&abs) {
+            Ok(meta) => meta.file_type().is_symlink(),
+            _ => false,
+        };
+        if is_symlink {
+            self.symlink.insert(prefix.to_owned());
+        } else {
+            self.plain.insert(prefix.to_owned());
+        }
+        is_symlink
+    }
+
     /// Whether any parent component of `rel_path` is a symlink.
     pub(crate) fn has_symlink_in_path(
         &mut self,
@@ -4174,15 +5089,8 @@ impl SymlinkDirCache {
             if self.plain.contains(&prefix) {
                 continue;
             }
-            let abs = index_entry_worktree_abs(work_tree, &prefix, precompose_unicode, ignorecase);
-            match fs::symlink_metadata(&abs) {
-                Ok(meta) if meta.file_type().is_symlink() => {
-                    self.symlink.insert(prefix.clone());
-                    return true;
-                }
-                _ => {
-                    self.plain.insert(prefix.clone());
-                }
+            if self.probe_prefix(work_tree, &prefix, precompose_unicode, ignorecase) {
+                return true;
             }
         }
         false
@@ -4592,6 +5500,15 @@ pub fn stat_matches(ie: &IndexEntry, meta: &fs::Metadata) -> bool {
     stat_matches_with_policy(ie, meta, crate::index::StatMatchPolicy::default())
 }
 
+/// Whether compact worktree stat from a directory scan matches the index row.
+pub(crate) fn stat_matches_blob_stat(
+    ie: &IndexEntry,
+    stat: &crate::worktree_scan::BlobDiskStat,
+    policy: crate::index::StatMatchPolicy,
+) -> bool {
+    stat.fields.matches_index_entry(ie, policy)
+}
+
 /// Like [`stat_matches`], honoring `core.trustctime`, `core.checkstat`, and `core.usenanosec`.
 #[must_use]
 pub fn stat_matches_with_policy(
@@ -4709,8 +5626,8 @@ pub fn refresh_index_stat_content_verified_with_rules(
     use crate::config::ConfigSet;
     use crate::crlf;
     use crate::worktree_scan::{
-        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
-        WorktreeBlobScanOptions,
+        collect_blob_lookup_batches, group_blob_entries_by_dir, visit_blob_lookup_batches,
+        BlobDiskLookup, BlobScanSparseMode, WorktreeBlobScanOptions,
     };
 
     let index_mtime = index_mtime_for_diff(index, index_mtime);
@@ -4785,46 +5702,54 @@ pub fn refresh_index_stat_content_verified_with_rules(
     let mut changed = false;
     let filter_fp = rules_lock.as_ref().map(|r| r.filter_process());
     let thread_policy = crate::parallel::ThreadPolicy::default();
-    let paths_by_entry_index =
-        crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
-    for_each_blob_by_directory_parallel(
-        &paths_by_entry_index,
+    // Symlink ancestor detection must run even when core.symlinks is false.
+    let refresh_batches = collect_blob_lookup_batches(
+        index,
         &blob_dirs,
         blob_scan,
         &thread_policy,
         &config,
         true,
+        None,
         dir_abs,
         file_abs,
         |rel_path| {
             dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
         },
-        |entry_index, path_str_ref, lookup| {
-            let BlobDiskLookup::Present(meta) = lookup else {
-                return Ok(());
-            };
-            let file_path =
-                index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
-            let ie = &mut index.entries[entry_index];
-            if refresh_index_blob_stat_from_metadata(
-                odb,
-                ie,
-                &meta,
-                path_str_ref,
-                &file_path,
-                index_mtime,
-                &conv,
-                &file_attrs_for,
-                stat_policy,
-                filter_fp,
-            )
-            .index_changed
-            {
-                changed = true;
-            }
-            Ok(())
+        BlobScanSparseMode::StatRefresh {
+            stat_policy,
+            index_mtime,
         },
     )?;
+    visit_blob_lookup_batches(refresh_batches, |entry_index, lookup| {
+        let BlobDiskLookup::Present(_stat) = lookup else {
+            return Ok(());
+        };
+        let path_owned = std::str::from_utf8(&index.entries[entry_index].path)
+            .unwrap_or("")
+            .to_owned();
+        let file_path =
+            index_entry_worktree_abs(work_tree, &path_owned, precompose_unicode, ignorecase);
+        let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
+        let ie = &mut index.entries[entry_index];
+        if refresh_index_blob_stat_from_metadata(
+            odb,
+            ie,
+            &meta,
+            &path_owned,
+            &file_path,
+            index_mtime,
+            &conv,
+            &file_attrs_for,
+            stat_policy,
+            filter_fp,
+        )
+        .index_changed
+        {
+            changed = true;
+        }
+        Ok(())
+    })?;
     Ok(changed)
 }
 
@@ -5544,10 +6469,11 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     for path in &all_paths {
         if index_entries
             .get(path.as_bytes())
-            .is_some_and(|ie| ie.skip_worktree())
+            .is_some_and(|ie| ie.skip_worktree() || ie.assume_unchanged())
         {
             // Sparse checkout: `git diff <rev>` does not report tree↔worktree drift for
             // skip-worktree paths (they are outside the sparse cone). Matches t7012 stash flow.
+            // Assume-unchanged (`CE_VALID`) paths are likewise omitted (Git `diff-lib.c`).
             continue;
         }
 
@@ -6520,7 +7446,7 @@ pub struct DiffPostprocessOptions {
     /// When set, `--break-rewrites` threshold on Git's internal 0–[`GIT_DIFF_MAX_SCORE`] scale
     /// (`None` = off).
     pub break_score: Option<u64>,
-    /// `-M` similarity threshold (0–100); `100` disables rename detection.
+    /// `-M` similarity threshold (`0`–`100`); values above `100` disable rename detection.
     pub rename_threshold: u32,
     /// `-C` copy threshold (0–100); `None` skips copy detection.
     pub copy_threshold: Option<u32>,
@@ -6535,7 +7461,7 @@ impl Default for DiffPostprocessOptions {
     fn default() -> Self {
         Self {
             break_score: None,
-            rename_threshold: 100,
+            rename_threshold: crate::diff::RENAME_DETECTION_DISABLED,
             copy_threshold: None,
             find_copies_harder: false,
             materialize_break_worktree_new_oid: false,
@@ -6756,7 +7682,7 @@ pub fn postprocess_diff_entries(
 ) -> Result<Vec<DiffEntry>> {
     let mut entries = entries;
     if let Some(break_score) = opts.break_score {
-        let rename_or_copy = opts.rename_threshold < 100 || opts.copy_threshold.is_some();
+        let rename_or_copy = opts.rename_threshold <= 100 || opts.copy_threshold.is_some();
         entries = if rename_or_copy {
             split_broken_modifications(odb, work_root, entries, break_score, worktree, config)?
         } else {
@@ -6792,7 +7718,7 @@ pub fn postprocess_diff_entries(
             config,
             thread_policy,
         ))
-    } else if opts.rename_threshold < 100 {
+    } else if opts.rename_threshold <= 100 {
         Ok(detect_renames_with_policy(
             odb,
             work_root,
@@ -7343,7 +8269,7 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
     }
 
     if use_git_histogram {
-        let patch = unified_diff_histogram_with_prefix_and_funcname(
+        let patch = unified_diff_histogram_with_prefix_and_funcname_indent(
             old_content,
             new_content,
             old_path,
@@ -7353,6 +8279,7 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
             src_prefix,
             dst_prefix,
             funcname_matcher,
+            indent_heuristic,
             quote_path_fully,
         );
         out.write_all(patch.as_bytes())?;
@@ -7361,6 +8288,42 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
 
     if algorithm == similar::Algorithm::Myers && !function_context {
         let patch = unified_diff_git_myers_with_prefix_and_funcname(
+            old_content,
+            new_content,
+            old_path,
+            new_path,
+            context_lines,
+            inter_hunk_context,
+            src_prefix,
+            dst_prefix,
+            funcname_matcher,
+            indent_heuristic,
+            quote_path_fully,
+        );
+        out.write_all(patch.as_bytes())?;
+        return Ok(());
+    }
+
+    if algorithm == similar::Algorithm::Lcs && !function_context {
+        let patch = unified_diff_git_minimal_with_prefix_and_funcname(
+            old_content,
+            new_content,
+            old_path,
+            new_path,
+            context_lines,
+            inter_hunk_context,
+            src_prefix,
+            dst_prefix,
+            funcname_matcher,
+            indent_heuristic,
+            quote_path_fully,
+        );
+        out.write_all(patch.as_bytes())?;
+        return Ok(());
+    }
+
+    if algorithm == similar::Algorithm::Patience && !function_context {
+        let patch = unified_diff_git_patience_with_prefix_and_funcname(
             old_content,
             new_content,
             old_path,
@@ -7500,7 +8463,7 @@ pub fn unified_diff_with_prefix_and_funcname_and_algorithm(
 /// (`2 * context + inter_hunk_context`), and each hunk keeps at most `context` unchanged lines
 /// at its edges. Unlike `similar::group_diff_ops`, the split threshold is decoupled from the
 /// edge context so odd gap limits group exactly like Git.
-fn group_diff_ops_gap(
+pub(crate) fn group_diff_ops_gap(
     mut ops: Vec<similar::DiffOp>,
     context: usize,
     max_common_gap: usize,
@@ -8828,23 +9791,7 @@ pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str
 /// Normalise one line like Git's `-b` / `--ignore-space-change`.
 #[must_use]
 pub fn normalize_ignore_space_change_line(line: &str) -> String {
-    let mut result = String::with_capacity(line.len());
-    let mut in_space = false;
-    for c in line.chars() {
-        if c.is_whitespace() {
-            if !in_space {
-                result.push(' ');
-                in_space = true;
-            }
-        } else {
-            result.push(c);
-            in_space = false;
-        }
-    }
-    while result.ends_with(' ') {
-        result.pop();
-    }
-    result
+    super::whitespace_mode::normalize_ignore_space_change_line(line)
 }
 
 /// Normalise text like Git's `-b` / `--ignore-space-change`: on each line, collapse runs of
@@ -9162,6 +10109,26 @@ pub fn should_break_rewrite_for_stat(old: &[u8], new: &[u8]) -> bool {
 #[must_use]
 pub fn should_break_rewrite_pair(old: &[u8], new: &[u8], break_score: u64) -> bool {
     should_break_rewrite_inner(old, new, break_score)
+}
+
+/// Parse `-M` / `--find-renames` threshold into Git's 0–100 similarity percent.
+#[must_use]
+pub fn parse_diff_rename_threshold_percent(arg: &str) -> Option<u8> {
+    let token = if arg.is_empty() { "50" } else { arg };
+    let internal = parse_diff_rename_score_token(token)?;
+    Some((internal.saturating_mul(100) / GIT_DIFF_MAX_SCORE).min(100) as u8)
+}
+
+/// Drop entries that do not match `filter` (Git `--diff-filter`, after rename detection).
+#[must_use]
+pub fn apply_diff_filter(
+    entries: Vec<DiffEntry>,
+    filter: Option<super::filter::DiffFilter>,
+) -> Vec<DiffEntry> {
+    match filter {
+        Some(f) => f.filter_entries(entries),
+        None => entries,
+    }
 }
 
 /// Parse a single Git `parse_rename_score` token (`50`, `50%`, decimal forms) into internal
@@ -11132,7 +12099,7 @@ mod read_worktree_bytes_for_mode_tests {
     fn annotate_marks_context_line_when_eof_line_is_unchanged() {
         let old = "a\nb\nc";
         let new = "a\nx\nc";
-        let raw = super::unified_diff_histogram_hunks_only(old, new, 3, 0);
+        let raw = super::unified_diff_histogram_hunks_only(old, new, 3, 0, false);
         let out = annotate_unified_diff_no_newline_at_eof(&raw, old, new);
         assert!(
             out.contains(" c\n\\ No newline at end of file"),
@@ -11188,12 +12155,31 @@ mod annotate_no_newline_tests {
 mod blob_diff_algorithm_smoke {
     use super::{
         anchored_unified_diff, count_changes_with_algorithm, unified_diff_histogram_hunks_only,
-        unified_diff_with_prefix_and_funcname_and_algorithm,
+        unified_diff_with_prefix_and_funcname_and_algorithm, unified_hunk_body_for_diff_options,
     };
     use similar::Algorithm;
 
     const OLD: &str = "alpha\nbeta\ngamma\n";
     const NEW: &str = "alpha\nBETA\ngamma\ndelta\n";
+
+    #[test]
+    fn t4071_minimal_u0_splits_at_repeated_anchor() {
+        use crate::diff::options::{DiffAlgorithm, DiffOptions};
+        let old = "x\nx\nx\nx\n";
+        let new = "x\nx\nx\nA\nB\nC\nD\nx\nE\nF\nG\n";
+        let opts = DiffOptions {
+            context_lines: 0,
+            algorithm: DiffAlgorithm::Minimal,
+            indent_heuristic: false,
+            ..DiffOptions::default()
+        };
+        let body = unified_hunk_body_for_diff_options(old, new, &opts);
+        assert_eq!(
+            body.matches("@@ ").count(),
+            2,
+            "minimal u0 should split at the repeated anchor line"
+        );
+    }
 
     #[test]
     fn myers_patience_histogram_minimal_emit_unified_hunks() {
@@ -11221,7 +12207,7 @@ mod blob_diff_algorithm_smoke {
 
     #[test]
     fn git_histogram_printer_and_anchored_diff_smoke() {
-        let hist = unified_diff_histogram_hunks_only(OLD, NEW, 3, 0);
+        let hist = unified_diff_histogram_hunks_only(OLD, NEW, 3, 0, false);
         assert!(!hist.is_empty());
         let anchors = vec!["beta".to_string()];
         let anchored = anchored_unified_diff(
@@ -11430,6 +12416,7 @@ mod line_coverage_tests {
             None,
             false,
             false,
+            false,
             |_old, _new| false,
         );
         assert!(!hist.is_empty());
@@ -11548,9 +12535,9 @@ mod line_coverage_tests {
 
         let cfg = ConfigSet::new();
         assert!(indent_heuristic_from_config(&cfg));
-        let _ = unified_diff_histogram_hunks_only("a\nb\n", "a\nB\n", 3, 0);
+        let _ = unified_diff_histogram_hunks_only("a\nb\n", "a\nB\n", 3, 0, false);
         let _ = unified_diff_histogram_with_prefix_and_funcname(
-            "x\n", "y\n", "a/f", "b/f", 3, 0, "", "", None, false,
+            "x\n", "y\n", "a/f", "b/f", 3, 0, "", "", None, false, false,
         );
         let _ = count_changes_with_algorithm("a\n", "b\n", Algorithm::Myers, false);
         let _ = should_break_rewrite_pair(b"short", b"totally different body", 50);

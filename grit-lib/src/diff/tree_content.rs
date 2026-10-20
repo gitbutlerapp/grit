@@ -10,10 +10,9 @@ use crate::parallel::{try_par_map_with_local, ParallelHashError};
 use crate::parallel::{ParallelOp, ThreadPolicy};
 use std::sync::Arc;
 
-use super::structured::{
-    structured_file_diff, SideBytes, StructuredDiffOptions, StructuredFileDiff,
-};
+use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
+use super::DiffOptions;
 
 /// Tree diff entry with structured line hunks ready for CLI rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +82,7 @@ pub fn tree_diff_structured_parallel(
     entries: Vec<DiffEntry>,
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
-    diff_options: StructuredDiffOptions,
+    diff_options: DiffOptions,
 ) -> Result<Vec<TreeDiffStructured>> {
     if entries.is_empty() {
         return Ok(Vec::new());

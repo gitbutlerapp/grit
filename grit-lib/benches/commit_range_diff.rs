@@ -10,9 +10,7 @@ use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::{
-    diff_trees, structured::StructuredDiffOptions, tree_diff_structured_parallel, DiffEntry,
-};
+use grit_lib::diff::{diff_trees, tree_diff_structured_parallel, DiffEntry, DiffOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
@@ -78,10 +76,9 @@ fn fixture() -> &'static CommitRangeFixture {
 
 fn bench_commit_range_structured(c: &mut Criterion) {
     let fx = fixture();
-    let opts = StructuredDiffOptions {
-        context_lines: 3,
-        word_level_inline: false,
-    };
+    let opts = DiffOptions::default()
+        .with_context_lines(3)
+        .with_word_level_inline(false);
     let mut group = c.benchmark_group("commit_range_structured_diff");
     group.throughput(Throughput::Elements(FILE_COUNT as u64));
     for threads in [1usize, 0] {

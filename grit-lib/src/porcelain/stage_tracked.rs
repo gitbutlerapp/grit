@@ -9,8 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::diff::{
-    entry_is_racy, index_entry_worktree_abs, materialize_worktree_blob, mode_from_metadata,
-    read_submodule_head_oid, stat_matches, symlink_target_bytes, SymlinkDirCache,
+    entry_is_racy, index_entry_worktree_abs, materialize_worktree_blob, read_submodule_head_oid,
+    symlink_target_bytes, SymlinkDirCache,
 };
 use crate::error::{Error, Result};
 use crate::hash::Parallelism;
@@ -27,9 +27,13 @@ use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
-    for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
-    BlobDiskLookup, WorktreeBlobScanOptions,
+    collect_blob_lookup_batches, group_blob_entries_by_dir, stat_scan_thread_count,
+    visit_blob_lookup_batches, BlobDiskLookup, BlobDiskStat, BlobScanSparseMode,
+    WorktreeBlobScanOptions,
 };
+
+/// Above this index size, defer parallel blob restage and multi-thread stat preload to cap RSS.
+const PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES: usize = 80_000;
 
 /// Summary of paths updated while staging tracked modifications/deletions.
 ///
@@ -176,7 +180,10 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
 ) -> Result<StageTrackedSummary> {
     let entry_count_at_start = index.entries.len();
     let bulk_untr_defer = entry_count_at_start >= thresholds.large_index_restage;
-    let parallel_restage = entry_count_at_start >= thresholds.parallel_tracked_restage;
+    // Parallel deferred restage holds every changed path plus batch read inputs at peak; stay
+    // serial on campaign-scale indexes so bulk add stays under the factory RSS ceiling.
+    let parallel_restage = entry_count_at_start >= thresholds.parallel_tracked_restage
+        && entry_count_at_start < PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES;
     if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = true;
     }
@@ -269,7 +276,8 @@ fn stage_tracked_modifications_in_index_body(
     let mut dir_symlinks = SymlinkDirCache::default();
 
     for raw_path in &unmerged_paths {
-        let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode);
+        let abs_path =
+            abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
         refresh_unmerged_tracked_path(repo, index, raw_path, &abs_path, rules, &mut summary)?;
     }
 
@@ -283,6 +291,7 @@ fn stage_tracked_modifications_in_index_body(
             index_mtime,
             trust_filemode,
             precompose_unicode,
+            ignorecase,
             &mut symlink_parent_cache,
             rules,
             &mut summary,
@@ -327,11 +336,12 @@ fn stage_tracked_modifications_in_index_body(
         .get_bool("core.preloadIndex")
         .and_then(|r| r.ok())
         .unwrap_or(true);
-    let blob_count: usize = blob_dirs.values().map(|v| v.len()).sum();
+    let blob_count = blob_dirs.len();
     let thread_policy = repo.thread_policy();
-    let blob_scan_opts = WorktreeBlobScanOptions {
-        preload_index,
-        stat_parallel_threads: Some(stat_scan_thread_count(
+    let stat_threads = if index.entries.len() >= PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES {
+        1
+    } else {
+        stat_scan_thread_count(
             &thread_policy,
             rules_config.as_ref(),
             WorktreeBlobScanOptions {
@@ -339,7 +349,11 @@ fn stage_tracked_modifications_in_index_body(
                 stat_parallel_threads: None,
             },
             blob_count,
-        )),
+        )
+    };
+    let blob_scan_opts = WorktreeBlobScanOptions {
+        preload_index,
+        stat_parallel_threads: Some(stat_threads),
     };
     let parallelism = thread_policy
         .resolve(
@@ -348,15 +362,15 @@ fn stage_tracked_modifications_in_index_body(
         )
         .parallelism();
     let mut deferred_restage: Vec<DeferredRestageJob> = Vec::new();
-    let paths_by_entry_index =
-        crate::worktree_scan::blob_scan_paths_by_entry_index(&blob_dirs, index.entries.len());
-    for_each_blob_by_directory_parallel(
-        &paths_by_entry_index,
+    let mut pending_removals: Vec<Vec<u8>> = Vec::new();
+    let stage_batches = collect_blob_lookup_batches(
+        index,
         &blob_dirs,
         blob_scan_opts,
         &thread_policy,
         &rules_config,
         true,
+        None,
         dir_abs,
         file_abs,
         |rel_path| {
@@ -371,60 +385,77 @@ fn stage_tracked_modifications_in_index_body(
                     path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
                 }
         },
-        |_entry_index, rel_path, lookup| {
-            let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
-                return Ok(());
-            };
-            if idx_e.stage() != 0 {
-                return Ok(());
-            }
-            let raw_path = idx_e.path.clone();
-            let abs_path = abs_path_for_stage_tracked(work_tree, &raw_path, precompose_unicode);
-            match lookup {
-                BlobDiskLookup::Missing => {
-                    if idx_e.skip_worktree() {
-                        return Ok(());
-                    }
-                    if rel_path_has_symlink_parent(work_tree, rel_path) {
-                        if index.remove(&raw_path) {
-                            summary.removed.push(raw_path);
-                        }
-                        return Ok(());
-                    }
-                    if symlink_metadata_for_staging(&abs_path)?.is_none() && index.remove(&raw_path)
-                    {
-                        summary.removed.push(raw_path);
-                    }
-                }
-                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                BlobDiskLookup::Present(meta) => {
-                    let ctx = PresentRefreshCtx {
-                        repo,
-                        index,
-                        raw_path: &raw_path,
-                        abs_path: &abs_path,
-                        idx_e: &idx_e,
-                        index_mtime,
-                        trust_filemode,
-                        rules,
-                    };
-                    let defer = parallel_restage.then_some(&mut deferred_restage);
-                    if refresh_present_tracked_path(ctx, &meta, defer)? {
-                        summary.modified.push(raw_path);
-                    }
-                }
-            }
-            Ok(())
+        BlobScanSparseMode::StageTracked {
+            index_mtime,
+            trust_filemode,
         },
     )?;
+    visit_blob_lookup_batches(stage_batches, |entry_index, lookup| {
+        let rel_path = match std::str::from_utf8(&index.entries[entry_index].path) {
+            Ok(p) => p,
+            Err(_) => return Ok(()),
+        };
+        let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
+            return Ok(());
+        };
+        if idx_e.stage() != 0 {
+            return Ok(());
+        }
+        let raw_path = idx_e.path.clone();
+        let abs_path =
+            abs_path_for_stage_tracked(work_tree, &raw_path, precompose_unicode, ignorecase);
+        match lookup {
+            BlobDiskLookup::Missing => {
+                if idx_e.skip_worktree() {
+                    return Ok(());
+                }
+                if rel_path_has_symlink_parent(work_tree, rel_path) {
+                    pending_removals.push(raw_path);
+                    return Ok(());
+                }
+                if symlink_metadata_for_staging(&abs_path)?.is_none() {
+                    pending_removals.push(raw_path);
+                }
+            }
+            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Present(stat) => {
+                let ctx = PresentRefreshCtx {
+                    repo,
+                    index,
+                    raw_path: &raw_path,
+                    abs_path: &abs_path,
+                    idx_e: &idx_e,
+                    index_mtime,
+                    trust_filemode,
+                    rules,
+                };
+                let defer = parallel_restage.then_some(&mut deferred_restage);
+                if refresh_present_tracked_path(ctx, stat, defer, entry_index)? {
+                    summary.modified.push(raw_path);
+                }
+            }
+        }
+        Ok(())
+    })?;
+    for raw_path in pending_removals {
+        if index.remove(&raw_path) {
+            summary.removed.push(raw_path);
+        }
+    }
 
     if !deferred_restage.is_empty() {
+        let restage_ctx = DeferredRestageContext {
+            work_tree,
+            precompose_unicode,
+            ignorecase,
+        };
         summary.modified.extend(restage_deferred_jobs(
             repo,
             index,
             rules,
             trust_filemode,
             parallelism,
+            restage_ctx,
             &deferred_restage,
         )?);
     }
@@ -504,14 +535,15 @@ fn abs_path_for_stage_tracked(
     work_tree: &Path,
     raw_path: &[u8],
     precompose_unicode: bool,
+    ignorecase: bool,
 ) -> PathBuf {
-    std::str::from_utf8(raw_path)
-        .ok()
-        .filter(|_| precompose_unicode)
-        .map_or_else(
-            || worktree_path_from_index_rel(work_tree, raw_path),
-            |rel| resolve_worktree_path_for_staging(work_tree, rel, true).abs,
-        )
+    let Some(rel) = std::str::from_utf8(raw_path).ok() else {
+        return worktree_path_from_index_rel(work_tree, raw_path);
+    };
+    if precompose_unicode {
+        return resolve_worktree_path_for_staging(work_tree, rel, true).abs;
+    }
+    index_entry_worktree_abs(work_tree, rel, false, ignorecase)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -524,11 +556,12 @@ fn stage_tracked_path_individual(
     index_mtime: Option<(u32, u32)>,
     trust_filemode: bool,
     precompose_unicode: bool,
+    ignorecase: bool,
     symlink_parent_cache: &mut HashMap<PathBuf, bool>,
     rules: &mut WorktreeRules,
     summary: &mut StageTrackedSummary,
 ) -> Result<()> {
-    let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode);
+    let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
     if path_has_symlink_parent_cached(work_tree, &abs_path, symlink_parent_cache) {
         if index.remove(raw_path) {
             summary.removed.push(raw_path.to_vec());
@@ -547,7 +580,7 @@ fn stage_tracked_path_individual(
                 trust_filemode,
                 rules,
             };
-            if refresh_present_tracked_path(ctx, &meta, None)? {
+            if refresh_present_tracked_path(ctx, BlobDiskStat::from_metadata(&meta), None, 0)? {
                 summary.modified.push(raw_path.to_vec());
             }
         }
@@ -561,17 +594,22 @@ fn stage_tracked_path_individual(
     Ok(())
 }
 
+/// Deferred blob restage: path captured at defer time (stable if later index rows shift).
 struct DeferredRestageJob {
     raw_path: Vec<u8>,
-    abs_path: PathBuf,
-    /// Worktree metadata from the directory stat scan (avoids a second `stat` during restage).
-    meta: fs::Metadata,
+}
+
+struct DeferredRestageContext<'a> {
+    work_tree: &'a Path,
+    precompose_unicode: bool,
+    ignorecase: bool,
 }
 
 fn refresh_present_tracked_path(
     ctx: PresentRefreshCtx<'_>,
-    meta: &fs::Metadata,
+    stat: BlobDiskStat,
     defer_restage: Option<&mut Vec<DeferredRestageJob>>,
+    entry_index: usize,
 ) -> Result<bool> {
     let PresentRefreshCtx {
         repo,
@@ -591,7 +629,7 @@ fn refresh_present_tracked_path(
         return refresh_gitlink(repo, index, raw_path, abs_path, idx_e);
     }
 
-    if meta.is_dir() && !meta.file_type().is_symlink() {
+    if stat.is_dir {
         if abs_path.join(".git").exists() {
             if let Some(oid) = read_submodule_head_oid(abs_path) {
                 if index
@@ -611,8 +649,10 @@ fn refresh_present_tracked_path(
         }
     }
 
-    let wt_mode = mode_from_metadata(meta);
-    let stat_same = stat_matches(idx_e, meta);
+    let wt_mode = stat.git_mode;
+    let stat_same = stat
+        .fields
+        .matches_index_entry(idx_e, crate::index::StatMatchPolicy::default());
     let racy = entry_is_racy(idx_e, index_mtime);
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
         if wt_mode == idx_mode || !trust_filemode {
@@ -626,20 +666,20 @@ fn refresh_present_tracked_path(
     let oid = match std::str::from_utf8(raw_path) {
         Ok(rel_path) => {
             if let Some(deferred) = defer_restage {
+                let _ = entry_index;
                 deferred.push(DeferredRestageJob {
                     raw_path: raw_path.to_vec(),
-                    abs_path: abs_path.to_path_buf(),
-                    meta: meta.clone(),
                 });
                 return Ok(false);
             }
+            let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
             let file_attrs = rules.file_attrs(rel_path, false);
             let conv = rules.conversion();
             let filter_fp = Some(rules.filter_process());
             let staged_oid = materialize_worktree_blob(
                 repo.odb(),
                 abs_path,
-                meta,
+                &meta,
                 conv,
                 &file_attrs,
                 rel_path,
@@ -655,7 +695,8 @@ fn refresh_present_tracked_path(
             staged_oid
         }
         Err(_) => {
-            let oid = read_worktree_blob_oid_raw(repo, abs_path, meta)?;
+            let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
+            let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta)?;
             if !idx_intent_to_add && idx_oid == oid && (wt_mode == idx_mode || !trust_filemode) {
                 return Ok(false);
             }
@@ -674,21 +715,37 @@ fn restage_deferred_jobs(
     rules: &mut WorktreeRules,
     trust_filemode: bool,
     parallelism: Parallelism,
+    ctx: DeferredRestageContext<'_>,
     jobs: &[DeferredRestageJob],
 ) -> Result<Vec<Vec<u8>>> {
+    let DeferredRestageContext {
+        work_tree,
+        precompose_unicode,
+        ignorecase,
+    } = ctx;
     let mut batch_inputs = Vec::with_capacity(jobs.len());
     for job in jobs {
-        let Some(idx_e) = index.get(&job.raw_path, 0) else {
+        let raw_path = job.raw_path.as_slice();
+        let rel_path = std::str::from_utf8(raw_path)
+            .map_err(|_| Error::Message("deferred restage requires utf-8 index paths".into()))?;
+        let Some(idx_e) = index.get(raw_path, 0).cloned() else {
             continue;
         };
-        let rel_path = std::str::from_utf8(&job.raw_path)
-            .map_err(|_| Error::Message("deferred restage requires utf-8 index paths".into()))?;
+        let abs_path =
+            abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
+        let file_attrs = rules.file_attrs(rel_path, false);
+        let index_entry =
+            if crate::crlf::clean_uses_autocrlf_index_guard(&file_attrs, rules.conversion()) {
+                Some(idx_e)
+            } else {
+                None
+            };
         batch_inputs.push(WorktreeBlobReadInput {
-            abs: job.abs_path.clone(),
+            abs: abs_path,
             index_relpath: rel_path.to_owned(),
-            index_entry: Some(idx_e.clone()),
-            file_attrs: rules.file_attrs(rel_path, false),
-            cached_meta: Some(job.meta.clone()),
+            index_entry,
+            file_attrs,
+            cached_meta: None,
         });
     }
     if !batch_inputs.is_empty() {
@@ -706,11 +763,12 @@ fn restage_deferred_jobs(
     let mut replacements = Vec::new();
     let mut modified = Vec::new();
     for (job, prep) in jobs.iter().zip(prepared.iter()) {
-        let Some(idx_e) = index.get(&job.raw_path, 0) else {
+        let raw_path = job.raw_path.as_slice();
+        let Some(idx_e) = index.get(raw_path, 0) else {
             continue;
         };
         debug_assert_eq!(
-            std::str::from_utf8(&job.raw_path).ok(),
+            std::str::from_utf8(raw_path).ok(),
             Some(prep.index_relpath.as_str())
         );
         let idx_mode = idx_e.mode;
@@ -719,8 +777,10 @@ fn restage_deferred_jobs(
         if prep.oid == idx_oid && (mode_for_index == idx_mode || !trust_filemode) {
             continue;
         }
-        let entry = entry_from_stat(&job.abs_path, &job.raw_path, prep.oid, mode_for_index)?;
-        modified.push(job.raw_path.clone());
+        let abs_path =
+            abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
+        let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
+        modified.push(raw_path.to_vec());
         replacements.push(entry);
     }
     if !replacements.is_empty() {
@@ -899,7 +959,7 @@ mod tests {
     use std::fs;
     use std::io::Write;
 
-    use crate::diff::{entry_is_racy, stat_matches};
+    use crate::diff::{entry_is_racy, mode_from_metadata, stat_matches};
     use crate::index::{
         entry_from_metadata, index_file_mtime, Index, MODE_EXECUTABLE, MODE_REGULAR,
     };

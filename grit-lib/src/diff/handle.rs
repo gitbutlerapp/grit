@@ -1,5 +1,7 @@
 //! Repository-scoped tree and index diffs via [`Diff`].
-use crate::diff::{diff_index_to_tree, diff_index_to_worktree, diff_trees, DiffEntry};
+use crate::diff::targets::{collect_files_for_target, file_diffs_from_entries};
+use crate::diff::{diff_index_to_tree, diff_index_to_worktree, diff_trees, DiffEntry, DiffOptions};
+use crate::diff::{DiffTarget, FileDiff};
 use crate::error::Result;
 use crate::index::Index;
 use crate::objects::ObjectId;
@@ -82,5 +84,32 @@ impl<'repo> Diff<'repo> {
             ignore_submodule_untracked,
             simplify_gitlinks,
         )
+    }
+
+    /// Structured per-file diffs for `target`, honoring `pathspecs` and line-diff `opts`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates index, ODB, and worktree diff failures.
+    pub fn files(
+        &self,
+        target: &DiffTarget,
+        pathspecs: &[String],
+        opts: &DiffOptions,
+    ) -> Result<Vec<FileDiff>> {
+        collect_files_for_target(self.repo, target, pathspecs, *opts)
+    }
+
+    /// Build [`FileDiff`] rows from an existing tree diff entry list (e.g. stash W vs index).
+    ///
+    /// # Errors
+    ///
+    /// Propagates object read and structured diff errors.
+    pub fn files_from_entries(
+        &self,
+        entries: Vec<DiffEntry>,
+        opts: &DiffOptions,
+    ) -> Result<Vec<FileDiff>> {
+        file_diffs_from_entries(self.repo, entries, *opts)
     }
 }

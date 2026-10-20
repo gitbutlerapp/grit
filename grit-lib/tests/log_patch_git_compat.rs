@@ -8,8 +8,8 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    write_commit_log_patch, write_commits_log_patch, DiffPostprocessOptions, LogPatchCommitHeader,
-    LogPatchDiffOptions, LogPatchOptions,
+    write_commit_log_patch, write_commits_log_patch, DiffAlgorithm, DiffOptions,
+    DiffPostprocessOptions, LogPatchCommitHeader, LogPatchOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -58,7 +58,7 @@ fn init_corpus_repo(git: &std::path::Path, dir: &std::path::Path) {
     git_in(dir, &["commit", "-q", "-m", "binary"]);
 }
 
-fn grit_log_patch(repo: &Repository, limit: usize, diff: LogPatchDiffOptions) -> Vec<u8> {
+fn grit_log_patch(repo: &Repository, limit: usize, diff: DiffOptions) -> Vec<u8> {
     let opts = RevListOptions {
         max_count: Some(limit),
         ..Default::default()
@@ -100,14 +100,14 @@ fn log_patch_corpus_matches_git_default_algorithm() {
         &["log", "-p", "--no-color", "--format=%H", "-15"],
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let grit_out = grit_log_patch(&repo, 15, LogPatchDiffOptions::default());
+    let grit_out = grit_log_patch(&repo, 15, DiffOptions::default());
     assert_eq!(grit_out, git_out);
 }
 
 fn assert_last_log_patch_matches_git(dir: &std::path::Path) {
     let git_out = git_in(dir, &["log", "-p", "--no-color", "--format=%H", "-1"]);
     let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open");
-    let grit_out = grit_log_patch(&repo, 1, LogPatchDiffOptions::default());
+    let grit_out = grit_log_patch(&repo, 1, DiffOptions::default());
     assert_eq!(
         grit_out,
         git_out,
@@ -200,11 +200,10 @@ fn log_patch_git_git_corpus_matches_git_default_and_histogram() {
         );
         let repo =
             Repository::discover(Some(&corpus), &RepositoryOptions::empty()).expect("open git.git");
-        let mut diff = LogPatchDiffOptions::from_config(
-            &repo.config().map(|c| (*c).clone()).unwrap_or_default(),
-        );
+        let mut diff =
+            DiffOptions::from_config(&repo.config().map(|c| (*c).clone()).unwrap_or_default());
         if histogram {
-            diff.use_git_histogram = true;
+            diff.algorithm = DiffAlgorithm::Histogram;
         }
         let grit_out = grit_log_patch(&repo, limit, diff);
         if grit_out != git_out {
@@ -245,7 +244,7 @@ fn log_patch_git_git_diff_tree_no_renames_matches_git() {
         .expect("head oid");
     let config = ConfigSet::new();
     let opts = DiffPostprocessOptions {
-        rename_threshold: 100,
+        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
         ..Default::default()
     };
     let git_raw = git_raw_lines(
@@ -274,8 +273,8 @@ fn log_patch_corpus_matches_git_histogram() {
         &["log", "-p", "--no-color", "--format=%H", "-10"],
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let mut diff = LogPatchDiffOptions::default();
-    diff.use_git_histogram = true;
+    let mut diff = DiffOptions::default();
+    diff.algorithm = DiffAlgorithm::Histogram;
     let grit_out = grit_log_patch(&repo, 10, diff);
     assert_eq!(grit_out, git_out);
 }

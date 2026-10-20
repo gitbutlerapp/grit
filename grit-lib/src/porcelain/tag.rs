@@ -12,8 +12,7 @@
 //! - Tag creation ([`create_tag`], [`CreateTagRequest`], [`TagKind`]) and list
 //!   classification ([`tag_ref_metadata`]).
 //! - The `--contains` / `--no-contains` / `--points-at` filter predicates
-//!   ([`tag_contains`], [`tag_points_at`]) and the [`peel_to_commit`] helper they
-//!   share.
+//!   ([`tag_contains`], [`tag_points_at`]).
 //! - The `--sort` comparators: numeric `version:refname` ordering
 //!   ([`compare_version`] / [`version_segments`]) and the `creatordate` /
 //!   `taggerdate` epoch extraction ([`creator_date`] / [`parse_epoch_from_ident`]).
@@ -77,11 +76,8 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
         return Err(Error::Message(format!("tag '{}' already exists", req.name)));
     }
 
-    let target_obj = repo.odb().read(&req.target)?;
-    let peeled = match target_obj.kind {
-        ObjectKind::Commit => Some(req.target),
-        _ => peel_to_commit(repo, &req.target),
-    };
+    let target_kind = repo.odb().read_info(&req.target)?.kind;
+    let peeled = repo.odb().peel_to_commit(req.target).ok().flatten();
 
     let wants_annotated = req.message.is_some();
     let (ref_oid, kind) = if wants_annotated {
@@ -96,7 +92,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
             .unwrap_or_default();
         let tag = TagData {
             object: req.target,
-            object_type: target_obj.kind.as_str().to_owned(),
+            object_type: target_kind.as_str().to_owned(),
             tag: req.name.clone(),
             tagger: Some(tagger.clone()),
             message,
@@ -121,16 +117,16 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
 /// Classify a tag ref target and peel to a commit when possible.
 #[must_use]
 pub fn tag_ref_metadata(repo: &Repository, ref_oid: &ObjectId) -> (TagKind, Option<ObjectId>) {
-    let Ok(obj) = repo.odb().read(ref_oid) else {
+    let Ok(info) = repo.odb().read_info(ref_oid) else {
         return (TagKind::Lightweight, None);
     };
-    if obj.kind == ObjectKind::Tag {
-        let peeled = peel_to_commit(repo, ref_oid);
-        (TagKind::Annotated, peeled)
-    } else if obj.kind == ObjectKind::Commit {
-        (TagKind::Lightweight, Some(*ref_oid))
-    } else {
-        (TagKind::Lightweight, peel_to_commit(repo, ref_oid))
+    match info.kind {
+        ObjectKind::Commit => (TagKind::Lightweight, Some(*ref_oid)),
+        ObjectKind::Tag => (
+            TagKind::Annotated,
+            repo.odb().peel_to_commit(*ref_oid).ok().flatten(),
+        ),
+        ObjectKind::Tree | ObjectKind::Blob => (TagKind::Lightweight, None),
     }
 }
 
@@ -164,10 +160,8 @@ pub fn get_tag_annotation(repo: &Repository, oid: &ObjectId, n: u32) -> Option<S
 /// Peels the tag ref to a commit, then walks ancestors.
 #[must_use]
 pub fn tag_contains(repo: &Repository, tag_oid: &ObjectId, target: &ObjectId) -> bool {
-    // Peel to commit
-    let commit_oid = match peel_to_commit(repo, tag_oid) {
-        Some(oid) => oid,
-        None => return false,
+    let Ok(Some(commit_oid)) = repo.odb().peel_to_commit(*tag_oid) else {
+        return false;
     };
 
     if &commit_oid == target {
@@ -230,24 +224,6 @@ pub fn tag_points_at(repo: &Repository, tag_oid: &ObjectId, target: &ObjectId) -
         }
     }
     false
-}
-
-/// Peel an object to a commit OID (following tags).
-#[must_use]
-pub fn peel_to_commit(repo: &Repository, oid: &ObjectId) -> Option<ObjectId> {
-    let mut current = *oid;
-    for _ in 0..10 {
-        let obj = repo.odb().read(&current).ok()?;
-        match obj.kind {
-            ObjectKind::Commit => return Some(current),
-            ObjectKind::Tag => {
-                let tag = parse_tag(&obj.data).ok()?;
-                current = tag.object;
-            }
-            _ => return None,
-        }
-    }
-    None
 }
 
 /// Extract the "creator date" for a tag object.

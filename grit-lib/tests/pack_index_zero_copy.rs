@@ -104,8 +104,8 @@ fn v2_idx_matches_git_show_index() {
     for (hex, off, crc) in git_rows {
         let oid = ObjectId::from_hex(&hex).expect("oid");
         let pos = idx.find_position(&oid).expect("oid in idx");
-        assert_eq!(idx.find_offset(&oid), Some(off));
-        assert_eq!(idx.offset_at(pos), off);
+        assert_eq!(idx.find_offset(&oid).expect("lookup"), Some(off));
+        assert_eq!(idx.offset_at(pos).expect("off"), off);
         assert_eq!(idx.oid_at(pos), oid.as_bytes());
         assert_eq!(idx.crc32_at(pos), crc);
     }
@@ -120,7 +120,7 @@ fn v1_idx_matches_git_show_index() {
         body.extend_from_slice(&slot.to_be_bytes());
     }
     for entry in parsed.iter() {
-        body.extend_from_slice(&(entry.offset() as u32).to_be_bytes());
+        body.extend_from_slice(&(entry.offset().expect("off") as u32).to_be_bytes());
         body.extend_from_slice(entry.oid());
     }
     let digest = grit_lib::objects::HashAlgo::Sha1.digest(&body);
@@ -133,8 +133,8 @@ fn v1_idx_matches_git_show_index() {
     for (hex, off, _crc) in git_rows {
         let oid = ObjectId::from_hex(&hex).expect("oid");
         let pos = idx.find_position(&oid).expect("oid in idx");
-        assert_eq!(idx.find_offset(&oid), Some(off));
-        assert_eq!(idx.offset_at(pos), off);
+        assert_eq!(idx.find_offset(&oid).expect("lookup"), Some(off));
+        assert_eq!(idx.offset_at(pos).expect("off"), off);
         assert_eq!(idx.crc32_at(pos), None);
     }
 }
@@ -148,12 +148,12 @@ fn lookup_oracle_random_hits_and_misses() {
         oracle.insert(ObjectId::from_bytes(entry.oid()).unwrap());
     }
     for oid in oracle.iter().copied() {
-        assert!(idx.contains(&oid));
+        assert!(idx.contains(&oid).expect("contains"));
         assert!(idx.find_position(&oid).is_some());
     }
     let miss = ObjectId::from_hex("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef").unwrap();
     assert!(!oracle.contains(&miss));
-    assert!(!idx.contains(&miss));
+    assert!(!idx.contains(&miss).expect("contains miss"));
 }
 
 fn git_empty_v2_idx(dir: &Path, sha256: bool) -> PathBuf {

@@ -31,10 +31,13 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::command_runner::CommandRunner;
-use crate::config::{ConfigFile, ConfigScope, ConfigSet, LoadConfigOptions};
+use crate::config::{
+    config_file_stamps, stamp_for_path, ConfigCacheKey, ConfigFile, ConfigScope, ConfigSet,
+    LoadConfigOptions,
+};
 use crate::diagnostics::{self, DiagnosticsHandle};
 use crate::environment::{Environment, RepositoryOptions};
 use crate::error::{Error, Result};
@@ -227,6 +230,24 @@ impl RepositoryBuilder {
 
 /// A handle to an open Git repository.
 ///
+/// ## Config and path caching
+///
+/// On open, Grit resolves the common git directory ([`Self::common_git_dir`]), loads the merged
+/// configuration cascade once, and keeps that snapshot for the lifetime of this handle. Hot paths
+/// (object reads, replace-ref checks, and similar) reuse the snapshot without re-statting config
+/// files on every access.
+///
+/// Refresh the snapshot when on-disk config may have changed:
+///
+/// - [`Self::reload_config`] after writing config through [`crate::config::ConfigHandle`] or other
+///   in-process library APIs on this handle.
+/// - Hook and filter subprocesses may rewrite config; [`crate::hooks::run_hook_opts`] reloads the
+///   snapshot after hooks finish when a [`Repository`] is provided.
+/// - External edits (another process, or the system `git` binary) are picked up on the next
+///   [`Self::config`] call, which revalidates file stamps once per call—not on every internal read.
+/// - Open a new [`Repository`] to observe ref or config changes made elsewhere without calling
+///   [`Self::reload_config`] (for example a `refs/replace/*` ref created by system `git`).
+///
 /// # Examples
 ///
 /// ```
@@ -246,18 +267,16 @@ impl RepositoryBuilder {
 /// ```
 pub struct Repository {
     git_dir: PathBuf,
+    /// Common git directory (`commondir` target when linked; otherwise [`Self::git_dir`]).
+    common_git_dir: PathBuf,
     work_tree: Option<PathBuf>,
     odb: Odb,
     explicit_git_dir: bool,
     discovery_root: Option<PathBuf>,
     work_tree_from_env: bool,
     discovery_via_gitfile: bool,
-    /// Lazily loaded repository config snapshot (system / global / local / worktree cascade).
-    ///
-    /// Hot paths should call [`Repository::config`] once per operation and pass `&ConfigSet`
-    /// down instead of calling [`ConfigSet::load`] repeatedly. [`Repository::reload_config`]
-    /// replaces the snapshot after in-process config writes so subsequent operations see updates
-    /// without reopening the repository.
+    /// Session config snapshot and derived hot-path flags (see struct-level rustdoc).
+    config_session: Mutex<Option<ConfigSession>>,
     /// Repository-scoped caches (config, attributes, filters, precompose, …).
     caches: Arc<RepoCaches>,
     /// Pluggable ref backend selected for this repository.
@@ -305,6 +324,49 @@ struct RepoCachedSettings {
     replace_ref_base: String,
 }
 
+/// Stamp metadata for one loaded config cascade (session invalidation).
+#[derive(Clone)]
+struct ConfigSessionValidation {
+    key: ConfigCacheKey,
+    env_fingerprint: Vec<(String, Option<String>)>,
+    base_stamps: Vec<(PathBuf, Option<(std::time::SystemTime, u64)>)>,
+    extra_stamps: Vec<(PathBuf, Option<(std::time::SystemTime, u64)>)>,
+}
+
+/// In-memory config session for one open [`Repository`] handle.
+struct ConfigSession {
+    config: Arc<ConfigSet>,
+    validation: ConfigSessionValidation,
+    cached_settings: RepoCachedSettings,
+    /// When `true`, [`Repository::resolve_replace_redirect`] skips replace-ref lookups.
+    replace_lookup_inactive: bool,
+}
+
+impl ConfigSessionValidation {
+    fn still_valid(&self, env: &Environment, git_dir: &Path, opts: &LoadConfigOptions) -> bool {
+        let Some(env_fp) = env.config_fingerprint() else {
+            return false;
+        };
+        if self.env_fingerprint.as_slice() != env_fp.as_slice() {
+            return false;
+        }
+        let key = ConfigCacheKey::new(Some(git_dir), opts);
+        if key != self.key {
+            return false;
+        }
+        let base_stamps = config_file_stamps(env, Some(git_dir), opts);
+        if self.base_stamps.as_slice() != base_stamps.as_slice() {
+            return false;
+        }
+        for (path, stamp) in &self.extra_stamps {
+            if stamp_for_path(path) != *stamp {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 impl Repository {
     fn config_load_options(&self, include_system: bool) -> LoadConfigOptions {
         LoadConfigOptions {
@@ -316,6 +378,7 @@ impl Repository {
                 ..Default::default()
             },
             diagnostics: Some(self.diagnostics()),
+            repo_caches: Some(Arc::clone(&self.caches)),
             ..Default::default()
         }
     }
@@ -333,14 +396,14 @@ impl Repository {
             return Err(Error::NotARepository(git_dir.display().to_string()));
         }
 
+        let common_git_dir = resolve_common_dir(&git_dir).unwrap_or_else(|| git_dir.clone());
+
         // For git worktrees the `objects/` directory lives in the common git
         // directory pointed to by the `commondir` file.
         let objects_dir = if git_dir.join("objects").exists() {
             git_dir.join("objects")
-        } else if let Some(common_dir) = resolve_common_dir(&git_dir) {
-            common_dir.join("objects")
         } else {
-            return Err(Error::NotARepository(git_dir.display().to_string()));
+            common_git_dir.join("objects")
         };
 
         if !objects_dir.exists() {
@@ -387,12 +450,14 @@ impl Repository {
 
         Ok(Self {
             git_dir,
+            common_git_dir,
             work_tree,
             odb,
             explicit_git_dir: false,
             discovery_root: None,
             work_tree_from_env: false,
             discovery_via_gitfile: false,
+            config_session: Mutex::new(None),
             caches,
             ref_store,
             environment,
@@ -515,9 +580,110 @@ impl Repository {
     }
 
     fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
+        self.config_arc_with_validation(true)
+    }
+
+    /// Hot-path config access: session snapshot without stamp revalidation.
+    pub(crate) fn ensure_config_arc_fast(&self) -> Result<Arc<ConfigSet>> {
+        self.config_arc_with_validation(false)
+    }
+
+    fn config_arc_with_validation(&self, validate_stamps: bool) -> Result<Arc<ConfigSet>> {
+        if validate_stamps {
+            if let Ok(guard) = self.config_session.lock() {
+                if let Some(session) = guard.as_ref() {
+                    let opts = self.config_load_options(true);
+                    if session.validation.still_valid(
+                        self.environment.as_ref(),
+                        &self.git_dir,
+                        &opts,
+                    ) {
+                        return Ok(Arc::clone(&session.config));
+                    }
+                }
+            }
+        } else if let Ok(guard) = self.config_session.lock() {
+            if let Some(session) = guard.as_ref() {
+                return Ok(Arc::clone(&session.config));
+            }
+        }
+        self.refresh_config_session()?;
+        self.config_session
+            .lock()
+            .map_err(|e| Error::Message(format!("config session lock poisoned: {e}")))?
+            .as_ref()
+            .map(|s| Arc::clone(&s.config))
+            .ok_or_else(|| Error::Message("config session missing after refresh".to_owned()))
+    }
+
+    fn refresh_config_session(&self) -> Result<()> {
         let opts = self.config_load_options(true);
+        if let Ok(guard) = self.config_session.lock() {
+            if let Some(session) = guard.as_ref() {
+                if session
+                    .validation
+                    .still_valid(self.environment.as_ref(), &self.git_dir, &opts)
+                {
+                    return Ok(());
+                }
+                let env = self.environment.as_ref();
+                let base_stamps = config_file_stamps(env, Some(&self.git_dir), &opts);
+                if session.validation.base_stamps.as_slice() != base_stamps.as_slice() {
+                    self.caches.invalidate_config_file_derived();
+                }
+            }
+        }
+        self.caches.clear_session_config();
+        let env = self.environment.as_ref();
+        let cfg = self
+            .caches
+            .load_config_with_options(env, Some(&self.git_dir), &opts)?;
+        let key = ConfigCacheKey::new(Some(&self.git_dir), &opts);
+        let (env_fingerprint, base_stamps, extra_stamps) =
+            self.caches.config_entry_stamps(&key).unwrap_or_else(|| {
+                (
+                    env.config_fingerprint().unwrap_or_default(),
+                    config_file_stamps(env, Some(&self.git_dir), &opts),
+                    Vec::new(),
+                )
+            });
+        let cached_settings =
+            Self::repo_cached_settings_from_config(cfg.as_ref(), self.environment.as_ref());
+        let replace_lookup_inactive = self.replace_lookup_inactive(cfg.as_ref());
         self.caches
-            .load_config_with_options(self.environment.as_ref(), Some(&self.git_dir), &opts)
+            .set_session_config(key.clone(), Arc::clone(&cfg));
+        let session = ConfigSession {
+            config: Arc::clone(&cfg),
+            validation: ConfigSessionValidation {
+                key,
+                env_fingerprint,
+                base_stamps,
+                extra_stamps,
+            },
+            cached_settings,
+            replace_lookup_inactive,
+        };
+        *self
+            .config_session
+            .lock()
+            .map_err(|e| Error::Message(format!("config session lock poisoned: {e}")))? =
+            Some(session);
+        Ok(())
+    }
+
+    fn replace_lookup_inactive(&self, cfg: &ConfigSet) -> bool {
+        if self.environment.git_no_replace_objects {
+            return true;
+        }
+        if !cfg
+            .get_bool("core.useReplaceRefs")
+            .and_then(|r| r.ok())
+            .unwrap_or(true)
+        {
+            return true;
+        }
+        let replace_dir = self.common_git_dir.join("refs/replace");
+        !replace_dir_is_non_empty(&replace_dir)
     }
 
     /// Return the diagnostic sink installed on this repository.
@@ -571,15 +737,32 @@ impl Repository {
     /// Propagates errors from [`ConfigSet::load`].
     pub fn reload_config(&self) -> Result<()> {
         self.caches.invalidate_config_cache();
-        let _ = self.config()?;
+        if let Ok(mut guard) = self.config_session.lock() {
+            *guard = None;
+        }
+        self.refresh_config_session()?;
         Ok(())
     }
 
-    /// Warm repository caches after discovery (reftable backend flag, optional config arc).
-    pub(crate) fn install_config_snapshot(&self, _config: Arc<ConfigSet>) {
+    /// Warm repository caches after discovery (reftable backend flag, ref store).
+    pub(crate) fn install_config_snapshot(&self) {
         let _ = self
             .caches
             .open_ref_store(&self.git_dir, self.environment.as_ref());
+    }
+
+    /// Common git directory for this handle (`commondir` when linked).
+    #[must_use]
+    pub fn common_git_dir(&self) -> &Path {
+        &self.common_git_dir
+    }
+
+    fn validate_repository_format_cached(&self) -> Result<()> {
+        let Some(config_path) = repository_config_path(&self.git_dir) else {
+            return Ok(());
+        };
+        let parsed = self.caches.repository_format(&self.git_dir, &config_path)?;
+        validate_repository_format_parsed(&parsed)
     }
 
     /// Reference storage backend for this repository.
@@ -848,7 +1031,12 @@ impl Repository {
     }
 
     fn cached_settings(&self) -> RepoCachedSettings {
-        self.ensure_config_arc()
+        if let Ok(guard) = self.config_session.lock() {
+            if let Some(session) = guard.as_ref() {
+                return session.cached_settings.clone();
+            }
+        }
+        self.ensure_config_arc_fast()
             .map(|cfg| {
                 Self::repo_cached_settings_from_config(cfg.as_ref(), self.environment.as_ref())
             })
@@ -922,12 +1110,12 @@ impl Repository {
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
-        if options.validate_repository_format {
-            validate_repository_format(&git_dir)?;
-        }
         let repo = Self::from_canonical_git_dir(options, git_dir, work_tree)?;
-        let cfg = repo.ensure_config_arc()?;
-        repo.install_config_snapshot(cfg);
+        repo.refresh_config_session()?;
+        if options.validate_repository_format {
+            repo.validate_repository_format_cached()?;
+        }
+        repo.install_config_snapshot();
         warn_core_bare_worktree_conflict(options, repo.git_dir());
         let _ = trace_repo_setup_if_requested(&repo);
         Ok(repo)
@@ -963,7 +1151,6 @@ impl Repository {
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
-        validate_repository_format(&git_dir)?;
         let environment = Arc::new(options.environment.clone());
         let command_runner = Arc::clone(&options.command_runner);
 
@@ -972,12 +1159,12 @@ impl Repository {
             return Err(Error::NotARepository(git_dir.display().to_string()));
         }
 
+        let common_git_dir = resolve_common_dir(&git_dir).unwrap_or_else(|| git_dir.clone());
+
         let objects_dir = if git_dir.join("objects").exists() {
             git_dir.join("objects")
-        } else if let Some(common_dir) = resolve_common_dir(&git_dir) {
-            common_dir.join("objects")
         } else {
-            return Err(Error::NotARepository(git_dir.display().to_string()));
+            common_git_dir.join("objects")
         };
 
         if !objects_dir.exists() {
@@ -1028,12 +1215,14 @@ impl Repository {
 
         let repo = Self {
             git_dir,
+            common_git_dir,
             work_tree,
             odb,
             explicit_git_dir: false,
             discovery_root: None,
             work_tree_from_env: false,
             discovery_via_gitfile: false,
+            config_session: Mutex::new(None),
             caches,
             ref_store,
             environment,
@@ -1046,8 +1235,10 @@ impl Repository {
             force_split_index: options.force_split_index,
             thread_policy: options.thread_policy,
         };
-        let cfg = repo.ensure_config_arc()?;
-        repo.install_config_snapshot(cfg);
+        repo.refresh_config_session()?;
+        if options.validate_repository_format {
+            repo.validate_repository_format_cached()?;
+        }
         warn_core_bare_worktree_conflict(options, repo.git_dir());
         let _ = trace_repo_setup_if_requested(&repo);
         Ok(repo)
@@ -1176,25 +1367,11 @@ impl Repository {
                 // `repositoryformatversion = 0` repo; t0001 #60). Discovery itself opens with
                 // validation skipped so an empty `.git/` is walked past, but a *found* repository
                 // must satisfy the format check.
-                validate_repository_format(repo.git_dir())?;
                 repo.environment = Arc::new(env.clone());
-                let load_opts = LoadConfigOptions {
-                    include_system: true,
-                    include_ctx: crate::config::IncludeContext {
-                        git_dir: Some(repo.git_dir.clone()),
-                        cwd: env.cwd.clone(),
-                        pwd: env.pwd.clone(),
-                        ..Default::default()
-                    },
-                    diagnostics: Some(Arc::clone(&options.diagnostics)),
-                    ..Default::default()
-                };
-                let cfg = Arc::new(ConfigSet::load_with_options(
-                    env,
-                    Some(&repo.git_dir),
-                    &load_opts,
-                )?);
-                repo.install_config_snapshot(Arc::clone(&cfg));
+                repo.refresh_config_session()?;
+                repo.validate_repository_format_cached()?;
+                repo.install_config_snapshot();
+                let cfg = repo.config()?;
                 repo.set_diagnostics(Arc::clone(&options.diagnostics));
                 if let Some(ref wt) = env_work_tree {
                     repo.work_tree = Some(wt.canonicalize().unwrap_or_else(|_| wt.clone()));
@@ -1208,7 +1385,8 @@ impl Repository {
                     let linked_gitfile =
                         repo.discovery_via_gitfile && resolve_common_dir(&repo.git_dir).is_some();
                     if !linked_gitfile {
-                        let (is_bare, core_wt) = read_core_bare_and_worktree_from_config(&cfg);
+                        let (is_bare, core_wt) =
+                            read_core_bare_and_worktree_from_config(cfg.as_ref());
                         if is_bare {
                             repo.work_tree = None;
                         } else if let Some(raw) = core_wt {
@@ -1749,12 +1927,17 @@ impl Repository {
         if self.environment.git_no_replace_objects {
             return None;
         }
+        if let Ok(guard) = self.config_session.lock() {
+            if guard.as_ref().is_some_and(|s| s.replace_lookup_inactive) {
+                return None;
+            }
+        }
         let settings = self.cached_settings();
         if !settings.use_replace_refs {
             return None;
         }
         let replace_ref =
-            self.git_dir
+            self.common_git_dir
                 .join(format!("{}{}", settings.replace_ref_base, oid.to_hex()));
         if !replace_ref.is_file() {
             return None;
@@ -2213,8 +2396,25 @@ fn display_common_dir_for_setup_trace(
 }
 
 /// Resolve the common git directory for linked worktrees.
+fn replace_dir_is_non_empty(replace_dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(replace_dir) else {
+        return false;
+    };
+    entries.filter_map(|e| e.ok()).any(|e| {
+        let Ok(ft) = e.file_type() else {
+            return false;
+        };
+        ft.is_file()
+    })
+}
+
+/// Resolve the common git directory for linked worktrees.
 fn resolve_common_dir(git_dir: &Path) -> Option<PathBuf> {
-    let common_raw = fs::read_to_string(git_dir.join("commondir")).ok()?;
+    let commondir_file = git_dir.join("commondir");
+    if !commondir_file.is_file() {
+        return None;
+    }
+    let common_raw = fs::read_to_string(commondir_file).ok()?;
     let common_rel = common_raw.trim();
     if common_rel.is_empty() {
         return None;
@@ -2236,7 +2436,15 @@ pub fn common_git_dir_for_config(git_dir: &Path) -> PathBuf {
 /// True when `extensions.worktreeConfig` is enabled in the common `config`.
 pub fn worktree_config_enabled(common_dir: &Path) -> bool {
     let path = common_dir.join("config");
-    let Ok(content) = fs::read_to_string(&path) else {
+    let Ok(content) = crate::repo_caches::read_local_config_file(&path) else {
+        return false;
+    };
+    worktree_config_enabled_for_text(Some(content.as_str()))
+}
+
+/// Like [`worktree_config_enabled`] when `config` body is already in memory.
+pub fn worktree_config_enabled_for_text(content: Option<&str>) -> bool {
+    let Some(content) = content else {
         return false;
     };
     let mut in_extensions = false;
@@ -2346,9 +2554,15 @@ pub fn init_worktree_config(git_dir: &Path) -> Result<()> {
 /// `GIT_REPO_VERSION_READ`, return the human message Git prints for
 /// `discover_git_directory_reason` / t1309.
 pub fn early_config_ignore_repo_reason(common_dir: &Path) -> Option<String> {
-    const GIT_REPO_VERSION_READ: u32 = 1;
     let path = common_dir.join("config");
-    let content = fs::read_to_string(&path).ok()?;
+    let content = crate::repo_caches::read_local_config_file(&path).ok()?;
+    early_config_ignore_repo_reason_for_text(Some(content.as_str()))
+}
+
+/// Like [`early_config_ignore_repo_reason`] when `config` body is already in memory.
+pub fn early_config_ignore_repo_reason_for_text(content: Option<&str>) -> Option<String> {
+    const GIT_REPO_VERSION_READ: u32 = 1;
+    let content = content?;
     let mut version = 0u32;
     let mut in_core = false;
     for raw_line in content.lines() {
@@ -2459,9 +2673,18 @@ pub(crate) fn local_config_write_path(git_dir: &Path) -> PathBuf {
 
 /// Determine the config file path for a repository or linked worktree.
 fn repository_config_path(git_dir: &Path) -> Option<PathBuf> {
+    repository_config_path_for_caches(git_dir)
+}
+
+/// Same as [`repository_config_path`] for [`crate::repo_caches::RepoCaches`].
+pub(crate) fn repository_config_path_for_caches(git_dir: &Path) -> Option<PathBuf> {
     let local = git_dir.join("config");
-    if local.exists() {
+    if local.is_file() {
         return Some(local);
+    }
+    let commondir = git_dir.join("commondir");
+    if !commondir.is_file() {
+        return None;
     }
     let common = resolve_common_dir(git_dir)?;
     let shared = common.join("config");
@@ -2504,13 +2727,14 @@ fn validate_repository_format(git_dir: &Path) -> Result<()> {
     let Some(config_path) = repository_config_path(git_dir) else {
         return Ok(());
     };
-    let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
+    let content = crate::repo_caches::read_local_config_file(&config_path)?;
     let parsed = parse_repository_format(&content, &config_path)?;
     validate_repository_format_parsed(&parsed)
 }
 
 /// The result of parsing `core.repositoryformatversion` and `extensions.*` from a
 /// repository's `config` file, using Git-compatible format parsing.
+#[derive(Clone)]
 pub(crate) struct RepositoryFormat {
     /// Declared `core.repositoryformatversion` (defaults to 0; invalid values ignored).
     pub(crate) repo_version: u32,
@@ -2533,7 +2757,7 @@ pub(crate) fn read_repository_format_from_git_dir(git_dir: &Path) -> Result<Repo
             ref_storage: None,
         });
     };
-    let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
+    let content = crate::repo_caches::read_local_config_file(&config_path)?;
     parse_repository_format(&content, &config_path)
 }
 
@@ -2611,7 +2835,10 @@ impl RepositoryFormat {
 /// # Errors
 ///
 /// Returns [`Error::Config`] if a section header is malformed (no closing `]`).
-fn parse_repository_format(content: &str, config_path: &Path) -> Result<RepositoryFormat> {
+pub(crate) fn parse_repository_format(
+    content: &str,
+    config_path: &Path,
+) -> Result<RepositoryFormat> {
     let mut in_core = false;
     let mut in_extensions = false;
     let mut repo_version = 0u32;

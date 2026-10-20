@@ -222,7 +222,9 @@ pub fn whitespace_error_string(ws: u32) -> String {
     parts.join(", ")
 }
 
-fn is_space_git(c: u8) -> bool {
+/// Git xdiff / `-w` / `-b` ASCII whitespace (not Unicode general whitespace).
+#[must_use]
+pub fn is_space_git(c: u8) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
 }
 

@@ -623,10 +623,6 @@ impl ReachableWalkState {
         !self.heap.is_empty()
     }
 
-    /// Drop heap entries that cannot be emitted under committer-date cutoffs.
-    ///
-    /// Used after a bounded page so `--cursor` is not offered when only
-    /// too-old (or too-new) commits remain queued.
     pub fn prune_heap_for_cutoffs(&mut self, cutoffs: ReachableWalkCommitterCutoffs) {
         if let Some(since) = cutoffs.since {
             self.heap.retain(|key| key.time >= since);
@@ -1754,13 +1750,26 @@ impl<'r> CommitGraphCache<'r> {
         })?;
         self.ensure_single_pack_reader();
         let linkage = if let Some(reader) = self.single_pack.as_mut() {
-            let object = reader.read_object(&commit_oid)?;
-            if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
+            match reader.read_object(&commit_oid) {
+                Ok(object) => {
+                    if object.kind != ObjectKind::Commit {
+                        return Err(Error::CorruptObject(format!(
+                            "object {commit_oid} is not a commit"
+                        )));
+                    }
+                    crate::objects::parse_commit_linkage(&object.data)?
+                }
+                Err(Error::ObjectNotFound(_)) => {
+                    let object = self.repo.odb().read(&commit_oid)?;
+                    if object.kind != ObjectKind::Commit {
+                        return Err(Error::CorruptObject(format!(
+                            "object {commit_oid} is not a commit"
+                        )));
+                    }
+                    crate::objects::parse_commit_linkage(&object.data)?
+                }
+                Err(e) => return Err(e),
             }
-            crate::objects::parse_commit_linkage(&object.data)?
         } else {
             let object = self.repo.odb().read(&commit_oid)?;
             if object.kind != ObjectKind::Commit {
@@ -1928,8 +1937,6 @@ mod tests {
         for _ in 0..1500 {
             old = first_parent_oid(&mut CommitGraphCache::new(&repo), old)?;
         }
-        reset_intersect_walk_steps();
-        reset_commit_parent_lookups();
         {
             let mut link = repo
                 .caches()
@@ -1939,6 +1946,8 @@ mod tests {
             link.parents.clear();
             link.times.clear();
         }
+        reset_intersect_walk_steps();
+        reset_commit_parent_lookups();
         let bases = merge_bases_first_vs_rest(&repo, tip, &[old])?;
         assert_eq!(bases, vec![old]);
         let parent_reads = commit_parent_lookups();

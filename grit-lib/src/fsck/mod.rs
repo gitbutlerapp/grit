@@ -985,7 +985,13 @@ fn verify_midx_and_commit_graph(repo: &Repository, issues: &mut Vec<FsckIssue>) 
         }
         match CommitGraphChain::try_load(objects_dir) {
             Ok(None) => {}
-            Ok(Some(_)) => {}
+            Ok(Some(_)) => {
+                if let Err(e) = CommitGraphChain::verify_on_disk(objects_dir) {
+                    issues.push(FsckIssue::CommitGraphInvalid {
+                        detail: e.to_string(),
+                    });
+                }
+            }
             Err(e) => issues.push(FsckIssue::CommitGraphInvalid {
                 detail: e.to_string(),
             }),

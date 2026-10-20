@@ -44,14 +44,13 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     assert!(filter.matches("refs/heads/main"));
     assert!(!filter.matches("refs/heads/topic"));
 
-    let cleared =
-        collect_decorations_inner(&repo, false, true, &DecorationFilter::default(), None)?;
+    let cleared = collect_decorations_inner(&repo, false, true, &DecorationFilter::default())?;
     assert!(cleared
         .values()
         .flatten()
         .any(|it| it.kind == DecorationKind::Other));
 
-    let filtered = collect_decorations_inner(&repo, true, false, &filter, None)?;
+    let filtered = collect_decorations_inner(&repo, true, false, &filter)?;
     assert!(!filtered.is_empty());
 
     fs::write(

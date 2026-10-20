@@ -164,6 +164,29 @@ pub struct RepoState {
 ///
 /// Returns [`Error::Io`] if files cannot be read.
 pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
+    resolve_head_impl(git_dir, None)
+}
+
+/// Resolve `HEAD` using the repository's cached ref store (avoids re-reading local `config`).
+pub fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<HeadState> {
+    resolve_head_impl(repo.git_dir(), Some(repo))
+}
+
+fn resolve_head_impl(git_dir: &Path, repo: Option<&crate::repo::Repository>) -> Result<HeadState> {
+    let resolve_named = |refname: &str| -> Result<crate::objects::ObjectId> {
+        if let Some(r) = repo {
+            r.resolve_ref_name(refname)
+        } else {
+            crate::refs::resolve_ref(git_dir, refname)
+        }
+    };
+    let read_symbolic = |refname: &str| -> Result<Option<String>> {
+        if let Some(r) = repo {
+            crate::refs::read_symbolic_ref_for_repository(r, refname)
+        } else {
+            crate::refs::read_symbolic_ref(git_dir, refname)
+        }
+    };
     let head_path = git_dir.join("HEAD");
     let content = match fs::read_link(&head_path) {
         Ok(link_target) => {
@@ -185,9 +208,9 @@ pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
 
     if let Some(refname) = trimmed.strip_prefix("ref: ") {
         let refname = if refname == "refs/heads/.invalid" {
-            if let Ok(Some(target)) = crate::refs::read_symbolic_ref(git_dir, "HEAD") {
+            if let Ok(Some(target)) = read_symbolic("HEAD") {
                 target
-            } else if let Ok(oid) = crate::refs::resolve_ref(git_dir, "HEAD") {
+            } else if let Ok(oid) = resolve_named("HEAD") {
                 // Detached HEAD: Git keeps the `.invalid` stub on disk while the OID lives in reftable.
                 return Ok(HeadState::Detached { oid });
             } else {
@@ -211,7 +234,7 @@ pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
         // Missing `refs/heads/*` => unborn branch (`None`). A symref to a non-branch
         // target that cannot be resolved (e.g. HEAD -> `.broken`) is invalid, matching
         // Git `refs_resolve_ref_unsafe` returning no target for `worktree list`.
-        let oid = match crate::refs::resolve_ref(git_dir, &refname) {
+        let oid = match resolve_named(&refname) {
             Ok(oid) => Some(oid),
             Err(Error::InvalidRef(msg)) if msg.starts_with("ref not found:") => {
                 if refname.starts_with("refs/heads/") {

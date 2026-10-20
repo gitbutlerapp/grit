@@ -129,8 +129,78 @@ pub fn grit_lib::apply::materialize_binary_patch_reverse(&grit_lib::apply::Binar
 pub fn grit_lib::apply::materialize_binary_patch_section(&grit_lib::apply::BinaryPatchSection, core::option::Option<&[u8]>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::apply::parse_patch(&str, usize, &str, bool, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>>
 pub fn grit_lib::apply::write_git_binary_patch(&[u8], &[u8], &str, &str) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::apply::write_git_binary_patch_sections<W: core::io::write::Write>(&mut W, &[u8], &[u8]) -> grit_lib::error::Result<()>
 pub mod grit_lib::bench_fixture
+pub mod grit_lib::bench_fixture::daily_special
+pub enum grit_lib::bench_fixture::daily_special::DailySpecialShape
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::BigBlobs
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::DeepTree
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::ManyRefs
+pub grit_lib::bench_fixture::daily_special::DailySpecialShape::ManyRefsLoose
+impl grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::expected_ref_count(self, bool) -> usize
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::tree_depth_range(self, bool) -> core::option::Option<(usize, usize)>
+impl core::clone::Clone for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::bench_fixture::daily_special::generate_daily_special_repo(&std::path::Path, grit_lib::objects::bench_fixture::daily_special::DailySpecialShape, bool) -> grit_lib::error::Result<grit_lib::objects::bench_fixture::synth::SynthReport>
+pub fn grit_lib::bench_fixture::daily_special::max_path_depth_in_head(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
 pub mod grit_lib::bench_fixture::synth
+pub enum grit_lib::bench_fixture::synth::PathLayout
+pub grit_lib::bench_fixture::synth::PathLayout::TierDefault
+pub grit_lib::bench_fixture::synth::PathLayout::WideGrid
+pub grit_lib::bench_fixture::synth::PathLayout::WideGrid::files_per_dir: usize
+impl core::clone::Clone for grit_lib::objects::bench_fixture::synth::PathLayout
+pub fn grit_lib::objects::bench_fixture::synth::PathLayout::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::synth::PathLayout
+pub fn grit_lib::objects::bench_fixture::synth::PathLayout::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::synth::PathLayout
+pub fn grit_lib::objects::bench_fixture::synth::PathLayout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Send for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Sync for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::synth::PathLayout
+pub enum grit_lib::bench_fixture::synth::RepoShape
+pub grit_lib::bench_fixture::synth::RepoShape::Small
+pub grit_lib::bench_fixture::synth::RepoShape::Synth100k
+pub grit_lib::bench_fixture::synth::RepoShape::Synth10k
+impl grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::spec(self, bool) -> grit_lib::objects::bench_fixture::synth::TierSpec
+impl core::clone::Clone for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
 pub enum grit_lib::bench_fixture::synth::SynthTier
 pub grit_lib::bench_fixture::synth::SynthTier::L
 pub grit_lib::bench_fixture::synth::SynthTier::M
@@ -179,6 +249,7 @@ pub grit_lib::bench_fixture::synth::TierSpec::blob_body_bytes: usize
 pub grit_lib::bench_fixture::synth::TierSpec::commit_count: usize
 pub grit_lib::bench_fixture::synth::TierSpec::edits_per_commit: usize
 pub grit_lib::bench_fixture::synth::TierSpec::file_count: usize
+pub grit_lib::bench_fixture::synth::TierSpec::layout: grit_lib::objects::bench_fixture::synth::PathLayout
 pub grit_lib::bench_fixture::synth::TierSpec::loose_after_pack: usize
 pub grit_lib::bench_fixture::synth::TierSpec::ref_count: usize
 pub grit_lib::bench_fixture::synth::TierSpec::seed: u64
@@ -1389,6 +1460,27 @@ pub unsafe fn grit_lib::config::git_date::tm::time_to_tm_local(u64, *mut libc::u
 pub fn grit_lib::config::git_date::tm::tm_to_time_t(&libc::unix::linux_like::tm) -> libc::unix::linux_like::linux::gnu::b64::time_t
 pub type grit_lib::config::git_date::tm::Timestamp = u64
 pub type grit_lib::config::git_date::tm::TzHhmm = i32
+pub enum grit_lib::config::git_date::DateSpecError
+pub grit_lib::config::git_date::DateSpecError::Unparseable
+pub grit_lib::config::git_date::DateSpecError::Unparseable::spec: alloc::string::String
+impl core::clone::Clone for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::config::git_date::DateSpecError
+impl core::cmp::PartialEq for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::config::git_date::DateSpecError
+impl core::fmt::Debug for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::config::git_date::DateSpecError
+pub fn grit_lib::config::git_date::DateSpecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::config::git_date::DateSpecError
+impl core::marker::Freeze for grit_lib::config::git_date::DateSpecError
+impl core::marker::Send for grit_lib::config::git_date::DateSpecError
+impl core::marker::Sync for grit_lib::config::git_date::DateSpecError
+impl core::marker::Unpin for grit_lib::config::git_date::DateSpecError
+impl core::marker::UnsafeUnpin for grit_lib::config::git_date::DateSpecError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::DateSpecError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::DateSpecError
 pub enum grit_lib::config::git_date::TestToolDateResult
 pub grit_lib::config::git_date::TestToolDateResult::Exit(i32)
 pub grit_lib::config::git_date::TestToolDateResult::Output(alloc::vec::Vec<alloc::string::String>)
@@ -1399,6 +1491,7 @@ impl core::marker::Unpin for grit_lib::config::git_date::TestToolDateResult
 impl core::marker::UnsafeUnpin for grit_lib::config::git_date::TestToolDateResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::TestToolDateResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::TestToolDateResult
+pub fn grit_lib::config::git_date::parse_date_cutoff(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::DateSpecError>
 pub fn grit_lib::config::git_date::test_tool_date(&grit_lib::config::environment::Environment, &[alloc::string::String]) -> core::result::Result<grit_lib::config::git_date::TestToolDateResult, alloc::string::String>
 pub mod grit_lib::config::git_path
 pub enum grit_lib::config::git_path::GitPathError
@@ -2004,6 +2097,7 @@ pub grit_lib::config::LoadConfigOptions::diagnostics: core::option::Option<grit_
 pub grit_lib::config::LoadConfigOptions::include_ctx: grit_lib::config::IncludeContext
 pub grit_lib::config::LoadConfigOptions::include_system: bool
 pub grit_lib::config::LoadConfigOptions::process_includes: bool
+pub grit_lib::config::LoadConfigOptions::repo_caches: core::option::Option<alloc::rcs::arc::Arc<grit_lib::repo::caches::RepoCaches>>
 impl core::clone::Clone for grit_lib::config::LoadConfigOptions
 pub fn grit_lib::config::LoadConfigOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::config::LoadConfigOptions
@@ -2433,11 +2527,15 @@ pub fn grit_lib::diff::fmt_merge_msg::fmt_merge_msg(&str, &grit_lib::diff::fmt_m
 pub mod grit_lib::diff::handle
 pub struct grit_lib::diff::handle::Diff<'repo>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
+pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
+pub fn grit_lib::diff::handle::Diff<'repo>::files_from_entries(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
 pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::diff::handle::Diff<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::diff::handle::Diff<'repo>::tree_to_tree(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::worktree_to_index(&self, &mut grit_lib::index::Index, bool, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+impl<'repo> grit_lib::diff::handle::Diff<'repo>
+pub fn grit_lib::diff::handle::Diff<'repo>::has_changes(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], grit_lib::diff::DiffOptions) -> grit_lib::error::Result<bool>
 impl<'repo> core::clone::Clone for grit_lib::diff::handle::Diff<'repo>
 pub fn grit_lib::diff::handle::Diff<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::diff::handle::Diff<'repo>
@@ -2774,29 +2872,6 @@ impl core::marker::Unpin for grit_lib::diff::structured::SideBytes
 impl core::marker::UnsafeUnpin for grit_lib::diff::structured::SideBytes
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::structured::SideBytes
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::structured::SideBytes
-pub struct grit_lib::diff::structured::StructuredDiffOptions
-pub grit_lib::diff::structured::StructuredDiffOptions::context_lines: usize
-pub grit_lib::diff::structured::StructuredDiffOptions::word_level_inline: bool
-impl grit_lib::diff::structured::StructuredDiffOptions
-pub fn grit_lib::diff::structured::StructuredDiffOptions::cap_word_level_inline_for_changed_files(self, usize) -> Self
-impl core::clone::Clone for grit_lib::diff::structured::StructuredDiffOptions
-pub fn grit_lib::diff::structured::StructuredDiffOptions::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::diff::structured::StructuredDiffOptions
-impl core::cmp::PartialEq for grit_lib::diff::structured::StructuredDiffOptions
-pub fn grit_lib::diff::structured::StructuredDiffOptions::eq(&self, &Self) -> bool
-impl core::default::Default for grit_lib::diff::structured::StructuredDiffOptions
-pub fn grit_lib::diff::structured::StructuredDiffOptions::default() -> Self
-impl core::fmt::Debug for grit_lib::diff::structured::StructuredDiffOptions
-pub fn grit_lib::diff::structured::StructuredDiffOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::diff::structured::StructuredDiffOptions
-impl core::marker::StructuralPartialEq for grit_lib::diff::structured::StructuredDiffOptions
-impl core::marker::Freeze for grit_lib::diff::structured::StructuredDiffOptions
-impl core::marker::Send for grit_lib::diff::structured::StructuredDiffOptions
-impl core::marker::Sync for grit_lib::diff::structured::StructuredDiffOptions
-impl core::marker::Unpin for grit_lib::diff::structured::StructuredDiffOptions
-impl core::marker::UnsafeUnpin for grit_lib::diff::structured::StructuredDiffOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::structured::StructuredDiffOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::structured::StructuredDiffOptions
 pub struct grit_lib::diff::structured::StructuredFileDiff
 pub grit_lib::diff::structured::StructuredFileDiff::hunks: alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>
 pub grit_lib::diff::structured::StructuredFileDiff::new_encoding_lossy: bool
@@ -2896,10 +2971,9 @@ impl core::marker::Unpin for grit_lib::diff::structured::StructuredTextDiff
 impl core::marker::UnsafeUnpin for grit_lib::diff::structured::StructuredTextDiff
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::structured::StructuredTextDiff
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::structured::StructuredTextDiff
-pub const grit_lib::diff::structured::WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize
 pub fn grit_lib::diff::structured::format_hunk_range(usize, usize) -> alloc::string::String
-pub fn grit_lib::diff::structured::structured_file_diff(&str, &str, &grit_lib::diff::structured::SideBytes, &grit_lib::diff::structured::SideBytes, grit_lib::diff::structured::StructuredDiffOptions) -> grit_lib::diff::structured::StructuredFileDiff
-pub fn grit_lib::diff::structured::structured_text_diff(&str, &str, grit_lib::diff::structured::StructuredDiffOptions) -> grit_lib::diff::structured::StructuredTextDiff
+pub fn grit_lib::diff::structured::structured_file_diff(&str, &str, &grit_lib::diff::structured::SideBytes, &grit_lib::diff::structured::SideBytes, grit_lib::diff::DiffOptions) -> grit_lib::diff::structured::StructuredFileDiff
+pub fn grit_lib::diff::structured::structured_text_diff(&str, &str, grit_lib::diff::DiffOptions) -> grit_lib::diff::structured::StructuredTextDiff
 pub mod grit_lib::diff::userdiff
 pub struct grit_lib::diff::userdiff::FuncnameMatcher
 impl grit_lib::diff::userdiff::FuncnameMatcher
@@ -2975,12 +3049,42 @@ pub const grit_lib::diff::ws::WS_SPACE_BEFORE_TAB: u32
 pub const grit_lib::diff::ws::WS_TAB_IN_INDENT: u32
 pub const grit_lib::diff::ws::WS_TAB_WIDTH_MASK: u32
 pub const grit_lib::diff::ws::WS_TRAILING_SPACE: u32
+pub fn grit_lib::diff::ws::is_space_git(u8) -> bool
 pub fn grit_lib::diff::ws::parse_whitespace_rule(&str) -> core::result::Result<u32, grit_lib::diff::ws::WhitespaceRuleError>
 pub fn grit_lib::diff::ws::whitespace_error_string(u32) -> alloc::string::String
 pub fn grit_lib::diff::ws::ws_blank_line(&str) -> bool
 pub fn grit_lib::diff::ws::ws_check(&str, u32) -> u32
 pub fn grit_lib::diff::ws::ws_fix_copy_line(&str, u32) -> (alloc::string::String, bool)
 pub fn grit_lib::diff::ws::ws_tab_width(u32) -> usize
+#[non_exhaustive] pub enum grit_lib::diff::DiffAlgorithm
+pub grit_lib::diff::DiffAlgorithm::Histogram
+pub grit_lib::diff::DiffAlgorithm::Minimal
+pub grit_lib::diff::DiffAlgorithm::Myers
+pub grit_lib::diff::DiffAlgorithm::Patience
+impl grit_lib::diff::DiffAlgorithm
+pub fn grit_lib::diff::DiffAlgorithm::similar_algorithm(self) -> similar::types::Algorithm
+pub fn grit_lib::diff::DiffAlgorithm::uses_git_histogram(self) -> bool
+impl core::clone::Clone for grit_lib::diff::DiffAlgorithm
+pub fn grit_lib::diff::DiffAlgorithm::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::DiffAlgorithm
+impl core::cmp::PartialEq for grit_lib::diff::DiffAlgorithm
+pub fn grit_lib::diff::DiffAlgorithm::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::DiffAlgorithm
+pub fn grit_lib::diff::DiffAlgorithm::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::DiffAlgorithm
+pub fn grit_lib::diff::DiffAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::DiffAlgorithm
+impl core::marker::StructuralPartialEq for grit_lib::diff::DiffAlgorithm
+impl core::str::traits::FromStr for grit_lib::diff::DiffAlgorithm
+pub type grit_lib::diff::DiffAlgorithm::Err = grit_lib::diff::UnknownDiffAlgorithm
+pub fn grit_lib::diff::DiffAlgorithm::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl core::marker::Freeze for grit_lib::diff::DiffAlgorithm
+impl core::marker::Send for grit_lib::diff::DiffAlgorithm
+impl core::marker::Sync for grit_lib::diff::DiffAlgorithm
+impl core::marker::Unpin for grit_lib::diff::DiffAlgorithm
+impl core::marker::UnsafeUnpin for grit_lib::diff::DiffAlgorithm
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffAlgorithm
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffAlgorithm
 pub enum grit_lib::diff::DiffStatus
 pub grit_lib::diff::DiffStatus::Added
 pub grit_lib::diff::DiffStatus::Copied
@@ -3007,6 +3111,51 @@ impl core::marker::Unpin for grit_lib::diff::DiffStatus
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffStatus
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffStatus
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffStatus
+#[non_exhaustive] pub enum grit_lib::diff::DiffTarget
+pub grit_lib::diff::DiffTarget::Commit(grit_lib::objects::ObjectId)
+pub grit_lib::diff::DiffTarget::IndexVsHead
+pub grit_lib::diff::DiffTarget::Trees
+pub grit_lib::diff::DiffTarget::Trees::new: grit_lib::objects::ObjectId
+pub grit_lib::diff::DiffTarget::Trees::old: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::diff::DiffTarget::WorktreeVsHead
+pub grit_lib::diff::DiffTarget::WorktreeVsIndex
+pub grit_lib::diff::DiffTarget::WorktreeVsTree(grit_lib::objects::ObjectId)
+impl core::clone::Clone for grit_lib::diff::DiffTarget
+pub fn grit_lib::diff::DiffTarget::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::DiffTarget
+impl core::cmp::PartialEq for grit_lib::diff::DiffTarget
+pub fn grit_lib::diff::DiffTarget::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::DiffTarget
+pub fn grit_lib::diff::DiffTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::DiffTarget
+impl core::marker::Freeze for grit_lib::diff::DiffTarget
+impl core::marker::Send for grit_lib::diff::DiffTarget
+impl core::marker::Sync for grit_lib::diff::DiffTarget
+impl core::marker::Unpin for grit_lib::diff::DiffTarget
+impl core::marker::UnsafeUnpin for grit_lib::diff::DiffTarget
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffTarget
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffTarget
+pub enum grit_lib::diff::InvalidDiffFilter
+pub grit_lib::diff::InvalidDiffFilter::Unknown(char)
+pub grit_lib::diff::InvalidDiffFilter::Unsupported(char)
+impl core::clone::Clone for grit_lib::diff::InvalidDiffFilter
+pub fn grit_lib::diff::InvalidDiffFilter::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::InvalidDiffFilter
+impl core::cmp::PartialEq for grit_lib::diff::InvalidDiffFilter
+pub fn grit_lib::diff::InvalidDiffFilter::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::diff::InvalidDiffFilter
+impl core::fmt::Debug for grit_lib::diff::InvalidDiffFilter
+pub fn grit_lib::diff::InvalidDiffFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::InvalidDiffFilter
+pub fn grit_lib::diff::InvalidDiffFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::InvalidDiffFilter
+impl core::marker::Freeze for grit_lib::diff::InvalidDiffFilter
+impl core::marker::Send for grit_lib::diff::InvalidDiffFilter
+impl core::marker::Sync for grit_lib::diff::InvalidDiffFilter
+impl core::marker::Unpin for grit_lib::diff::InvalidDiffFilter
+impl core::marker::UnsafeUnpin for grit_lib::diff::InvalidDiffFilter
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::InvalidDiffFilter
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::InvalidDiffFilter
 pub enum grit_lib::diff::LogPatchCommitHeader
 pub grit_lib::diff::LogPatchCommitHeader::FormatPercentH
 pub grit_lib::diff::LogPatchCommitHeader::Full
@@ -3028,6 +3177,80 @@ impl core::marker::Unpin for grit_lib::diff::LogPatchCommitHeader
 impl core::marker::UnsafeUnpin for grit_lib::diff::LogPatchCommitHeader
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::LogPatchCommitHeader
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::LogPatchCommitHeader
+#[non_exhaustive] pub enum grit_lib::diff::NoIndexError
+pub grit_lib::diff::NoIndexError::PathNotAccessible
+pub grit_lib::diff::NoIndexError::PathNotAccessible::path: alloc::string::String
+impl core::clone::Clone for grit_lib::diff::NoIndexError
+pub fn grit_lib::diff::NoIndexError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::NoIndexError
+impl core::cmp::PartialEq for grit_lib::diff::NoIndexError
+pub fn grit_lib::diff::NoIndexError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::diff::NoIndexError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::diff::NoIndexError) -> Self
+impl core::error::Error for grit_lib::diff::NoIndexError
+impl core::fmt::Debug for grit_lib::diff::NoIndexError
+pub fn grit_lib::diff::NoIndexError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::NoIndexError
+pub fn grit_lib::diff::NoIndexError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::NoIndexError
+impl core::marker::Freeze for grit_lib::diff::NoIndexError
+impl core::marker::Send for grit_lib::diff::NoIndexError
+impl core::marker::Sync for grit_lib::diff::NoIndexError
+impl core::marker::Unpin for grit_lib::diff::NoIndexError
+impl core::marker::UnsafeUnpin for grit_lib::diff::NoIndexError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::NoIndexError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::NoIndexError
+#[non_exhaustive] pub enum grit_lib::diff::RenameDetection
+pub grit_lib::diff::RenameDetection::Off
+pub grit_lib::diff::RenameDetection::Similarity(u8)
+impl grit_lib::diff::RenameDetection
+pub fn grit_lib::diff::RenameDetection::threshold_percent(self) -> core::option::Option<u32>
+impl core::clone::Clone for grit_lib::diff::RenameDetection
+pub fn grit_lib::diff::RenameDetection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::RenameDetection
+impl core::cmp::PartialEq for grit_lib::diff::RenameDetection
+pub fn grit_lib::diff::RenameDetection::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::RenameDetection
+pub fn grit_lib::diff::RenameDetection::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::RenameDetection
+pub fn grit_lib::diff::RenameDetection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::RenameDetection
+impl core::marker::StructuralPartialEq for grit_lib::diff::RenameDetection
+impl core::marker::Freeze for grit_lib::diff::RenameDetection
+impl core::marker::Send for grit_lib::diff::RenameDetection
+impl core::marker::Sync for grit_lib::diff::RenameDetection
+impl core::marker::Unpin for grit_lib::diff::RenameDetection
+impl core::marker::UnsafeUnpin for grit_lib::diff::RenameDetection
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::RenameDetection
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::RenameDetection
+#[non_exhaustive] pub enum grit_lib::diff::ResolveDiffArgumentsError
+pub grit_lib::diff::ResolveDiffArgumentsError::AgainstWithCommits
+pub grit_lib::diff::ResolveDiffArgumentsError::Message(alloc::string::String)
+pub grit_lib::diff::ResolveDiffArgumentsError::RangeWithSecondRevision
+pub grit_lib::diff::ResolveDiffArgumentsError::StagedAndUnstaged
+pub grit_lib::diff::ResolveDiffArgumentsError::StagedWithRevisions
+pub grit_lib::diff::ResolveDiffArgumentsError::TooManyRevisions
+pub grit_lib::diff::ResolveDiffArgumentsError::UnstagedWithRevisions
+impl core::clone::Clone for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::ResolveDiffArgumentsError
+impl core::cmp::PartialEq for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
+impl core::error::Error for grit_lib::diff::ResolveDiffArgumentsError
+impl core::fmt::Debug for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::ResolveDiffArgumentsError
+impl core::marker::Freeze for grit_lib::diff::ResolveDiffArgumentsError
+impl core::marker::Send for grit_lib::diff::ResolveDiffArgumentsError
+impl core::marker::Sync for grit_lib::diff::ResolveDiffArgumentsError
+impl core::marker::Unpin for grit_lib::diff::ResolveDiffArgumentsError
+impl core::marker::UnsafeUnpin for grit_lib::diff::ResolveDiffArgumentsError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
 pub enum grit_lib::diff::WorktreeAddRefresh
 pub grit_lib::diff::WorktreeAddRefresh::ModeOnly
 pub grit_lib::diff::WorktreeAddRefresh::ModeOnly::mode: u32
@@ -3052,11 +3275,15 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::WorktreeAddRefr
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::WorktreeAddRefresh
 pub struct grit_lib::diff::Diff<'repo>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
+pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
+pub fn grit_lib::diff::handle::Diff<'repo>::files_from_entries(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
 pub fn grit_lib::diff::handle::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::diff::handle::Diff<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::diff::handle::Diff<'repo>::tree_to_tree(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::handle::Diff<'repo>::worktree_to_index(&self, &mut grit_lib::index::Index, bool, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+impl<'repo> grit_lib::diff::handle::Diff<'repo>
+pub fn grit_lib::diff::handle::Diff<'repo>::has_changes(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], grit_lib::diff::DiffOptions) -> grit_lib::error::Result<bool>
 impl<'repo> core::clone::Clone for grit_lib::diff::handle::Diff<'repo>
 pub fn grit_lib::diff::handle::Diff<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::diff::handle::Diff<'repo>
@@ -3069,6 +3296,24 @@ impl<'repo> core::marker::Unpin for grit_lib::diff::handle::Diff<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::diff::handle::Diff<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::handle::Diff<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::handle::Diff<'repo>
+pub struct grit_lib::diff::DiffArguments
+pub grit_lib::diff::DiffArguments::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::diff::DiffArguments::target: grit_lib::diff::DiffTarget
+impl core::clone::Clone for grit_lib::diff::DiffArguments
+pub fn grit_lib::diff::DiffArguments::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::DiffArguments
+impl core::cmp::PartialEq for grit_lib::diff::DiffArguments
+pub fn grit_lib::diff::DiffArguments::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::DiffArguments
+pub fn grit_lib::diff::DiffArguments::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::DiffArguments
+impl core::marker::Freeze for grit_lib::diff::DiffArguments
+impl core::marker::Send for grit_lib::diff::DiffArguments
+impl core::marker::Sync for grit_lib::diff::DiffArguments
+impl core::marker::Unpin for grit_lib::diff::DiffArguments
+impl core::marker::UnsafeUnpin for grit_lib::diff::DiffArguments
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffArguments
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffArguments
 pub struct grit_lib::diff::DiffEntry
 pub grit_lib::diff::DiffEntry::new_mode: alloc::string::String
 pub grit_lib::diff::DiffEntry::new_oid: grit_lib::objects::ObjectId
@@ -3096,6 +3341,30 @@ impl core::marker::Unpin for grit_lib::diff::DiffEntry
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffEntry
+pub struct grit_lib::diff::DiffFilter
+impl grit_lib::diff::DiffFilter
+pub fn grit_lib::diff::DiffFilter::filter_entries(self, alloc::vec::Vec<grit_lib::diff::DiffEntry>) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
+impl core::clone::Clone for grit_lib::diff::DiffFilter
+pub fn grit_lib::diff::DiffFilter::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::DiffFilter
+impl core::cmp::PartialEq for grit_lib::diff::DiffFilter
+pub fn grit_lib::diff::DiffFilter::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::DiffFilter
+pub fn grit_lib::diff::DiffFilter::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::DiffFilter
+pub fn grit_lib::diff::DiffFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::DiffFilter
+impl core::marker::StructuralPartialEq for grit_lib::diff::DiffFilter
+impl core::str::traits::FromStr for grit_lib::diff::DiffFilter
+pub type grit_lib::diff::DiffFilter::Err = grit_lib::diff::InvalidDiffFilter
+pub fn grit_lib::diff::DiffFilter::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl core::marker::Freeze for grit_lib::diff::DiffFilter
+impl core::marker::Send for grit_lib::diff::DiffFilter
+impl core::marker::Sync for grit_lib::diff::DiffFilter
+impl core::marker::Unpin for grit_lib::diff::DiffFilter
+impl core::marker::UnsafeUnpin for grit_lib::diff::DiffFilter
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffFilter
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffFilter
 pub struct grit_lib::diff::DiffIndexToWorktreeOptions
 pub grit_lib::diff::DiffIndexToWorktreeOptions::command_runner: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::config: core::option::Option<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -3123,6 +3392,47 @@ impl core::marker::Unpin for grit_lib::diff::DiffIndexToWorktreeOptions
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffIndexToWorktreeOptions
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
+#[non_exhaustive] pub struct grit_lib::diff::DiffOptions
+pub grit_lib::diff::DiffOptions::algorithm: grit_lib::diff::DiffAlgorithm
+pub grit_lib::diff::DiffOptions::context_lines: usize
+pub grit_lib::diff::DiffOptions::filter: core::option::Option<grit_lib::diff::DiffFilter>
+pub grit_lib::diff::DiffOptions::indent_heuristic: bool
+pub grit_lib::diff::DiffOptions::inter_hunk_context: usize
+pub grit_lib::diff::DiffOptions::renames: grit_lib::diff::RenameDetection
+pub grit_lib::diff::DiffOptions::whitespace: grit_lib::diff::WhitespaceMode
+pub grit_lib::diff::DiffOptions::word_level_inline: bool
+impl grit_lib::diff::DiffOptions
+pub fn grit_lib::diff::DiffOptions::cap_word_level_inline_for_changed_files(self, usize) -> Self
+pub fn grit_lib::diff::DiffOptions::from_config(&grit_lib::config::ConfigSet) -> Self
+pub fn grit_lib::diff::DiffOptions::rename_similarity_threshold(self) -> core::option::Option<u32>
+pub fn grit_lib::diff::DiffOptions::rename_threshold_u32(self) -> u32
+pub fn grit_lib::diff::DiffOptions::resolve_indent_heuristic(&grit_lib::config::ConfigSet, bool, bool) -> bool
+pub fn grit_lib::diff::DiffOptions::with_algorithm(self, grit_lib::diff::DiffAlgorithm) -> Self
+pub fn grit_lib::diff::DiffOptions::with_context_lines(self, usize) -> Self
+pub fn grit_lib::diff::DiffOptions::with_filter(self, core::option::Option<grit_lib::diff::DiffFilter>) -> Self
+pub fn grit_lib::diff::DiffOptions::with_indent_heuristic(self, bool) -> Self
+pub fn grit_lib::diff::DiffOptions::with_inter_hunk_context(self, usize) -> Self
+pub fn grit_lib::diff::DiffOptions::with_renames(self, grit_lib::diff::RenameDetection) -> Self
+pub fn grit_lib::diff::DiffOptions::with_whitespace(self, grit_lib::diff::WhitespaceMode) -> Self
+pub fn grit_lib::diff::DiffOptions::with_word_level_inline(self, bool) -> Self
+impl core::clone::Clone for grit_lib::diff::DiffOptions
+pub fn grit_lib::diff::DiffOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::DiffOptions
+impl core::cmp::PartialEq for grit_lib::diff::DiffOptions
+pub fn grit_lib::diff::DiffOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::DiffOptions
+pub fn grit_lib::diff::DiffOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::DiffOptions
+pub fn grit_lib::diff::DiffOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::DiffOptions
+impl core::marker::StructuralPartialEq for grit_lib::diff::DiffOptions
+impl core::marker::Freeze for grit_lib::diff::DiffOptions
+impl core::marker::Send for grit_lib::diff::DiffOptions
+impl core::marker::Sync for grit_lib::diff::DiffOptions
+impl core::marker::Unpin for grit_lib::diff::DiffOptions
+impl core::marker::UnsafeUnpin for grit_lib::diff::DiffOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffOptions
 pub struct grit_lib::diff::DiffPostprocessOptions
 pub grit_lib::diff::DiffPostprocessOptions::break_score: core::option::Option<u64>
 pub grit_lib::diff::DiffPostprocessOptions::copy_threshold: core::option::Option<u32>
@@ -3158,42 +3468,45 @@ impl<'a> core::marker::Unpin for grit_lib::diff::DiffPostprocessWorktree<'a>
 impl<'a> core::marker::UnsafeUnpin for grit_lib::diff::DiffPostprocessWorktree<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffPostprocessWorktree<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffPostprocessWorktree<'a>
-pub struct grit_lib::diff::LogPatchDiffOptions
-pub grit_lib::diff::LogPatchDiffOptions::algorithm: similar::types::Algorithm
-pub grit_lib::diff::LogPatchDiffOptions::context_lines: usize
-pub grit_lib::diff::LogPatchDiffOptions::indent_heuristic: bool
-pub grit_lib::diff::LogPatchDiffOptions::inter_hunk_context: usize
-pub grit_lib::diff::LogPatchDiffOptions::use_git_histogram: bool
-impl grit_lib::diff::LogPatchDiffOptions
-pub fn grit_lib::diff::LogPatchDiffOptions::from_config(&grit_lib::config::ConfigSet) -> Self
-impl core::clone::Clone for grit_lib::diff::LogPatchDiffOptions
-pub fn grit_lib::diff::LogPatchDiffOptions::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::diff::LogPatchDiffOptions
-impl core::cmp::PartialEq for grit_lib::diff::LogPatchDiffOptions
-pub fn grit_lib::diff::LogPatchDiffOptions::eq(&self, &Self) -> bool
-impl core::default::Default for grit_lib::diff::LogPatchDiffOptions
-pub fn grit_lib::diff::LogPatchDiffOptions::default() -> Self
-impl core::fmt::Debug for grit_lib::diff::LogPatchDiffOptions
-pub fn grit_lib::diff::LogPatchDiffOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::diff::LogPatchDiffOptions
-impl core::marker::StructuralPartialEq for grit_lib::diff::LogPatchDiffOptions
-impl core::marker::Freeze for grit_lib::diff::LogPatchDiffOptions
-impl core::marker::Send for grit_lib::diff::LogPatchDiffOptions
-impl core::marker::Sync for grit_lib::diff::LogPatchDiffOptions
-impl core::marker::Unpin for grit_lib::diff::LogPatchDiffOptions
-impl core::marker::UnsafeUnpin for grit_lib::diff::LogPatchDiffOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::LogPatchDiffOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::LogPatchDiffOptions
+pub struct grit_lib::diff::FileDiff
+pub grit_lib::diff::FileDiff::binary: bool
+pub grit_lib::diff::FileDiff::content_changed: bool
+pub grit_lib::diff::FileDiff::hunks: alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>
+pub grit_lib::diff::FileDiff::new_encoding_lossy: bool
+pub grit_lib::diff::FileDiff::new_mode: core::option::Option<alloc::string::String>
+pub grit_lib::diff::FileDiff::new_oid: grit_lib::objects::ObjectId
+pub grit_lib::diff::FileDiff::old_encoding_lossy: bool
+pub grit_lib::diff::FileDiff::old_mode: core::option::Option<alloc::string::String>
+pub grit_lib::diff::FileDiff::old_oid: grit_lib::objects::ObjectId
+pub grit_lib::diff::FileDiff::old_path: core::option::Option<alloc::string::String>
+pub grit_lib::diff::FileDiff::path: alloc::string::String
+pub grit_lib::diff::FileDiff::status: grit_lib::diff::DiffStatus
+impl core::clone::Clone for grit_lib::diff::FileDiff
+pub fn grit_lib::diff::FileDiff::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::FileDiff
+impl core::cmp::PartialEq for grit_lib::diff::FileDiff
+pub fn grit_lib::diff::FileDiff::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::FileDiff
+pub fn grit_lib::diff::FileDiff::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::FileDiff
+impl core::marker::Freeze for grit_lib::diff::FileDiff
+impl core::marker::Send for grit_lib::diff::FileDiff
+impl core::marker::Sync for grit_lib::diff::FileDiff
+impl core::marker::Unpin for grit_lib::diff::FileDiff
+impl core::marker::UnsafeUnpin for grit_lib::diff::FileDiff
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::FileDiff
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::FileDiff
 pub struct grit_lib::diff::LogPatchOptions
 pub grit_lib::diff::LogPatchOptions::abbrev_len: usize
 pub grit_lib::diff::LogPatchOptions::commit_header: grit_lib::diff::LogPatchCommitHeader
-pub grit_lib::diff::LogPatchOptions::diff: grit_lib::diff::LogPatchDiffOptions
+pub grit_lib::diff::LogPatchOptions::diff: grit_lib::diff::DiffOptions
 impl grit_lib::diff::LogPatchOptions
 pub fn grit_lib::diff::LogPatchOptions::git_default(&grit_lib::config::ConfigSet) -> Self
 impl core::clone::Clone for grit_lib::diff::LogPatchOptions
 pub fn grit_lib::diff::LogPatchOptions::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::diff::LogPatchOptions
 pub fn grit_lib::diff::LogPatchOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::LogPatchOptions
 impl core::marker::Freeze for grit_lib::diff::LogPatchOptions
 impl core::marker::Send for grit_lib::diff::LogPatchOptions
 impl core::marker::Sync for grit_lib::diff::LogPatchOptions
@@ -3201,6 +3514,37 @@ impl core::marker::Unpin for grit_lib::diff::LogPatchOptions
 impl core::marker::UnsafeUnpin for grit_lib::diff::LogPatchOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::LogPatchOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::LogPatchOptions
+pub struct grit_lib::diff::PatchResolvedSide
+pub grit_lib::diff::PatchResolvedSide::entry: grit_lib::diff::DiffEntry
+pub grit_lib::diff::PatchResolvedSide::new_bytes: alloc::vec::Vec<u8>
+pub grit_lib::diff::PatchResolvedSide::old_bytes: alloc::vec::Vec<u8>
+impl core::clone::Clone for grit_lib::diff::PatchResolvedSide
+pub fn grit_lib::diff::PatchResolvedSide::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::diff::PatchResolvedSide
+pub fn grit_lib::diff::PatchResolvedSide::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::diff::PatchResolvedSide
+impl core::marker::Send for grit_lib::diff::PatchResolvedSide
+impl core::marker::Sync for grit_lib::diff::PatchResolvedSide
+impl core::marker::Unpin for grit_lib::diff::PatchResolvedSide
+impl core::marker::UnsafeUnpin for grit_lib::diff::PatchResolvedSide
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::PatchResolvedSide
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::PatchResolvedSide
+pub struct grit_lib::diff::PatchTextOptions
+pub grit_lib::diff::PatchTextOptions::abbrev_len: usize
+pub grit_lib::diff::PatchTextOptions::diff: grit_lib::diff::DiffOptions
+impl grit_lib::diff::PatchTextOptions
+pub fn grit_lib::diff::PatchTextOptions::from_repo(&grit_lib::repo::Repository, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<Self>
+impl core::clone::Clone for grit_lib::diff::PatchTextOptions
+pub fn grit_lib::diff::PatchTextOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::diff::PatchTextOptions
+pub fn grit_lib::diff::PatchTextOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::diff::PatchTextOptions
+impl core::marker::Send for grit_lib::diff::PatchTextOptions
+impl core::marker::Sync for grit_lib::diff::PatchTextOptions
+impl core::marker::Unpin for grit_lib::diff::PatchTextOptions
+impl core::marker::UnsafeUnpin for grit_lib::diff::PatchTextOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::PatchTextOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::PatchTextOptions
 pub struct grit_lib::diff::SubmodulePorcelainFlags
 pub grit_lib::diff::SubmodulePorcelainFlags::modified: bool
 pub grit_lib::diff::SubmodulePorcelainFlags::new_commits: bool
@@ -3262,6 +3606,55 @@ impl core::marker::Unpin for grit_lib::diff::TreeDiffStructured
 impl core::marker::UnsafeUnpin for grit_lib::diff::TreeDiffStructured
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::TreeDiffStructured
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::TreeDiffStructured
+pub struct grit_lib::diff::UnknownDiffAlgorithm(pub alloc::string::String)
+impl core::clone::Clone for grit_lib::diff::UnknownDiffAlgorithm
+pub fn grit_lib::diff::UnknownDiffAlgorithm::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::UnknownDiffAlgorithm
+impl core::cmp::PartialEq for grit_lib::diff::UnknownDiffAlgorithm
+pub fn grit_lib::diff::UnknownDiffAlgorithm::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::diff::UnknownDiffAlgorithm
+impl core::fmt::Debug for grit_lib::diff::UnknownDiffAlgorithm
+pub fn grit_lib::diff::UnknownDiffAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::UnknownDiffAlgorithm
+pub fn grit_lib::diff::UnknownDiffAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::UnknownDiffAlgorithm
+impl core::marker::Freeze for grit_lib::diff::UnknownDiffAlgorithm
+impl core::marker::Send for grit_lib::diff::UnknownDiffAlgorithm
+impl core::marker::Sync for grit_lib::diff::UnknownDiffAlgorithm
+impl core::marker::Unpin for grit_lib::diff::UnknownDiffAlgorithm
+impl core::marker::UnsafeUnpin for grit_lib::diff::UnknownDiffAlgorithm
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::UnknownDiffAlgorithm
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::UnknownDiffAlgorithm
+#[non_exhaustive] pub struct grit_lib::diff::WhitespaceMode
+pub grit_lib::diff::WhitespaceMode::ignore_all_space: bool
+pub grit_lib::diff::WhitespaceMode::ignore_blank_lines: bool
+pub grit_lib::diff::WhitespaceMode::ignore_space_at_eol: bool
+pub grit_lib::diff::WhitespaceMode::ignore_space_change: bool
+impl grit_lib::diff::WhitespaceMode
+pub fn grit_lib::diff::WhitespaceMode::ignore_all_space() -> Self
+pub fn grit_lib::diff::WhitespaceMode::ignore_blank_lines() -> Self
+pub fn grit_lib::diff::WhitespaceMode::ignore_space_change() -> Self
+pub fn grit_lib::diff::WhitespaceMode::is_active(self) -> bool
+pub fn grit_lib::diff::WhitespaceMode::normalize_line_for_compare<'a>(&self, &'a str) -> alloc::borrow::Cow<'a, str>
+pub fn grit_lib::diff::WhitespaceMode::normalizes_line_compare(self) -> bool
+impl core::clone::Clone for grit_lib::diff::WhitespaceMode
+pub fn grit_lib::diff::WhitespaceMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::WhitespaceMode
+impl core::cmp::PartialEq for grit_lib::diff::WhitespaceMode
+pub fn grit_lib::diff::WhitespaceMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::WhitespaceMode
+pub fn grit_lib::diff::WhitespaceMode::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::WhitespaceMode
+pub fn grit_lib::diff::WhitespaceMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::WhitespaceMode
+impl core::marker::StructuralPartialEq for grit_lib::diff::WhitespaceMode
+impl core::marker::Freeze for grit_lib::diff::WhitespaceMode
+impl core::marker::Send for grit_lib::diff::WhitespaceMode
+impl core::marker::Sync for grit_lib::diff::WhitespaceMode
+impl core::marker::Unpin for grit_lib::diff::WhitespaceMode
+impl core::marker::UnsafeUnpin for grit_lib::diff::WhitespaceMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::WhitespaceMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::WhitespaceMode
 pub struct grit_lib::diff::WorktreeAddRefreshParams<'a>
 pub grit_lib::diff::WorktreeAddRefreshParams::abs_path: &'a std::path::Path
 pub grit_lib::diff::WorktreeAddRefreshParams::conv: &'a grit_lib::worktree::crlf::ConversionConfig
@@ -3283,10 +3676,13 @@ impl<'a> !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::WorktreeAddRe
 pub const grit_lib::diff::GIT_DIFF_DEFAULT_BREAK_SCORE: u64
 pub const grit_lib::diff::GIT_DIFF_DEFAULT_MERGE_SCORE_AFTER_BREAK: u64
 pub const grit_lib::diff::GIT_DIFF_MAX_SCORE: u64
+pub const grit_lib::diff::RENAME_DETECTION_DISABLED: u32
+pub const grit_lib::diff::WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize
 pub const grit_lib::diff::ZERO_OID: &str
 pub fn grit_lib::diff::anchored_unified_diff(&str, &str, &str, &str, usize, &[alloc::string::String], similar::types::Algorithm, bool, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::annotate_unified_diff_no_newline_at_eof(&str, &str, &str) -> alloc::string::String
 pub fn grit_lib::diff::append_untracked_worktree_added_for_rename_detection(&grit_lib::repo::Repository, &grit_lib::index::Index, &grit_lib::worktree::worktree_rules::WorktreeRules, alloc::vec::Vec<grit_lib::diff::DiffEntry>) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, std::collections::hash::set::HashSet<alloc::string::String>)>
+pub fn grit_lib::diff::apply_diff_filter(alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<grit_lib::diff::DiffFilter>) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
 pub fn grit_lib::diff::apply_orderfile_entries(alloc::vec::Vec<grit_lib::diff::DiffEntry>, &str, &std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::apply_rename_detection_to_diff_entries(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&std::path::Path>, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::apply_rotate_skip_entries(alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&str>, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -3309,6 +3705,7 @@ pub fn grit_lib::diff::diff_index_to_worktree(&grit_lib::objects::odb::Odb, &mut
 pub fn grit_lib::diff::diff_index_to_worktree_for_staging(&grit_lib::objects::odb::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool, alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::index::IndexStatFields>)>
 pub fn grit_lib::diff::diff_index_to_worktree_with_options(&grit_lib::objects::odb::Odb, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool)>
 pub fn grit_lib::diff::diff_index_to_worktree_with_renames(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions, u32) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool)>
+pub fn grit_lib::diff::diff_paths(&std::path::Path, &std::path::Path, &grit_lib::diff::DiffOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>, grit_lib::diff::NoIndexError>
 pub fn grit_lib::diff::diff_slice_ops_compacted(&[&str], &[&str], similar::types::Algorithm, bool) -> alloc::vec::Vec<similar::types::DiffOp>
 pub fn grit_lib::diff::diff_tree_path_change_count(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<usize>
 pub fn grit_lib::diff::diff_tree_to_worktree(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -3334,6 +3731,7 @@ pub fn grit_lib::diff::hash_worktree_file(&grit_lib::objects::odb::Odb, &std::pa
 pub fn grit_lib::diff::head_path_states(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, (u32, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::diff::indent_heuristic_from_config(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::diff::index_mtime_for_diff(&grit_lib::index::Index, core::option::Option<(u32, u32)>) -> core::option::Option<(u32, u32)>
+pub fn grit_lib::diff::line_diff_unified_hunk_body(&str, &str, &grit_lib::diff::DiffOptions) -> alloc::string::String
 pub fn grit_lib::diff::map_new_to_old_lines_compacted(&str, &str, similar::types::Algorithm, bool, usize) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::diff::materialize_worktree_blob(&grit_lib::objects::odb::Odb, &std::path::Path, &std::fs::Metadata, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &str, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::mode_from_metadata(&std::fs::Metadata) -> u32
@@ -3341,6 +3739,7 @@ pub fn grit_lib::diff::normalize_ignore_space_change(&str) -> alloc::string::Str
 pub fn grit_lib::diff::normalize_ignore_space_change_line(&str) -> alloc::string::String
 pub fn grit_lib::diff::orderfile_pattern_matches(&str, &str) -> bool
 pub fn grit_lib::diff::parse_diff_rename_score_token(&str) -> core::option::Option<u64>
+pub fn grit_lib::diff::parse_diff_rename_threshold_percent(&str) -> core::option::Option<u8>
 pub fn grit_lib::diff::parse_indent_heuristic_cli_flags(&[alloc::string::String]) -> (bool, bool)
 pub fn grit_lib::diff::path_checkout_skip_blob_write_when_up_to_date(&grit_lib::objects::odb::Odb, &std::path::Path, &std::path::Path, &grit_lib::index::Index, &grit_lib::index::IndexEntry, &grit_lib::objects::ObjectId, u32, &str, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::diff::postprocess_diff_entries(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&std::path::Path>, core::option::Option<&grit_lib::diff::DiffPostprocessWorktree<'_>>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, &grit_lib::diff::DiffPostprocessOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -3352,6 +3751,8 @@ pub fn grit_lib::diff::read_worktree_side_bytes_for_diff(&grit_lib::objects::odb
 pub fn grit_lib::diff::refresh_index_stat_content_verified(&grit_lib::objects::odb::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, core::option::Option<(u32, u32)>, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<usize>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::diff::refresh_index_stat_content_verified_with_rules(&grit_lib::objects::odb::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, core::option::Option<(u32, u32)>, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<usize>, core::option::Option<&alloc::rcs::arc::Arc<std::sync::poison::mutex::Mutex<grit_lib::worktree::worktree_rules::WorktreeRules>>>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::diff::rename_similarity_score(&[u8], &[u8]) -> u32
+pub fn grit_lib::diff::renames_from_config(&grit_lib::config::ConfigSet) -> grit_lib::diff::RenameDetection
+pub fn grit_lib::diff::resolve_diff_arguments(&grit_lib::repo::Repository, core::option::Option<&str>, bool, bool, core::option::Option<&str>, &[alloc::string::String], &[alloc::string::String]) -> core::result::Result<grit_lib::diff::DiffArguments, grit_lib::diff::ResolveDiffArgumentsError>
 pub fn grit_lib::diff::resolve_indent_heuristic(&grit_lib::config::ConfigSet, bool, bool) -> bool
 pub fn grit_lib::diff::rewrite_dissimilarity_index_percent(&[u8], &[u8]) -> core::option::Option<u32>
 pub fn grit_lib::diff::rewrite_merge_score(&[u8], &[u8]) -> core::option::Option<u64>
@@ -3365,13 +3766,14 @@ pub fn grit_lib::diff::submodule_commit_subject_line(&grit_lib::objects::CommitD
 pub fn grit_lib::diff::submodule_embedded_git_dir(&std::path::Path) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::diff::submodule_head_object_broken(&std::path::Path) -> bool
 pub fn grit_lib::diff::submodule_porcelain_flags(&std::path::Path, &str, grit_lib::objects::ObjectId) -> grit_lib::diff::SubmodulePorcelainFlags
+pub fn grit_lib::diff::text_sides_differ(&str, &str, &grit_lib::diff::DiffOptions) -> bool
 pub fn grit_lib::diff::tree_diff_contents_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffContent>>
-pub fn grit_lib::diff::tree_diff_structured_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, grit_lib::diff::structured::StructuredDiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffStructured>>
+pub fn grit_lib::diff::tree_diff_structured_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffStructured>>
 pub fn grit_lib::diff::tree_oid_of_commit(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::unified_diff(&str, &str, &str, &str, usize, bool, bool) -> alloc::string::String
-pub fn grit_lib::diff::unified_diff_histogram_hunks_only(&str, &str, usize, usize) -> alloc::string::String
-pub fn grit_lib::diff::unified_diff_histogram_ignore_with_prefix_and_funcname<F>(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool, F) -> alloc::string::String where F: core::ops::function::Fn(&[&str], &[&str]) -> bool
-pub fn grit_lib::diff::unified_diff_histogram_with_prefix_and_funcname(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool) -> alloc::string::String
+pub fn grit_lib::diff::unified_diff_histogram_hunks_only(&str, &str, usize, usize, bool) -> alloc::string::String
+pub fn grit_lib::diff::unified_diff_histogram_ignore_with_prefix_and_funcname<F>(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool, bool, F) -> alloc::string::String where F: core::ops::function::Fn(&[&str], &[&str]) -> bool
+pub fn grit_lib::diff::unified_diff_histogram_with_prefix_and_funcname(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::unified_diff_with_prefix(&str, &str, &str, &str, usize, usize, &str, &str, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::unified_diff_with_prefix_and_funcname(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::unified_diff_with_prefix_and_funcname_and_algorithm(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, similar::types::Algorithm, bool, bool, bool, bool) -> alloc::string::String
@@ -3381,6 +3783,9 @@ pub fn grit_lib::diff::write_commit_header_and_message<W: core::io::write::Write
 pub fn grit_lib::diff::write_commit_log_patch<W: core::io::write::Write>(&grit_lib::repo::Repository, &mut W, &grit_lib::objects::ObjectId, &grit_lib::diff::LogPatchOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::write_commits_log_patch<W: core::io::write::Write>(&grit_lib::repo::Repository, &mut W, &[grit_lib::objects::ObjectId], &grit_lib::diff::LogPatchOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::write_diff_entry_log_patch<W: core::io::write::Write>(&mut W, &grit_lib::repo::Repository, &grit_lib::objects::odb::Odb, &grit_lib::diff::DiffEntry, &grit_lib::diff::LogPatchOptions) -> grit_lib::error::Result<()>
+pub fn grit_lib::diff::write_patch<W: core::io::write::Write>(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry], &grit_lib::diff::PatchTextOptions, &mut W) -> grit_lib::error::Result<()>
+pub fn grit_lib::diff::write_patch_resolved<W: core::io::write::Write>(&grit_lib::repo::Repository, &[grit_lib::diff::PatchResolvedSide], &grit_lib::diff::PatchTextOptions, &mut W) -> grit_lib::error::Result<()>
+pub fn grit_lib::diff::write_patch_structured<W: core::io::write::Write>(&grit_lib::repo::Repository, &[grit_lib::diff::TreeDiffStructured], &grit_lib::diff::PatchTextOptions, &mut W) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::write_unified_diff_with_prefix_and_funcname_and_algorithm<W: core::io::write::Write>(&mut W, &str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, similar::types::Algorithm, bool, bool, bool, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::zero_oid() -> grit_lib::objects::ObjectId
 pub mod grit_lib::error
@@ -3627,12 +4032,16 @@ impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::command_runner::hooks::HookError) -> Self
+impl core::convert::From<grit_lib::diff::NoIndexError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::diff::NoIndexError) -> Self
 impl core::convert::From<grit_lib::error::ApplyError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ApplyError) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::convert::From<grit_lib::error::DiffPathError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::DiffPathError) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::midx::CompactError
@@ -5241,7 +5650,76 @@ pub fn grit_lib::object_inspect::tree_entry_cat_file_type(&grit_lib::repo::Repos
 pub fn grit_lib::object_inspect::tree_entry_mode_cat_file_p(u32) -> alloc::string::String
 pub mod grit_lib::objects
 pub mod grit_lib::objects::bench_fixture
+pub mod grit_lib::objects::bench_fixture::daily_special
+pub enum grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::BigBlobs
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::DeepTree
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::ManyRefs
+pub grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::ManyRefsLoose
+impl grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::expected_ref_count(self, bool) -> usize
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::tree_depth_range(self, bool) -> core::option::Option<(usize, usize)>
+impl core::clone::Clone for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::daily_special::DailySpecialShape
+pub fn grit_lib::objects::bench_fixture::daily_special::generate_daily_special_repo(&std::path::Path, grit_lib::objects::bench_fixture::daily_special::DailySpecialShape, bool) -> grit_lib::error::Result<grit_lib::objects::bench_fixture::synth::SynthReport>
+pub fn grit_lib::objects::bench_fixture::daily_special::max_path_depth_in_head(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
 pub mod grit_lib::objects::bench_fixture::synth
+pub enum grit_lib::objects::bench_fixture::synth::PathLayout
+pub grit_lib::objects::bench_fixture::synth::PathLayout::TierDefault
+pub grit_lib::objects::bench_fixture::synth::PathLayout::WideGrid
+pub grit_lib::objects::bench_fixture::synth::PathLayout::WideGrid::files_per_dir: usize
+impl core::clone::Clone for grit_lib::objects::bench_fixture::synth::PathLayout
+pub fn grit_lib::objects::bench_fixture::synth::PathLayout::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::synth::PathLayout
+pub fn grit_lib::objects::bench_fixture::synth::PathLayout::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::synth::PathLayout
+pub fn grit_lib::objects::bench_fixture::synth::PathLayout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Send for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Sync for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::synth::PathLayout
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::synth::PathLayout
+pub enum grit_lib::objects::bench_fixture::synth::RepoShape
+pub grit_lib::objects::bench_fixture::synth::RepoShape::Small
+pub grit_lib::objects::bench_fixture::synth::RepoShape::Synth100k
+pub grit_lib::objects::bench_fixture::synth::RepoShape::Synth10k
+impl grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::spec(self, bool) -> grit_lib::objects::bench_fixture::synth::TierSpec
+impl core::clone::Clone for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::cmp::PartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::bench_fixture::synth::RepoShape
+pub fn grit_lib::objects::bench_fixture::synth::RepoShape::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::StructuralPartialEq for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Freeze for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Send for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Sync for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::Unpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::marker::UnsafeUnpin for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bench_fixture::synth::RepoShape
 pub enum grit_lib::objects::bench_fixture::synth::SynthTier
 pub grit_lib::objects::bench_fixture::synth::SynthTier::L
 pub grit_lib::objects::bench_fixture::synth::SynthTier::M
@@ -5290,6 +5768,7 @@ pub grit_lib::objects::bench_fixture::synth::TierSpec::blob_body_bytes: usize
 pub grit_lib::objects::bench_fixture::synth::TierSpec::commit_count: usize
 pub grit_lib::objects::bench_fixture::synth::TierSpec::edits_per_commit: usize
 pub grit_lib::objects::bench_fixture::synth::TierSpec::file_count: usize
+pub grit_lib::objects::bench_fixture::synth::TierSpec::layout: grit_lib::objects::bench_fixture::synth::PathLayout
 pub grit_lib::objects::bench_fixture::synth::TierSpec::loose_after_pack: usize
 pub grit_lib::objects::bench_fixture::synth::TierSpec::ref_count: usize
 pub grit_lib::objects::bench_fixture::synth::TierSpec::seed: u64
@@ -5646,6 +6125,7 @@ pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::try_load_across(&std::
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::try_load_across_with_caches(&std::path::Path, &[std::path::PathBuf], core::option::Option<&grit_lib::repo::caches::RepoCaches>) -> core::result::Result<core::option::Option<Self>, grit_lib::error::Error>
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::try_load_with_caches(&std::path::Path, core::option::Option<&grit_lib::repo::caches::RepoCaches>) -> core::result::Result<core::option::Option<Self>, grit_lib::error::Error>
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::upgradable_filter_bytes(&self, &grit_lib::objects::ObjectId, &grit_lib::diff::bloom::BloomFilterSettings) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::verify_on_disk(&std::path::Path) -> core::result::Result<(), grit_lib::error::Error>
 impl core::clone::Clone for grit_lib::revwalk::commit_graph::CommitGraphChain
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::revwalk::commit_graph::CommitGraphChain
@@ -7066,6 +7546,9 @@ pub fn grit_lib::objects::odb::Odb::primary_writable(&self) -> grit_lib::error::
 pub fn grit_lib::objects::odb::Odb::uses_files_primary(&self) -> bool
 pub fn grit_lib::objects::odb::Odb::with_resolved_work_tree(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::write_commit_graph(&self) -> grit_lib::error::Result<()>
+impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::peel_tags(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectKind)>
+pub fn grit_lib::objects::odb::Odb::peel_to_commit(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl core::clone::Clone for grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::objects::odb::Odb
@@ -7262,6 +7745,8 @@ impl core::marker::UnsafeUnpin for grit_lib::objects::pack::LocalPackInfo
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack::LocalPackInfo
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::LocalPackInfo
 pub struct grit_lib::objects::pack::PackData
+impl core::fmt::Debug for grit_lib::objects::pack::PackData
+pub fn grit_lib::objects::pack::PackData::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::deref::Deref for grit_lib::objects::pack::PackData
 pub type grit_lib::objects::pack::PackData::Target = [u8]
 pub fn grit_lib::objects::pack::PackData::deref(&self) -> &[u8]
@@ -7279,19 +7764,19 @@ pub grit_lib::objects::pack::PackIndex::is_cruft: bool
 pub grit_lib::objects::pack::PackIndex::is_promisor: bool
 pub grit_lib::objects::pack::PackIndex::pack_path: std::path::PathBuf
 impl grit_lib::objects::pack::PackIndex
-pub fn grit_lib::objects::pack::PackIndex::contains(&self, &grit_lib::objects::ObjectId) -> bool
+pub fn grit_lib::objects::pack::PackIndex::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
 pub fn grit_lib::objects::pack::PackIndex::crc32_at(&self, usize) -> core::option::Option<u32>
-pub fn grit_lib::objects::pack::PackIndex::crc32_for_pack_offset(&self, u64) -> core::option::Option<u32>
-pub fn grit_lib::objects::pack::PackIndex::find_offset(&self, &grit_lib::objects::ObjectId) -> core::option::Option<u64>
-pub fn grit_lib::objects::pack::PackIndex::find_offset_monotonic(&self, &grit_lib::objects::ObjectId, &mut usize) -> core::option::Option<u64>
+pub fn grit_lib::objects::pack::PackIndex::crc32_for_pack_offset(&self, u64) -> grit_lib::error::Result<core::option::Option<u32>>
+pub fn grit_lib::objects::pack::PackIndex::find_offset(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<u64>>
+pub fn grit_lib::objects::pack::PackIndex::find_offset_monotonic(&self, &grit_lib::objects::ObjectId, &mut usize) -> grit_lib::error::Result<core::option::Option<u64>>
 pub fn grit_lib::objects::pack::PackIndex::find_position(&self, &grit_lib::objects::ObjectId) -> core::option::Option<usize>
-pub fn grit_lib::objects::pack::PackIndex::find_position_by_offset_sorted(&self, u64) -> core::option::Option<usize>
+pub fn grit_lib::objects::pack::PackIndex::find_position_by_offset_sorted(&self, u64) -> grit_lib::error::Result<core::option::Option<usize>>
 pub fn grit_lib::objects::pack::PackIndex::hash_bytes(&self) -> usize
 pub fn grit_lib::objects::pack::PackIndex::is_empty(&self) -> bool
 pub fn grit_lib::objects::pack::PackIndex::iter(&self) -> grit_lib::pack_index::PackIndexIter<'_>
 pub fn grit_lib::objects::pack::PackIndex::len(&self) -> usize
-pub fn grit_lib::objects::pack::PackIndex::next_pack_offset_after(&self, u64, u64) -> u64
-pub fn grit_lib::objects::pack::PackIndex::offset_at(&self, usize) -> u64
+pub fn grit_lib::objects::pack::PackIndex::next_pack_offset_after(&self, u64, u64) -> grit_lib::error::Result<u64>
+pub fn grit_lib::objects::pack::PackIndex::offset_at(&self, usize) -> grit_lib::error::Result<u64>
 pub fn grit_lib::objects::pack::PackIndex::oid_at(&self, usize) -> &[u8]
 impl core::clone::Clone for grit_lib::objects::pack::PackIndex
 pub fn grit_lib::objects::pack::PackIndex::clone(&self) -> Self
@@ -7310,8 +7795,9 @@ pub grit_lib::objects::pack::PackIndexEntry::offset: u64
 pub grit_lib::objects::pack::PackIndexEntry::oid: alloc::vec::Vec<u8>
 impl core::clone::Clone for grit_lib::objects::pack::PackIndexEntry
 pub fn grit_lib::objects::pack::PackIndexEntry::clone(&self) -> Self
-impl core::convert::From<grit_lib::objects::pack::PackIndexEntryRef<'_>> for grit_lib::objects::pack::PackIndexEntry
-pub fn grit_lib::objects::pack::PackIndexEntry::from(grit_lib::objects::pack::PackIndexEntryRef<'_>) -> Self
+impl core::convert::TryFrom<grit_lib::objects::pack::PackIndexEntryRef<'_>> for grit_lib::objects::pack::PackIndexEntry
+pub type grit_lib::objects::pack::PackIndexEntry::Error = grit_lib::error::Error
+pub fn grit_lib::objects::pack::PackIndexEntry::try_from(grit_lib::objects::pack::PackIndexEntryRef<'_>) -> grit_lib::error::Result<Self>
 impl core::fmt::Debug for grit_lib::objects::pack::PackIndexEntry
 pub fn grit_lib::objects::pack::PackIndexEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for grit_lib::objects::pack::PackIndexEntry
@@ -7324,10 +7810,11 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::PackIndex
 pub struct grit_lib::objects::pack::PackIndexEntryRef<'a>
 impl<'a> grit_lib::objects::pack::PackIndexEntryRef<'a>
 pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::crc32(&self) -> core::option::Option<u32>
-pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::offset(&self) -> u64
+pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::offset(&self) -> grit_lib::error::Result<u64>
 pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::oid(&self) -> &'a [u8]
-impl core::convert::From<grit_lib::objects::pack::PackIndexEntryRef<'_>> for grit_lib::objects::pack::PackIndexEntry
-pub fn grit_lib::objects::pack::PackIndexEntry::from(grit_lib::objects::pack::PackIndexEntryRef<'_>) -> Self
+impl core::convert::TryFrom<grit_lib::objects::pack::PackIndexEntryRef<'_>> for grit_lib::objects::pack::PackIndexEntry
+pub type grit_lib::objects::pack::PackIndexEntry::Error = grit_lib::error::Error
+pub fn grit_lib::objects::pack::PackIndexEntry::try_from(grit_lib::objects::pack::PackIndexEntryRef<'_>) -> grit_lib::error::Result<Self>
 impl<'a> core::clone::Clone for grit_lib::objects::pack::PackIndexEntryRef<'a>
 pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::clone(&self) -> Self
 impl<'a> core::fmt::Debug for grit_lib::objects::pack::PackIndexEntryRef<'a>
@@ -7386,6 +7873,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::ReuseWrit
 pub struct grit_lib::objects::pack::SingleLocalPackReader
 impl grit_lib::objects::pack::SingleLocalPackReader
 pub fn grit_lib::objects::pack::SingleLocalPackReader::open(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
+pub fn grit_lib::objects::pack::SingleLocalPackReader::open_allow_loose(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_info(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_object(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 impl core::marker::Freeze for grit_lib::objects::pack::SingleLocalPackReader
@@ -7432,7 +7920,7 @@ pub fn grit_lib::objects::pack::collect_packed_delta_reuse_for_send(&std::path::
 pub fn grit_lib::objects::pack::compute_fanout_from_entries(&[grit_lib::objects::pack::PackIndexEntry]) -> [u32; 256]
 pub fn grit_lib::objects::pack::compute_fanout_from_oid_slices(&[&[u8]]) -> [u32; 256]
 pub fn grit_lib::objects::pack::configure_delta_base_cache_from_config(core::option::Option<&grit_lib::config::ConfigSet>)
-pub fn grit_lib::objects::pack::find_position_by_pack_offset(&grit_lib::objects::pack::PackIndex, u64) -> core::option::Option<usize>
+pub fn grit_lib::objects::pack::find_position_by_pack_offset(&grit_lib::objects::pack::PackIndex, u64) -> grit_lib::error::Result<core::option::Option<usize>>
 pub fn grit_lib::objects::pack::hash_object_bytes(grit_lib::objects::ObjectKind, &[u8], usize) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack::max_verify_pack_delta_depth(&[grit_lib::objects::pack::VerifyObjectRecord]) -> u64
 pub fn grit_lib::objects::pack::oid_bytes_to_hex(&[u8]) -> alloc::string::String
@@ -7732,7 +8220,7 @@ pub const grit_lib::objects::pack_rev::RIDX_HASH_ID_SHA256: u32
 pub const grit_lib::objects::pack_rev::RIDX_SIGNATURE: u32
 pub const grit_lib::objects::pack_rev::RIDX_VERSION: u32
 pub fn grit_lib::objects::pack_rev::append_hashfile_checksum(&mut alloc::vec::Vec<u8>, usize)
-pub fn grit_lib::objects::pack_rev::build_pack_rev_bytes(&grit_lib::objects::pack::PackIndex) -> alloc::vec::Vec<u8>
+pub fn grit_lib::objects::pack_rev::build_pack_rev_bytes(&grit_lib::objects::pack::PackIndex) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack_rev::build_pack_rev_bytes_from_index_order_offsets(&[u64]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::pack_rev::build_pack_rev_bytes_from_index_order_offsets_and_checksum(&[u64], &[u8]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::pack_rev::hashfile_checksum_valid(&[u8], usize) -> bool
@@ -8691,11 +9179,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::log::DecorationItem
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::log::DecorationItem
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::log::DecorationItem
 pub fn grit_lib::porcelain::log::collect_decorations(&grit_lib::repo::Repository, bool) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
-pub fn grit_lib::porcelain::log::collect_decorations_for_commits(&grit_lib::repo::Repository, bool, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
-pub fn grit_lib::porcelain::log::collect_decorations_inner(&grit_lib::repo::Repository, bool, bool, &grit_lib::porcelain::log::DecorationFilter, Option<&std::collections::HashSet<String>>) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
-pub fn grit_lib::porcelain::log::load_commits_with_decorations(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &grit_lib::porcelain::log::DecorationMap) -> grit_lib::error::Result<Vec<grit_lib::porcelain::log::LoadedCommit>>
-pub struct grit_lib::porcelain::log::CommitRefDecoration
-pub struct grit_lib::porcelain::log::LoadedCommit
+pub fn grit_lib::porcelain::log::collect_decorations_inner(&grit_lib::repo::Repository, bool, bool, &grit_lib::porcelain::log::DecorationFilter) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
 pub fn grit_lib::porcelain::log::current_branch_decoration_index(&[grit_lib::porcelain::log::DecorationItem], &grit_lib::state::HeadState) -> core::option::Option<usize>
 pub fn grit_lib::porcelain::log::normalize_glob_ref(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::log::peel_to_commit_hex(&grit_lib::objects::odb::Odb, &str) -> core::option::Option<alloc::string::String>
@@ -9456,7 +9940,6 @@ pub fn grit_lib::porcelain::tag::creator_date(&grit_lib::repo::Repository, &grit
 pub fn grit_lib::porcelain::tag::get_tag_annotation(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, u32) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::porcelain::tag::glob_matches(&str, &str) -> bool
 pub fn grit_lib::porcelain::tag::parse_epoch_from_ident(&str) -> i64
-pub fn grit_lib::porcelain::tag::peel_to_commit(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::porcelain::tag::strip_comments(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::tag::tag_contains(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::porcelain::tag::tag_points_at(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
@@ -9603,12 +10086,16 @@ impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::command_runner::hooks::HookError) -> Self
+impl core::convert::From<grit_lib::diff::NoIndexError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::diff::NoIndexError) -> Self
 impl core::convert::From<grit_lib::error::ApplyError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ApplyError) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::convert::From<grit_lib::error::DiffPathError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::DiffPathError) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::midx::CompactError
@@ -10273,6 +10760,9 @@ pub fn grit_lib::objects::odb::Odb::primary_writable(&self) -> grit_lib::error::
 pub fn grit_lib::objects::odb::Odb::uses_files_primary(&self) -> bool
 pub fn grit_lib::objects::odb::Odb::with_resolved_work_tree(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::write_commit_graph(&self) -> grit_lib::error::Result<()>
+impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::peel_tags(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectKind)>
+pub fn grit_lib::objects::odb::Odb::peel_to_commit(&self, grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 impl core::clone::Clone for grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::objects::odb::Odb
@@ -10308,6 +10798,7 @@ pub struct grit_lib::prelude::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
+pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
 pub fn grit_lib::repo::Repository::config_handle(&self) -> grit_lib::config::handle::ConfigHandle<'_>
 pub fn grit_lib::repo::Repository::diagnostics(&self) -> grit_lib::diagnostics::DiagnosticsHandle
@@ -10364,7 +10855,7 @@ pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintena
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
 impl core::fmt::Debug for grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::repo::Repository
+impl !core::marker::Freeze for grit_lib::repo::Repository
 impl core::marker::Send for grit_lib::repo::Repository
 impl core::marker::Sync for grit_lib::repo::Repository
 impl core::marker::Unpin for grit_lib::repo::Repository
@@ -11823,6 +12314,7 @@ pub fn grit_lib::refs::read_log_refs_config(&std::path::Path) -> grit_lib::refs:
 pub fn grit_lib::refs::read_raw_ref(&std::path::Path, &str) -> grit_lib::error::Result<grit_lib::refs::RawRefLookup>
 pub fn grit_lib::refs::read_ref_file(&std::path::Path) -> grit_lib::error::Result<grit_lib::refs::Ref>
 pub fn grit_lib::refs::read_symbolic_ref(&std::path::Path, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
+pub fn grit_lib::refs::read_symbolic_ref_for_repository(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::refs::ref_matches_glob(&str, &str) -> bool
 pub fn grit_lib::refs::ref_update_flags(&str) -> grit_lib::refs::store::RefUpdateFlags
 pub fn grit_lib::refs::reflog_file_path(&std::path::Path, &str) -> std::path::PathBuf
@@ -11919,7 +12411,7 @@ pub grit_lib::remote::clone::CloneOutcome::transfer: grit_lib::remote::transfer:
 pub grit_lib::remote::clone::CloneOutcome::url: alloc::string::String
 impl core::fmt::Debug for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::CloneOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::remote::clone::CloneOutcome
+impl !core::marker::Freeze for grit_lib::remote::clone::CloneOutcome
 impl core::marker::Send for grit_lib::remote::clone::CloneOutcome
 impl core::marker::Sync for grit_lib::remote::clone::CloneOutcome
 impl core::marker::Unpin for grit_lib::remote::clone::CloneOutcome
@@ -11964,6 +12456,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::credentials::
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::credentials::Credential
 pub struct grit_lib::remote::credentials::HelperCredentialProvider
 impl grit_lib::remote::credentials::HelperCredentialProvider
+pub fn grit_lib::remote::credentials::HelperCredentialProvider::helpers_for(&self, &grit_lib::remote::credentials::Credential) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::new(grit_lib::config::ConfigSet) -> Self
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::credentials::HelperCredentialProvider
@@ -12027,13 +12520,144 @@ pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::known_common(&mut
 pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::new(grit_lib::repo::Repository) -> Self
 pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::next_have(&mut self) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::fetch_negotiator::SkippingNegotiator::repo(&self) -> &grit_lib::repo::Repository
-impl core::marker::Freeze for grit_lib::remote::fetch_negotiator::SkippingNegotiator
+impl !core::marker::Freeze for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl core::marker::Send for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl core::marker::Sync for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl core::marker::Unpin for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl core::marker::UnsafeUnpin for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::fetch_negotiator::SkippingNegotiator
+pub mod grit_lib::remote::github_auth
+#[non_exhaustive] pub enum grit_lib::remote::github_auth::DeviceFlowError
+pub grit_lib::remote::github_auth::DeviceFlowError::AccessDenied
+pub grit_lib::remote::github_auth::DeviceFlowError::DeviceCodeRejected(alloc::string::String)
+pub grit_lib::remote::github_auth::DeviceFlowError::Expired
+pub grit_lib::remote::github_auth::DeviceFlowError::Http
+pub grit_lib::remote::github_auth::DeviceFlowError::Http::source: grit_lib::error::Error
+pub grit_lib::remote::github_auth::DeviceFlowError::Http::step: grit_lib::remote::github_auth::DeviceFlowStep
+pub grit_lib::remote::github_auth::DeviceFlowError::MissingField(&'static str)
+pub grit_lib::remote::github_auth::DeviceFlowError::TimedOut
+pub grit_lib::remote::github_auth::DeviceFlowError::TokenRejected(alloc::string::String)
+pub grit_lib::remote::github_auth::DeviceFlowError::UnexpectedResponse
+impl core::error::Error for grit_lib::remote::github_auth::DeviceFlowError
+pub fn grit_lib::remote::github_auth::DeviceFlowError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::remote::github_auth::DeviceFlowError
+pub fn grit_lib::remote::github_auth::DeviceFlowError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::github_auth::DeviceFlowError
+pub fn grit_lib::remote::github_auth::DeviceFlowError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::Send for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::Sync for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::Unpin for grit_lib::remote::github_auth::DeviceFlowError
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceFlowError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceFlowError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceFlowError
+pub enum grit_lib::remote::github_auth::DeviceFlowStep
+pub grit_lib::remote::github_auth::DeviceFlowStep::PollToken
+pub grit_lib::remote::github_auth::DeviceFlowStep::RequestDeviceCode
+impl core::clone::Clone for grit_lib::remote::github_auth::DeviceFlowStep
+pub fn grit_lib::remote::github_auth::DeviceFlowStep::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::cmp::PartialEq for grit_lib::remote::github_auth::DeviceFlowStep
+pub fn grit_lib::remote::github_auth::DeviceFlowStep::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::github_auth::DeviceFlowStep
+pub fn grit_lib::remote::github_auth::DeviceFlowStep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::StructuralPartialEq for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Freeze for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Send for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Sync for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::Unpin for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceFlowStep
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceFlowStep
+pub enum grit_lib::remote::github_auth::PollStatus
+pub grit_lib::remote::github_auth::PollStatus::Authorized(alloc::string::String)
+pub grit_lib::remote::github_auth::PollStatus::Pending
+pub grit_lib::remote::github_auth::PollStatus::SlowDown
+pub grit_lib::remote::github_auth::PollStatus::SlowDown::interval: core::time::Duration
+impl core::clone::Clone for grit_lib::remote::github_auth::PollStatus
+pub fn grit_lib::remote::github_auth::PollStatus::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::github_auth::PollStatus
+impl core::cmp::PartialEq for grit_lib::remote::github_auth::PollStatus
+pub fn grit_lib::remote::github_auth::PollStatus::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::github_auth::PollStatus
+pub fn grit_lib::remote::github_auth::PollStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Freeze for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Send for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Sync for grit_lib::remote::github_auth::PollStatus
+impl core::marker::Unpin for grit_lib::remote::github_auth::PollStatus
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::PollStatus
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::PollStatus
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::PollStatus
+pub struct grit_lib::remote::github_auth::DeviceAuthorization
+pub grit_lib::remote::github_auth::DeviceAuthorization::device_code: alloc::string::String
+pub grit_lib::remote::github_auth::DeviceAuthorization::expires_in: core::time::Duration
+pub grit_lib::remote::github_auth::DeviceAuthorization::interval: core::time::Duration
+pub grit_lib::remote::github_auth::DeviceAuthorization::user_code: alloc::string::String
+pub grit_lib::remote::github_auth::DeviceAuthorization::verification_uri: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::github_auth::DeviceAuthorization
+pub fn grit_lib::remote::github_auth::DeviceAuthorization::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::cmp::PartialEq for grit_lib::remote::github_auth::DeviceAuthorization
+pub fn grit_lib::remote::github_auth::DeviceAuthorization::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::github_auth::DeviceAuthorization
+pub fn grit_lib::remote::github_auth::DeviceAuthorization::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Freeze for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Send for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Sync for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::Unpin for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceAuthorization
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceAuthorization
+pub struct grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> grit_lib::remote::github_auth::DeviceFlow<'a>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::new(&'a dyn grit_lib::remote::transport::http::HttpClient, &'a str) -> Self
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::poll(&self, &grit_lib::remote::github_auth::DeviceAuthorization, core::time::Duration) -> core::result::Result<grit_lib::remote::github_auth::PollStatus, grit_lib::remote::github_auth::DeviceFlowError>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::request_device_code(&self) -> core::result::Result<grit_lib::remote::github_auth::DeviceAuthorization, grit_lib::remote::github_auth::DeviceFlowError>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::wait_for_token(&self, &grit_lib::remote::github_auth::DeviceAuthorization, &mut dyn grit_lib::remote::github_auth::PollClock) -> core::result::Result<alloc::string::String, grit_lib::remote::github_auth::DeviceFlowError>
+pub fn grit_lib::remote::github_auth::DeviceFlow<'a>::with_scope(self, &'a str) -> Self
+impl<'a> core::marker::Freeze for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::Send for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::Sync for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::Unpin for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::DeviceFlow<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::DeviceFlow<'a>
+pub struct grit_lib::remote::github_auth::SystemPollClock
+impl core::clone::Clone for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::clone(&self) -> Self
+impl core::default::Default for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::github_auth::SystemPollClock
+impl grit_lib::remote::github_auth::PollClock for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::now(&self) -> std::time::Instant
+pub fn grit_lib::remote::github_auth::SystemPollClock::sleep(&mut self, core::time::Duration)
+impl core::marker::Freeze for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::Send for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::Sync for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::Unpin for grit_lib::remote::github_auth::SystemPollClock
+impl core::marker::UnsafeUnpin for grit_lib::remote::github_auth::SystemPollClock
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::github_auth::SystemPollClock
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::github_auth::SystemPollClock
+pub const grit_lib::remote::github_auth::ACCESS_TOKEN_URL: &str
+pub const grit_lib::remote::github_auth::DEFAULT_SCOPE: &str
+pub const grit_lib::remote::github_auth::DEVICE_CODE_URL: &str
+pub const grit_lib::remote::github_auth::GITHUB_HOST: &str
+pub const grit_lib::remote::github_auth::TOKEN_USERNAME: &str
+pub const grit_lib::remote::github_auth::VERIFICATION_URL: &str
+pub trait grit_lib::remote::github_auth::PollClock
+pub fn grit_lib::remote::github_auth::PollClock::now(&self) -> std::time::Instant
+pub fn grit_lib::remote::github_auth::PollClock::sleep(&mut self, core::time::Duration)
+impl grit_lib::remote::github_auth::PollClock for grit_lib::remote::github_auth::SystemPollClock
+pub fn grit_lib::remote::github_auth::SystemPollClock::now(&self) -> std::time::Instant
+pub fn grit_lib::remote::github_auth::SystemPollClock::sleep(&mut self, core::time::Duration)
+pub fn grit_lib::remote::github_auth::github_token_credential(core::option::Option<&str>) -> grit_lib::remote::credentials::Credential
+pub fn grit_lib::remote::github_auth::is_github_https_url(&str) -> bool
 pub mod grit_lib::remote::http_client
 pub struct grit_lib::remote::http_client::UreqHttpClient
 impl grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -13458,6 +14082,7 @@ pub fn grit_lib::repo::caches::RepoCaches::open_ref_store(&self, &std::path::Pat
 pub fn grit_lib::repo::caches::RepoCaches::pathspec_precompose_enabled(&self, &grit_lib::config::environment::Environment, &std::path::Path) -> bool
 pub fn grit_lib::repo::caches::RepoCaches::promisor_hydrate_hook(&self) -> core::option::Option<grit_lib::blame::PromisorHydrateHook>
 pub fn grit_lib::repo::caches::RepoCaches::ref_storage_format(&self, &std::path::Path) -> grit_lib::refs::ref_storage::RefStorageFormat
+pub fn grit_lib::repo::caches::RepoCaches::ref_storage_format_from_local_config(&self, &std::path::Path) -> grit_lib::error::Result<grit_lib::refs::ref_storage::RefStorageFormat>
 pub fn grit_lib::repo::caches::RepoCaches::set_promisor_hydrate_hook(&self, core::option::Option<grit_lib::blame::PromisorHydrateHook>)
 pub fn grit_lib::repo::caches::RepoCaches::should_warn_commit_graph_once(&self, &str) -> bool
 pub fn grit_lib::repo::caches::RepoCaches::warn_bare_worktree_conflict_once(&self, &std::path::Path)
@@ -13525,6 +14150,7 @@ pub struct grit_lib::repo::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
+pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
 pub fn grit_lib::repo::Repository::config_handle(&self) -> grit_lib::config::handle::ConfigHandle<'_>
 pub fn grit_lib::repo::Repository::diagnostics(&self) -> grit_lib::diagnostics::DiagnosticsHandle
@@ -13581,7 +14207,7 @@ pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintena
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
 impl core::fmt::Debug for grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::repo::Repository
+impl !core::marker::Freeze for grit_lib::repo::Repository
 impl core::marker::Send for grit_lib::repo::Repository
 impl core::marker::Sync for grit_lib::repo::Repository
 impl core::marker::Unpin for grit_lib::repo::Repository
@@ -13603,6 +14229,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryBuil
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryBuilder
 pub fn grit_lib::repo::common_git_dir_for_config(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::repo::early_config_ignore_repo_reason(&std::path::Path) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::repo::early_config_ignore_repo_reason_for_text(core::option::Option<&str>) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::repo::ensure_core_bare(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::init_worktree_config(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::repository_format_warning(&std::path::Path) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
@@ -13611,6 +14238,7 @@ pub fn grit_lib::repo::resolve_git_directory_arg(&std::path::Path) -> grit_lib::
 pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::repo::validate_repo_format(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::worktree_config_enabled(&std::path::Path) -> bool
+pub fn grit_lib::repo::worktree_config_enabled_for_text(core::option::Option<&str>) -> bool
 pub mod grit_lib::repo_handles
 pub enum grit_lib::repo_handles::HookSource
 pub grit_lib::repo_handles::HookSource::CoreHooksPath
@@ -13996,6 +14624,7 @@ pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::try_load_across(&std::
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::try_load_across_with_caches(&std::path::Path, &[std::path::PathBuf], core::option::Option<&grit_lib::repo::caches::RepoCaches>) -> core::result::Result<core::option::Option<Self>, grit_lib::error::Error>
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::try_load_with_caches(&std::path::Path, core::option::Option<&grit_lib::repo::caches::RepoCaches>) -> core::result::Result<core::option::Option<Self>, grit_lib::error::Error>
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::upgradable_filter_bytes(&self, &grit_lib::objects::ObjectId, &grit_lib::diff::bloom::BloomFilterSettings) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::verify_on_disk(&std::path::Path) -> core::result::Result<(), grit_lib::error::Error>
 impl core::clone::Clone for grit_lib::revwalk::commit_graph::CommitGraphChain
 pub fn grit_lib::revwalk::commit_graph::CommitGraphChain::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::revwalk::commit_graph::CommitGraphChain
@@ -14067,6 +14696,87 @@ pub fn grit_lib::revwalk::commit_graph::load_commit_graph_commit_info(&grit_lib:
 pub fn grit_lib::revwalk::commit_graph::parse_graph_file(&std::path::Path) -> core::option::Option<grit_lib::revwalk::commit_graph::ParsedGraphDump>
 pub fn grit_lib::revwalk::commit_graph::remove_commit_graph_chain_dir(&std::path::Path) -> bool
 pub type grit_lib::revwalk::commit_graph::BloomWalkStatsHandle = alloc::rcs::arc::Arc<std::sync::poison::mutex::Mutex<grit_lib::revwalk::commit_graph::BloomWalkStats>>
+pub mod grit_lib::revwalk::filter
+pub enum grit_lib::revwalk::filter::CommitFilterError
+pub grit_lib::revwalk::filter::CommitFilterError::InvalidPattern
+pub grit_lib::revwalk::filter::CommitFilterError::InvalidPattern::detail: alloc::string::String
+pub grit_lib::revwalk::filter::CommitFilterError::InvalidPattern::pattern: alloc::string::String
+impl core::error::Error for grit_lib::revwalk::filter::CommitFilterError
+impl core::fmt::Debug for grit_lib::revwalk::filter::CommitFilterError
+pub fn grit_lib::revwalk::filter::CommitFilterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::revwalk::filter::CommitFilterError
+pub fn grit_lib::revwalk::filter::CommitFilterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::Send for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::Sync for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::Unpin for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::CommitFilterError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::CommitFilterError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::CommitFilterError
+pub struct grit_lib::revwalk::filter::CommitFilter
+impl grit_lib::revwalk::filter::CommitFilter
+pub fn grit_lib::revwalk::filter::CommitFilter::builder() -> grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilter::is_active(&self) -> bool
+pub fn grit_lib::revwalk::filter::CommitFilter::matches(&self, &grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+impl core::clone::Clone for grit_lib::revwalk::filter::CommitFilter
+pub fn grit_lib::revwalk::filter::CommitFilter::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::revwalk::filter::CommitFilter
+pub fn grit_lib::revwalk::filter::CommitFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::Send for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::Sync for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::Unpin for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::CommitFilter
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::CommitFilter
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::CommitFilter
+pub struct grit_lib::revwalk::filter::CommitFilterBuilder
+impl grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::all_match(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::author(self, impl core::convert::Into<grit_lib::revwalk::filter::Pattern>) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::build(self) -> core::result::Result<grit_lib::revwalk::filter::CommitFilter, grit_lib::revwalk::filter::CommitFilterError>
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::committer(self, impl core::convert::Into<grit_lib::revwalk::filter::Pattern>) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::fixed_strings(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::grep(self, impl core::convert::Into<grit_lib::revwalk::filter::Pattern>) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::ignore_case(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::invert_grep(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::mailmap(self, grit_lib::config::mailmap::MailmapTable) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::new() -> Self
+impl core::clone::Clone for grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::clone(&self) -> Self
+impl core::default::Default for grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::default() -> Self
+impl core::fmt::Debug for grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::Send for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::Sync for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::Unpin for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::CommitFilterBuilder
+pub struct grit_lib::revwalk::filter::Pattern(_)
+impl grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::as_str(&self) -> &str
+pub fn grit_lib::revwalk::filter::Pattern::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::filter::Pattern
+impl core::cmp::PartialEq for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::eq(&self, &Self) -> bool
+impl core::convert::From<&str> for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::from(&str) -> Self
+impl core::convert::From<alloc::string::String> for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::from(alloc::string::String) -> Self
+impl core::fmt::Debug for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::filter::Pattern
+impl core::marker::Freeze for grit_lib::revwalk::filter::Pattern
+impl core::marker::Send for grit_lib::revwalk::filter::Pattern
+impl core::marker::Sync for grit_lib::revwalk::filter::Pattern
+impl core::marker::Unpin for grit_lib::revwalk::filter::Pattern
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::Pattern
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::Pattern
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::Pattern
 pub mod grit_lib::revwalk::handle
 pub struct grit_lib::revwalk::handle::RevWalk<'repo>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
@@ -14538,8 +15248,10 @@ pub grit_lib::revwalk::history::RewritePlan::commits: alloc::vec::Vec<grit_lib::
 pub grit_lib::revwalk::history::RewritePlan::head: grit_lib::revwalk::history::HeadEffect
 pub grit_lib::revwalk::history::RewritePlan::ref_updates: alloc::vec::Vec<grit_lib::revwalk::history::PlannedRefUpdate>
 impl grit_lib::revwalk::history::RewritePlan
+pub fn grit_lib::revwalk::history::RewritePlan::head_change(&self) -> core::option::Option<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>
 pub fn grit_lib::revwalk::history::RewritePlan::mapped_tip(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::history::RewritePlan::ref_update_lines(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::revwalk::history::RewritePlan::replacement(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 impl core::clone::Clone for grit_lib::revwalk::history::RewritePlan
 pub fn grit_lib::revwalk::history::RewritePlan::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::RewritePlan
@@ -14651,11 +15363,11 @@ pub type grit_lib::revwalk::history::HistoryEdits = alloc::collections::btree::m
 pub type grit_lib::revwalk::history::Pathspec<'a> = &'a [alloc::string::String]
 pub mod grit_lib::revwalk::log_walk
 pub struct grit_lib::revwalk::log_walk::LogWalkCursor
-pub grit_lib::revwalk::log_walk::LogWalkCursor::anchor_head: grit_lib::objects::ObjectId
 impl grit_lib::revwalk::log_walk::LogWalkCursor
 pub fn grit_lib::revwalk::log_walk::LogWalkCursor::decode(&str) -> grit_lib::error::Result<Self>
 pub fn grit_lib::revwalk::log_walk::LogWalkCursor::encode(&self) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::revwalk::log_walk::LogWalkCursor::step(&grit_lib::repo::Repository, core::option::Option<&grit_lib::revwalk::log_walk::LogWalkCursor>, usize) -> grit_lib::error::Result<grit_lib::revwalk::log_walk::LogWalkPage>
+pub fn grit_lib::revwalk::log_walk::LogWalkCursor::resume_query(&self) -> &grit_lib::revwalk::log_walk::LogWalkQuery
+pub fn grit_lib::revwalk::log_walk::LogWalkCursor::step(&grit_lib::repo::Repository, &grit_lib::revwalk::log_walk::LogWalkQuery, core::option::Option<&grit_lib::revwalk::log_walk::LogWalkCursor>, usize) -> grit_lib::error::Result<grit_lib::revwalk::log_walk::LogWalkPage>
 impl core::clone::Clone for grit_lib::revwalk::log_walk::LogWalkCursor
 pub fn grit_lib::revwalk::log_walk::LogWalkCursor::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::log_walk::LogWalkCursor
@@ -14689,6 +15401,27 @@ impl core::marker::Unpin for grit_lib::revwalk::log_walk::LogWalkPage
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::log_walk::LogWalkPage
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::log_walk::LogWalkPage
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::log_walk::LogWalkPage
+pub struct grit_lib::revwalk::log_walk::LogWalkQuery
+pub grit_lib::revwalk::log_walk::LogWalkQuery::cutoffs: grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs
+pub grit_lib::revwalk::log_walk::LogWalkQuery::hide: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::revwalk::log_walk::LogWalkQuery::tips: alloc::vec::Vec<grit_lib::objects::ObjectId>
+impl grit_lib::revwalk::log_walk::LogWalkQuery
+pub fn grit_lib::revwalk::log_walk::LogWalkQuery::from_rev_walk(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<core::option::Option<Self>>
+impl core::clone::Clone for grit_lib::revwalk::log_walk::LogWalkQuery
+pub fn grit_lib::revwalk::log_walk::LogWalkQuery::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::cmp::PartialEq for grit_lib::revwalk::log_walk::LogWalkQuery
+pub fn grit_lib::revwalk::log_walk::LogWalkQuery::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::revwalk::log_walk::LogWalkQuery
+pub fn grit_lib::revwalk::log_walk::LogWalkQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::marker::Freeze for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::marker::Send for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::marker::Sync for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::marker::Unpin for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::log_walk::LogWalkQuery
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::log_walk::LogWalkQuery
 pub mod grit_lib::revwalk::merge_base
 pub enum grit_lib::revwalk::merge_base::MergeBaseForDiffError
 pub grit_lib::revwalk::merge_base::MergeBaseForDiffError::Multiple
@@ -14725,6 +15458,30 @@ impl core::marker::Unpin for grit_lib::revwalk::merge_base::ReachableWalkLimit
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::merge_base::ReachableWalkLimit
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::merge_base::ReachableWalkLimit
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::merge_base::ReachableWalkLimit
+pub struct grit_lib::revwalk::merge_base::ReachableCountFilter
+pub grit_lib::revwalk::merge_base::ReachableCountFilter::first_parent_only: bool
+pub grit_lib::revwalk::merge_base::ReachableCountFilter::max_parents: core::option::Option<usize>
+pub grit_lib::revwalk::merge_base::ReachableCountFilter::min_parents: core::option::Option<usize>
+pub grit_lib::revwalk::merge_base::ReachableCountFilter::since: core::option::Option<i64>
+pub grit_lib::revwalk::merge_base::ReachableCountFilter::until: core::option::Option<i64>
+impl core::clone::Clone for grit_lib::revwalk::merge_base::ReachableCountFilter
+pub fn grit_lib::revwalk::merge_base::ReachableCountFilter::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::cmp::PartialEq for grit_lib::revwalk::merge_base::ReachableCountFilter
+pub fn grit_lib::revwalk::merge_base::ReachableCountFilter::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::revwalk::merge_base::ReachableCountFilter
+pub fn grit_lib::revwalk::merge_base::ReachableCountFilter::default() -> Self
+impl core::fmt::Debug for grit_lib::revwalk::merge_base::ReachableCountFilter
+pub fn grit_lib::revwalk::merge_base::ReachableCountFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::marker::Freeze for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::marker::Send for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::marker::Sync for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::marker::Unpin for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::merge_base::ReachableCountFilter
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::merge_base::ReachableCountFilter
 pub struct grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs
 pub grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs::since: core::option::Option<i64>
 pub grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs::until: core::option::Option<i64>
@@ -14791,8 +15548,11 @@ pub fn grit_lib::revwalk::merge_base::ahead_behind_of_target_commits(&grit_lib::
 pub fn grit_lib::revwalk::merge_base::ahead_of_target_commits(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, usize) -> grit_lib::error::Result<(usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub fn grit_lib::revwalk::merge_base::ancestor_closure(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::merge_base::branch_base_for_tip(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<core::option::Option<usize>>
-pub fn grit_lib::revwalk::merge_base::commits_reachable_excluding_ancestors_of(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], core::option::Option<usize>, grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::revwalk::merge_base::commits_reachable_excluding_ancestors_of(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], core::option::Option<usize>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::revwalk::merge_base::commits_reachable_excluding_ancestors_of_cutoffs(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], core::option::Option<usize>, grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::revwalk::merge_base::count_commits_reachable_excluding_ancestors_of(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], grit_lib::revwalk::merge_base::ReachableCountFilter) -> grit_lib::error::Result<usize>
 pub fn grit_lib::revwalk::merge_base::count_symmetric_ahead_behind(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<(usize, usize)>
+pub fn grit_lib::revwalk::merge_base::first_parent_commits_with_cutoffs(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, usize, grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::merge_base::fork_point(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::merge_base::independent_commits(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::merge_base::is_ancestor(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
@@ -14804,7 +15564,9 @@ pub fn grit_lib::revwalk::merge_base::merge_bases_first_vs_rest(&grit_lib::repo:
 pub fn grit_lib::revwalk::merge_base::merge_bases_octopus(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::merge_base::resolve_commit_specs(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::merge_base::resolve_fork_point_reflog_ref(&grit_lib::repo::Repository, &str) -> alloc::string::String
-pub fn grit_lib::revwalk::merge_base::walk_commits_reachable_excluding_ancestors_of(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], grit_lib::revwalk::merge_base::ReachableWalkLimit, grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) -> grit_lib::error::Result<(usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
+pub fn grit_lib::revwalk::merge_base::try_linear_chain_commits_with_cutoffs(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, usize, grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) -> grit_lib::error::Result<core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>>
+pub fn grit_lib::revwalk::merge_base::walk_commits_reachable_excluding_ancestors_of(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], grit_lib::revwalk::merge_base::ReachableWalkLimit) -> grit_lib::error::Result<(usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
+pub fn grit_lib::revwalk::merge_base::walk_commits_reachable_excluding_ancestors_of_cutoffs(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], grit_lib::revwalk::merge_base::ReachableWalkLimit, grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) -> grit_lib::error::Result<(usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub mod grit_lib::revwalk::object_inspect
 pub enum grit_lib::revwalk::object_inspect::ObjectContents
 pub grit_lib::revwalk::object_inspect::ObjectContents::Blob(alloc::vec::Vec<u8>)
@@ -14932,6 +15694,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::LeftRightCounts
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::LeftRightCounts
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::LeftRightCounts
 pub struct grit_lib::revwalk::queries::RevWalkListOptions
+pub grit_lib::revwalk::queries::RevWalkListOptions::commit_filter: core::option::Option<alloc::rcs::arc::Arc<grit_lib::revwalk::filter::CommitFilter>>
 pub grit_lib::revwalk::queries::RevWalkListOptions::first_parent: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::limit: core::option::Option<usize>
 pub grit_lib::revwalk::queries::RevWalkListOptions::merges: grit_lib::revwalk::queries::MergeFilter
@@ -14943,14 +15706,10 @@ pub grit_lib::revwalk::queries::RevWalkListOptions::skip: usize
 pub grit_lib::revwalk::queries::RevWalkListOptions::until: core::option::Option<i64>
 impl core::clone::Clone for grit_lib::revwalk::queries::RevWalkListOptions
 pub fn grit_lib::revwalk::queries::RevWalkListOptions::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::revwalk::queries::RevWalkListOptions
-impl core::cmp::PartialEq for grit_lib::revwalk::queries::RevWalkListOptions
-pub fn grit_lib::revwalk::queries::RevWalkListOptions::eq(&self, &Self) -> bool
 impl core::default::Default for grit_lib::revwalk::queries::RevWalkListOptions
 pub fn grit_lib::revwalk::queries::RevWalkListOptions::default() -> Self
 impl core::fmt::Debug for grit_lib::revwalk::queries::RevWalkListOptions
 pub fn grit_lib::revwalk::queries::RevWalkListOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::revwalk::queries::RevWalkListOptions
 impl core::marker::Freeze for grit_lib::revwalk::queries::RevWalkListOptions
 impl core::marker::Send for grit_lib::revwalk::queries::RevWalkListOptions
 impl core::marker::Sync for grit_lib::revwalk::queries::RevWalkListOptions
@@ -14980,7 +15739,9 @@ impl core::marker::Unpin for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
+pub fn grit_lib::revwalk::queries::committer_cutoff_from_date(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::revwalk::queries::parse_rev_walk_tokens(&grit_lib::repo::Repository, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
+pub fn grit_lib::revwalk::queries::resolve_log_walk_tips_and_hide(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub mod grit_lib::revwalk::rev_list
 pub enum grit_lib::revwalk::rev_list::FilterObjectKind
 pub grit_lib::revwalk::rev_list::FilterObjectKind::Blob
@@ -15158,6 +15919,7 @@ pub grit_lib::revwalk::rev_list::RevListOptions::bloom_stats: core::option::Opti
 pub grit_lib::revwalk::rev_list::RevListOptions::boundary: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::cherry_mark: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::cherry_pick: bool
+pub grit_lib::revwalk::rev_list::RevListOptions::commit_filter: core::option::Option<alloc::rcs::arc::Arc<grit_lib::revwalk::filter::CommitFilter>>
 pub grit_lib::revwalk::rev_list::RevListOptions::commit_graph_changed_paths_version: i32
 pub grit_lib::revwalk::rev_list::RevListOptions::commit_graph_read_changed_paths: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::count: bool
@@ -15254,6 +16016,7 @@ impl core::marker::Unpin for grit_lib::revwalk::rev_list::RevListResult
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::RevListResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::RevListResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::RevListResult
+pub fn grit_lib::revwalk::rev_list::all_ref_commit_tips_for_walk(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::rev_list::collect_revision_specs_from_stdin_lines(&std::path::Path, &[alloc::string::String], &[&str]) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, bool, alloc::vec::Vec<alloc::string::String>)>
 pub fn grit_lib::revwalk::rev_list::collect_revision_specs_with_stdin(&std::path::Path, &[alloc::string::String], bool) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, bool, alloc::vec::Vec<alloc::string::String>)>
 pub fn grit_lib::revwalk::rev_list::commit_tips_from_named_refs(&grit_lib::repo::Repository, &[(alloc::string::String, grit_lib::objects::ObjectId)], &grit_lib::refs::ref_exclusions::RefExclusions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
@@ -15506,6 +16269,22 @@ impl core::marker::Unpin for grit_lib::revwalk::rev_parse_error::AmbiguousObject
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint
+pub enum grit_lib::revwalk::CommitFilterError
+pub grit_lib::revwalk::CommitFilterError::InvalidPattern
+pub grit_lib::revwalk::CommitFilterError::InvalidPattern::detail: alloc::string::String
+pub grit_lib::revwalk::CommitFilterError::InvalidPattern::pattern: alloc::string::String
+impl core::error::Error for grit_lib::revwalk::filter::CommitFilterError
+impl core::fmt::Debug for grit_lib::revwalk::filter::CommitFilterError
+pub fn grit_lib::revwalk::filter::CommitFilterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::revwalk::filter::CommitFilterError
+pub fn grit_lib::revwalk::filter::CommitFilterError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::Send for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::Sync for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::Unpin for grit_lib::revwalk::filter::CommitFilterError
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::CommitFilterError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::CommitFilterError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::CommitFilterError
 pub enum grit_lib::revwalk::MergeFilter
 pub grit_lib::revwalk::MergeFilter::Any
 pub grit_lib::revwalk::MergeFilter::NoMerges
@@ -15548,6 +16327,47 @@ impl core::marker::Unpin for grit_lib::revwalk::queries::RefSelection
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::RefSelection
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::RefSelection
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RefSelection
+pub struct grit_lib::revwalk::CommitFilter
+impl grit_lib::revwalk::filter::CommitFilter
+pub fn grit_lib::revwalk::filter::CommitFilter::builder() -> grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilter::is_active(&self) -> bool
+pub fn grit_lib::revwalk::filter::CommitFilter::matches(&self, &grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+impl core::clone::Clone for grit_lib::revwalk::filter::CommitFilter
+pub fn grit_lib::revwalk::filter::CommitFilter::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::revwalk::filter::CommitFilter
+pub fn grit_lib::revwalk::filter::CommitFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::Send for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::Sync for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::Unpin for grit_lib::revwalk::filter::CommitFilter
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::CommitFilter
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::CommitFilter
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::CommitFilter
+pub struct grit_lib::revwalk::CommitFilterBuilder
+impl grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::all_match(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::author(self, impl core::convert::Into<grit_lib::revwalk::filter::Pattern>) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::build(self) -> core::result::Result<grit_lib::revwalk::filter::CommitFilter, grit_lib::revwalk::filter::CommitFilterError>
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::committer(self, impl core::convert::Into<grit_lib::revwalk::filter::Pattern>) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::fixed_strings(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::grep(self, impl core::convert::Into<grit_lib::revwalk::filter::Pattern>) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::ignore_case(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::invert_grep(self, bool) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::mailmap(self, grit_lib::config::mailmap::MailmapTable) -> Self
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::new() -> Self
+impl core::clone::Clone for grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::clone(&self) -> Self
+impl core::default::Default for grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::default() -> Self
+impl core::fmt::Debug for grit_lib::revwalk::filter::CommitFilterBuilder
+pub fn grit_lib::revwalk::filter::CommitFilterBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::Send for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::Sync for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::Unpin for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::CommitFilterBuilder
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::CommitFilterBuilder
 pub struct grit_lib::revwalk::LeftRightCounts
 pub grit_lib::revwalk::LeftRightCounts::left: usize
 pub grit_lib::revwalk::LeftRightCounts::right: usize
@@ -15567,6 +16387,29 @@ impl core::marker::Unpin for grit_lib::revwalk::queries::LeftRightCounts
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::LeftRightCounts
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::LeftRightCounts
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::LeftRightCounts
+pub struct grit_lib::revwalk::Pattern(_)
+impl grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::as_str(&self) -> &str
+pub fn grit_lib::revwalk::filter::Pattern::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::filter::Pattern
+impl core::cmp::PartialEq for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::eq(&self, &Self) -> bool
+impl core::convert::From<&str> for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::from(&str) -> Self
+impl core::convert::From<alloc::string::String> for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::from(alloc::string::String) -> Self
+impl core::fmt::Debug for grit_lib::revwalk::filter::Pattern
+pub fn grit_lib::revwalk::filter::Pattern::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::revwalk::filter::Pattern
+impl core::marker::Freeze for grit_lib::revwalk::filter::Pattern
+impl core::marker::Send for grit_lib::revwalk::filter::Pattern
+impl core::marker::Sync for grit_lib::revwalk::filter::Pattern
+impl core::marker::Unpin for grit_lib::revwalk::filter::Pattern
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::Pattern
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::Pattern
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::Pattern
 pub struct grit_lib::revwalk::RevWalk<'repo>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
@@ -15594,6 +16437,7 @@ impl<'repo> core::marker::UnsafeUnpin for grit_lib::revwalk::handle::RevWalk<'re
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::handle::RevWalk<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::handle::RevWalk<'repo>
 pub struct grit_lib::revwalk::RevWalkListOptions
+pub grit_lib::revwalk::RevWalkListOptions::commit_filter: core::option::Option<alloc::rcs::arc::Arc<grit_lib::revwalk::filter::CommitFilter>>
 pub grit_lib::revwalk::RevWalkListOptions::first_parent: bool
 pub grit_lib::revwalk::RevWalkListOptions::limit: core::option::Option<usize>
 pub grit_lib::revwalk::RevWalkListOptions::merges: grit_lib::revwalk::queries::MergeFilter
@@ -15605,14 +16449,10 @@ pub grit_lib::revwalk::RevWalkListOptions::skip: usize
 pub grit_lib::revwalk::RevWalkListOptions::until: core::option::Option<i64>
 impl core::clone::Clone for grit_lib::revwalk::queries::RevWalkListOptions
 pub fn grit_lib::revwalk::queries::RevWalkListOptions::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::revwalk::queries::RevWalkListOptions
-impl core::cmp::PartialEq for grit_lib::revwalk::queries::RevWalkListOptions
-pub fn grit_lib::revwalk::queries::RevWalkListOptions::eq(&self, &Self) -> bool
 impl core::default::Default for grit_lib::revwalk::queries::RevWalkListOptions
 pub fn grit_lib::revwalk::queries::RevWalkListOptions::default() -> Self
 impl core::fmt::Debug for grit_lib::revwalk::queries::RevWalkListOptions
 pub fn grit_lib::revwalk::queries::RevWalkListOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::revwalk::queries::RevWalkListOptions
 impl core::marker::Freeze for grit_lib::revwalk::queries::RevWalkListOptions
 impl core::marker::Send for grit_lib::revwalk::queries::RevWalkListOptions
 impl core::marker::Sync for grit_lib::revwalk::queries::RevWalkListOptions
@@ -15642,7 +16482,9 @@ impl core::marker::Unpin for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
+pub fn grit_lib::revwalk::committer_cutoff_from_date(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::revwalk::parse_rev_walk_tokens(&grit_lib::repo::Repository, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
+pub fn grit_lib::revwalk::resolve_log_walk_tips_and_hide(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub mod grit_lib::stash
 pub struct grit_lib::stash::FlatTreeEntry
 pub grit_lib::stash::FlatTreeEntry::mode: u32
@@ -15820,6 +16662,7 @@ pub fn grit_lib::state::read_orig_head(&std::path::Path) -> grit_lib::error::Res
 pub fn grit_lib::state::read_revert_head(&std::path::Path) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::state::repo_state(&std::path::Path, bool) -> grit_lib::error::Result<grit_lib::state::RepoState>
 pub fn grit_lib::state::resolve_head(&std::path::Path) -> grit_lib::error::Result<grit_lib::state::HeadState>
+pub fn grit_lib::state::resolve_head_for_repository(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::state::HeadState>
 pub fn grit_lib::state::split_commit_in_progress(&std::path::Path, &grit_lib::state::HeadState) -> bool
 pub fn grit_lib::state::upstream_tracking(&std::path::Path, &str) -> grit_lib::error::Result<core::option::Option<(usize, usize)>>
 pub fn grit_lib::state::wt_status_get_state(&std::path::Path, &grit_lib::state::HeadState, bool) -> grit_lib::error::Result<grit_lib::state::WtStatusState>

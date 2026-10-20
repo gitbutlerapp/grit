@@ -334,7 +334,10 @@ mod tests {
         .expect("install");
         let idx = read_pack_index(&idx_path).expect("read idx");
         assert_eq!(idx.len(), 1);
-        let offset = idx.find_offset(&blob).expect("blob in idx");
+        let offset = idx
+            .find_offset(&blob)
+            .expect("blob in idx")
+            .expect("offset");
         assert!(offset > 0, "pack index offset is positive");
         let pack_str = pack_path.to_str().expect("pack path utf-8");
         let out = grit_test_support::git_cmd(&["verify-pack", "-s", pack_str])
@@ -342,11 +345,15 @@ mod tests {
             .exec();
         assert!(out.ok(), "{}", out.dump("git verify-pack"));
         assert_eq!(
-            idx.find_offset(&blob),
-            Some(idx.offset_at(0)),
+            idx.find_offset(&blob).expect("lookup"),
+            Some(idx.offset_at(0).expect("off0")),
             "idx offset matches blob"
         );
-        assert_eq!(idx.find_offset(&blob), Some(offset), "idx offset stable");
+        assert_eq!(
+            idx.find_offset(&blob).expect("lookup"),
+            Some(offset),
+            "idx offset stable"
+        );
     }
 
     #[test]

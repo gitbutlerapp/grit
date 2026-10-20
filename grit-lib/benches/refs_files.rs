@@ -26,6 +26,7 @@ fn fixture_ready(path: &Path) -> bool {
     path.join("packed-refs").exists() || path.join("refs").is_dir()
 }
 
+#[derive(Clone)]
 struct RefsFilesFixture {
     git_dir: PathBuf,
 }

@@ -1057,9 +1057,35 @@ pub fn refresh_untracked_cache_for_status(
         uc,
     )?;
 
+    collapse_tracked_only_untr_subtree(&mut root);
     uc.root = Some(root);
 
     Ok(())
+}
+
+/// Mark UNTR nodes that contain only tracked paths so later status runs skip them.
+fn collapse_tracked_only_untr_subtree(dir: &mut UntrackedCacheDir) {
+    for child in dir.dirs.iter_mut() {
+        collapse_tracked_only_untr_subtree(child);
+    }
+    if !dir.untracked.is_empty() {
+        return;
+    }
+    if dir.dirs.is_empty() {
+        if !dir.name.is_empty() {
+            dir.check_only = true;
+            dir.recurse = true;
+        }
+        return;
+    }
+    if dir.name.is_empty() {
+        return;
+    }
+    if dir.dirs.iter().all(|child| child.check_only) {
+        dir.check_only = true;
+        dir.recurse = true;
+        dir.dirs.clear();
+    }
 }
 
 /// Collect untracked paths from a populated untracked cache tree.
@@ -1070,6 +1096,9 @@ pub fn refresh_untracked_cache_for_status(
 #[must_use]
 pub fn collect_untracked_from_cache(uc: &UntrackedCache) -> Vec<String> {
     fn walk(dir: &UntrackedCacheDir, rel: &str, out: &mut Vec<String>) {
+        if dir.check_only {
+            return;
+        }
         for name in &dir.untracked {
             if rel.is_empty() {
                 out.push(name.clone());
@@ -1889,6 +1918,22 @@ fn traditional_normal_directory_only(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collapse_tracked_only_never_marks_root_check_only() {
+        let mut root = UntrackedCacheDir::new(String::new());
+        root.valid = true;
+        root.recurse = true;
+        let mut child = UntrackedCacheDir::new("tracked".to_string());
+        child.valid = true;
+        child.recurse = true;
+        root.dirs.push(child);
+        collapse_tracked_only_untr_subtree(&mut root);
+        assert!(
+            !root.check_only,
+            "worktree root must stay traversable for UNTR invalidation"
+        );
+    }
 
     #[test]
     fn untracked_extension_round_trip_shell() {

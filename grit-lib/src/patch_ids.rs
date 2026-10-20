@@ -722,7 +722,7 @@ fn patch_id_append_git_show_entry(odb: &Odb, entry: &DiffEntry, out: &mut Vec<u8
         format!("b/{git_new}")
     };
     let unified = unified_diff_histogram_with_prefix_and_funcname(
-        old_str, new_str, &old_path, &new_path, 3, 0, "", "", None, false,
+        old_str, new_str, &old_path, &new_path, 3, 0, "", "", None, false, false,
     );
     out.extend_from_slice(unified.as_bytes());
     Ok(())

@@ -9,10 +9,12 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use grit_lib::diff::{count_changes_with_algorithm, diff_trees};
+use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use similar::Algorithm;
+use std::sync::Arc;
 
 use s7::HistoryBenchFixtures;
 
@@ -110,6 +112,31 @@ fn bench_revwalk_topo(c: &mut Criterion) {
 
 fn bench_revwalk_date(c: &mut Criterion) {
     revwalk_group(c, OrderingMode::DateOrderWalk, "date_order");
+}
+
+fn bench_revwalk_filter(c: &mut Criterion) {
+    let fx = HistoryBenchFixtures::global();
+    let filter = Arc::new(
+        CommitFilterBuilder::new()
+            .author(".")
+            .build()
+            .expect("author filter"),
+    );
+    let mut group = c.benchmark_group("revwalk_filter");
+    group.throughput(Throughput::Elements(fx.commit_count as u64));
+    fx.ensure_commit_graph();
+    group.bench_function("author_over_10k", |b| {
+        b.iter(|| {
+            let opts = RevListOptions {
+                commit_filter: Some(filter.clone()),
+                use_commit_graph: true,
+                ..Default::default()
+            };
+            let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+            black_box(result.commits.len())
+        });
+    });
+    group.finish();
 }
 
 fn bench_revwalk_limit_near_full_history(c: &mut Criterion) {
@@ -313,6 +340,7 @@ criterion_group!(
     bench_s1_rev_list_objects_v1,
     bench_revwalk_topo,
     bench_revwalk_date,
+    bench_revwalk_filter,
     bench_revwalk_path_limited,
     bench_log_first_1000_gitgit_like,
     bench_revwalk_limit_near_full_history,

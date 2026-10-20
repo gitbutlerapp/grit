@@ -522,6 +522,10 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use super::*;
+    use grit_test_support::heavy_disk_serial_guard;
+
+    /// Minimum entry count for parallel IEOT load (`2 * INDEX_LOAD_THREAD_COST`).
+    const LARGE_INDEX_ENTRIES: usize = 2 * INDEX_LOAD_THREAD_COST;
     use crate::config::ConfigSet;
     use crate::environment::Environment;
     use crate::index::{Index, IndexParseContext};
@@ -566,7 +570,8 @@ mod tests {
 
     #[test]
     fn read_eoie_finds_git_written_trailer() {
-        let (_tmp, bytes, _cfg) = git_index_with_eoie(25_000);
+        let _disk = heavy_disk_serial_guard();
+        let (_tmp, bytes, _cfg) = git_index_with_eoie(LARGE_INDEX_ENTRIES);
         let algo = HashAlgo::Sha1;
         let body = &bytes[..bytes.len() - algo.len()];
         let off = read_eoie_extension(body, algo).expect("valid git EOIE");
@@ -575,7 +580,8 @@ mod tests {
 
     #[test]
     fn parallel_ieot_entry_load_runs_for_large_git_index() {
-        let (_tmp, bytes, cfg) = git_index_with_eoie(25_000);
+        let _disk = heavy_disk_serial_guard();
+        let (_tmp, bytes, cfg) = git_index_with_eoie(LARGE_INDEX_ENTRIES);
         let algo = HashAlgo::Sha1;
         let body = &bytes[..bytes.len() - algo.len()];
         let ext_off = read_eoie_extension(body, algo).expect("EOIE");

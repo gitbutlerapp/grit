@@ -31,7 +31,7 @@ fn main() -> grit_lib::error::Result<()> {
             println!(
                 "  first oid: {} @ offset {}",
                 pack::oid_bytes_to_hex(e.oid()),
-                e.offset()
+                e.offset()?
             );
         }
     }

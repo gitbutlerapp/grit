@@ -372,7 +372,7 @@ fn idx_rev_identical_threads_1_2_4_8_deep_delta_chain() {
         let idx_path = scratch.path().join("t.idx");
         std::fs::write(&idx_path, &grit_idx).expect("write idx");
         let index = grit_lib::objects::pack::read_pack_index(&idx_path).expect("parse");
-        let offsets: Vec<u64> = index.iter().map(|e| e.offset()).collect();
+        let offsets: Vec<u64> = index.iter().map(|e| e.offset().expect("offset")).collect();
         let grit_rev =
             build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, trailer);
         if reference_rev.is_none() {

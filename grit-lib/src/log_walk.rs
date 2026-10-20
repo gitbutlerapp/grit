@@ -119,11 +119,15 @@ impl LogWalkCursor {
         };
 
         let commits = state.emit_until(repo, Some(limit), query.cutoffs)?;
+        if query.cutoffs.since.is_some() {
+            state.prune_heap_for_cutoffs(query.cutoffs);
+        }
         let walk_snapshot = state.snapshot();
-        let has_more = {
-            let mut probe = ReachableWalkState::from_snapshot(walk_snapshot.clone());
-            !probe.emit_until(repo, Some(1), query.cutoffs)?.is_empty()
-        };
+        let has_more = walk_has_emitting_commit_after_page(
+            repo,
+            &walk_snapshot,
+            query.cutoffs,
+        )?;
         let next = has_more.then(|| LogWalkCursor {
             query: query.clone(),
             walk: walk_snapshot,
@@ -155,6 +159,17 @@ impl LogWalkCursor {
             .map_err(|_| Error::CorruptObject("log walk cursor base64 decode failed".to_owned()))?;
         read_snapshot(&bytes)
     }
+}
+
+fn walk_has_emitting_commit_after_page(
+    repo: &Repository,
+    walk: &ReachableWalkSnapshot,
+    cutoffs: ReachableWalkCommitterCutoffs,
+) -> Result<bool> {
+    let mut probe = ReachableWalkState::from_snapshot(walk.clone());
+    Ok(!probe
+        .emit_until(repo, Some(1), cutoffs)?
+        .is_empty())
 }
 
 fn write_snapshot_v3(
@@ -518,6 +533,36 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn since_paging_no_next_when_page_covers_all_matching_commits() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let since = 250i64;
+        let c1 = write_commit(&repo.odb(), &[], "c1", 100)?;
+        let c2 = write_commit(&repo.odb(), &[c1], "c2", 200)?;
+        let c3 = write_commit(&repo.odb(), &[c2], "c3", 300)?;
+        let tip = write_commit(&repo.odb(), &[c3], "tip", 400)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
+
+        let cutoffs = ReachableWalkCommitterCutoffs {
+            since: Some(since),
+            until: None,
+        };
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs,
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 1)?;
+        assert_eq!(page.commits, vec![tip]);
+        assert!(page.next.is_some());
+        let page2 = LogWalkCursor::step(&repo, &query, page.next.as_ref(), 1)?;
+        assert_eq!(page2.commits, vec![c3]);
+        assert!(page2.next.is_none());
+        Ok(())
     }
 
     #[test]

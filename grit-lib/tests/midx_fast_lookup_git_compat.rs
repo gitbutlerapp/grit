@@ -349,6 +349,6 @@ fn midx_lookup_uses_binary_search() {
             .clone();
         let idx_path = pack_dir.join(idx_name);
         let idx = read_pack_index_cached(&idx_path).expect("idx");
-        assert_eq!(idx.find_offset(&oid), Some(off));
+        assert_eq!(idx.find_offset(&oid).expect("lookup"), Some(off));
     }
 }

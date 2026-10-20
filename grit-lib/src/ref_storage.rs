@@ -69,7 +69,16 @@ impl RefStorageFormat {
     /// Propagates I/O and repository format errors when local config is invalid.
     pub fn detect(git_dir: &Path) -> Result<Self> {
         let parsed = read_repository_format_from_git_dir(git_dir)?;
-        validate_repository_format_parsed(&parsed)?;
+        Self::from_repository_format(&parsed)
+    }
+
+    /// Resolve ref storage from an already-parsed repository-local format block.
+    ///
+    /// # Errors
+    ///
+    /// Propagates repository format validation and invalid `extensions.refStorage` values.
+    pub(crate) fn from_repository_format(parsed: &crate::repo::RepositoryFormat) -> Result<Self> {
+        validate_repository_format_parsed(parsed)?;
         match parsed.ref_storage.as_deref() {
             None => Ok(Self::Files),
             Some(raw) => Self::parse_config_value(raw),
@@ -95,4 +104,37 @@ impl RefStorageFormat {
 /// Detect ref storage format for `git_dir` (see [`RefStorageFormat::detect`]).
 pub fn detect_format(git_dir: &Path) -> Result<RefStorageFormat> {
     RefStorageFormat::detect(git_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn detect_reflects_rewritten_ref_storage_without_repository() {
+        let tmp = TempDir::new().expect("tempdir");
+        let git_dir = tmp.path().join(".git");
+        fs::create_dir_all(&git_dir).expect("git dir");
+        fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n",
+        )
+        .expect("config");
+        assert_eq!(
+            RefStorageFormat::detect(&git_dir).expect("detect"),
+            RefStorageFormat::Files
+        );
+
+        fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 1\n[extensions]\n\trefStorage = reftable\n",
+        )
+        .expect("rewrite");
+        assert_eq!(
+            RefStorageFormat::detect(&git_dir).expect("detect again"),
+            RefStorageFormat::Reftable
+        );
+    }
 }

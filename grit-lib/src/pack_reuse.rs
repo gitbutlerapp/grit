@@ -142,7 +142,7 @@ impl StreamingReuse {
             Err(_) => return Ok(None),
         };
         self.note_verbatim(written);
-        if let Some(entry_off) = self.pack.idx.find_offset(oid) {
+        if let Some(entry_off) = self.pack.idx.find_offset(oid)? {
             self.source_to_output.insert(entry_off, out_offset);
         }
         Ok(Some(written))
@@ -161,13 +161,13 @@ impl StreamingReuse {
         if !self.marks_reuse(oid) {
             return Ok(None);
         }
-        let Some(entry_off) = self.pack.idx.find_offset(oid) else {
+        let Some(entry_off) = self.pack.idx.find_offset(oid)? else {
             return Ok(None);
         };
         let pack_bytes = self.pack.pack_bytes.as_ref();
         let mut offset_map: HashMap<u64, u64> = self.source_to_output.clone();
         for (base_oid, out_off) in oid_to_offset {
-            if let Some(src) = self.pack.idx.find_offset(base_oid) {
+            if let Some(src) = self.pack.idx.find_offset(base_oid)? {
                 offset_map.entry(src).or_insert(*out_off);
             }
         }
@@ -369,10 +369,10 @@ fn compute_reuse_bits(
             let Ok(oid) = send_set.bitmap_index().oid_at(pos) else {
                 continue;
             };
-            let Some(entry_off) = pack.idx.find_offset(&oid) else {
+            let Some(entry_off) = pack.idx.find_offset(&oid)? else {
                 continue;
             };
-            if !entry_crc_ok(&pack.idx, pack_bytes, entry_off) {
+            if !entry_crc_ok(&pack.idx, pack_bytes, entry_off)? {
                 continue;
             }
             let mut p = entry_off as usize;
@@ -398,7 +398,7 @@ fn compute_reuse_bits(
                     if !reuse.get(base_pos as usize) {
                         continue;
                     }
-                    let Some(base_off) = pack.idx.find_offset(&base_oid) else {
+                    let Some(base_off) = pack.idx.find_offset(&base_oid)? else {
                         continue;
                     };
                     let mut bp = base_off as usize;
@@ -420,14 +420,14 @@ fn compute_reuse_bits(
     Ok(reuse)
 }
 
-fn entry_crc_ok(idx: &PackIndex, pack_bytes: &[u8], entry_off: u64) -> bool {
-    let Some(end) = pack_entry_raw_end(idx, pack_bytes, entry_off) else {
-        return false;
+fn entry_crc_ok(idx: &PackIndex, pack_bytes: &[u8], entry_off: u64) -> Result<bool> {
+    let Some(end) = pack_entry_raw_end(idx, pack_bytes, entry_off)? else {
+        return Ok(false);
     };
     let slice = &pack_bytes[entry_off as usize..end];
-    match idx.crc32_for_pack_offset(entry_off) {
-        Some(crc) => crc32fast::hash(slice) == crc,
-        None => true,
+    match idx.crc32_for_pack_offset(entry_off)? {
+        Some(crc) => Ok(crc32fast::hash(slice) == crc),
+        None => Ok(true),
     }
 }
 
@@ -444,7 +444,7 @@ fn delta_base_oid(
     Ok(Some(match dep {
         PackedDeltaDependency::RefBase { base_oid } => base_oid,
         PackedDeltaDependency::OfsBase { base_offset } => {
-            let Some(row) = find_position_by_pack_offset(idx, base_offset) else {
+            let Some(row) = find_position_by_pack_offset(idx, base_offset)? else {
                 return Ok(None);
             };
             ObjectId::from_bytes(idx.oid_at(row))?
@@ -482,13 +482,13 @@ fn write_one_reused(
     pack_offset: u64,
     in_pack_base: Option<u64>,
 ) -> Result<u64> {
-    let Some(end) = pack_entry_raw_end(&pack.idx, pack_bytes, entry_off) else {
+    let Some(end) = pack_entry_raw_end(&pack.idx, pack_bytes, entry_off)? else {
         return Err(Error::CorruptObject(
             "truncated reused pack entry".to_owned(),
         ));
     };
     let slice = &pack_bytes[entry_off as usize..end];
-    if let Some(crc) = pack.idx.crc32_for_pack_offset(entry_off) {
+    if let Some(crc) = pack.idx.crc32_for_pack_offset(entry_off)? {
         if crc32fast::hash(slice) != crc {
             return Err(Error::CorruptObject("pack reuse CRC mismatch".to_owned()));
         }
@@ -567,7 +567,7 @@ fn write_ref_delta_from_ofs(
     let base_oid = match dep {
         PackedDeltaDependency::RefBase { base_oid } => base_oid,
         PackedDeltaDependency::OfsBase { base_offset } => {
-            let row = find_position_by_pack_offset(&pack.idx, base_offset).ok_or_else(|| {
+            let row = find_position_by_pack_offset(&pack.idx, base_offset)?.ok_or_else(|| {
                 Error::CorruptObject("ofs delta base missing from index".to_owned())
             })?;
             ObjectId::from_bytes(pack.idx.oid_at(row))?

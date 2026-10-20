@@ -223,6 +223,7 @@ fn single_local_pack_offset(objects: &Path, oid: &ObjectId) -> u64 {
         .expect("pack idx");
     let idx = read_pack_index(&idx_path).expect("read idx");
     idx.find_offset(oid)
+        .expect("lookup")
         .unwrap_or_else(|| panic!("oid {} missing from {}", oid.to_hex(), idx_path.display()))
 }
 

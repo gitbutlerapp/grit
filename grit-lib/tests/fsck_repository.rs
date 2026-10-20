@@ -774,7 +774,7 @@ fn idx_oid_content_mismatch_returns_fsck_report_not_error() {
         .map(|e| {
             (
                 ObjectId::from_bytes(e.oid()).expect("oid"),
-                e.offset(),
+                e.offset().expect("offset"),
                 e.crc32().unwrap_or(0),
             )
         })

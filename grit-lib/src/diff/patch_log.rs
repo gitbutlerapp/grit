@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 use std::io::Write;
 
+use super::structured::{StructuredFileDiff, StructuredLine, StructuredLineKind};
 use crate::attributes::load_gitattributes_for_check_attr_source;
-use crate::blame::{parse_diff_algorithm_name, BlameDiffAlgorithm};
 use crate::commit_pretty::{
     abbrev_hex, approximate_object_count, auto_abbrev_len_for_object_count,
 };
 use crate::config::ConfigSet;
+use crate::diff::options::DiffOptions;
 use crate::error::Result;
 use crate::merge_file;
 use crate::objects::CommitData;
@@ -19,64 +20,7 @@ use crate::quote_path::format_diff_path_with_prefix;
 use crate::repo::Repository;
 use crate::userdiff::{matcher_for_path_parsed, FuncnameMatcher};
 
-use super::{
-    diff_trees, empty_blob_oid, write_unified_diff_with_prefix_and_funcname_and_algorithm,
-    zero_oid, DiffEntry, DiffStatus,
-};
-
-/// Line diff settings for [`write_commit_log_patch`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LogPatchDiffOptions {
-    /// Context lines (`-U`, default 3).
-    pub context_lines: usize,
-    /// `--inter-hunk-context` (default 0).
-    pub inter_hunk_context: usize,
-    /// Line diff algorithm (Myers, patience, …).
-    pub algorithm: similar::Algorithm,
-    /// Use Git's histogram engine (`diff.algorithm = histogram`).
-    pub use_git_histogram: bool,
-    /// Apply Git's indent heuristic when generating hunks.
-    pub indent_heuristic: bool,
-}
-
-impl Default for LogPatchDiffOptions {
-    fn default() -> Self {
-        Self {
-            context_lines: 3,
-            inter_hunk_context: 0,
-            algorithm: similar::Algorithm::Myers,
-            use_git_histogram: false,
-            indent_heuristic: false,
-        }
-    }
-}
-
-impl LogPatchDiffOptions {
-    /// Resolve options from repository config (`diff.algorithm`, indent heuristic).
-    #[must_use]
-    pub fn from_config(config: &ConfigSet) -> Self {
-        let mut opts = Self::default();
-        if let Some(name) = config.get("diff.algorithm") {
-            if let Some(parsed) = parse_diff_algorithm_name(&name) {
-                match parsed {
-                    BlameDiffAlgorithm::Histogram => {
-                        opts.use_git_histogram = true;
-                        opts.algorithm = similar::Algorithm::Myers;
-                    }
-                    BlameDiffAlgorithm::Patience => {
-                        opts.algorithm = similar::Algorithm::Patience;
-                    }
-                    BlameDiffAlgorithm::Minimal => {
-                        opts.algorithm = similar::Algorithm::Lcs;
-                    }
-                    BlameDiffAlgorithm::Myers => {}
-                }
-            }
-        }
-        opts.indent_heuristic = super::resolve_indent_heuristic(config, false, false);
-        opts
-    }
-}
+use super::{diff_trees, empty_blob_oid, zero_oid, DiffEntry, DiffStatus};
 
 /// How much commit metadata precedes each patch in [`write_commit_log_patch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -89,10 +33,10 @@ pub enum LogPatchCommitHeader {
 }
 
 /// Options for [`write_commit_log_patch`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct LogPatchOptions {
     /// Unified diff hunk settings.
-    pub diff: LogPatchDiffOptions,
+    pub diff: DiffOptions,
     /// Minimum abbreviated oid length (`core.abbrev`, default 7).
     pub abbrev_len: usize,
     /// Commit header shape before patches.
@@ -104,11 +48,336 @@ impl LogPatchOptions {
     #[must_use]
     pub fn git_default(config: &ConfigSet) -> Self {
         Self {
-            diff: LogPatchDiffOptions::from_config(config),
+            diff: DiffOptions::from_config(config),
             abbrev_len: 7,
             commit_header: LogPatchCommitHeader::Full,
         }
     }
+}
+
+/// Options for [`write_patch`] (`git diff --binary`-compatible output for `git apply`).
+#[derive(Debug, Clone)]
+pub struct PatchTextOptions {
+    /// Unified diff hunk settings (algorithm, context, whitespace, renames).
+    pub diff: DiffOptions,
+    /// Minimum abbreviated oid length on `index` lines for text files (`core.abbrev`).
+    pub abbrev_len: usize,
+}
+
+impl PatchTextOptions {
+    /// Resolve `core.abbrev` and attach line-diff options.
+    ///
+    /// # Errors
+    ///
+    /// Propagates config and ODB errors from abbrev resolution.
+    pub fn from_repo(repo: &Repository, diff: DiffOptions) -> Result<Self> {
+        let config = repo.config()?.clone();
+        Ok(Self {
+            diff,
+            abbrev_len: resolve_core_abbrev_len(&config, repo.odb())?,
+        })
+    }
+}
+
+/// Write `git diff --binary`-style patches for tree diff entries (for `git apply`).
+///
+/// Emits `diff --git` headers, `index` lines, unified hunks or `GIT binary patch` bodies.
+///
+/// # Errors
+///
+/// Propagates ODB reads, diff generation, and I/O errors.
+pub fn write_patch<W: Write>(
+    repo: &Repository,
+    entries: &[DiffEntry],
+    opts: &PatchTextOptions,
+    out: &mut W,
+) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let odb = repo.odb();
+    let config = repo.config()?.clone();
+    let thread_policy = repo.thread_policy();
+    let log_opts = LogPatchOptions {
+        diff: opts.diff,
+        abbrev_len: opts.abbrev_len,
+        commit_header: LogPatchCommitHeader::FormatPercentH,
+    };
+    let mut par_opts = thread_policy.resolve(crate::parallel::ParallelOp::DiffContent, &config);
+    par_opts.min_items = 0;
+    par_opts.min_total_bytes = None;
+    let store = odb.pack_store_for(odb.objects_dir());
+    let entries_vec = entries.to_vec();
+    let abbrev_len = opts.abbrev_len;
+    let mut abbrev_cache = OidAbbrevCache::new(abbrev_len);
+    let oids = entries_vec.iter().flat_map(|e| [e.old_oid, e.new_oid]);
+    abbrev_cache.warm_for_patch_batch(repo, oids, &thread_policy, &config)?;
+    let chunks = match crate::parallel::try_par_map_with_local(
+        &entries_vec,
+        par_opts,
+        0,
+        || crate::objects::pack_store::PackReadContextGuard::install(std::sync::Arc::clone(&store)),
+        |_ctx, entry| {
+            let mut buf = Vec::new();
+            let mut abbrev_cache = abbrev_cache.clone();
+            write_diff_entry_patch(
+                &mut buf,
+                repo,
+                odb,
+                entry,
+                &log_opts,
+                &mut abbrev_cache,
+                None,
+                DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
+                &config,
+            )?;
+            Ok(buf)
+        },
+    ) {
+        Ok(rows) => rows,
+        Err(crate::parallel::ParallelHashError::Task(err)) => return Err(err),
+    };
+    for chunk in chunks {
+        out.write_all(&chunk)?;
+    }
+    Ok(())
+}
+
+/// Write patch text from precomputed [`TreeDiffStructured`](super::tree_content::TreeDiffStructured) rows.
+///
+/// Use after [`super::tree_diff_structured_parallel`] (or `grit diff`'s commit-range path) to avoid
+/// recomputing line diffs.
+///
+/// # Errors
+///
+/// Propagates ODB reads and I/O errors.
+pub fn write_patch_structured<W: Write>(
+    repo: &Repository,
+    items: &[super::tree_content::TreeDiffStructured],
+    opts: &PatchTextOptions,
+    out: &mut W,
+) -> Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let odb = repo.odb();
+    let config = repo.config()?.clone();
+    let thread_policy = repo.thread_policy();
+    let log_opts = LogPatchOptions {
+        diff: opts.diff,
+        abbrev_len: opts.abbrev_len,
+        commit_header: LogPatchCommitHeader::FormatPercentH,
+    };
+    let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
+    let oids = items
+        .iter()
+        .flat_map(|item| [item.entry.old_oid, item.entry.new_oid]);
+    abbrev_cache.warm_for_patch_batch(repo, oids, &thread_policy, &config)?;
+    for item in items {
+        write_diff_entry_patch_from_structured(
+            out,
+            repo,
+            odb,
+            &item.entry,
+            &log_opts,
+            &mut abbrev_cache,
+            item.binary,
+            &item.structured,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_structured_line<W: Write>(out: &mut W, prefix: char, line: &StructuredLine) -> Result<()> {
+    write!(out, "{prefix}")?;
+    for segment in &line.segments {
+        write!(out, "{}", segment.text)?;
+    }
+    Ok(())
+}
+
+fn format_git_diff_hunk_side(start_1based: usize, line_count: usize) -> String {
+    if line_count == 1 {
+        format!("{start_1based}")
+    } else {
+        format!("{start_1based},{line_count}")
+    }
+}
+
+fn write_structured_unified_body<W: Write>(
+    out: &mut W,
+    git_old: &str,
+    git_new: &str,
+    old_mode: u32,
+    new_mode: u32,
+    structured: &StructuredFileDiff,
+) -> Result<()> {
+    const QUOTE_FULLY: bool = true;
+    let old_path = if old_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        format_diff_path_with_prefix("a/", git_old, QUOTE_FULLY)
+    };
+    let new_path = if new_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
+    };
+    writeln!(out, "--- {old_path}")?;
+    writeln!(out, "+++ {new_path}")?;
+    for hunk in &structured.hunks {
+        writeln!(
+            out,
+            "@@ -{} +{} @@",
+            format_git_diff_hunk_side(hunk.old_start, hunk.old_lines),
+            format_git_diff_hunk_side(hunk.new_start, hunk.new_lines),
+        )?;
+        for line in &hunk.lines {
+            let prefix = match line.kind {
+                StructuredLineKind::Context => ' ',
+                StructuredLineKind::Add => '+',
+                StructuredLineKind::Del => '-',
+            };
+            if line.no_newline_at_eof {
+                write_structured_line(out, prefix, line)?;
+                writeln!(out)?;
+                writeln!(out, "\\ No newline at end of file")?;
+            } else {
+                write_structured_line(out, prefix, line)?;
+                writeln!(out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_diff_entry_patch_from_structured<W: Write>(
+    out: &mut W,
+    repo: &Repository,
+    odb: &Odb,
+    entry: &DiffEntry,
+    opts: &LogPatchOptions,
+    abbrev_cache: &mut OidAbbrevCache,
+    is_binary: bool,
+    structured: &StructuredFileDiff,
+) -> Result<()> {
+    write_diff_entry_patch_headers(out, repo, entry, opts, abbrev_cache, is_binary)?;
+    let old_mode = log_patch_parse_mode_u32(&entry.old_mode);
+    let new_mode = log_patch_parse_mode_u32(&entry.new_mode);
+    let git_old = entry
+        .old_path
+        .as_deref()
+        .or(entry.new_path.as_deref())
+        .unwrap_or("dev/null");
+    let git_new = entry
+        .new_path
+        .as_deref()
+        .or(entry.old_path.as_deref())
+        .unwrap_or("dev/null");
+    if entry.old_oid == entry.new_oid {
+        return Ok(());
+    }
+    let use_structured = !is_binary
+        && !structured.hunks.is_empty()
+        && !structured.old_encoding_lossy
+        && !structured.new_encoding_lossy;
+    if use_structured {
+        write_structured_unified_body(out, git_old, git_new, old_mode, new_mode, structured)?;
+        return Ok(());
+    }
+    let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0)?;
+    let new_bytes = read_blob_side(odb, entry.new_oid, new_mode == 0)?;
+    if old_bytes == new_bytes {
+        return Ok(());
+    }
+    if is_binary {
+        crate::apply::write_git_binary_patch_sections(out, &old_bytes, &new_bytes)?;
+        return Ok(());
+    }
+    write_patch_unified_body_from_bytes(
+        out, &old_bytes, &new_bytes, git_old, git_new, old_mode, new_mode, opts,
+    )
+}
+
+/// Unified hunk body for `git diff --binary` (no funcname context).
+#[allow(clippy::too_many_arguments)]
+fn write_patch_unified_body_from_bytes<W: Write>(
+    out: &mut W,
+    old_bytes: &[u8],
+    new_bytes: &[u8],
+    git_old: &str,
+    git_new: &str,
+    old_mode: u32,
+    new_mode: u32,
+    opts: &LogPatchOptions,
+) -> Result<()> {
+    const QUOTE_FULLY: bool = true;
+    let byte_oriented = !crate::commit_encoding::is_strict_utf8(old_bytes)
+        || !crate::commit_encoding::is_strict_utf8(new_bytes);
+    let (old_text, new_text) = if byte_oriented {
+        (
+            crate::commit_encoding::decode_latin1(old_bytes),
+            crate::commit_encoding::decode_latin1(new_bytes),
+        )
+    } else {
+        let old_s = std::str::from_utf8(old_bytes)
+            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
+        let new_s = std::str::from_utf8(new_bytes)
+            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
+        (old_s.to_owned(), new_s.to_owned())
+    };
+    let old_path = if old_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        git_old.to_owned()
+    };
+    let new_path = if new_mode == 0 {
+        "/dev/null".to_owned()
+    } else {
+        git_new.to_owned()
+    };
+    let d = &opts.diff;
+    if byte_oriented {
+        let mut patch_buf = Vec::new();
+        super::write_unified_diff_from_diff_options(
+            &mut patch_buf,
+            &old_text,
+            &new_text,
+            &old_path,
+            &new_path,
+            "a/",
+            "b/",
+            None,
+            d,
+            QUOTE_FULLY,
+        )?;
+        let patch_str = std::str::from_utf8(&patch_buf)
+            .map_err(|_| crate::error::Error::CorruptObject("patch re-encoding failed".into()))?;
+        out.write_all(&crate::commit_encoding::encode_latin1_lossy(patch_str))?;
+    } else {
+        super::write_unified_diff_from_diff_options(
+            out,
+            &old_text,
+            &new_text,
+            &old_path,
+            &new_path,
+            "a/",
+            "b/",
+            None,
+            d,
+            QUOTE_FULLY,
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiffEntryPatchBinaryFormat {
+    /// `Binary files a/... and b/... differ` (log/show without `--binary`).
+    LogShortMessage,
+    /// `GIT binary patch` sections (`git diff --binary`, `git apply`).
+    GitApplyBinaryPatch,
 }
 
 fn resolve_core_abbrev_len(config: &ConfigSet, odb: &Odb) -> Result<usize> {
@@ -130,7 +399,7 @@ fn effective_log_patch_options(
     opts: &LogPatchOptions,
 ) -> Result<LogPatchOptions> {
     let config = repo.config()?.clone();
-    let mut out = opts.clone();
+    let mut out = *opts;
     out.abbrev_len = resolve_core_abbrev_len(&config, repo.odb())?;
     Ok(out)
 }
@@ -306,9 +575,10 @@ fn write_parsed_commit_log_patch<W: Write>(
             writeln!(out)?;
         }
     }
+    let config = repo.config()?.clone();
     let entries = diff_trees(odb, parent_tree.as_ref(), Some(&commit.tree), "")?;
     for entry in entries {
-        write_diff_entry_log_patch_with_tree(
+        write_diff_entry_patch(
             out,
             repo,
             odb,
@@ -316,6 +586,8 @@ fn write_parsed_commit_log_patch<W: Write>(
             opts,
             abbrev_cache,
             Some(&commit.tree),
+            DiffEntryPatchBinaryFormat::LogShortMessage,
+            &config,
         )?;
     }
     Ok(())
@@ -416,20 +688,34 @@ pub fn write_diff_entry_log_patch<W: Write>(
     entry: &DiffEntry,
     opts: &LogPatchOptions,
 ) -> Result<()> {
+    let config = repo.config()?.clone();
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
-    write_diff_entry_log_patch_with_tree(out, repo, odb, entry, opts, &mut abbrev_cache, None)
+    write_diff_entry_patch(
+        out,
+        repo,
+        odb,
+        entry,
+        opts,
+        &mut abbrev_cache,
+        None,
+        DiffEntryPatchBinaryFormat::LogShortMessage,
+        &config,
+    )
 }
 
-fn write_diff_entry_log_patch_with_tree<W: Write>(
+fn index_oid_full(oid: &ObjectId) -> String {
+    oid.to_hex()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_diff_entry_patch_headers<W: Write>(
     out: &mut W,
     repo: &Repository,
-    odb: &Odb,
     entry: &DiffEntry,
     opts: &LogPatchOptions,
     abbrev_cache: &mut OidAbbrevCache,
-    new_tree: Option<&ObjectId>,
+    index_full_oid: bool,
 ) -> Result<()> {
-    let config = repo.config()?.clone();
     let git_old = entry
         .old_path
         .as_deref()
@@ -489,82 +775,138 @@ fn write_diff_entry_log_patch_with_tree<W: Write>(
         } else {
             entry.old_mode.trim()
         };
+        let mut index_pair = |old: &ObjectId, new: &ObjectId| -> Result<(String, String)> {
+            if index_full_oid {
+                Ok((index_oid_full(old), index_oid_full(new)))
+            } else {
+                abbrev_index_pair(abbrev_cache, repo, old, new, opts.abbrev_len)
+            }
+        };
         match entry.status {
             DiffStatus::Added => {
-                let (old_a, new_a) = abbrev_index_pair(
-                    abbrev_cache,
-                    repo,
-                    &zero_oid(),
-                    &entry.new_oid,
-                    opts.abbrev_len,
-                )?;
+                let (old_a, new_a) = index_pair(&zero_oid(), &entry.new_oid)?;
                 writeln!(out, "index {old_a}..{new_a}")?;
             }
             DiffStatus::Deleted => {
-                let (old_a, new_a) = abbrev_index_pair(
-                    abbrev_cache,
-                    repo,
-                    &entry.old_oid,
-                    &zero_oid(),
-                    opts.abbrev_len,
-                )?;
+                let (old_a, new_a) = index_pair(&entry.old_oid, &zero_oid())?;
                 writeln!(out, "index {old_a}..{new_a}")?;
             }
             DiffStatus::Renamed | DiffStatus::Copied => {
-                let (old_a, new_a) = abbrev_index_pair(
-                    abbrev_cache,
-                    repo,
-                    &entry.old_oid,
-                    &entry.new_oid,
-                    opts.abbrev_len,
-                )?;
+                let (old_a, new_a) = index_pair(&entry.old_oid, &entry.new_oid)?;
                 writeln!(out, "index {old_a}..{new_a}")?;
             }
             _ => {
-                let (old_a, new_a) = abbrev_index_pair(
-                    abbrev_cache,
-                    repo,
-                    &entry.old_oid,
-                    &entry.new_oid,
-                    opts.abbrev_len,
-                )?;
+                let (old_a, new_a) = index_pair(&entry.old_oid, &entry.new_oid)?;
                 writeln!(out, "index {old_a}..{new_a} {index_mode}")?;
             }
         }
     }
+    Ok(())
+}
 
+#[allow(clippy::too_many_arguments)]
+fn write_diff_entry_patch<W: Write>(
+    out: &mut W,
+    repo: &Repository,
+    odb: &Odb,
+    entry: &DiffEntry,
+    opts: &LogPatchOptions,
+    abbrev_cache: &mut OidAbbrevCache,
+    new_tree: Option<&ObjectId>,
+    binary_format: DiffEntryPatchBinaryFormat,
+    config: &ConfigSet,
+) -> Result<()> {
+    let old_mode = log_patch_parse_mode_u32(&entry.old_mode);
+    let new_mode = log_patch_parse_mode_u32(&entry.new_mode);
     let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0)?;
     let new_bytes = read_blob_side(odb, entry.new_oid, new_mode == 0)?;
+    write_diff_entry_patch_with_resolved_bytes(
+        out,
+        repo,
+        entry,
+        opts,
+        abbrev_cache,
+        binary_format,
+        config,
+        &old_bytes,
+        &new_bytes,
+        new_tree,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
+    out: &mut W,
+    repo: &Repository,
+    entry: &DiffEntry,
+    opts: &LogPatchOptions,
+    abbrev_cache: &mut OidAbbrevCache,
+    binary_format: DiffEntryPatchBinaryFormat,
+    config: &ConfigSet,
+    old_bytes: &[u8],
+    new_bytes: &[u8],
+    new_tree: Option<&ObjectId>,
+) -> Result<()> {
+    const QUOTE_FULLY: bool = true;
+    let git_old = entry
+        .old_path
+        .as_deref()
+        .or(entry.new_path.as_deref())
+        .unwrap_or("dev/null");
+    let git_new = entry
+        .new_path
+        .as_deref()
+        .or(entry.old_path.as_deref())
+        .unwrap_or("dev/null");
+    let old_mode = log_patch_parse_mode_u32(&entry.old_mode);
+    let new_mode = log_patch_parse_mode_u32(&entry.new_mode);
+    let is_binary = merge_file::is_binary(old_bytes) || merge_file::is_binary(new_bytes);
+    let index_full_oid =
+        is_binary && binary_format == DiffEntryPatchBinaryFormat::GitApplyBinaryPatch;
+    write_diff_entry_patch_headers(out, repo, entry, opts, abbrev_cache, index_full_oid)?;
+
     if old_bytes == new_bytes {
         return Ok(());
     }
 
-    if merge_file::is_binary(&old_bytes) || merge_file::is_binary(&new_bytes) {
-        let old_side = if old_mode == 0 {
-            "/dev/null".to_owned()
-        } else {
-            format_diff_path_with_prefix("a/", git_old, QUOTE_FULLY)
-        };
-        let new_side = if new_mode == 0 {
-            "/dev/null".to_owned()
-        } else {
-            format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
-        };
-        writeln!(out, "Binary files {old_side} and {new_side} differ")?;
+    if is_binary {
+        match binary_format {
+            DiffEntryPatchBinaryFormat::LogShortMessage => {
+                let old_side = if old_mode == 0 {
+                    "/dev/null".to_owned()
+                } else {
+                    format_diff_path_with_prefix("a/", git_old, QUOTE_FULLY)
+                };
+                let new_side = if new_mode == 0 {
+                    "/dev/null".to_owned()
+                } else {
+                    format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
+                };
+                writeln!(out, "Binary files {old_side} and {new_side} differ")?;
+            }
+            DiffEntryPatchBinaryFormat::GitApplyBinaryPatch => {
+                crate::apply::write_git_binary_patch_sections(out, old_bytes, new_bytes)?;
+            }
+        }
         return Ok(());
     }
 
-    let byte_oriented = !crate::commit_encoding::is_strict_utf8(&old_bytes)
-        || !crate::commit_encoding::is_strict_utf8(&new_bytes);
+    if binary_format == DiffEntryPatchBinaryFormat::GitApplyBinaryPatch && new_tree.is_none() {
+        return write_patch_unified_body_from_bytes(
+            out, old_bytes, new_bytes, git_old, git_new, old_mode, new_mode, opts,
+        );
+    }
+    let byte_oriented = !crate::commit_encoding::is_strict_utf8(old_bytes)
+        || !crate::commit_encoding::is_strict_utf8(new_bytes);
     let (old_text, new_text) = if byte_oriented {
         (
-            crate::commit_encoding::decode_latin1(&old_bytes),
-            crate::commit_encoding::decode_latin1(&new_bytes),
+            crate::commit_encoding::decode_latin1(old_bytes),
+            crate::commit_encoding::decode_latin1(new_bytes),
         )
     } else {
-        let old_s = std::str::from_utf8(&old_bytes)
+        let old_s = std::str::from_utf8(old_bytes)
             .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
-        let new_s = std::str::from_utf8(&new_bytes)
+        let new_s = std::str::from_utf8(new_bytes)
             .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
         (old_s.to_owned(), new_s.to_owned())
     };
@@ -580,50 +922,94 @@ fn write_diff_entry_log_patch_with_tree<W: Write>(
     };
     let d = &opts.diff;
     let funcname_matcher = if let Some(tree) = new_tree {
-        log_patch_funcname_matcher(repo, &config, tree, git_new)?
+        log_patch_funcname_matcher(repo, config, tree, git_new)?
     } else {
         None
     };
     let funcname_ref = funcname_matcher.as_ref();
     if byte_oriented {
         let mut patch_buf = Vec::new();
-        write_unified_diff_with_prefix_and_funcname_and_algorithm(
+        super::write_unified_diff_from_diff_options(
             &mut patch_buf,
             &old_text,
             &new_text,
             &old_path,
             &new_path,
-            d.context_lines,
-            d.inter_hunk_context,
             "a/",
             "b/",
             funcname_ref,
-            d.algorithm,
-            false,
-            d.use_git_histogram,
-            d.indent_heuristic,
+            d,
             QUOTE_FULLY,
         )?;
         let patch_str = std::str::from_utf8(&patch_buf)
             .map_err(|_| crate::error::Error::CorruptObject("patch re-encoding failed".into()))?;
         out.write_all(&crate::commit_encoding::encode_latin1_lossy(patch_str))?;
     } else {
-        write_unified_diff_with_prefix_and_funcname_and_algorithm(
+        super::write_unified_diff_from_diff_options(
             out,
             &old_text,
             &new_text,
             &old_path,
             &new_path,
-            d.context_lines,
-            d.inter_hunk_context,
             "a/",
             "b/",
             funcname_ref,
-            d.algorithm,
-            false,
-            d.use_git_histogram,
-            d.indent_heuristic,
+            d,
             QUOTE_FULLY,
+        )?;
+    }
+    Ok(())
+}
+
+/// One file with both sides already resolved (worktree/index paths).
+#[derive(Debug, Clone)]
+pub struct PatchResolvedSide {
+    /// Tree diff metadata.
+    pub entry: DiffEntry,
+    /// Old side bytes.
+    pub old_bytes: Vec<u8>,
+    /// New side bytes.
+    pub new_bytes: Vec<u8>,
+}
+
+/// Write patch text when blob bytes are already loaded (worktree diffs).
+///
+/// # Errors
+///
+/// Propagates ODB reads and I/O errors.
+pub fn write_patch_resolved<W: Write>(
+    repo: &Repository,
+    files: &[PatchResolvedSide],
+    opts: &PatchTextOptions,
+    out: &mut W,
+) -> Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let config = repo.config()?.clone();
+    let thread_policy = repo.thread_policy();
+    let log_opts = LogPatchOptions {
+        diff: opts.diff,
+        abbrev_len: opts.abbrev_len,
+        commit_header: LogPatchCommitHeader::FormatPercentH,
+    };
+    let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
+    let oids = files
+        .iter()
+        .flat_map(|f| [f.entry.old_oid, f.entry.new_oid]);
+    abbrev_cache.warm_for_patch_batch(repo, oids, &thread_policy, &config)?;
+    for file in files {
+        write_diff_entry_patch_with_resolved_bytes(
+            out,
+            repo,
+            &file.entry,
+            &log_opts,
+            &mut abbrev_cache,
+            DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
+            &config,
+            &file.old_bytes,
+            &file.new_bytes,
+            None,
         )?;
     }
     Ok(())

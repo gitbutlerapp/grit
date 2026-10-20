@@ -122,7 +122,7 @@ fn oracle_index_and_reads(repo: &RepoFixture, idx_path: &Path, idx: &PackIndex, 
     let mut iter_oids = HashSet::new();
     for entry in idx.iter() {
         iter_oids.insert(ObjectId::from_bytes(entry.oid()).expect("oid"));
-        let _owned: PackIndexEntry = entry.into();
+        let _owned: PackIndexEntry = PackIndexEntry::try_from(entry).expect("entry");
         if !sha256 {
             let oid = ObjectId::from_bytes(entry.oid()).expect("oid");
             assert!(pack_index_entry_matches_sha1_oid(&entry, &oid));
@@ -132,18 +132,21 @@ fn oracle_index_and_reads(repo: &RepoFixture, idx_path: &Path, idx: &PackIndex, 
 
     for (hex, off, crc) in &git_rows {
         let oid = ObjectId::from_hex(hex).expect("hex oid");
-        assert!(idx.contains(&oid));
+        assert!(idx.contains(&oid).expect("contains"));
         let pos = idx.find_position(&oid).expect("find_position");
-        assert_eq!(idx.find_offset(&oid), Some(*off));
-        assert_eq!(idx.offset_at(pos), *off);
+        assert_eq!(idx.find_offset(&oid).expect("lookup"), Some(*off));
+        assert_eq!(idx.offset_at(pos).expect("off"), *off);
         assert_eq!(idx.crc32_at(pos), *crc);
-        assert_eq!(idx.crc32_for_pack_offset(*off), *crc);
+        assert_eq!(idx.crc32_for_pack_offset(*off).expect("crc lookup"), *crc);
         assert_eq!(
-            idx.find_position_by_offset_sorted(*off),
+            idx.find_position_by_offset_sorted(*off)
+                .expect("off lookup"),
             Some(pos),
             "offset lookup for {hex}"
         );
-        let next = idx.next_pack_offset_after(*off, pack_end);
+        let next = idx
+            .next_pack_offset_after(*off, pack_end)
+            .expect("next off");
         assert!(next > *off);
         assert!(next <= pack_end);
 
@@ -329,7 +332,7 @@ fn fanout_all_objects_share_first_byte() {
     assert_eq!(idx.fanout[0xac], 32);
     for (oid, off) in rows {
         let id = ObjectId::from_bytes(&oid).expect("oid");
-        assert_eq!(idx.find_offset(&id), Some(off));
+        assert_eq!(idx.find_offset(&id).expect("lookup"), Some(off));
     }
 }
 
@@ -647,14 +650,17 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     let ext_pack_path = ext_idx_path.with_extension("pack");
     let ext_row = 1usize;
     let ext_count = ext_idx.len();
-    let ext_pack_offset = ext_idx.offset_at(ext_row);
+    let ext_pack_offset = ext_idx.offset_at(ext_row).expect("ext off");
     let ext_oid = ObjectId::from_bytes(ext_idx.oid_at(ext_row)).expect("ext oid");
     let mut ext_raw = std::fs::read(&ext_idx_path).expect("raw ext");
     force_v2_entry_large_table(&mut ext_raw, hb, ext_count, ext_row, ext_pack_offset);
     let forced_path = scratch.path().join("ext64-forced.idx");
     std::fs::write(&forced_path, &ext_raw).expect("write forced idx");
     let forced_idx = read_pack_index(&forced_path).expect("parse forced large table");
-    assert_eq!(forced_idx.offset_at(ext_row), ext_pack_offset);
+    assert_eq!(
+        forced_idx.offset_at(ext_row).expect("forced off"),
+        ext_pack_offset
+    );
     let ext_off32 = 8 + 256 * 4 + ext_count * hb + ext_count * 4;
     let large_base = ext_off32 + ext_count * 4;
     let ext_pack_len = std::fs::metadata(&ext_pack_path)
@@ -747,8 +753,8 @@ fn install_duplicate_pack_index(
     );
     let idx = read_pack_index(&idx_path).expect("dup idx");
     assert_eq!(idx.len(), 2);
-    assert_eq!(idx.offset_at(0), off0);
-    assert_eq!(idx.offset_at(1), off1);
+    assert_eq!(idx.offset_at(0).expect("off0"), off0);
+    assert_eq!(idx.offset_at(1).expect("off1"), off1);
     (built, idx_path, oid)
 }
 

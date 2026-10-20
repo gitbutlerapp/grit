@@ -372,24 +372,30 @@ impl<'repo> RevWalk<'repo> {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         };
 
-        if options.limit.is_none()
+        let use_unfiltered_fast_path = options.limit.is_none()
             && options.paths.is_empty()
             && options.refs.is_empty()
             && options.skip == 0
             && !options.reverse
-        {
-            let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
-            let filter = ReachableCountFilter {
-                min_parents,
-                max_parents,
-                first_parent_only: options.first_parent,
-                since: options.since,
-                until: options.until,
-            };
-            let left_count =
-                count_commits_reachable_excluding_ancestors_of(repo, &[left], &[right], filter)?;
-            let right_count =
-                count_commits_reachable_excluding_ancestors_of(repo, &[right], &[left], filter)?;
+            && options.since.is_none()
+            && options.until.is_none()
+            && options.merges == MergeFilter::Any
+            && !options.first_parent;
+
+        if use_unfiltered_fast_path {
+            let filter = ReachableCountFilter::default();
+            let left_count = count_commits_reachable_excluding_ancestors_of(
+                repo,
+                &[left],
+                &[right],
+                filter,
+            )?;
+            let right_count = count_commits_reachable_excluding_ancestors_of(
+                repo,
+                &[right],
+                &[left],
+                filter,
+            )?;
             return Ok(LeftRightCounts {
                 left: left_count,
                 right: right_count,
