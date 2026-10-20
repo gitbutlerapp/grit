@@ -42,7 +42,7 @@ use crate::userdiff::FuncnameMatcher;
 use crate::worktree_rules::WorktreeRules;
 
 use super::unified_emit::{
-    emit_unified_body_from_edits, line_ending_only_edits, write_patch_line, EditSpan, LineSide,
+    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineSide,
     UnifiedEmitOptions,
 };
 
@@ -62,111 +62,92 @@ fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
     starts.windows(2).map(|w| &body[w[0]..w[1]]).collect()
 }
 
+/// Histogram line alignment from imara, then Git `xdl_change_compact` (and optional indent heuristic).
+pub(crate) fn histogram_compacted_line_ops(
+    old_content: &str,
+    new_content: &str,
+    indent_heuristic: bool,
+) -> Vec<similar::DiffOp> {
+    use imara_diff::{Algorithm, Diff, InternedInput};
+
+    let before = LineSide::from_text(old_content);
+    let after = LineSide::from_text(new_content);
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let old_len = old_lines.len();
+    let new_len = new_lines.len();
+
+    let input = InternedInput::new(old_content, new_content);
+    let mut diff = Diff::compute(Algorithm::Histogram, &input);
+    diff.postprocess_lines(&input);
+    let hunks: Vec<_> = diff.hunks().collect();
+    if hunks.is_empty() {
+        return Vec::new();
+    }
+
+    let mut changed1 = vec![false; old_len];
+    let mut changed2 = vec![false; new_len];
+    for h in &hunks {
+        for (i, flag) in changed1
+            .iter_mut()
+            .enumerate()
+            .take(h.before.end as usize)
+            .skip(h.before.start as usize)
+        {
+            if i < old_len {
+                *flag = true;
+            }
+        }
+        for (i, flag) in changed2
+            .iter_mut()
+            .enumerate()
+            .take(h.after.end as usize)
+            .skip(h.after.start as usize)
+        {
+            if i < new_len {
+                *flag = true;
+            }
+        }
+    }
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_len, new_len);
+    diff_indent_heuristic::apply_change_compact_to_ops(
+        &raw,
+        &old_lines,
+        &new_lines,
+        indent_heuristic,
+    )
+}
+
 pub(crate) fn histogram_unified_body_raw(
     old_content: &str,
     new_content: &str,
     context_lines: usize,
     inter_hunk_context: usize,
+    indent_heuristic: bool,
 ) -> String {
-    use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
-    use std::fmt::Write as _;
-
-    let input = InternedInput::new(old_content, new_content);
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
     let before_side = LineSide::from_text(old_content);
     let after_side = LineSide::from_text(new_content);
-
-    // Assemble hunks ourselves: imara's `UnifiedDiff` printer starts the first
-    // hunk's context at line 0 whenever the first change is within
-    // `2 * context_len` of the file start, emitting more leading context than
-    // its own header claims (t4061), and its gap threshold cannot express
-    // Git's odd `2 * U + inter_hunk_context` fuse limits (t4032).
-    let hunks: Vec<Hunk> = diff.hunks().collect();
-    if hunks.is_empty() {
+    let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic);
+    let mut edits = diff_ops_to_edit_spans(&ops);
+    if edits.is_empty() {
         if old_content != new_content {
-            let edits = line_ending_only_edits(&before_side, &after_side);
-            if !edits.is_empty() {
-                return emit_unified_body_from_edits(
-                    &before_side,
-                    &after_side,
-                    &edits,
-                    UnifiedEmitOptions {
-                        context_lines,
-                        inter_hunk_context,
-                        function_context: false,
-                    },
-                    None,
-                );
-            }
+            edits = line_ending_only_edits(&before_side, &after_side);
         }
-        return String::new();
-    }
-
-    let ctx = context_lines.min(u32::MAX as usize) as u32;
-    let max_gap = (2usize.saturating_mul(context_lines))
-        .saturating_add(inter_hunk_context)
-        .min(u32::MAX as usize) as u32;
-    let before_len = input.before.len() as u32;
-    let after_len = input.after.len() as u32;
-
-    // Fuse hunks whose unchanged gap is at most `max_gap` (Git xdl_get_hunk).
-    let mut groups: Vec<&[Hunk]> = Vec::new();
-    let mut group_start = 0usize;
-    for i in 1..hunks.len() {
-        if hunks[i].before.start - hunks[i - 1].before.end > max_gap {
-            groups.push(&hunks[group_start..i]);
-            group_start = i;
+        if edits.is_empty() {
+            return String::new();
         }
     }
-    groups.push(&hunks[group_start..]);
-
-    // Git hunk header range: 1-based start (the preceding line when the range
-    // is empty) with the `,count` part omitted when the count is exactly 1.
-    fn fmt_side(start: u32, count: u32) -> String {
-        let shown_start = if count == 0 { start } else { start + 1 };
-        if count == 1 {
-            format!("{shown_start}")
-        } else {
-            format!("{shown_start},{count}")
-        }
-    }
-
-    let mut out = String::new();
-    for group in groups {
-        let first = &group[0];
-        let last = &group[group.len() - 1];
-        let b_start = first.before.start.saturating_sub(ctx);
-        let a_start = first.after.start.saturating_sub(ctx);
-        let b_end = (last.before.end.saturating_add(ctx)).min(before_len);
-        let a_end = (last.after.end.saturating_add(ctx)).min(after_len);
-
-        let _ = writeln!(
-            out,
-            "@@ -{} +{} @@",
-            fmt_side(b_start, b_end - b_start),
-            fmt_side(a_start, a_end - a_start)
-        );
-
-        let mut pos = b_start;
-        for hunk in group {
-            for idx in pos..hunk.before.start {
-                write_patch_line(&mut out, ' ', before_side.line(idx as usize));
-            }
-            for idx in hunk.before.start..hunk.before.end {
-                write_patch_line(&mut out, '-', before_side.line(idx as usize));
-            }
-            for idx in hunk.after.start..hunk.after.end {
-                write_patch_line(&mut out, '+', after_side.line(idx as usize));
-            }
-            pos = hunk.before.end;
-        }
-        for idx in pos..b_end {
-            write_patch_line(&mut out, ' ', before_side.line(idx as usize));
-        }
-    }
-
-    out
+    emit_unified_body_from_edits(
+        &before_side,
+        &after_side,
+        &edits,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context: false,
+        },
+        None,
+    )
 }
 
 /// Build the unified-diff body (no `---`/`+++` header) using Git's histogram
@@ -185,6 +166,70 @@ pub(crate) fn histogram_unified_body_raw(
 /// Optional `--function-context` (`-W`) hunk expansion is applied *after*
 /// ignorable change-record pruning so the boundaries/funcname header match Git.
 #[allow(clippy::too_many_arguments)]
+fn diff_ops_to_ignorable_edit_spans<F>(
+    ops: &[similar::DiffOp],
+    old_lines: &[&str],
+    new_lines: &[&str],
+    is_ignorable_change: F,
+) -> Vec<EditSpan>
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
+    use similar::DiffOp;
+    let mut out = Vec::new();
+    for op in ops {
+        match *op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete {
+                old_index,
+                old_len,
+                new_index,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: 0,
+                    skip_in_output: is_ignorable_change(removed, &[]),
+                });
+            }
+            DiffOp::Insert {
+                old_index,
+                new_index,
+                new_len,
+            } => {
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: 0,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(&[], added),
+                });
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(removed, added),
+                });
+            }
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn histogram_unified_body_ignore_fc<F>(
     old_content: &str,
     new_content: &str,
@@ -192,66 +237,21 @@ pub(crate) fn histogram_unified_body_ignore_fc<F>(
     inter_hunk_context: usize,
     function_context: bool,
     funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
     is_ignorable_change: F,
 ) -> String
 where
     F: Fn(&[&str], &[&str]) -> bool,
 {
-    use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
-
-    let input = InternedInput::new(old_content, new_content);
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
-
-    let raw_hunks: Vec<Hunk> = diff.hunks().collect();
-    if raw_hunks.is_empty() {
-        return String::new();
-    }
-
-    struct Change {
-        i1: i64,
-        chg1: i64,
-        i2: i64,
-        chg2: i64,
-        ignore: bool,
-    }
-
-    let mut changes: Vec<Change> = Vec::with_capacity(raw_hunks.len());
-    for h in &raw_hunks {
-        let i1 = h.before.start as i64;
-        let chg1 = (h.before.end - h.before.start) as i64;
-        let i2 = h.after.start as i64;
-        let chg2 = (h.after.end - h.after.start) as i64;
-        let removed: Vec<&str> = input.before[h.before.start as usize..h.before.end as usize]
-            .iter()
-            .map(|&t| input.interner[t])
-            .collect();
-        let added: Vec<&str> = input.after[h.after.start as usize..h.after.end as usize]
-            .iter()
-            .map(|&t| input.interner[t])
-            .collect();
-        let ignore = is_ignorable_change(&removed, &added);
-        changes.push(Change {
-            i1,
-            chg1,
-            i2,
-            chg2,
-            ignore,
-        });
-    }
-
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let edits: Vec<EditSpan> = changes
-        .into_iter()
-        .map(|c| EditSpan {
-            before_start: c.i1,
-            before_len: c.chg1,
-            after_start: c.i2,
-            after_len: c.chg2,
-            skip_in_output: c.ignore,
-        })
-        .collect();
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic);
+    if ops.is_empty() {
+        return String::new();
+    }
+    let edits = diff_ops_to_ignorable_edit_spans(&ops, &old_lines, &new_lines, is_ignorable_change);
     emit_unified_body_from_edits(
         &before,
         &after,
@@ -450,8 +450,15 @@ pub fn unified_diff_histogram_hunks_only(
     new_content: &str,
     context_lines: usize,
     inter_hunk_context: usize,
+    indent_heuristic: bool,
 ) -> String {
-    histogram_unified_body_raw(old_content, new_content, context_lines, inter_hunk_context)
+    histogram_unified_body_raw(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+    )
 }
 #[expect(clippy::too_many_arguments)]
 /// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm.
@@ -466,12 +473,18 @@ pub fn unified_diff_histogram_with_prefix_and_funcname(
     src_prefix: &str,
     dst_prefix: &str,
     funcname_matcher: Option<&FuncnameMatcher>,
+    indent_heuristic: bool,
     quote_path_fully: bool,
 ) -> String {
     use crate::quote_path::format_diff_path_with_prefix;
 
-    let body =
-        histogram_unified_body_raw(old_content, new_content, context_lines, inter_hunk_context);
+    let body = histogram_unified_body_raw(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+    );
 
     let mut output = String::new();
     if old_path == "/dev/null" {
@@ -549,6 +562,7 @@ pub fn unified_diff_histogram_ignore_with_prefix_and_funcname<F>(
     funcname_matcher: Option<&FuncnameMatcher>,
     quote_path_fully: bool,
     function_context: bool,
+    indent_heuristic: bool,
     is_ignorable_change: F,
 ) -> String
 where
@@ -563,6 +577,7 @@ where
         inter_hunk_context,
         function_context,
         funcname_matcher,
+        indent_heuristic,
         is_ignorable_change,
     );
     if body.is_empty() {
@@ -7353,6 +7368,7 @@ pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Wri
             src_prefix,
             dst_prefix,
             funcname_matcher,
+            indent_heuristic,
             quote_path_fully,
         );
         out.write_all(patch.as_bytes())?;
@@ -11132,7 +11148,7 @@ mod read_worktree_bytes_for_mode_tests {
     fn annotate_marks_context_line_when_eof_line_is_unchanged() {
         let old = "a\nb\nc";
         let new = "a\nx\nc";
-        let raw = super::unified_diff_histogram_hunks_only(old, new, 3, 0);
+        let raw = super::unified_diff_histogram_hunks_only(old, new, 3, 0, false);
         let out = annotate_unified_diff_no_newline_at_eof(&raw, old, new);
         assert!(
             out.contains(" c\n\\ No newline at end of file"),
@@ -11221,7 +11237,7 @@ mod blob_diff_algorithm_smoke {
 
     #[test]
     fn git_histogram_printer_and_anchored_diff_smoke() {
-        let hist = unified_diff_histogram_hunks_only(OLD, NEW, 3, 0);
+        let hist = unified_diff_histogram_hunks_only(OLD, NEW, 3, 0, false);
         assert!(!hist.is_empty());
         let anchors = vec!["beta".to_string()];
         let anchored = anchored_unified_diff(
@@ -11430,6 +11446,7 @@ mod line_coverage_tests {
             None,
             false,
             false,
+            false,
             |_old, _new| false,
         );
         assert!(!hist.is_empty());
@@ -11548,9 +11565,9 @@ mod line_coverage_tests {
 
         let cfg = ConfigSet::new();
         assert!(indent_heuristic_from_config(&cfg));
-        let _ = unified_diff_histogram_hunks_only("a\nb\n", "a\nB\n", 3, 0);
+        let _ = unified_diff_histogram_hunks_only("a\nb\n", "a\nB\n", 3, 0, false);
         let _ = unified_diff_histogram_with_prefix_and_funcname(
-            "x\n", "y\n", "a/f", "b/f", 3, 0, "", "", None, false,
+            "x\n", "y\n", "a/f", "b/f", 3, 0, "", "", None, false, false,
         );
         let _ = count_changes_with_algorithm("a\n", "b\n", Algorithm::Myers, false);
         let _ = should_break_rewrite_pair(b"short", b"totally different body", 50);

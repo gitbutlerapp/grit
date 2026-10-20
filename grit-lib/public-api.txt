@@ -3424,9 +3424,9 @@ pub fn grit_lib::diff::submodule_porcelain_flags(&std::path::Path, &str, grit_li
 pub fn grit_lib::diff::tree_diff_contents_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffContent>>
 pub fn grit_lib::diff::tree_oid_of_commit(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::unified_diff(&str, &str, &str, &str, usize, bool, bool) -> alloc::string::String
-pub fn grit_lib::diff::unified_diff_histogram_hunks_only(&str, &str, usize, usize) -> alloc::string::String
-pub fn grit_lib::diff::unified_diff_histogram_ignore_with_prefix_and_funcname<F>(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool, F) -> alloc::string::String where F: core::ops::function::Fn(&[&str], &[&str]) -> bool
-pub fn grit_lib::diff::unified_diff_histogram_with_prefix_and_funcname(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool) -> alloc::string::String
+pub fn grit_lib::diff::unified_diff_histogram_hunks_only(&str, &str, usize, usize, bool) -> alloc::string::String
+pub fn grit_lib::diff::unified_diff_histogram_ignore_with_prefix_and_funcname<F>(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool, bool, F) -> alloc::string::String where F: core::ops::function::Fn(&[&str], &[&str]) -> bool
+pub fn grit_lib::diff::unified_diff_histogram_with_prefix_and_funcname(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::unified_diff_with_prefix(&str, &str, &str, &str, usize, usize, &str, &str, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::unified_diff_with_prefix_and_funcname(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::unified_diff_with_prefix_and_funcname_and_algorithm(&str, &str, &str, &str, usize, usize, &str, &str, core::option::Option<&grit_lib::diff::userdiff::FuncnameMatcher>, similar::types::Algorithm, bool, bool, bool, bool) -> alloc::string::String

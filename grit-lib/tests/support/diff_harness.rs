@@ -320,6 +320,7 @@ pub fn grit_blob_patch(old: &[u8], new: &[u8], path: &str, opts: &GritBlobPatchO
                 None,
                 false,
                 false,
+                opts.indent_heuristic,
                 |removed, added| {
                     removed.iter().all(|l| ws_blank_line(l))
                         && added.iter().all(|l| ws_blank_line(l))

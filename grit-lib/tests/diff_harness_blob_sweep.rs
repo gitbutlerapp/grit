@@ -37,7 +37,7 @@ fn all_blob_pairs_exercise_diff_printers() {
             let _ = annotate_unified_diff_no_newline_at_eof(&patch, old_s, new_s);
         }
         let _ = normalize_ignore_space_change(old_s);
-        let _ = unified_diff_histogram_hunks_only(old_s, new_s, 3, 0);
+        let _ = unified_diff_histogram_hunks_only(old_s, new_s, 3, 0, false);
         for algo in [Algorithm::Myers, Algorithm::Patience, Algorithm::Histogram] {
             let _ = unified_diff_with_prefix_and_funcname_and_algorithm(
                 old_s, new_s, "a/x", "b/x", 3, 0, "a/", "b/", None, algo, true, false, true, false,

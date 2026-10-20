@@ -3,7 +3,7 @@
 use similar::{ChangeTag, DiffOp, TextDiff};
 
 use crate::diff::options::{DiffAlgorithm, DiffOptions};
-use crate::diff::{git_xdiff_compacted_line_ops, group_diff_ops_gap};
+use crate::diff::{git_xdiff_compacted_line_ops, group_diff_ops_gap, histogram_compacted_line_ops};
 use crate::diff_indent_heuristic;
 
 use super::{StructuredHunk, StructuredLine, StructuredLineKind, StructuredSegment};
@@ -19,12 +19,20 @@ pub(crate) fn line_hunks(
         return Vec::new();
     }
     match options.algorithm {
-        DiffAlgorithm::Histogram => histogram_structured_hunks(
-            old_content,
-            new_content,
-            options.context_lines,
-            options.inter_hunk_context,
-        ),
+        DiffAlgorithm::Histogram => {
+            let old_lines: Vec<&str> = split_lines_git(old_content);
+            let new_lines: Vec<&str> = split_lines_git(new_content);
+            let ops =
+                histogram_compacted_line_ops(old_content, new_content, options.indent_heuristic);
+            structured_hunks_from_ops(
+                old_content,
+                new_content,
+                &old_lines,
+                &new_lines,
+                ops,
+                options,
+            )
+        }
         DiffAlgorithm::Myers => {
             let old_lines: Vec<&str> = split_lines_git(old_content);
             let new_lines: Vec<&str> = split_lines_git(new_content);
@@ -72,6 +80,11 @@ fn split_lines_git(text: &str) -> Vec<&str> {
     parts
 }
 
+fn ops_substantively_change(ops: &[DiffOp]) -> bool {
+    ops.iter()
+        .any(|op| !matches!(op, DiffOp::Equal { .. }))
+}
+
 fn structured_hunks_from_ops(
     old_content: &str,
     new_content: &str,
@@ -80,7 +93,7 @@ fn structured_hunks_from_ops(
     ops: Vec<DiffOp>,
     options: &DiffOptions,
 ) -> Vec<StructuredHunk> {
-    if ops.is_empty() {
+    if !ops_substantively_change(&ops) {
         if old_content != new_content {
             return line_ending_only_structured_hunks(old_content, new_content, options);
         }
@@ -356,217 +369,4 @@ fn line_missing_eof_newline(
         return false;
     }
     index == Some(line_count.saturating_sub(1))
-}
-
-/// Build structured hunks with Git histogram (`imara-diff`).
-fn histogram_structured_hunks(
-    old_content: &str,
-    new_content: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-) -> Vec<StructuredHunk> {
-    use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
-
-    let input = InternedInput::new(old_content, new_content);
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
-    let hunks: Vec<Hunk> = diff.hunks().collect();
-    if hunks.is_empty() {
-        return Vec::new();
-    }
-
-    let ctx = context_lines.min(u32::MAX as usize) as u32;
-    let max_gap = (2usize.saturating_mul(context_lines))
-        .saturating_add(inter_hunk_context)
-        .min(u32::MAX as usize) as u32;
-    let before_len = input.before.len() as u32;
-    let after_len = input.after.len() as u32;
-    let before_ends_nl = old_content.ends_with('\n');
-    let after_ends_nl = new_content.ends_with('\n');
-    let before_line_count = input.before.len();
-    let after_line_count = input.after.len();
-
-    let mut groups: Vec<&[Hunk]> = Vec::new();
-    let mut group_start = 0usize;
-    for i in 1..hunks.len() {
-        if hunks[i].before.start - hunks[i - 1].before.end > max_gap {
-            groups.push(&hunks[group_start..i]);
-            group_start = i;
-        }
-    }
-    groups.push(&hunks[group_start..]);
-
-    fn hunk_side_start(start: u32, count: u32) -> usize {
-        if count == 0 {
-            start as usize
-        } else {
-            start as usize + 1
-        }
-    }
-
-    let mut out = Vec::with_capacity(groups.len());
-    for group in groups {
-        let first = &group[0];
-        let last = &group[group.len() - 1];
-        let b_start = first.before.start.saturating_sub(ctx);
-        let a_start = first.after.start.saturating_sub(ctx);
-        let b_end = (last.before.end.saturating_add(ctx)).min(before_len);
-        let a_end = (last.after.end.saturating_add(ctx)).min(after_len);
-        let old_lines = (b_end - b_start) as usize;
-        let new_lines = (a_end - a_start) as usize;
-        let old_start = hunk_side_start(b_start, b_end - b_start);
-        let new_start = hunk_side_start(a_start, a_end - a_start);
-
-        let mut lines = Vec::new();
-        let mut old_line = old_start;
-        let mut new_line = new_start;
-        let mut pos = b_start;
-        for hunk in group {
-            for &token in &input.before[pos as usize..hunk.before.start as usize] {
-                push_histogram_context_line(
-                    &mut lines,
-                    input.interner[token],
-                    &mut old_line,
-                    &mut new_line,
-                    before_line_count,
-                    after_line_count,
-                    before_ends_nl,
-                    after_ends_nl,
-                );
-            }
-            for &token in &input.before[hunk.before.start as usize..hunk.before.end as usize] {
-                push_histogram_del_line(
-                    &mut lines,
-                    input.interner[token],
-                    &mut old_line,
-                    before_line_count,
-                    before_ends_nl,
-                );
-            }
-            for &token in &input.after[hunk.after.start as usize..hunk.after.end as usize] {
-                push_histogram_add_line(
-                    &mut lines,
-                    input.interner[token],
-                    &mut new_line,
-                    after_line_count,
-                    after_ends_nl,
-                );
-            }
-            pos = hunk.before.end;
-        }
-        for &token in &input.before[pos as usize..b_end as usize] {
-            push_histogram_context_line(
-                &mut lines,
-                input.interner[token],
-                &mut old_line,
-                &mut new_line,
-                before_line_count,
-                after_line_count,
-                before_ends_nl,
-                after_ends_nl,
-            );
-        }
-
-        out.push(StructuredHunk {
-            old_start,
-            new_start,
-            old_lines,
-            new_lines,
-            context: None,
-            lines,
-        });
-    }
-    out
-}
-
-fn strip_diff_newline_only(s: &str) -> &str {
-    s.strip_suffix('\n').unwrap_or(s)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn push_histogram_context_line(
-    lines: &mut Vec<StructuredLine>,
-    raw: &str,
-    old_line: &mut usize,
-    new_line: &mut usize,
-    before_line_count: usize,
-    after_line_count: usize,
-    before_ends_nl: bool,
-    after_ends_nl: bool,
-) {
-    let text = strip_diff_newline_only(raw).to_owned();
-    let o = *old_line;
-    let n = *new_line;
-    *old_line = old_line.saturating_add(1);
-    *new_line = new_line.saturating_add(1);
-    lines.push(StructuredLine {
-        kind: StructuredLineKind::Context,
-        old: Some(o),
-        new: Some(n),
-        segments: vec![StructuredSegment {
-            text,
-            emphasis: false,
-        }],
-        no_newline_at_eof: line_missing_eof_newline(
-            Some(o.saturating_sub(1)),
-            before_line_count,
-            before_ends_nl,
-        ) || line_missing_eof_newline(
-            Some(n.saturating_sub(1)),
-            after_line_count,
-            after_ends_nl,
-        ),
-    });
-}
-
-fn push_histogram_del_line(
-    lines: &mut Vec<StructuredLine>,
-    raw: &str,
-    old_line: &mut usize,
-    before_line_count: usize,
-    before_ends_nl: bool,
-) {
-    let text = strip_diff_newline_only(raw).to_owned();
-    let o = *old_line;
-    *old_line = old_line.saturating_add(1);
-    lines.push(StructuredLine {
-        kind: StructuredLineKind::Del,
-        old: Some(o),
-        new: None,
-        segments: vec![StructuredSegment {
-            text,
-            emphasis: false,
-        }],
-        no_newline_at_eof: line_missing_eof_newline(
-            Some(o.saturating_sub(1)),
-            before_line_count,
-            before_ends_nl,
-        ),
-    });
-}
-
-fn push_histogram_add_line(
-    lines: &mut Vec<StructuredLine>,
-    raw: &str,
-    new_line: &mut usize,
-    after_line_count: usize,
-    after_ends_nl: bool,
-) {
-    let text = strip_diff_newline_only(raw).to_owned();
-    let n = *new_line;
-    *new_line = new_line.saturating_add(1);
-    lines.push(StructuredLine {
-        kind: StructuredLineKind::Add,
-        old: None,
-        new: Some(n),
-        segments: vec![StructuredSegment {
-            text,
-            emphasis: false,
-        }],
-        no_newline_at_eof: line_missing_eof_newline(
-            Some(n.saturating_sub(1)),
-            after_line_count,
-            after_ends_nl,
-        ),
-    });
 }
