@@ -627,6 +627,35 @@ fn since_skew_bounded_limit_match_git() {
 }
 
 #[test]
+fn left_right_counts_limit_one_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let oids = build_commit_dag(
+        wt,
+        &[("b", "a"), ("c", "b"), ("d", "c")],
+        &[("d", "refs/heads/main")],
+    );
+    git(wt, &["branch", "side", &oids["b"].to_hex()]);
+    git(wt, &["checkout", "side"]);
+    build_commit_dag(wt, &[("s1", "b"), ("s2", "s1")], &[]);
+    git(wt, &["checkout", "main"]);
+    let repo = open_grit(wt);
+    let walk = repo.rev_walk();
+    let token = "main...side";
+    let git_counts = git_rev_list_left_right_count(wt, &[token, "-n", "1"]);
+    let grit_counts = walk
+        .left_right_counts(
+            &[token],
+            &RevWalkListOptions {
+                limit: Some(1),
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("left/right counts with -n 1");
+    assert_eq!(grit_counts, git_counts);
+}
+
+#[test]
 fn left_right_counts_match_git_rev_list_left_right_count() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

@@ -228,9 +228,20 @@ pub fn load_commits_with_decorations(
     oids: &[ObjectId],
     decorations: &DecorationMap,
 ) -> Result<Vec<LoadedCommit>> {
+    if oids.is_empty() {
+        return Ok(Vec::new());
+    }
     let odb = repo.odb();
-    let mut out = Vec::with_capacity(oids.len());
-    for oid in oids {
+    let config = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    let par_opts = repo
+        .thread_policy()
+        .resolve(crate::parallel::ParallelOp::IndexLoad, &config);
+    let threads = par_opts.threads;
+    let thread_count = threads.get();
+    let est_bytes = oids.len().saturating_mul(512);
+    let load_one = |oid: &ObjectId| -> Result<LoadedCommit> {
         let obj = odb.read(oid)?;
         let data = parse_commit(&obj.data)?;
         let hex = oid.to_hex();
@@ -246,16 +257,25 @@ pub fn load_commits_with_decorations(
                     .collect()
             })
             .unwrap_or_default();
-        out.push(LoadedCommit {
+        Ok(LoadedCommit {
             oid: *oid,
             parents: data.parents,
             author: data.author,
             committer: data.committer,
             message: data.message,
             refs,
+        })
+    };
+    if oids.len() >= crate::hash::PAR_HASH_MIN_ITEMS
+        && crate::hash::parallel_hash_worthwhile(oids.len(), est_bytes, thread_count)
+    {
+        return crate::hash::try_par_hash_with(oids, threads, est_bytes, load_one).map_err(|e| {
+            match e {
+                crate::hash::ParallelHashError::Task(err) => err,
+            }
         });
     }
-    Ok(out)
+    oids.iter().map(load_one).collect()
 }
 
 fn prepend_if_target(
@@ -342,12 +362,15 @@ pub fn collect_decorations_inner(
         }
 
         if let Some(rest) = refname.strip_prefix("refs/heads/") {
+            let hex = oid.to_hex();
+            if commit_targets.is_some_and(|targets| !targets.contains(&hex)) {
+                continue;
+            }
             let display = if full {
                 refname.clone()
             } else {
                 rest.to_owned()
             };
-            let hex = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
             prepend_if_target(
                 &mut map,
                 hex,
@@ -367,7 +390,15 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
+            let direct = oid.to_hex();
+            let peeled = if commit_targets.is_some_and(|targets| targets.contains(&direct)) {
+                direct
+            } else {
+                commit_hex_for_ref_object(odb, &oid)
+            };
+            if commit_targets.is_some_and(|targets| !targets.contains(&peeled)) {
+                continue;
+            }
             prepend_if_target(
                 &mut map,
                 peeled,
@@ -382,15 +413,18 @@ pub fn collect_decorations_inner(
         }
 
         if let Some(rest) = refname.strip_prefix("refs/remotes/") {
+            let hex = oid.to_hex();
+            if commit_targets.is_some_and(|targets| !targets.contains(&hex)) {
+                continue;
+            }
             let display = if full {
                 refname.clone()
             } else {
                 rest.to_owned()
             };
-            let peeled = peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex());
             prepend_if_target(
                 &mut map,
-                peeled,
+                hex,
                 commit_targets,
                 DecorationItem {
                     refname: Some(refname.clone()),
@@ -472,6 +506,11 @@ pub fn collect_decorations_inner(
     }
 
     Ok(map)
+}
+
+/// Map a ref's peeled object id to the commit hex used for decoration lookup.
+fn commit_hex_for_ref_object(odb: &Odb, oid: &ObjectId) -> String {
+    peel_to_commit_hex(odb, &oid.to_hex()).unwrap_or_else(|| oid.to_hex())
 }
 
 /// Peel an object (possibly a tag) down to a commit and return its hex.

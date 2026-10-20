@@ -268,6 +268,32 @@ fn commit_count_from_result(result: RevListResult) -> Result<usize> {
     Ok(result.commit_count())
 }
 
+/// Left/right counts when filters force a full `rev-list` walk (paths, skip, limit, …).
+///
+/// Applies [`RevWalkListOptions::limit`] once to the combined traversal, matching
+/// `git rev-list --left-right --count -n`.
+fn left_right_counts_from_combined_walk(
+    repo: &Repository,
+    options: &RevWalkListOptions,
+    parsed: &RevWalkParsedSpecs,
+    positive: &[String],
+    all_refs: bool,
+) -> Result<LeftRightCounts> {
+    let mut opts = rev_list_options_from_walk(repo, options, parsed, all_refs, false)?;
+    opts.left_right = true;
+    let result = rev_list(repo, positive, &parsed.negative, &opts)?;
+    let mut left = 0usize;
+    let mut right = 0usize;
+    for oid in &result.commits {
+        match result.left_right_map.get(oid) {
+            Some(true) => left += 1,
+            Some(false) => right += 1,
+            None => {}
+        }
+    }
+    Ok(LeftRightCounts { left, right })
+}
+
 impl<'repo> RevWalk<'repo> {
     /// Parse range tokens the same way [`Self::commits`] and [`Self::count`] do.
     pub fn parse_tokens(&self, tokens: &[&str]) -> Result<RevWalkParsedSpecs> {
@@ -346,10 +372,10 @@ impl<'repo> RevWalk<'repo> {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         };
 
-        if options.paths.is_empty()
+        if options.limit.is_none()
+            && options.paths.is_empty()
             && options.refs.is_empty()
             && options.skip == 0
-            && options.limit.is_none()
             && !options.reverse
         {
             let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
@@ -370,20 +396,7 @@ impl<'repo> RevWalk<'repo> {
             });
         }
 
-        let mut opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
-        opts.left_right = true;
-        let left_count = {
-            let mut left_opts = opts.clone();
-            left_opts.left_only = true;
-            rev_list(repo, &positive, &parsed.negative, &left_opts)?.commit_count()
-        };
-        let mut right_opts = opts;
-        right_opts.right_only = true;
-        let right_count = rev_list(repo, &positive, &parsed.negative, &right_opts)?.commit_count();
-        Ok(LeftRightCounts {
-            left: left_count,
-            right: right_count,
-        })
+        left_right_counts_from_combined_walk(repo, options, &parsed, &positive, all_refs)
     }
 
     /// Merge bases of two revisions (`git merge-base`, or `--all` when `all` is true).

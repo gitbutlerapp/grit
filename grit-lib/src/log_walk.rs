@@ -119,10 +119,14 @@ impl LogWalkCursor {
         };
 
         let commits = state.emit_until(repo, Some(limit), query.cutoffs)?;
-        state.prune_heap_for_cutoffs(query.cutoffs);
-        let next = state.has_pending().then(|| LogWalkCursor {
+        let walk_snapshot = state.snapshot();
+        let has_more = {
+            let mut probe = ReachableWalkState::from_snapshot(walk_snapshot.clone());
+            !probe.emit_until(repo, Some(1), query.cutoffs)?.is_empty()
+        };
+        let next = has_more.then(|| LogWalkCursor {
             query: query.clone(),
-            walk: state.snapshot(),
+            walk: walk_snapshot,
         });
         Ok(LogWalkPage { commits, next })
     }
@@ -514,6 +518,74 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn until_paging_reaches_in_range_grandparent_after_too_new_link() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let until = 1_000_000i64;
+        let grandparent = write_commit(&repo.odb(), &[], "gp", until - 50_000)?;
+        let too_new = write_commit(&repo.odb(), &[grandparent], "skip", until + 10_000)?;
+        let mut parent = too_new;
+        for i in 0..10 {
+            parent = write_commit(
+                &repo.odb(),
+                &[parent],
+                &format!("c{i}"),
+                until - i as i64 * 100,
+            )?;
+        }
+        let tip = parent;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
+
+        let cutoffs = ReachableWalkCommitterCutoffs {
+            since: None,
+            until: Some(until),
+        };
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs,
+        };
+
+        let git_all = {
+            let until_arg = format!("@{until} +0000");
+            let out = Command::new("git")
+                .args([
+                    "-C",
+                    repo.git_dir().to_str().expect("utf8"),
+                    "log",
+                    "--until",
+                    &until_arg,
+                    "--format=%H",
+                ])
+                .output()
+                .expect("git log");
+            assert!(out.status.success());
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|line| line.parse().ok())
+                .collect::<Vec<ObjectId>>()
+        };
+        assert_eq!(
+            git_all.len(),
+            11,
+            "git should list ten in-range commits plus the grandparent"
+        );
+
+        let page1 = LogWalkCursor::step(&repo, &query, None, 10)?;
+        assert_eq!(page1.commits.len(), 10);
+        assert!(
+            page1.next.is_some(),
+            "grandparent remains after a too-new parent link"
+        );
+        let page2 = LogWalkCursor::step(&repo, &query, page1.next.as_ref(), 10)?;
+        let mut paged: Vec<_> = page1.commits.into_iter().chain(page2.commits).collect();
+        assert!(page2.next.is_none());
+        assert_eq!(paged, git_all);
+        Ok(())
     }
 
     #[test]
