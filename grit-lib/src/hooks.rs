@@ -709,8 +709,15 @@ pub fn run_hook_opts(
         };
 
         if !exit.success {
+            if let Some(r) = repo {
+                let _ = r.reload_config();
+            }
             return Ok(HookResult::Failed(exit.code.unwrap_or(1)));
         }
+    }
+
+    if let Some(r) = repo {
+        let _ = r.reload_config();
     }
 
     Ok(HookResult::Success)

@@ -1028,9 +1028,14 @@ fn repo_midx_hash_version_for_objects_dir(objects_dir: &Path) -> u8 {
     sniff_objectformat_hash_version(&gitdir.join("config"))
 }
 
-/// Uncached `[extensions] objectformat` scan of one config file.
+/// Cached `[extensions] objectformat` scan of one config file (reuses process-local config text cache).
 fn sniff_objectformat_hash_version(config_path: &Path) -> u8 {
-    let Ok(text) = fs::read_to_string(config_path) else {
+    sniff_objectformat_hash_version_uncached(config_path)
+}
+
+/// Uncached `[extensions] objectformat` scan of one config file.
+fn sniff_objectformat_hash_version_uncached(config_path: &Path) -> u8 {
+    let Ok(text) = crate::repo_caches::process_cached_local_config(config_path) else {
         return HASH_VERSION_SHA1;
     };
     // Minimal scan for `[extensions]` ... `objectformat = sha256`. Section and key

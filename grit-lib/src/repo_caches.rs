@@ -8,6 +8,47 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+type LocalConfigFileStamp = (std::time::SystemTime, u64);
+type ProcessLocalConfigCache = HashMap<PathBuf, (Option<LocalConfigFileStamp>, String)>;
+// hygiene: process-wide local config body cache keyed by path (cleared on repository config invalidation)
+static PROCESS_LOCAL_CONFIG: Mutex<Option<ProcessLocalConfigCache>> = Mutex::new(None);
+
+/// Process-wide cache for repository-local `config` bodies (used when no [`RepoCaches`] handle exists).
+/// Drop process-wide local-config and dependent caches (called on repository config invalidation).
+pub(crate) fn clear_process_config_caches() {
+    if let Ok(mut guard) = PROCESS_LOCAL_CONFIG.lock() {
+        *guard = None;
+    }
+    crate::repo::clear_process_repository_format_cache();
+    crate::refs::store::clear_process_ref_store_cache();
+}
+
+fn evict_process_local_config_for_path(path: &Path) {
+    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if let Ok(mut guard) = PROCESS_LOCAL_CONFIG.lock() {
+        if let Some(map) = guard.as_mut() {
+            map.remove(&key);
+        }
+    }
+}
+
+pub(crate) fn process_cached_local_config(path: &Path) -> Result<String> {
+    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let stamp = crate::config::stamp_for_path(path);
+    if let Ok(mut guard) = PROCESS_LOCAL_CONFIG.lock() {
+        let map = guard.get_or_insert_with(HashMap::new);
+        if let Some((cached_stamp, text)) = map.get(&key) {
+            if cached_stamp == &stamp {
+                return Ok(text.clone());
+            }
+        }
+        let text = std::fs::read_to_string(path).map_err(Error::Io)?;
+        map.insert(key, (stamp, text.clone()));
+        return Ok(text);
+    }
+    std::fs::read_to_string(path).map_err(Error::Io)
+}
+
 use crate::commit_graph_file::CommitGraphChain;
 
 use crate::attributes::{
@@ -34,6 +75,13 @@ use crate::repo::Repository;
 /// Per-repository cache arena (held behind [`Arc`] on [`Repository`]).
 pub struct RepoCaches {
     config_cache: Mutex<HashMap<ConfigCacheKey, crate::config::ConfigCacheEntry>>,
+    /// Installed by [`crate::repo::Repository::refresh_config_session`]; hot paths read this
+    /// without re-statting the config cascade.
+    session_config: Mutex<Option<(ConfigCacheKey, Arc<ConfigSet>)>>,
+    /// Parsed `[core]` / `[extensions]` from repository-local `config` (one disk read per handle).
+    local_repo_format: Mutex<Option<crate::repo::RepositoryFormat>>,
+    /// Raw bytes of repository-local `config` for helpers that would otherwise re-open the file.
+    local_config_text: Mutex<Option<String>>,
     attr_stack: Mutex<HashMap<(PathBuf, PathBuf), AttrStackCacheEntry>>,
     attr_bare: Mutex<HashMap<PathBuf, AttrStackCacheEntry>>,
     attr_tree: Mutex<HashMap<ObjectId, Arc<ParsedGitAttributes>>>,
@@ -70,6 +118,9 @@ impl RepoCaches {
     ) -> Arc<Self> {
         Arc::new(Self {
             config_cache: Mutex::new(HashMap::new()),
+            session_config: Mutex::new(None),
+            local_repo_format: Mutex::new(None),
+            local_config_text: Mutex::new(None),
             attr_stack: Mutex::new(HashMap::new()),
             attr_bare: Mutex::new(HashMap::new()),
             attr_tree: Mutex::new(HashMap::new()),
@@ -186,13 +237,13 @@ impl RepoCaches {
             effective.diagnostics = Some(self.diagnostics_handle());
         }
         let opts = &effective;
+        let key = ConfigCacheKey::new(git_dir, opts);
         let Some(env_fp) = env.config_fingerprint() else {
             #[cfg(test)]
             crate::config::cascade_load_counters::record_uncached();
             let set = ConfigSet::load_with_options_uncached(env, git_dir, opts, &mut Vec::new())?;
             return Ok(Arc::new(set));
         };
-        let key = ConfigCacheKey::new(git_dir, opts);
         let base_stamps = config_file_stamps(env, git_dir, opts);
         {
             let cache = self
@@ -225,11 +276,94 @@ impl RepoCaches {
         Ok(Arc::new(set))
     }
 
+    /// Drop cached repository-local `config` body and derived parse (not the full cascade cache).
+    pub(crate) fn clear_local_config_derived(&self) {
+        if let Ok(mut slot) = self.local_repo_format.lock() {
+            *slot = None;
+        }
+        if let Ok(mut slot) = self.local_config_text.lock() {
+            *slot = None;
+        }
+    }
+
     /// Drop all memoized configuration cascades for this repository handle.
     pub fn invalidate_config_cache(&self) {
         if let Ok(mut cache) = self.config_cache.lock() {
             cache.clear();
         }
+        self.clear_session_config();
+        self.clear_local_config_derived();
+        clear_process_config_caches();
+    }
+
+    /// Repository-local `config` body (linked worktree common dir when needed), read at most once per handle until invalidation.
+    pub(crate) fn local_config_text(&self, config_path: &Path) -> Result<String> {
+        if let Ok(guard) = self.local_config_text.lock() {
+            if let Some(text) = guard.as_ref() {
+                return Ok(text.clone());
+            }
+        }
+        let text = process_cached_local_config(config_path)?;
+        if let Ok(mut guard) = self.local_config_text.lock() {
+            *guard = Some(text.clone());
+        }
+        Ok(text)
+    }
+
+    /// Parsed repository format from local `config`, cached for ref backend detection and validation.
+    pub(crate) fn repository_format(
+        &self,
+        _git_dir: &Path,
+        config_path: &Path,
+    ) -> Result<crate::repo::RepositoryFormat> {
+        if let Ok(guard) = self.local_repo_format.lock() {
+            if let Some(parsed) = guard.as_ref() {
+                return Ok(parsed.clone());
+            }
+        }
+        let content = self.local_config_text(config_path)?;
+        let parsed = crate::repo::parse_repository_format(&content, config_path)?;
+        if let Ok(mut guard) = self.local_repo_format.lock() {
+            *guard = Some(parsed.clone());
+        }
+        Ok(parsed)
+    }
+
+    /// Return the repository session config snapshot when installed.
+    #[must_use]
+    pub(crate) fn session_config(&self) -> Option<Arc<ConfigSet>> {
+        self.session_config
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|(_, cfg)| Arc::clone(cfg)))
+    }
+
+    /// Install or replace the session config snapshot (see [`crate::repo::Repository`] rustdoc).
+    pub(crate) fn set_session_config(&self, key: ConfigCacheKey, config: Arc<ConfigSet>) {
+        if let Ok(mut slot) = self.session_config.lock() {
+            *slot = Some((key, config));
+        }
+    }
+
+    /// Drop the session config snapshot (part of [`Self::invalidate_config_cache`]).
+    pub(crate) fn clear_session_config(&self) {
+        if let Ok(mut slot) = self.session_config.lock() {
+            *slot = None;
+        }
+    }
+
+    /// Stamp metadata for a cached cascade entry (after [`Self::load_config_with_options`]).
+    pub(crate) fn config_entry_stamps(
+        &self,
+        key: &ConfigCacheKey,
+    ) -> Option<crate::config::ConfigCacheEntryStamps> {
+        let cache = self.config_cache.lock().ok()?;
+        let entry = cache.get(key)?;
+        Some((
+            entry.env_fingerprint.clone(),
+            entry.base_stamps.clone(),
+            entry.extra_stamps.clone(),
+        ))
     }
 
     /// Evict config cache entries whose stamp lists mention `path` (in-process config writes).
@@ -242,6 +376,10 @@ impl RepoCaches {
                     .chain(&entry.extra_stamps)
                     .any(|(p, _)| p == path)
             });
+        }
+        evict_process_local_config_for_path(path);
+        if let Ok(mut slot) = self.local_config_text.lock() {
+            *slot = None;
         }
     }
 
@@ -360,6 +498,19 @@ impl RepoCaches {
         })
     }
 
+    /// Ref storage backend from repository-local config (one parse per handle until invalidation).
+    ///
+    /// # Errors
+    ///
+    /// Propagates local config I/O and format parse failures.
+    pub fn ref_storage_format_from_local_config(&self, git_dir: &Path) -> Result<RefStorageFormat> {
+        let Some(config_path) = crate::repo::repository_config_path_for_caches(git_dir) else {
+            return Ok(RefStorageFormat::Files);
+        };
+        let parsed = self.repository_format(git_dir, &config_path)?;
+        RefStorageFormat::from_repository_format(&parsed)
+    }
+
     /// Cached ref storage format for `git_dir`.
     ///
     /// On detection failure, returns [`crate::RefStorageFormat::Files`].
@@ -399,7 +550,7 @@ impl RepoCaches {
                 return Ok(Arc::clone(store));
             }
         }
-        let store = crate::refs::store::open_ref_store_uncached(git_dir, env)?;
+        let store = crate::refs::store::open_ref_store_uncached(git_dir, env, Some(self))?;
         if let Ok(mut guard) = self.ref_stores.lock() {
             guard.insert(key, Arc::clone(&store));
         }

@@ -334,6 +334,9 @@ pub fn resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
 /// git directory. Returns `None` when git_dir is already the common dir.
 pub fn common_dir(git_dir: &Path) -> Option<PathBuf> {
     let commondir_file = git_dir.join("commondir");
+    if !commondir_file.is_file() {
+        return None;
+    }
     let raw = fs::read_to_string(commondir_file).ok()?;
     let rel = raw.trim();
     // Match Git: `commondir` may be relative to this gitdir or an absolute path (see

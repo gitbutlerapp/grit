@@ -237,6 +237,8 @@ pub struct LoadConfigOptions {
     pub include_ctx: IncludeContext,
     /// Optional sink for non-fatal config load warnings.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// When set, repository-local `config` is read at most once per [`crate::repo_caches::RepoCaches`] handle.
+    pub repo_caches: Option<std::sync::Arc<crate::repo_caches::RepoCaches>>,
 }
 
 impl std::fmt::Debug for LoadConfigOptions {
@@ -258,6 +260,7 @@ impl Default for LoadConfigOptions {
             command_includes: true,
             include_ctx: IncludeContext::default(),
             diagnostics: None,
+            repo_caches: None,
         }
     }
 }
@@ -2371,32 +2374,29 @@ impl ConfigSet {
         if let Some(gd) = git_dir {
             let common_dir = crate::repo::common_git_dir_for_config(gd);
             let local_path = common_dir.join("config");
-            if let Some(msg) = crate::repo::early_config_ignore_repo_reason(&common_dir) {
+            let local_text = opts
+                .repo_caches
+                .as_ref()
+                .and_then(|c| c.local_config_text(&local_path).ok())
+                .or_else(|| crate::repo_caches::process_cached_local_config(&local_path).ok());
+            if let Some(msg) =
+                crate::repo::early_config_ignore_repo_reason_for_text(local_text.as_deref())
+            {
                 if let Some(sink) = opts.diagnostics.as_ref() {
                     sink.warn(crate::diagnostics::Warning::IgnoredGitDir {
                         path: gd.to_path_buf(),
                         reason: msg,
                     });
                 }
-            } else {
-                match ConfigFile::from_path(&local_path, ConfigScope::Local) {
-                    Ok(Some(f)) => Self::merge_with_includes_collect(
-                        &mut set,
-                        &f,
-                        proc,
-                        0,
-                        &ctx,
-                        included_files,
-                    )?,
-                    Ok(None) => {}
-                    Err(e) => return Err(e),
-                }
+            } else if let Some(text) = local_text.as_deref() {
+                let f = ConfigFile::parse(&local_path, text, ConfigScope::Local)?;
+                Self::merge_with_includes_collect(&mut set, &f, proc, 0, &ctx, included_files)?;
             }
 
             // Worktree config — Git only reads `config.worktree` when
             // `extensions.worktreeConfig` is enabled in the common repository `config`.
             let wt_path = gd.join("config.worktree");
-            if crate::repo::worktree_config_enabled(&common_dir) {
+            if crate::repo::worktree_config_enabled_for_text(local_text.as_deref()) {
                 match ConfigFile::from_path(&wt_path, ConfigScope::Worktree) {
                     Ok(Some(f)) => Self::merge_with_includes_collect(
                         &mut set,
@@ -2752,11 +2752,18 @@ fn include_directive_for_entry(entry: &ConfigEntry) -> Option<(String, Option<St
 // strictly more conservative than upstream.
 
 /// Stat snapshot of one cascade file (`None` = file absent).
-type ConfigFileStamp = (PathBuf, Option<(SystemTime, u64)>);
+pub(crate) type ConfigFileStamp = (PathBuf, Option<(SystemTime, u64)>);
 
-#[derive(PartialEq, Eq, Hash)]
+/// Stamp metadata stored with a memoized config cascade entry.
+pub(crate) type ConfigCacheEntryStamps = (
+    Vec<(String, Option<String>)>,
+    Vec<ConfigFileStamp>,
+    Vec<ConfigFileStamp>,
+);
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ConfigCacheKey {
-    git_dir: Option<PathBuf>,
+    pub(crate) git_dir: Option<PathBuf>,
     include_system: bool,
     process_includes: bool,
     command_includes: bool,
@@ -2820,7 +2827,7 @@ fn config_cascade_file_paths(
     paths
 }
 
-fn stamp_for_path(path: &Path) -> Option<(SystemTime, u64)> {
+pub(crate) fn stamp_for_path(path: &Path) -> Option<(SystemTime, u64)> {
     fs::metadata(path)
         .ok()
         .and_then(|m| Some((m.modified().ok()?, m.len())))

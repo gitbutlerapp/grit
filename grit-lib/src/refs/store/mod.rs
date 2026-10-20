@@ -22,7 +22,7 @@ pub use error::RefStoreError;
 pub use files::{FilesRefStore, FilesRefStoreConfig};
 pub use memory::MemoryRefStore;
 pub use open::open_ref_store;
-pub(crate) use open::open_ref_store_uncached;
+pub(crate) use open::{clear_process_ref_store_cache, open_ref_store_uncached};
 pub use reftable::ReftableRefStore;
 pub use transaction::RefTransaction;
 pub use types::{
