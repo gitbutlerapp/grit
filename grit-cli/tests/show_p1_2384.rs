@@ -115,16 +115,20 @@ fn show_rev_path_binary_blob_human_and_json() {
     git(dir.path(), &["commit", "-m", "binary"]);
     grit(dir.path(), &["init"]).expect_ok();
 
+    let git_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["show", "HEAD:binary.dat"])
+        .output()
+        .expect("git show");
+    assert!(git_out.status.success());
+
     let grit_human = Command::new(env!("CARGO_BIN_EXE_grit"))
         .current_dir(dir.path())
         .args(["show", "HEAD:binary.dat"])
         .output()
         .expect("grit show");
     assert!(grit_human.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&grit_human.stdout).trim(),
-        "Binary file"
-    );
+    assert_eq!(grit_human.stdout, git_out.stdout);
 
     let json = gs_json(dir.path(), &["show", "HEAD:binary.dat"]);
     assert_eq!(json["kind"], "blob");

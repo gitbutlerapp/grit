@@ -430,14 +430,28 @@ impl HumanRender for ShowPathOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             ShowPathOutcome::Blob {
-                binary, text, spec, ..
+                binary,
+                text,
+                data_base64,
+                spec,
+                ..
             } => {
-                if *binary {
-                    outln!(w, "Binary file");
-                    return Ok(());
-                }
                 if let Some(t) = text {
                     w.write_all(t.as_bytes())
+                        .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
+                    return Ok(());
+                }
+                if *binary {
+                    let bytes = if let Some(b64) = data_base64 {
+                        STANDARD
+                            .decode(b64)
+                            .map_err(|e| anyhow::anyhow!("decoding blob base64: {e}"))?
+                    } else {
+                        let (repo, _) = context::discover_with_warnings()?;
+                        let resolved = repo.resolve(spec)?;
+                        repo.read_object_raw_for_display(&resolved.oid)?.data
+                    };
+                    w.write_all(&bytes)
                         .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
                     return Ok(());
                 }
