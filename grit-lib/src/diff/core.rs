@@ -60,54 +60,24 @@ pub(crate) fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
     starts.windows(2).map(|w| &body[w[0]..w[1]]).collect()
 }
 
-/// Histogram line alignment from imara, then Git `xdl_change_compact` (and optional indent heuristic).
+/// Histogram line alignment (Git xdiff histogram), then `xdl_change_compact`.
 pub(crate) fn histogram_compacted_line_ops(
     old_content: &str,
     new_content: &str,
     indent_heuristic: bool,
 ) -> Vec<similar::DiffOp> {
-    use imara_diff::{Algorithm, Diff, InternedInput};
+    use crate::line_interner::LineInterner;
 
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
     let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
     let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
-    let old_len = old_lines.len();
-    let new_len = new_lines.len();
-
-    let input = InternedInput::new(old_content, new_content);
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
-    let hunks: Vec<_> = diff.hunks().collect();
-    if hunks.is_empty() {
-        return Vec::new();
-    }
-
-    let mut changed1 = vec![false; old_len];
-    let mut changed2 = vec![false; new_len];
-    for h in &hunks {
-        for (i, flag) in changed1
-            .iter_mut()
-            .enumerate()
-            .take(h.before.end as usize)
-            .skip(h.before.start as usize)
-        {
-            if i < old_len {
-                *flag = true;
-            }
-        }
-        for (i, flag) in changed2
-            .iter_mut()
-            .enumerate()
-            .take(h.after.end as usize)
-            .skip(h.after.start as usize)
-        {
-            if i < new_len {
-                *flag = true;
-            }
-        }
-    }
-    let raw = changed_flags_to_ops(&changed1, &changed2, old_len, new_len);
+    let mut interner = LineInterner::default();
+    let ids1 = interner.intern_all(&old_lines);
+    let ids2 = interner.intern_all(&new_lines);
+    let (changed1, changed2) =
+        git_xdiff::histogram_changed_flags(&old_lines, &new_lines, &ids1, &ids2);
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     diff_indent_heuristic::apply_change_compact_to_ops(
         &raw,
         &old_lines,
@@ -1741,7 +1711,7 @@ mod git_xdiff {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn merge_myers_region(
+    pub(super) fn merge_myers_region(
         lines1: &[&str],
         lines2: &[&str],
         changed1: &mut [bool],
@@ -1773,6 +1743,8 @@ mod git_xdiff {
             }
         }
     }
+
+    include!("git_histogram.rs");
 }
 
 /// Convert per-token `changed` flags (Git xdiff style) into `similar::DiffOp`s.
