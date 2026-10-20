@@ -15,6 +15,32 @@
       ],
       "type": "string"
     },
+    "DiffTotalsJson": {
+      "description": "Aggregate line counts for `--stat` / `--numstat` JSON.",
+      "properties": {
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "files_changed": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "files_changed",
+        "insertions"
+      ],
+      "type": "object"
+    },
     "FileDiff": {
       "description": "One changed file.",
       "properties": {
@@ -22,10 +48,14 @@
           "type": "boolean"
         },
         "hunks": {
+          "description": "Patch hunks; omitted in JSON unless the output format is a full patch.",
           "items": {
             "$ref": "#/definitions/Hunk"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "new_encoding_lossy": {
           "description": "True when new side bytes were decoded with lossy UTF-8.",
@@ -60,13 +90,32 @@
           "description": "Display path (the new path, or the old path for a deletion).",
           "type": "string"
         },
+        "similarity": {
+          "description": "Rename/copy similarity (0–100).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stat": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LineStatJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Line counts when `--stat` / `--numstat` / `--shortstat` is active."
+        },
         "status": {
           "$ref": "#/definitions/ChangeStatus"
         }
       },
       "required": [
         "binary",
-        "hunks",
         "path",
         "status"
       ],
@@ -175,6 +224,26 @@
       ],
       "type": "string"
     },
+    "LineStatJson": {
+      "description": "Per-file line counts in JSON when stat modes are active.",
+      "properties": {
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "insertions"
+      ],
+      "type": "object"
+    },
     "Segment": {
       "description": "A run of text within a line, flagged if it's part of the word-level change.",
       "properties": {
@@ -198,6 +267,16 @@
         "$ref": "#/definitions/FileDiff"
       },
       "type": "array"
+    },
+    "totals": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DiffTotalsJson"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [

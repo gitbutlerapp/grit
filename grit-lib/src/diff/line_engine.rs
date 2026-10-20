@@ -5,7 +5,6 @@ use super::super::{
 };
 use super::{StructuredHunk, StructuredLine, StructuredLineKind, StructuredSegment};
 use crate::diff::options::DiffOptions;
-
 /// Line-level hunks for two text sides, honoring algorithm, context, and indent heuristic.
 #[must_use]
 pub(crate) fn line_hunks(

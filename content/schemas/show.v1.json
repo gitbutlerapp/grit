@@ -106,6 +106,14 @@
         "path": {
           "type": "string"
         },
+        "similarity": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "status": {
           "$ref": "#/definitions/ChangeStatus"
         }

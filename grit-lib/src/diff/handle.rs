@@ -1,8 +1,13 @@
 //! Repository-scoped tree and index diffs via [`Diff`].
-use crate::diff::{diff_index_to_tree, diff_index_to_worktree, diff_trees, DiffEntry};
+use crate::config::ConfigSet;
+use crate::diff::{
+    build_file_diffs, diff_index_to_tree, diff_index_to_worktree, diff_trees, DiffDetail,
+    DiffEntry, DiffFilesOutput, DiffOptions,
+};
 use crate::error::Result;
 use crate::index::Index;
 use crate::objects::ObjectId;
+use crate::parallel::ThreadPolicy;
 use crate::repo::Repository;
 
 /// Compare trees, the index, and the working tree for one repository.
@@ -81,6 +86,29 @@ impl<'repo> Diff<'repo> {
             work_tree,
             ignore_submodule_untracked,
             simplify_gitlinks,
+        )
+    }
+
+    /// Build per-file diff output for tree or index diff entries.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object database and diff errors from [`build_file_diffs`].
+    pub fn files(
+        &self,
+        entries: Vec<DiffEntry>,
+        detail: DiffDetail,
+        diff_options: DiffOptions,
+        config: &ConfigSet,
+        thread_policy: &ThreadPolicy,
+    ) -> Result<DiffFilesOutput> {
+        build_file_diffs(
+            self.repo.odb(),
+            entries,
+            detail,
+            diff_options,
+            config,
+            thread_policy,
         )
     }
 }

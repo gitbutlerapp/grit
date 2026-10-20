@@ -6,7 +6,6 @@
 //! commit; and for any commit, its metadata, message, and the change it
 //! introduced (rendered with the same delta-style as `grit diff`).
 
-use std::io::IsTerminal;
 use std::io::Write;
 
 use anyhow::{bail, Context, Result};
@@ -16,14 +15,12 @@ use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
+use crate::commands::diff::diff_of_commit;
 use crate::context::{self, subject_line};
-use crate::markdown;
-use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderContext};
+use crate::diff_render::{self, diffstat_from_patch};
+pub use crate::diff_render::{render_markdown_stat, render_stat, DiffStat};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ui::PathDisplayOptions;
-
-/// Width budget for the `+`/`-` change bars in the diffstat.
-const BAR_WIDTH: usize = 40;
 
 /// What `grit show` resolved (`--json` contract).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -57,27 +54,6 @@ pub struct ShowOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     path_display: Option<PathDisplayOptions>,
-}
-
-/// A diffstat: per-file insertion/deletion counts plus totals.
-#[derive(Serialize, JsonSchema)]
-pub struct DiffStat {
-    pub files: Vec<FileStat>,
-    pub files_changed: usize,
-    pub insertions: usize,
-    pub deletions: usize,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct FileStat {
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub old_path: Option<String>,
-    pub status: ChangeStatus,
-    pub insertions: usize,
-    pub deletions: usize,
-    pub binary: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -129,7 +105,7 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
         message: data.message.trim_end().to_owned(),
     };
 
-    let stat = diffstat(&diff_of_commit(&repo, &commit_oid)?);
+    let stat = diffstat_from_patch(&diff_of_commit(&repo, &commit_oid)?.files);
 
     Ok(ShowOutcome {
         warnings: sink.warnings(),
@@ -142,40 +118,9 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
     })
 }
 
-/// Reduce a full diff to a per-file insertion/deletion summary.
-pub(crate) fn diffstat(diff: &DiffOutcome) -> DiffStat {
-    let mut files = Vec::new();
-    let mut insertions = 0;
-    let mut deletions = 0;
-    for file in &diff.files {
-        let mut ins = 0;
-        let mut del = 0;
-        for hunk in &file.hunks {
-            for line in &hunk.lines {
-                match line.kind {
-                    LineKind::Add => ins += 1,
-                    LineKind::Del => del += 1,
-                    LineKind::Context => {}
-                }
-            }
-        }
-        insertions += ins;
-        deletions += del;
-        files.push(FileStat {
-            path: file.path.clone(),
-            old_path: file.old_path.clone(),
-            status: file.status,
-            insertions: ins,
-            deletions: del,
-            binary: file.binary,
-        });
-    }
-    DiffStat {
-        files_changed: files.len(),
-        files,
-        insertions,
-        deletions,
-    }
+/// Back-compat wrapper for stash and log.
+pub(crate) fn diffstat(diff: &crate::commands::diff::DiffOutcome) -> DiffStat {
+    diffstat_from_patch(&diff.files)
 }
 
 /// Determine what `target` names: a branch, a tag (light or annotated), or a
@@ -293,7 +238,7 @@ impl MarkdownRender for ShowOutcome {
 
 impl HumanRender for ShowOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let color = use_color();
+        let color = diff_render::use_color();
 
         // Annotated tags lead with their own block.
         if let Some(tag) = &self.tag {
@@ -340,135 +285,13 @@ impl HumanRender for ShowOutcome {
         outln!(w);
         print_message(w, &self.commit.message)?;
 
-        render_stat(w, &self.stat, color, self.path_display.as_ref())?;
+        diff_render::render_stat_with_leading_blank(
+            w,
+            &self.stat,
+            color,
+            self.path_display.as_ref(),
+        )?;
         Ok(())
-    }
-}
-
-/// Render the diffstat, mirroring `git show --stat`.
-pub(crate) fn render_stat(
-    w: &mut dyn Write,
-    stat: &DiffStat,
-    color: bool,
-    path_opts: Option<&PathDisplayOptions>,
-) -> Result<()> {
-    if stat.files.is_empty() {
-        return Ok(());
-    }
-    outln!(w);
-
-    let name_width = stat
-        .files
-        .iter()
-        .map(|f| stat_path(f, path_opts).chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(60);
-    let max_changes = stat
-        .files
-        .iter()
-        .map(|f| f.insertions + f.deletions)
-        .max()
-        .unwrap_or(0);
-
-    for file in &stat.files {
-        let path = stat_path(file, path_opts);
-        if file.binary {
-            outln!(w, " {path:<name_width$} | Bin");
-            continue;
-        }
-        let total = file.insertions + file.deletions;
-        let bar = change_bar(file.insertions, file.deletions, max_changes, color);
-        outln!(w, " {path:<name_width$} | {total:>3} {bar}");
-    }
-
-    outln!(w, " {}", summary_line(stat));
-    Ok(())
-}
-
-/// `old => new` for a rename, otherwise just the path.
-fn stat_path(file: &FileStat, path_opts: Option<&PathDisplayOptions>) -> String {
-    match &file.old_path {
-        Some(old) => {
-            let old_shown = path_opts
-                .map(|o| o.format_path_for_human(old))
-                .unwrap_or_else(|| old.clone());
-            let new_shown = path_opts
-                .map(|o| o.format_path_for_human(&file.path))
-                .unwrap_or_else(|| file.path.clone());
-            format!("{old_shown} => {new_shown}")
-        }
-        None => path_opts
-            .map(|o| o.format_path_for_human(&file.path))
-            .unwrap_or_else(|| file.path.clone()),
-    }
-}
-
-/// A scaled `+`/`-` bar (green/red on a TTY), like `git --stat`.
-fn change_bar(insertions: usize, deletions: usize, max_changes: usize, color: bool) -> String {
-    let total = insertions + deletions;
-    if total == 0 {
-        return String::new();
-    }
-    // Scale the longest file's bar to BAR_WIDTH; shorter ones scale proportionally.
-    let scaled = if max_changes > BAR_WIDTH {
-        ((total * BAR_WIDTH).div_ceil(max_changes)).max(1)
-    } else {
-        total
-    };
-    let mut plus = ((insertions * scaled) as f64 / total as f64).round() as usize;
-    let mut minus = scaled.saturating_sub(plus);
-    // Keep at least one cell for a side that actually changed.
-    if insertions > 0 && plus == 0 {
-        plus = 1;
-        minus = minus.saturating_sub(1);
-    }
-    if deletions > 0 && minus == 0 {
-        minus = 1;
-        plus = plus.saturating_sub(1);
-    }
-    let plus_bar = "+".repeat(plus);
-    let minus_bar = "-".repeat(minus);
-    if color {
-        format!(
-            "{}{}",
-            paint(true, "32", &plus_bar),
-            paint(true, "31", &minus_bar)
-        )
-    } else {
-        format!("{plus_bar}{minus_bar}")
-    }
-}
-
-/// `N files changed, N insertions(+), N deletions(-)` (omitting zero parts).
-fn summary_line(stat: &DiffStat) -> String {
-    let mut parts = vec![format!(
-        "{} file{} changed",
-        stat.files_changed,
-        plural(stat.files_changed)
-    )];
-    if stat.insertions > 0 {
-        parts.push(format!(
-            "{} insertion{}(+)",
-            stat.insertions,
-            plural(stat.insertions)
-        ));
-    }
-    if stat.deletions > 0 {
-        parts.push(format!(
-            "{} deletion{}(-)",
-            stat.deletions,
-            plural(stat.deletions)
-        ));
-    }
-    parts.join(", ")
-}
-
-fn plural(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
     }
 }
 
@@ -491,6 +314,14 @@ fn print_markdown_message(w: &mut dyn Write, message: &str) -> Result<()> {
     Ok(())
 }
 
+fn paint(color: bool, code: &str, text: &str) -> String {
+    if color {
+        format!("\x1b[{code}m{text}\x1b[0m")
+    } else {
+        text.to_owned()
+    }
+}
+
 fn message_body(full: &str, subject: &str) -> String {
     let mut lines = full.lines();
     let first = lines.next().unwrap_or("");
@@ -498,50 +329,5 @@ fn message_body(full: &str, subject: &str) -> String {
         lines.collect::<Vec<_>>().join("\n").trim().to_owned()
     } else {
         full.trim().to_owned()
-    }
-}
-
-pub(crate) fn render_markdown_stat(
-    w: &mut dyn Write,
-    stat: &DiffStat,
-    path_opts: Option<&PathDisplayOptions>,
-) -> Result<()> {
-    if stat.files.is_empty() {
-        return Ok(());
-    }
-    outln!(w, "## Changes");
-    outln!(w);
-    outln!(w, "| File | + | − |");
-    outln!(w, "| --- | ---: | ---: |");
-    for file in &stat.files {
-        let path = markdown::escape_table_cell(&stat_path(file, path_opts));
-        let path_code = markdown::format_inline_code(&path);
-        if file.binary {
-            outln!(w, "| {path_code} | binary | |");
-        } else {
-            outln!(
-                w,
-                "| {path_code} | {} | {} |",
-                file.insertions,
-                file.deletions
-            );
-        }
-    }
-    outln!(w);
-    outln!(w, "{}", summary_line(stat));
-    Ok(())
-}
-
-pub(crate) fn use_color() -> bool {
-    std::io::stdout().is_terminal()
-        && grit_lib::porcelain::terminal::ansi_supported()
-        && std::env::var_os("NO_COLOR").is_none()
-}
-
-fn paint(color: bool, code: &str, text: &str) -> String {
-    if color {
-        format!("\x1b[{code}m{text}\x1b[0m")
-    } else {
-        text.to_owned()
     }
 }

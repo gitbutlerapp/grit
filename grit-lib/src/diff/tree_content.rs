@@ -8,11 +8,33 @@ use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::parallel::{try_par_map_with_local, ParallelHashError};
 use crate::parallel::{ParallelOp, ThreadPolicy};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use super::detail::{line_change_counts, LineStat};
 use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
 use super::DiffOptions;
+
+thread_local! {
+    static DIFF_BLOB_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
+}
+
+/// Test hook: count blob ODB reads during diff content loading.
+#[doc(hidden)]
+pub fn set_diff_blob_read_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
+    DIFF_BLOB_READ_HOOK.with(|cell| *cell.borrow_mut() = hook);
+}
+
+fn note_blob_read() {
+    DIFF_BLOB_READ_HOOK.with(|cell| {
+        if let Some(counter) = cell.borrow().as_ref() {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+}
 
 /// Tree diff entry with structured line hunks ready for CLI rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +92,68 @@ pub fn tree_diff_contents_parallel(
         })
     })?;
     Ok(rows)
+}
+
+/// Per-file line counts for stat modes (loads blobs, no hunk allocation).
+///
+/// # Errors
+///
+/// Propagates object database read failures.
+pub fn tree_diff_stat_parallel(
+    odb: &Odb,
+    entries: Vec<DiffEntry>,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+    diff_options: DiffOptions,
+) -> Result<Vec<(DiffEntry, bool, Option<LineStat>)>> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
+    par_opts.min_items = 0;
+    par_opts.min_total_bytes = None;
+    let store = odb.pack_store_for(odb.objects_dir());
+    let rows = try_par_map_with_local(
+        &entries,
+        par_opts,
+        0,
+        || PackReadContextGuard::install(Arc::clone(&store)),
+        |_ctx, entry| {
+            if !entry.old_oid.is_zero()
+                && entry.old_oid == entry.new_oid
+                && entry.old_mode == entry.new_mode
+            {
+                let (_, old_bin) = load_old_side(odb, entry)?;
+                let binary = old_bin;
+                return Ok((
+                    entry.clone(),
+                    binary,
+                    if binary {
+                        None
+                    } else {
+                        Some(LineStat::default())
+                    },
+                ));
+            }
+            let (old_bytes, old_bin) = load_old_side(odb, entry)?;
+            let (new_bytes, new_bin) = load_new_side(odb, entry)?;
+            let binary = old_bin || new_bin;
+            let stat = if binary {
+                None
+            } else {
+                Some(line_change_counts(
+                    &old_bytes.text(),
+                    &new_bytes.text(),
+                    &diff_options,
+                ))
+            };
+            Ok((entry.clone(), binary, stat))
+        },
+    );
+    match rows {
+        Ok(rows) => Ok(rows),
+        Err(ParallelHashError::Task(err)) => Err(err),
+    }
 }
 
 /// Load sides and compute structured line diffs for each entry in parallel.
@@ -192,6 +276,7 @@ fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
     if *oid == ObjectId::zero() {
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
+    note_blob_read();
     let data = odb.read(oid)?.data;
     Ok(bytes_for_diff(&data))
 }

@@ -12,8 +12,9 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::commands::diff::diff_of_commit;
-use crate::commands::show::{diffstat, render_stat, use_color, DiffStat};
+use crate::commands::show::diffstat;
 use crate::context::{self, subject_line, CommitSummary};
+use crate::diff_render::{render_stat, use_color, DiffStat};
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui;

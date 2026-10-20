@@ -170,7 +170,8 @@ fn print_fenced_diff(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
 
 fn render_file_patch(file: &FileDiff) -> String {
     let mut out = String::new();
-    for hunk in &file.hunks {
+    let hunks = file.hunks.as_deref().unwrap_or(&[]);
+    for hunk in hunks {
         if !out.is_empty() {
             out.push('\n');
         }
