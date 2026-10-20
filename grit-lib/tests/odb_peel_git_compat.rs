@@ -86,7 +86,9 @@ fn peel_reports_missing_tag_target() {
     let root = tmp.path();
     git(root, &["init", "-q", "-b", "main"]);
     let missing = "1111111111111111111111111111111111111111";
-    let body = format!("object {missing}\ntype commit\ntag dangling\ntagger T <t@example.com> 0 +0000\n\nd\n");
+    let body = format!(
+        "object {missing}\ntype commit\ntag dangling\ntagger T <t@example.com> 0 +0000\n\nd\n"
+    );
     let path = root.join("tag.txt");
     std::fs::write(&path, body).unwrap();
     let tag: ObjectId = git(
