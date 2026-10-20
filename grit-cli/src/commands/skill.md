@@ -34,8 +34,8 @@ The target branch is the first that exists of: the `target.branch` config value,
 | Uncommitted changes as a diff | `grit diff` |
 | Changed paths only | `grit diff --name-only` |
 | Per-file line counts | `grit diff --stat` or `grit diff --numstat` |
-| The change one commit made | `grit diff <commit>` |
-| A commit's message and file summary | `grit show [<commit-or-branch-or-tag>]` |
+| The change one commit made | `grit show <commit>` (patch by default; `grit diff <commit>` is the same diff without commit metadata) |
+| A commit's message and diffstat only | `grit show [<commit-or-branch-or-tag>] --stat` |
 | Recent history, ten at a time | `grit log`, then `grit log --before <next>` using the `next` value |
 | Commits on this branch not on the target | `grit shortlog` |
 

@@ -4,7 +4,10 @@
 //! plus the commit it points at; for a lightweight tag, the same; for an
 //! annotated tag, the tag's own metadata and message followed by the target
 //! commit; and for any commit, its metadata, message, and the change it
-//! introduced (rendered with the same delta-style as `grit diff`).
+//! introduced (delta-style patch by default, or `--stat` / other diff formats).
+//!
+//! Merge commits use first-parent diff semantics (same as `git show` without
+//! `--diff-merges`); combined parent diffs are not shown here.
 
 use std::io::Write;
 
@@ -15,12 +18,20 @@ use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::commands::diff::diff_of_commit;
+use crate::commands::diff::{CommitDiffOptions, DiffOutcome, DiffTotalsJson, FileDiff};
 use crate::context::{self, subject_line};
-use crate::diff_render::{self, diffstat_from_patch};
-pub use crate::diff_render::{render_markdown_stat, render_stat, DiffStat};
+use crate::diff_format::DiffFormatArgs;
+pub use crate::diff_render::DiffStat;
+use crate::diff_render::{self, diffstat_from_files};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-use crate::ui::PathDisplayOptions;
+
+/// Inputs for `grit show`.
+pub struct ShowRunOptions {
+    pub object: Option<String>,
+    pub paths: Vec<String>,
+    pub format: DiffFormatArgs,
+    pub word_level_inline: bool,
+}
 
 /// What `grit show` resolved (`--json` contract).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -49,11 +60,16 @@ pub struct ShowOutcome {
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub tag: Option<TagInfo>,
     pub commit: CommitInfo,
-    /// A summary (diffstat) of the change the commit introduced — not the full patch.
+    /// Per-file diff rows (same shape as `grit diff --json`).
+    pub files: Vec<FileDiff>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub totals: Option<DiffTotalsJson>,
+    /// Summary diffstat (always present for scripting convenience).
     pub stat: DiffStat,
     #[serde(skip)]
     #[schemars(skip)]
-    path_display: Option<PathDisplayOptions>,
+    diff: DiffOutcome,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -77,15 +93,12 @@ pub struct TagInfo {
 
 pub use crate::output::Person;
 
-pub fn run(object: Option<String>) -> Result<ShowOutcome> {
+pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
     let (repo, sink) = context::discover_with_warnings()?;
-    let target = object.unwrap_or_else(|| "HEAD".to_owned());
+    let target = opts.object.unwrap_or_else(|| "HEAD".to_owned());
 
     let (kind, ref_name, tag) = classify(&repo, &target)?;
 
-    // Resolve the name, then peel through any (annotated) tag objects to the
-    // underlying commit. `resolve_revision` resolves branches/HEAD/sha and
-    // lightweight tags to a commit, but yields the tag *object* for annotated tags.
     let resolved =
         grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, &target)
             .with_context(|| format!("could not resolve '{target}'"))?;
@@ -105,7 +118,18 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
         message: data.message.trim_end().to_owned(),
     };
 
-    let stat = diffstat_from_patch(&diff_of_commit(&repo, &commit_oid)?.files);
+    let diff = crate::commands::diff::diff_for_commit(
+        &repo,
+        &commit_oid,
+        CommitDiffOptions {
+            paths: opts.paths,
+            format: opts.format,
+            word_level_inline: opts.word_level_inline,
+        },
+    )?;
+    let stat = diffstat_from_files(&diff.files);
+    let files = diff.files.clone();
+    let totals = diff.totals;
 
     Ok(ShowOutcome {
         warnings: sink.warnings(),
@@ -113,14 +137,16 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
         ref_name,
         tag,
         commit,
+        files,
+        totals,
         stat,
-        path_display: PathDisplayOptions::from_repo(&repo).ok(),
+        diff,
     })
 }
 
 /// Back-compat wrapper for stash and log.
 pub(crate) fn diffstat(diff: &crate::commands::diff::DiffOutcome) -> DiffStat {
-    diffstat_from_patch(&diff.files)
+    diffstat_from_files(&diff.files)
 }
 
 /// Determine what `target` names: a branch, a tag (light or annotated), or a
@@ -231,7 +257,7 @@ impl MarkdownRender for ShowOutcome {
             print_markdown_message(w, &body)?;
             outln!(w);
         }
-        render_markdown_stat(w, &self.stat, self.path_display.as_ref())?;
+        self.diff.render_markdown_diff(w)?;
         Ok(())
     }
 }
@@ -240,7 +266,6 @@ impl HumanRender for ShowOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let color = diff_render::use_color();
 
-        // Annotated tags lead with their own block.
         if let Some(tag) = &self.tag {
             outln!(w, "{}", paint(color, "33;1", &format!("tag {}", tag.name)));
             if let Some(tagger) = &tag.tagger {
@@ -260,7 +285,6 @@ impl HumanRender for ShowOutcome {
             }
         }
 
-        // Commit block.
         outln!(
             w,
             "{}",
@@ -285,12 +309,20 @@ impl HumanRender for ShowOutcome {
         outln!(w);
         print_message(w, &self.commit.message)?;
 
-        diff_render::render_stat_with_leading_blank(
-            w,
-            &self.stat,
-            color,
-            self.path_display.as_ref(),
-        )?;
+        let fmt = self.diff.format_flags();
+        if fmt.human_stat_block() {
+            diff_render::render_stat_with_leading_blank(
+                w,
+                &self.stat,
+                color,
+                self.diff.path_display_opts(),
+            )?;
+        } else {
+            if !self.diff.files.is_empty() && fmt.detail() == grit_lib::diff::DiffDetail::Patch {
+                outln!(w);
+            }
+            self.diff.render_human_diff(w, None)?;
+        }
         Ok(())
     }
 }

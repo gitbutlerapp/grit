@@ -1577,10 +1577,10 @@ fn show_json_commit_branch_and_tag() -> TestResult {
     assert_eq!(v["commit"]["subject"], "second");
     assert_eq!(v["commit"]["oid"].as_str().unwrap().len(), 40);
     assert_eq!(v["commit"]["author"]["email"], "test@example.com");
-    // `show` carries a diffstat, not the full patch.
     assert_eq!(v["stat"]["files"][0]["path"], "a.txt");
     assert_eq!(v["stat"]["files_changed"], 1);
     assert_eq!(v["stat"]["insertions"], 1);
+    assert!(v["files"].as_array().is_some_and(|a| !a.is_empty()));
 
     // By commit sha → commit kind.
     let sha = v["commit"]["oid"].as_str().unwrap().to_owned();

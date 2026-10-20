@@ -303,7 +303,7 @@ fn show_markdown_escapes_pipe_characters_in_diffstat_table() {
         .status()
         .unwrap();
     let out = Command::new(GRIT)
-        .args(["show", "--markdown", "HEAD"])
+        .args(["show", "--stat", "--markdown", "HEAD"])
         .current_dir(dir.path())
         .output()
         .expect("show");

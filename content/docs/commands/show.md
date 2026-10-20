@@ -1,6 +1,6 @@
 ---
 title: grit show
-summary: Show a commit, tag or branch, and a summary of what it changed.
+summary: Show a commit, tag or branch, and the change it introduced.
 group: History
 order: 3
 ---
@@ -8,26 +8,35 @@ order: 3
 ## Synopsis
 
 ```text
-grit show [<object>]
+grit show [<object>] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U<n>] [-- <path>…]
 ```
 
 ## Description
 
-Shows a commit's id, author, date and full message, followed by a summary of the files it changed and how many lines were added and removed in each. With no argument, it shows the current commit. File stats use rename detection (Git `-M50`), so a rename with minor edits is shown as `old => new` with insertion/deletion counts for the content delta, not as deleting the old path and adding the new one.
+Shows a commit's id, author, date and full message, followed by the change that commit introduced (delta-style patch by default, like `grit diff <commit>`). With no argument, it shows the current commit.
 
 `<object>` can be a commit id (full or short), an expression like `HEAD~2`, a branch or a tag. For a branch or tag, the first line names it. For an annotated tag, the tag's own author, date and message come before the commit it points at.
 
-To see the full change a commit made, use [`grit diff <commit>`](../diff/).
+**Merge commits** use first-parent diff semantics (the same as `git show` without `--diff-merges`): only the diff against the first parent is shown. Combined parent diffs are not supported here.
+
+Use `--stat` (or other diff format flags below) instead of the default patch. Limit output to paths with `-- <path>…` after the commit argument.
 
 ## Options
 
 | Option | Description |
 | --- | --- |
 | `<object>` | The commit, branch or tag to show. Defaults to the current commit. |
+| `--stat` | Summary with change bars per file instead of a full patch. |
+| `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines. |
+| `--shortstat` | Only the summary line (`N files changed, …`). |
+| `--name-only` | Changed paths, one per line. |
+| `--name-status` | Status letter and path(s) per line. |
+| `-U`, `--unified <n>` | Lines of context around each change in patch mode (default 3). |
+| `-- <path>…` | Limit the diff to these paths (pathspecs). |
 
 ## Examples
 
-Show the latest commit:
+Show the latest commit with patch (default):
 
 ```console
 $ grit show
@@ -38,8 +47,26 @@ Date:   2026-10-07 10:00:00 +0000
 
     Say hi
 
- main.rs |   4 +++-
- 1 file changed, 3 insertions(+), 1 deletion(-)
+## main.rs
+**status:** modified
+
+- 1  1
++ 1  2
+ context line
+- old line
++ new line
+```
+
+Show only the diffstat (previous default style):
+
+```console
+$ grit show HEAD --stat
+```
+
+Show one file from a commit:
+
+```console
+$ grit show HEAD~1 -- README.md
 ```
 
 Show what a tag points at:
@@ -68,7 +95,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `ref_name` | string | Branch or tag name when you named a ref; omitted for a raw commit id. |
 | `tag` | object | For an annotated tag: `name`, `tagger`, and `message`. |
 | `commit` | object | Commit id, parents, author, committer, subject, and full message. |
-| `stat` | object | Change stats with `files`, `files_changed`, `insertions`, and `deletions`. |
+| `files` | array | Per-file diff rows (same shape as [`grit diff`](diff.md) `--json`). |
+| `totals` | object | Aggregate line counts when a stat-style format is selected; omitted for patch-only output unless the library computed totals. |
+| `stat` | object | Summary diffstat with `files`, `files_changed`, `insertions`, and `deletions` (always present). |
 
 Example:
 
@@ -92,6 +121,14 @@ Example:
     "subject": "second",
     "message": "second"
   },
+  "files": [
+    {
+      "path": "README.md",
+      "status": "modified",
+      "binary": false,
+      "hunks": []
+    }
+  ],
   "stat": {
     "files": [
       {
@@ -112,24 +149,26 @@ Example:
 ## Markdown output
 
 Schema: [v1](/schemas/show/v1.json)
-Pass [`--markdown`](../global-options/) for headings, commit metadata, message body, and a diffstat table:
+
+Pass [`--markdown`](../global-options/) for headings, commit metadata, message body, and fenced `diff` blocks per file (or a diffstat table with `--stat`):
 
 ```text
 # Commit `b52cca6`
 
 **Oid:** `92501f188ae0815af09a0cef6e121eddda4113cf`
 **Author:** Ada Lovelace <ada@example.com>
-**Date:** 2026-10-07 14:54:02 +0000
+**Date:** 2026-10-07T14:54:02Z
 
-Subject line as a level-2 heading, then a "Changes" section with a table:
+## second
 
-| File | + | − |
-| --- | ---: | ---: |
-| `README.md` | 1 | 0 |
-
-1 file changed, 1 insertion(+)
+```diff
+@@ -1,1 +1,2 @@
+ line
++added
+```
 ```
 
 ## See also
 
-[grit diff](../diff/), [grit log](../log/), [grit tag](../tag/)
+- [`grit diff`](diff.md) — compare commits, ranges, or the working tree without commit metadata.
+- [`grit log`](log.md) — list recent commits.

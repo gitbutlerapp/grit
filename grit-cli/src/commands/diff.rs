@@ -118,7 +118,7 @@ pub struct DiffOutcome {
 }
 
 /// One changed file.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct FileDiff {
     /// Display path (the new path, or the old path for a deletion).
     pub path: String,
@@ -163,7 +163,7 @@ pub struct FileDiff {
 }
 
 /// A contiguous run of changes plus surrounding context.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct Hunk {
     /// 1-based first old/new line numbers in the hunk.
     pub old_start: usize,
@@ -212,6 +212,7 @@ impl JsonSchema for Line {
 }
 
 /// One rendered line of a hunk.
+#[derive(Clone)]
 pub struct Line {
     pub kind: LineKind,
     /// 1-based old/new line numbers (absent on the side where the line is new/gone).
@@ -271,7 +272,7 @@ pub enum LineKind {
 }
 
 /// A run of text within a line, flagged if it's part of the word-level change.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct Segment {
     pub text: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -693,21 +694,51 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
 }
 
 /// The diff a single commit introduced, as a [`DiffOutcome`]. Reused by `grit show`.
-pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<DiffOutcome> {
+/// Options for diffing a single commit's patch (first parent vs commit tree).
+pub struct CommitDiffOptions {
+    /// Pathspecs from trailing `PATH` arguments (after `--`).
+    pub paths: Vec<String>,
+    pub format: DiffFormatArgs,
+    pub word_level_inline: bool,
+}
+
+/// Diff the change one commit introduced (first-parent tree vs commit tree).
+pub fn diff_for_commit(
+    repo: &grit_lib::repo::Repository,
+    oid: &ObjectId,
+    opts: CommitDiffOptions,
+) -> Result<DiffOutcome> {
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
+    let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
-    diff_options.word_level_inline = false;
-    let format = DiffFormatArgs::default();
+    opts.format.apply_context(&mut diff_options);
+    diff_options.word_level_inline = opts.word_level_inline;
+    let detail = opts.format.detail();
+    let format = opts.format;
+    let entries = filter_diff_entries(
+        commit_entries(repo, oid, &config, &thread_policy)?,
+        repo,
+        &pathspecs,
+    );
     Ok(finish_outcome(
         repo,
         format,
-        outcome_from_tree_structured(
-            commit_changes(repo, oid, &config, &thread_policy, diff_options)?,
-            format,
-        ),
+        tree_diff_outcome(repo, entries, detail, diff_options, format)?,
     ))
+}
+
+pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<DiffOutcome> {
+    diff_for_commit(
+        repo,
+        oid,
+        CommitDiffOptions {
+            paths: Vec::new(),
+            format: DiffFormatArgs::default(),
+            word_level_inline: false,
+        },
+    )
 }
 
 /// Build a full patch-style [`DiffOutcome`] from tree diff entries (e.g. stash W vs base).
@@ -1491,36 +1522,6 @@ fn worktree_against_tree(
         .collect()
 }
 
-/// The change a single commit introduced: its first parent's tree vs its own.
-fn commit_changes(
-    repo: &grit_lib::repo::Repository,
-    oid: &ObjectId,
-    config: &grit_lib::config::ConfigSet,
-    thread_policy: &grit_lib::parallel::ThreadPolicy,
-    diff_options: DiffOptions,
-) -> Result<Vec<TreeDiffStructured>> {
-    let commit = context::read_commit(repo, oid)?;
-    let new_tree = commit.tree;
-    let old_tree = match commit.parents.first() {
-        Some(parent) => Some(context::commit_tree(repo, parent)?),
-        None => None,
-    };
-
-    let mut entries = diff_trees_with_renames_and_policy(
-        repo.odb(),
-        old_tree.as_ref(),
-        Some(&new_tree),
-        "",
-        rename_threshold(config),
-        config,
-        thread_policy,
-    )
-    .context("could not diff the commit")?;
-    sort_entries(&mut entries);
-    tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
-        .context("could not build structured diff")
-}
-
 fn sort_entries(entries: &mut [DiffEntry]) {
     entries.sort_by(|a, b| a.path().cmp(b.path()));
 }
@@ -1734,13 +1735,26 @@ fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
 
 // --- Human (delta-style) rendering -----------------------------------------
 
-impl HumanRender for DiffOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+impl DiffOutcome {
+    #[must_use]
+    pub(crate) fn format_flags(&self) -> DiffFormatArgs {
+        self.format
+    }
+
+    pub(crate) fn path_display_opts(&self) -> Option<&PathDisplayOptions> {
+        self.path_display.as_ref()
+    }
+
+    /// Render only the diff body (no commit header). `empty_message` is printed when there
+    /// are no files in patch mode; pass `None` to stay silent (as `grit show` does).
+    pub fn render_human_diff(&self, w: &mut dyn Write, empty_message: Option<&str>) -> Result<()> {
         if self.files.is_empty() {
             if format_is_byte_list_or_stat(self.format) {
                 return Ok(());
             }
-            outln!(w, "No changes.");
+            if let Some(msg) = empty_message {
+                outln!(w, "{msg}");
+            }
             return Ok(());
         }
         let color = diff_render::use_color();
@@ -1767,10 +1781,9 @@ impl HumanRender for DiffOutcome {
         }
         Ok(())
     }
-}
 
-impl MarkdownRender for DiffOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    /// Markdown diff body only (used by `grit show` after the commit header).
+    pub fn render_markdown_diff(&self, w: &mut dyn Write) -> Result<()> {
         if self.files.is_empty() && format_is_byte_list_or_stat(self.format) {
             return Ok(());
         }
@@ -1805,6 +1818,18 @@ impl MarkdownRender for DiffOutcome {
         }
         markdown::print_diff_files(w, &self.files, self.path_display.as_ref())?;
         Ok(())
+    }
+}
+
+impl HumanRender for DiffOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        self.render_human_diff(w, Some("No changes."))
+    }
+}
+
+impl MarkdownRender for DiffOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        self.render_markdown_diff(w)
     }
 }
 
