@@ -177,23 +177,41 @@ pub(crate) mod pack_cache {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
             return Ok(None);
         }
-        SINGLE_PACK_READER.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            if slot.as_ref().is_none_or(|(dir, _)| dir != objects_dir) {
-                *slot = super::SingleLocalPackReader::open_allow_loose(objects_dir)
-                    .ok()
-                    .flatten()
-                    .map(|reader| (objects_dir.to_path_buf(), reader));
-            }
-            let Some((_, reader)) = slot.as_mut() else {
-                return Ok(None);
-            };
-            match reader.read_object(oid) {
-                Ok(obj) => Ok(Some(obj)),
-                Err(Error::ObjectNotFound(_)) => Ok(None),
-                Err(err) => Err(err),
-            }
-        })
+        let store = crate::pack_store::PackStore::active_for_reads();
+        sync_thread_local_with_store(&store);
+
+        let needs_open = SINGLE_PACK_READER.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .is_none_or(|(dir, _)| dir != objects_dir)
+        });
+        if needs_open {
+            let opened = super::SingleLocalPackReader::open_allow_loose(objects_dir)?;
+            SINGLE_PACK_READER.with(|cell| {
+                *cell.borrow_mut() = opened.map(|reader| (objects_dir.to_path_buf(), reader));
+            });
+        }
+
+        let epoch_before = THREAD_WARM_EPOCH.get();
+        let store_key_before = THREAD_WARM_STORE.get();
+        let taken = SINGLE_PACK_READER.with(|cell| cell.borrow_mut().take());
+        let Some((dir, mut reader)) = taken else {
+            return Ok(None);
+        };
+
+        let result = match reader.read_object(oid) {
+            Ok(obj) => Ok(Some(obj)),
+            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        };
+
+        if THREAD_WARM_EPOCH.get() == epoch_before && THREAD_WARM_STORE.get() == store_key_before {
+            SINGLE_PACK_READER.with(|cell| {
+                *cell.borrow_mut() = Some((dir, reader));
+            });
+        }
+
+        result
     }
 
     /// Drop thread-local pack caches after invalidation on this or another thread.

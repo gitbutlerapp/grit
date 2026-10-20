@@ -283,6 +283,140 @@ fn stale_read_after_invalidation() {
     );
 }
 
+/// Regression: [`SINGLE_PACK_READER`] must not stay mutably borrowed across pack reads that
+/// invalidate thread-local caches (reentrant `RefCell` panic on this branch).
+#[test]
+fn single_pack_reader_survives_invalidation_between_reads_on_one_thread() {
+    clear_pack_cache();
+    test_hooks::reset();
+
+    let root = TempDir::new().expect("tempdir");
+    let repo = Repository::init(
+        root.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init repo");
+    let objects = repo.git_dir().join("objects");
+    let mut oids = Vec::new();
+    for i in 0..32 {
+        oids.push(
+            repo.odb()
+                .write(
+                    ObjectKind::Blob,
+                    format!("single-pack blob {i}\n").as_bytes(),
+                )
+                .expect("write blob"),
+        );
+    }
+    let pack = build_pack(
+        repo.odb(),
+        &oids,
+        &[],
+        &PackBuildOptions {
+            delta: true,
+            max_depth: 32,
+            use_ofs_delta: true,
+            ..PackBuildOptions::default()
+        },
+    )
+    .expect("build pack");
+    install_pack(&objects, "only", &pack);
+    for oid in &oids {
+        let hex = oid.to_hex();
+        let loose = objects.join(&hex[..2]).join(&hex[2..]);
+        let _ = fs::remove_file(loose);
+    }
+
+    let odb = Odb::with_work_tree(&objects, root.path());
+    odb.with_pack_read_context(|| {
+        for oid in &oids {
+            let _ = odb.read(oid).expect("read before invalidation");
+            odb.invalidate_packs();
+            let _ = odb.read(oid).expect("read after same-thread invalidation");
+        }
+    });
+}
+
+#[test]
+fn single_pack_reader_concurrent_reads_with_invalidation() {
+    clear_pack_cache();
+    test_hooks::reset();
+
+    let root = TempDir::new().expect("tempdir");
+    let repo = Repository::init(
+        root.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init repo");
+    let objects = repo.git_dir().join("objects");
+    let mut oids = Vec::new();
+    for i in 0..24 {
+        oids.push(
+            repo.odb()
+                .write(
+                    ObjectKind::Blob,
+                    format!("concurrent single-pack {i}\n").as_bytes(),
+                )
+                .expect("write blob"),
+        );
+    }
+    let pack = build_pack(
+        repo.odb(),
+        &oids,
+        &[],
+        &PackBuildOptions {
+            delta: true,
+            max_depth: 32,
+            use_ofs_delta: true,
+            ..PackBuildOptions::default()
+        },
+    )
+    .expect("build pack");
+    install_pack(&objects, "only", &pack);
+    for oid in &oids {
+        let hex = oid.to_hex();
+        let loose = objects.join(&hex[..2]).join(&hex[2..]);
+        let _ = fs::remove_file(loose);
+    }
+
+    let odb = Odb::with_work_tree(&objects, root.path());
+    let stop = Arc::new(AtomicBool::new(false));
+    let odb_inv = odb.clone();
+    let stop_inv = Arc::clone(&stop);
+    let invalidator = std::thread::spawn(move || {
+        while !stop_inv.load(Ordering::Acquire) {
+            odb_inv.invalidate_packs();
+            std::thread::yield_now();
+        }
+    });
+
+    let threads = 6;
+    let barrier = Arc::new(Barrier::new(threads));
+    let mut handles = Vec::new();
+    for _ in 0..threads {
+        let b = Arc::clone(&barrier);
+        let odb_t = odb.clone();
+        let sample = oids.clone();
+        handles.push(std::thread::spawn(move || {
+            b.wait();
+            odb_t.with_pack_read_context(|| {
+                for oid in &sample {
+                    let _ = odb_t.read(oid).expect("concurrent single-pack read");
+                }
+            });
+        }));
+    }
+    for h in handles {
+        h.join().expect("reader thread");
+    }
+    stop.store(true, Ordering::Release);
+    invalidator.join().expect("invalidator");
+}
+
 /// Two [`PackStore`] instances can share epoch 0; warming must not reuse the first store's TLS.
 #[test]
 fn pack_thread_local_warm_follows_active_store_on_one_thread() {

@@ -135,7 +135,7 @@ Example:
       "relative_date": "2 days ago"
     },
     {
-      "oid": "919c45f33de5e0bd05f8ffb089f697f4644976",
+      "oid": "919c45f33de5e5c0bd05f8ffb089f697f4644976",
       "subject": "initial",
       "author": {
         "name": "Ada Lovelace",

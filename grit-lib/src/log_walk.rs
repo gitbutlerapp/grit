@@ -521,6 +521,53 @@ mod tests {
     }
 
     #[test]
+    fn since_paging_no_next_when_cutoff_exhausts_history() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let since = 1_500_000i64;
+        let too_old = write_commit(&repo.odb(), &[], "root", since - 50_000)?;
+        let skewed = write_commit(&repo.odb(), &[too_old], "skewed", since + 10_000)?;
+        let tip = write_commit(&repo.odb(), &[skewed], "tip", since + 20_000)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
+
+        let since_arg = format!("@{since} +0000");
+        let git_out = Command::new("git")
+            .args([
+                "-C",
+                repo.git_dir().to_str().expect("utf8"),
+                "log",
+                "--since",
+                &since_arg,
+                "--format=%H",
+            ])
+            .output()
+            .expect("git log");
+        assert!(git_out.status.success());
+        let git_order: Vec<ObjectId> = String::from_utf8_lossy(&git_out.stdout)
+            .lines()
+            .filter_map(|line| line.parse().ok())
+            .collect();
+
+        let cutoffs = ReachableWalkCommitterCutoffs {
+            since: Some(since),
+            until: None,
+        };
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs,
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 10)?;
+        assert_eq!(page.commits, git_order);
+        assert!(
+            page.next.is_none(),
+            "git has no further --since history; grit must not offer a cursor"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn until_paging_reaches_in_range_grandparent_after_too_new_link() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
         let repo = open_repo(&dir)?;
