@@ -7,9 +7,9 @@ use anyhow::{Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::porcelain::stash::{
-    apply_stash, drop_stash, list_stashes, pop_stash, push_stash, stash_diff, StashCreateOptions,
+    apply_stash_entry, drop_stash, list_stashes, pop_stash_entry, push_stash, stash_diff,
+    StashCreateOptions,
 };
-use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -302,21 +302,11 @@ pub fn run_apply(index: Option<String>) -> Result<StashApplyOutcome> {
         .work_tree()
         .context("grit stash apply needs a working tree")?;
     let n = parse_stash_index(index.as_deref())?;
-    let env = context::environment();
-    let config = repo.config().context("could not load config")?;
-    let now = context::wall_clock_now(&env);
-    let identity = context::reflog_identity(&env, &config, now);
-    let conflicts = apply_stash(&repo, work_tree, &stash_oid_at(&repo, n)?, false, &identity)
-        .map_err(map_stash_error)?;
-    let conflict_paths = if conflicts {
-        unmerged_paths(&repo)?
-    } else {
-        Vec::new()
-    };
+    let applied = apply_stash_entry(&repo, work_tree, n, false).map_err(map_stash_error)?;
     Ok(StashApplyOutcome {
         index: n,
-        conflicts,
-        conflict_paths,
+        conflicts: applied.has_conflicts(),
+        conflict_paths: applied.conflicted_paths,
     })
 }
 
@@ -330,17 +320,13 @@ pub fn run_pop(index: Option<String>) -> Result<StashPopOutcome> {
     let config = repo.config().context("could not load config")?;
     let now = context::wall_clock_now(&env);
     let identity = context::reflog_identity(&env, &config, now);
-    let conflicts = pop_stash(&repo, work_tree, n, false, &identity).map_err(map_stash_error)?;
-    let conflict_paths = if conflicts {
-        unmerged_paths(&repo)?
-    } else {
-        Vec::new()
-    };
+    let popped = pop_stash_entry(&repo, work_tree, n, false, &identity).map_err(map_stash_error)?;
+    let conflicts = popped.has_conflicts();
     Ok(StashPopOutcome {
         index: n,
         dropped: !conflicts,
         conflicts,
-        conflict_paths,
+        conflict_paths: popped.conflicted_paths,
     })
 }
 
@@ -353,29 +339,6 @@ pub fn run_drop(index: Option<String>) -> Result<StashDropOutcome> {
     let identity = context::reflog_identity(&env, &config, now);
     drop_stash(&repo, n, &identity).map_err(map_stash_error)?;
     Ok(StashDropOutcome { index: n })
-}
-
-fn stash_oid_at(repo: &Repository, n: usize) -> Result<grit_lib::objects::ObjectId> {
-    list_stashes(repo)
-        .map_err(map_stash_error)?
-        .into_iter()
-        .find(|e| e.index == n)
-        .map(|e| e.oid)
-        .ok_or(Error::StashNotFound { n })
-        .map_err(map_stash_error)
-}
-
-fn unmerged_paths(repo: &Repository) -> Result<Vec<String>> {
-    let index = repo.index_handle().load().context("could not load index")?;
-    let mut paths: Vec<String> = index
-        .entries()
-        .iter()
-        .filter(|e| e.stage() > 0)
-        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
-        .collect();
-    paths.sort();
-    paths.dedup();
-    Ok(paths)
 }
 
 /// Parse `n` or `stash@{n}` (default `0`).

@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::porcelain::stash::{
-    apply_stash, create_stash, drop_stash, list_stashes, pop_stash, push_stash, StashCreateOptions,
-    StashEntry,
+    apply_stash_entry, create_stash, drop_stash, list_stashes, pop_stash, push_stash,
+    StashCreateOptions, StashEntry,
 };
 use crate::repo::Repository;
 
@@ -127,13 +127,9 @@ impl<'repo> RepositoryStash<'repo> {
     ///
     /// Propagates apply failures.
     pub fn apply(&self, work_tree: &Path, options: &StashApplyOptions) -> Result<bool> {
-        let oid = stash_oid_at(self.repo, options.index)?;
-        apply_stash(
-            self.repo,
-            work_tree,
-            &oid,
-            options.restore_index,
-            &options.identity,
+        Ok(
+            apply_stash_entry(self.repo, work_tree, options.index, options.restore_index)?
+                .has_conflicts(),
         )
     }
 
@@ -162,12 +158,4 @@ impl<'repo> RepositoryStash<'repo> {
     pub fn drop(&self, index: usize, identity: &str) -> Result<()> {
         drop_stash(self.repo, index, identity)
     }
-}
-
-fn stash_oid_at(repo: &Repository, index: usize) -> Result<ObjectId> {
-    list_stashes(repo)?
-        .into_iter()
-        .find(|e| e.index == index)
-        .map(|e| e.oid)
-        .ok_or(crate::error::Error::StashNotFound { n: index })
 }

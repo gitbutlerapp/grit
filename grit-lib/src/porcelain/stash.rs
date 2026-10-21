@@ -3,8 +3,9 @@
 //! The library builds Git-compatible stash commits (W/I/U parents), updates
 //! `refs/stash` and its reflog, and applies entries onto the worktree and index.
 //! The `grit` binary keeps argument parsing, human/`--json`/`--markdown`
-//! output, and exit-code mapping; [`apply_stash`] and [`pop_stash`] return
-//! whether merge conflicts occurred so the CLI can decide whether to drop.
+//! output, and exit-code mapping. [`apply_stash_entry`] and [`pop_stash_entry`]
+//! report the paths left conflicted (a pop keeps the entry when there are any);
+//! [`apply_stash`] and [`pop_stash`] return only whether conflicts occurred.
 //!
 //! Flattening and worktree helpers ([`FlatTreeEntry`], [`flatten_tree_full`],
 //! [`add_stage_entry`], [`worktree_bytes_for_index_mode`],
@@ -784,7 +785,7 @@ pub fn list_stashes(repo: &Repository) -> Result<Vec<StashEntry>> {
         .collect())
 }
 
-fn stash_oid_at(repo: &Repository, n: usize) -> Result<ObjectId> {
+pub(crate) fn stash_oid_at(repo: &Repository, n: usize) -> Result<ObjectId> {
     let entries = list_stashes(repo)?;
     entries
         .into_iter()
@@ -830,12 +831,7 @@ pub fn pop_stash(
     restore_index: bool,
     identity: &str,
 ) -> Result<bool> {
-    let oid = stash_oid_at(repo, n)?;
-    let conflicts = apply_stash(repo, work_tree, &oid, restore_index, identity)?;
-    if !conflicts {
-        drop_stash(repo, n, identity)?;
-    }
-    Ok(conflicts)
+    Ok(pop_stash_entry(repo, work_tree, n, restore_index, identity)?.has_conflicts())
 }
 
 /// Tree diff of stash W against its `HEAD` parent (`stash show` without `--index`).
@@ -1116,8 +1112,8 @@ pub(crate) fn check_stash_untracked_restore(
 /// three-way-merges changed files when HEAD has moved since the stash was
 /// created, restores the index from the stash index parent when `restore_index`
 /// is set (otherwise tracks current HEAD at touched paths), and materializes
-/// any untracked-files parent. The CLI handles the `Dropped …`/conflict-kept
-/// messaging around this.
+/// any untracked-files parent. [`apply_stash_entry`] does the same by stash
+/// index and also reports which paths conflicted.
 pub fn apply_stash(
     repo: &Repository,
     work_tree: &Path,
@@ -1125,6 +1121,104 @@ pub fn apply_stash(
     restore_index: bool,
     _identity: &str,
 ) -> Result<bool> {
+    Ok(apply_stash_commit(repo, work_tree, stash_oid, restore_index)?.has_conflicts())
+}
+
+/// Result of [`apply_stash_entry`] and [`pop_stash_entry`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StashApplyOutcome {
+    /// Paths left with conflict stages (1–3) in the index, sorted and de-duplicated.
+    ///
+    /// Empty when the stash applied cleanly.
+    pub conflicted_paths: Vec<String>,
+}
+
+impl StashApplyOutcome {
+    /// Whether the apply left merge conflicts in the worktree and index.
+    ///
+    /// For [`pop_stash_entry`], `true` also means the stash entry was kept.
+    #[must_use]
+    pub fn has_conflicts(&self) -> bool {
+        !self.conflicted_paths.is_empty()
+    }
+}
+
+/// Apply `stash@{{n}}` onto the current worktree and index without dropping it.
+///
+/// Same merge rules as [`apply_stash`]; see there for how `restore_index` is used.
+///
+/// # Parameters
+///
+/// - `repo`: the repository.
+/// - `work_tree`: the worktree to apply into.
+/// - `n`: stash index in newest-first order (`0` is `stash@{{0}}`).
+/// - `restore_index`: restore the stashed index instead of keeping the current one.
+///
+/// # Returns
+///
+/// The paths that conflicted; [`StashApplyOutcome::has_conflicts`] is false on a clean apply.
+///
+/// # Errors
+///
+/// Returns [`Error::StashNotFound`] when `n` is out of range, and the [`apply_stash`]
+/// errors (corrupt stash, local changes or untracked files in the way, index write).
+pub fn apply_stash_entry(
+    repo: &Repository,
+    work_tree: &Path,
+    n: usize,
+    restore_index: bool,
+) -> Result<StashApplyOutcome> {
+    let oid = stash_oid_at(repo, n)?;
+    apply_stash_commit(repo, work_tree, &oid, restore_index)
+}
+
+/// Apply `stash@{{n}}` and drop it when it applied without conflicts.
+///
+/// # Parameters
+///
+/// - `repo`, `work_tree`, `n`, `restore_index`: as for [`apply_stash_entry`].
+/// - `identity`: reflog identity for the drop.
+///
+/// # Returns
+///
+/// The conflicted paths. When there are any, the entry is kept on the stash.
+///
+/// # Errors
+///
+/// Propagates [`apply_stash_entry`] and [`drop_stash`] failures.
+pub fn pop_stash_entry(
+    repo: &Repository,
+    work_tree: &Path,
+    n: usize,
+    restore_index: bool,
+    identity: &str,
+) -> Result<StashApplyOutcome> {
+    let outcome = apply_stash_entry(repo, work_tree, n, restore_index)?;
+    if !outcome.has_conflicts() {
+        drop_stash(repo, n, identity)?;
+    }
+    Ok(outcome)
+}
+
+/// Sorted, de-duplicated paths of every conflict-stage entry in `index`.
+fn unmerged_paths(index: &Index) -> Vec<String> {
+    let mut paths: Vec<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() != 0)
+        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn apply_stash_commit(
+    repo: &Repository,
+    work_tree: &Path,
+    stash_oid: &ObjectId,
+    restore_index: bool,
+) -> Result<StashApplyOutcome> {
     let obj = repo.odb().read(stash_oid)?;
     let stash_commit = parse_commit(&obj.data)?;
 
@@ -1554,6 +1648,11 @@ pub fn apply_stash(
             rules_arc.as_ref(),
         )?;
     }
+    let conflicted_paths = if has_conflicts {
+        unmerged_paths(&new_index)
+    } else {
+        Vec::new()
+    };
     repo.write_index(&mut new_index)
         .map_err(|e| Error::StashIndexWrite(e.to_string()))?;
 
@@ -1568,7 +1667,7 @@ pub fn apply_stash(
         }
     }
 
-    Ok(has_conflicts)
+    Ok(StashApplyOutcome { conflicted_paths })
 }
 
 const STASH_REF: &str = "refs/stash";
