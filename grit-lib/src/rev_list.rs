@@ -23,10 +23,7 @@ use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
-use crate::objects::{
-    find_tree_entry_by_name_in_data, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind,
-    TreeRefIter,
-};
+use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind, TreeRefIter};
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
@@ -5415,6 +5412,11 @@ fn tree_has_pathspec_match_cached(
     _cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     let object = repo.odb().read(&tree_oid)?;
+    if object.kind != ObjectKind::Tree {
+        return Err(Error::CorruptObject(format!(
+            "object {tree_oid} is not a tree"
+        )));
+    }
     let oid_len = repo.odb().hash_algo().len();
     for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
         let entry = entry?;
@@ -7786,14 +7788,18 @@ fn tree_oid_at_path(
     for component in path_prefix.split('/').filter(|part| !part.is_empty()) {
         let blob = tree_state.tree_blob(repo, current)?;
         let oid_len = tree_state.oid_len(repo);
-        let Some(entry) = find_tree_entry_by_name_in_data(&blob, oid_len, component.as_bytes())?
-        else {
+        let mut found = None;
+        for entry in TreeRefIter::with_oid_len(blob.as_slice(), oid_len) {
+            let entry = entry?;
+            if entry.mode == MODE_TREE && String::from_utf8_lossy(entry.name) == component {
+                found = Some(entry.oid);
+                break;
+            }
+        }
+        let Some(next) = found else {
             return Ok(None);
         };
-        if entry.mode != MODE_TREE {
-            return Ok(None);
-        }
-        current = entry.oid;
+        current = next;
     }
     Ok(Some(current))
 }
@@ -7815,7 +7821,13 @@ fn entry_oid_at_path(
     };
     let blob = tree_state.tree_blob(repo, dir_tree)?;
     let oid_len = tree_state.oid_len(repo);
-    Ok(find_tree_entry_by_name_in_data(&blob, oid_len, name.as_bytes())?.map(|entry| entry.oid))
+    for entry in TreeRefIter::with_oid_len(blob.as_slice(), oid_len) {
+        let entry = entry?;
+        if String::from_utf8_lossy(entry.name) == name {
+            return Ok(Some(entry.oid));
+        }
+    }
+    Ok(None)
 }
 
 fn subtree_unchanged_in_all_parents(

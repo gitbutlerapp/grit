@@ -5,10 +5,10 @@ use std::collections::VecDeque;
 use grit_lib::diff::tree_oid_of_commit;
 use grit_lib::error::Error;
 use grit_lib::objects::bench_fixture::synth::{generate_synth_repo_with_spec, RepoShape};
+use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{
     parse_tree, parse_tree_with_oid_len, HashAlgo, ObjectId, ObjectKind, TreeEntry, TreeRefIter,
 };
-use grit_lib::objects::odb::Odb;
 use grit_lib::repo::Repository;
 use grit_test_support::objects::{git_supports_sha256, HashAlgo as FixtureAlgo, RepoFixture};
 
@@ -79,25 +79,24 @@ fn tree_ref_iter_matches_parse_tree_sha256_repo() {
         return;
     }
     let fixture = RepoFixture::init(FixtureAlgo::Sha256).expect("init sha256");
+    std::fs::write(fixture.path().join("sha256-tree.txt"), b"payload\n").expect("file");
+    assert!(fixture.git(&["add", "sha256-tree.txt"]).ok, "add");
     assert!(
-        fixture
-            .git(&["commit", "--allow-empty", "-m", "seed"])
-            .ok,
-        "seed commit"
+        fixture.git(&["commit", "-m", "sha256 tree"]).ok,
+        "commit with file"
     );
-    let tree_oid = fixture
-        .git(&["rev-parse", "HEAD^{tree}"])
-        .stdout
-        .trim()
-        .to_string();
-    let tree_body = fixture.git(&["cat-file", "-p", &tree_oid]).stdout;
-    assert_tree_parsers_match(tree_body.as_bytes());
-
     let repo = Repository::open(
         fixture.path().join(".git").as_path(),
         &grit_lib::config::environment::RepositoryOptions::empty().with_work_tree(fixture.path()),
     )
     .expect("open");
+    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("head");
+    let commit_obj = repo.odb().read(&head).expect("commit");
+    let commit = grit_lib::objects::parse_commit(&commit_obj.data).expect("parse commit");
+    let tree_obj = repo.odb().read(&commit.tree).expect("tree object");
+    assert_eq!(tree_obj.kind, ObjectKind::Tree);
+    assert!(!tree_obj.data.is_empty());
+    assert_tree_parsers_match(&tree_obj.data);
     trees_from_repo_head(&repo).expect("walk");
 }
 

@@ -577,6 +577,8 @@ pub struct TreeRefIter<'a> {
     data: &'a [u8],
     pos: usize,
     oid_len: usize,
+    /// Set after the first parse error so callers do not see endless `Err` items.
+    failed: bool,
 }
 
 impl<'a> TreeRefIter<'a> {
@@ -587,6 +589,7 @@ impl<'a> TreeRefIter<'a> {
             data,
             pos: 0,
             oid_len,
+            failed: false,
         }
     }
 
@@ -596,14 +599,12 @@ impl<'a> TreeRefIter<'a> {
     ///
     /// Returns [`Error::CorruptObject`] when the blob does not parse as a tree.
     pub fn infer_oid_len(data: &'a [u8]) -> Result<Self> {
-        match Self::with_oid_len(data, HashAlgo::Sha1.len()).collect::<Result<Vec<_>>>() {
-            Ok(_) => Ok(Self::with_oid_len(data, HashAlgo::Sha1.len())),
-            Err(sha1_err) => {
-                match Self::with_oid_len(data, HashAlgo::Sha256.len()).collect::<Result<Vec<_>>>() {
-                    Ok(_) => Ok(Self::with_oid_len(data, HashAlgo::Sha256.len())),
-                    Err(_) => Err(sha1_err),
-                }
-            }
+        match try_parse_tree_oid_len(data, HashAlgo::Sha1.len()) {
+            Ok(()) => Ok(Self::with_oid_len(data, HashAlgo::Sha1.len())),
+            Err(sha1_err) => match try_parse_tree_oid_len(data, HashAlgo::Sha256.len()) {
+                Ok(()) => Ok(Self::with_oid_len(data, HashAlgo::Sha256.len())),
+                Err(_) => Err(sha1_err),
+            },
         }
     }
 
@@ -651,12 +652,33 @@ impl<'a> Iterator for TreeRefIter<'a> {
     type Item = Result<TreeEntryRef<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.failed || self.pos >= self.data.len() {
+            return None;
+        }
         match self.next_entry() {
             Ok(Some(entry)) => Some(Ok(entry)),
             Ok(None) => None,
-            Err(err) => Some(Err(err)),
+            Err(err) => {
+                self.failed = true;
+                self.pos = self.data.len();
+                Some(Err(err))
+            }
         }
     }
+}
+
+/// Walk `data` once to verify it parses as a tree with the given OID width (no entry allocation).
+fn try_parse_tree_oid_len(data: &[u8], oid_len: usize) -> Result<()> {
+    for entry in TreeRefIter::with_oid_len(data, oid_len) {
+        entry?;
+    }
+    Ok(())
+}
+
+fn collect_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntry>> {
+    TreeRefIter::with_oid_len(data, oid_len)
+        .map(|entry| entry.map(|e| e.to_owned()))
+        .collect()
 }
 
 /// Parse the raw data of a tree object into its entries.
@@ -670,9 +692,12 @@ impl<'a> Iterator for TreeRefIter<'a> {
 ///
 /// Returns [`Error::CorruptObject`] if the data is malformed.
 pub fn parse_tree(data: &[u8]) -> Result<Vec<TreeEntry>> {
-    TreeRefIter::infer_oid_len(data)?
-        .map(|entry| entry.map(|e| e.to_owned()))
-        .collect()
+    match collect_tree_with_oid_len(data, HashAlgo::Sha1.len()) {
+        Ok(entries) => Ok(entries),
+        Err(sha1_err) => {
+            collect_tree_with_oid_len(data, HashAlgo::Sha256.len()).map_err(|_| sha1_err)
+        }
+    }
 }
 
 /// Parse a tree blob assuming a fixed raw OID width (`oid_len` bytes).
@@ -680,9 +705,7 @@ pub fn parse_tree(data: &[u8]) -> Result<Vec<TreeEntry>> {
 /// Returns an error if the data does not parse cleanly into whole entries of
 /// that width (used by [`parse_tree`] to detect the hash algorithm).
 pub fn parse_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntry>> {
-    TreeRefIter::with_oid_len(data, oid_len)
-        .map(|entry| entry.map(|e| e.to_owned()))
-        .collect()
+    collect_tree_with_oid_len(data, oid_len)
 }
 
 /// Build the raw bytes of a tree object from a slice of entries.
@@ -1555,6 +1578,14 @@ mod commit_parse_tests {
         assert_eq!(oid.loose_suffix().len(), 38);
         assert!(ObjectId::is_hex_len(40));
         assert!(ObjectId::is_loose_suffix_len(38));
+    }
+
+    #[test]
+    fn tree_ref_iter_yields_at_most_one_error() {
+        let bad = b"100644 incomplete";
+        let mut iter = TreeRefIter::with_oid_len(bad, HashAlgo::Sha1.len());
+        assert!(iter.next().unwrap().is_err());
+        assert!(iter.next().is_none());
     }
 
     #[test]
