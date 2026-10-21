@@ -4,6 +4,12 @@
 //! Git does: create exclusively, write staged content, then rename over the target path.
 //! [`LockFile::acquire`] retries with jittered exponential backoff when configured, matching
 //! `core.filesRefLockTimeout`, `core.packedRefsTimeout`, and `reftable.lockTimeout`.
+//!
+//! ```rust
+//! use grit_lib::lockfile::LockWait;
+//!
+//! assert_eq!(LockWait::Immediately, LockWait::Immediately);
+//! ```
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};

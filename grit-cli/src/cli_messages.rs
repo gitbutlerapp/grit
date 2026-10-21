@@ -14,11 +14,25 @@ pub fn human_error_message(err: &Error) -> String {
     if let Some(lib) = err.downcast_ref::<LibError>() {
         return map_lib_error(lib);
     }
+    for cause in err.chain() {
+        if let Some(structured) = cause.downcast_ref::<StructuredCliError>() {
+            return structured.human.clone();
+        }
+        if let Some(lib) = cause.downcast_ref::<LibError>() {
+            return map_lib_error(lib);
+        }
+    }
     format!("{err:#}")
 }
 
 fn map_lib_error(err: &LibError) -> String {
     match err {
+        LibError::HashCollision { oid } => {
+            format!(
+                "refusing to store content that triggers an SHA-1 hash collision (digest {})",
+                oid.to_hex()
+            )
+        }
         LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
             format!("revision '{name}' not found")
         }

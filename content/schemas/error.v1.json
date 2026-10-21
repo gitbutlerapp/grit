@@ -45,6 +45,13 @@
         "kind": {
           "description": "Machine-readable category (e.g. `conflict`).",
           "type": "string"
+        },
+        "oid": {
+          "description": "Plain SHA-1 digest for colliding input, when `kind == \"hash_collision\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

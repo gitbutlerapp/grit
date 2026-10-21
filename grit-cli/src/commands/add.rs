@@ -15,6 +15,7 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
+use crate::json_error;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
@@ -126,6 +127,6 @@ fn map_add_error(err: LibError) -> anyhow::Error {
             msg.push_str("(ignored paths cannot be staged; adjust ignore rules or use a future force option)");
             anyhow::anyhow!(msg)
         }
-        other => anyhow::anyhow!("{other}"),
+        other => json_error::map_lib_error(other),
     }
 }

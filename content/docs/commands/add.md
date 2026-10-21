@@ -70,6 +70,8 @@ Example:
 }
 ```
 
+When staging would hash blob data that triggers an SHA-1 chosen-prefix collision, the command fails (exit **1**). With `--json`, stdout is the shared [error object](../scripting.md) with `kind` `hash_collision` and `oid` set to the unsafe digest hex (see [error schema](/schemas/error/v1.json)).
+
 ## Markdown output
 
 Schema: [v1](/schemas/add/v1.json)

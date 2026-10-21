@@ -165,7 +165,13 @@ fn issue_detail(issue: &FsckIssue) -> String {
         FsckIssue::HashMismatch { path, .. } => {
             format!("loose hash mismatch at {}", path.display())
         }
-        FsckIssue::BadObject { error, .. } => error.detail.clone(),
+        FsckIssue::BadObject { error, .. } => {
+            if error.id == "sha1Collision" {
+                format!("SHA-1 chosen-prefix collision: {}", error.detail)
+            } else {
+                error.detail.clone()
+            }
+        }
         FsckIssue::PackChecksum { pack } => format!("pack checksum invalid for {}", pack.display()),
         FsckIssue::IdxMismatch { pack } => {
             format!("index checksum mismatch for {}", pack.display())

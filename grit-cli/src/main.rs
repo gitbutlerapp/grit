@@ -965,6 +965,7 @@ fn main() {
         now: context::wall_clock_now(&env),
     };
     if let Err(err) = dispatch(cli, &opts, &render_ctx) {
+        let err = json_error::ensure_structured(err);
         output::emit_error(&err, &opts);
         let code = if err
             .downcast_ref::<commands::bundle::MissingPrerequisites>()

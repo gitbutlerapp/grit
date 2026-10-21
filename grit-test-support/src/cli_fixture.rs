@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output as ProcessOutput};
 
-use serde::Serialize;
 use serde::de::Deserialize;
+use serde::Serialize;
 
 use crate::git_fsck;
 

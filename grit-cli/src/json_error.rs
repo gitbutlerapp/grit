@@ -4,6 +4,8 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use anyhow::Error;
+use grit_lib::error::Error as LibError;
+use grit_lib::objects::ObjectId;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -18,6 +20,10 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub conflicts: Option<Vec<String>>,
+    /// Plain SHA-1 digest for colliding input, when `kind == "hash_collision"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub oid: Option<String>,
 }
 
 /// Carries both human text and a structured JSON payload.
@@ -48,16 +54,75 @@ pub fn operation_conflict(operation: &str, mut paths: Vec<String>) -> Error {
             error: format!("{operation} has conflicts"),
             kind: "conflict",
             conflicts: Some(paths),
+            oid: None,
         },
         human,
     })
 }
 
+/// Build a structured CLI error for SHA-1 chosen-prefix collision detection (sha1dc).
+pub fn hash_collision(oid: ObjectId) -> Error {
+    let hex = oid.to_hex();
+    let human =
+        format!("refusing to store content that triggers an SHA-1 hash collision (digest {hex})");
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: "SHA-1 hash collision".to_owned(),
+            kind: "hash_collision",
+            conflicts: None,
+            oid: Some(hex),
+        },
+        human,
+    })
+}
+
+/// Map a library error to `anyhow`, using structured JSON for typed failures.
+pub fn map_lib_error(err: LibError) -> Error {
+    match err {
+        LibError::HashCollision { oid } => hash_collision(oid),
+        other => Error::new(other),
+    }
+}
+
+fn hash_collision_from_chain(err: &Error) -> Option<ObjectId> {
+    if let Some(LibError::HashCollision { oid }) = err.downcast_ref::<LibError>() {
+        return Some(*oid);
+    }
+    for cause in err.chain() {
+        if let Some(LibError::HashCollision { oid }) = cause.downcast_ref::<LibError>() {
+            return Some(*oid);
+        }
+    }
+    None
+}
+
+/// Wrap [`LibError::HashCollision`] anywhere in the chain as [`StructuredCliError`].
+pub fn ensure_structured(err: Error) -> Error {
+    if structured_json_payload(&err).is_some() {
+        return err;
+    }
+    if let Some(oid) = hash_collision_from_chain(&err) {
+        return hash_collision(oid);
+    }
+    err
+}
+
 /// If `err` wraps a [`StructuredCliError`], return its JSON payload.
 pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
-    err.downcast_ref::<StructuredCliError>()
-        .map(|e| e.payload.clone())
+    if let Some(e) = err.downcast_ref::<StructuredCliError>() {
+        return Some(e.payload.clone());
+    }
+    hash_collision_from_chain(err).map(|oid| {
+        let hex = oid.to_hex();
+        StructuredJsonError {
+            error: "SHA-1 hash collision".to_owned(),
+            kind: "hash_collision",
+            conflicts: None,
+            oid: Some(hex),
+        }
+    })
 }
+
 /// Exit code for invalid `--author` / `--grep` patterns (documented on `grit log` / `grit revs`).
 pub const INVALID_COMMIT_FILTER_EXIT: i32 = 129;
 
@@ -81,6 +146,7 @@ pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) 
             error: human.clone(),
             kind: "invalid_pattern",
             conflicts: None,
+            oid: None,
         },
         human,
     })
@@ -95,6 +161,7 @@ pub fn invalid_pickaxe(err: grit_lib::diff::PickaxeError) -> Error {
             error: human.clone(),
             kind: "invalid_pattern",
             conflicts: None,
+            oid: None,
         },
         human,
     })
