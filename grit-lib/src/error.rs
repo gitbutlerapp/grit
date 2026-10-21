@@ -355,12 +355,9 @@ pub enum DiffPathError {
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PathspecFromFileParseError {
-    /// A NUL-terminated entry used C-style quoting (forbidden in NUL mode).
-    #[error("pathspec-from-file: line is not NUL terminated: {line}")]
-    QuotedLineInNulMode {
-        /// Offending entry text.
-        line: String,
-    },
+    /// A NUL-separated entry is not valid UTF-8.
+    #[error("invalid UTF-8 in pathspec-from-file (NUL mode)")]
+    InvalidUtf8InNulRecord,
     /// A line-mode entry had invalid double-quote wrapping.
     #[error("invalid C-style quoting: {line}")]
     InvalidCStyleQuoting {
@@ -583,6 +580,10 @@ pub enum Error {
     /// A general path-related error (invalid UTF-8, out-of-bounds, etc.).
     #[error("path error: {0}")]
     PathError(String),
+
+    /// `--pathspec-from-file` parse failure.
+    #[error(transparent)]
+    PathspecFromFile(#[from] PathspecFromFileParseError),
 
     /// A tree/index path component is forbidden (`.git`, HFS/NTFS aliases, etc.).
     #[error("invalid path '{0}'")]

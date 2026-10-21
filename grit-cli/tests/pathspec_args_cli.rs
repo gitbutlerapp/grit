@@ -216,3 +216,67 @@ fn restore_pathspec_from_file_matches_git() {
     assert_eq!(git_worktree, grit_worktree);
     assert_eq!(git_worktree, "a\n");
 }
+
+#[test]
+fn add_blank_line_pathspec_from_file_fails_like_git() {
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    init_repo(grit, &dir);
+    fs::write(dir.path().join("extra.txt"), b"x\n").expect("write");
+    fs::write(dir.path().join("list.txt"), b"\n").expect("blank");
+
+    let git_out = run_git(dir.path(), &["add", "--pathspec-from-file", "list.txt"]);
+    assert!(!git_out.status.success());
+
+    let grit_out = run_grit(
+        grit,
+        dir.path(),
+        &["add", "--pathspec-from-file", "list.txt"],
+    );
+    assert!(!grit_out.status.success());
+    let stderr = String::from_utf8_lossy(&grit_out.stderr);
+    assert!(
+        stderr.contains("invalid path ''") || stderr.contains("empty"),
+        "stderr: {stderr}"
+    );
+
+    let staged = ls_files_sorted(dir.path());
+    assert!(
+        staged.iter().all(|l| !l.contains("extra.txt")),
+        "must not stage whole tree on blank pathspec line: {staged:?}"
+    );
+}
+
+#[test]
+fn add_nul_empty_record_fails_like_git() {
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    init_repo(grit, &dir);
+    fs::write(dir.path().join("a.txt"), b"a\n").expect("write");
+    fs::write(dir.path().join("b.txt"), b"b\n").expect("write");
+    let list = dir.path().join("list.bin");
+    fs::write(&list, b"a.txt\0\0b.txt").expect("nul empty");
+
+    let git_out = run_git(
+        dir.path(),
+        &[
+            "add",
+            "--pathspec-from-file",
+            list.file_name().unwrap().to_str().unwrap(),
+            "--pathspec-file-nul",
+        ],
+    );
+    assert!(!git_out.status.success());
+
+    let grit_out = run_grit(
+        grit,
+        dir.path(),
+        &[
+            "add",
+            "--pathspec-from-file",
+            list.to_str().unwrap(),
+            "--pathspec-file-nul",
+        ],
+    );
+    assert!(!grit_out.status.success());
+}

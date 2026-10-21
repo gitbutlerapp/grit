@@ -4505,6 +4505,7 @@ pub grit_lib::error::Error::PathError(alloc::string::String)
 pub grit_lib::error::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
 pub grit_lib::error::Error::PathsHaveLocalModifications
 pub grit_lib::error::Error::PathsHaveLocalModifications::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::Error::PathspecFromFile(grit_lib::error::PathspecFromFileParseError)
 pub grit_lib::error::Error::PathspecIgnored
 pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecNoMatch
@@ -4578,6 +4579,8 @@ impl core::convert::From<grit_lib::error::FilterError> for grit_lib::error::Erro
 pub fn grit_lib::error::Error::from(grit_lib::error::FilterError) -> Self
 impl core::convert::From<grit_lib::error::PathOutsideRepoError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::PathOutsideRepoError) -> Self
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
@@ -4749,15 +4752,16 @@ pub grit_lib::error::PathspecFromFileParseError::InvalidEscapeSequence
 pub grit_lib::error::PathspecFromFileParseError::InvalidEscapeSequence::escape: char
 pub grit_lib::error::PathspecFromFileParseError::InvalidOctalBytes
 pub grit_lib::error::PathspecFromFileParseError::InvalidOctalValue
+pub grit_lib::error::PathspecFromFileParseError::InvalidUtf8InNulRecord
 pub grit_lib::error::PathspecFromFileParseError::InvalidUtf8InQuotedLine
-pub grit_lib::error::PathspecFromFileParseError::QuotedLineInNulMode
-pub grit_lib::error::PathspecFromFileParseError::QuotedLineInNulMode::line: alloc::string::String
 pub grit_lib::error::PathspecFromFileParseError::TruncatedOctalEscape
 impl core::clone::Clone for grit_lib::error::PathspecFromFileParseError
 pub fn grit_lib::error::PathspecFromFileParseError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::error::PathspecFromFileParseError
 impl core::cmp::PartialEq for grit_lib::error::PathspecFromFileParseError
 pub fn grit_lib::error::PathspecFromFileParseError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::error::Error for grit_lib::error::PathspecFromFileParseError
@@ -9638,15 +9642,16 @@ pub grit_lib::pathspec::PathspecFromFileParseError::InvalidEscapeSequence
 pub grit_lib::pathspec::PathspecFromFileParseError::InvalidEscapeSequence::escape: char
 pub grit_lib::pathspec::PathspecFromFileParseError::InvalidOctalBytes
 pub grit_lib::pathspec::PathspecFromFileParseError::InvalidOctalValue
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidUtf8InNulRecord
 pub grit_lib::pathspec::PathspecFromFileParseError::InvalidUtf8InQuotedLine
-pub grit_lib::pathspec::PathspecFromFileParseError::QuotedLineInNulMode
-pub grit_lib::pathspec::PathspecFromFileParseError::QuotedLineInNulMode::line: alloc::string::String
 pub grit_lib::pathspec::PathspecFromFileParseError::TruncatedOctalEscape
 impl core::clone::Clone for grit_lib::error::PathspecFromFileParseError
 pub fn grit_lib::error::PathspecFromFileParseError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::error::PathspecFromFileParseError
 impl core::cmp::PartialEq for grit_lib::error::PathspecFromFileParseError
 pub fn grit_lib::error::PathspecFromFileParseError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::error::Error for grit_lib::error::PathspecFromFileParseError
@@ -11037,6 +11042,7 @@ pub grit_lib::prelude::Error::PathError(alloc::string::String)
 pub grit_lib::prelude::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
 pub grit_lib::prelude::Error::PathsHaveLocalModifications
 pub grit_lib::prelude::Error::PathsHaveLocalModifications::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::prelude::Error::PathspecFromFile(grit_lib::error::PathspecFromFileParseError)
 pub grit_lib::prelude::Error::PathspecIgnored
 pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
@@ -11110,6 +11116,8 @@ impl core::convert::From<grit_lib::error::FilterError> for grit_lib::error::Erro
 pub fn grit_lib::error::Error::from(grit_lib::error::FilterError) -> Self
 impl core::convert::From<grit_lib::error::PathOutsideRepoError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::PathOutsideRepoError) -> Self
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
@@ -18630,15 +18638,16 @@ pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidEscapeSeque
 pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidEscapeSequence::escape: char
 pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidOctalBytes
 pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidOctalValue
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidUtf8InNulRecord
 pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidUtf8InQuotedLine
-pub grit_lib::worktree::pathspec::PathspecFromFileParseError::QuotedLineInNulMode
-pub grit_lib::worktree::pathspec::PathspecFromFileParseError::QuotedLineInNulMode::line: alloc::string::String
 pub grit_lib::worktree::pathspec::PathspecFromFileParseError::TruncatedOctalEscape
 impl core::clone::Clone for grit_lib::error::PathspecFromFileParseError
 pub fn grit_lib::error::PathspecFromFileParseError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::error::PathspecFromFileParseError
 impl core::cmp::PartialEq for grit_lib::error::PathspecFromFileParseError
 pub fn grit_lib::error::PathspecFromFileParseError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::error::Error for grit_lib::error::PathspecFromFileParseError
