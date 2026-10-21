@@ -214,6 +214,7 @@ impl DiffFormatArgs {
     }
 
     /// Apply `-U` and other shared flags (legacy name used by diff/log/show call sites).
+    #[allow(dead_code)]
     pub fn apply_context(self, diff_options: &mut DiffOptions) {
         let config = ConfigSet::new();
         let _ = self.apply_to_options(diff_options, &config);
