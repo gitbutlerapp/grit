@@ -95,24 +95,14 @@ pub(crate) fn histogram_compacted_line_ops(
         return Vec::new();
     }
     let raw = changed_flags_to_ops(&changed1, &changed2, old_len, new_len);
-    if ws.normalizes_line_compare() {
-        diff_indent_heuristic::apply_change_compact_to_ops_with_ws(
-            &raw,
-            &old_lines,
-            &new_lines,
-            indent_heuristic,
-            ws,
-        )
-    } else {
-        diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
-            &raw,
-            &old_lines,
-            &new_lines,
-            indent_heuristic,
-            ws,
-            true,
-        )
-    }
+    diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+        &raw,
+        &old_lines,
+        &new_lines,
+        indent_heuristic,
+        ws,
+        true,
+    )
 }
 
 pub(crate) fn histogram_unified_body_raw(

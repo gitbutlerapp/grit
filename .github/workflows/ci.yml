@@ -351,8 +351,8 @@ jobs:
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
           # Many grit-lib integration tests link a full grit-lib + http-ureq stack at once;
-          # nproc parallel lld links have bus-error'd on ubuntu-latest (signal 7).
-          CARGO_BUILD_JOBS: "2"
+          # parallel lld links have bus-error'd on ubuntu-latest (signal 7); one job is enough.
+          CARGO_BUILD_JOBS: "1"
         run: cargo test --workspace
 
       - name: Criterion object micro-benchmarks (smoke)
