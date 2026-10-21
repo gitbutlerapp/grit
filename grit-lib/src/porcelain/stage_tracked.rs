@@ -320,17 +320,27 @@ fn stage_tracked_modifications_in_index_body(
     }
     let blob_dirs = group_blob_entries_by_dir(index, honor_fsmonitor);
     let work_tree_owned = work_tree.to_path_buf();
-    let dir_abs = move |dir: &str| {
+    let dir_abs = move |dir: &[u8]| {
         if dir.is_empty() {
             work_tree_owned.clone()
         } else {
-            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+            crate::diff::index_entry_worktree_abs_bytes(
+                &work_tree_owned,
+                dir,
+                precompose_unicode,
+                ignorecase,
+            )
         }
     };
     let work_tree_for_files = work_tree.to_path_buf();
     let work_tree_for_symlink = work_tree.to_path_buf();
-    let file_abs = move |rel: &str| {
-        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+    let file_abs = move |rel: &[u8]| {
+        crate::diff::index_entry_worktree_abs_bytes(
+            &work_tree_for_files,
+            rel,
+            precompose_unicode,
+            ignorecase,
+        )
     };
     let preload_index = rules_config
         .get_bool("core.preloadIndex")
@@ -374,16 +384,20 @@ fn stage_tracked_modifications_in_index_body(
         dir_abs,
         file_abs,
         |rel_path| {
-            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
-                || {
-                    let abs = index_entry_worktree_abs(
-                        &work_tree_for_symlink,
-                        rel_path,
-                        precompose_unicode,
-                        ignorecase,
-                    );
-                    path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
-                }
+            dir_symlinks.has_symlink_in_path_bytes(
+                work_tree,
+                rel_path,
+                precompose_unicode,
+                ignorecase,
+            ) || {
+                let abs = crate::diff::index_entry_worktree_abs_bytes(
+                    &work_tree_for_symlink,
+                    rel_path,
+                    precompose_unicode,
+                    ignorecase,
+                );
+                path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
+            }
         },
         BlobScanSparseMode::StageTracked {
             index_mtime,
@@ -391,10 +405,8 @@ fn stage_tracked_modifications_in_index_body(
         },
     )?;
     visit_blob_lookup_batches(stage_batches, |entry_index, lookup| {
-        let rel_path = match std::str::from_utf8(&index.entries[entry_index].path) {
-            Ok(p) => p,
-            Err(_) => return Ok(()),
-        };
+        let path_stored = crate::repo_relpath::storage_string(&index.entries[entry_index].path);
+        let rel_path = path_stored.as_str();
         let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
             return Ok(());
         };

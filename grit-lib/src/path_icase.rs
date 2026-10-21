@@ -66,13 +66,18 @@ impl Stage0TrackedPaths {
     /// Whether a repository-relative path is already tracked at stage 0.
     #[must_use]
     pub fn contains(&self, path: &str) -> bool {
-        let bytes = path.as_bytes();
+        self.contains_bytes(path.as_bytes())
+    }
+
+    /// Whether a repository-relative path is already tracked at stage 0 (raw index bytes).
+    #[must_use]
+    pub fn contains_bytes(&self, path: &[u8]) -> bool {
         if let Some(folded) = &self.folded {
             folded
-                .get(&memihash(bytes))
-                .is_some_and(|bucket| bucket_has_path(bucket, bytes))
+                .get(&memihash(path))
+                .is_some_and(|bucket| bucket_has_path(bucket, path))
         } else {
-            self.exact.contains(bytes)
+            self.exact.contains(path)
         }
     }
 }

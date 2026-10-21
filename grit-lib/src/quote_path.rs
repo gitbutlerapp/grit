@@ -110,6 +110,51 @@ pub fn quote_c_style(path: &str, quote_fully: bool) -> String {
     quote_c_style_inner(path, quote_fully, false)
 }
 
+/// Quote a repository-relative path stored as raw bytes (non-UTF-8 names on Unix).
+#[must_use]
+pub fn quote_c_style_bytes(path: &[u8], quote_fully: bool) -> String {
+    let mut any = false;
+    for &b in path {
+        if cq_must_quote(b, quote_fully) {
+            any = true;
+            break;
+        }
+    }
+    if !any {
+        return String::from_utf8_lossy(path).into_owned();
+    }
+
+    let mut out = String::with_capacity(path.len() + 2);
+    out.push('"');
+    let mut p = 0usize;
+    while p < path.len() {
+        let mut len = 0usize;
+        while p + len < path.len() && !cq_must_quote(path[p + len], quote_fully) {
+            len += 1;
+        }
+        for &b in &path[p..p + len] {
+            out.push(char::from(b));
+        }
+        p += len;
+        if p >= path.len() {
+            break;
+        }
+        let ch = path[p];
+        p += 1;
+        out.push('\\');
+        let cq = CQ_LOOKUP[ch as usize];
+        if cq >= b' ' as i8 {
+            out.push(cq as u8 as char);
+        } else {
+            out.push(char::from(((ch >> 6) & 3) + b'0'));
+            out.push(char::from(((ch >> 3) & 7) + b'0'));
+            out.push(char::from((ch & 7) + b'0'));
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// Quote a repository-relative path for human-facing CLI output (status, diff headers).
 ///
 /// `quote_fully` mirrors Git's `core.quotepath` (see [`crate::config::ConfigSet::quote_path_fully`]).

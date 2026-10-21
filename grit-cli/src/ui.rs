@@ -85,6 +85,10 @@ impl PathDisplayOptions {
     /// Map a repository-relative path to a safe human-facing string (Git `quote.c` style).
     #[must_use]
     pub fn format_path_for_human(&self, repo_rel: &str) -> String {
+        let bytes = grit_lib::repo_relpath::storage_bytes(repo_rel);
+        if std::str::from_utf8(&bytes).is_err() {
+            return grit_lib::repo_relpath::display(repo_rel, self.quote_path_fully);
+        }
         let rel = self
             .path_display
             .as_ref()

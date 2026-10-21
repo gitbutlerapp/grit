@@ -191,8 +191,8 @@ use crate::index::{Index, MODE_GITLINK};
 /// per-directory hash map of owned path strings.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BlobScanPlan {
-    /// Parent directories in lexicographic order (empty string is the repository root).
-    pub dirs: Vec<String>,
+    /// Parent directories in lexicographic order (empty is the repository root).
+    pub dirs: Vec<Vec<u8>>,
     /// For each [`Self::dirs`] element, a range into [`Self::indices`].
     pub dir_ranges: Vec<std::ops::Range<usize>>,
     /// [`Index::entries`] indices in visit order (sorted by parent dir, then path).
@@ -210,7 +210,7 @@ impl BlobScanPlan {
         self.indices.is_empty()
     }
 
-    fn push_entry(&mut self, dir: String, entry_index: usize) {
+    fn push_entry(&mut self, dir: Vec<u8>, entry_index: usize) {
         if self.dirs.last().is_none_or(|d| d != &dir) {
             if !self.dirs.is_empty() {
                 let end = self.indices.len();
@@ -258,18 +258,33 @@ fn index_blob_scan_eligible(
     true
 }
 
-fn entry_rel_path(index: &Index, entry_index: usize) -> Result<&str> {
-    let ie = index
-        .entries
-        .get(entry_index)
-        .ok_or_else(|| Error::Message(format!("index entry {entry_index} out of range")))?;
-    std::str::from_utf8(&ie.path)
-        .map_err(|_| Error::Message(format!("index entry {entry_index} path is not valid UTF-8")))
+fn dir_entry_key(entry: &fs::DirEntry) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        entry.file_name().as_os_str().as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .into_owned()
+            .into_bytes()
+    }
 }
 
-fn entry_file_name(index: &Index, entry_index: usize) -> Result<&str> {
+fn entry_rel_path(index: &Index, entry_index: usize) -> Result<&[u8]> {
+    index
+        .entries
+        .get(entry_index)
+        .map(|ie| ie.path.as_slice())
+        .ok_or_else(|| Error::Message(format!("index entry {entry_index} out of range")))
+}
+
+fn entry_file_name(index: &Index, entry_index: usize) -> Result<&[u8]> {
     let rel = entry_rel_path(index, entry_index)?;
-    Ok(rel.rsplit_once('/').map_or(rel, |(_, file)| file))
+    Ok(crate::repo_relpath::file_name(rel))
 }
 
 /// Group stage-0 blob index entries by parent directory for bulk `read_dir`.
@@ -284,12 +299,8 @@ pub(crate) fn plan_blob_entries_by_dir(index: &Index, honor_fsmonitor_valid: boo
         if !index_blob_scan_eligible(ie, index, honor_fsmonitor_valid) {
             continue;
         }
-        let Ok(rel_path) = std::str::from_utf8(&ie.path) else {
-            continue;
-        };
-        let dir = rel_path
-            .rsplit_once('/')
-            .map_or(String::new(), |(dir, _)| dir.to_owned());
+        let rel_path = ie.path.as_slice();
+        let dir = crate::repo_relpath::parent_dir(rel_path);
         plan.push_entry(dir, entry_index);
     }
     plan.finish()
@@ -322,9 +333,7 @@ pub(crate) fn plan_blob_entries_by_dir_for_paths(
         }) else {
             continue;
         };
-        let dir = path
-            .rsplit_once('/')
-            .map_or(String::new(), |(dir, _)| dir.to_owned());
+        let dir = crate::repo_relpath::parent_dir(path_bytes);
         plan.push_entry(dir, entry_index);
     }
     plan.finish()
@@ -617,11 +626,11 @@ impl BlobLookupCollectSink<'_> {
 #[allow(clippy::too_many_arguments)]
 fn collect_blob_lookups_in_directory(
     index: &Index,
-    dir: &str,
+    dir: &[u8],
     entry_indices: &[usize],
-    dir_abs: &dyn Fn(&str) -> PathBuf,
-    file_abs: &dyn Fn(&str) -> PathBuf,
-    symlink_missing: &HashSet<String>,
+    dir_abs: &dyn Fn(&[u8]) -> PathBuf,
+    file_abs: &dyn Fn(&[u8]) -> PathBuf,
+    symlink_missing: &HashSet<Vec<u8>>,
     out: &mut Vec<(usize, BlobDiskLookup)>,
     sparse: BlobScanSparseMode,
     scanned: &mut usize,
@@ -662,16 +671,16 @@ fn collect_blob_lookups_in_directory(
 #[allow(clippy::too_many_arguments)]
 fn for_each_blob_in_one_directory<F, H>(
     index: &Index,
-    dir: &str,
+    dir: &[u8],
     entry_indices: &[usize],
-    dir_abs: &dyn Fn(&str) -> PathBuf,
-    file_abs: &dyn Fn(&str) -> PathBuf,
+    dir_abs: &dyn Fn(&[u8]) -> PathBuf,
+    file_abs: &dyn Fn(&[u8]) -> PathBuf,
     has_symlink_ancestor: &mut H,
     visit: &mut F,
 ) -> Result<()>
 where
-    F: FnMut(usize, &str, BlobDiskLookup) -> Result<()>,
-    H: FnMut(&str) -> bool,
+    F: FnMut(usize, &[u8], BlobDiskLookup) -> Result<()>,
+    H: FnMut(&[u8]) -> bool,
 {
     if entry_indices.is_empty() {
         return Ok(());
@@ -748,9 +757,9 @@ where
 fn collect_blob_lookups_serial(
     index: &Index,
     plan: &BlobScanPlan,
-    symlink_missing: &HashSet<String>,
-    dir_abs: &dyn Fn(&str) -> PathBuf,
-    file_abs: &dyn Fn(&str) -> PathBuf,
+    symlink_missing: &HashSet<Vec<u8>>,
+    dir_abs: &dyn Fn(&[u8]) -> PathBuf,
+    file_abs: &dyn Fn(&[u8]) -> PathBuf,
     sparse: BlobScanSparseMode,
 ) -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
     let mut out = match sparse {
@@ -840,9 +849,9 @@ fn preload_blob_lookups_parallel(
     index: &Index,
     plan: &BlobScanPlan,
     threads: usize,
-    symlink_missing: &HashSet<String>,
-    dir_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
-    file_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
+    symlink_missing: &HashSet<Vec<u8>>,
+    dir_abs: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync>,
+    file_abs: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync>,
     sparse: BlobScanSparseMode,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>> {
     let blob_count = plan.len();
@@ -918,14 +927,14 @@ fn preload_blob_lookups_parallel(
 pub(crate) fn for_each_blob_by_directory<F, H>(
     index: &Index,
     plan: &BlobScanPlan,
-    dir_abs: impl Fn(&str) -> PathBuf,
-    file_abs: impl Fn(&str) -> PathBuf,
+    dir_abs: impl Fn(&[u8]) -> PathBuf,
+    file_abs: impl Fn(&[u8]) -> PathBuf,
     mut has_symlink_ancestor: H,
     visit: F,
 ) -> Result<()>
 where
     F: FnMut(usize, BlobDiskLookup) -> Result<()>,
-    H: FnMut(&str) -> bool,
+    H: FnMut(&[u8]) -> bool,
 {
     let symlink_missing = build_symlink_missing(index, plan, &mut has_symlink_ancestor);
     let (batch, scanned) = collect_blob_lookups_serial(
@@ -948,8 +957,8 @@ where
 fn build_symlink_missing(
     index: &Index,
     plan: &BlobScanPlan,
-    has_symlink_ancestor: &mut impl FnMut(&str) -> bool,
-) -> HashSet<String> {
+    has_symlink_ancestor: &mut impl FnMut(&[u8]) -> bool,
+) -> HashSet<Vec<u8>> {
     let mut symlink_missing = HashSet::new();
     for (dir_idx, _) in plan.dirs.iter().enumerate() {
         let Some(range) = plan.dir_ranges.get(dir_idx) else {
@@ -964,7 +973,7 @@ fn build_symlink_missing(
         if has_symlink_ancestor(sample_path) {
             for &entry_index in &plan.indices[range.clone()] {
                 if let Ok(rel_path) = entry_rel_path(index, entry_index) {
-                    symlink_missing.insert(rel_path.to_owned());
+                    symlink_missing.insert(rel_path.to_vec());
                 }
             }
         }
@@ -985,14 +994,15 @@ pub(crate) fn collect_blob_lookup_batches(
     thread_policy: &crate::parallel::ThreadPolicy,
     config: &crate::config::ConfigSet,
     scan_symlink_ancestors: bool,
-    precomputed_symlink_missing: Option<&HashSet<String>>,
-    dir_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
-    file_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
-    mut has_symlink_ancestor: impl FnMut(&str) -> bool,
+    precomputed_symlink_missing: Option<&HashSet<Vec<u8>>>,
+    dir_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
+    file_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
+    mut has_symlink_ancestor: impl FnMut(&[u8]) -> bool,
     sparse: BlobScanSparseMode,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>> {
     let symlink_missing_storage;
-    let symlink_missing: &HashSet<String> = if let Some(precomputed) = precomputed_symlink_missing {
+    let symlink_missing: &HashSet<Vec<u8>> = if let Some(precomputed) = precomputed_symlink_missing
+    {
         precomputed
     } else if scan_symlink_ancestors {
         symlink_missing_storage = build_symlink_missing(index, plan, &mut has_symlink_ancestor);
@@ -1004,8 +1014,8 @@ pub(crate) fn collect_blob_lookup_batches(
 
     let blob_count = plan.len();
     let threads = stat_scan_thread_count(thread_policy, config, scan_options, blob_count);
-    let dir_abs_arc: Arc<dyn Fn(&str) -> PathBuf + Send + Sync> = Arc::new(dir_abs);
-    let file_abs_arc: Arc<dyn Fn(&str) -> PathBuf + Send + Sync> = Arc::new(file_abs);
+    let dir_abs_arc: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync> = Arc::new(dir_abs);
+    let file_abs_arc: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync> = Arc::new(file_abs);
     let batches = if threads > 1 {
         // Always partition parallel preload by directory groups so multi-file parents use
         // one read_dir per directory (Git preload-index style). A flat per-file stat loop
@@ -1059,9 +1069,9 @@ pub(crate) fn for_each_blob_by_directory_parallel<F>(
     thread_policy: &crate::parallel::ThreadPolicy,
     config: &crate::config::ConfigSet,
     scan_symlink_ancestors: bool,
-    dir_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
-    file_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
-    has_symlink_ancestor: impl FnMut(&str) -> bool,
+    dir_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
+    file_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
+    has_symlink_ancestor: impl FnMut(&[u8]) -> bool,
     visit: F,
 ) -> Result<()>
 where
@@ -1083,25 +1093,36 @@ where
     visit_blob_lookup_batches(batches, visit)
 }
 
-fn dir_entry_name_matches(index_file_name: &str, entry: &fs::DirEntry) -> bool {
+fn dir_entry_name_matches(index_file_name: &[u8], entry: &fs::DirEntry) -> bool {
     let disk = entry.file_name();
-    let disk = disk.to_string_lossy();
-    if disk == index_file_name {
-        return true;
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let disk = disk.as_os_str().as_bytes();
+        if disk == index_file_name {
+            return true;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let disk = disk.to_string_lossy();
+        if disk.as_bytes() == index_file_name {
+            return true;
+        }
     }
     #[cfg(windows)]
     {
-        disk.eq_ignore_ascii_case(index_file_name)
+        let disk = disk.to_string_lossy();
+        if let Ok(index) = std::str::from_utf8(index_file_name) {
+            return disk.eq_ignore_ascii_case(index);
+        }
     }
-    #[cfg(not(windows))]
-    {
-        false
-    }
+    false
 }
 
 fn lookup_blob_in_directory(
-    on_disk: &HashMap<String, fs::DirEntry>,
-    index_file_name: &str,
+    on_disk: &HashMap<Vec<u8>, fs::DirEntry>,
+    index_file_name: &[u8],
     target_abs: &Path,
 ) -> BlobDiskLookup {
     if let Some(entry) = on_disk.get(index_file_name) {
@@ -1127,7 +1148,7 @@ fn lookup_blob_in_directory(
     }
 }
 
-fn read_directory_map(abs_dir: &Path) -> Result<(bool, HashMap<String, fs::DirEntry>)> {
+fn read_directory_map(abs_dir: &Path) -> Result<(bool, HashMap<Vec<u8>, fs::DirEntry>)> {
     if probe_counts(abs_dir) {
         WORKTREE_READ_DIR_PROBE.fetch_add(1, Ordering::Relaxed);
     }
@@ -1136,8 +1157,8 @@ fn read_directory_map(abs_dir: &Path) -> Result<(bool, HashMap<String, fs::DirEn
             let mut on_disk = HashMap::new();
             for item in rd {
                 let Ok(entry) = item else { continue };
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name == ".git" {
+                let name = dir_entry_key(&entry);
+                if name.as_slice() == b".git" {
                     continue;
                 }
                 on_disk.insert(name, entry);
@@ -1186,17 +1207,17 @@ mod tests {
         );
         let plan = group_blob_entries_by_dir(&index, false);
         assert_eq!(plan.dirs.len(), 1);
-        assert_eq!(plan.dirs[0], "d0");
+        assert_eq!(plan.dirs[0], b"d0".to_vec());
 
         let mut seen = 0;
-        let dir_abs = |dir: &str| {
+        let dir_abs = |dir: &[u8]| {
             if dir.is_empty() {
                 wt.to_path_buf()
             } else {
-                wt.join(dir)
+                crate::index::worktree_path_from_index_rel(wt, dir)
             }
         };
-        let file_abs = |rel: &str| wt.join(rel);
+        let file_abs = |rel: &[u8]| crate::index::worktree_path_from_index_rel(wt, rel);
         for_each_blob_by_directory(
             &index,
             &plan,
@@ -1230,14 +1251,14 @@ mod tests {
 
         let plan = group_blob_entries_by_dir(&index, false);
         let mut missing = false;
-        let dir_abs = |dir: &str| {
+        let dir_abs = |dir: &[u8]| {
             if dir.is_empty() {
                 wt.to_path_buf()
             } else {
-                wt.join(dir)
+                crate::index::worktree_path_from_index_rel(wt, dir)
             }
         };
-        let file_abs = |rel: &str| wt.join(rel);
+        let file_abs = |rel: &[u8]| crate::index::worktree_path_from_index_rel(wt, rel);
         for_each_blob_by_directory(
             &index,
             &plan,
@@ -1274,14 +1295,14 @@ mod tests {
         }
         let plan = group_blob_entries_by_dir(&index, false);
         let _probe = reset_worktree_metadata_probe(wt);
-        let dir_abs = |dir: &str| {
+        let dir_abs = |dir: &[u8]| {
             if dir.is_empty() {
                 wt.to_path_buf()
             } else {
-                wt.join(dir)
+                crate::index::worktree_path_from_index_rel(wt, dir)
             }
         };
-        let file_abs = |rel: &str| wt.join(rel);
+        let file_abs = |rel: &[u8]| crate::index::worktree_path_from_index_rel(wt, rel);
         let mut seen = 0;
         for_each_blob_by_directory(
             &index,
@@ -1346,15 +1367,16 @@ mod tests {
         let plan = group_blob_entries_by_dir(&index, false);
         let _probe = reset_worktree_metadata_probe(&wt);
         let wt_dir = wt.clone();
-        let dir_abs = move |dir: &str| {
+        let dir_abs = move |dir: &[u8]| {
             if dir.is_empty() {
                 wt_dir.clone()
             } else {
-                wt_dir.join(dir)
+                crate::index::worktree_path_from_index_rel(&wt_dir, dir)
             }
         };
         let wt_file = wt.clone();
-        let file_abs = move |rel: &str| wt_file.join(rel);
+        let file_abs =
+            move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel);
         let policy = crate::parallel::ThreadPolicy::default();
         let config = crate::config::ConfigSet::new();
         let mut seen = 0;
@@ -1413,15 +1435,16 @@ mod tests {
         let plan = group_blob_entries_by_dir(&index, false);
         let _probe = reset_worktree_metadata_probe(&wt);
         let wt_dir = wt.clone();
-        let dir_abs = move |dir: &str| {
+        let dir_abs = move |dir: &[u8]| {
             if dir.is_empty() {
                 wt_dir.clone()
             } else {
-                wt_dir.join(dir)
+                crate::index::worktree_path_from_index_rel(&wt_dir, dir)
             }
         };
         let wt_file = wt.clone();
-        let file_abs = move |rel: &str| wt_file.join(rel);
+        let file_abs =
+            move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel);
         let policy = crate::parallel::ThreadPolicy::default();
         let config = crate::config::ConfigSet::new();
         let mut seen = 0;

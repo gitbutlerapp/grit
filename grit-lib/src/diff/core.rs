@@ -2782,8 +2782,7 @@ fn diff_tree_entries_count(
                     }
                     std::cmp::Ordering::Equal => {
                         if o.oid != n.oid || o.mode != n.mode {
-                            let name_str = String::from_utf8_lossy(&o.name);
-                            let path = format_path(prefix, &name_str);
+                            let path = crate::repo_relpath::format_path_stored(prefix, &o.name);
                             if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 if show_trees {
                                     *count += 1;
@@ -2828,8 +2827,7 @@ fn emit_deleted_count(
     show_trees: bool,
     count: &mut usize,
 ) -> Result<()> {
-    let name_str = String::from_utf8_lossy(&entry.name);
-    let path = format_path(prefix, &name_str);
+    let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
     if is_tree_mode(entry.mode) {
         if show_trees {
             *count += 1;
@@ -2848,8 +2846,7 @@ fn emit_added_count(
     show_trees: bool,
     count: &mut usize,
 ) -> Result<()> {
-    let name_str = String::from_utf8_lossy(&entry.name);
-    let path = format_path(prefix, &name_str);
+    let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
     if is_tree_mode(entry.mode) {
         if show_trees {
             *count += 1;
@@ -2897,8 +2894,7 @@ fn diff_tree_entries_opts(
                     std::cmp::Ordering::Equal => {
                         // Both present — check for changes
                         if o.oid != n.oid || o.mode != n.mode {
-                            let name_str = String::from_utf8_lossy(&o.name);
-                            let path = format_path(prefix, &name_str);
+                            let path = crate::repo_relpath::format_path_stored(prefix, &o.name);
                             if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 // Both are trees
                                 if show_trees {
@@ -3053,8 +3049,7 @@ fn emit_deleted_opts(
     index_hint: Option<&DiffTreesIndexHint<'_>>,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
-    let name_str = String::from_utf8_lossy(&entry.name);
-    let path = format_path(prefix, &name_str);
+    let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
     if is_tree_mode(entry.mode) {
         if show_trees {
             result.push(DiffEntry {
@@ -3103,8 +3098,7 @@ fn emit_added_opts(
     show_trees: bool,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
-    let name_str = String::from_utf8_lossy(&entry.name);
-    let path = format_path(prefix, &name_str);
+    let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
     if is_tree_mode(entry.mode) {
         if show_trees {
             result.push(DiffEntry {
@@ -4442,7 +4436,8 @@ fn worktree_diff_pass1_index_entry(
     let is_intent_to_add = ie.intent_to_add();
 
     if ie.mode == 0o160000 {
-        let sub_dir = work_tree.join(path_str_ref);
+        let sub_dir =
+            index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
         match fs::symlink_metadata(&sub_dir) {
             Err(e)
                 if e.kind() == std::io::ErrorKind::NotFound
@@ -4557,19 +4552,20 @@ fn worktree_diff_pass1_index_entry(
     }
 
     let file_path =
-        index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
+        index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
+    let path_match = crate::repo_relpath::as_utf8_for_matching(path_str_ref);
 
     if is_intent_to_add {
         match fs::symlink_metadata(&file_path) {
             Ok(meta) => {
-                let file_attrs = file_attrs_for(path_str_ref);
+                let file_attrs = file_attrs_for(path_match.as_ref());
                 let worktree_oid = worktree_file_oid(
                     odb,
                     &file_path,
                     &meta,
                     conv,
                     &file_attrs,
-                    path_str_ref,
+                    path_match.as_ref(),
                     None,
                     materialize_dirty_blobs,
                     filter_fp,
@@ -4779,12 +4775,12 @@ fn diff_index_to_worktree_inner(
             if !index_entry_needs_worktree_diff_pass1(ie) {
                 continue;
             }
-            let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
+            let path_stored = crate::repo_relpath::storage_string(&ie.path);
             worktree_diff_pass1_index_entry(
                 odb,
                 work_tree,
                 ie,
-                path_str_ref,
+                &path_stored,
                 simplify_gitlinks,
                 ignore_submodule_untracked,
                 error_on_broken_gitlinks,
@@ -4818,16 +4814,16 @@ fn diff_index_to_worktree_inner(
         group_blob_entries_by_dir(index, honor_fsmonitor_valid)
     };
     let work_tree_owned = work_tree.to_path_buf();
-    let dir_abs = move |dir: &str| {
+    let dir_abs = move |dir: &[u8]| {
         if dir.is_empty() {
             work_tree_owned.clone()
         } else {
-            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+            index_entry_worktree_abs_bytes(&work_tree_owned, dir, precompose_unicode, ignorecase)
         }
     };
     let work_tree_for_files = work_tree.to_path_buf();
-    let file_abs = move |rel: &str| {
-        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+    let file_abs = move |rel: &[u8]| {
+        index_entry_worktree_abs_bytes(&work_tree_for_files, rel, precompose_unicode, ignorecase)
     };
     let blob_count = blob_dirs.len();
     let thread_policy = options.thread_policy.unwrap_or_default();
@@ -4865,15 +4861,18 @@ fn diff_index_to_worktree_inner(
         dir_abs,
         file_abs,
         |rel_path| {
-            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+            dir_symlinks.has_symlink_in_path_bytes(
+                work_tree,
+                rel_path,
+                precompose_unicode,
+                ignorecase,
+            )
         },
         sparse,
     )?;
     let retained_indices = blob_lookup_batch_entry_indices(&blob_stat_batches);
     visit_blob_lookup_batches(blob_stat_batches, |entry_index, lookup| {
-        let path_owned = std::str::from_utf8(&index.entries[entry_index].path)
-            .unwrap_or("")
-            .to_owned();
+        let path_owned = crate::repo_relpath::storage_string(&index.entries[entry_index].path);
         let path_str_ref = path_owned.as_str();
         if use_fsmonitor_stat_skip {
             let ie_skip = &index.entries[entry_index];
@@ -4919,9 +4918,10 @@ fn diff_index_to_worktree_inner(
                     }
                     if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
                         let path_owned = path_str_ref.to_owned();
-                        let file_path = index_entry_worktree_abs(
+                        let path_bytes = index.entries[entry_index].path.as_slice();
+                        let file_path = index_entry_worktree_abs_bytes(
                             work_tree,
-                            &path_owned,
+                            path_bytes,
                             precompose_unicode,
                             ignorecase,
                         );
@@ -4996,9 +4996,9 @@ fn diff_index_to_worktree_inner(
                     } else if !(stat_same && (!trust_filemode || worktree_mode == ie.mode) && !racy)
                         && !stat_refresh_verified[entry_index]
                     {
-                        let file_path = index_entry_worktree_abs(
+                        let file_path = index_entry_worktree_abs_bytes(
                             work_tree,
-                            path_str_ref,
+                            &index.entries[entry_index].path,
                             precompose_unicode,
                             ignorecase,
                         );
@@ -5012,9 +5012,9 @@ fn diff_index_to_worktree_inner(
                         });
                     }
                 } else {
-                    let file_path = index_entry_worktree_abs(
+                    let file_path = index_entry_worktree_abs_bytes(
                         work_tree,
-                        path_str_ref,
+                        &index.entries[entry_index].path,
                         precompose_unicode,
                         ignorecase,
                     );
@@ -5150,15 +5150,32 @@ pub(crate) fn index_entry_worktree_abs(
     precompose_unicode: bool,
     ignorecase: bool,
 ) -> PathBuf {
-    if precompose_unicode {
-        return crate::unicode_normalization::resolve_worktree_path_for_staging(
-            work_tree,
-            index_relpath,
-            true,
-        )
-        .abs;
+    index_entry_worktree_abs_bytes(
+        work_tree,
+        index_relpath.as_bytes(),
+        precompose_unicode,
+        ignorecase,
+    )
+}
+
+pub(crate) fn index_entry_worktree_abs_bytes(
+    work_tree: &Path,
+    index_relpath: &[u8],
+    precompose_unicode: bool,
+    ignorecase: bool,
+) -> PathBuf {
+    if precompose_unicode || ignorecase {
+        if let Ok(s) = std::str::from_utf8(index_relpath) {
+            if precompose_unicode {
+                return crate::unicode_normalization::resolve_worktree_path_for_staging(
+                    work_tree, s, true,
+                )
+                .abs;
+            }
+            return crate::path_icase::worktree_path_for_index_entry(work_tree, s, ignorecase);
+        }
     }
-    crate::path_icase::worktree_path_for_index_entry(work_tree, index_relpath, ignorecase)
+    crate::index::worktree_path_from_index_rel(work_tree, index_relpath)
 }
 
 /// Effective index-file mtime for racy-git checks.
@@ -5223,6 +5240,59 @@ impl SymlinkDirCache {
             if self.probe_prefix(work_tree, &prefix, precompose_unicode, ignorecase) {
                 return true;
             }
+        }
+        false
+    }
+
+    /// Whether any parent component of `rel_path` is a symlink (raw index path bytes).
+    pub(crate) fn has_symlink_in_path_bytes(
+        &mut self,
+        work_tree: &Path,
+        rel_path: &[u8],
+        precompose_unicode: bool,
+        ignorecase: bool,
+    ) -> bool {
+        if let Ok(s) = std::str::from_utf8(rel_path) {
+            return self.has_symlink_in_path(work_tree, s, precompose_unicode, ignorecase);
+        }
+        let mut prefix = Vec::<u8>::new();
+        let mut start = 0usize;
+        let end = rel_path
+            .iter()
+            .rposition(|&b| b == b'/')
+            .unwrap_or(rel_path.len());
+        while start < end {
+            let next = rel_path[start..end]
+                .iter()
+                .position(|&b| b == b'/')
+                .map_or(end, |p| start + p);
+            let component = &rel_path[start..next];
+            start = next + 1;
+            if component.is_empty() {
+                continue;
+            }
+            if !prefix.is_empty() {
+                prefix.push(b'/');
+            }
+            prefix.extend_from_slice(component);
+            let key = crate::repo_relpath::storage_string(&prefix);
+            if self.symlink.contains(&key) {
+                return true;
+            }
+            if self.plain.contains(&key) {
+                continue;
+            }
+            let abs =
+                index_entry_worktree_abs_bytes(work_tree, &prefix, precompose_unicode, ignorecase);
+            let is_symlink = match fs::symlink_metadata(&abs) {
+                Ok(meta) => meta.file_type().is_symlink(),
+                _ => false,
+            };
+            if is_symlink {
+                self.symlink.insert(key);
+                return true;
+            }
+            self.plain.insert(key);
         }
         false
     }
@@ -5364,7 +5434,8 @@ pub fn worktree_differs_from_index_entry(
     use crate::config::ConfigSet;
     use crate::crlf;
 
-    let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
+    let path_stored = crate::repo_relpath::storage_string(&ie.path);
+    let path_str_ref = crate::repo_relpath::as_utf8_for_matching(&path_stored);
     let config = config.cloned().unwrap_or_else(|| {
         ConfigSet::load(
             &crate::environment::Environment::empty(),
@@ -5386,7 +5457,7 @@ pub fn worktree_differs_from_index_entry(
         .and_then(|r| r.ok())
         .unwrap_or(false);
     let file_path =
-        index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
+        index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
 
     if ie.mode == 0o160000 {
         let sub_head_oid = read_submodule_head(&file_path);
@@ -5394,7 +5465,7 @@ pub fn worktree_differs_from_index_entry(
             Some(oid) => oid == ie.oid,
             None => submodule_worktree_is_unpopulated_placeholder(&file_path),
         };
-        let mut flags = submodule_porcelain_flags(work_tree, path_str_ref, ie.oid);
+        let mut flags = submodule_porcelain_flags(work_tree, path_str_ref.as_ref(), ie.oid);
         if ignore_submodule_untracked {
             flags.untracked = false;
         }
@@ -5423,14 +5494,14 @@ pub fn worktree_differs_from_index_entry(
 
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
-    let file_attrs = crlf::get_file_attrs(&attrs, path_str_ref, false, &config);
+    let file_attrs = crlf::get_file_attrs(&attrs, path_str_ref.as_ref(), false, &config);
     let worktree_oid = hash_worktree_file(
         odb,
         &file_path,
         &meta,
         &conv,
         &file_attrs,
-        path_str_ref,
+        path_str_ref.as_ref(),
         Some(ie),
         filter_process,
     )?;
@@ -5818,16 +5889,16 @@ pub fn refresh_index_stat_content_verified_with_rules(
 
     let blob_dirs = group_blob_entries_by_dir(index, false);
     let work_tree_owned = work_tree.to_path_buf();
-    let dir_abs = move |dir: &str| {
+    let dir_abs = move |dir: &[u8]| {
         if dir.is_empty() {
             work_tree_owned.clone()
         } else {
-            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+            index_entry_worktree_abs_bytes(&work_tree_owned, dir, precompose_unicode, ignorecase)
         }
     };
     let work_tree_for_files = work_tree.to_path_buf();
-    let file_abs = move |rel: &str| {
-        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+    let file_abs = move |rel: &[u8]| {
+        index_entry_worktree_abs_bytes(&work_tree_for_files, rel, precompose_unicode, ignorecase)
     };
     let mut dir_symlinks = SymlinkDirCache::default();
     let mut changed = false;
@@ -5845,7 +5916,12 @@ pub fn refresh_index_stat_content_verified_with_rules(
         dir_abs,
         file_abs,
         |rel_path| {
-            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+            dir_symlinks.has_symlink_in_path_bytes(
+                work_tree,
+                rel_path,
+                precompose_unicode,
+                ignorecase,
+            )
         },
         BlobScanSparseMode::StatRefresh {
             stat_policy,
@@ -5856,11 +5932,13 @@ pub fn refresh_index_stat_content_verified_with_rules(
         let BlobDiskLookup::Present(_stat) = lookup else {
             return Ok(());
         };
-        let path_owned = std::str::from_utf8(&index.entries[entry_index].path)
-            .unwrap_or("")
-            .to_owned();
-        let file_path =
-            index_entry_worktree_abs(work_tree, &path_owned, precompose_unicode, ignorecase);
+        let path_owned = crate::repo_relpath::storage_string(&index.entries[entry_index].path);
+        let file_path = index_entry_worktree_abs_bytes(
+            work_tree,
+            &index.entries[entry_index].path,
+            precompose_unicode,
+            ignorecase,
+        );
         let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
         let ie = &mut index.entries[entry_index];
         if refresh_index_blob_stat_from_metadata(
@@ -6186,7 +6264,8 @@ pub fn read_worktree_side_bytes_for_diff(
     index_entry: Option<&IndexEntry>,
     worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
 ) -> Result<Vec<u8>> {
-    let file_path = work_tree.join(rel_path);
+    let file_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
+    let rel_match = crate::repo_relpath::as_utf8_for_matching(rel_path);
     if mode == MODE_SYMLINK {
         return read_worktree_bytes_for_mode(&file_path, mode).map_err(Error::Io);
     }
@@ -6197,22 +6276,22 @@ pub fn read_worktree_side_bytes_for_diff(
             &file_path,
             &meta,
             rules.conversion(),
-            &rules.file_attrs(rel_path, meta.is_dir()),
-            rel_path,
+            &rules.file_attrs(rel_match.as_ref(), meta.is_dir()),
+            rel_match.as_ref(),
             index_entry,
             Some(rules.filter_process()),
         );
     }
     let conv = crate::crlf::ConversionConfig::from_config(config);
     let attrs = crate::crlf::load_gitattributes(work_tree);
-    let file_attrs = crate::crlf::get_file_attrs(&attrs, rel_path, meta.is_dir(), config);
+    let file_attrs = crate::crlf::get_file_attrs(&attrs, rel_match.as_ref(), meta.is_dir(), config);
     worktree_blob_bytes(
         odb,
         &file_path,
         &meta,
         &conv,
         &file_attrs,
-        rel_path,
+        rel_match.as_ref(),
         index_entry,
         None,
     )

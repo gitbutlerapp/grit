@@ -2215,7 +2215,8 @@ fn new_side_bytes(
         // Tree↔worktree collection often stores only a hash of normalized worktree bytes; the
         // Blob is not in the ODB until staging writes it. Always read the live worktree here.
         let mode = u32::from_str_radix(&e.new_mode, 8).unwrap_or(0);
-        let index_entry = ctx.index.get(p.as_bytes(), 0);
+        let path_bytes = grit_lib::repo_relpath::storage_bytes(p);
+        let index_entry = ctx.index.get(&path_bytes, 0);
         let rules = ctx.rules.lock().unwrap_or_else(|e| e.into_inner());
         let data = read_worktree_side_bytes_for_diff(
             odb,

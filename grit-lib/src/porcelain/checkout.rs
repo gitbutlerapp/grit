@@ -143,8 +143,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
         if target_paths.contains(path) {
             continue;
         }
-        let path_str = String::from_utf8_lossy(path);
-        let abs = work_tree.join(path_str.as_ref());
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
         if let Some(entry) = index.get(path, 0) {
             if entry.mode == MODE_GITLINK {
                 remove_uninitialized_gitlink_worktree(&abs);
@@ -187,11 +186,11 @@ pub fn checkout_hard_to_tree_from_head_tree(
     let mut dir_cache = LeadingDirCache::with_protect(protect);
 
     for te in target_entries {
-        let path = String::from_utf8_lossy(&te.path).into_owned();
+        let abs = crate::index::worktree_path_from_index_rel(work_tree, &te.path);
         let mode = te.mode;
         if mode == MODE_GITLINK {
             if trees_differ && written_by_tree_diff.contains(&te.path) {
-                let abs = work_tree.join(&path);
+                let abs = abs.clone();
                 let mut entry = entry_from_stat(&abs, te.path.as_slice(), te.oid, MODE_GITLINK)?;
                 entry.size = 0;
                 new_entries.push(entry);
@@ -200,9 +199,9 @@ pub fn checkout_hard_to_tree_from_head_tree(
             if let Some(existing) = index.get(te.path.as_slice(), 0) {
                 if existing.oid == te.oid
                     && existing.mode == MODE_GITLINK
-                    && gitlink_worktree_matches_index(&work_tree.join(&path))
+                    && gitlink_worktree_matches_index(&abs)
                 {
-                    let abs = work_tree.join(&path);
+                    let abs = abs.clone();
                     let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
                     let mut entry =
                         entry_from_metadata(&meta, te.path.as_slice(), te.oid, MODE_GITLINK);
@@ -211,8 +210,9 @@ pub fn checkout_hard_to_tree_from_head_tree(
                     continue;
                 }
             }
+            let path = crate::repo_relpath::storage_string(&te.path);
             materialize_gitlink_worktree(work_tree, &path, &mut dir_cache)?;
-            let abs = work_tree.join(&path);
+            let abs = abs.clone();
             let mut entry = entry_from_stat(&abs, te.path.as_slice(), te.oid, MODE_GITLINK)?;
             entry.size = 0;
             new_entries.push(entry);
@@ -220,12 +220,12 @@ pub fn checkout_hard_to_tree_from_head_tree(
         }
 
         if trees_differ && written_by_tree_diff.contains(&te.path) {
-            let abs = work_tree.join(&path);
             let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
             new_entries.push(entry_from_metadata(&meta, te.path.as_slice(), te.oid, mode));
             continue;
         }
 
+        let path = crate::repo_relpath::storage_string(&te.path);
         if let Some(existing) = index.get(te.path.as_slice(), 0) {
             if crate::diff::path_checkout_skip_blob_write_when_up_to_date_with_config(
                 repo.odb(),
@@ -239,7 +239,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
                 Some(rules.filter_process()),
                 Some(config.as_ref()),
             )? {
-                let abs = work_tree.join(&path);
+                let abs = abs.clone();
                 let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
                 new_entries.push(entry_from_metadata(&meta, te.path.as_slice(), te.oid, mode));
                 continue;
@@ -2151,14 +2151,15 @@ fn write_checkout_entry(
     dir_cache: &mut LeadingDirCache,
     oid: ObjectId,
 ) -> Result<IndexEntry> {
+    let index_path = crate::repo_relpath::storage_bytes(rel_path).into_owned();
     if mode == MODE_SYMLINK {
         let meta = write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
-        return Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode));
+        return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
     }
 
     if can_overwrite_regular_in_place(change) {
         dir_cache.ensure_parents(work_tree, rel_path)?;
-        let abs_path = work_tree.join(rel_path);
+        let abs_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
         let old_mode = parse_git_mode(&change.old_mode);
         let mut file = match OpenOptions::new()
             .write(true)
@@ -2168,7 +2169,7 @@ fn write_checkout_entry(
             Ok(f) => f,
             Err(_) => {
                 let meta = write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
-                return Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode));
+                return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
             }
         };
         file.write_all(data)
@@ -2176,11 +2177,11 @@ fn write_checkout_entry(
         drop(file);
         apply_in_place_git_mode_transition_at_path(&abs_path, old_mode, mode)?;
         let meta = written_file_symlink_metadata(&abs_path)?;
-        return Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode));
+        return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
     }
 
     let meta = write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
-    Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode))
+    Ok(entry_from_metadata(&meta, &index_path, oid, mode))
 }
 
 /// Adjust only the executable bit for an in-place overwrite, preserving umask-driven permissions.
@@ -2428,8 +2429,9 @@ pub(crate) fn write_to_worktree_cached(
     mode: u32,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<fs::Metadata> {
-    validate_worktree_path(rel_path.as_bytes(), mode, dir_cache.protect)?;
-    let abs_path = work_tree.join(rel_path);
+    let rel_bytes = crate::repo_relpath::storage_bytes(rel_path);
+    validate_worktree_path(&rel_bytes, mode, dir_cache.protect)?;
+    let abs_path = crate::index::worktree_path_from_index_rel(work_tree, &rel_bytes);
 
     dir_cache.ensure_parents(work_tree, rel_path)?;
     if let Some(parent) = abs_path.parent() {

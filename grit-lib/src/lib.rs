@@ -293,6 +293,8 @@ pub mod remote;
 pub mod repo;
 pub(crate) mod repo_caches;
 pub mod repo_handles;
+#[doc(hidden)]
+pub mod repo_relpath;
 pub(crate) mod rerere;
 pub(crate) mod resolve_undo;
 pub(crate) mod rev_list;

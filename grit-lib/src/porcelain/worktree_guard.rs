@@ -341,16 +341,26 @@ fn worktree_clean_for_switch_paths(
         if stat_clean {
             let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
             let work_tree_owned = work_tree.to_path_buf();
-            let dir_abs = |dir: &str| {
+            let dir_abs = |dir: &[u8]| {
                 if dir.is_empty() {
                     work_tree_owned.clone()
                 } else {
-                    index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+                    crate::diff::index_entry_worktree_abs_bytes(
+                        &work_tree_owned,
+                        dir,
+                        precompose_unicode,
+                        ignorecase,
+                    )
                 }
             };
             let work_tree_for_files = work_tree.to_path_buf();
-            let file_abs = move |rel: &str| {
-                index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+            let file_abs = move |rel: &[u8]| {
+                crate::diff::index_entry_worktree_abs_bytes(
+                    &work_tree_for_files,
+                    rel,
+                    precompose_unicode,
+                    ignorecase,
+                )
             };
             for_each_blob_by_directory(
                 index,
@@ -399,16 +409,26 @@ fn worktree_clean_for_switch_paths(
             stat_parallel_threads,
         };
         let work_tree_owned = work_tree.to_path_buf();
-        let dir_abs = move |dir: &str| {
+        let dir_abs = move |dir: &[u8]| {
             if dir.is_empty() {
                 work_tree_owned.clone()
             } else {
-                index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+                crate::diff::index_entry_worktree_abs_bytes(
+                    &work_tree_owned,
+                    dir,
+                    precompose_unicode,
+                    ignorecase,
+                )
             }
         };
         let work_tree_for_files = work_tree.to_path_buf();
-        let file_abs = move |rel: &str| {
-            index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+        let file_abs = move |rel: &[u8]| {
+            crate::diff::index_entry_worktree_abs_bytes(
+                &work_tree_for_files,
+                rel,
+                precompose_unicode,
+                ignorecase,
+            )
         };
         let matches = AtomicBool::new(true);
         let guard_batches = collect_blob_lookup_batches(

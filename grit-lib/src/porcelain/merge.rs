@@ -79,13 +79,14 @@ pub fn tree_to_index_entries(
     prefix: &str,
 ) -> Result<Vec<IndexEntry>> {
     let protect = ProtectOptions::from_config(&*repo.config()?);
-    tree_to_index_entries_with_protect(repo, oid, prefix, protect)
+    let prefix_bytes = crate::repo_relpath::storage_bytes(prefix);
+    tree_to_index_entries_with_protect(repo, oid, &prefix_bytes, protect)
 }
 
 fn tree_to_index_entries_with_protect(
     repo: &Repository,
     oid: &ObjectId,
-    prefix: &str,
+    prefix: &[u8],
     protect: ProtectOptions,
 ) -> Result<Vec<IndexEntry>> {
     let obj = repo.odb().read(oid)?;
@@ -96,19 +97,13 @@ fn tree_to_index_entries_with_protect(
     let mut result = Vec::new();
 
     for te in entries {
-        let name = String::from_utf8_lossy(&te.name).into_owned();
-        let path = if prefix.is_empty() {
-            name.clone()
-        } else {
-            format!("{prefix}/{name}")
-        };
-        validate_tree_walk_entry(prefix.as_bytes(), &te.name, te.mode, protect)?;
+        let path_bytes = crate::repo_relpath::join_rel(prefix, &te.name);
+        validate_tree_walk_entry(prefix, &te.name, te.mode, protect)?;
 
         if te.mode == 0o040000 {
-            let sub = tree_to_index_entries_with_protect(repo, &te.oid, &path, protect)?;
+            let sub = tree_to_index_entries_with_protect(repo, &te.oid, &path_bytes, protect)?;
             result.extend(sub);
         } else {
-            let path_bytes = path.into_bytes();
             result.push(IndexEntry {
                 ctime_sec: 0,
                 ctime_nsec: 0,

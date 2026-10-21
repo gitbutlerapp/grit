@@ -779,7 +779,16 @@ fn stage_untracked_paths_parallel(
         if indexed_any_stage.contains(path.as_bytes()) {
             continue;
         }
-        let resolved = resolve_worktree_path_for_staging(work_tree, path, precompose_unicode);
+        let resolved = if precompose_unicode {
+            resolve_worktree_path_for_staging(work_tree, path, true)
+        } else {
+            let rel_bytes = crate::repo_relpath::storage_bytes(path);
+            let abs = crate::index::worktree_path_from_index_rel(work_tree, &rel_bytes);
+            crate::unicode_normalization::WorktreePathForStaging {
+                abs,
+                index_relpath: path.to_owned(),
+            }
+        };
         if is_unregistered_embedded_git_repo(index, &resolved.index_relpath, &resolved.abs) {
             deferred.push(resolved.index_relpath.trim_end_matches('/').to_owned());
             continue;
@@ -827,7 +836,7 @@ fn stage_untracked_paths_parallel(
         index.cache_tree.is_none() && index.untracked_cache.is_none();
     let mut batch_entries: Vec<IndexEntry> = Vec::with_capacity(prepared.len());
     for prep in prepared {
-        let abs = work_tree.join(&prep.index_relpath);
+        let abs = crate::repo_relpath::worktree_abs(work_tree, &prep.index_relpath);
         if prep.meta.is_dir()
             && !prep.meta.file_type().is_symlink()
             && read_submodule_head_oid(&abs).is_some()
@@ -838,8 +847,8 @@ fn stage_untracked_paths_parallel(
         icase_map.remove_alias_of(index, prep.index_relpath.as_bytes());
         let mode =
             mode_with_executable_hint(prep.mode, &prep.index_relpath, executable_hint, matches);
-        let mut entry =
-            entry_from_metadata(&prep.meta, prep.index_relpath.as_bytes(), prep.oid, mode);
+        let index_path = crate::repo_relpath::storage_bytes(&prep.index_relpath).into_owned();
+        let mut entry = entry_from_metadata(&prep.meta, &index_path, prep.oid, mode);
         entry.mode = mode;
         if !skip_per_path_cache_invalidate {
             index.invalidate_untracked_cache_for_path(&prep.index_relpath);
@@ -892,9 +901,16 @@ fn stage_untracked_path(
         .get_bool("core.precomposeunicode")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
-    let abs = resolved.abs;
-    let index_relpath = resolved.index_relpath;
+    let rel_bytes = crate::repo_relpath::storage_bytes(rel_path);
+    let (abs, index_relpath) = if precompose_unicode {
+        let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
+        (resolved.abs, resolved.index_relpath)
+    } else {
+        (
+            crate::index::worktree_path_from_index_rel(work_tree, &rel_bytes),
+            rel_path.to_owned(),
+        )
+    };
     let meta = fs::symlink_metadata(&abs).map_err(|e| {
         Error::Io(std::io::Error::new(
             e.kind(),
