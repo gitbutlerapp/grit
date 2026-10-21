@@ -334,3 +334,127 @@ followup = "Factory speed: diff --quiet / has_changes fast path (step 6)"
 documented = "log --name-status --limit 20 on synth-10k smoke ≈2.1× git"
 followup = "Factory speed: log diff detail on medium fixture"
 
+[scenario."medium/log-stat"]
+documented = "log --stat --limit 20 on synth-10k smoke above 1.1× git (single-run smoke baseline)"
+followup = "Factory speed: log diff detail on medium fixture"
+
+[scenario."medium/status-dirty"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/status-clean"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/add"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/diff-dirty"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/diff-clean"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/log"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/merge-base"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/resolve"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/cat"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/switch"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/pick"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/merge"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/revert"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/stash-push-pop"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."medium/fsck"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "Refresh medium fixture baseline after full campaign run"
+
+[scenario."git-dot-git/diff-name-only"]
+documented = "New diff output scenario on git.git; ratio tracked on smoke campaign run"
+followup = "Factory speed: diff list modes on git.git fixture"
+
+[scenario."git-dot-git/diff-w"]
+documented = "New diff -w scenario on git.git; ratio tracked on smoke campaign run"
+followup = "Factory speed: whitespace diff on git.git fixture"
+
+[scenario."git-dot-git/diff-quiet-clean"]
+documented = "diff --quiet on git.git smoke baseline"
+followup = "Factory speed: diff --quiet fast path"
+
+[scenario."git-dot-git/diff-quiet-dirty"]
+documented = "diff --quiet dirty on git.git smoke baseline"
+followup = "Factory speed: diff --quiet fast path"
+
+[scenario."git-dot-git/show-patch"]
+documented = "show patch on largest commit git.git smoke baseline"
+followup = "Factory speed: show patch on git.git"
+
+[scenario."git-dot-git/log-stat"]
+documented = "log --stat on git.git smoke baseline"
+followup = "Factory speed: log diff detail on git.git"
+
+[scenario."git-dot-git/log-name-status"]
+documented = "log --name-status on git.git smoke baseline"
+followup = "Factory speed: log diff detail on git.git"
+
+[scenario."chromium-synth/diff-stat"]
+documented = "diff --stat on chromium-synth smoke baseline"
+followup = "Factory speed: diff stat on chromium fixture"
+
+[scenario."chromium-synth/diff-name-only"]
+documented = "diff --name-only on chromium-synth smoke baseline"
+followup = "Factory speed: diff list modes on chromium fixture"
+
+[scenario."chromium-synth/diff-w"]
+documented = "diff -w on chromium-synth smoke baseline"
+followup = "Factory speed: whitespace diff on chromium fixture"
+
+[scenario."chromium-synth/diff-quiet-clean"]
+documented = "diff --quiet on chromium-synth smoke baseline"
+followup = "Factory speed: diff --quiet fast path"
+
+[scenario."chromium-synth/diff-quiet-dirty"]
+documented = "diff --quiet dirty on chromium-synth smoke baseline"
+followup = "Factory speed: diff --quiet fast path"
+
+[scenario."chromium-synth/show-patch"]
+documented = "show patch on chromium-synth smoke baseline"
+followup = "Factory speed: show patch on chromium fixture"
+
+[scenario."chromium-synth/log-stat"]
+documented = "log --stat on chromium-synth smoke baseline"
+followup = "Factory speed: log diff detail on chromium fixture"
+
+[scenario."chromium-synth/log-name-status"]
+documented = "log --name-status on chromium-synth smoke baseline"
+followup = "Factory speed: log diff detail on chromium fixture"
+

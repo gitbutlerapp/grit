@@ -1,3 +1,0 @@
-ancestorEntries = ["grit-cli/tests/diff_format_flags.rs", "grit-cli/tests/snapshots/grit_test_support__cli_fixture__skill.snap"]
-ourEntries = ["grit-cli/tests/diff_format_flags.rs", "grit-cli/tests/snapshots/grit_test_support__cli_fixture__skill.snap"]
-theirEntries = ["grit-cli/tests/diff_format_flags.rs", "grit-cli/tests/snapshots/grit_test_support__cli_fixture__skill.snap"]
