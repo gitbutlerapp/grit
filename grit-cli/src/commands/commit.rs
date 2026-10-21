@@ -98,12 +98,12 @@ pub fn run(
     let env = repo.environment();
     let now = crate::context::wall_clock_now(env);
     let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
-    let author = if amend {
-        String::new()
-    } else if let Some(arg) = author_override {
+    let author = if let Some(arg) = author_override {
         let contact = parse_author_arg(&arg).map_err(|e| anyhow::anyhow!("{e}"))?;
         let date_override = env.var(IdentRole::Author.env_date_key());
         author_identity_line(&contact, date_override.as_deref(), now)
+    } else if amend {
+        String::new()
     } else {
         context::identity(env, config.as_ref(), IdentRole::Author, now)?
     };

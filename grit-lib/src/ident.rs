@@ -195,6 +195,22 @@ pub enum AuthorArgError {
     /// Non-whitespace remains after the closing `>`.
     #[error("invalid author: trailing text after '>'")]
     TrailingText,
+    /// Name or email contains control characters or other bytes invalid in a commit header line.
+    #[error("invalid author: name or email contains invalid characters")]
+    InvalidCharacter,
+}
+
+fn author_field_has_invalid_bytes(s: &str) -> bool {
+    s.bytes().any(|b| b < b' ' || b == 127)
+}
+
+fn validate_author_contact(contact: &AuthorContact) -> Result<(), AuthorArgError> {
+    if author_field_has_invalid_bytes(&contact.name)
+        || author_field_has_invalid_bytes(&contact.email)
+    {
+        return Err(AuthorArgError::InvalidCharacter);
+    }
+    Ok(())
 }
 
 /// Parse `git commit --author` values: `Name <email>` or a bare email (no whitespace).
@@ -221,16 +237,20 @@ pub fn parse_author_arg(raw: &str) -> Result<AuthorContact, AuthorArgError> {
             return Err(AuthorArgError::TrailingText);
         }
         let name = s[..lt].trim_end_matches(|c: char| c.is_ascii_whitespace());
-        return Ok(AuthorContact {
+        let contact = AuthorContact {
             name: name.to_owned(),
             email: email.to_owned(),
-        });
+        };
+        validate_author_contact(&contact)?;
+        return Ok(contact);
     }
     if s.contains('@') && !s.chars().any(char::is_whitespace) {
-        return Ok(AuthorContact {
+        let contact = AuthorContact {
             name: String::new(),
             email: s.to_owned(),
-        });
+        };
+        validate_author_contact(&contact)?;
+        return Ok(contact);
     }
     Err(AuthorArgError::InvalidFormat)
 }
@@ -293,6 +313,14 @@ mod tests {
         assert_eq!(
             parse_author_arg("A <a@b.com> extra"),
             Err(AuthorArgError::TrailingText)
+        );
+    }
+
+    #[test]
+    fn parse_author_arg_rejects_control_characters_in_name() {
+        assert_eq!(
+            parse_author_arg("Bad\nInjected <x@y.example>"),
+            Err(AuthorArgError::InvalidCharacter)
         );
     }
 }
