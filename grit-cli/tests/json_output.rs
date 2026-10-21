@@ -549,6 +549,8 @@ fn assert_commit_json_shape(commit: &Value) {
         commit_json_keys(commit),
         [
             "author",
+            "change_id",
+            "change_id_stored",
             "committer",
             "message",
             "oid",
