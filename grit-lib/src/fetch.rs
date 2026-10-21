@@ -2387,7 +2387,7 @@ mod fetch_advertised_ref_tests {
         std::fs::write(git_dir.join("refs/tags/loose"), format!("{}\n", a.to_hex()))
             .expect("loose tag");
         std::fs::write(
-            git_dir.join("packed-refs"),
+            crate::refs::store::paths::packed_refs_path(&git_dir),
             format!(
                 "# pack-refs with: peeled fully-peeled sorted \n{} refs/tags/moved\n{} refs/tags/packed\n",
                 a.to_hex(),
