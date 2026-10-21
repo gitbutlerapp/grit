@@ -6,8 +6,8 @@ use grit_lib::config::gitmodules::{
     check_submodule_name, check_submodule_url, validate_gitmodules_blob_line,
 };
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
-use grit_lib::refs::branch_tracking::shorten_tracking_ref;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::rev_parse::abbreviate_ref_name;
 use grit_lib::state::{detect_in_progress, repo_state, resolve_head};
 use grit_lib::worktree::crlf::{
     convert_to_git, convert_to_worktree_eager, ConversionConfig, FileAttrs,
@@ -58,7 +58,7 @@ fn state_detect_and_repo_state_on_fresh_repo() {
     let _repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     let _rs = repo_state(&git_dir, false).expect("repo_state");
     assert_eq!(
-        shorten_tracking_ref("refs/remotes/origin/main"),
+        abbreviate_ref_name("refs/remotes/origin/main"),
         "origin/main"
     );
 }

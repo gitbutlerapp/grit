@@ -3,7 +3,7 @@
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::refs::branch_tracking::{stat_branch_pair, AheadBehindMode, TrackingStat};
+use grit_lib::refs::branch_tracking::{Standing, TipComparison};
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
@@ -73,16 +73,14 @@ fn t6040_branch_tracking_ahead_behind_matches_git() {
         .unwrap();
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let grit_stat =
-        stat_branch_pair(&repo, "topic", "refs/heads/main", AheadBehindMode::Full).expect("stat");
+    let topic = repo.refs().resolve("refs/heads/topic").expect("topic");
+    let main = repo.refs().resolve("refs/heads/main").expect("main");
+    let comparison = TipComparison::compute(&repo, topic, main, 1).expect("compare");
     let (git_left, git_right) = git_ahead_behind(dir.path(), "main", "topic");
-    match grit_stat {
-        TrackingStat::Diverged { ahead, behind, .. } => {
-            // `stat_branch_pair` reports how `topic` differs from `main`; git `main...topic` uses
-            // left=main-only, right=topic-only commits.
-            assert_eq!(ahead, git_right);
-            assert_eq!(behind, git_left);
-        }
-        other => panic!("expected diverged stat, got {other:?}"),
-    }
+    // The comparison reports how `topic` differs from `main`; git `main...topic` uses
+    // left=main-only, right=topic-only commits.
+    assert_eq!(comparison.ahead, git_right);
+    assert_eq!(comparison.behind, git_left);
+    assert_eq!(comparison.newest_ahead, vec![topic]);
+    assert_eq!(comparison.standing(), Standing::Ahead);
 }

@@ -58,8 +58,7 @@ use grit_lib::porcelain::tag::{
 use grit_lib::porcelain::terminal::{ansi_supported, stderr_supports_color, stdout_supports_color};
 use grit_lib::progress::ProgressPhase;
 use grit_lib::refs::branch_tracking::{
-    format_tracking_info, remote_tracking_ref_is_mapped, update_remote_tracking_ref,
-    upstream_tracking_full_ref, AheadBehindMode,
+    apply_push_remote_tracking_updates, upstream_tracking_full_ref,
 };
 use grit_lib::refs::hide_refs::{hide_ref_patterns_receive, hide_ref_patterns_uploadpack};
 use grit_lib::refs::ref_namespace::{
@@ -77,6 +76,7 @@ use grit_lib::remote::protocol::{
     merged_git_protocol_value, protocol_from_user, server_protocol_version_from_git_protocol,
     ClientProtocolVersionInputs, ProtocolPolicyInputs,
 };
+use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
 use grit_lib::remote::transport_path::{
     check_local_url_path_not_option_like, looks_like_command_line_option,
 };
@@ -361,10 +361,25 @@ fn porcelain_checkout_glob_and_branch_tracking() {
     repo.reload_config().expect("reload");
     let empty_tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("tree");
     grit_lib::refs::write_ref(git_dir.as_path(), "refs/heads/main", &empty_tree).expect("main");
-    let _ = upstream_tracking_full_ref(&repo, "main");
-    let _ = remote_tracking_ref_is_mapped(&repo, "refs/remotes/origin/main");
-    let _ = format_tracking_info(&repo, "main", AheadBehindMode::Quick, false);
+    assert_eq!(
+        upstream_tracking_full_ref(&repo, "main").as_deref(),
+        Some("refs/remotes/origin/main")
+    );
     let head = grit_lib::refs::resolve_ref(git_dir.as_path(), "HEAD").expect("head");
-    update_remote_tracking_ref(git_dir.as_path(), "origin", "refs/heads/main", Some(head))
+    let pushed = PushRefResult {
+        local_ref: Some("refs/heads/main".to_owned()),
+        remote_ref: "refs/heads/main".to_owned(),
+        old_oid: None,
+        new_oid: Some(head),
+        forced: false,
+        deletion: false,
+        status: PushRefStatus::Ok,
+        message: None,
+    };
+    apply_push_remote_tracking_updates(git_dir.as_path(), "origin", &[pushed])
         .expect("tracking update");
+    assert_eq!(
+        grit_lib::refs::resolve_ref(git_dir.as_path(), "refs/remotes/origin/main").ok(),
+        Some(head)
+    );
 }
