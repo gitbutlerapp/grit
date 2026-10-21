@@ -33,6 +33,9 @@ fn map_lib_error(err: &LibError) -> String {
             }
             format!("ref not found: {refname}")
         }
+        LibError::InvalidPathComponent { path, reason } => {
+            format!("cannot use path '{path}': {reason}")
+        }
         other => other.git_stderr_message(),
     }
 }

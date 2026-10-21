@@ -182,8 +182,15 @@ pub fn validate_component(
     if let Some(err) = validate_component_symlink_dotfile(name, mode, opts) {
         return Err(err);
     }
-    if opts.protect_ntfs && has_dos_drive_prefix_bytes(name) {
-        return Err(PathComponentError::NtfsDriveOrStream);
+    if opts.protect_ntfs {
+        if has_dos_drive_prefix_bytes(name) {
+            return Err(PathComponentError::NtfsDriveOrStream);
+        }
+        if let Ok(name_str) = std::str::from_utf8(name) {
+            if scan_ntfs_backslash_dot_special(name_str, ntfs_backslash_dotdot_tail) {
+                return Err(PathComponentError::NtfsBackslash);
+            }
+        }
     }
     let audit = audit_tree_entry_name(name, opts);
     if audit.empty {
@@ -286,7 +293,10 @@ impl TreeEntryNameAudit {
 /// Returns `true` when `name` should trigger fsck `hasDotgit` for a tree entry.
 #[must_use]
 pub fn component_is_dotgit_alias(name: &[u8], opts: ProtectOptions) -> bool {
-    if name.eq_ignore_ascii_case(b".git") || name.eq_ignore_ascii_case(b"git~1") {
+    if name.eq_ignore_ascii_case(b".git") {
+        return true;
+    }
+    if name.eq_ignore_ascii_case(b"git~1") && opts.protect_ntfs {
         return true;
     }
     let Ok(name_str) = std::str::from_utf8(name) else {
@@ -380,6 +390,10 @@ fn scan_ntfs_backslash_dotgit(name: &str) -> bool {
     scan_ntfs_backslash_dot_special(name, is_ntfs_dotgit)
 }
 
+fn ntfs_backslash_dotdot_tail(after: &str) -> bool {
+    after == ".." || after.starts_with("..\\") || after.starts_with("../")
+}
+
 fn scan_ntfs_backslash_dot_special(name: &str, mut pred: impl FnMut(&str) -> bool) -> bool {
     let mut slash_rest = name;
     while let Some(idx) = slash_rest.find('\\') {
@@ -438,16 +452,18 @@ mod tests {
 
     #[test]
     fn ascii_dotgit_and_git_tilde_one() {
-        for name in [
-            b".git".as_slice(),
-            b".GIT".as_slice(),
-            b"git~1".as_slice(),
-            b"GIT~1".as_slice(),
-        ] {
+        for name in [b".git".as_slice(), b".GIT".as_slice()] {
             assert_eq!(
                 validate_component(name, BLOB, OFF).unwrap_err(),
                 PathComponentError::DotGit
             );
+        }
+        for name in [b"git~1".as_slice(), b"GIT~1".as_slice()] {
+            assert_eq!(
+                validate_component(name, BLOB, FSCK).unwrap_err(),
+                PathComponentError::DotGit
+            );
+            assert!(validate_component(name, BLOB, OFF).is_ok());
         }
         assert!(validate_component(b"git~2", BLOB, OFF).is_ok());
     }
@@ -480,6 +496,11 @@ mod tests {
             validate_component(b"foo\\.git", BLOB, FSCK).unwrap_err(),
             PathComponentError::NtfsBackslash
         );
+        assert_eq!(
+            validate_component(br"a\..\x", BLOB, FSCK).unwrap_err(),
+            PathComponentError::NtfsBackslash
+        );
+        assert!(validate_component(br"a\..\x", BLOB, OFF).is_ok());
     }
 
     #[test]
@@ -586,9 +607,6 @@ mod tests {
     fn audit_matches_validate_for_tree_cases() {
         let audit = audit_tree_entry_name(b".git", FSCK);
         assert!(audit.dotgit);
-        assert_eq!(
-            audit.first_error().unwrap_err(),
-            PathComponentError::DotGit
-        );
+        assert_eq!(audit.first_error().unwrap_err(), PathComponentError::DotGit);
     }
 }

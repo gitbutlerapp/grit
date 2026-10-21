@@ -44,6 +44,8 @@ use crate::merge_trees::{
     TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::path_population::validate_tree_walk_entry;
+use crate::path_validate::ProtectOptions;
 use crate::porcelain::checkout;
 use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::index_from_tree::{
@@ -79,6 +81,7 @@ pub fn tree_to_index_entries(
     if obj.kind != ObjectKind::Tree {
         return Err(Error::Message(format!("expected tree, got {}", obj.kind)));
     }
+    let protect = ProtectOptions::from_config(&*repo.config()?);
     let entries = parse_tree(&obj.data)?;
     let mut result = Vec::new();
 
@@ -89,6 +92,7 @@ pub fn tree_to_index_entries(
         } else {
             format!("{prefix}/{name}")
         };
+        validate_tree_walk_entry(&path, &te.name, te.mode, protect)?;
 
         if te.mode == 0o040000 {
             let sub = tree_to_index_entries(repo, &te.oid, &path)?;

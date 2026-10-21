@@ -132,8 +132,8 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
 
     let mut lock = repo.begin_index_update()?;
     let mut index = repo.load_index()?;
-    let src = normalize_and_validate_repo_relative(work_tree, src)?;
-    let dst = normalize_and_validate_repo_relative(work_tree, dst)?;
+    let src = normalize_and_validate_repo_relative(repo, work_tree, src)?;
+    let dst = normalize_and_validate_repo_relative(repo, work_tree, dst)?;
 
     let src_entries = index_paths_under(&index, &src, true);
     if src_entries.is_empty() {
@@ -143,7 +143,7 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
     }
 
     let (final_dst, dst_is_dir_target) = resolve_move_destination(work_tree, &index, &src, &dst)?;
-    let final_dst = normalize_and_validate_repo_relative(work_tree, &final_dst)?;
+    let final_dst = normalize_and_validate_repo_relative(repo, work_tree, &final_dst)?;
 
     if is_subdirectory(&final_dst, &src) {
         return Err(Error::Message(format!(
@@ -546,7 +546,11 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
 /// # Errors
 ///
 /// Returns [`Error::InvalidPath`] when `path` is empty, absolute, or contains `..`.
-fn normalize_and_validate_repo_relative(_work_tree: &Path, path: &str) -> Result<String> {
+fn normalize_and_validate_repo_relative(
+    repo: &Repository,
+    _work_tree: &Path,
+    path: &str,
+) -> Result<String> {
     if path.is_empty() {
         return Err(Error::InvalidPath("empty path".into()));
     }
@@ -572,10 +576,9 @@ fn normalize_and_validate_repo_relative(_work_tree: &Path, path: &str) -> Result
     if rel.is_empty() {
         return Err(Error::InvalidPath("empty path".into()));
     }
-    let opts = ProtectOptions::default();
-    validate_path(rel.as_bytes(), EntryMode::new(0o100644), opts).map_err(|e| {
-        Error::InvalidPath(format!("'{path}' is not a valid repository path ({e})"))
-    })?;
+    let opts = ProtectOptions::from_config(&*repo.config()?);
+    validate_path(rel.as_bytes(), EntryMode::new(0o100644), opts)
+        .map_err(|reason| Error::invalid_path_component(rel, reason))?;
     Ok(rel.to_string())
 }
 
@@ -884,27 +887,37 @@ fn entry_with_relpath(mut entry: IndexEntry, path: &str) -> IndexEntry {
 mod path_validation_tests {
     use super::normalize_and_validate_repo_relative;
     use crate::error::Error;
+    use crate::repo::{InitOptions, Repository};
+
+    fn test_repo() -> (tempfile::TempDir, Repository) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        (dir, repo)
+    }
 
     #[test]
     fn rejects_absolute_paths() {
-        let wt = std::env::temp_dir();
-        let err =
-            normalize_and_validate_repo_relative(&wt, "/tmp/repo/destination").expect_err("abs");
+        let (_dir, repo) = test_repo();
+        let wt = repo.work_tree().expect("worktree");
+        let err = normalize_and_validate_repo_relative(&repo, wt, "/tmp/repo/destination")
+            .expect_err("abs");
         assert!(matches!(err, Error::InvalidPath(_)));
     }
 
     #[test]
     fn rejects_internal_parent_components() {
-        let wt = std::env::temp_dir();
-        let err = normalize_and_validate_repo_relative(&wt, "dir/../source").expect_err("..");
+        let (_dir, repo) = test_repo();
+        let wt = repo.work_tree().expect("worktree");
+        let err = normalize_and_validate_repo_relative(&repo, wt, "dir/../source").expect_err("..");
         assert!(matches!(err, Error::InvalidPath(_)));
     }
 
     #[test]
     fn accepts_simple_relative_paths() {
-        let wt = std::env::temp_dir();
+        let (_dir, repo) = test_repo();
+        let wt = repo.work_tree().expect("worktree");
         assert_eq!(
-            normalize_and_validate_repo_relative(&wt, "./nested/file.txt").expect("ok"),
+            normalize_and_validate_repo_relative(&repo, wt, "./nested/file.txt").expect("ok"),
             "nested/file.txt"
         );
     }

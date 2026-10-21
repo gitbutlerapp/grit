@@ -1540,7 +1540,11 @@ pub fn status(
         .collect();
     let index_sparse_on_disk =
         index.sparse_directories || index.has_sparse_directory_placeholders();
-    let _ = index.expand_sparse_directory_placeholders(repo.odb());
+    let protect = repo_config
+        .as_deref()
+        .map(crate::path_validate::ProtectOptions::from_config)
+        .unwrap_or_default();
+    let _ = index.expand_sparse_directory_placeholders(repo.odb(), protect);
 
     let head_tree = match head.oid() {
         Some(oid) => {

@@ -310,6 +310,25 @@ fn stage_inner_on_index(
     };
 
     if !opts.pathspecs.is_empty() {
+        let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+        for spec in &opts.pathspecs {
+            if pathspec_is_exclude(spec) {
+                continue;
+            }
+            if has_glob_chars(spec) || spec.ends_with('/') {
+                continue;
+            }
+            let rel = spec.trim_start_matches("./");
+            if rel.is_empty() || rel.ends_with('/') {
+                continue;
+            }
+            crate::path_validate::validate_path(
+                rel.as_bytes(),
+                crate::path_validate::EntryMode::new(0o100644),
+                protect,
+            )
+            .map_err(|reason| Error::invalid_path_component(rel, reason))?;
+        }
         validate_pathspecs(repo, index, work_tree, &unstaged, &untracked, opts, &rules)?;
     }
 

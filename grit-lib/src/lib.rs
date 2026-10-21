@@ -262,6 +262,7 @@ pub(crate) mod pack_zlib;
 pub mod parallel;
 pub(crate) mod patch_ids;
 pub(crate) mod path_icase;
+pub(crate) mod path_population;
 pub mod path_validate;
 pub(crate) mod pathspec;
 pub(crate) mod pkt_line;

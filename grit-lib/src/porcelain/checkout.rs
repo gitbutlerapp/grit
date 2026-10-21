@@ -29,6 +29,8 @@ use crate::index::{
 use crate::objects::ObjectId;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::path_icase::paths_equal;
+use crate::path_population::validate_worktree_path;
+use crate::path_validate::ProtectOptions;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
@@ -99,8 +101,13 @@ pub fn checkout_between_trees_with_progress(
     to: &ObjectId,
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
+    // Reject hostile tree paths before touching the worktree (same rules as index population).
+    crate::porcelain::merge::tree_to_index_entries(repo, to, "")?;
     if from.is_none() {
         return checkout_populated_tree(repo, to, progress);
+    }
+    if let Some(from_oid) = from {
+        crate::porcelain::merge::tree_to_index_entries(repo, from_oid, "")?;
     }
     checkout_between_trees_slow(repo, from, Some(to), progress)
 }
@@ -181,7 +188,8 @@ pub fn checkout_hard_to_tree_from_head_tree(
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
     let mut new_entries: Vec<IndexEntry> = Vec::with_capacity(target_entries.len());
-    let mut dir_cache = LeadingDirCache::new();
+    let protect = ProtectOptions::from_config(config.as_ref());
+    let mut dir_cache = LeadingDirCache::with_protect(protect);
 
     for te in target_entries {
         let path = String::from_utf8_lossy(&te.path).into_owned();
@@ -880,7 +888,7 @@ fn checkout_bulk_added_tree_changes(
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
-    let mut dir_cache = LeadingDirCache::new();
+    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
     let mut write_jobs: Vec<CheckoutWriteJob> = Vec::with_capacity(changes.len());
     for change in changes {
         let Some(path) = change.new_path.as_deref() else {
@@ -1015,7 +1023,7 @@ fn checkout_bulk_mod_delete_tree_changes(
     };
 
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
-    let mut dir_cache = LeadingDirCache::new();
+    let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
     let mut write_jobs: Vec<CheckoutWriteJob> = Vec::with_capacity(write_changes.len());
     for change in &write_changes {
         let Some(path) = change.new_path.as_deref() else {
@@ -1261,6 +1269,11 @@ fn checkout_tree_changes_with_progress(
         &mut loaded_index
     };
     let config = repo.config()?;
+    let protect = ProtectOptions::from_config(config.as_ref());
+    validate_diff_changes_for_worktree(changes, protect)?;
+    if let Some(extra) = attribute_changes {
+        validate_diff_changes_for_worktree(extra, protect)?;
+    }
     let ignorecase = config
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
@@ -1399,7 +1412,7 @@ fn checkout_tree_changes_with_progress(
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
     let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len() / 8);
     let mut deleted_abs_paths: Vec<PathBuf> = Vec::with_capacity(changes.len() / 8);
-    let mut dir_cache = LeadingDirCache::new();
+    let mut dir_cache = LeadingDirCache::with_protect(protect);
     let mut plan: Vec<CheckoutPlanSlot> = Vec::with_capacity(changes.len());
     let mut write_jobs: Vec<CheckoutWriteJob> = Vec::new();
     let mut rules: Option<WorktreeRules> = None;
@@ -2016,6 +2029,28 @@ fn parse_git_mode(mode: &str) -> u32 {
     u32::from_str_radix(mode, 8).unwrap_or(MODE_REGULAR)
 }
 
+fn validate_diff_changes_for_worktree(
+    changes: &[DiffEntry],
+    protect: ProtectOptions,
+) -> Result<()> {
+    for change in changes {
+        let mode = if change.new_path.is_some() {
+            parse_git_mode(&change.new_mode)
+        } else {
+            parse_git_mode(&change.old_mode)
+        };
+        if let Some(path) = &change.new_path {
+            validate_worktree_path(path.as_bytes(), mode, protect)?;
+        }
+        if change.status == DiffStatus::Deleted {
+            if let Some(path) = &change.old_path {
+                validate_worktree_path(path.as_bytes(), mode, protect)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// True when `path` is a gitlink directory with an initialized submodule (`.git` file or dir).
 fn gitlink_worktree_is_populated(path: &Path) -> bool {
     if !path.is_dir() {
@@ -2191,6 +2226,7 @@ fn apply_in_place_git_mode_transition_at_path(
 /// Tracks leading directories already verified or created during one checkout pass.
 pub(crate) struct LeadingDirCache {
     ready: HashSet<PathBuf>,
+    protect: ProtectOptions,
 }
 
 fn precreate_checkout_parent_dirs(
@@ -2219,8 +2255,13 @@ fn precreate_checkout_parent_dirs(
 
 impl LeadingDirCache {
     pub(crate) fn new() -> Self {
+        Self::with_protect(ProtectOptions::default())
+    }
+
+    pub(crate) fn with_protect(protect: ProtectOptions) -> Self {
         Self {
             ready: HashSet::new(),
+            protect,
         }
     }
 
@@ -2228,6 +2269,7 @@ impl LeadingDirCache {
     pub(crate) fn with_ready_from(source: &Self) -> Self {
         Self {
             ready: source.ready.clone(),
+            protect: source.protect,
         }
     }
 
@@ -2390,6 +2432,7 @@ pub(crate) fn write_to_worktree_cached(
     mode: u32,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<fs::Metadata> {
+    validate_worktree_path(rel_path.as_bytes(), mode, dir_cache.protect)?;
     let abs_path = work_tree.join(rel_path);
 
     dir_cache.ensure_parents(work_tree, rel_path)?;

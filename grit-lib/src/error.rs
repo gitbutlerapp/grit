@@ -524,6 +524,15 @@ pub enum Error {
     #[error("invalid path '{0}'")]
     InvalidPath(String),
 
+    /// A repository-relative path failed [`crate::path_validate`] rules while populating the index or checkout.
+    #[error("invalid path '{path}': {reason}")]
+    InvalidPathComponent {
+        /// Full repository-relative path that was rejected.
+        path: String,
+        /// Which component rule failed.
+        reason: crate::path_validate::PathComponentError,
+    },
+
     /// A configuration file parsing or access error.
     #[error(transparent)]
     Config(#[from] ConfigError),
@@ -820,6 +829,18 @@ pub enum Error {
 }
 
 impl Error {
+    /// Build [`Error::InvalidPathComponent`].
+    #[must_use]
+    pub fn invalid_path_component(
+        path: impl Into<String>,
+        reason: crate::path_validate::PathComponentError,
+    ) -> Self {
+        Self::InvalidPathComponent {
+            path: path.into(),
+            reason,
+        }
+    }
+
     /// When set, the CLI should prefix stderr with `fatal: ` for Git-compatible commands.
     #[must_use]
     pub fn wants_fatal_prefix(&self) -> bool {

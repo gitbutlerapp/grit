@@ -79,6 +79,7 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
     }
 
     let mut index = repo.load_index()?;
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
 
     let restore_staged = opts.staged;
     let restore_worktree = opts.worktree || !opts.staged;
@@ -86,12 +87,12 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
 
     let explicit_source_entries = match opts.source {
         RestoreSource::Index => None,
-        RestoreSource::Tree(oid) => Some(flatten_tree_full(repo.odb(), &oid, "")?),
+        RestoreSource::Tree(oid) => Some(flatten_tree_full(repo.odb(), &oid, "", protect)?),
     };
 
     let head_entries = if needs_head_tree_entries(restore_staged, opts.source) {
         match resolve_head_tree(repo)? {
-            Some(tree) => flatten_tree_full(repo.odb(), &tree, "")?,
+            Some(tree) => flatten_tree_full(repo.odb(), &tree, "", protect)?,
             None => Vec::new(),
         }
     } else {

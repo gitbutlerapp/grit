@@ -59,7 +59,8 @@ pub(crate) fn load_worktree_index(repo: &Repository) -> Result<Index> {
     let index_path = repo.index_path_for_env()?;
     let mut index = repo.load_index_at(&index_path)?;
     if index.has_sparse_directory_placeholders() {
-        index.expand_sparse_directory_placeholders(repo.odb())?;
+        let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+        index.expand_sparse_directory_placeholders(repo.odb(), protect)?;
     }
     Ok(index)
 }

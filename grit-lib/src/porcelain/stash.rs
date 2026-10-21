@@ -61,6 +61,7 @@ pub fn flatten_tree_full(
     odb: &Odb,
     tree_oid: &ObjectId,
     prefix: &str,
+    protect: crate::path_validate::ProtectOptions,
 ) -> Result<Vec<FlatTreeEntry>> {
     let obj = odb.read(tree_oid)?;
     let entries = parse_tree(&obj.data)?;
@@ -68,12 +69,18 @@ pub fn flatten_tree_full(
     for entry in entries {
         let entry_name = String::from_utf8_lossy(&entry.name).to_string();
         let full_path = if prefix.is_empty() {
-            entry_name
+            entry_name.clone()
         } else {
             format!("{prefix}/{entry_name}")
         };
+        crate::path_population::validate_tree_walk_entry(
+            &full_path,
+            &entry.name,
+            entry.mode,
+            protect,
+        )?;
         if entry.mode == 0o40000 {
-            let sub = flatten_tree_full(odb, &entry.oid, &full_path)?;
+            let sub = flatten_tree_full(odb, &entry.oid, &full_path, protect)?;
             result.extend(sub);
         } else {
             result.push(FlatTreeEntry {
@@ -84,6 +91,15 @@ pub fn flatten_tree_full(
         }
     }
     Ok(result)
+}
+
+pub(crate) fn flatten_tree_full_for_repo(
+    repo: &Repository,
+    tree_oid: &ObjectId,
+    prefix: &str,
+) -> Result<Vec<FlatTreeEntry>> {
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+    flatten_tree_full(repo.odb(), tree_oid, prefix, protect)
 }
 
 /// Lookup a path in a lexicographically sorted [`flatten_tree_full`] slice.
@@ -930,10 +946,10 @@ pub fn stash_worktree_change_paths(
         .parents
         .first()
         .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
-    let stash_tree_entries = flatten_tree_full(repo.odb(), &stash_commit.tree, "")?;
+    let stash_tree_entries = flatten_tree_full_for_repo(repo, &stash_commit.tree, "")?;
     let head_obj = repo.odb().read(head_at_stash)?;
     let head_commit = parse_commit(&head_obj.data)?;
-    let base_tree_entries = flatten_tree_full(repo.odb(), &head_commit.tree, "")?;
+    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_commit.tree, "")?;
 
     let changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
     Ok(changes.into_iter().map(|(path, _)| path).collect())
@@ -1035,7 +1051,7 @@ pub(crate) fn check_stash_untracked_restore(
     let ut_oid = &stash_commit.parents[2];
     let ut_obj = repo.odb().read(ut_oid)?;
     let ut_commit = parse_commit(&ut_obj.data)?;
-    let ut_entries = flatten_tree_full(repo.odb(), &ut_commit.tree, "")?;
+    let ut_entries = flatten_tree_full_for_repo(repo, &ut_commit.tree, "")?;
     if ut_entries.is_empty() {
         return Ok(());
     }
@@ -1045,8 +1061,8 @@ pub(crate) fn check_stash_untracked_restore(
         .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
     let head_obj = repo.odb().read(head_at_stash)?;
     let head_commit = parse_commit(&head_obj.data)?;
-    let base_tree_entries = flatten_tree_full(repo.odb(), &head_commit.tree, "")?;
-    let stash_tree_entries = flatten_tree_full(repo.odb(), &stash_commit.tree, "")?;
+    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_commit.tree, "")?;
+    let stash_tree_entries = flatten_tree_full_for_repo(repo, &stash_commit.tree, "")?;
     let wt_changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
     let wt_deletions: HashSet<String> = wt_changes
         .iter()
@@ -1130,19 +1146,19 @@ pub fn apply_stash(
     };
 
     // Read stash trees
-    let stash_tree_entries = flatten_tree_full(repo.odb(), &stash_commit.tree, "")?;
+    let stash_tree_entries = flatten_tree_full_for_repo(repo, &stash_commit.tree, "")?;
 
     // Read HEAD-at-stash tree (base)
     let head_at_stash_obj = repo.odb().read(head_at_stash)?;
     let head_at_stash_commit = parse_commit(&head_at_stash_obj.data)?;
-    let base_tree_entries = flatten_tree_full(repo.odb(), &head_at_stash_commit.tree, "")?;
+    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_at_stash_commit.tree, "")?;
 
     let wt_changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
 
     // Read index commit tree
     let idx_obj = repo.odb().read(index_commit_oid)?;
     let idx_commit = parse_commit(&idx_obj.data)?;
-    let idx_tree_entries = flatten_tree_full(repo.odb(), &idx_commit.tree, "")?;
+    let idx_tree_entries = flatten_tree_full_for_repo(repo, &idx_commit.tree, "")?;
     // Determine if HEAD has moved since the stash was created
     let current_head = resolve_head(repo.git_dir())?;
     let current_head_oid = current_head.oid().copied();
@@ -1156,7 +1172,7 @@ pub fn apply_stash(
         };
         let head_obj = repo.odb().read(head_oid)?;
         let head_commit = parse_commit(&head_obj.data)?;
-        current_head_loaded = flatten_tree_full(repo.odb(), &head_commit.tree, "")?;
+        current_head_loaded = flatten_tree_full_for_repo(repo, &head_commit.tree, "")?;
         &current_head_loaded
     } else {
         &base_tree_entries
@@ -1546,7 +1562,7 @@ pub fn apply_stash(
         let ut_oid = &stash_commit.parents[2];
         let ut_obj = repo.odb().read(ut_oid)?;
         let ut_commit = parse_commit(&ut_obj.data)?;
-        let ut_entries = flatten_tree_full(repo.odb(), &ut_commit.tree, "")?;
+        let ut_entries = flatten_tree_full_for_repo(repo, &ut_commit.tree, "")?;
         for entry in &ut_entries {
             materialize_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
         }

@@ -1016,7 +1016,10 @@ impl Index {
             Err(e) => return Err(Error::Io(e)),
         };
         idx.source_mtime = index_file_mtime(path);
-        idx.expand_sparse_directory_placeholders(odb)?;
+        idx.expand_sparse_directory_placeholders(
+            odb,
+            crate::path_validate::ProtectOptions::default(),
+        )?;
         Ok(idx)
     }
 
@@ -1055,7 +1058,10 @@ impl Index {
             Err(e) => return Err(Error::Io(e)),
         };
         idx.source_mtime = index_file_mtime(path);
-        idx.expand_sparse_directory_placeholders(odb)?;
+        let protect = config
+            .map(crate::path_validate::ProtectOptions::from_config)
+            .unwrap_or_default();
+        idx.expand_sparse_directory_placeholders(odb, protect)?;
         Ok(idx)
     }
 
@@ -1071,7 +1077,11 @@ impl Index {
     ///
     /// Each placeholder must reference a tree object. New entries are marked skip-worktree like Git's
     /// expanded index, except we keep `sparse_directories` false in memory after expansion.
-    pub fn expand_sparse_directory_placeholders(&mut self, odb: &Odb) -> Result<()> {
+    pub fn expand_sparse_directory_placeholders(
+        &mut self,
+        odb: &Odb,
+        protect: crate::path_validate::ProtectOptions,
+    ) -> Result<()> {
         if !self.has_sparse_directory_placeholders() {
             return Ok(());
         }
@@ -1079,7 +1089,7 @@ impl Index {
         for entry in self.entries.drain(..) {
             if entry.is_sparse_directory_placeholder() {
                 let prefix = trim_trailing_slash_bytes(&entry.path);
-                let blobs = flatten_tree_blobs(odb, &entry.oid, prefix)?;
+                let blobs = flatten_tree_blobs(odb, &entry.oid, prefix, protect)?;
                 out.extend(blobs);
             } else {
                 out.push(entry);
@@ -2904,7 +2914,16 @@ impl Index {
         self.sort();
         let has_stage1 = self.entries.iter().any(|e| e.stage() == 1);
         let mut appended: Vec<IndexEntry> = Vec::new();
-        read_tree_into_overlay(repo, &tree_oid, prefix, &[], has_stage1, &mut appended)?;
+        let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+        read_tree_into_overlay(
+            repo,
+            &tree_oid,
+            prefix,
+            &[],
+            has_stage1,
+            protect,
+            &mut appended,
+        )?;
         for e in appended {
             self.add_or_replace(e);
         }
@@ -2945,12 +2964,14 @@ fn peel_to_tree_oid(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_tree_into_overlay(
     repo: &Repository,
     tree_oid: &ObjectId,
     prefix: &[u8],
     rel_base: &[u8],
     use_replace_path: bool,
+    protect: crate::path_validate::ProtectOptions,
     out: &mut Vec<IndexEntry>,
 ) -> Result<()> {
     let obj = repo.odb().read(tree_oid)?;
@@ -2961,27 +2982,21 @@ fn read_tree_into_overlay(
     }
     let entries = parse_tree(&obj.data)?;
     for TreeEntry { mode, name, oid } in entries {
-        if mode == MODE_TREE {
-            let mut path = rel_base.to_vec();
-            if !path.is_empty() {
-                path.push(b'/');
-            }
-            path.extend_from_slice(&name);
-            if !prefix_under_or_equal(prefix, &path) {
-                continue;
-            }
-            read_tree_into_overlay(repo, &oid, prefix, &path, use_replace_path, out)?;
-            continue;
-        }
-        if mode == MODE_GITLINK {
-            continue;
-        }
         let mut path = rel_base.to_vec();
         if !path.is_empty() {
             path.push(b'/');
         }
         path.extend_from_slice(&name);
         if !prefix_under_or_equal(prefix, &path) {
+            continue;
+        }
+        let display_path = String::from_utf8_lossy(&path);
+        crate::path_population::validate_tree_walk_entry(&display_path, &name, mode, protect)?;
+        if mode == MODE_TREE {
+            read_tree_into_overlay(repo, &oid, prefix, &path, use_replace_path, protect, out)?;
+            continue;
+        }
+        if mode == MODE_GITLINK {
             continue;
         }
         let entry = synthetic_stage1_index_entry(mode, &path, oid);
@@ -3345,11 +3360,19 @@ fn collect_sparse_aware_expected_blobs(
 ) -> Result<Vec<IndexEntry>> {
     let mut out = Vec::new();
     walk_sparse_aware(
-        odb, tree_oid, prefix, patterns, cone_mode, entries, &mut out,
+        odb,
+        tree_oid,
+        prefix,
+        patterns,
+        cone_mode,
+        entries,
+        crate::path_validate::ProtectOptions::default(),
+        &mut out,
     )?;
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_sparse_aware(
     odb: &Odb,
     tree_oid: &ObjectId,
@@ -3357,6 +3380,7 @@ fn walk_sparse_aware(
     patterns: &[String],
     cone_mode: bool,
     entries: &[IndexEntry],
+    protect: crate::path_validate::ProtectOptions,
     out: &mut Vec<IndexEntry>,
 ) -> Result<()> {
     let obj = odb.read(tree_oid)?;
@@ -3373,6 +3397,13 @@ fn walk_sparse_aware(
             p.extend_from_slice(&te.name);
             p
         };
+        let display_path = String::from_utf8_lossy(&path);
+        crate::path_population::validate_tree_walk_entry(
+            &display_path,
+            &te.name,
+            te.mode,
+            protect,
+        )?;
         if te.mode == MODE_TREE {
             let path_slash = {
                 let mut p = path.clone();
@@ -3387,7 +3418,9 @@ fn walk_sparse_aware(
             }) {
                 continue;
             }
-            walk_sparse_aware(odb, &te.oid, &path, patterns, cone_mode, entries, out)?;
+            walk_sparse_aware(
+                odb, &te.oid, &path, patterns, cone_mode, entries, protect, out,
+            )?;
         } else {
             let path_len = path.len().min(0xFFF) as u16;
             let path_str = String::from_utf8_lossy(&path);
@@ -3419,7 +3452,12 @@ fn walk_sparse_aware(
     Ok(())
 }
 
-fn flatten_tree_blobs(odb: &Odb, tree_oid: &ObjectId, prefix: &[u8]) -> Result<Vec<IndexEntry>> {
+fn flatten_tree_blobs(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    prefix: &[u8],
+    protect: crate::path_validate::ProtectOptions,
+) -> Result<Vec<IndexEntry>> {
     let obj = odb.read(tree_oid)?;
     if obj.kind != ObjectKind::Tree {
         return Err(Error::IndexError(format!("expected tree at {}", tree_oid)));
@@ -3435,8 +3473,15 @@ fn flatten_tree_blobs(odb: &Odb, tree_oid: &ObjectId, prefix: &[u8]) -> Result<V
             p.extend_from_slice(&te.name);
             p
         };
+        let display_path = String::from_utf8_lossy(&path);
+        crate::path_population::validate_tree_walk_entry(
+            &display_path,
+            &te.name,
+            te.mode,
+            protect,
+        )?;
         if te.mode == MODE_TREE {
-            let sub = flatten_tree_blobs(odb, &te.oid, &path)?;
+            let sub = flatten_tree_blobs(odb, &te.oid, &path, protect)?;
             out.extend(sub);
         } else {
             let path_len = path.len().min(0xFFF) as u16;
