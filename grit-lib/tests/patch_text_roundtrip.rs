@@ -77,9 +77,14 @@ fn grit_patch_structured(repo: &Repository, base: &str, tip: &str) -> Vec<u8> {
     .expect("diff");
     entries.sort_by(|a, b| a.path().cmp(b.path()));
     let diff_opts = DiffOptions::default();
-    let structured =
-        tree_diff_structured_parallel(repo.odb(), entries, &config, &thread_policy, diff_opts)
-            .expect("structured");
+    let structured = tree_diff_structured_parallel(
+        repo.odb(),
+        entries,
+        &config,
+        &thread_policy,
+        diff_opts.clone(),
+    )
+    .expect("structured");
     let patch_opts = PatchTextOptions::from_repo(repo, diff_opts).expect("patch opts");
     let mut out = Cursor::new(Vec::new());
     write_patch_structured(repo, &structured, &patch_opts, &mut out)

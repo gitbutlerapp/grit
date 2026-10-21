@@ -103,4 +103,5 @@ baseline = [
   "grit-utils/baselines/history.json",
   "grit-utils/baselines/campaign-before.json",
   "grit-utils/baselines/campaign-after.json",
+  "grit-utils/baselines/dashboard/git-dot-git-worktree-status.json",
 ]

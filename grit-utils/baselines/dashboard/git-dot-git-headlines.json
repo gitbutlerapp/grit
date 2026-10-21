@@ -1,0 +1,92 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-21T06:46:02.442791121Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.15",
+    "grit_commit": "756aa953ec917b318f18fa23f658055885aca376"
+  },
+  "scenarios": [
+    {
+      "id": "branch/list@many-refs",
+      "area": "branching",
+      "headline": true,
+      "name": "branch",
+      "description": "List branches vs git branch",
+      "git": {
+        "median_wall_ms": 50.696612,
+        "peak_rss_bytes": 5472256,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 50.734566,
+        "peak_rss_bytes": 12910592,
+        "runs": 20
+      },
+      "ratio": 1.0007486496336284
+    },
+    {
+      "id": "log/oneline-100@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits one line each vs git log --oneline",
+      "git": {
+        "median_wall_ms": 50.55756699999999,
+        "peak_rss_bytes": 12959744,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 50.602256999999994,
+        "peak_rss_bytes": 21700608,
+        "runs": 20
+      },
+      "ratio": 1.000883942852709
+    },
+    {
+      "id": "resolve/head-n@git-git",
+      "area": "revwalk",
+      "description": "Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD",
+      "git": {
+        "median_wall_ms": 50.6453165,
+        "peak_rss_bytes": 5476352,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 50.6342475,
+        "peak_rss_bytes": 13041664,
+        "runs": 20
+      },
+      "ratio": 0.999781440797196
+    },
+    {
+      "id": "show/head@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "show",
+      "description": "Show HEAD commit vs git show",
+      "git": {
+        "median_wall_ms": 50.6544365,
+        "peak_rss_bytes": 7110656,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 50.650270500000005,
+        "peak_rss_bytes": 15282176,
+        "runs": 20
+      },
+      "ratio": 0.9999177564634443
+    }
+  ]
+}
