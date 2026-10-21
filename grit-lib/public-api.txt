@@ -4741,6 +4741,67 @@ impl core::marker::Unpin for grit_lib::error::PathOutsideRepoError
 impl core::marker::UnsafeUnpin for grit_lib::error::PathOutsideRepoError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathOutsideRepoError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathOutsideRepoError
+#[non_exhaustive] pub enum grit_lib::error::PathspecFromFileParseError
+pub grit_lib::error::PathspecFromFileParseError::InvalidCStyleQuoting
+pub grit_lib::error::PathspecFromFileParseError::InvalidCStyleQuoting::line: alloc::string::String
+pub grit_lib::error::PathspecFromFileParseError::InvalidEscapeAtEnd
+pub grit_lib::error::PathspecFromFileParseError::InvalidEscapeSequence
+pub grit_lib::error::PathspecFromFileParseError::InvalidEscapeSequence::escape: char
+pub grit_lib::error::PathspecFromFileParseError::InvalidOctalBytes
+pub grit_lib::error::PathspecFromFileParseError::InvalidOctalValue
+pub grit_lib::error::PathspecFromFileParseError::InvalidUtf8InQuotedLine
+pub grit_lib::error::PathspecFromFileParseError::QuotedLineInNulMode
+pub grit_lib::error::PathspecFromFileParseError::QuotedLineInNulMode::line: alloc::string::String
+pub grit_lib::error::PathspecFromFileParseError::TruncatedOctalEscape
+impl core::clone::Clone for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::PathspecFromFileParseError
+impl core::cmp::PartialEq for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::error::Error for grit_lib::error::PathspecFromFileParseError
+impl core::fmt::Debug for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Freeze for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Send for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Sync for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Unpin for grit_lib::error::PathspecFromFileParseError
+impl core::marker::UnsafeUnpin for grit_lib::error::PathspecFromFileParseError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathspecFromFileParseError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathspecFromFileParseError
+#[non_exhaustive] pub enum grit_lib::error::PathspecResolveError
+pub grit_lib::error::PathspecResolveError::EmptyPathspec
+pub grit_lib::error::PathspecResolveError::FromFile(grit_lib::error::PathspecFromFileParseError)
+pub grit_lib::error::PathspecResolveError::NeedsWorkTree
+pub grit_lib::error::PathspecResolveError::OutsideRepository
+pub grit_lib::error::PathspecResolveError::OutsideRepository::elt: alloc::string::String
+pub grit_lib::error::PathspecResolveError::OutsideRepository::path: alloc::string::String
+pub grit_lib::error::PathspecResolveError::OutsideRepository::work_tree: alloc::string::String
+impl core::clone::Clone for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::PathspecResolveError
+impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::error::Error for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::PathspecResolveError
+impl core::marker::Freeze for grit_lib::error::PathspecResolveError
+impl core::marker::Send for grit_lib::error::PathspecResolveError
+impl core::marker::Sync for grit_lib::error::PathspecResolveError
+impl core::marker::Unpin for grit_lib::error::PathspecResolveError
+impl core::marker::UnsafeUnpin for grit_lib::error::PathspecResolveError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathspecResolveError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathspecResolveError
 #[non_exhaustive] pub enum grit_lib::error::RefLockError
 pub grit_lib::error::RefLockError::DirectoryInTheWay
 pub grit_lib::error::RefLockError::DirectoryInTheWay::path: alloc::string::String
@@ -9568,6 +9629,193 @@ pub fn grit_lib::parallel::parallel_worthwhile(usize, usize, core::num::nonzero:
 pub fn grit_lib::parallel::try_par_map<T, R, E, F>(&[T], grit_lib::parallel::ParallelOptions, usize, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, F: core::ops::function::Fn(&T) -> core::result::Result<R, E> + core::marker::Sync
 pub fn grit_lib::parallel::try_par_map_force<T, R, E, F>(&[T], grit_lib::parallel::ParallelOptions, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, F: core::ops::function::Fn(&T) -> core::result::Result<R, E> + core::marker::Sync
 pub fn grit_lib::parallel::try_par_map_with_local<T, R, E, S, Init, F>(&[T], grit_lib::parallel::ParallelOptions, usize, Init, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, S: core::marker::Send, Init: core::ops::function::Fn() -> S + core::marker::Sync, F: core::ops::function::Fn(&mut S, &T) -> core::result::Result<R, E> + core::marker::Sync
+pub mod grit_lib::pathspec
+#[non_exhaustive] pub enum grit_lib::pathspec::PathspecFromFileParseError
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidCStyleQuoting
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidCStyleQuoting::line: alloc::string::String
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidEscapeAtEnd
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidEscapeSequence
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidEscapeSequence::escape: char
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidOctalBytes
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidOctalValue
+pub grit_lib::pathspec::PathspecFromFileParseError::InvalidUtf8InQuotedLine
+pub grit_lib::pathspec::PathspecFromFileParseError::QuotedLineInNulMode
+pub grit_lib::pathspec::PathspecFromFileParseError::QuotedLineInNulMode::line: alloc::string::String
+pub grit_lib::pathspec::PathspecFromFileParseError::TruncatedOctalEscape
+impl core::clone::Clone for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::PathspecFromFileParseError
+impl core::cmp::PartialEq for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::error::Error for grit_lib::error::PathspecFromFileParseError
+impl core::fmt::Debug for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Freeze for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Send for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Sync for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Unpin for grit_lib::error::PathspecFromFileParseError
+impl core::marker::UnsafeUnpin for grit_lib::error::PathspecFromFileParseError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathspecFromFileParseError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathspecFromFileParseError
+#[non_exhaustive] pub enum grit_lib::pathspec::PathspecResolveError
+pub grit_lib::pathspec::PathspecResolveError::EmptyPathspec
+pub grit_lib::pathspec::PathspecResolveError::FromFile(grit_lib::error::PathspecFromFileParseError)
+pub grit_lib::pathspec::PathspecResolveError::NeedsWorkTree
+pub grit_lib::pathspec::PathspecResolveError::OutsideRepository
+pub grit_lib::pathspec::PathspecResolveError::OutsideRepository::elt: alloc::string::String
+pub grit_lib::pathspec::PathspecResolveError::OutsideRepository::path: alloc::string::String
+pub grit_lib::pathspec::PathspecResolveError::OutsideRepository::work_tree: alloc::string::String
+impl core::clone::Clone for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::PathspecResolveError
+impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::error::Error for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::PathspecResolveError
+impl core::marker::Freeze for grit_lib::error::PathspecResolveError
+impl core::marker::Send for grit_lib::error::PathspecResolveError
+impl core::marker::Sync for grit_lib::error::PathspecResolveError
+impl core::marker::Unpin for grit_lib::error::PathspecResolveError
+impl core::marker::UnsafeUnpin for grit_lib::error::PathspecResolveError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathspecResolveError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathspecResolveError
+pub struct grit_lib::pathspec::PathOutsideRepository
+pub grit_lib::pathspec::PathOutsideRepository::elt: alloc::string::String
+pub grit_lib::pathspec::PathOutsideRepository::path: alloc::string::String
+pub grit_lib::pathspec::PathOutsideRepository::work_tree: std::path::PathBuf
+impl core::clone::Clone for grit_lib::pathspec::PathOutsideRepository
+pub fn grit_lib::pathspec::PathOutsideRepository::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::pathspec::PathOutsideRepository
+pub fn grit_lib::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::pathspec::PathOutsideRepository
+pub fn grit_lib::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::Send for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::Sync for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::Unpin for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathOutsideRepository
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathOutsideRepository
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathOutsideRepository
+pub struct grit_lib::pathspec::PathspecInput
+pub grit_lib::pathspec::PathspecInput::data: alloc::vec::Vec<u8>
+pub grit_lib::pathspec::PathspecInput::nul_terminated: bool
+impl grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::new(alloc::vec::Vec<u8>, bool) -> Self
+impl core::clone::Clone for grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pathspec::PathspecInput
+impl core::cmp::PartialEq for grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::pathspec::PathspecInput
+impl core::marker::Freeze for grit_lib::pathspec::PathspecInput
+impl core::marker::Send for grit_lib::pathspec::PathspecInput
+impl core::marker::Sync for grit_lib::pathspec::PathspecInput
+impl core::marker::Unpin for grit_lib::pathspec::PathspecInput
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecInput
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecInput
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecInput
+pub struct grit_lib::pathspec::PathspecMatchContext
+pub grit_lib::pathspec::PathspecMatchContext::is_directory: bool
+pub grit_lib::pathspec::PathspecMatchContext::is_git_submodule: bool
+pub grit_lib::pathspec::PathspecMatchContext::precompose_paths: bool
+impl core::clone::Clone for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pathspec::PathspecMatchContext
+impl core::cmp::PartialEq for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::default() -> Self
+impl core::fmt::Debug for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::StructuralPartialEq for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Freeze for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Send for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Sync for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Unpin for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecMatchContext
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecMatchContext
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecMatchContext
+pub struct grit_lib::pathspec::ResolvedPathspecs
+pub grit_lib::pathspec::ResolvedPathspecs::scoped: bool
+pub grit_lib::pathspec::ResolvedPathspecs::sources: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::pathspec::ResolvedPathspecs::specs: alloc::vec::Vec<alloc::string::String>
+impl grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::is_entire_tree(&self) -> bool
+pub fn grit_lib::pathspec::ResolvedPathspecs::resolve(&grit_lib::repo::Repository, &std::path::Path, &[alloc::string::String], core::option::Option<grit_lib::pathspec::PathspecInput>) -> core::result::Result<Self, grit_lib::error::PathspecResolveError>
+impl core::clone::Clone for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pathspec::ResolvedPathspecs
+impl core::cmp::PartialEq for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::default() -> Self
+impl core::fmt::Debug for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Freeze for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Send for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Sync for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Unpin for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::ResolvedPathspecs
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::ResolvedPathspecs
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::argv_pathspec_preserves_spelling(&str) -> bool
+pub fn grit_lib::pathspec::bloom_lookup_prefix(&str) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::pathspec::bloom_lookup_prefix_with_cwd(&str, core::option::Option<&str>) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::pathspec::context_from_mode_bits(u32) -> grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::context_from_mode_octal(&str) -> grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::extend_pathspec_list_implicit_cwd(&[alloc::string::String], core::option::Option<&str>) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::pathspec::has_glob_chars(&str) -> bool
+pub fn grit_lib::pathspec::literal_pathspecs_enabled() -> bool
+pub fn grit_lib::pathspec::matches_ls_tree_pathspec(&str, &str, u32, &[grit_lib::worktree::crlf::AttrRule]) -> bool
+pub fn grit_lib::pathspec::matches_pathspec(&str, &str) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_for_object(&str, &str, u32, &[grit_lib::worktree::crlf::AttrRule]) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_list(&str, &[alloc::string::String]) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_list_for_object(&str, u32, &[grit_lib::worktree::crlf::AttrRule], &[alloc::string::String]) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_list_precompose(&str, &[alloc::string::String], bool) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_list_with_context(&str, &[alloc::string::String], grit_lib::pathspec::PathspecMatchContext) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_set_for_object(&[alloc::string::String], &str, u32, &[grit_lib::worktree::crlf::AttrRule]) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_set_for_object_ls_tree(&[alloc::string::String], &str, u32, &[grit_lib::worktree::crlf::AttrRule]) -> bool
+pub fn grit_lib::pathspec::matches_pathspec_with_context(&str, &str, grit_lib::pathspec::PathspecMatchContext) -> bool
+pub fn grit_lib::pathspec::normalize_worktree_file_path(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
+pub fn grit_lib::pathspec::normalize_worktree_file_path_with_git_dir(&str, &std::path::Path, core::option::Option<&str>, core::option::Option<&std::path::Path>) -> alloc::string::String
+pub fn grit_lib::pathspec::parse_pathspecs_from_source(&[u8], bool) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::error::PathspecFromFileParseError>
+pub fn grit_lib::pathspec::path_allowed_by_pathspec_list(&[alloc::string::String], &str) -> bool
+pub fn grit_lib::pathspec::pathdiff(&std::path::Path, &std::path::Path) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::pathspec::pathspec_contributes_match(&str, &str) -> bool
+pub fn grit_lib::pathspec::pathspec_exclude_matches(&str, &str) -> bool
+pub fn grit_lib::pathspec::pathspec_has_top(&str) -> bool
+pub fn grit_lib::pathspec::pathspec_is_exclude(&str) -> bool
+pub fn grit_lib::pathspec::pathspec_match_context_with_precompose(bool) -> grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::pathspec_matches(&str, &str) -> bool
+pub fn grit_lib::pathspec::pathspec_wants_descent_for_rev_tree(&str, &[alloc::string::String]) -> bool
+pub fn grit_lib::pathspec::pathspec_wants_descent_into_tree(&str, &str) -> bool
+pub fn grit_lib::pathspec::pathspecs_allow_bloom(&[alloc::string::String]) -> bool
+pub fn grit_lib::pathspec::precompose_argv_pathspec(&str) -> alloc::borrow::Cow<'_, str>
+pub fn grit_lib::pathspec::resolve_magic_pathspec(&str, &str) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::pathspec::resolve_pathspec(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
+pub fn grit_lib::pathspec::resolve_pathspec_in_worktree(&str, &str, &std::path::Path, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
+pub fn grit_lib::pathspec::resolve_pathspec_in_worktree_with_git_dir(&str, &str, &std::path::Path, core::option::Option<&str>, core::option::Option<&std::path::Path>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
+pub fn grit_lib::pathspec::resolve_pathspec_with_argv_precompose(&str, &std::path::Path, core::option::Option<&str>, bool) -> alloc::string::String
+pub fn grit_lib::pathspec::simple_length(&str) -> usize
+pub fn grit_lib::pathspec::validate_attr_pathspecs(&[alloc::string::String]) -> core::result::Result<(), alloc::string::String>
+pub fn grit_lib::pathspec::validate_global_pathspec_flags() -> core::result::Result<(), alloc::string::String>
+pub fn grit_lib::pathspec::wildmatch_flags_icase_glob(bool, bool) -> u32
 pub mod grit_lib::porcelain
 pub mod grit_lib::porcelain::add
 pub enum grit_lib::porcelain::add::StageMode
@@ -18374,50 +18622,155 @@ pub fn grit_lib::worktree::ignore::path_in_sparse_checkout(&str, &[alloc::string
 pub fn grit_lib::worktree::ignore::path_matches_sparse_pattern_list(&str, &[alloc::string::String]) -> core::option::Option<bool>
 pub fn grit_lib::worktree::ignore::submodule_containing_path(&str, &grit_lib::index::Index) -> core::option::Option<alloc::string::String>
 pub mod grit_lib::worktree::pathspec
+#[non_exhaustive] pub enum grit_lib::worktree::pathspec::PathspecFromFileParseError
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidCStyleQuoting
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidCStyleQuoting::line: alloc::string::String
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidEscapeAtEnd
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidEscapeSequence
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidEscapeSequence::escape: char
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidOctalBytes
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidOctalValue
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::InvalidUtf8InQuotedLine
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::QuotedLineInNulMode
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::QuotedLineInNulMode::line: alloc::string::String
+pub grit_lib::worktree::pathspec::PathspecFromFileParseError::TruncatedOctalEscape
+impl core::clone::Clone for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::PathspecFromFileParseError
+impl core::cmp::PartialEq for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::error::Error for grit_lib::error::PathspecFromFileParseError
+impl core::fmt::Debug for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::PathspecFromFileParseError
+pub fn grit_lib::error::PathspecFromFileParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Freeze for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Send for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Sync for grit_lib::error::PathspecFromFileParseError
+impl core::marker::Unpin for grit_lib::error::PathspecFromFileParseError
+impl core::marker::UnsafeUnpin for grit_lib::error::PathspecFromFileParseError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathspecFromFileParseError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathspecFromFileParseError
+#[non_exhaustive] pub enum grit_lib::worktree::pathspec::PathspecResolveError
+pub grit_lib::worktree::pathspec::PathspecResolveError::EmptyPathspec
+pub grit_lib::worktree::pathspec::PathspecResolveError::FromFile(grit_lib::error::PathspecFromFileParseError)
+pub grit_lib::worktree::pathspec::PathspecResolveError::NeedsWorkTree
+pub grit_lib::worktree::pathspec::PathspecResolveError::OutsideRepository
+pub grit_lib::worktree::pathspec::PathspecResolveError::OutsideRepository::elt: alloc::string::String
+pub grit_lib::worktree::pathspec::PathspecResolveError::OutsideRepository::path: alloc::string::String
+pub grit_lib::worktree::pathspec::PathspecResolveError::OutsideRepository::work_tree: alloc::string::String
+impl core::clone::Clone for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::PathspecResolveError
+impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::error::Error for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::PathspecResolveError
+impl core::marker::Freeze for grit_lib::error::PathspecResolveError
+impl core::marker::Send for grit_lib::error::PathspecResolveError
+impl core::marker::Sync for grit_lib::error::PathspecResolveError
+impl core::marker::Unpin for grit_lib::error::PathspecResolveError
+impl core::marker::UnsafeUnpin for grit_lib::error::PathspecResolveError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathspecResolveError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathspecResolveError
 pub struct grit_lib::worktree::pathspec::PathOutsideRepository
 pub grit_lib::worktree::pathspec::PathOutsideRepository::elt: alloc::string::String
 pub grit_lib::worktree::pathspec::PathOutsideRepository::path: alloc::string::String
 pub grit_lib::worktree::pathspec::PathOutsideRepository::work_tree: std::path::PathBuf
-impl core::clone::Clone for grit_lib::worktree::pathspec::PathOutsideRepository
-pub fn grit_lib::worktree::pathspec::PathOutsideRepository::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::worktree::pathspec::PathOutsideRepository
-pub fn grit_lib::worktree::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for grit_lib::worktree::pathspec::PathOutsideRepository
-pub fn grit_lib::worktree::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::worktree::pathspec::PathOutsideRepository
-impl core::marker::Send for grit_lib::worktree::pathspec::PathOutsideRepository
-impl core::marker::Sync for grit_lib::worktree::pathspec::PathOutsideRepository
-impl core::marker::Unpin for grit_lib::worktree::pathspec::PathOutsideRepository
-impl core::marker::UnsafeUnpin for grit_lib::worktree::pathspec::PathOutsideRepository
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::pathspec::PathOutsideRepository
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::pathspec::PathOutsideRepository
+impl core::clone::Clone for grit_lib::pathspec::PathOutsideRepository
+pub fn grit_lib::pathspec::PathOutsideRepository::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::pathspec::PathOutsideRepository
+pub fn grit_lib::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::pathspec::PathOutsideRepository
+pub fn grit_lib::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::Send for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::Sync for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::Unpin for grit_lib::pathspec::PathOutsideRepository
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathOutsideRepository
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathOutsideRepository
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathOutsideRepository
+pub struct grit_lib::worktree::pathspec::PathspecInput
+pub grit_lib::worktree::pathspec::PathspecInput::data: alloc::vec::Vec<u8>
+pub grit_lib::worktree::pathspec::PathspecInput::nul_terminated: bool
+impl grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::new(alloc::vec::Vec<u8>, bool) -> Self
+impl core::clone::Clone for grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pathspec::PathspecInput
+impl core::cmp::PartialEq for grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::pathspec::PathspecInput
+pub fn grit_lib::pathspec::PathspecInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::pathspec::PathspecInput
+impl core::marker::Freeze for grit_lib::pathspec::PathspecInput
+impl core::marker::Send for grit_lib::pathspec::PathspecInput
+impl core::marker::Sync for grit_lib::pathspec::PathspecInput
+impl core::marker::Unpin for grit_lib::pathspec::PathspecInput
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecInput
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecInput
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecInput
 pub struct grit_lib::worktree::pathspec::PathspecMatchContext
 pub grit_lib::worktree::pathspec::PathspecMatchContext::is_directory: bool
 pub grit_lib::worktree::pathspec::PathspecMatchContext::is_git_submodule: bool
 pub grit_lib::worktree::pathspec::PathspecMatchContext::precompose_paths: bool
-impl core::clone::Clone for grit_lib::worktree::pathspec::PathspecMatchContext
-pub fn grit_lib::worktree::pathspec::PathspecMatchContext::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::cmp::PartialEq for grit_lib::worktree::pathspec::PathspecMatchContext
-pub fn grit_lib::worktree::pathspec::PathspecMatchContext::eq(&self, &Self) -> bool
-impl core::default::Default for grit_lib::worktree::pathspec::PathspecMatchContext
-pub fn grit_lib::worktree::pathspec::PathspecMatchContext::default() -> Self
-impl core::fmt::Debug for grit_lib::worktree::pathspec::PathspecMatchContext
-pub fn grit_lib::worktree::pathspec::PathspecMatchContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::marker::StructuralPartialEq for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::marker::Freeze for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::marker::Send for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::marker::Sync for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::marker::Unpin for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::marker::UnsafeUnpin for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::pathspec::PathspecMatchContext
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::pathspec::PathspecMatchContext
+impl core::clone::Clone for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pathspec::PathspecMatchContext
+impl core::cmp::PartialEq for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::default() -> Self
+impl core::fmt::Debug for grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::pathspec::PathspecMatchContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::StructuralPartialEq for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Freeze for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Send for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Sync for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::Unpin for grit_lib::pathspec::PathspecMatchContext
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecMatchContext
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecMatchContext
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecMatchContext
+pub struct grit_lib::worktree::pathspec::ResolvedPathspecs
+pub grit_lib::worktree::pathspec::ResolvedPathspecs::scoped: bool
+pub grit_lib::worktree::pathspec::ResolvedPathspecs::sources: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::worktree::pathspec::ResolvedPathspecs::specs: alloc::vec::Vec<alloc::string::String>
+impl grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::is_entire_tree(&self) -> bool
+pub fn grit_lib::pathspec::ResolvedPathspecs::resolve(&grit_lib::repo::Repository, &std::path::Path, &[alloc::string::String], core::option::Option<grit_lib::pathspec::PathspecInput>) -> core::result::Result<Self, grit_lib::error::PathspecResolveError>
+impl core::clone::Clone for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::pathspec::ResolvedPathspecs
+impl core::cmp::PartialEq for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::default() -> Self
+impl core::fmt::Debug for grit_lib::pathspec::ResolvedPathspecs
+pub fn grit_lib::pathspec::ResolvedPathspecs::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Freeze for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Send for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Sync for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::Unpin for grit_lib::pathspec::ResolvedPathspecs
+impl core::marker::UnsafeUnpin for grit_lib::pathspec::ResolvedPathspecs
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::ResolvedPathspecs
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::ResolvedPathspecs
 pub fn grit_lib::worktree::pathspec::argv_pathspec_preserves_spelling(&str) -> bool
 pub fn grit_lib::worktree::pathspec::bloom_lookup_prefix(&str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::worktree::pathspec::bloom_lookup_prefix_with_cwd(&str, core::option::Option<&str>) -> core::option::Option<alloc::string::String>
-pub fn grit_lib::worktree::pathspec::context_from_mode_bits(u32) -> grit_lib::worktree::pathspec::PathspecMatchContext
-pub fn grit_lib::worktree::pathspec::context_from_mode_octal(&str) -> grit_lib::worktree::pathspec::PathspecMatchContext
+pub fn grit_lib::worktree::pathspec::context_from_mode_bits(u32) -> grit_lib::pathspec::PathspecMatchContext
+pub fn grit_lib::worktree::pathspec::context_from_mode_octal(&str) -> grit_lib::pathspec::PathspecMatchContext
 pub fn grit_lib::worktree::pathspec::extend_pathspec_list_implicit_cwd(&[alloc::string::String], core::option::Option<&str>) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::worktree::pathspec::has_glob_chars(&str) -> bool
 pub fn grit_lib::worktree::pathspec::literal_pathspecs_enabled() -> bool
@@ -18427,20 +18780,20 @@ pub fn grit_lib::worktree::pathspec::matches_pathspec_for_object(&str, &str, u32
 pub fn grit_lib::worktree::pathspec::matches_pathspec_list(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::worktree::pathspec::matches_pathspec_list_for_object(&str, u32, &[grit_lib::worktree::crlf::AttrRule], &[alloc::string::String]) -> bool
 pub fn grit_lib::worktree::pathspec::matches_pathspec_list_precompose(&str, &[alloc::string::String], bool) -> bool
-pub fn grit_lib::worktree::pathspec::matches_pathspec_list_with_context(&str, &[alloc::string::String], grit_lib::worktree::pathspec::PathspecMatchContext) -> bool
+pub fn grit_lib::worktree::pathspec::matches_pathspec_list_with_context(&str, &[alloc::string::String], grit_lib::pathspec::PathspecMatchContext) -> bool
 pub fn grit_lib::worktree::pathspec::matches_pathspec_set_for_object(&[alloc::string::String], &str, u32, &[grit_lib::worktree::crlf::AttrRule]) -> bool
 pub fn grit_lib::worktree::pathspec::matches_pathspec_set_for_object_ls_tree(&[alloc::string::String], &str, u32, &[grit_lib::worktree::crlf::AttrRule]) -> bool
-pub fn grit_lib::worktree::pathspec::matches_pathspec_with_context(&str, &str, grit_lib::worktree::pathspec::PathspecMatchContext) -> bool
+pub fn grit_lib::worktree::pathspec::matches_pathspec_with_context(&str, &str, grit_lib::pathspec::PathspecMatchContext) -> bool
 pub fn grit_lib::worktree::pathspec::normalize_worktree_file_path(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
 pub fn grit_lib::worktree::pathspec::normalize_worktree_file_path_with_git_dir(&str, &std::path::Path, core::option::Option<&str>, core::option::Option<&std::path::Path>) -> alloc::string::String
-pub fn grit_lib::worktree::pathspec::parse_pathspecs_from_source(&[u8], bool) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
+pub fn grit_lib::worktree::pathspec::parse_pathspecs_from_source(&[u8], bool) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::error::PathspecFromFileParseError>
 pub fn grit_lib::worktree::pathspec::path_allowed_by_pathspec_list(&[alloc::string::String], &str) -> bool
 pub fn grit_lib::worktree::pathspec::pathdiff(&std::path::Path, &std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::worktree::pathspec::pathspec_contributes_match(&str, &str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_exclude_matches(&str, &str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_has_top(&str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_is_exclude(&str) -> bool
-pub fn grit_lib::worktree::pathspec::pathspec_match_context_with_precompose(bool) -> grit_lib::worktree::pathspec::PathspecMatchContext
+pub fn grit_lib::worktree::pathspec::pathspec_match_context_with_precompose(bool) -> grit_lib::pathspec::PathspecMatchContext
 pub fn grit_lib::worktree::pathspec::pathspec_matches(&str, &str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_wants_descent_for_rev_tree(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_wants_descent_into_tree(&str, &str) -> bool
@@ -18448,8 +18801,8 @@ pub fn grit_lib::worktree::pathspec::pathspecs_allow_bloom(&[alloc::string::Stri
 pub fn grit_lib::worktree::pathspec::precompose_argv_pathspec(&str) -> alloc::borrow::Cow<'_, str>
 pub fn grit_lib::worktree::pathspec::resolve_magic_pathspec(&str, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::worktree::pathspec::resolve_pathspec(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
-pub fn grit_lib::worktree::pathspec::resolve_pathspec_in_worktree(&str, &str, &std::path::Path, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::worktree::pathspec::PathOutsideRepository>
-pub fn grit_lib::worktree::pathspec::resolve_pathspec_in_worktree_with_git_dir(&str, &str, &std::path::Path, core::option::Option<&str>, core::option::Option<&std::path::Path>) -> core::result::Result<alloc::string::String, grit_lib::worktree::pathspec::PathOutsideRepository>
+pub fn grit_lib::worktree::pathspec::resolve_pathspec_in_worktree(&str, &str, &std::path::Path, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
+pub fn grit_lib::worktree::pathspec::resolve_pathspec_in_worktree_with_git_dir(&str, &str, &std::path::Path, core::option::Option<&str>, core::option::Option<&std::path::Path>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
 pub fn grit_lib::worktree::pathspec::resolve_pathspec_with_argv_precompose(&str, &std::path::Path, core::option::Option<&str>, bool) -> alloc::string::String
 pub fn grit_lib::worktree::pathspec::simple_length(&str) -> usize
 pub fn grit_lib::worktree::pathspec::validate_attr_pathspecs(&[alloc::string::String]) -> core::result::Result<(), alloc::string::String>

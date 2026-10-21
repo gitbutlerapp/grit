@@ -351,6 +351,70 @@ pub enum DiffPathError {
     },
 }
 
+/// `--pathspec-from-file` / `--pathspec-file-nul` parse failure.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PathspecFromFileParseError {
+    /// A NUL-terminated entry used C-style quoting (forbidden in NUL mode).
+    #[error("pathspec-from-file: line is not NUL terminated: {line}")]
+    QuotedLineInNulMode {
+        /// Offending entry text.
+        line: String,
+    },
+    /// A line-mode entry had invalid double-quote wrapping.
+    #[error("invalid C-style quoting: {line}")]
+    InvalidCStyleQuoting {
+        /// Raw line from the file.
+        line: String,
+    },
+    /// Backslash escape at end of a quoted line.
+    #[error("invalid escape at end of string")]
+    InvalidEscapeAtEnd,
+    /// Octal escape shorter than three digits.
+    #[error("truncated octal escape")]
+    TruncatedOctalEscape,
+    /// Octal escape bytes are not valid UTF-8.
+    #[error("invalid octal bytes")]
+    InvalidOctalBytes,
+    /// Octal digits do not form a valid byte value.
+    #[error("invalid octal escape value")]
+    InvalidOctalValue,
+    /// Unknown escape after backslash in a quoted line.
+    #[error("invalid escape sequence \\{escape}")]
+    InvalidEscapeSequence {
+        /// Character after the backslash.
+        escape: char,
+    },
+    /// Quoted line decoded to invalid UTF-8.
+    #[error("invalid UTF-8 in quoted pathspec")]
+    InvalidUtf8InQuotedLine,
+}
+
+/// Failure while resolving argv and `--pathspec-from-file` pathspecs against a work tree.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PathspecResolveError {
+    /// An argv pathspec was the empty string.
+    #[error("invalid path ''")]
+    EmptyPathspec,
+    /// Resolved path lies outside the repository work tree.
+    #[error("{elt}: '{path}' is outside repository at '{work_tree}'")]
+    OutsideRepository {
+        /// User-facing pathspec token (argv element).
+        elt: String,
+        /// Resolved absolute path outside the work tree.
+        path: String,
+        /// Canonical work tree root.
+        work_tree: String,
+    },
+    /// `--pathspec-from-file` bytes could not be parsed.
+    #[error(transparent)]
+    FromFile(#[from] PathspecFromFileParseError),
+    /// Command requires a working tree but the repository is bare.
+    #[error("this operation needs a working tree")]
+    NeedsWorkTree,
+}
+
 /// Path outside the repository during pathspec or transport resolution.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
