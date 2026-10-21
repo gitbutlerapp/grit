@@ -1,0 +1,12 @@
+## Daily compare (`0.1` tolerance)
+
+- baseline: `/tmp/daily-production-run1.json`
+- candidate: `/tmp/daily-production-run2.json`
+- compared rows: **57** (skipped pending 1, sub-20ms time 0, git median drift 0, grit median drift 0, missing 0)
+
+| scenario | metric | ratio A | ratio B | drift | status |
+| --- | --- | ---: | ---: | ---: | --- |
+| *(none)* | | | | | ok |
+All daily scenario ratios within tolerance 0.1
+Compared 57 rows; skipped 1 pending, 0 sub-20ms time, 0 git median drift, 0 grit median drift; 0 missing in candidate
+compare_exit=0

@@ -2,7 +2,7 @@
 
 Machine-readable output of `grit-bench daily`. The factory dashboard at [maint.grit-scm.com/cooking/bench](https://maint.grit-scm.com/cooking/bench) consumes reports with this tag.
 
-Scenario ids are stable: `<command>/<case>@<repo>`. Peak RSS is the maximum over timed runs for each tool (bytes, from child process resource usage).
+Scenario ids are stable: `<command>/<case>@<repo>`. Peak RSS is the **median** peak over timed runs for each tool (bytes, from child process resource usage). Using the median keeps consecutive-run memory ratio checks stable on noisy remote scenarios.
 
 ## TypeScript shape (factory `daily-bench.ts`)
 
