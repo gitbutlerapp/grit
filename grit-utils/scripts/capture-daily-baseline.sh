@@ -13,6 +13,11 @@ BASELINE_DIR="grit-utils/baselines/daily"
 MAX_COMPARE_ATTEMPTS="${GRIT_BENCH_DAILY_COMPARE_ATTEMPTS:-8}"
 TOLERANCE="${GRIT_BENCH_DAILY_TOLERANCE:-0.10}"
 
+# Run one functional area at a time to cap peak RSS on memory-tight factory VMs.
+DAILY_AREAS=(
+  odb packs refs index worktree diff revwalk blame branching remotes maintenance config ignore hooks notes bundles worktrees
+)
+
 BASELINE_GRIT="${GRIT_BENCH_BASELINE_GRIT:-}"
 if [[ -z "${BASELINE_GRIT}" ]]; then
   echo "Set GRIT_BENCH_BASELINE_GRIT to the latest release grit binary" >&2
@@ -21,13 +26,35 @@ fi
 
 mkdir -p "${BASELINE_DIR}"
 
-wall_run() {
-  local label=$1
+merge_daily_parts() {
+  local out=$1
   shift
-  local start end
+  jq -s '
+    .[0] as $first |
+    {
+      schema: $first.schema,
+      generated_at: $first.generated_at,
+      machine: $first.machine,
+      tools: $first.tools,
+      scenarios: (map(.scenarios) | add | unique_by(.id) | sort_by(.id))
+    }
+  ' "$@" >"$out"
+}
+
+run_daily_merged() {
+  local label=$1
+  local out=$2
+  local tmpdir start end
+  tmpdir=$(mktemp -d)
   start=$(date +%s)
-  echo "${label} started $(date -Is)"
-  "$@"
+  echo "${label} started $(date -Is) (sequential --area batches)"
+  for area in "${DAILY_AREAS[@]}"; do
+    echo "  area=${area} …"
+    "$BENCH" daily --offline --area "$area" --baseline-grit "${BASELINE_GRIT}" \
+      --output "${tmpdir}/${area}.json"
+  done
+  merge_daily_parts "$out" "${tmpdir}"/*.json
+  rm -rf "${tmpdir}"
   end=$(date +%s)
   echo "${label} wall_seconds=$((end - start))"
 }
@@ -36,14 +63,10 @@ attempt=1
 while true; do
   echo "=== daily capture attempt ${attempt}/${MAX_COMPARE_ATTEMPTS} $(date -Is) ==="
   echo "Run 1 → ${RUN1}"
-  wall_run "daily run 1" "$BENCH" daily --offline \
-    --baseline-grit "${BASELINE_GRIT}" \
-    --output "${RUN1}" 2>&1 | tee "${BASELINE_DIR}/first-run.log"
+  run_daily_merged "daily run 1" "${RUN1}" 2>&1 | tee "${BASELINE_DIR}/first-run.log"
 
   echo "Run 2 → ${RUN2}"
-  wall_run "daily run 2" "$BENCH" daily --offline \
-    --baseline-grit "${BASELINE_GRIT}" \
-    --output "${RUN2}" 2>&1 | tee "${BASELINE_DIR}/second-run.log"
+  run_daily_merged "daily run 2" "${RUN2}" 2>&1 | tee "${BASELINE_DIR}/second-run.log"
 
   echo "Compare consecutive runs (±${TOLERANCE} tolerance)"
   set +e

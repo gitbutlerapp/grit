@@ -116,7 +116,7 @@ Full factory captures run **`grit-bench daily`** twice back-to-back (release bui
 
 Time-ratio drift applies when git median wall time is **above 20 ms** on both captures; peak-RSS ratios are always compared when medians are stable. The committed transcript lives in **`grit-utils/baselines/daily/consecutive-compare.txt`** (exit **0** at ±10% tolerance).
 
-Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** after building release binaries and setting **`GRIT_BENCH_BASELINE_GRIT`**.
+Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** after building release binaries and setting **`GRIT_BENCH_BASELINE_GRIT`**. The capture script prepares only fixtures the daily matrix uses (not full **`synth-l`**) and runs **`daily --area …`** sequentially, merging partial JSON reports, so peak RSS stays within factory VM limits.
 
 | Baseline file | Role |
 | --- | --- |
