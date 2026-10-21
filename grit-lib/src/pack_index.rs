@@ -348,15 +348,34 @@ impl PackIndex {
     }
 
     /// Smallest pack offset strictly greater than `entry_offset`, capped at `pack_end`.
+    ///
+    /// Uses the cached offset-sorted table, so repeated calls cost a binary search each.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the index has a malformed large-offset entry.
     pub fn next_pack_offset_after(&self, entry_offset: u64, pack_end: u64) -> Result<u64> {
-        let mut min_after = pack_end;
-        for entry in self.iter() {
-            let off = entry.offset()?;
-            if off > entry_offset && off <= pack_end && off < min_after {
-                min_after = off;
-            }
+        self.with_sorted_offsets(|pairs| {
+            let next = pairs.partition_point(|p| p.0 <= entry_offset);
+            pairs
+                .get(next)
+                .map_or(pack_end, |&(off, _)| off.min(pack_end))
+        })
+    }
+
+    /// Run `f` over `(pack offset, index row)` pairs sorted by offset, building and
+    /// caching the table on first use.
+    fn with_sorted_offsets<R>(&self, f: impl FnOnce(&[(u64, u32)]) -> R) -> Result<R> {
+        let mut guard = self.offset_lookup.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(pairs) = guard.as_deref() {
+            return Ok(f(pairs));
         }
-        Ok(min_after)
+        let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(self.len());
+        for i in 0..self.len() {
+            pairs.push((self.offset_at(i)?, i as u32));
+        }
+        pairs.sort_unstable_by_key(|p| p.0);
+        Ok(f(guard.insert(pairs)))
     }
 
     /// CRC32 for the index row at `entry_offset`, if any.
@@ -382,20 +401,12 @@ impl PackIndex {
 
     /// `find_position_by_offset_sorted` method.
     pub fn find_position_by_offset_sorted(&self, offset: u64) -> Result<Option<usize>> {
-        let mut guard = self.offset_lookup.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.is_none() {
-            let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(self.len());
-            for i in 0..self.len() {
-                pairs.push((self.offset_at(i)?, i as u32));
-            }
-            pairs.sort_by_key(|p| p.0);
-            *guard = Some(pairs);
-        }
-        let Some(pairs) = guard.as_ref() else {
-            return Ok(None);
-        };
-        let idx = pairs.binary_search_by_key(&offset, |p| p.0).ok();
-        Ok(idx.map(|i| pairs[i].1 as usize))
+        self.with_sorted_offsets(|pairs| {
+            pairs
+                .binary_search_by_key(&offset, |p| p.0)
+                .ok()
+                .map(|i| pairs[i].1 as usize)
+        })
     }
 
     fn find_position_in_bucket(&self, lo: usize, hi: usize, needle: &[u8]) -> Option<usize> {
@@ -933,6 +944,41 @@ mod tests {
         }
         let miss = ObjectId::from_bytes(&[0x06; 20]).unwrap();
         assert!(idx.find_position(&miss).is_none());
+    }
+
+    #[test]
+    fn next_pack_offset_after_matches_linear_scan() {
+        // Offsets deliberately not in OID order, as in real packs.
+        let rows: Vec<(Vec<u8>, u64)> = (0..50u8)
+            .map(|i| {
+                let mut oid = vec![i; 20];
+                oid[0] = i.wrapping_mul(37);
+                (oid, 12 + (u64::from(i) * 7 % 50) * 30)
+            })
+            .collect();
+        let idx = parse_pack_index_bytes(Path::new("order.idx"), build_v1_idx_bytes(&rows), false)
+            .expect("parse v1 idx");
+        let offsets: Vec<u64> = rows.iter().map(|r| r.1).collect();
+        let pack_end = 12 + 50 * 30 - 10;
+        for probe in (0..pack_end + 40).step_by(5) {
+            let expected = offsets
+                .iter()
+                .copied()
+                .filter(|&o| o > probe && o <= pack_end)
+                .min()
+                .unwrap_or(pack_end);
+            assert_eq!(
+                idx.next_pack_offset_after(probe, pack_end).expect("next"),
+                expected,
+                "probe {probe}"
+            );
+        }
+        for (i, &off) in offsets.iter().enumerate() {
+            let pos = idx.find_position_by_offset_sorted(off).expect("lookup");
+            let pos = pos.expect("every row offset resolves");
+            assert_eq!(idx.offset_at(pos).expect("offset"), off, "row {i}");
+        }
+        assert_eq!(idx.find_position_by_offset_sorted(13).expect("miss"), None);
     }
 
     #[test]
