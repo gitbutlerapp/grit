@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "error: not a v2 or v3 git bundle\n"
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"error\":\"not a v2 or v3 git bundle\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "**Error:** not a v2 or v3 git bundle\n",
+    "stderr": ""
+  }
+}

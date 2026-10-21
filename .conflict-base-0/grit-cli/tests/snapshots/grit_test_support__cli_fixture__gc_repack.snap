@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "repack: packed 13 objects into [REPO]/.git/objects/pack/pack-[HASH].pack ([DURATION]).\n",
+    "stderr": "Repacking objects…\n"
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"repack\",\"duration_ms\": 0,\"loose_before\":13,\"packs_before\":0,\"objects_packed\":13,\"pack_bytes\":887,\"pack_path\":\"[REPO]/.git/objects/pack/pack-[HASH].pack\",\"removed_pack_files\":0,\"pruned_loose\":13,\"unreachable_loose_pruned\":0}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n#### repack\n\n- **duration_ms:** 0\n- **loose_before:** 13\n- **packs_before:** 0\n- **objects_packed:** 13\n- **pack_bytes:** 887\n- **pack_path:** `[REPO]/.git/objects/pack/pack-[HASH].pack`\n- **removed_pack_files:** 0\n- **pruned_loose:** 13\n- **unreachable_loose_pruned:** 0\n\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "CONFLICT (content): f.txt\n\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`.\n"
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"result\":\"conflicts\",\"branch\":\"side\",\"conflicts\":[\"f.txt\"],\"conflict_details\":[{\"path\":\"f.txt\",\"kind\":\"content\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "## Merge\n\n- Merge **`side`** stopped with conflicts\n\n- **content** — `f.txt`\n\n→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`\n",
+    "stderr": ""
+  }
+}

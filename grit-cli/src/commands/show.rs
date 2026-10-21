@@ -313,7 +313,7 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
                 CommitDiffOptions {
                     paths: opts.paths.clone(),
                     format: {
-                        let mut f = opts.format;
+                        let mut f = opts.format.clone();
                         f.stat = true;
                         f.name_only = false;
                         f.name_status = false;

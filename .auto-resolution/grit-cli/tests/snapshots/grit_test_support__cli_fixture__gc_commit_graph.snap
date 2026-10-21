@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "commit-graph: wrote 2 commits to [REPO]/.git/objects/info/commit-graph ([DURATION]).\n",
+    "stderr": "Writing commit-graph…\n"
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"commit-graph\",\"duration_ms\": 0,\"commit_count\":2,\"path\":\"[REPO]/.git/objects/info/commit-graph\",\"removed_chain\":false}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n#### commit-graph\n\n- **duration_ms:** 0\n- **commit_count:** 2\n- **path:** `[REPO]/.git/objects/info/commit-graph`\n- **removed_chain:** false\n\n",
+    "stderr": ""
+  }
+}

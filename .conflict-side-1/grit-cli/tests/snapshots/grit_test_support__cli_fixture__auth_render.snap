@@ -1,0 +1,40 @@
+---
+source: grit-cli/src/render_outcome_snapshots.rs
+expression: payload
+---
+{
+  "sign_in": {
+    "human": {
+      "exit": 0,
+      "stdout": "\n✓ Signed in to GitHub — token stored for github.com.\n",
+      "stderr": ""
+    },
+    "json": {
+      "exit": 0,
+      "stdout": "{\"authenticated\":true,\"host\":\"github.com\"}\n",
+      "stderr": ""
+    },
+    "markdown": {
+      "exit": 0,
+      "stdout": "## Auth\n\n- Signed in to **`github.com`**\n",
+      "stderr": ""
+    }
+  },
+  "logout": {
+    "human": {
+      "exit": 0,
+      "stdout": "✓ Signed out of GitHub — removed the stored token for github.com.\n",
+      "stderr": ""
+    },
+    "json": {
+      "exit": 0,
+      "stdout": "{\"logged_out\":true,\"host\":\"github.com\"}\n",
+      "stderr": ""
+    },
+    "markdown": {
+      "exit": 0,
+      "stdout": "## Auth logout\n\n- Signed out of **`github.com`** (stored token removed)\n",
+      "stderr": ""
+    }
+  }
+}

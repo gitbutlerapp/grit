@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "05ff129da292185ae68f1190d7138c2e23a832f9\trefs/tags/v0.1\nb5ea30de417ac84c09b8cfc0acf5f2c39efc611f\trefs/tags/v0.1^{}\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"refs\",\"refs\":[{\"name\":\"refs/tags/v0.1\",\"oid\":\"05ff129da292185ae68f1190d7138c2e23a832f9\",\"peeled\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Remote refs\n\n| Ref | Object | Peeled | Symref target |\n| --- | --- | --- | --- |\n| `refs/tags/v0.1` | `05ff129da292185ae68f1190d7138c2e23a832f9` | `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f` | — |\n\n",
+    "stderr": ""
+  }
+}

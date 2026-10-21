@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "[main 9244cbd] third\n3 changes committed\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"oid\":\"9244cbde6917078809df2efb49409a61e601fc8b\",\"branch\":\"main\",\"subject\":\"third\",\"changes\":3,\"amended\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Commit\n\n- **`main`** · `9244cbd` — third\n- **3** changes committed\n",
+    "stderr": ""
+  }
+}

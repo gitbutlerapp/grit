@@ -1,0 +1,194 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Allow kicking off a build manually from the Actions tab. A manual run
+  # refreshes the rolling `nightly` prerelease (see the `publish-nightly` job) so
+  # `install-nightly` can fetch it with plain curl — no GitHub auth required.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          # Statically-linked musl builds (portable across distros, e.g. Alpine).
+          # Built with `cross` so the right musl C toolchain is provided for
+          # native dependencies (e.g. ring) on both architectures.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keep in step with rust-toolchain.toml: cargo builds with the pinned
+      # toolchain, so the cross targets must be installed for that version.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build
+        if: ${{ !matrix.cross }}
+        run: |
+          cargo build --profile dist --target ${{ matrix.target }} -p grit-cli
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: |
+          cross build --profile dist --target ${{ matrix.target }} -p grit-cli
+
+      # Completion scripts depend only on the CLI shape, not the target CPU. Generate
+      # them with a host-native binary so cross-compiled artifacts (e.g. aarch64
+      # Linux built on x86_64 Ubuntu) can still ship pre-generated scripts.
+      - name: Build host grit for completions
+        run: cargo build --profile dist -p grit-cli
+
+      - name: Package
+        run: |
+          host_grit="${GITHUB_WORKSPACE}/target/dist/grit"
+          cd target/${{ matrix.target }}/dist
+          mkdir -p completions
+          "$host_grit" completions bash > completions/grit.bash
+          "$host_grit" completions zsh > completions/_grit
+          "$host_grit" completions fish > completions/grit.fish
+          tar czf ../../../grit-${{ matrix.target }}.tar.gz grit completions
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grit-${{ matrix.target }}
+          path: |
+            grit-${{ matrix.target }}.tar.gz
+
+  # Windows ships the `grit` CLI (the `grit-cli` crate), installed via
+  # `irm grit-scm.com/install.ps1 | iex` (see site/public/install.ps1).
+  build-windows:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      # The repo's logs/ directory contains files with ':' in their names, which
+      # are invalid on NTFS and abort `git checkout` on Windows. Sparse-checkout
+      # everything except logs/ — the build doesn't need it.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            /*
+            !/logs/
+          sparse-checkout-cone-mode: false
+
+      # Keep in step with rust-toolchain.toml: cargo builds with the pinned
+      # toolchain, so the cross targets must be installed for that version.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: |
+          cargo build --profile dist --target ${{ matrix.target }} -p grit-cli
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $release = "target/${{ matrix.target }}/dist"
+          New-Item -ItemType Directory -Force -Path "$release/completions" | Out-Null
+          & "$release/grit.exe" completions bash | Set-Content -Encoding utf8 "$release/completions/grit.bash"
+          & "$release/grit.exe" completions zsh | Set-Content -Encoding utf8 "$release/completions/_grit"
+          & "$release/grit.exe" completions fish | Set-Content -Encoding utf8 "$release/completions/grit.fish"
+          & "$release/grit.exe" completions powershell | Set-Content -Encoding utf8 "$release/completions/grit.ps1"
+          Compress-Archive -Path "$release/grit.exe","$release/completions" -DestinationPath grit-${{ matrix.target }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grit-windows-${{ matrix.target }}
+          path: |
+            grit-${{ matrix.target }}.zip
+
+  release:
+    needs: [build, build-windows]
+    # Only publish a GitHub Release for tag pushes. Manual (workflow_dispatch)
+    # runs stop after the build jobs, leaving the artifacts on the run to download.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            grit-*.tar.gz
+            grit-*.zip
+
+  # Manual (workflow_dispatch) runs refresh a rolling `nightly` prerelease.
+  # Release assets are public, so `install-nightly` downloads them with plain
+  # curl — no GitHub CLI or token needed (unlike workflow-run artifacts, which
+  # require authentication). The previous nightly release and its tag are deleted
+  # first so the tag always points at the commit we just built.
+  publish-nightly:
+    needs: [build, build-windows]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Refresh the rolling "nightly" prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # `gh` is preinstalled on the runner; this is CI-side only and does not
+          # affect how end users install the nightly build.
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create nightly \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Nightly" \
+            --notes "Latest manual build from ${GITHUB_SHA}." \
+            grit-*.tar.gz grit-*.zip

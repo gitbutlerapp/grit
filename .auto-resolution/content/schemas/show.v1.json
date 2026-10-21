@@ -1,0 +1,698 @@
+{
+  "$id": "https://grit-scm.com/schemas/show/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ChangeStatus": {
+      "description": "Machine-readable diff change status (`--json` / `--markdown` contract).",
+      "enum": [
+        "added",
+        "deleted",
+        "modified",
+        "type_changed",
+        "renamed",
+        "copied",
+        "unmerged"
+      ],
+      "type": "string"
+    },
+    "CommitInfo": {
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/Person"
+        },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "committer",
+        "message",
+        "oid",
+        "parents",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "DiffStat": {
+      "description": "A diffstat: per-file insertion/deletion counts plus totals.",
+      "properties": {
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/FileStat"
+          },
+          "type": "array"
+        },
+        "files_changed": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "files",
+        "files_changed",
+        "insertions"
+      ],
+      "type": "object"
+    },
+    "DiffTotalsJson": {
+      "description": "Aggregate line counts for `--stat` / `--numstat` JSON.",
+      "properties": {
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "files_changed": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "files_changed",
+        "insertions"
+      ],
+      "type": "object"
+    },
+    "FileDiff": {
+      "description": "One changed file.",
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "combined_status": {
+          "description": "Per-parent combined status letters (`MM`, `DD`, …) for merge `--cc` name-status.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hunks": {
+          "description": "Patch hunks; omitted in JSON unless the output format is a full patch.",
+          "items": {
+            "$ref": "#/definitions/Hunk"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "new_encoding_lossy": {
+          "description": "True when new side bytes were decoded with lossy UTF-8.",
+          "type": "boolean"
+        },
+        "new_mode": {
+          "description": "New git mode (octal), when present on this side.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old_encoding_lossy": {
+          "description": "True when old side bytes were decoded with lossy UTF-8.",
+          "type": "boolean"
+        },
+        "old_mode": {
+          "description": "Old git mode (octal), when present on this side.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old_path": {
+          "description": "Pre-rename path, when different from `path`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Display path (the new path, or the old path for a deletion).",
+          "type": "string"
+        },
+        "similarity": {
+          "description": "Rename/copy similarity (0–100).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stat": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LineStatJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Line counts when `--stat` / `--numstat` / `--shortstat` is active."
+        },
+        "status": {
+          "$ref": "#/definitions/ChangeStatus"
+        }
+      },
+      "required": [
+        "binary",
+        "path",
+        "status"
+      ],
+      "type": "object"
+    },
+    "FileStat": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "similarity": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/ChangeStatus"
+        }
+      },
+      "required": [
+        "binary",
+        "deletions",
+        "insertions",
+        "path",
+        "status"
+      ],
+      "type": "object"
+    },
+    "Hunk": {
+      "description": "A contiguous run of changes plus surrounding context.",
+      "properties": {
+        "combined_header": {
+          "description": "Combined (`--cc`) hunk header; when set, [`Self::old_start`] / range fields are omitted from human output.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "context": {
+          "description": "The enclosing definition line (function/struct/…), when found.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/definitions/Line"
+          },
+          "type": "array"
+        },
+        "new_lines": {
+          "description": "Lines on the new side in this hunk (context + additions).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "new_start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_lines": {
+          "description": "Lines on the old side in this hunk (context + removals).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_start": {
+          "description": "1-based first old/new line numbers in the hunk.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "lines",
+        "new_lines",
+        "new_start",
+        "old_lines",
+        "old_start"
+      ],
+      "type": "object"
+    },
+    "Line": {
+      "description": "JSON schema shape for [`Line`] (`text` or `segments`, never both).",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/LineKind"
+        },
+        "new": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "no_newline_at_eof": {
+          "type": "boolean"
+        },
+        "old": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/definitions/Segment"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "LineKind": {
+      "enum": [
+        "context",
+        "add",
+        "del"
+      ],
+      "type": "string"
+    },
+    "LineStatJson": {
+      "description": "Per-file line counts in JSON when stat modes are active.",
+      "properties": {
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "insertions"
+      ],
+      "type": "object"
+    },
+    "Person": {
+      "description": "A parsed identity line (`Name <email> <epoch> <tz>`) for stable `--json` output.",
+      "properties": {
+        "date": {
+          "description": "Author or committer timestamp in RFC 3339.",
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    },
+    "Segment": {
+      "description": "A run of text within a line, flagged if it's part of the word-level change.",
+      "properties": {
+        "emphasis": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "ShowKind": {
+      "description": "What `grit show` resolved (`--json` contract).",
+      "enum": [
+        "commit",
+        "branch",
+        "tag",
+        "annotated_tag"
+      ],
+      "type": "string"
+    },
+    "ShowMultipleJson": {
+      "properties": {
+        "objects": {
+          "items": {
+            "$ref": "#/definitions/ShowObjectResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "objects"
+      ],
+      "type": "object"
+    },
+    "ShowObjectResult": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShowOutcome"
+            }
+          ],
+          "description": "Commit, branch, tag, or annotated tag."
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShowPathOutcome"
+            }
+          ],
+          "description": "Blob or tree at `revision:path`."
+        }
+      ],
+      "description": "One resolved object in a multi-object show (commit metadata or `rev:path` contents)."
+    },
+    "ShowOutcome": {
+      "description": "Result of `grit show`.",
+      "properties": {
+        "commit": {
+          "$ref": "#/definitions/CommitInfo"
+        },
+        "files": {
+          "description": "Per-file diff rows (same shape as `grit diff --json`).",
+          "items": {
+            "$ref": "#/definitions/FileDiff"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/definitions/ShowKind"
+        },
+        "ref_name": {
+          "description": "Branch or tag name, when shown via a ref.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stat": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DiffStat"
+            }
+          ],
+          "description": "Summary diffstat (always present for scripting convenience)."
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TagInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Annotated-tag metadata, when `kind == \"annotated_tag\"`."
+        },
+        "totals": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DiffTotalsJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "description": "Non-fatal warnings emitted while resolving the object.",
+          "items": {
+            "$ref": "#/definitions/WarningRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "commit",
+        "files",
+        "kind",
+        "stat"
+      ],
+      "type": "object"
+    },
+    "ShowPathOutcome": {
+      "description": "`grit show REV:path` JSON shape.",
+      "oneOf": [
+        {
+          "properties": {
+            "binary": {
+              "type": "boolean"
+            },
+            "data_base64": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "blob"
+              ],
+              "type": "string"
+            },
+            "oid": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "spec": {
+              "type": "string"
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "oid",
+            "path",
+            "size",
+            "spec"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "entries": {
+              "items": {
+                "$ref": "#/definitions/ShowTreeEntryJson"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "tree"
+              ],
+              "type": "string"
+            },
+            "oid": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "spec": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "entries",
+            "kind",
+            "oid",
+            "path",
+            "size",
+            "spec"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ShowTreeEntryJson": {
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "oid",
+        "path",
+        "type"
+      ],
+      "type": "object"
+    },
+    "TagInfo": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tagger": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Person"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "name"
+      ],
+      "type": "object"
+    },
+    "WarningRecord": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/definitions/ShowOutcome"
+    },
+    {
+      "$ref": "#/definitions/ShowPathOutcome"
+    },
+    {
+      "$ref": "#/definitions/ShowMultipleJson"
+    }
+  ],
+  "title": "ShowRunResult"
+}
