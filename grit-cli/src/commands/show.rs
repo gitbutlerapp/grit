@@ -24,16 +24,19 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::commands::diff::{CommitDiffOptions, DiffOutcome, DiffTotalsJson, FileDiff};
-use crate::context::{self, subject_line};
+use crate::commits_json::CommitJsonLoader;
+use crate::context;
+use crate::diff_args;
 use crate::diff_format::DiffFormatArgs;
 pub use crate::diff_render::DiffStat;
 use crate::diff_render::{self, diffstat_from_files};
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 
 /// Inputs for `grit show`.
 pub struct ShowRunOptions {
     pub objects: Vec<String>,
     pub paths: Vec<String>,
+    pub line_opts: diff_args::DiffLineOptions,
     pub format: DiffFormatArgs,
     pub word_level_inline: bool,
     pub diff_merges: DiffMerges,
@@ -218,7 +221,7 @@ pub struct ShowOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub tag: Option<TagInfo>,
-    pub commit: CommitInfo,
+    pub commit: CommitJson,
     /// Per-file diff rows (same shape as `grit diff --json`).
     pub files: Vec<FileDiff>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -229,16 +232,6 @@ pub struct ShowOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     diff: DiffOutcome,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct CommitInfo {
-    pub oid: String,
-    pub parents: Vec<String>,
-    pub author: Person,
-    pub committer: Person,
-    pub subject: String,
-    pub message: String,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -287,23 +280,17 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
     let resolved = grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, spec)
         .with_context(|| format!("could not resolve '{spec}'"))?;
     let commit_oid = peel_to_commit(&repo, resolved)?;
-    let data = context::read_commit(&repo, &commit_oid)?;
-
-    let commit = CommitInfo {
-        oid: commit_oid.to_hex(),
-        parents: data
-            .parents
-            .iter()
-            .map(grit_lib::objects::ObjectId::to_hex)
-            .collect(),
-        author: Person::from_identity_line(&data.author),
-        committer: Person::from_identity_line(&data.committer),
-        subject: subject_line(&data.message),
-        message: data.message.trim_end().to_owned(),
-    };
+    let loader = CommitJsonLoader::new(&repo)?;
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
+    let (mut json_rows, _) =
+        loader.load_with_summaries(&repo, std::slice::from_ref(&commit_oid), now)?;
+    let commit = json_rows
+        .pop()
+        .context("internal error: missing commit JSON row")?;
 
     let diff_opts = CommitDiffOptions {
         paths: opts.paths.clone(),
+        line_opts: opts.line_opts.clone(),
         format: opts.format,
         word_level_inline: opts.word_level_inline,
         diff_merges: opts.diff_merges,
@@ -316,6 +303,7 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
                 &commit_oid,
                 CommitDiffOptions {
                     paths: opts.paths.clone(),
+                    line_opts: opts.line_opts.clone(),
                     format: {
                         let mut f = opts.format;
                         f.stat = true;

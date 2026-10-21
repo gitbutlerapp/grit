@@ -10,7 +10,9 @@ use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
 use std::sync::Arc;
 
-use crate::rev_list::{rev_list, split_revision_token, RevListOptions, RevListResult};
+use crate::rev_list::{
+    rev_list, split_revision_token, OrderingMode, RevListOptions, RevListResult,
+};
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_revision_for_range_end,
@@ -79,6 +81,8 @@ pub struct RevWalkListOptions {
     pub commit_filter: Option<Arc<CommitFilter>>,
     /// Pickaxe filter (`-S` / `-G`).
     pub pickaxe: Option<Arc<crate::diff::Pickaxe>>,
+    /// Topological order and graph-friendly path handling (`log --graph`).
+    pub graph: bool,
 }
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
@@ -199,6 +203,7 @@ pub(crate) fn rev_list_options_from_walk(
 ) -> Result<RevListOptions> {
     let paths = repo.resolve_rev_walk_pathspecs(&walk.paths)?;
     let (min_parents, max_parents) = merge_filter_to_parent_bounds(walk.merges);
+    let graph = walk.graph;
     Ok(RevListOptions {
         first_parent: walk.first_parent,
         max_count: walk.limit,
@@ -211,6 +216,14 @@ pub(crate) fn rev_list_options_from_walk(
         all_refs,
         paths,
         count,
+        ordering: if graph {
+            OrderingMode::Topo
+        } else {
+            OrderingMode::Default
+        },
+        preserve_simplify_merges_graph_merges: graph,
+        path_graph_reorder: graph,
+        parent_rewrite: graph && !walk.paths.is_empty(),
         use_commit_graph: true,
         use_commit_graph_bloom: !walk.paths.is_empty(),
         paths_resolved_from_argv: !walk.paths.is_empty(),
@@ -308,11 +321,23 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// Propagates rev-parse and rev-list errors.
     pub fn commits(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<Vec<ObjectId>> {
+        Ok(self.rev_list_result(tokens, options)?.commits)
+    }
+
+    /// Like [`Self::commits`], but retains bounded `--graph` linkage when available.
+    ///
+    /// # Errors
+    ///
+    /// Propagates rev-parse and rev-list errors.
+    pub fn rev_list_result(
+        &self,
+        tokens: &[&str],
+        options: &RevWalkListOptions,
+    ) -> Result<crate::rev_list::RevListResult> {
         let repo = self.repository();
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
-        let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
-        Ok(result.commits)
+        rev_list(repo, &positive, &parsed.negative, &opts)
     }
 
     /// Count reachable commits without collecting them, using the commit-graph when loaded.
@@ -409,6 +434,9 @@ impl<'repo> RevWalk<'repo> {
         }
 
         let mut opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
+        // `--count` must not apply `-n`/`--max-count` per side; Git counts the full
+        // left and right sets even when a list limit is also set.
+        opts.max_count = None;
         opts.left_right = true;
         let left_count = {
             let mut left_opts = opts.clone();
@@ -460,6 +488,7 @@ impl<'repo> RevWalk<'repo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo::{InitOptions, Repository};
 
     #[test]
     fn split_double_dot_token_without_repo() {

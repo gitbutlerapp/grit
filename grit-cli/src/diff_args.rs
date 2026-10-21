@@ -8,17 +8,7 @@ use grit_lib::diff::{
 
 /// Line-diff and tree-diff formatting flags (Git `-U` / unified context, `-M`, filters).
 #[derive(Debug, Clone, Default, Args)]
-pub struct DiffFormatArgs {
-    /// Lines of unchanged context around each change (Git `-U`). When omitted, uses
-    /// `diff.context` from config (default 3).
-    #[arg(
-        short = 'U',
-        long = "unified",
-        value_name = "LINES",
-        num_args = 0..=1,
-        default_missing_value = "3"
-    )]
-    pub unified: Option<usize>,
+pub struct DiffLineOptions {
     /// Detect renames; optional similarity threshold (`50` default, or `50%`). Use `-M`, `-M30`,
     /// or `--find-renames` / `--find-renames=30` (long form requires `=` when a threshold is given).
     #[arg(
@@ -50,14 +40,10 @@ pub struct DiffFormatArgs {
     pub ignore_blank_lines: bool,
 }
 
-impl DiffFormatArgs {
+impl DiffLineOptions {
     /// Apply CLI overrides onto repository-configured [`DiffOptions`].
-    #[allow(dead_code)]
     pub fn to_options(&self, base: DiffOptions) -> Result<DiffOptions> {
-        let mut options = match self.unified {
-            Some(n) => base.with_context_lines(n),
-            None => base,
-        };
+        let mut options = base;
         if self.no_renames {
             options.renames = RenameDetection::Off;
         } else if let Some(threshold) = &self.find_renames {

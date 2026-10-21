@@ -18,14 +18,16 @@ use anyhow::{Context, Result};
 use grit_lib::diff::{
     apply_rename_detection_to_diff_entries, build_file_diffs, commit_diff_files,
     diff_commits_with_renames_and_policy, diff_index_to_tree_with_renames,
-    diff_index_to_worktree_with_renames, diff_trees_with_renames_and_policy, line_change_counts,
-    read_submodule_head_oid, read_worktree_side_bytes_for_diff,
+    diff_index_to_worktree_with_renames, diff_paths, diff_trees_with_renames_and_policy,
+    line_change_counts, read_submodule_head_oid, read_worktree_side_bytes_for_diff,
+    resolve_diff_arguments,
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
-    submodule_porcelain_flags, tree_diff_structured_parallel, DiffDetail, DiffEntry,
-    DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, DiffStatus,
-    TreeDiffStructured,
+    submodule_porcelain_flags, tree_diff_structured_parallel, write_patch_resolved,
+    write_patch_structured, DiffDetail, DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions,
+    DiffMerges, DiffOptions, DiffStatus, PatchResolvedSide, PatchTextOptions,
+    ResolveDiffArgumentsError, TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -52,6 +54,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::context;
+use crate::diff_args;
 use crate::diff_format::DiffFormatArgs;
 use crate::diff_render::{
     self, diffstat_from_files, render_name_only, render_name_status, render_numstat,
@@ -61,12 +64,14 @@ use crate::markdown;
 use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderContext};
 use crate::ui::{self, PathDisplayOptions};
 
-/// Git `-M` rename similarity threshold (matches commit-to-commit diffs in this command).
+/// Git `-M` rename similarity threshold (101 disables rename detection).
+fn rename_threshold_for_diff(options: &DiffOptions) -> u32 {
+    options.renames.threshold_percent().unwrap_or(101)
+}
+
+/// Git `-M` rename similarity threshold from repository config (worktree diffs).
 fn rename_threshold(config: &grit_lib::config::ConfigSet) -> u32 {
-    DiffOptions::from_config(config)
-        .renames
-        .threshold_percent()
-        .unwrap_or(101)
+    rename_threshold_for_diff(&DiffOptions::from_config(config))
 }
 
 /// Lines of unchanged context to show around each change.
@@ -118,6 +123,10 @@ pub struct DiffOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     path_display: Option<PathDisplayOptions>,
+    /// Raw Git patch body for `--patch-text` (human stdout only).
+    #[serde(skip)]
+    #[schemars(skip)]
+    patch_text: Option<String>,
 }
 
 /// One changed file.
@@ -302,12 +311,18 @@ pub struct Segment {
 
 /// Inputs for `grit diff` (flags and revision arguments).
 pub struct DiffRunOptions {
+    /// Diff two paths without opening a repository (`--no-index`).
+    pub no_index: bool,
+    /// Emit a Git-compatible unified patch (`git diff` text) instead of delta-style output.
+    pub patch_text: bool,
     pub staged: bool,
     pub unstaged: bool,
     pub against: Option<String>,
     pub commits: Vec<String>,
     /// Pathspecs from trailing `PATH` arguments (after `--`).
     pub paths: Vec<String>,
+    /// Line-diff and tree-diff flags (`-M`, `--no-renames`, `--diff-algorithm`, …).
+    pub line_opts: diff_args::DiffLineOptions,
     /// Output format (`--stat`, `--name-only`, …).
     pub format: DiffFormatArgs,
     /// Intra-line word highlights in structured hunks (human TTY output only).
@@ -447,6 +462,7 @@ fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -
         totals: None,
         format,
         path_display: None,
+        patch_text: None,
     }
 }
 
@@ -515,6 +531,159 @@ fn outcome_from_lib(
         totals,
         format,
         path_display: None,
+        patch_text: None,
+    }
+}
+
+fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
+    let repo = context::discover()?;
+    let mut diff_options =
+        DiffOptions::from_config(repo.config().context("could not load config")?.as_ref());
+    diff_options.context_lines = CONTEXT_LINES;
+    diff_options = opts
+        .line_opts
+        .to_options(diff_options)
+        .context("invalid diff options")?;
+    opts.format.apply_context(&mut diff_options);
+    let patch_opts = PatchTextOptions::from_repo(&repo, diff_options.clone())?;
+    let mut buf = Vec::new();
+    let changed =
+        if !opts.staged && !opts.unstaged && opts.commits.is_empty() && opts.against.is_none() {
+            let pathspecs = resolve_worktree_diff_pathspecs(&repo, &opts.paths)?;
+            let changes = filtered_worktree_file_changes(&repo, None, &pathspecs)?;
+            let hash_algo = repo.odb().hash_algo();
+            let resolved: Vec<PatchResolvedSide> = changes
+                .iter()
+                .map(|fc| file_change_to_patch_resolved(fc, hash_algo))
+                .collect();
+            write_patch_resolved(&repo, &resolved, &patch_opts, &mut buf)
+                .context("could not write patch")?;
+            !changes.is_empty()
+        } else {
+            let prefix = pathspec_prefix_for_repo(&repo)?;
+            let args = resolve_diff_arguments(
+                &repo,
+                prefix.as_deref(),
+                opts.staged,
+                opts.unstaged,
+                opts.against.as_deref(),
+                &opts.commits,
+                &opts.paths,
+            )
+            .map_err(map_resolve_diff_arguments_error)?;
+            let structured = repo
+                .diff()
+                .tree_structured(&args.target, &args.pathspecs, &diff_options)
+                .context("could not diff")?;
+            write_patch_structured(&repo, &structured, &patch_opts, &mut buf)
+                .context("could not write patch")?;
+            !structured.is_empty()
+        };
+    let text = String::from_utf8(buf).context("patch text was not UTF-8")?;
+    Ok(DiffOutcome {
+        changed,
+        files: Vec::new(),
+        totals: None,
+        format: opts.format,
+        path_display: None,
+        patch_text: Some(text),
+    })
+}
+
+fn map_resolve_diff_arguments_error(err: ResolveDiffArgumentsError) -> anyhow::Error {
+    anyhow::anyhow!(err.to_string())
+}
+
+fn run_no_index(opts: DiffRunOptions) -> Result<DiffOutcome> {
+    if opts.staged || opts.unstaged {
+        anyhow::bail!("--no-index cannot be combined with --staged or --unstaged");
+    }
+    if opts.against.is_some() {
+        anyhow::bail!("--no-index cannot be combined with --against");
+    }
+    let mut paths = opts.commits;
+    paths.extend(opts.paths);
+    if paths.len() != 2 {
+        anyhow::bail!("--no-index requires exactly two paths");
+    }
+    let mut diff_options = DiffOptions::default();
+    diff_options.context_lines = CONTEXT_LINES;
+    diff_options = opts
+        .line_opts
+        .to_options(diff_options)
+        .context("invalid diff options")?;
+    opts.format.apply_context(&mut diff_options);
+    let lib_files = diff_paths(Path::new(&paths[0]), Path::new(&paths[1]), &diff_options)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let detail = opts.format.detail();
+    let files: Vec<FileDiff> = lib_files
+        .into_iter()
+        .map(|f| no_index_file_to_cli(f, detail))
+        .collect();
+    Ok(DiffOutcome {
+        changed: !files.is_empty(),
+        files,
+        totals: None,
+        format: opts.format,
+        path_display: None,
+        patch_text: None,
+    })
+}
+
+fn no_index_file_to_cli(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff {
+    let hunks = f
+        .hunks
+        .into_iter()
+        .map(|h| Hunk {
+            old_start: h.old_start,
+            new_start: h.new_start,
+            old_lines: h.old_lines,
+            new_lines: h.new_lines,
+            context: h.context,
+            combined_header: None,
+            lines: h
+                .lines
+                .into_iter()
+                .map(|l| Line {
+                    kind: match l.kind {
+                        StructuredLineKind::Context => LineKind::Context,
+                        StructuredLineKind::Add => LineKind::Add,
+                        StructuredLineKind::Del => LineKind::Del,
+                    },
+                    old: l.old,
+                    new: l.new,
+                    segments: l
+                        .segments
+                        .into_iter()
+                        .map(|s| Segment {
+                            text: s.text,
+                            emphasis: s.emphasis,
+                        })
+                        .collect(),
+                    no_newline_at_eof: l.no_newline_at_eof,
+                    parents: None,
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    FileDiff {
+        path: f.path,
+        old_path: f.old_path,
+        status: f.status.into(),
+        old_mode: f.old_mode,
+        new_mode: f.new_mode,
+        old_encoding_lossy: f.old_encoding_lossy,
+        new_encoding_lossy: f.new_encoding_lossy,
+        binary: f.binary,
+        content_changed: f.content_changed,
+        similarity: None,
+        stat: None,
+        combined_status: None,
+        hunks: if detail == DiffDetail::Patch {
+            Some(hunks)
+        } else {
+            None
+        },
     }
 }
 
@@ -657,6 +826,12 @@ fn outcome_from_entries(
 }
 
 pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
+    if opts.no_index {
+        return run_no_index(opts);
+    }
+    if opts.patch_text {
+        return run_patch_text(opts);
+    }
     let repo = context::discover()?;
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
@@ -664,6 +839,10 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         disambiguate_diff_revision_and_paths(&repo, opts.commits, opts.paths);
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
+    diff_options = opts
+        .line_opts
+        .to_options(diff_options)
+        .context("invalid diff options")?;
     opts.format.apply_context(&mut diff_options);
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
@@ -759,7 +938,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             if let Some((base, tip)) = parse_commit_range(&repo, spec)? {
                 let pathspecs = resolve_commit_diff_pathspecs(&repo, &path_args)?;
                 let entries = filter_diff_entries(
-                    tree_commit_entries(&repo, &base, &tip, &config, &thread_policy)?,
+                    tree_commit_entries(
+                        &repo,
+                        &base,
+                        &tip,
+                        &diff_options,
+                        &config,
+                        &thread_policy,
+                    )?,
                     &repo,
                     &pathspecs,
                 );
@@ -771,7 +957,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             } else if let Ok(oid) = resolve_diff_commit(&repo, spec) {
                 let pathspecs = resolve_commit_diff_pathspecs(&repo, &path_args)?;
                 let entries = filter_diff_entries(
-                    commit_entries(&repo, &oid, &config, &thread_policy)?,
+                    commit_entries(&repo, &oid, &diff_options, &config, &thread_policy)?,
                     &repo,
                     &pathspecs,
                 );
@@ -793,7 +979,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     let pathspecs =
                         resolve_commit_diff_pathspecs(&repo, std::slice::from_ref(&commits[1]))?;
                     let entries = filter_diff_entries(
-                        tree_commit_entries(&repo, &base, &tip, &config, &thread_policy)?,
+                        tree_commit_entries(
+                            &repo,
+                            &base,
+                            &tip,
+                            &diff_options,
+                            &config,
+                            &thread_policy,
+                        )?,
                         &repo,
                         &pathspecs,
                     );
@@ -814,7 +1007,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             let base = resolve_diff_commit(&repo, &commits[0])?;
             let tip = resolve_diff_commit(&repo, &commits[1])?;
             let entries = filter_diff_entries(
-                tree_commit_entries(&repo, &base, &tip, &config, &thread_policy)?,
+                tree_commit_entries(&repo, &base, &tip, &diff_options, &config, &thread_policy)?,
                 &repo,
                 &pathspecs,
             );
@@ -846,6 +1039,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
 pub struct CommitDiffOptions {
     /// Pathspecs from trailing `PATH` arguments (after `--`).
     pub paths: Vec<String>,
+    pub line_opts: diff_args::DiffLineOptions,
     pub format: DiffFormatArgs,
     pub word_level_inline: bool,
     /// Merge commit parent diff mode (`first-parent` or `combined`).
@@ -863,6 +1057,10 @@ pub fn diff_for_commit(
     let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
+    diff_options = opts
+        .line_opts
+        .to_options(diff_options)
+        .context("invalid diff options")?;
     opts.format.apply_context(&mut diff_options);
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
@@ -893,6 +1091,7 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
             totals: None,
             format: DiffFormatArgs::default(),
             path_display: None,
+            patch_text: None,
         });
     }
     diff_for_commit(
@@ -900,6 +1099,7 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
         oid,
         CommitDiffOptions {
             paths: Vec::new(),
+            line_opts: diff_args::DiffLineOptions::default(),
             format: DiffFormatArgs::default(),
             word_level_inline: false,
             diff_merges: DiffMerges::FirstParent,
@@ -948,6 +1148,7 @@ fn outcome_from_tree_structured(
         totals: None,
         format,
         path_display: None,
+        patch_text: None,
     }
 }
 
@@ -1029,15 +1230,37 @@ fn outcome_from_changes(
     par_opts.min_items = 0;
     let est_bytes = changes.len().saturating_mul(8192);
     use grit_lib::parallel::par_map;
-    let files = par_map(&changes, par_opts, est_bytes, |fc| {
+    let mut files: Vec<FileDiff> = par_map(&changes, par_opts, est_bytes, |fc| {
         build_file_diff(fc, diff_options.clone())
     });
+    if diff_options.whitespace.is_active() {
+        files.retain(|f| {
+            if f.binary {
+                return true;
+            }
+            if matches!(
+                f.status,
+                ChangeStatus::Added
+                    | ChangeStatus::Deleted
+                    | ChangeStatus::Renamed
+                    | ChangeStatus::Copied
+                    | ChangeStatus::TypeChanged
+            ) {
+                return true;
+            }
+            if f.old_mode != f.new_mode {
+                return true;
+            }
+            f.hunks.as_ref().is_some_and(|h| !h.is_empty())
+        });
+    }
     DiffOutcome {
         changed: !files.is_empty(),
         files,
         totals: None,
         format,
         path_display: None,
+        patch_text: None,
     }
 }
 
@@ -1400,6 +1623,7 @@ fn outcome_stat_from_changes(
         files,
         format,
         path_display: None,
+        patch_text: None,
     }
 }
 
@@ -1407,6 +1631,7 @@ fn tree_commit_entries(
     repo: &grit_lib::repo::Repository,
     base: &ObjectId,
     tip: &ObjectId,
+    diff_options: &DiffOptions,
     config: &grit_lib::config::ConfigSet,
     thread_policy: &grit_lib::parallel::ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
@@ -1414,7 +1639,7 @@ fn tree_commit_entries(
         repo.odb(),
         base,
         tip,
-        rename_threshold(config),
+        rename_threshold_for_diff(diff_options),
         config,
         thread_policy,
     )
@@ -1426,6 +1651,7 @@ fn tree_commit_entries(
 fn commit_entries(
     repo: &grit_lib::repo::Repository,
     oid: &ObjectId,
+    diff_options: &DiffOptions,
     config: &grit_lib::config::ConfigSet,
     thread_policy: &grit_lib::parallel::ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
@@ -1440,7 +1666,7 @@ fn commit_entries(
         old_tree.as_ref(),
         Some(&new_tree),
         "",
-        rename_threshold(config),
+        rename_threshold_for_diff(diff_options),
         config,
         thread_policy,
     )
@@ -1696,6 +1922,40 @@ fn sort_entries(entries: &mut [DiffEntry]) {
     entries.sort_by(|a, b| a.path().cmp(b.path()));
 }
 
+fn file_change_to_patch_resolved(
+    fc: &FileChange,
+    hash_algo: grit_lib::objects::HashAlgo,
+) -> PatchResolvedSide {
+    let oid_for_side = |mode: &str, bytes: &SideBytes| -> ObjectId {
+        if mode == "000000" {
+            return grit_lib::diff::zero_oid();
+        }
+        hash_algo.hash_object(grit_lib::objects::ObjectKind::Blob, &bytes.data)
+    };
+    let (old_path, new_path) = match fc.status {
+        DiffStatus::Added => (None, Some(fc.path.clone())),
+        DiffStatus::Deleted => (Some(fc.path.clone()), None),
+        _ => (
+            fc.old_path.clone().or(Some(fc.path.clone())),
+            Some(fc.path.clone()),
+        ),
+    };
+    PatchResolvedSide {
+        entry: DiffEntry {
+            status: fc.status,
+            old_path,
+            new_path,
+            old_mode: fc.old_mode.clone(),
+            new_mode: fc.new_mode.clone(),
+            old_oid: oid_for_side(&fc.old_mode, &fc.old_bytes),
+            new_oid: oid_for_side(&fc.new_mode, &fc.new_bytes),
+            score: fc.similarity,
+        },
+        old_bytes: fc.old_bytes.data.clone(),
+        new_bytes: fc.new_bytes.data.clone(),
+    }
+}
+
 fn file_change(
     e: DiffEntry,
     old_bytes: SideBytes,
@@ -1921,6 +2181,13 @@ impl DiffOutcome {
     /// Render only the diff body (no commit header). `empty_message` is printed when there
     /// are no files in patch mode; pass `None` to stay silent (as `grit show` does).
     pub fn render_human_diff(&self, w: &mut dyn Write, empty_message: Option<&str>) -> Result<()> {
+        if let Some(text) = &self.patch_text {
+            w.write_all(text.as_bytes())?;
+            if !text.ends_with('\n') {
+                w.write_all(b"\n")?;
+            }
+            return Ok(());
+        }
         if self.files.is_empty() {
             if format_is_byte_list_or_stat(self.format) {
                 return Ok(());

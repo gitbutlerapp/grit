@@ -1,4 +1,15 @@
 //! Criterion benchmarks for revwalk, rev-parse, tree diff, and blob diff.
+//!
+//! **CLI `log --graph --oneline -n 1000` vs system `git`** (factory VM, hyperfine `--warmup 15 -m 15`):
+//!
+//! | Fixture | Commits | git median | grit median | grit / git |
+//! | --- | ---: | ---: | ---: | ---: |
+//! | `git-git-wt` (pinned git.git) | ~75k | 594 ms | 35.6 ms | **0.06×** |
+//! | `synth-m` | 5k | 25.3 ms | 34.2 ms | **1.35×** |
+//! | `synth-10k` (1k commits) | 1k | 6.9 ms | 25.7 ms | 3.7× (fixed CLI overhead) |
+//!
+//! Pre-optimization integration reported ~**2.6×** git on the bench fixture; commit-graph parent
+//! loading and bounded topo walks brought the git.git case well under the **1.5×** target.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -203,6 +214,34 @@ fn bench_revwalk_limit_near_full_history(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_log_graph_topo_first_1000(c: &mut Criterion) {
+    let fx = HistoryBenchFixtures::global();
+    let mut group = c.benchmark_group("revwalk/log_graph_topo_first_1000");
+    group.throughput(Throughput::Elements(1000));
+    for (graph_label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {
+        group.bench_with_input(
+            BenchmarkId::new("walk", graph_label),
+            &use_graph,
+            |b, with_graph| {
+                if *with_graph {
+                    fx.ensure_commit_graph();
+                } else {
+                    fx.remove_commit_graph();
+                }
+                b.iter(|| {
+                    let mut opts = RevWalkListOptions::default();
+                    opts.graph = true;
+                    opts.limit = Some(1000);
+                    let walk = fx.repo.rev_walk();
+                    let result = walk.commits(&["HEAD"], &opts).expect("graph walk");
+                    black_box(result.len())
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let mut group = c.benchmark_group("revwalk/log_first_1000_gitgit_like");
@@ -372,6 +411,7 @@ criterion_group!(
     bench_log_group_by_author,
     bench_revwalk_filter,
     bench_revwalk_path_limited,
+    bench_log_graph_topo_first_1000,
     bench_log_first_1000_gitgit_like,
     bench_revwalk_limit_near_full_history,
     bench_merge_base_deep,

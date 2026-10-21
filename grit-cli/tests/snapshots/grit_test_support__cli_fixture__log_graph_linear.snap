@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "* e9856e3 third\n* 104137d second\n* e5deeaf first\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"error\":\"`grit log --graph` is for human output only; omit `--graph` when using `--json`\",\"kind\":\"incompatible_flags\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "_`--graph` affects human output only; this listing omits graph columns._\n\n",
+    "stderr": ""
+  }
+}

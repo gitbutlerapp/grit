@@ -28,13 +28,25 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 | Option | Description |
 | --- | --- |
+| `-p`, `--patch` | Unified patch (default when no other format flag is set). |
+| `--patch-text` | Git-compatible unified patch on stdout (not delta-style). Rejected with `--json`. |
+| `--exit-code` | Exit with **1** when there are changes (errors still exit **2**). |
+| `--quiet` | Print nothing; implies `--exit-code`. |
 | `--stat` | Per-file change counts with `+`/`-` bars and a summary line (like `git diff --stat`). Mutually exclusive with the other format flags below. |
 | `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines (`-<TAB>-` for binary). |
 | `--shortstat` | Only the summary line (`N files changed, …`). |
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
 | `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (bare `-U` means 3). |
+| `-M`, `--find-renames[=<n>]` | Detect renames; optional similarity threshold (`50` default, or `50%`). Attached `-M30` is accepted. |
+| `--no-renames` | Do not detect renames (show separate delete/add pairs). |
+| `--diff-algorithm <algo>` | Line diff algorithm (`myers`, `minimal`, `patience`, `histogram`; overrides `diff.algorithm`). |
+| `--diff-filter <letters>` | Limit output to change types (Git letter syntax: `ADMR…`). |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
+| `--no-index` | Compare two filesystem paths outside any repository (exactly two path arguments). Exit **1** when the paths differ (matches `git diff --no-index`). |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
@@ -112,6 +124,7 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `files` | array | Changed files (see nested fields below). |
+| `changed` | boolean | **Required.** `true` when the diff found at least one change (used with `--exit-code` / `--quiet`). |
 | `totals` | object | Present for `--stat`, `--numstat`, and `--shortstat`: `files_changed`, `insertions`, `deletions`. |
 
 Each `files[]` entry includes `path`, `status`, `binary`, optional `old_path` (renames), optional `similarity` (0–100 on renames/copies), optional `combined_status` (per-parent combined letters such as `MM` or `DD` on merge `--cc` / `--name-status` output; omitted on ordinary two-tree diffs), optional `stat` (`{ "insertions", "deletions" }` when line counts were computed; omitted when `binary` is true), optional `old_mode` / `new_mode`, optional `old_encoding_lossy` / `new_encoding_lossy`, and `hunks` only for the default patch format.

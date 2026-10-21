@@ -230,6 +230,7 @@ impl RevSelectArgs {
             paths: self.paths.clone(),
             commit_filter,
             pickaxe,
+            graph: false,
         })
     }
 

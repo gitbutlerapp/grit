@@ -6,6 +6,10 @@
 use anyhow::{bail, Context, Result};
 use grit_lib::diff::{CommitFilesManyInput, CommitFilesManyOptions, DiffOptions};
 use grit_lib::objects::ObjectId;
+use grit_lib::revwalk::graph::{
+    display_parents_for_graph, log_graph_materialize, GraphCharset, GraphCommitInput, GraphLayout,
+    GraphLineKind, GraphRenderedLine,
+};
 use grit_lib::revwalk::group_by::{
     group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping,
     GroupByAuthorOptions,
@@ -14,6 +18,7 @@ use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use crate::commands::diff::{
@@ -27,7 +32,7 @@ use crate::diff_format::DiffFormatArgs;
 use crate::diff_render::{render_stat, use_color};
 use crate::log_display::{
     decorate_commit_row, render_author_groups_human, render_author_groups_markdown,
-    render_oneline_line,
+    render_oneline_from_summary, render_oneline_line, render_oneline_oid_subject,
 };
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
@@ -50,6 +55,8 @@ pub struct LogDisplayOptions {
     pub decorate: bool,
     pub group_by: Option<LogGroupBy>,
     pub group_count_only: bool,
+    pub graph: bool,
+    pub graph_unicode: bool,
 }
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
@@ -78,6 +85,12 @@ pub struct LogOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     oneline_lines: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    graph_lines: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    graph_note: Option<&'static str>,
     #[serde(skip)]
     #[schemars(skip)]
     continuation_args: Option<String>,
@@ -115,14 +128,20 @@ impl HumanRender for LogOutcome {
             }
             return render_author_groups_human(w, &self.author_group_rows);
         }
-        if self.commits.is_empty() {
+        if self.commits.is_empty() && !self.display.graph {
             outln!(w, "No commits yet.");
             return Ok(());
         }
         let now = ctx.now.unix_timestamp();
         let color = use_color();
         let head_branch = self.head_branch.as_deref();
-        if self.display.oneline {
+        if self.display.graph {
+            if self.graph_lines.is_empty() {
+                outln!(w, "No commits yet.");
+                return Ok(());
+            }
+            self.render_graph_human(w)?;
+        } else if self.display.oneline {
             for line in &self.oneline_lines {
                 outln!(w, "{line}");
             }
@@ -183,9 +202,13 @@ impl MarkdownRender for LogOutcome {
             }
             return render_author_groups_markdown(w, &self.author_group_rows);
         }
-        if self.commit_rows.is_empty() {
+        if self.commit_rows.is_empty() && !self.display.graph {
             outln!(w, "No commits yet.");
             return Ok(());
+        }
+        if let Some(note) = self.graph_note {
+            outln!(w, "_{note}_");
+            outln!(w);
         }
         if self.display.oneline {
             for line in &self.oneline_lines {
@@ -245,6 +268,20 @@ pub fn run(
         if display.oneline {
             bail!("`grit log` cannot combine `--oneline` with `--group-by`");
         }
+        if display.graph {
+            bail!("`grit log` cannot combine `--graph` with `--group-by`");
+        }
+    }
+    if display.graph {
+        if format.any_format_flag() {
+            bail!("`grit log` cannot combine diff format flags with `--graph`");
+        }
+        if output_mode == OutputMode::Json {
+            return Err(crate::json_error::incompatible_output_flags(
+                "`grit log --graph` is for human output only; omit `--graph` when using `--json`",
+                "incompatible_flags",
+            ));
+        }
     }
     let repo = context::discover()?;
     let env = repo.environment();
@@ -265,6 +302,9 @@ pub fn run(
     let continuation = cursor.or(deprecated_cursor);
     if display.group_by.is_some() && continuation.is_some() {
         bail!("`grit log` cannot combine `--cursor` with `--group-by`");
+    }
+    if display.graph && continuation.is_some() {
+        bail!("`grit log` cannot combine `--graph` with `--cursor`");
     }
     if let Some(token) = continuation.as_deref() {
         if !rev.paths.is_empty() {
@@ -307,25 +347,44 @@ pub fn run(
             display,
             output_mode,
             None,
+            LogGraphBuild::default(),
         );
     }
 
     let token_refs = rev.rev_tokens(&["HEAD"]);
     let page_size = rev.max_count.unwrap_or(PAGE);
 
-    let use_rev_walk = display.group_by.is_some()
+    let mut walk_opts = opts.clone();
+    walk_opts.graph = display.graph;
+
+    let use_rev_walk = display.graph
+        || display.group_by.is_some()
         || !rev.paths.is_empty()
         || rev.max_count.is_some()
-        || opts.commit_filter.as_ref().is_some_and(|f| f.is_active())
-        || opts.pickaxe.is_some()
-        || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
+        || walk_opts
+            .commit_filter
+            .as_ref()
+            .is_some_and(|f| f.is_active())
+        || walk_opts.pickaxe.is_some()
+        || LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?.is_none();
 
     if use_rev_walk {
         if rev.max_count == Some(0) {
             return empty_outcome(display);
         }
-        let mut fetch_opts = opts.clone();
-        fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
+        let walk = repo.rev_walk();
+        let mut fetch_opts = walk_opts.clone();
+        let page_limit = if display.graph && rev.max_count.is_none() {
+            Some(PAGE)
+        } else {
+            rev.max_count
+        };
+        fetch_opts.limit = fetch_limit_plus_one(page_limit);
+        let list_result = walk
+            .rev_list_result(&token_refs, &fetch_opts)
+            .context("could not list commits")?;
+        let graph_linkage = list_result.log_graph_linkage.clone();
+        let (oids, truncated) = truncate_oid_list(list_result.commits, page_limit);
         if display.group_by == Some(LogGroupBy::Author) {
             let use_mailmap = rev_select::log_mailmap_enabled(&repo, rev.no_mailmap);
             let mailmap = mailmap_for_grouping(&repo, use_mailmap)?;
@@ -367,11 +426,6 @@ pub fn run(
             let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
             return build_author_group_outcome(&repo, &oids, truncated, display, use_mailmap);
         }
-        let oids = repo
-            .rev_walk()
-            .commits(&token_refs, &fetch_opts)
-            .context("could not list commits")?;
-        let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
         return build_commit_outcome(
             &repo,
             &oids,
@@ -382,6 +436,10 @@ pub fn run(
             display,
             output_mode,
             None,
+            LogGraphBuild {
+                parent_rewrite: graph_needs_parent_rewrite(&rev, &walk_opts),
+                linkage: graph_linkage,
+            },
         );
     }
 
@@ -402,7 +460,21 @@ pub fn run(
         display,
         output_mode,
         None,
+        LogGraphBuild::default(),
     )
+}
+
+#[derive(Clone, Default)]
+struct LogGraphBuild {
+    parent_rewrite: bool,
+    linkage: Option<grit_lib::revwalk::rev_list::LogGraphLinkage>,
+}
+
+fn graph_needs_parent_rewrite(
+    rev: &RevSelectArgs,
+    walk: &grit_lib::revwalk::RevWalkListOptions,
+) -> bool {
+    !rev.paths.is_empty() || walk.commit_filter.as_ref().is_some_and(|f| f.is_active())
 }
 
 fn resolve_current_branch(repo: &grit_lib::repo::Repository) -> Result<Option<String>> {
@@ -429,6 +501,8 @@ fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
         display,
         head_branch: None,
         oneline_lines: Vec::new(),
+        graph_lines: Vec::new(),
+        graph_note: None,
         continuation_args: None,
         format: DiffFormatArgs::default(),
         commit_diffs: Vec::new(),
@@ -497,6 +571,8 @@ fn build_author_group_outcome_from_groups(
         display,
         head_branch: None,
         oneline_lines: Vec::new(),
+        graph_lines: Vec::new(),
+        graph_note: None,
         continuation_args: None,
         format: DiffFormatArgs::default(),
         commit_diffs: Vec::new(),
@@ -514,16 +590,43 @@ fn build_commit_outcome(
     display: LogDisplayOptions,
     output_mode: OutputMode,
     continuation_args: Option<String>,
+    graph: LogGraphBuild,
 ) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
     let json_output = output_mode == OutputMode::Json;
+    let graph_human_oneline = display.graph
+        && output_mode == OutputMode::Human
+        && display.oneline
+        && !format.any_format_flag()
+        && !display.decorate;
     let need_refs = display.decorate || json_output;
     let head_branch = if display.oneline || display.decorate {
         resolve_current_branch(repo)?
     } else {
         None
     };
+
+    if graph_human_oneline {
+        let graph_lines = build_graph_oneline_lines(repo, oids, display, &graph)?;
+        return Ok(LogOutcome {
+            commits: Vec::new(),
+            groups: None,
+            next,
+            truncated,
+            commit_rows: Vec::new(),
+            author_group_rows: Vec::new(),
+            display,
+            head_branch: None,
+            oneline_lines: Vec::new(),
+            graph_lines,
+            graph_note: None,
+            continuation_args,
+            format,
+            commit_diffs: Vec::new(),
+        });
+    }
+
     let detail = format.detail_for_log();
 
     let (commit_json_rows, commit_rows) = if need_refs {
@@ -612,11 +715,32 @@ fn build_commit_outcome(
     }
 
     let head_branch_ref = head_branch.as_deref();
-    let oneline_lines = if display.oneline {
+    let oneline_lines = if display.oneline && !display.graph {
         commits
             .iter()
             .map(|c| render_oneline_line(repo, &c.commit, display.decorate, head_branch_ref))
             .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+
+    let graph_note = if display.graph && output_mode == OutputMode::Markdown {
+        Some("`--graph` affects human output only; this listing omits graph columns.")
+    } else {
+        None
+    };
+
+    let graph_lines = if display.graph && output_mode == OutputMode::Human {
+        build_graph_text_lines(
+            repo,
+            oids,
+            Some(&commits),
+            &commit_rows,
+            display,
+            head_branch_ref,
+            now,
+            &graph,
+        )?
     } else {
         Vec::new()
     };
@@ -631,8 +755,172 @@ fn build_commit_outcome(
         display,
         head_branch,
         oneline_lines,
+        graph_lines,
+        graph_note,
         continuation_args,
         format,
         commit_diffs,
     })
+}
+
+impl LogOutcome {
+    fn render_graph_human(&self, w: &mut dyn Write) -> Result<()> {
+        let mut buf = String::new();
+        for (i, line) in self.graph_lines.iter().enumerate() {
+            if i > 0 {
+                buf.push('\n');
+            }
+            buf.push_str(line);
+        }
+        if !buf.is_empty() {
+            buf.push('\n');
+            w.write_all(buf.as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+fn build_graph_oneline_lines(
+    repo: &grit_lib::repo::Repository,
+    oids: &[ObjectId],
+    display: LogDisplayOptions,
+    graph: &LogGraphBuild,
+) -> Result<Vec<String>> {
+    let charset = if display.graph_unicode {
+        GraphCharset::UNICODE
+    } else {
+        GraphCharset::ASCII
+    };
+    let (parent_map, subjects) = if let Some(linkage) = graph.linkage.clone() {
+        (linkage.parents, linkage.subjects)
+    } else {
+        log_graph_materialize(repo, oids, graph.parent_rewrite)?
+    };
+    let inputs: Vec<GraphCommitInput> = oids
+        .iter()
+        .map(|&id| GraphCommitInput {
+            id,
+            parents: parent_map.get(&id).cloned().unwrap_or_default(),
+        })
+        .collect();
+    let mut layout = GraphLayout::new(charset);
+    let blocks = layout.render(&inputs);
+    let mut out = Vec::with_capacity(oids.len() + blocks.len());
+    let mut prefix_cache = HashMap::new();
+    for (block, &oid) in blocks.into_iter().zip(oids.iter()) {
+        let subject = subjects
+            .get(&oid)
+            .map(String::as_str)
+            .unwrap_or("(no subject)");
+        for graph_line in block {
+            if graph_line.kind == GraphLineKind::Padding {
+                out.push(graph_line.prefix.trim_end().to_owned());
+                continue;
+            }
+            let text = render_oneline_oid_subject(repo, oid, subject, &mut prefix_cache)?;
+            out.push(format!("{}{text}", graph_line.prefix));
+        }
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_graph_text_lines(
+    repo: &grit_lib::repo::Repository,
+    oids: &[ObjectId],
+    commits: Option<&[LogCommit]>,
+    summaries: &[CommitSummary],
+    display: LogDisplayOptions,
+    head_branch: Option<&str>,
+    now: i64,
+    graph: &LogGraphBuild,
+) -> Result<Vec<String>> {
+    let charset = if display.graph_unicode {
+        GraphCharset::UNICODE
+    } else {
+        GraphCharset::ASCII
+    };
+    let visible: HashSet<ObjectId> = oids.iter().copied().collect();
+    let parent_map = if let Some(linkage) = graph.linkage.as_ref() {
+        linkage.parents.clone()
+    } else {
+        display_parents_for_graph(repo, &visible, graph.parent_rewrite)?
+    };
+    let inputs: Vec<GraphCommitInput> = oids
+        .iter()
+        .map(|&id| GraphCommitInput {
+            id,
+            parents: parent_map.get(&id).cloned().unwrap_or_default(),
+        })
+        .collect();
+    let mut layout = GraphLayout::new(charset);
+    let blocks = layout.render(&inputs);
+    let mut out = Vec::with_capacity(oids.len() + blocks.len());
+    if let Some(commits) = commits {
+        for (block, (commit, summary)) in blocks.into_iter().zip(commits.iter().zip(summaries)) {
+            append_graph_block_lines(
+                repo,
+                &mut out,
+                block,
+                summary,
+                Some(commit),
+                display,
+                head_branch,
+                now,
+            )?;
+        }
+    } else {
+        for (block, summary) in blocks.into_iter().zip(summaries) {
+            append_graph_block_lines(
+                repo,
+                &mut out,
+                block,
+                summary,
+                None,
+                display,
+                head_branch,
+                now,
+            )?;
+        }
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_graph_block_lines(
+    repo: &grit_lib::repo::Repository,
+    out: &mut Vec<String>,
+    block: Vec<GraphRenderedLine>,
+    summary: &CommitSummary,
+    commit: Option<&LogCommit>,
+    display: LogDisplayOptions,
+    head_branch: Option<&str>,
+    now: i64,
+) -> Result<()> {
+    for graph_line in block {
+        if graph_line.kind == GraphLineKind::Padding {
+            out.push(graph_line.prefix.trim_end().to_owned());
+            continue;
+        }
+        let text = if display.oneline {
+            if display.decorate {
+                let commit = commit
+                    .ok_or_else(|| anyhow::anyhow!("internal error: missing log commit row"))?;
+                render_oneline_line(repo, &commit.commit, true, head_branch)?
+            } else {
+                render_oneline_from_summary(repo, summary)?
+            }
+        } else {
+            let commit =
+                commit.ok_or_else(|| anyhow::anyhow!("internal error: missing log commit row"))?;
+            let row = ui::commit_rows(std::slice::from_ref(summary), now)[0].clone();
+            if display.decorate {
+                decorate_commit_row(&row, &commit.commit.refs, head_branch)
+            } else {
+                row
+            }
+        };
+        out.push(format!("{}{text}", graph_line.prefix));
+    }
+    Ok(())
 }

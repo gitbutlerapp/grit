@@ -534,6 +534,14 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "log_decorate",
             &["log", "--decorate", "--oneline", "--limit", "1"],
         ),
+        (
+            "log_graph_linear",
+            &["log", "--graph", "--oneline", "-n", "3"],
+        ),
+        (
+            "log_graph_merge",
+            &["log", "--graph", "--oneline", "-n", "5"],
+        ),
         ("reflog", &["reflog"]),
         ("diff", &["diff"]),
         ("diff_staged", &["diff", "--staged"]),

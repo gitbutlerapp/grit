@@ -159,8 +159,9 @@ pub fn structured_text_diff(
     new_text: &str,
     options: DiffOptions,
 ) -> StructuredTextDiff {
+    let populate_enclosing_context = options.function_context || options.word_level_inline;
     let mut hunks =
-        line_engine::line_hunks(old_text, new_text, &options, options.word_level_inline);
+        line_engine::line_hunks(old_text, new_text, &options, populate_enclosing_context);
     if options.word_level_inline {
         apply_word_level_inline(&mut hunks, old_text, new_text);
     }

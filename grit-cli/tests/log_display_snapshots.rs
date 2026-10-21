@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use grit_test_support::CliFixture;
+use grit_test_support::{git, CliFixture};
 
 fn snapshot_dir() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/snapshots"))
@@ -41,6 +41,61 @@ fn log_decorate_snapshot() {
             f.write_repo_file("a.txt", "x\n");
             f.run_ok(&["commit", "-m", "only"]);
             f.run_ok(&["tag", "v1"]);
+        },
+    );
+}
+
+#[test]
+fn log_graph_rejects_json() {
+    let fixture = CliFixture::new();
+    fixture.run_ok(&["init"]);
+    fixture.write_repo_file("a.txt", "x\n");
+    fixture.run_ok(&["commit", "-m", "only"]);
+    let out = fixture.run(&["log", "--graph", "--json"]);
+    assert!(!out.ok());
+    assert_eq!(out.status, Some(1));
+    assert!(out.stdout.contains("incompatible_flags"));
+    assert!(out.stdout.contains("--graph"));
+}
+
+#[test]
+fn log_graph_linear() {
+    snapshot_fresh(
+        "log_graph_linear",
+        &["log", "--graph", "--oneline", "-n", "3"],
+        |f| {
+            f.run_ok(&["init"]);
+            f.write_repo_file("a.txt", "one\n");
+            f.run_ok(&["commit", "-m", "first"]);
+            f.write_repo_file("a.txt", "two\n");
+            f.run_ok(&["commit", "-m", "second"]);
+            f.write_repo_file("a.txt", "three\n");
+            f.run_ok(&["commit", "-m", "third"]);
+        },
+    );
+}
+
+#[test]
+fn log_graph_merge() {
+    snapshot_fresh(
+        "log_graph_merge",
+        &["log", "--graph", "--oneline", "-n", "10"],
+        |f| {
+            f.run_ok(&["init"]);
+            let root = f.path();
+            git(root, &["checkout", "-B", "main"]);
+            std::fs::write(root.join("f"), "a\n").expect("write");
+            git(root, &["add", "f"]);
+            git(root, &["commit", "-m", "root"]);
+            git(root, &["checkout", "-b", "topic"]);
+            std::fs::write(root.join("t"), "t\n").expect("write");
+            git(root, &["add", "t"]);
+            git(root, &["commit", "-m", "topic"]);
+            git(root, &["checkout", "main"]);
+            std::fs::write(root.join("m"), "m\n").expect("write");
+            git(root, &["add", "m"]);
+            git(root, &["commit", "-m", "mainline"]);
+            git(root, &["merge", "--no-ff", "-m", "merge", "topic"]);
         },
     );
 }

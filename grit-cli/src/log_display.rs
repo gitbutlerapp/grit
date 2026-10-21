@@ -3,10 +3,14 @@
 use std::io::Write;
 
 use anyhow::Result;
+use std::collections::HashMap;
+
 use grit_lib::object_inspect::abbreviate_for_display;
+use grit_lib::object_inspect::abbreviate_oneline_cached;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
+use crate::context::CommitSummary;
 use crate::output::{outln, CommitJson, CommitRefJson, CommitRefKind};
 
 /// Format ref decorations for `--oneline` / `--decorate` (Git `%d` / `%h %d %s`).
@@ -62,6 +66,23 @@ pub fn decorate_commit_row(row: &str, refs: &[CommitRefJson], head_branch: Optio
     out.push_str(&deco);
     out.push_str(&row[i..]);
     out
+}
+
+/// One `--oneline` row from a loaded summary (avoids hex parse when the oid is already known).
+pub fn render_oneline_from_summary(repo: &Repository, summary: &CommitSummary) -> Result<String> {
+    let abbrev = abbreviate_for_display(repo, summary.oid, true)?;
+    Ok(format!("{abbrev} {}", summary.subject))
+}
+
+/// Like [`render_oneline_from_summary`] but reuses prefix-uniqueness memoization across a page.
+pub fn render_oneline_oid_subject(
+    repo: &Repository,
+    oid: ObjectId,
+    subject: &str,
+    prefix_cache: &mut HashMap<String, bool>,
+) -> Result<String> {
+    let abbrev = abbreviate_oneline_cached(repo, oid, prefix_cache)?;
+    Ok(format!("{abbrev} {subject}"))
 }
 
 /// One `--oneline` row: `<abbrev> [<decorations>] <subject>`.

@@ -292,6 +292,41 @@ pub fn run_fixture_cli_matrix(
         log_allows_grit_failure,
     )?);
 
+    if !smoke {
+        out.push(run_matrix_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "log-graph-n1000"),
+                group: "log".into(),
+                fixture: fixture.label.clone(),
+                description: "log --graph --oneline -n 1000 (topo bounded walk)".into(),
+                grit_argv: vec![
+                    "log".into(),
+                    "--graph".into(),
+                    "--oneline".into(),
+                    "-n".into(),
+                    "1000".into(),
+                ],
+                git_argv: vec![
+                    "log".into(),
+                    "--graph".into(),
+                    "--oneline".into(),
+                    "-n".into(),
+                    "1000".into(),
+                ],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &fixture.worktree,
+            false,
+        )?);
+    }
+
     if !smoke && fixture.id == "git-dot-git" {
         out.push(run_matrix_scenario(
             hyperfine,

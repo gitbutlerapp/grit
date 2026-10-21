@@ -13,15 +13,20 @@
 //! # }
 //! ```
 pub mod filter;
+pub mod graph;
 pub mod group_by;
 pub mod handle;
 pub mod queries;
 
 pub use crate::diff::{Pickaxe, PickaxeError, PickaxeKind};
 pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError, Pattern};
+pub use graph::{
+    display_parents_for_graph, list_commits_for_log_graph, log_graph_materialize,
+    rewrite_display_parents, rewrite_display_parents_map, GraphCharset, GraphCommitInput,
+    GraphLayout, GraphLineKind, GraphRenderedLine, GraphRowTopology,
+};
 pub use group_by::{
-    group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping, AuthorGroup,
-    GroupByAuthorOptions,
+    group_commits_by_author, mailmap_for_grouping, AuthorGroup, GroupByAuthorOptions,
 };
 pub use handle::RevWalk;
 pub use queries::{

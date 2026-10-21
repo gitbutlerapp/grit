@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "*   b5951c1 merge\n| \\\n| * a4777de topic\n* | 941df66 mainline\n|/\n* 0775e58 root\n* b5ea30d second\n* 72934de first\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"error\":\"`grit log --graph` is for human output only; omit `--graph` when using `--json`\",\"kind\":\"incompatible_flags\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "_`--graph` affects human output only; this listing omits graph columns._\n\n",
+    "stderr": ""
+  }
+}

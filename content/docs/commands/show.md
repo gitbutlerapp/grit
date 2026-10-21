@@ -8,7 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
-grit show [<object>…] [--diff-merges first-parent|combined] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U[n]] [-W] [-- <path>…]
+grit show [<object>…] [--diff-merges first-parent|combined] [-p] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U[n]] [-W] [-- <path>…]
 ```
 
 ## Description
@@ -31,6 +31,7 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 | --- | --- |
 | `<object>…` | Commits, branches, tags, or `rev:path` specs. Defaults to `HEAD`. |
 | `--diff-merges` | `combined` (default) or `first-parent` for merge commits. |
+| `-p`, `--patch` | Unified patch (default when no other format flag is set). |
 | `--stat` | Summary with change bars per file instead of a full patch. |
 | `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines. |
 | `--shortstat` | Only the summary line (`N files changed, …`). |
@@ -38,6 +39,13 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 | `--name-status` | Status letter and path(s) per line. |
 | `-U`, `--unified <n>` | Lines of context around each change in patch mode (bare `-U` means 3). |
 | `-W`, `--function-context` | Expand hunks to enclosing function boundaries (patch mode). |
+| `-M`, `--find-renames[=<n>]` | Detect renames in the commit patch (optional similarity threshold). |
+| `--no-renames` | Do not detect renames in the commit patch. |
+| `--diff-algorithm <algo>` | Line diff algorithm for the patch (`myers`, `minimal`, `patience`, `histogram`). |
+| `--diff-filter <letters>` | Limit patch output to change types (Git letter syntax). |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines in the patch. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
 | `-- <path>…` | Limit the diff to these paths (pathspecs). |
 
 ## Examples

@@ -109,6 +109,8 @@ pub struct DiffOptions {
     pub filter: Option<DiffFilter>,
     /// Whitespace comparison rules for line diffs.
     pub whitespace: WhitespaceMode,
+    /// Expand hunks to enclosing function boundaries (Git `-W` / `--function-context`).
+    pub function_context: bool,
     /// When false, skip intra-line word emphasis (line-level hunks only).
     pub word_level_inline: bool,
     /// When set, incremented on each blob ODB read during tree content loading (tests only).
@@ -126,6 +128,7 @@ impl Default for DiffOptions {
             renames: RenameDetection::default(),
             filter: None,
             whitespace: WhitespaceMode::default(),
+            function_context: false,
             word_level_inline: true,
             blob_read_counter: None,
         }

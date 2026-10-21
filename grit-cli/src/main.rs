@@ -459,6 +459,12 @@ enum Command {
         /// With `--group-by`, omit per-commit lists in `--json` output.
         #[arg(long)]
         count: bool,
+        /// Draw an ASCII commit graph in human output (implies topological order).
+        #[arg(long)]
+        graph: bool,
+        /// Use Unicode box-drawing characters in `--graph` output (human only).
+        #[arg(long = "graph-unicode")]
+        graph_unicode: bool,
     },
     /// List or count commits matching revision ranges.
     Revs {
@@ -513,6 +519,15 @@ enum Command {
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
     Diff {
+        /// Compare two filesystem paths outside any repository (like `git diff --no-index`).
+        #[arg(long = "no-index")]
+        no_index: bool,
+        /// Emit a Git-compatible unified patch instead of delta-style output.
+        #[arg(
+            long = "patch-text",
+            conflicts_with_all = ["patch", "stat", "numstat", "shortstat", "name_only", "name_status"]
+        )]
+        patch_text: bool,
         /// Staged changes only (index vs HEAD).
         #[arg(short = 'S', long = "staged", visible_aliases = ["cached"])]
         staged: bool,
@@ -535,6 +550,8 @@ enum Command {
         #[arg(value_name = "PATH", last = true)]
         paths: Vec<String>,
         #[command(flatten)]
+        line_opts: diff_args::DiffLineOptions,
+        #[command(flatten)]
         format: diff_format::DiffFormatArgs,
     },
     /// Show information about a commit, tag, or branch (defaults to HEAD).
@@ -548,6 +565,8 @@ enum Command {
         /// Limit the diff to these paths (after `--`).
         #[arg(value_name = "PATH", last = true)]
         paths: Vec<String>,
+        #[command(flatten)]
+        line_opts: diff_args::DiffLineOptions,
         #[command(flatten)]
         format: diff_format::DiffFormatArgs,
     },
@@ -1089,6 +1108,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             decorate,
             group_by,
             count,
+            graph,
+            graph_unicode,
         } => {
             if count && group_by.is_none() {
                 bail!("`--count` requires `--group-by`");
@@ -1100,6 +1121,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     LogGroupByArg::Author => commands::log::LogGroupBy::Author,
                 }),
                 group_count_only: count,
+                graph,
+                graph_unicode,
             };
             emit(
                 &commands::log::run(rev, cursor, format, display, opts.mode)?,
@@ -1156,6 +1179,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Diff {
+            no_index,
+            patch_text,
             staged,
             unstaged,
             against,
@@ -1163,15 +1188,25 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             quiet,
             commits,
             paths,
+            line_opts,
             format,
         } => {
+            if patch_text && matches!(opts.mode, crate::output::OutputMode::Json) {
+                return Err(crate::json_error::incompatible_output_flags(
+                    "`grit diff --patch-text` is for human output only; omit `--patch-text` when using `--json`",
+                    "incompatible_flags",
+                ));
+            }
             let wants_exit_code = exit_code || quiet;
             match commands::diff::run(commands::diff::DiffRunOptions {
+                no_index,
+                patch_text,
                 staged,
                 unstaged,
                 against,
                 commits,
                 paths,
+                line_opts,
                 format,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
@@ -1184,6 +1219,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     }
                     if wants_exit_code {
                         std::process::exit(commands::diff::exit_code(&outcome));
+                    }
+                    if no_index && outcome.changed {
+                        std::process::exit(1);
                     }
                     Ok(())
                 }
@@ -1201,6 +1239,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             objects,
             diff_merges,
             paths,
+            line_opts,
             format,
         } => {
             let diff_merges =
@@ -1209,6 +1248,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 &commands::show::run(commands::show::ShowRunOptions {
                     objects,
                     paths,
+                    line_opts,
                     format,
                     word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                         && commands::diff::diff_word_level_inline_for_output(),
@@ -2196,8 +2236,20 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
-    fn schema_top_level_field_names(schema: &serde_json::Value) -> HashSet<String> {
+    fn schema_top_level_field_names(
+        root: &serde_json::Value,
+        schema: &serde_json::Value,
+    ) -> HashSet<String> {
         let mut keys = HashSet::new();
+        if let Some(ref_name) = schema
+            .get("$ref")
+            .and_then(|r| r.as_str())
+            .and_then(|r| r.strip_prefix("#/definitions/"))
+        {
+            if let Some(def) = root.get("definitions").and_then(|d| d.get(ref_name)) {
+                return schema_top_level_field_names(root, def);
+            }
+        }
         if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
             keys.extend(props.keys().cloned());
             return keys;
@@ -2205,7 +2257,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         for branch_key in ["anyOf", "oneOf"] {
             if let Some(items) = schema.get(branch_key).and_then(|v| v.as_array()) {
                 for item in items {
-                    keys.extend(schema_top_level_field_names(item));
+                    keys.extend(schema_top_level_field_names(root, item));
                 }
                 return keys;
             }
@@ -2216,11 +2268,11 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                 .and_then(|r| r.as_str())
                 .and_then(|r| r.strip_prefix("#/definitions/"))
             {
-                if let Some(def) = schema.get("definitions").and_then(|d| d.get(ref_name)) {
-                    return schema_top_level_field_names(def);
+                if let Some(def) = root.get("definitions").and_then(|d| d.get(ref_name)) {
+                    return schema_top_level_field_names(root, def);
                 }
             }
-            keys.extend(schema_top_level_field_names(items));
+            keys.extend(schema_top_level_field_names(root, items));
         }
         keys
     }
@@ -2230,7 +2282,8 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         let mut keys = HashSet::new();
         for path in expected_json_command_paths() {
             if path == command || path.starts_with(&format!("{command}.")) {
-                keys.extend(schema_top_level_field_names(&load_committed_schema(&path)));
+                let schema = load_committed_schema(&path);
+                keys.extend(schema_top_level_field_names(&schema, &schema));
             }
         }
         keys

@@ -675,6 +675,15 @@ impl Default for RevListOptions {
     }
 }
 
+/// Parents and subjects collected during a bounded `--graph` rev-list walk.
+#[derive(Debug, Clone, Default)]
+pub struct LogGraphLinkage {
+    /// Display parent lists keyed by commit id.
+    pub parents: HashMap<ObjectId, Vec<ObjectId>>,
+    /// First-line subjects keyed by commit id.
+    pub subjects: HashMap<ObjectId, String>,
+}
+
 /// Final commit selection result.
 #[derive(Debug, Clone)]
 pub struct RevListResult {
@@ -713,6 +722,8 @@ pub struct RevListResult {
     pub reachable_non_commit_object_count: Option<usize>,
     /// When a positive spec named a ref to an annotated tag of a commit, maps peeled commit → tag OID.
     pub tip_annotated_tag_by_commit: HashMap<ObjectId, ObjectId>,
+    /// Populated by bounded topological walks for `log --graph` (avoids a second linkage pass).
+    pub log_graph_linkage: Option<LogGraphLinkage>,
 }
 
 impl RevListResult {
@@ -971,6 +982,7 @@ pub fn rev_list(
                 reachable_commit_count: None,
                 reachable_non_commit_object_count: None,
                 tip_annotated_tag_by_commit: HashMap::new(),
+                log_graph_linkage: None,
             });
         }
         return Err(Error::InvalidRef("no revisions specified".to_owned()));
@@ -1006,6 +1018,15 @@ pub fn rev_list(
 
     if let Some(ordered) = try_bounded_limit_list(repo, &include, &exclude, options)? {
         return Ok(rev_list_result_from_commits(ordered));
+    }
+
+    if let Some((ordered, linkage)) =
+        try_bounded_topo_limit_list(repo, &include, &exclude, options)?
+    {
+        return Ok(rev_list_result_from_commits_with_linkage(
+            ordered,
+            Some(linkage),
+        ));
     }
 
     if let Some(ordered) =
@@ -1248,6 +1269,7 @@ pub fn rev_list(
             reachable_commit_count: Some(count),
             reachable_non_commit_object_count: None,
             tip_annotated_tag_by_commit: HashMap::new(),
+            log_graph_linkage: None,
         });
     }
 
@@ -1785,6 +1807,7 @@ pub fn rev_list(
         reachable_commit_count,
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit,
+        log_graph_linkage: None,
     })
 }
 
@@ -3725,6 +3748,31 @@ fn topo_sort(
 
     reorder_adjacent_merge_parent_blocks(graph, &mut out)?;
     Ok(out)
+}
+
+fn bounded_topo_sort_ready(
+    graph: &mut CommitGraph<'_>,
+    discovery_order: &[ObjectId],
+    ready: &mut [ObjectId],
+) {
+    let rank: HashMap<ObjectId, usize> = discovery_order
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(rank, oid)| (oid, rank))
+        .collect();
+    ready.sort_by(|&a, &b| {
+        graph
+            .committer_time(a)
+            .cmp(&graph.committer_time(b))
+            .then_with(|| {
+                rank.get(&b)
+                    .copied()
+                    .unwrap_or(usize::MAX)
+                    .cmp(&rank.get(&a).copied().unwrap_or(usize::MAX))
+            })
+            .then_with(|| a.cmp(&b))
+    });
 }
 
 fn graph_order_topo_sort(
@@ -5809,6 +5857,13 @@ fn load_commit(repo: &Repository, oid: ObjectId) -> Result<crate::objects::Commi
 }
 
 fn rev_list_result_from_commits(commits: Vec<ObjectId>) -> RevListResult {
+    rev_list_result_from_commits_with_linkage(commits, None)
+}
+
+fn rev_list_result_from_commits_with_linkage(
+    commits: Vec<ObjectId>,
+    log_graph_linkage: Option<LogGraphLinkage>,
+) -> RevListResult {
     RevListResult {
         commits,
         objects: Vec::new(),
@@ -5825,6 +5880,7 @@ fn rev_list_result_from_commits(commits: Vec<ObjectId>) -> RevListResult {
         reachable_commit_count: None,
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit: HashMap::new(),
+        log_graph_linkage,
     }
 }
 
@@ -5951,6 +6007,7 @@ fn try_commit_graph_count_only(
         reachable_commit_count: Some(n),
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit: HashMap::new(),
+        log_graph_linkage: None,
     }))
 }
 
@@ -6072,6 +6129,7 @@ fn try_rev_list_accelerated(
         reachable_non_commit_object_count: (options.count && options.objects)
             .then_some(non_commit_count),
         tip_annotated_tag_by_commit: HashMap::new(),
+        log_graph_linkage: None,
     }))
 }
 
@@ -6383,6 +6441,22 @@ fn try_bounded_commit_filter_limit_list(
 }
 
 fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
+    bounded_limit_list_common(options)
+        && matches!(
+            options.ordering,
+            OrderingMode::Default | OrderingMode::DateOrderWalk
+        )
+}
+
+fn can_use_bounded_topo_limit_list(options: &RevListOptions) -> bool {
+    options.ordering == OrderingMode::Topo && bounded_limit_list_common_inner(options, true)
+}
+
+fn bounded_limit_list_common(options: &RevListOptions) -> bool {
+    bounded_limit_list_common_inner(options, false)
+}
+
+fn bounded_limit_list_common_inner(options: &RevListOptions, graph_topo: bool) -> bool {
     (options.max_count.is_some() || options.skip > 0)
         && bounded_limit_list_need(options) < BOUNDED_LIMIT_LIST_EARLY_STOP_MAX
         && options
@@ -6414,10 +6488,133 @@ fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
         && !options.exclude_first_parent_only
         && !options.exclude_promisor_objects
         && options.missing_action == MissingAction::Error
-        && matches!(
-            options.ordering,
-            OrderingMode::Default | OrderingMode::DateOrderWalk
-        )
+        && (graph_topo || !options.parent_rewrite)
+        && (graph_topo || !options.preserve_simplify_merges_graph_merges)
+        && (graph_topo || !options.path_graph_reorder)
+}
+
+/// Incremental topological walk for `--max-count` / `--skip` (Git `limit_list` + topo).
+fn try_bounded_topo_limit_list(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<(Vec<ObjectId>, LogGraphLinkage)>> {
+    if include.is_empty() || !can_use_bounded_topo_limit_list(options) {
+        return Ok(None);
+    }
+    let Some(max_count) = options.max_count else {
+        return Ok(None);
+    };
+    if max_count == 0 {
+        return Ok(Some((Vec::new(), LogGraphLinkage::default())));
+    }
+
+    let mut graph =
+        CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
+    let excluded = if exclude.is_empty() {
+        HashSet::new()
+    } else {
+        walk_closure(&mut graph, exclude)?
+    };
+
+    let mut discover_heap = BinaryHeap::new();
+    let mut queued: HashSet<ObjectId> = HashSet::new();
+    let mut next_seq = 0u64;
+    for &tip in include {
+        if excluded.contains(&tip) || !queued.insert(tip) {
+            continue;
+        }
+        discover_heap.push(CommitDateKey {
+            oid: tip,
+            date: graph.sort_key(tip, false),
+            seq: next_seq,
+        });
+        next_seq += 1;
+    }
+
+    let mut unemitted_children: HashMap<ObjectId, usize> = HashMap::new();
+    let mut selected: HashSet<ObjectId> = HashSet::new();
+    let mut emitted: HashSet<ObjectId> = HashSet::new();
+    let mut discovery_order: Vec<ObjectId> = Vec::new();
+    let mut ready: Vec<ObjectId> = Vec::new();
+    let mut out = Vec::with_capacity(max_count.min(64));
+    let mut topo_seen = 0usize;
+
+    while out.len() < max_count {
+        bounded_topo_sort_ready(&mut graph, &discovery_order, &mut ready);
+        while let Some(oid) = ready.pop() {
+            if !emitted.insert(oid) {
+                continue;
+            }
+            topo_seen += 1;
+            if topo_seen > options.skip && out.len() < max_count {
+                out.push(oid);
+            }
+            if out.len() >= max_count {
+                break;
+            }
+            let parents = graph.parents_of(oid)?;
+            for parent in parents {
+                if excluded.contains(&parent) {
+                    continue;
+                }
+                let count = unemitted_children.entry(parent).or_insert(0);
+                *count = count.saturating_sub(1);
+                if selected.contains(&parent) && *count == 0 {
+                    ready.push(parent);
+                }
+            }
+        }
+        if out.len() >= max_count {
+            break;
+        }
+        let Some(item) = discover_heap.pop() else {
+            break;
+        };
+        let oid = item.oid;
+        if excluded.contains(&oid) || !selected.insert(oid) {
+            continue;
+        }
+        discovery_order.push(oid);
+        unemitted_children.entry(oid).or_insert(0);
+        let parents = graph.parents_of(oid)?;
+        for parent in parents {
+            if excluded.contains(&parent) {
+                continue;
+            }
+            *unemitted_children.entry(parent).or_insert(0) += 1;
+            if !selected.contains(&parent) && queued.insert(parent) {
+                discover_heap.push(CommitDateKey {
+                    oid: parent,
+                    date: graph.sort_key(parent, false),
+                    seq: next_seq,
+                });
+                next_seq += 1;
+            }
+        }
+        if unemitted_children.get(&oid).copied().unwrap_or(0) == 0 {
+            ready.push(oid);
+        }
+    }
+
+    reorder_adjacent_merge_parent_blocks(&mut graph, &mut out)?;
+    if options.reverse {
+        out.reverse();
+    }
+    let mut linkage = LogGraphLinkage::default();
+    for &oid in &out {
+        linkage
+            .parents
+            .insert(oid, graph.parents.get(&oid).cloned().unwrap_or_default());
+        if graph.subject_of(oid).is_none() {
+            graph.cache_commit_subject(oid)?;
+        }
+        if let Some(subject) = graph.subject_of(oid) {
+            linkage.subjects.insert(oid, subject.to_owned());
+        }
+    }
+    Ok(Some((out, linkage)))
 }
 
 fn try_bounded_limit_list(
@@ -7003,6 +7200,7 @@ pub(crate) struct CommitGraph<'r> {
     author_time: HashMap<ObjectId, i64>,
     shallow_boundaries: HashSet<ObjectId>,
     graft_parents: HashMap<ObjectId, Vec<ObjectId>>,
+    subjects: HashMap<ObjectId, String>,
 }
 
 impl<'r> CommitGraph<'r> {
@@ -7034,7 +7232,12 @@ impl<'r> CommitGraph<'r> {
             author_time: HashMap::new(),
             shallow_boundaries,
             graft_parents,
+            subjects: HashMap::new(),
         }
+    }
+
+    pub(crate) fn subject_of(&self, oid: ObjectId) -> Option<&str> {
+        self.subjects.get(&oid).map(String::as_str)
     }
 
     pub(crate) fn commit_tree(&mut self, oid: ObjectId) -> Result<ObjectId> {
@@ -7102,6 +7305,20 @@ impl<'r> CommitGraph<'r> {
         }
     }
 
+    fn cache_commit_subject(&mut self, oid: ObjectId) -> Result<()> {
+        if self.subjects.contains_key(&oid) {
+            return Ok(());
+        }
+        let object = self.repo.odb().read(&oid)?;
+        if object.kind != ObjectKind::Commit {
+            return Ok(());
+        }
+        if let Ok(subject) = crate::objects::read_commit_subject_line(&object.data) {
+            self.subjects.insert(oid, subject);
+        }
+        Ok(())
+    }
+
     fn populate(&mut self, oid: ObjectId) -> Result<()> {
         if self.parents.contains_key(&oid) {
             return Ok(());
@@ -7122,6 +7339,7 @@ impl<'r> CommitGraph<'r> {
                 }
                 self.committer_time.insert(oid, ctime);
                 self.parents.insert(oid, parents);
+                self.cache_commit_subject(oid)?;
                 return Ok(());
             }
         }
@@ -7144,8 +7362,19 @@ impl<'r> CommitGraph<'r> {
             .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
         self.commit_trees.insert(oid, commit.tree);
         self.parents.insert(oid, parents);
+        self.subjects
+            .insert(oid, subject_line_from_commit_message(&commit.message));
         Ok(())
     }
+}
+
+fn subject_line_from_commit_message(message: &str) -> String {
+    message
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("(no subject)")
+        .to_owned()
 }
 
 /// Load shallow boundary commit OIDs from `.git/shallow`.
@@ -10544,6 +10773,44 @@ mod line_coverage_tests {
             },
         )?;
         assert!(bounded.commits.len() <= 8);
+
+        let full_topo = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &RevListOptions {
+                ordering: OrderingMode::Topo,
+                ..RevListOptions::default()
+            },
+        )?;
+        let limited_topo = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &RevListOptions {
+                ordering: OrderingMode::Topo,
+                max_count: Some(12),
+                ..RevListOptions::default()
+            },
+        )?;
+        assert_eq!(
+            limited_topo.commits,
+            full_topo.commits.into_iter().take(12).collect::<Vec<_>>()
+        );
+
+        let graph_topo_flags = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &RevListOptions {
+                ordering: OrderingMode::Topo,
+                max_count: Some(12),
+                preserve_simplify_merges_graph_merges: true,
+                path_graph_reorder: true,
+                ..RevListOptions::default()
+            },
+        )?;
+        assert_eq!(graph_topo_flags.commits, limited_topo.commits);
 
         let empty_ok = rev_list(
             &repo,

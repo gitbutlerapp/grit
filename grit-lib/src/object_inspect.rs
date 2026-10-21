@@ -245,6 +245,26 @@ pub fn abbreviate_for_display(repo: &Repository, oid: ObjectId, short: bool) -> 
     }
 }
 
+/// Abbreviate many recent commits for `--oneline` output, reusing prefix-uniqueness checks.
+///
+/// Callers should pass commits in display order; `prefix_cache` may be reused across a page.
+///
+/// # Errors
+///
+/// Propagates object database errors from prefix disambiguation.
+pub fn abbreviate_oneline_cached(
+    repo: &Repository,
+    oid: ObjectId,
+    prefix_cache: &mut std::collections::HashMap<String, bool>,
+) -> Result<String> {
+    crate::rev_parse::abbreviate_object_id_with_prefix_cache_assume_exists(
+        repo,
+        oid,
+        7,
+        prefix_cache,
+    )
+}
+
 fn infer_ref_name(repo: &Repository, spec: &str, oid: ObjectId) -> Option<String> {
     let rev_part = spec.split(':').next().unwrap_or(spec);
     let (base, _) = parse_peel_suffix(rev_part);

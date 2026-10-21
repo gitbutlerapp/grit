@@ -499,6 +499,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
 ) -> String {
     use crate::diff::options::DiffAlgorithm;
 
+    let function_context = options.function_context;
     let ws = options.whitespace;
     if ws.is_active() {
         let blank_only = blank_line_ignorable(ws);
@@ -511,7 +512,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.context_lines,
                     options.inter_hunk_context,
                     options.indent_heuristic,
-                    false,
+                    function_context,
                     ws,
                     ignorable,
                 ),
@@ -541,7 +542,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                             new_content,
                             options.context_lines,
                             options.inter_hunk_context,
-                            false,
+                            function_context,
                             None,
                             options.indent_heuristic,
                             ws,
@@ -568,7 +569,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.context_lines,
                     options.inter_hunk_context,
                     options.indent_heuristic,
-                    false,
+                    function_context,
                     ws,
                     Some(blank_only),
                 ),
@@ -596,7 +597,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     new_content,
                     options.context_lines,
                     options.inter_hunk_context,
-                    false,
+                    function_context,
                     None,
                     options.indent_heuristic,
                     ws,
@@ -612,7 +613,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
             options.context_lines,
             options.inter_hunk_context,
             options.indent_heuristic,
-            false,
+            function_context,
             ws,
         ),
         DiffAlgorithm::Minimal => git_xdiff_unified_body_raw(
@@ -6623,10 +6624,11 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     for path in &all_paths {
         if index_entries
             .get(path.as_bytes())
-            .is_some_and(|ie| ie.skip_worktree())
+            .is_some_and(|ie| ie.skip_worktree() || ie.assume_unchanged())
         {
             // Sparse checkout: `git diff <rev>` does not report tree↔worktree drift for
             // skip-worktree paths (they are outside the sparse cone). Matches t7012 stash flow.
+            // Assume-unchanged: Git ignores worktree drift and index-vs-tree changes for the path.
             continue;
         }
 
