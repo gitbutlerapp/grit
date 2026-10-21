@@ -13,7 +13,7 @@ grit revert <commit>
 
 ## Description
 
-Creates a new commit on the current branch that undoes the changes introduced by `<commit>`. The revert commit uses the standard `Revert "…"` subject and a `This reverts commit <oid>.` body, matching what Git writes with `git revert --no-edit`.
+Creates a new commit on the current branch that undoes the changes introduced by `<commit>`. The revert commit uses the standard `Revert "…"` subject and a `This reverts commit <oid>.` body, matching what Git writes with `git revert --no-edit`, and gets a new `change-id` (not a copy of the reverted commit's id).
 
 `<commit>` can be a full or short commit id, a branch name (to revert the commit at its tip) or an expression like `HEAD~1`.
 

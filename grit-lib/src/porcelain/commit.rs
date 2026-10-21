@@ -280,15 +280,8 @@ fn create_commit_with_index(
                     set_change_id(&mut commit_data, &ChangeId::derived_from_commit_id(&tip));
                 }
             }
-        } else if let Some(id) = policy
-            .id_for_new_commit(
-                &commit_data,
-                repo.odb().hash_algo(),
-                repo.change_id_generator().as_ref(),
-            )
-            .map_err(|e| Error::Message(format!("change id: {e}")))?
-        {
-            set_change_id(&mut commit_data, &id);
+        } else {
+            stamp_change_id_on_new_commit(repo, &policy, &mut commit_data)?;
         }
     }
     let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
@@ -375,6 +368,32 @@ fn create_commit_with_index(
         parent,
         changes,
     })
+}
+
+/// When [`ChangeIdPolicy`] is enabled, assign a fresh id to a newly written commit.
+///
+/// Does not run on amends or history rewrites; callers pass an empty `extra_headers`
+/// so source change ids never carry over (pick, revert, clean merge).
+///
+/// # Errors
+///
+/// Propagates change-id generation failures as [`Error::Message`].
+pub(crate) fn stamp_change_id_on_new_commit(
+    repo: &Repository,
+    policy: &ChangeIdPolicy,
+    data: &mut CommitData,
+) -> Result<()> {
+    if let Some(id) = policy
+        .id_for_new_commit(
+            data,
+            repo.odb().hash_algo(),
+            repo.change_id_generator().as_ref(),
+        )
+        .map_err(|e| Error::Message(format!("change id: {e}")))?
+    {
+        set_change_id(data, &id);
+    }
+    Ok(())
 }
 
 /// Serialize `data` and sign the bytes when [`should_sign_commit`] says so.
