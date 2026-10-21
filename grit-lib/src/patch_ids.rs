@@ -478,6 +478,10 @@ fn compute_patch_id_filtered(
         Some(parent_commit.tree)
     };
 
+    if parent_tree_oid.as_ref() == Some(&commit.tree) {
+        return Ok(None);
+    }
+
     // Match `git show` / `git diff-tree -M`: pair renames before hashing.
     let mut diffs =
         diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit.tree), "", 50)?;

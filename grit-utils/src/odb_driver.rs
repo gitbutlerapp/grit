@@ -283,15 +283,13 @@ pub fn rev_walk_left_right_count(repo: &Repository, range: &str) -> Result<()> {
 /// Symmetric left/right counts with `--cherry-pick` (matches `git rev-list --left-right --cherry-pick --count`).
 pub fn rev_walk_cherry_pick_left_right_count(repo: &Repository, range: &str) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
-        let counts = repo
-            .rev_walk()
-            .left_right_counts(
-                &[range],
-                &RevWalkListOptions {
-                    cherry: CherryMode::Pick,
-                    ..RevWalkListOptions::default()
-                },
-            )?;
+        let counts = repo.rev_walk().left_right_counts(
+            &[range],
+            &RevWalkListOptions {
+                cherry: CherryMode::Pick,
+                ..RevWalkListOptions::default()
+            },
+        )?;
         println!("{} {}", counts.left, counts.right);
         Ok(())
     })

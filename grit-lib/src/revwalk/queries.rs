@@ -2,15 +2,17 @@
 use crate::error::{Error, Result};
 use crate::git_date::parse::{parse_date_basic_at, DateParseError};
 use crate::merge_base::{
+    commits_reachable_excluding_ancestors_of_cutoffs,
     count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
-    merge_bases_first_vs_rest, ReachableCountFilter,
+    merge_bases_first_vs_rest, ReachableCountFilter, ReachableWalkCommitterCutoffs,
 };
+use crate::objects::parse_commit;
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
 use crate::rev_list::{
-    commit_output_parents, rev_list, split_revision_token, OutputMode, RevListOptions,
-    RevListResult,
+    cherry_equivalent_commits, commit_output_parents, rev_list, split_revision_token, OutputMode,
+    RevListOptions, RevListResult,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
@@ -408,6 +410,112 @@ fn commit_count_from_result(result: RevListResult) -> Result<usize> {
 ///
 /// Applies [`RevWalkListOptions::limit`] once to the combined traversal, matching
 /// `git rev-list --left-right --count -n`.
+fn cherry_pick_left_right_counts_compatible(options: &RevWalkListOptions) -> bool {
+    options.cherry == CherryMode::Pick
+        && options.limit.is_none()
+        && options.paths.is_empty()
+        && options.refs.is_empty()
+        && options.skip == 0
+        && !options.reverse
+        && !options.include_parents
+        && !options.first_parent
+        && options.merges == MergeFilter::Any
+        && options.since.is_none()
+        && options.until.is_none()
+}
+
+fn filter_side_commits_by_parent_count(
+    repo: &Repository,
+    oids: Vec<ObjectId>,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+) -> Result<Vec<ObjectId>> {
+    if min_parents.is_none() && max_parents.is_none() {
+        return Ok(oids);
+    }
+    let min_p = min_parents.unwrap_or(0);
+    let max_p = max_parents.unwrap_or(usize::MAX);
+    let mut out = Vec::with_capacity(oids.len());
+    for oid in oids {
+        let obj = repo.odb().read(&oid)?;
+        let commit = parse_commit(&obj.data)?;
+        let parent_count = commit.parents.len();
+        if parent_count >= min_p && parent_count <= max_p {
+            out.push(oid);
+        }
+    }
+    Ok(out)
+}
+
+fn try_side_commits_first_parent_to_merge_base(
+    repo: &Repository,
+    tip: ObjectId,
+    merge_base: ObjectId,
+) -> Result<Option<Vec<ObjectId>>> {
+    if tip == merge_base {
+        return Ok(Some(Vec::new()));
+    }
+    let mut out = Vec::new();
+    let mut cur = tip;
+    while cur != merge_base {
+        out.push(cur);
+        let obj = repo.odb().read(&cur)?;
+        let commit = parse_commit(&obj.data)?;
+        if commit.parents.len() != 1 {
+            return Ok(None);
+        }
+        cur = commit.parents[0];
+    }
+    Ok(Some(out))
+}
+
+fn left_right_cherry_pick_counts(
+    repo: &Repository,
+    left: ObjectId,
+    right: ObjectId,
+    options: &RevWalkListOptions,
+) -> Result<LeftRightCounts> {
+    let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
+    let merge_base = merge_bases_first_vs_rest(repo, left, &[right])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::Message("symmetric range has no merge base".into()))?;
+    let mut left_only = match try_side_commits_first_parent_to_merge_base(repo, left, merge_base)? {
+        Some(list) => list,
+        None => commits_reachable_excluding_ancestors_of_cutoffs(
+            repo,
+            &[left],
+            &[right],
+            None,
+            ReachableWalkCommitterCutoffs::default(),
+        )?,
+    };
+    let mut right_only = match try_side_commits_first_parent_to_merge_base(repo, right, merge_base)?
+    {
+        Some(list) => list,
+        None => commits_reachable_excluding_ancestors_of_cutoffs(
+            repo,
+            &[right],
+            &[left],
+            None,
+            ReachableWalkCommitterCutoffs::default(),
+        )?,
+    };
+    left_only = filter_side_commits_by_parent_count(repo, left_only, min_parents, max_parents)?;
+    right_only = filter_side_commits_by_parent_count(repo, right_only, min_parents, max_parents)?;
+    let paths = repo.resolve_rev_walk_pathspecs(&options.paths)?;
+    let cherry_equivalent = cherry_equivalent_commits(repo, &left_only, &right_only, &paths)?;
+    let left = left_only
+        .iter()
+        .filter(|oid| !cherry_equivalent.contains(oid))
+        .count();
+    let right = right_only
+        .iter()
+        .filter(|oid| !cherry_equivalent.contains(oid))
+        .count();
+    Ok(LeftRightCounts::new(left, right))
+}
+
 fn left_right_counts_from_combined_walk(
     repo: &Repository,
     options: &RevWalkListOptions,
@@ -542,6 +650,10 @@ impl<'repo> RevWalk<'repo> {
         let (Some(left), Some(right)) = (parsed.symmetric_left, parsed.symmetric_right) else {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         };
+
+        if cherry_pick_left_right_counts_compatible(options) {
+            return left_right_cherry_pick_counts(repo, left, right, options);
+        }
 
         if options.cherry == CherryMode::Off
             && options.limit.is_none()

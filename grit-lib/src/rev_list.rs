@@ -21,8 +21,7 @@ use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
 use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
-    commits_reachable_excluding_ancestors_of_cutoffs, is_ancestor,
-    ReachableWalkCommitterCutoffs,
+    commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
@@ -1369,20 +1368,12 @@ pub fn rev_list(
             // "left" iff it is reachable from the left tip but not from the right tip, and vice
             // versa.  Using plain set intersection incorrectly labels the shared spine as "right"
             // only, which breaks `--cherry-pick` on `A...B` (t3419-rebase-patch-id).
-            if options.cherry_pick || options.cherry_mark {
-                for &oid in &ordered {
-                    let from_left = is_ancestor(repo, oid, left_oid)?;
-                    let from_right = is_ancestor(repo, oid, right_oid)?;
-                    left_right_map.insert(oid, from_left && !from_right);
-                }
-            } else {
-                let left_reach = walk_closure(&mut graph, &[left_oid])?;
-                let right_reach = walk_closure(&mut graph, &[right_oid])?;
-                for &oid in &ordered {
-                    let from_left = left_reach.contains(&oid);
-                    let from_right = right_reach.contains(&oid);
-                    left_right_map.insert(oid, from_left && !from_right);
-                }
+            let left_reach = walk_closure(&mut graph, &[left_oid])?;
+            let right_reach = walk_closure(&mut graph, &[right_oid])?;
+            for &oid in &ordered {
+                let from_left = left_reach.contains(&oid);
+                let from_right = right_reach.contains(&oid);
+                left_right_map.insert(oid, from_left && !from_right);
             }
         }
     }
@@ -1401,40 +1392,8 @@ pub fn rev_list(
             .filter(|o| left_right_map.get(o) == Some(&false))
             .copied()
             .collect();
-        let left_first = !left_commits.is_empty()
-            && !right_commits.is_empty()
-            && left_commits.len() < right_commits.len();
-
-        let mut by_patch: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-        if left_first {
-            for oid in &left_commits {
-                if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, &options.paths) {
-                    by_patch.entry(pid).or_default().push(*oid);
-                }
-            }
-            for oid in &right_commits {
-                if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, &options.paths) {
-                    if let Some(others) = by_patch.get(&pid) {
-                        cherry_equivalent.insert(*oid);
-                        cherry_equivalent.extend(others.iter().copied());
-                    }
-                }
-            }
-        } else {
-            for oid in &right_commits {
-                if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, &options.paths) {
-                    by_patch.entry(pid).or_default().push(*oid);
-                }
-            }
-            for oid in &left_commits {
-                if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, &options.paths) {
-                    if let Some(others) = by_patch.get(&pid) {
-                        cherry_equivalent.insert(*oid);
-                        cherry_equivalent.extend(others.iter().copied());
-                    }
-                }
-            }
-        }
+        cherry_equivalent =
+            cherry_equivalent_commits(repo, &left_commits, &right_commits, &options.paths)?;
     }
 
     // Filter left-only / right-only
@@ -5276,6 +5235,57 @@ pub fn commit_visible_for_dense_pathspecs(
         return Ok(true);
     }
     Ok(false)
+}
+
+/// Commits matched as patch-id equivalents across a symmetric left/right pair.
+///
+/// Used by `--cherry-pick` / `--cherry-mark` handling in [`rev_list`] and fast left/right counts.
+///
+/// # Errors
+///
+/// Propagates object read and patch-id errors.
+pub fn cherry_equivalent_commits(
+    repo: &Repository,
+    left_commits: &[ObjectId],
+    right_commits: &[ObjectId],
+    paths: &[String],
+) -> Result<HashSet<ObjectId>> {
+    let mut cherry_equivalent = HashSet::new();
+    if left_commits.is_empty() || right_commits.is_empty() {
+        return Ok(cherry_equivalent);
+    }
+    let left_first = left_commits.len() < right_commits.len();
+    let mut by_patch: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+    if left_first {
+        for oid in left_commits {
+            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+                by_patch.entry(pid).or_default().push(*oid);
+            }
+        }
+        for oid in right_commits {
+            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+                if let Some(others) = by_patch.get(&pid) {
+                    cherry_equivalent.insert(*oid);
+                    cherry_equivalent.extend(others.iter().copied());
+                }
+            }
+        }
+    } else {
+        for oid in right_commits {
+            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+                by_patch.entry(pid).or_default().push(*oid);
+            }
+        }
+        for oid in left_commits {
+            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+                if let Some(others) = by_patch.get(&pid) {
+                    cherry_equivalent.insert(*oid);
+                    cherry_equivalent.extend(others.iter().copied());
+                }
+            }
+        }
+    }
+    Ok(cherry_equivalent)
 }
 
 fn compute_cherry_patch_id(
