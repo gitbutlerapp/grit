@@ -66,7 +66,7 @@ $ grit commit -m "Explain what changed and why"
 | Delete a merged branch | `grit branch -d <name>` |
 | Delete regardless | `grit branch -D <name>` |
 
-`grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run with uncommitted changes. Commit first. They also refuse rather than overwrite an untracked file.
+`grit switch`, `grit merge`, and `grit pull` allow local edits on paths the destination does not change (same scoped rule as Git). `grit pick` and `grit revert` still require a clean worktree. All of these refuse rather than overwrite an untracked file.
 
 ## Combining work
 

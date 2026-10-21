@@ -45,13 +45,17 @@ use crate::merge_trees::{
     TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
-use crate::porcelain::checkout::{self, checkout_between_trees};
+use crate::porcelain::checkout;
 use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
 };
+use crate::porcelain::switch::{
+    checkout_tree_transition_allow_local, verify_tree_transition_allow_local,
+    TreeTransitionVerifyError,
+};
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
-use crate::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
+use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::refs;
 use crate::repo::Repository;
 use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
@@ -279,8 +283,6 @@ pub fn integrate_branch(
     other_oid: ObjectId,
     label: &str,
 ) -> Result<IntegrateBranchOutcome> {
-    ensure_worktree_clean_for_merge(repo)?;
-
     if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
         return Ok(IntegrateBranchOutcome::UpToDate);
     }
@@ -289,8 +291,7 @@ pub fn integrate_branch(
     let other_tree = commit_tree(repo, &other_oid)?;
 
     if is_ancestor(repo, into_oid, other_oid)? {
-        prepare_tree_checkout(repo, Some(&into_tree), &other_tree)?;
-        checkout_between_trees(repo, Some(&into_tree), &other_tree)?;
+        merge_checkout_tree_transition(repo, Some(&into_tree), &other_tree)?;
         move_branch(
             repo,
             into_ref,
@@ -331,11 +332,8 @@ pub fn integrate_branch(
     if has_tree_merge_conflicts(&merged) {
         let paths = tree_merge_conflict_paths(&merged);
         let details = classify_merge_conflicts(&merged.index, &paths);
-        prepare_tree_checkout(
-            repo,
-            Some(&into_tree),
-            &materialized_merge_result_tree(repo.odb(), &merged)?,
-        )?;
+        let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
+        ensure_merge_tree_transition_allowed(repo, Some(&into_tree), &materialized)?;
         apply_conflict_merge_worktree(repo, &into_tree, &merged)?;
         record_merge_in_progress(repo.git_dir(), into_oid, other_oid, label)?;
         return Ok(IntegrateBranchOutcome::Conflicts { paths, details });
@@ -351,6 +349,7 @@ pub fn integrate_branch(
         "GIT_COMMITTER_DATE",
     )?;
 
+    merge_checkout_tree_transition(repo, Some(&into_tree), &merged.result_tree)?;
     apply_clean_tree_merge_to_worktree(repo, &into_tree, &merged)?;
 
     let commit = CommitData {
@@ -393,6 +392,55 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     checkout::checkout_tree_changes(repo, &changes)?;
     clear_merge_state(repo.git_dir())?;
     Ok(())
+}
+
+fn merge_overwrite_error_message(paths: &[String]) -> Error {
+    if paths.is_empty() {
+        Error::Message("you have uncommitted changes — commit them before merging".into())
+    } else if paths.len() == 1 {
+        Error::Message(format!(
+            "local changes to '{}' would be overwritten by merge",
+            paths[0]
+        ))
+    } else {
+        Error::Message(format!(
+            "local changes would be overwritten by merge:\n  {}",
+            paths.join("\n  ")
+        ))
+    }
+}
+
+fn map_tree_transition_error_for_merge(err: Error) -> Error {
+    if err.to_string() == "you have uncommitted changes — commit them before switching" {
+        Error::Message("you have uncommitted changes — commit them before merging".into())
+    } else {
+        err
+    }
+}
+
+fn ensure_merge_tree_transition_allowed(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<()> {
+    prepare_tree_checkout(repo, from_tree, to_tree)?;
+    match verify_tree_transition_allow_local(repo, from_tree, to_tree) {
+        Ok(()) => Ok(()),
+        Err(TreeTransitionVerifyError::WouldOverwrite(paths)) => {
+            Err(merge_overwrite_error_message(&paths))
+        }
+        Err(TreeTransitionVerifyError::Failed(err)) => Err(err),
+    }
+}
+
+fn merge_checkout_tree_transition(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<()> {
+    ensure_merge_tree_transition_allowed(repo, from_tree, to_tree)?;
+    checkout_tree_transition_allow_local(repo, from_tree, to_tree)
+        .map_err(map_tree_transition_error_for_merge)
 }
 
 fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {

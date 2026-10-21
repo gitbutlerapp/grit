@@ -178,7 +178,7 @@ $ grit push --tags
 
 `grit merge`, `grit pull` and `grit pick` never leave a half-finished merge behind. If the two sides change the same lines, `grit` lists the conflicting files and leaves your branch and working tree as they were. To resolve the conflict, run the merge with `git`, fix the files and commit. Conflict resolution in `grit` itself is on the roadmap.
 
-`grit` refuses to switch branches when your local edits would conflict with the destination branch, and refuses to merge or pull while you have uncommitted changes. Use [`grit reset --soft HEAD~1`](../reset/) to uncommit while keeping changes staged.
+`grit` refuses to switch branches, merge, or pull when your local edits would be overwritten by files that differ on the other side. Unrelated uncommitted edits are kept, like Git. Use [`grit reset --soft HEAD~1`](../reset/) to uncommit while keeping changes staged.
 
 ## Offline bundles and linked worktrees
 

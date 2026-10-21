@@ -13,7 +13,6 @@ use grit_lib::porcelain::merge::{
     abort_branch_merge, integrate_branch, IntegrateBranchOutcome, MergeConflictDetail,
     MergeConflictKind,
 };
-use grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_merge;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
@@ -231,10 +230,6 @@ pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
     }
 
     let branch = branch.context("branch name required unless using --abort")?;
-
-    ensure_worktree_clean_for_merge(&repo)
-        .map_err(anyhow::Error::new)
-        .context("could not verify worktree is clean")?;
 
     let (refname, head_oid) = match resolve_head(repo.git_dir())? {
         HeadState::Branch {

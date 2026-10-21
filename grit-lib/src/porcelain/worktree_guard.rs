@@ -1432,8 +1432,8 @@ pub fn ensure_no_untracked_overwrite(
 /// Collect untracked paths and refuse when updating the worktree from `from_tree` to `to_tree`
 /// would clobber an untracked file.
 ///
-/// Does not check for staged or unstaged changes; callers such as `grit merge` enforce a clean
-/// worktree separately.
+/// Does not check for staged or unstaged changes; callers such as `grit merge` enforce scoped
+/// local-change compatibility separately.
 ///
 /// # Errors
 ///
