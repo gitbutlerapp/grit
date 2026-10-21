@@ -346,7 +346,9 @@ fn tasks_from_gc_stats(stats: GcStats, timings: GcPhaseTimings) -> Vec<GcTaskRep
 pub fn run_full(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     let repo = context::discover()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    progress(mode, "Running garbage collection…");
+    if !quiet {
+        progress(mode, "Running garbage collection…");
+    }
     let opts = GcOptions::full_run(dry_run, now);
     let stats = gc(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))?;
     let timings = stats.phase_timings;

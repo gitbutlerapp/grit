@@ -790,6 +790,76 @@ fn git_pack_count(git_dir: &Path) -> usize {
         .count()
 }
 
+fn git_size_pack_kib(dir: &Path) -> u64 {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(["count-objects", "-v"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("count-objects -v");
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        if let Some(kib) = line.strip_prefix("size-pack: ") {
+            return kib.trim().parse().expect("size-pack");
+        }
+    }
+    0
+}
+
+fn git_verify_pack_delta_chain_count(dir: &Path) -> usize {
+    let pack_dir = dir.join(".git/objects/pack");
+    let pack = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .expect("pack file")
+        .path();
+    let out = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(&pack)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("verify-pack");
+    assert!(
+        out.status.success(),
+        "verify-pack: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| line.contains("chain length"))
+        .count()
+}
+
+fn repo_with_loose_only_edited_blob_history() -> TempDir {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    let f = dir.path().join("f.txt");
+    let mut lines: Vec<String> = (1..=3000)
+        .map(|n| {
+            format!("{n} some moderately long line of text to make blob bigger abcdefghijklmnop")
+        })
+        .collect();
+    std::fs::write(&f, format!("{}\n", lines.join("\n"))).expect("write f.txt");
+    git(dir.path(), &["add", "f.txt"]);
+    git(dir.path(), &["commit", "-m", "c0"]);
+    for i in 1..=10 {
+        lines[i * 100 - 1] = format!("edit {i}");
+        std::fs::write(&f, format!("{}\n", lines.join("\n"))).expect("rewrite f.txt");
+        git(dir.path(), &["add", "f.txt"]);
+        git(dir.path(), &["commit", "-m", &format!("c{i}")]);
+    }
+    assert_eq!(
+        git_pack_count(&dir.path().join(".git")),
+        0,
+        "fixture must stay all-loose until maintenance"
+    );
+    dir
+}
+
 fn repo_with_one_pack_and_loose_commits(loose_commits: usize) -> TempDir {
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
@@ -1043,6 +1113,47 @@ fn gc_autopacklimit_consolidates_packs_like_git() {
         "grit gc must consolidate packs when autopacklimit exceeded, like git gc"
     );
     assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 1);
+}
+
+#[test]
+fn gc_from_loose_objects_builds_delta_compressed_pack_like_repack() {
+    let _pack_guard = test_pack_cache_guard();
+    let seed = repo_with_loose_only_edited_blob_history();
+
+    let grit_gc = TempDir::new().expect("gc copy");
+    duplicate_repo_tree(seed.path(), grit_gc.path());
+    let grit_repack = TempDir::new().expect("repack copy");
+    duplicate_repo_tree(seed.path(), grit_repack.path());
+
+    let repo_gc = Repository::discover(Some(grit_gc.path()), &RepositoryOptions::empty())
+        .expect("open gc copy");
+    let gc_stats = gc(
+        &repo_gc,
+        &GcOptions::with_reflog_policy(1_700_000_000, false),
+    )
+    .expect("grit gc");
+    clear_pack_cache_after_disk_maintenance();
+
+    let repo_repack = Repository::discover(Some(grit_repack.path()), &RepositoryOptions::empty())
+        .expect("open repack copy");
+    let repack_stats = repack_all(&repo_repack, &RepackOptions::default()).expect("grit repack");
+    clear_pack_cache_after_disk_maintenance();
+
+    let gc_bytes = gc_stats.repack.pack_bytes.expect("gc pack bytes");
+    let repack_bytes = repack_stats.pack_bytes.expect("repack pack bytes");
+    assert!(
+        gc_bytes <= repack_bytes.saturating_mul(3) / 2,
+        "gc pack {gc_bytes} bytes should match repack {repack_bytes} bytes (within 50%)"
+    );
+    assert!(
+        git_verify_pack_delta_chain_count(grit_gc.path()) > 0,
+        "gc pack must contain delta chains when built from loose objects"
+    );
+    assert!(
+        git_size_pack_kib(grit_gc.path()) <= git_size_pack_kib(grit_repack.path()) * 2,
+        "gc size-pack should stay near repack for the same history"
+    );
+    git_fsck(grit_gc.path(), true);
 }
 
 #[test]
