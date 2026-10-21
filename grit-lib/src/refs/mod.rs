@@ -314,18 +314,13 @@ pub(crate) fn parse_ref_content(content: &str) -> Result<Ref> {
 ///
 /// # Errors
 ///
+/// - [`Error::RefStore`] with [`RefStoreError::NotFound`](store::RefStoreError::NotFound) if
+///   `refname`, or the target at the end of its symbolic chain, does not exist.
 /// - [`Error::InvalidRef`] if the ref is malformed or forms a cycle.
-/// - [`Error::ObjectNotFound`] if a symbolic target does not exist.
 pub fn resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
-    match open_ref_store(git_dir)?.resolve(refname) {
-        Ok(oid) => Ok(oid),
-        Err(Error::RefStore(store::RefStoreError::Corrupt(msg)))
-            if msg.starts_with("ref not found:") =>
-        {
-            Err(Error::InvalidRef(msg))
-        }
-        Err(err) => Err(map_public_ref_store_error(err, refname)),
-    }
+    open_ref_store(git_dir)?
+        .resolve(refname)
+        .map_err(|err| map_public_ref_store_error(err, refname))
 }
 
 /// Determine the common git directory for worktree-aware ref resolution.
@@ -1809,11 +1804,12 @@ fn remove_dir_tree(dir: &Path) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage, or
-/// [`Error::Io`] for errors other than "not found".
+/// Returns [`RefStoreError::NotFound`](store::RefStoreError::NotFound) (inside
+/// [`Error::RefStore`]) when `refname` does not exist, [`Error::InvalidRef`] when it is not
+/// safe for ref storage, or [`Error::Io`] for filesystem failures.
 pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     if matches!(read_raw_ref(git_dir, refname)?, RawRefLookup::NotFound) {
-        return Err(Error::InvalidRef(format!("ref not found: {refname}")));
+        return Err(store::RefStoreError::not_found(refname).into());
     }
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         let store = open_ref_store(git_dir)?;

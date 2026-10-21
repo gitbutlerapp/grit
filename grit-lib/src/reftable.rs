@@ -28,6 +28,7 @@
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
+use crate::refs::store::RefStoreError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
@@ -3069,9 +3070,9 @@ fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Re
             RefValue::Symref(target) => {
                 reftable_resolve_ref_depth(&store_git_dir, &target, depth + 1)
             }
-            RefValue::Deletion => Err(Error::InvalidRef(format!("ref not found: {refname}"))),
+            RefValue::Deletion => Err(RefStoreError::not_found(refname).into()),
         },
-        None => Err(Error::InvalidRef(format!("ref not found: {refname}"))),
+        None => Err(RefStoreError::not_found(refname).into()),
     }
 }
 
@@ -3321,7 +3322,7 @@ pub fn reftable_delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
     let mut stack = ReftableStack::open(&store_git_dir)?;
     if stack.lookup_ref(&storage_refname)?.is_none() {
-        return Err(Error::InvalidRef(format!("ref not found: {refname}")));
+        return Err(RefStoreError::not_found(refname).into());
     }
     let opts = read_write_options(&store_git_dir);
     stack.write_ref(&storage_refname, RefValue::Deletion, None, &opts)

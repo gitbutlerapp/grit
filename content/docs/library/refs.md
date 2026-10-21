@@ -23,6 +23,19 @@ Batch ref updates use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTrans
 
 `resolve_head` reads `HEAD` and returns a `HeadState`. `resolve_ref` (or `RefStore::resolve` on the repository store) follows symbolic refs with cycle detection. `read_ref_file` returns a `Ref` without resolving the full chain.
 
+On every backend, a missing ref fails with [`RefStoreError::NotFound`](rustdoc:grit_lib::refs::store::RefStoreError::NotFound) inside `Error::RefStore`, naming the ref that is absent. For a dangling symbolic ref (an unborn branch behind `HEAD`, say) that is the target, not the name you asked for. `delete_ref` on a missing ref fails the same way. Match on the variant rather than the message:
+
+```rust
+use grit_lib::error::Error;
+use grit_lib::refs::store::RefStoreError;
+
+match repo.refs().resolve("refs/heads/topic") {
+    Ok(oid) => println!("topic is at {oid}"),
+    Err(Error::RefStore(RefStoreError::NotFound { name })) => println!("{name} does not exist"),
+    Err(err) => return Err(err.into()),
+}
+```
+
 ## Listing, writing, and reflog
 
 `list_refs` and `list_refs_for_repository` iterate with a prefix. `write_ref` and `write_symbolic_ref` update single refs; use transactions when updating many refs atomically.

@@ -10,6 +10,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::is_valid_storable_ref_name;
 use grit_lib::refs::reflog::read_reflog;
+use grit_lib::refs::store::{open_ref_store, RefStoreError};
 use grit_lib::refs::{
     append_reflog, delete_ref, list_refs, list_refs_glob, list_refs_physical,
     packed_refs_entry_exists, read_head, read_log_refs_config, read_raw_ref, read_ref_file,
@@ -325,10 +326,49 @@ fn t1400_delete_missing_ref_typed_error_both_backends() {
         let git_dir = repo.git_dir();
         let err = delete_ref(&git_dir, "refs/heads/never-created").unwrap_err();
         assert!(
-            matches!(err, Error::InvalidRef(ref msg) if msg.contains("ref not found")),
+            matches!(
+                err,
+                Error::RefStore(RefStoreError::NotFound { ref name })
+                    if name == "refs/heads/never-created"
+            ),
             "{err:?}"
         );
         eprintln!("ok t1400_delete_missing ({})", backend_label(backend));
+    });
+}
+
+#[test]
+fn resolve_missing_ref_names_the_missing_ref_both_backends() {
+    each_backend(|backend, repo| {
+        let git_dir = repo.git_dir();
+        let err = resolve_ref(&git_dir, "refs/heads/never-created").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::RefStore(RefStoreError::NotFound { ref name })
+                    if name == "refs/heads/never-created"
+            ),
+            "{err:?}"
+        );
+
+        write_symbolic_ref(&git_dir, "refs/heads/dangling", "refs/heads/gone").expect("symref");
+        let err = resolve_ref(&git_dir, "refs/heads/dangling").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/gone"
+            ),
+            "{err:?}"
+        );
+        let store = open_ref_store(&git_dir).expect("ref store");
+        assert!(
+            matches!(
+                store.resolve("refs/heads/dangling"),
+                Err(Error::RefStore(RefStoreError::NotFound { ref name })) if name == "refs/heads/gone"
+            ),
+            "{}",
+            backend_label(backend)
+        );
     });
 }
 

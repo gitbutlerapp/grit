@@ -74,7 +74,7 @@ pub trait RefStore: Send + Sync + Debug {
     /// # Errors
     ///
     /// Returns [`RefStoreError::SymrefLoop`] when the chain is too deep and
-    /// [`RefStoreError::Corrupt`] when an intermediate target is missing.
+    /// [`RefStoreError::NotFound`] when `name` or a symbolic target is missing.
     fn resolve(&self, name: &str) -> Result<ObjectId> {
         resolve_store(self, name)
     }
@@ -136,7 +136,7 @@ fn resolve_via_raw<S: RefStore + ?Sized>(
         .read_raw(name)
         .map_err(|err| RefStoreError::Corrupt(err.to_string()))?
     {
-        None => Err(RefStoreError::Corrupt(format!("ref not found: {name}"))),
+        None => Err(RefStoreError::not_found(name)),
         Some(RawRef::Direct(oid)) => Ok(oid),
         Some(RawRef::Symbolic(target)) => resolve_via_raw(store, &target, depth + 1),
     }

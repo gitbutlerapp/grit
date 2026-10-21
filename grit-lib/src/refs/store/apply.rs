@@ -346,7 +346,7 @@ pub fn resolve_map(
         return Err(RefStoreError::SymrefLoop);
     }
     let Some(value) = refs.get(name) else {
-        return Err(RefStoreError::Corrupt(format!("ref not found: {name}")));
+        return Err(RefStoreError::not_found(name));
     };
     match value {
         RawRef::Direct(oid) => Ok(*oid),

@@ -77,6 +77,7 @@ pub fn run_refstore_conformance(factory: StoreFactory) {
     cas_failure(&factory);
     create_only_missing(&factory);
     delete_missing_ref(&factory);
+    resolve_missing_ref_is_not_found(&factory);
     df_conflict_in_batch(&factory);
     df_conflict_against_store(&factory);
     symref_deref_state_and_reflog(&factory);
@@ -174,6 +175,32 @@ fn delete_missing_ref(factory: &StoreFactory) {
         prepare_err(store.as_ref(), txn),
         RefStoreError::ExpectedMismatch { .. }
     ));
+}
+
+fn resolve_missing_ref_is_not_found(factory: &StoreFactory) {
+    let store = factory();
+    let missing = store.resolve("refs/heads/absent").expect_err("missing ref");
+    assert!(
+        matches!(
+            missing,
+            grit_lib::error::Error::RefStore(RefStoreError::NotFound { ref name })
+                if name == "refs/heads/absent"
+        ),
+        "{missing:?}"
+    );
+
+    seed_symref(store.as_ref(), "refs/heads/alias", "refs/heads/unborn");
+    let dangling = store
+        .resolve("refs/heads/alias")
+        .expect_err("dangling symref");
+    assert!(
+        matches!(
+            dangling,
+            grit_lib::error::Error::RefStore(RefStoreError::NotFound { ref name })
+                if name == "refs/heads/unborn"
+        ),
+        "{dangling:?}"
+    );
 }
 
 fn df_conflict_in_batch(factory: &StoreFactory) {

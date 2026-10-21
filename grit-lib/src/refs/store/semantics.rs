@@ -207,7 +207,7 @@ fn resolve_map(
         baseline
     };
     let Some(value) = map.get(name) else {
-        return Err(RefStoreError::Corrupt(format!("ref not found: {name}")));
+        return Err(RefStoreError::not_found(name));
     };
     match value {
         RawRef::Direct(oid) => Ok(*oid),

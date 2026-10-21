@@ -32,6 +32,7 @@ use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::reflog;
+use crate::refs::store::RefStoreError;
 use crate::repo::Repository;
 
 /// The current state of HEAD.
@@ -236,7 +237,7 @@ fn resolve_head_impl(git_dir: &Path, repo: Option<&crate::repo::Repository>) -> 
         // Git `refs_resolve_ref_unsafe` returning no target for `worktree list`.
         let oid = match resolve_named(&refname) {
             Ok(oid) => Some(oid),
-            Err(Error::InvalidRef(msg)) if msg.starts_with("ref not found:") => {
+            Err(Error::RefStore(RefStoreError::NotFound { .. })) => {
                 if refname.starts_with("refs/heads/") {
                     None
                 } else {
@@ -806,5 +807,46 @@ mod merge_sentinel_tests {
         for name in merge_completion_sentinels() {
             assert!(!git.join(name).exists(), "expected {name} to be removed");
         }
+    }
+}
+
+#[cfg(test)]
+mod head_state_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::{resolve_head, resolve_head_for_repository, HeadState};
+    use crate::repo::init_repository;
+    use crate::RefStorageFormat;
+    use tempfile::TempDir;
+
+    fn unborn_main() -> HeadState {
+        HeadState::Branch {
+            refname: "refs/heads/main".to_owned(),
+            short_name: "main".to_owned(),
+            oid: None,
+        }
+    }
+
+    #[test]
+    fn unborn_branch_resolves_without_oid_on_every_backend() {
+        for format in [RefStorageFormat::Files, RefStorageFormat::Reftable] {
+            let tmp = TempDir::new().unwrap();
+            let repo = init_repository(tmp.path(), false, "main", None, format).unwrap();
+            assert_eq!(resolve_head(repo.git_dir()).unwrap(), unborn_main());
+            assert_eq!(resolve_head_for_repository(&repo).unwrap(), unborn_main());
+        }
+    }
+
+    #[test]
+    fn head_symref_to_missing_non_branch_is_invalid() {
+        let tmp = TempDir::new().unwrap();
+        let repo =
+            init_repository(tmp.path(), false, "main", None, RefStorageFormat::Files).unwrap();
+        std::fs::write(repo.git_dir().join("HEAD"), "ref: refs/tags/missing\n").unwrap();
+        assert_eq!(resolve_head(repo.git_dir()).unwrap(), HeadState::Invalid);
+        assert_eq!(
+            resolve_head_for_repository(&repo).unwrap(),
+            HeadState::Invalid
+        );
     }
 }

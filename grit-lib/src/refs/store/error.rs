@@ -44,6 +44,13 @@ pub enum RefStoreError {
     #[error("symbolic ref loop or chain too deep")]
     SymrefLoop,
 
+    /// The ref (or the target at the end of its symbolic chain) does not exist.
+    #[error("ref not found: {name}")]
+    NotFound {
+        /// Name of the missing ref: the requested name, or the dangling symbolic target.
+        name: String,
+    },
+
     /// Stored data for a ref or reflog is malformed.
     #[error("corrupt ref store: {0}")]
     Corrupt(String),
@@ -54,6 +61,14 @@ pub enum RefStoreError {
         /// The rejected ref name.
         name: String,
     },
+}
+
+impl RefStoreError {
+    pub(crate) fn not_found(name: &str) -> Self {
+        Self::NotFound {
+            name: name.to_owned(),
+        }
+    }
 }
 
 impl From<RefnameUnavailable> for RefStoreError {

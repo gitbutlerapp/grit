@@ -13010,6 +13010,8 @@ pub grit_lib::refs::store::RefStoreError::LockHeld
 pub grit_lib::refs::store::RefStoreError::LockHeld::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::NameUnavailable
 pub grit_lib::refs::store::RefStoreError::NameUnavailable::reason: grit_lib::refs::RefnameUnavailable
+pub grit_lib::refs::store::RefStoreError::NotFound
+pub grit_lib::refs::store::RefStoreError::NotFound::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::SymrefLoop
 impl core::clone::Clone for grit_lib::refs::store::RefStoreError
 pub fn grit_lib::refs::store::RefStoreError::clone(&self) -> Self

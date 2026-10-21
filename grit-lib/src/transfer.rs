@@ -1783,7 +1783,8 @@ fn ref_store_error_refname(err: &Error) -> Option<String> {
         crate::refs::store::RefStoreError::ExpectedMismatch { name, .. }
         | crate::refs::store::RefStoreError::DuplicateUpdate { name }
         | crate::refs::store::RefStoreError::LockHeld { name }
-        | crate::refs::store::RefStoreError::InvalidRefName { name } => name.clone(),
+        | crate::refs::store::RefStoreError::InvalidRefName { name }
+        | crate::refs::store::RefStoreError::NotFound { name } => name.clone(),
         crate::refs::store::RefStoreError::NameUnavailable { reason } => match reason {
             crate::refs::RefnameUnavailable::SameBatch { refname, .. }
             | crate::refs::RefnameUnavailable::AncestorExists {
