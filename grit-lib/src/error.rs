@@ -659,6 +659,36 @@ pub enum Error {
         worktree_path: String,
     },
 
+    /// `refs/heads/<branch>` does not exist.
+    #[error("no branch named '{branch}'")]
+    BranchNotFound {
+        /// Short branch name (e.g. `topic`).
+        branch: String,
+    },
+
+    /// [`delete_branch`](crate::porcelain::branch::delete_branch) refuses to delete the branch
+    /// `HEAD` points at.
+    #[error("cannot delete '{branch}' — it is the current branch")]
+    CannotDeleteCurrentBranch {
+        /// Short branch name (e.g. `main`).
+        branch: String,
+    },
+
+    /// [`delete_branch`](crate::porcelain::branch::delete_branch) without `force` found commits
+    /// on the branch that are not reachable from its upstream (or from `HEAD` when it has none).
+    #[error("the branch '{branch}' is not fully merged")]
+    BranchNotMerged {
+        /// Short branch name (e.g. `topic`).
+        branch: String,
+    },
+
+    /// `refs/tags/<tag>` does not exist.
+    #[error("no tag named '{tag}'")]
+    TagNotFound {
+        /// Short tag name (e.g. `v1.0`).
+        tag: String,
+    },
+
     /// A linked worktree path is already registered under `.git/worktrees/`.
     #[error(
         "'{path}' is a missing but already registered worktree; use add with --force to override, or prune or remove to clear"

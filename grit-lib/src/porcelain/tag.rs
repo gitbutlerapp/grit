@@ -1,16 +1,15 @@
-//! `git tag` listing/filtering core.
+//! Tag creation, listing, deletion and the list filter/sort helpers.
 //!
 //! The `grit tag` command parses argv, resolves identity, and formats output;
 //! what lives here is presentation-free tag logic: creating lightweight and
-//! annotated tags ([`create_tag`]), listing metadata ([`tag_ref_metadata`]),
-//! filter/sort predicates, and `-m`/`-F` message cleanup ([`strip_comments`]).
-//! This module performs object and ref writes for create paths and pure
-//! computations for list filters.
+//! annotated tags ([`create_tag`]), listing ([`list_tags`]) and deleting
+//! ([`delete_tag`]) tag refs, filter/sort predicates, and `-m`/`-F` message
+//! cleanup ([`strip_comments`]).
 //!
 //! # What this module owns
 //!
-//! - Tag creation ([`create_tag`], [`CreateTagRequest`], [`TagKind`]) and list
-//!   classification ([`tag_ref_metadata`]).
+//! - Tag creation ([`create_tag`], [`CreateTagRequest`], [`TagKind`]), listing
+//!   ([`list_tags`], [`TagInfo`], [`tag_ref_metadata`]) and deletion ([`delete_tag`]).
 //! - The `--contains` / `--no-contains` / `--points-at` filter predicates
 //!   ([`tag_contains`], [`tag_points_at`]).
 //! - The `--sort` comparators: numeric `version:refname` ordering
@@ -27,6 +26,8 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
 use crate::refs;
 use crate::repo::Repository;
+
+const TAGS_PREFIX: &str = "refs/tags/";
 
 /// Whether a `refs/tags/*` ref is lightweight or an annotated tag object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +129,72 @@ pub fn tag_ref_metadata(repo: &Repository, ref_oid: &ObjectId) -> (TagKind, Opti
         ),
         ObjectKind::Tree | ObjectKind::Blob => (TagKind::Lightweight, None),
     }
+}
+
+/// One tag in the result of [`list_tags`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagInfo {
+    /// Short tag name (without `refs/tags/`).
+    pub name: String,
+    /// Object id stored at `refs/tags/<name>` (a tag object for annotated tags).
+    pub oid: ObjectId,
+    /// Whether the tag is lightweight or annotated.
+    pub kind: TagKind,
+    /// Commit the tag ultimately references, when it peels to one.
+    pub peeled: Option<ObjectId>,
+}
+
+/// List the tags (`refs/tags/*`) of `repo`, sorted by name and classified with
+/// [`tag_ref_metadata`].
+///
+/// Reads through the repository's ref store, so the reftable backend is honoured.
+///
+/// # Errors
+///
+/// Returns an error when the ref store cannot be read. Unreadable tag targets are
+/// reported as lightweight with no peeled commit rather than failing the listing.
+pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>> {
+    Ok(repo
+        .references()
+        .list(TAGS_PREFIX)?
+        .into_iter()
+        .map(|(refname, oid)| {
+            let (kind, peeled) = tag_ref_metadata(repo, &oid);
+            TagInfo {
+                name: refname
+                    .strip_prefix(TAGS_PREFIX)
+                    .unwrap_or(&refname)
+                    .to_owned(),
+                oid,
+                kind,
+                peeled,
+            }
+        })
+        .collect())
+}
+
+/// Delete `refs/tags/<name>`.
+///
+/// The tag object of an annotated tag stays in the object database.
+///
+/// # Returns
+///
+/// The object id the tag ref pointed at before deletion.
+///
+/// # Errors
+///
+/// Returns [`Error::TagNotFound`] when the tag does not exist, and propagates ref
+/// store failures.
+pub fn delete_tag(repo: &Repository, name: &str) -> Result<ObjectId> {
+    let tag_ref = format!("{TAGS_PREFIX}{name}");
+    let oid = repo
+        .references()
+        .resolve_if_exists(&tag_ref)?
+        .ok_or_else(|| Error::TagNotFound {
+            tag: name.to_owned(),
+        })?;
+    refs::delete_ref(repo.git_dir(), &tag_ref)?;
+    Ok(oid)
 }
 
 /// Get annotation text for a tag (up to `n` lines).
@@ -370,5 +437,101 @@ fn glob_match_bytes(pat: &[u8], text: &[u8]) -> bool {
         (Some(&b'?'), Some(_)) => glob_match_bytes(&pat[1..], &text[1..]),
         (Some(p), Some(t)) if p == t => glob_match_bytes(&pat[1..], &text[1..]),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use super::*;
+    use crate::porcelain::commit::{create_commit, CommitRequest};
+    use crate::progress::NullProgress;
+    use crate::repo::InitOptions;
+
+    fn repo_with_commit() -> (tempfile::TempDir, Repository, ObjectId) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+        let req = CommitRequest {
+            message: "one".into(),
+            author: "T <t@example.com> 1700000000 +0000".into(),
+            committer: "T <t@example.com> 1700000000 +0000".into(),
+            allow_empty: true,
+            sign_override: None,
+            amend: false,
+            assume_worktree_synced: false,
+            skip_pre_commit_tree_match: false,
+            staged_change_count: None,
+        };
+        let oid = create_commit(&repo, &req, &mut NullProgress)
+            .expect("commit")
+            .oid;
+        (tmp, repo, oid)
+    }
+
+    fn tag(repo: &Repository, name: &str, target: ObjectId, message: Option<&str>) -> ObjectId {
+        create_tag(
+            repo,
+            &CreateTagRequest {
+                name: name.into(),
+                target,
+                message: message.map(str::to_owned),
+                tagger: Some("T <t@example.com> 1700000000 +0000".into()),
+            },
+        )
+        .expect("create tag")
+        .oid
+    }
+
+    #[test]
+    fn list_tags_is_empty_without_tags() {
+        let (_tmp, repo, _) = repo_with_commit();
+        assert!(list_tags(&repo).unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_tags_sorts_and_classifies() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        let annotated = tag(&repo, "v2", commit, Some("release"));
+        tag(&repo, "v1", commit, None);
+
+        assert_eq!(
+            list_tags(&repo).unwrap(),
+            vec![
+                TagInfo {
+                    name: "v1".into(),
+                    oid: commit,
+                    kind: TagKind::Lightweight,
+                    peeled: Some(commit),
+                },
+                TagInfo {
+                    name: "v2".into(),
+                    oid: annotated,
+                    kind: TagKind::Annotated,
+                    peeled: Some(commit),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn delete_tag_returns_old_target_and_keeps_tag_object() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        let annotated = tag(&repo, "v1", commit, Some("release"));
+
+        assert_eq!(delete_tag(&repo, "v1").unwrap(), annotated);
+        assert!(list_tags(&repo).unwrap().is_empty());
+        assert!(repo.odb().exists(&annotated));
+    }
+
+    #[test]
+    fn delete_missing_tag_is_typed() {
+        let (_tmp, repo, _) = repo_with_commit();
+        let err = delete_tag(&repo, "nope").unwrap_err();
+        assert!(
+            matches!(&err, Error::TagNotFound { tag } if tag == "nope"),
+            "{err:?}"
+        );
+        assert_eq!(err.to_string(), "no tag named 'nope'");
     }
 }

@@ -67,6 +67,17 @@ impl<'repo> References<'repo> {
         self.repo.resolve_ref_name(name.as_str())
     }
 
+    /// Resolve `name` when it exists, `Ok(None)` when it does not.
+    ///
+    /// Unlike [`resolve`](Self::resolve), a missing ref is not an error, so read and
+    /// corruption failures stay distinguishable from absence.
+    pub(crate) fn resolve_if_exists(&self, name: &str) -> Result<Option<ObjectId>> {
+        if self.repo.refs().read_raw(name)?.is_none() {
+            return Ok(None);
+        }
+        self.repo.resolve_ref_name(name).map(Some)
+    }
+
     /// List refs under `prefix` (for example `"refs/heads/"`), sorted by name.
     ///
     /// # Errors
