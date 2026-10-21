@@ -102,5 +102,9 @@ fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
     )
     .expect("name-only");
     assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
-    let _target = DiffTarget::Trees;
+    let new_tree = tree_with(&repo, &[("f", b"x\n")]);
+    let _target = DiffTarget::Trees {
+        old: None,
+        new: new_tree,
+    };
 }

@@ -344,16 +344,57 @@ pub fn git_cmd(args: &[&str]) -> Cmd {
 /// while a test is still inspecting the repository (missing loose objects, MIDX entries naming
 /// deleted packs). A test can still override these with its own `GIT_CONFIG_*` variables.
 fn no_background_maintenance_env() -> Vec<(OsString, Option<OsString>)> {
-    [
-        ("GIT_CONFIG_COUNT", "2"),
-        ("GIT_CONFIG_KEY_0", "gc.auto"),
-        ("GIT_CONFIG_VALUE_0", "0"),
-        ("GIT_CONFIG_KEY_1", "maintenance.auto"),
-        ("GIT_CONFIG_VALUE_1", "false"),
+    git_config_count_env(standard_test_git_config_pairs())
+}
+
+/// Config entries merged into every grit/git subprocess from [`configure_git_env`].
+fn standard_test_git_config_pairs() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("gc.auto", "0"),
+        ("maintenance.auto", "false"),
+        ("grit.testing.changeId", "content-hash"),
     ]
-    .into_iter()
-    .map(|(k, v)| (OsString::from(k), Some(OsString::from(v))))
-    .collect()
+}
+
+fn git_config_count_env(
+    pairs: Vec<(&'static str, &'static str)>,
+) -> Vec<(OsString, Option<OsString>)> {
+    let mut env = vec![(
+        OsString::from("GIT_CONFIG_COUNT"),
+        Some(OsString::from(pairs.len().to_string())),
+    )];
+    for (i, (key, value)) in pairs.into_iter().enumerate() {
+        env.push((
+            OsString::from(format!("GIT_CONFIG_KEY_{i}")),
+            Some(OsString::from(key)),
+        ));
+        env.push((
+            OsString::from(format!("GIT_CONFIG_VALUE_{i}")),
+            Some(OsString::from(value)),
+        ));
+    }
+    env
+}
+
+/// Merge `extra` config pairs after [`standard_test_git_config_pairs`], replacing keys on conflict.
+pub fn merge_git_config_env<'a>(cmd: &'a mut Command, extra: &[(&str, &str)]) -> &'a mut Command {
+    let mut pairs: Vec<(String, String)> = standard_test_git_config_pairs()
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+    for (key, value) in extra {
+        if let Some(slot) = pairs.iter_mut().find(|(k, _)| k == key) {
+            slot.1 = (*value).to_owned();
+        } else {
+            pairs.push(((*key).to_owned(), (*value).to_owned()));
+        }
+    }
+    cmd.env("GIT_CONFIG_COUNT", pairs.len().to_string());
+    for (i, (key, value)) in pairs.iter().enumerate() {
+        cmd.env(format!("GIT_CONFIG_KEY_{i}"), key);
+        cmd.env(format!("GIT_CONFIG_VALUE_{i}"), value);
+    }
+    cmd
 }
 
 /// Run system `git`, assert success, and return stdout.
@@ -576,7 +617,8 @@ pub fn configure_git_env(cmd: &mut Command) -> &mut Command {
         .env("GIT_AUTHOR_DATE", DETERMINISTIC_DATE)
         .env("GIT_COMMITTER_DATE", DETERMINISTIC_DATE)
         .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device());
+    merge_git_config_env(cmd, &[])
 }
 
 fn null_device() -> &'static str {

@@ -4,6 +4,7 @@
 //! object, persists the index with a valid cache-tree, then updates the branch and `HEAD`
 //! reflogs through [`crate::refs::update_branch_for_commit`].
 
+use crate::change_id::{change_id, set_change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::diff::refresh_index_stat_content_verified_with_rules;
 use crate::diff::{diff_tree_path_change_count, zero_oid};
@@ -258,7 +259,7 @@ fn create_commit_with_index(
             }
         }
     }
-    let commit_data = CommitData {
+    let mut commit_data = CommitData {
         tree,
         parents: commit_parents,
         author,
@@ -271,6 +272,25 @@ fn create_commit_with_index(
         extra_headers: amend_extra_headers,
     };
     let config = repo.config()?;
+    let policy = ChangeIdPolicy::from_config(config.as_ref());
+    if policy.enabled() {
+        if req.amend {
+            if change_id(&commit_data).is_none() {
+                if let Some(tip) = replaced_tip {
+                    set_change_id(&mut commit_data, &ChangeId::derived_from_commit_id(&tip));
+                }
+            }
+        } else if let Some(id) = policy
+            .id_for_new_commit(
+                &commit_data,
+                repo.odb().hash_algo(),
+                repo.change_id_generator().as_ref(),
+            )
+            .map_err(|e| Error::Message(format!("change id: {e}")))?
+        {
+            set_change_id(&mut commit_data, &id);
+        }
+    }
     let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
 
@@ -359,6 +379,10 @@ fn create_commit_with_index(
 
 /// Serialize `data` and sign the bytes when [`should_sign_commit`] says so.
 ///
+/// Does not assign change ids. Callers that need a `change-id` header (for example
+/// [`create_commit`]) set it with [`crate::change_id::set_change_id`] first. Stash,
+/// notes, and other auxiliary commits use this path without adding ids.
+///
 /// # Errors
 ///
 /// Propagates signing and config errors from [`GpgConfig::from_config`] and
@@ -384,6 +408,8 @@ pub fn prepare_commit_bytes(
 }
 
 /// Write a commit object to the ODB, honoring `commit.gpgsign` and `sign_override`.
+///
+/// Does not assign change ids; see [`prepare_commit_bytes`].
 ///
 /// # Errors
 ///

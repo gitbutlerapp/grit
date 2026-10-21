@@ -194,10 +194,14 @@ fn algorithm_flag_overrides_config() {
     opts.algorithm = DiffAlgorithm::Histogram;
     assert_eq!(opts.algorithm, DiffAlgorithm::Histogram);
 
-    let opts_off = opts.with_renames(RenameDetection::Off);
-    assert_eq!(opts_off.rename_similarity_threshold(), None);
+    let threshold = opts
+        .clone()
+        .with_renames(RenameDetection::Off)
+        .rename_similarity_threshold();
+    assert_eq!(threshold, None);
     assert_eq!(
-        opts_off.rename_threshold_u32(),
+        opts.with_renames(RenameDetection::Off)
+            .rename_threshold_u32(),
         grit_lib::diff::RENAME_DETECTION_DISABLED
     );
 }

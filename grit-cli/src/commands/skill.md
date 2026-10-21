@@ -54,6 +54,8 @@ $ grit commit -m "Explain what changed and why"
 
 `grit commit` fails with "nothing to commit" on a clean tree unless you pass `--allow-empty`. It also refuses a detached HEAD.
 
+Each commit gets a stable **`change-id`** header (on by default) that survives `--amend`. Disable with `grit config grit.changeIds false` when you need Git-identical commit objects. See the docs site section on change ids for derivation and testing config.
+
 ## Branches
 
 | Task | Command |

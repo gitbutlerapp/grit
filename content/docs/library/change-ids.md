@@ -34,6 +34,12 @@ Derivation takes object-id bytes `4..20`, reverses their order, bit-reverses eac
 
 Embedders inject randomness with [`ChangeIdGenerator`](rustdoc:grit_lib::change_id::ChangeIdGenerator) on [`RepositoryOptions::with_change_id_generator`](rustdoc:grit_lib::environment::RepositoryOptions::with_change_id_generator); [`Repository::change_id_generator`](rustdoc:grit_lib::repo::Repository::change_id_generator) exposes the active generator.
 
+## Where ids are assigned
+
+[`create_commit`](rustdoc:grit_lib::porcelain::commit::create_commit) (and the CLI `grit commit` built on it) applies [`ChangeIdPolicy`](rustdoc:grit_lib::change_id::ChangeIdPolicy) before serializing: new commits, the initial commit, merge conclusions, and amends that need a stored id. Amends keep an existing `change-id` / `gitbutler-change-id` header; when the replaced tip had none, the derived id from that tip is stored.
+
+[`prepare_commit_bytes`](rustdoc:grit_lib::porcelain::commit::prepare_commit_bytes) and [`write_commit_object`](rustdoc:grit_lib::porcelain::commit::write_commit_object) do **not** add change ids — stash, notes, and other auxiliary commits stay header-free unless the caller sets one.
+
 ## Git compatibility
 
 The header is an ordinary commit header line. System `git` preserves it on read/write; `git fsck --strict` accepts commits that carry `change-id`.
