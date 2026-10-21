@@ -11,7 +11,7 @@ mod imp {
 
     use libc::{
         regcomp, regex_t, regexec, regfree, regmatch_t, REG_EXTENDED, REG_ICASE, REG_NEWLINE,
-        REG_NOMATCH, REG_STARTEND,
+        REG_NOMATCH,
     };
 
     /// Compiled POSIX ERE (`REG_EXTENDED | REG_NEWLINE`).
@@ -84,27 +84,19 @@ mod imp {
             if from > haystack.len() {
                 return None;
             }
-            let mut pmatch = regmatch_t {
-                rm_so: from as libc::regoff_t,
-                rm_eo: haystack.len() as libc::regoff_t,
-            };
-            let rc = unsafe {
-                regexec(
-                    &self.inner.re,
-                    haystack.as_ptr().cast(),
-                    1,
-                    &mut pmatch,
-                    REG_STARTEND,
-                )
-            };
+            // Search from `from` via a suffix slice. `REG_STARTEND` is a BSD/glibc extension and
+            // is not exposed by musl's libc bindings, so we avoid it for portable static builds.
+            let suffix = &haystack[from..];
+            let mut pmatch = regmatch_t { rm_so: 0, rm_eo: 0 };
+            let rc = unsafe { regexec(&self.inner.re, suffix.as_ptr().cast(), 1, &mut pmatch, 0) };
             if rc == REG_NOMATCH {
                 return None;
             }
             if rc != 0 {
                 return None;
             }
-            let start = pmatch.rm_so.max(0) as usize;
-            let end = pmatch.rm_eo.max(0) as usize;
+            let start = from + pmatch.rm_so.max(0) as usize;
+            let end = from + pmatch.rm_eo.max(0) as usize;
             if start > end || end > haystack.len() {
                 return None;
             }
