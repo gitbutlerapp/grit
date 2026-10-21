@@ -13,7 +13,8 @@ use crate::fixture::{remove_dir_robust, scratch_dir};
 use crate::fsck_suite::{clone_deep_worktree, fsck_medium_scenario};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::network_fixture::{ensure_fixture, NetworkFixtureKind, NetworkProfile};
-use crate::odb_fixture::{ensure_git_git_bare, odb_isolated_env};
+use crate::odb_fixture::odb_isolated_env;
+use crate::parallel_fixture::{ensure_repack_pack, ParallelProfile};
 use crate::parallel_suite::prepare_parallel_index_pack;
 use crate::resource::bench_with_peak_rss;
 use crate::scenarios::{Driver, Scenario};
@@ -75,21 +76,6 @@ fn hash_object_256mib_scenario(
         grit_via_shell: true,
         git_via_shell: true,
     }
-}
-
-fn find_primary_pack(repo: &Path) -> Result<PathBuf> {
-    let pack_dir = repo.join("objects/pack");
-    let mut packs: Vec<PathBuf> = fs::read_dir(&pack_dir)
-        .with_context(|| format!("read {}", pack_dir.display()))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "pack"))
-        .collect();
-    packs.sort();
-    packs
-        .into_iter()
-        .next()
-        .with_context(|| format!("no .pack under {}", pack_dir.display()))
 }
 
 fn ensure_hash_payload() -> Result<PathBuf> {
@@ -273,7 +259,7 @@ pub fn prepare_hash_object(_git: &Path, repo: &Path) -> Result<()> {
     clear_loose_objects(repo)
 }
 
-/// End-to-end hash scenarios: 256 MiB blob write, git.git index-pack, medium fsck.
+/// End-to-end hash scenarios: 256 MiB blob write, repacked-pack index-pack, medium fsck.
 pub fn run_hash_suite(
     hyperfine: &Path,
     git: &Path,
@@ -300,8 +286,14 @@ pub fn run_hash_suite(
         prepare: Some(&hash_prepare),
     })?;
 
-    let git_git = ensure_git_git_bare(git)?;
-    let pack_path = find_primary_pack(&git_git)?;
+    // Synthetic repacked pack: realistic size/shape without git.git's SHAttered test blobs
+    // (grit rejects those on the checked object-id path; system git index-pack accepts them).
+    let index_profile = if smoke {
+        ParallelProfile::Smoke
+    } else {
+        ParallelProfile::Production
+    };
+    let (pack_repo, pack_path) = ensure_repack_pack(git, index_profile)?;
     let staging = scratch_dir().join("hash-index-pack-staging");
     prepare_parallel_index_pack(&pack_path, &staging)?;
     let pack_in_staging = staging.join("bench.pack");
@@ -321,7 +313,7 @@ pub fn run_hash_suite(
             "index-pack".into(),
             pack_in_staging.display().to_string(),
             "--repo".into(),
-            git_git.display().to_string(),
+            pack_repo.display().to_string(),
             "--threads".into(),
             "0".into(),
         ],
@@ -329,8 +321,11 @@ pub fn run_hash_suite(
     let index_scenario = Scenario {
         id: "index-pack-git-git".into(),
         group: "hash".into(),
-        fixture: git_git.display().to_string(),
-        description: "Build pack index records for upstream git.git primary pack".into(),
+        fixture: pack_repo.display().to_string(),
+        description: format!(
+            "Build pack index records for repacked {} pack (collision-test blobs excluded)",
+            index_profile.suffix()
+        ),
         grit_argv: vec![grit_index],
         git_argv: vec![git_index],
         driver: Driver::Lib,
