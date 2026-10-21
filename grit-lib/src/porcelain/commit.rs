@@ -336,7 +336,9 @@ fn create_commit_with_index(
         }
     }
 
-    let mut message = if req.amend && req.message.trim().is_empty() {
+    // Reuse the tip message only when the caller supplied no new message bytes (`""`).
+    // Whitespace-only bodies must go through [`normalize_commit_message`] and fail when empty.
+    let mut message = if req.amend && req.message.is_empty() {
         amend_default_message.unwrap_or_default()
     } else {
         normalize_commit_message(&req.message)?
@@ -973,6 +975,25 @@ mod tests {
             outcome.oid
         );
         assert!(outcome.hooks_run.contains(&HookName::PostCommit));
+    }
+
+    #[test]
+    fn amend_whitespace_only_message_does_not_reuse_tip() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("keep subject"), &mut NullProgress).unwrap();
+
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut amend = commit_req("   \n\n");
+        amend.amend = true;
+        assert!(matches!(
+            create_commit(&repo, &amend, &mut NullProgress),
+            Err(Error::Message(_))
+        ));
     }
 
     #[test]

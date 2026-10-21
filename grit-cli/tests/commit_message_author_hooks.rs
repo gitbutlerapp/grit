@@ -246,8 +246,8 @@ fn amend_author_override() -> TestResult {
         ],
     );
     assert!(out.success(), "{}", out.dump());
-    let idents = git(root, &["log", "-1", "--format=%an|%ae"]).stdout;
-    assert_eq!(idents.trim(), "New Author|new@example.com");
+    let idents = git(root, &["log", "-1", "--format=%an|%ae|%cn|%ce"]).stdout;
+    assert_eq!(idents.trim(), "New Author|new@example.com|R|r@e.com");
     assert!(git(root, &["fsck", "--strict"]).success());
     Ok(())
 }
