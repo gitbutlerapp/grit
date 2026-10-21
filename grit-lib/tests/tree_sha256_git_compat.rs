@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::objects::{parse_commit, parse_tree, HashAlgo, ObjectId, ObjectKind};
+use grit_lib::objects::{serialize_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::tree_sha256::{
     path_matches_glob, tree_sha256, MissingSubmoduleReason, TreeSha256, TreeSha256Options,
@@ -326,8 +326,14 @@ fn golden_vectors_match_reference_tool() {
     }
     let raw = fs::read_to_string(&golden_path).unwrap();
     let entries: Vec<GoldenEntry> = serde_json::from_str(&raw).unwrap();
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for entry in entries {
-        let repo = Repository::discover(Some(&entry.repo), &RepositoryOptions::empty()).unwrap();
+        let repo_path = if entry.repo.is_absolute() {
+            entry.repo.clone()
+        } else {
+            manifest.join(&entry.repo)
+        };
+        let repo = Repository::discover(Some(&repo_path), &RepositoryOptions::empty()).unwrap();
         let oid: ObjectId = entry.rev.parse().unwrap();
         let report = tree_sha256(&repo, oid, &TreeSha256Options::default()).unwrap();
         assert_eq!(
@@ -373,4 +379,204 @@ fn sha256_object_format_repo() {
 fn glob_exclusion_unit() {
     assert!(path_matches_glob("vendor/foo", "vendor/*"));
     assert!(!path_matches_glob("other", "vendor/*"));
+}
+
+#[test]
+fn non_utf8_and_backslash_tree_entry_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = init_repo(tmp.path());
+    let odb = repo.odb();
+    let blob_a = odb
+        .write_loose_materialize(ObjectKind::Blob, b"a\n")
+        .unwrap();
+    let blob_b = odb
+        .write_loose_materialize(ObjectKind::Blob, b"b\n")
+        .unwrap();
+    let tree_body = serialize_tree(&[
+        TreeEntry {
+            mode: 0o100644,
+            name: b"non-utf8-\xff".to_vec(),
+            oid: blob_a,
+        },
+        TreeEntry {
+            mode: 0o100644,
+            name: b"back\\slash".to_vec(),
+            oid: blob_b,
+        },
+    ]);
+    let tree = odb
+        .write_loose_materialize(ObjectKind::Tree, &tree_body)
+        .unwrap();
+    let commit_body =
+        format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\n");
+    let commit = odb
+        .write_loose_materialize(ObjectKind::Commit, commit_body.as_bytes())
+        .unwrap();
+    let report = tree_sha256(&repo, commit, &TreeSha256Options::default()).unwrap();
+    assert_eq!(report.files, 2);
+    let expected = plain_tree_sha256_from_records(
+        &repo,
+        &[(blob_a, b"non-utf8-\xff"), (blob_b, b"back\\slash")],
+    );
+    assert_eq!(report.digest.to_hex(), expected);
+}
+
+fn plain_tree_sha256_from_records(repo: &Repository, entries: &[(ObjectId, &[u8])]) -> String {
+    let mut records: Vec<Vec<u8>> = Vec::with_capacity(entries.len());
+    for (oid, path) in entries {
+        let obj = repo.odb().read(oid).unwrap();
+        let hex = hex_bytes(&HashAlgo::Sha256.checksum_digest(&obj.data));
+        records.push(file_record_bytes_raw(&hex, path));
+    }
+    records.sort_by(|a, b| record_path_key(a).cmp(record_path_key(b)));
+    let mut concat = Vec::new();
+    for r in &records {
+        concat.extend_from_slice(r);
+    }
+    hex_bytes(&HashAlgo::Sha256.checksum_digest(&concat))
+}
+
+fn file_record_bytes_raw(content_hex: &str, path: &[u8]) -> Vec<u8> {
+    let mut rec = Vec::new();
+    rec.extend_from_slice(content_hex.as_bytes());
+    rec.push(b' ');
+    rec.extend_from_slice(path);
+    rec.push(0);
+    rec
+}
+
+#[test]
+fn gitlink_commit_in_super_odb_still_requires_checkout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sub_dir = tmp.path().join("sub-src");
+    fs::create_dir(&sub_dir).unwrap();
+    git(&sub_dir, &["init", "-q", "-b", "main"]);
+    fs::write(sub_dir.join("m.txt"), b"m\n").unwrap();
+    git(&sub_dir, &["add", "m.txt"]);
+    git(&sub_dir, &["commit", "-m", "sub"]);
+    let sub_head: ObjectId = git(&sub_dir, &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+
+    let super_dir = tmp.path().join("super");
+    fs::create_dir(&super_dir).unwrap();
+    git(&super_dir, &["init", "-q", "-b", "main"]);
+    fs::write(
+        super_dir.join(".gitmodules"),
+        format!(
+            "[submodule \"module\"]\n\tpath = module\n\turl = file://{}\n",
+            sub_dir.display()
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .current_dir(&super_dir)
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{},module", sub_head.to_hex()),
+        ])
+        .status()
+        .unwrap();
+    git(&super_dir, &["add", ".gitmodules"]);
+    git(&super_dir, &["commit", "-m", "super"]);
+
+    // Pin the gitlink commit into the superproject ODB without checking out `module/`.
+    let sub_commit_path = sub_dir
+        .join(".git/objects")
+        .join(&sub_head.to_hex()[..2])
+        .join(&sub_head.to_hex()[2..]);
+    let super_obj = super_dir
+        .join(".git/objects")
+        .join(&sub_head.to_hex()[..2])
+        .join(&sub_head.to_hex()[2..]);
+    fs::create_dir_all(super_obj.parent().unwrap()).unwrap();
+    fs::copy(sub_commit_path, super_obj).unwrap();
+
+    let repo = Repository::discover(Some(&super_dir), &RepositoryOptions::empty()).unwrap();
+    let head: ObjectId = git(&super_dir, &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+    let err = tree_sha256(&repo, head, &TreeSha256Options::default()).unwrap_err();
+    match err {
+        Error::TreeSha256MissingSubmodules(list) => {
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0].path, "module");
+            assert_eq!(list[0].reason, MissingSubmoduleReason::NotCheckedOut);
+        }
+        other => panic!("expected missing submodule, got {other:?}"),
+    }
+}
+
+#[test]
+fn nested_submodule_excluded_paths_are_qualified() {
+    let tmp = tempfile::tempdir().unwrap();
+    let nest = tmp.path().join("nest-src");
+    fs::create_dir(&nest).unwrap();
+    git(&nest, &["init", "-q", "-b", "main"]);
+    fs::write(nest.join("n.txt"), b"n\n").unwrap();
+    git(&nest, &["add", "n.txt"]);
+    git(&nest, &["commit", "-m", "nest"]);
+    let nest_head = git(&nest, &["rev-parse", "HEAD"]).trim().to_string();
+
+    let inner = tmp.path().join("inner-src");
+    fs::create_dir(&inner).unwrap();
+    git(&inner, &["init", "-q", "-b", "main"]);
+    fs::write(
+        inner.join(".gitmodules"),
+        format!(
+            "[submodule \"nest\"]\n\tpath = nest\n\turl = file://{}\n",
+            nest.display()
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .current_dir(&inner)
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{nest_head},nest"),
+        ])
+        .status()
+        .unwrap();
+    git(&inner, &["add", ".gitmodules"]);
+    git(&inner, &["commit", "-m", "inner"]);
+    let inner_head = git(&inner, &["rev-parse", "HEAD"]).trim().to_string();
+
+    let root = tmp.path().join("root");
+    fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    fs::write(
+        root.join(".gitmodules"),
+        format!(
+            "[submodule \"inner\"]\n\tpath = inner\n\turl = file://{}\n",
+            inner.display()
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .current_dir(&root)
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{inner_head},inner"),
+        ])
+        .status()
+        .unwrap();
+    git(&root, &["add", ".gitmodules"]);
+    git(&root, &["commit", "-m", "root"]);
+    install_submodule_checkout(&root, "inner", &inner, &inner_head);
+
+    let repo = Repository::discover(Some(&root), &RepositoryOptions::empty()).unwrap();
+    let head: ObjectId = git(&root, &["rev-parse", "HEAD"]).trim().parse().unwrap();
+    let mut opts = TreeSha256Options::default();
+    opts.exclude_exact = vec!["nest".into()];
+    let report = tree_sha256(&repo, head, &opts).unwrap();
+    assert_eq!(report.excluded.len(), 1);
+    assert_eq!(report.excluded[0].0, "inner/nest");
 }

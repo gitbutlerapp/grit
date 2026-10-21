@@ -1,0 +1,8 @@
+[
+  {
+    "name": "single-file",
+    "repo": "tests/fixtures/tree_sha256/single-file",
+    "rev": "eed9ee17b2e6a1dc1be53dce8c404e585c017fb2",
+    "digest": "c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a"
+  }
+]

@@ -10,7 +10,7 @@ use crate::config::ConfigSet;
 use crate::diff::submodule_embedded_git_dir;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
-use crate::hash::try_par_hash_with;
+use crate::hash::{try_par_hash_with, try_par_hash_with_force, PAR_HASH_MIN_ITEMS};
 use crate::objects::{parse_commit, parse_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use crate::parallel::ParallelHashError;
 use crate::parallel::ParallelOp;
@@ -163,7 +163,7 @@ fn tree_sha256_with_chain(
         cycles: Vec::new(),
         blob_jobs: Vec::new(),
     };
-    ctx.walk_tree(tree_oid, "")?;
+    ctx.walk_tree(tree_oid, b"")?;
     ctx.finish_blob_jobs()?;
     if !ctx.missing.is_empty() {
         return Err(Error::TreeSha256MissingSubmodules(ctx.missing));
@@ -217,7 +217,7 @@ fn record_sort_key(record: &[u8]) -> &[u8] {
 }
 
 struct BlobJob {
-    path: String,
+    path: Vec<u8>,
     oid: ObjectId,
 }
 
@@ -235,25 +235,21 @@ struct ComputeCtx<'a> {
 }
 
 impl ComputeCtx<'_> {
-    fn walk_tree(&mut self, tree_oid: ObjectId, prefix: &str) -> Result<()> {
+    fn walk_tree(&mut self, tree_oid: ObjectId, prefix: &[u8]) -> Result<()> {
         let obj = self.repo.odb().read(&tree_oid)?;
         if obj.kind != ObjectKind::Tree {
             return Err(Error::CorruptObject(format!("expected tree {tree_oid}")));
         }
         let entries = parse_tree(&obj.data)?;
         for TreeEntry { mode, name, oid } in entries {
-            let name_str = std::str::from_utf8(&name)
-                .map_err(|_| Error::CorruptObject("tree name not utf-8".into()))?;
-            if name_str.contains('/') || name_str.contains('\\') {
-                return Err(Error::CorruptObject("tree name contains slash".into()));
+            if name.contains(&b'/') || name.contains(&0) {
+                return Err(Error::CorruptObject("invalid tree entry name".into()));
             }
-            let mut path = String::with_capacity(prefix.len() + name_str.len());
-            path.push_str(prefix);
-            path.push_str(name_str);
+            let path = join_path_bytes(prefix, &name);
             match mode {
                 0o040000 => {
                     let mut child_prefix = path;
-                    child_prefix.push('/');
+                    child_prefix.push(b'/');
                     self.walk_tree(oid, &child_prefix)?;
                 }
                 0o100644 | 0o100755 | 0o120000 => {
@@ -266,40 +262,28 @@ impl ComputeCtx<'_> {
         Ok(())
     }
 
-    fn handle_gitlink(&mut self, path: &str, gitlink: ObjectId) -> Result<()> {
+    fn handle_gitlink(&mut self, path: &[u8], gitlink: ObjectId) -> Result<()> {
+        let path_str = path_bytes_to_string(path);
         if self.is_excluded(path) {
             self.push_excluded_record(path, gitlink);
-            self.excluded.push((path.to_owned(), gitlink));
+            self.excluded.push((path_str.clone(), gitlink));
             return Ok(());
         }
         if gitlink_in_commit_chain(&self.commit_chain, gitlink) {
             self.push_cycle_record(path, gitlink);
-            self.cycles.push(path.to_owned());
+            self.cycles.push(path_str.clone());
             return Ok(());
-        }
-        if let Ok(obj) = self.repo.odb().read(&gitlink) {
-            if obj.kind == ObjectKind::Commit {
-                let tree = parse_commit(&obj.data)?.tree;
-                self.commit_chain.push(gitlink);
-                let mut prefix = path.to_owned();
-                if !prefix.ends_with('/') {
-                    prefix.push('/');
-                }
-                self.walk_tree(tree, &prefix)?;
-                self.commit_chain.pop();
-                return Ok(());
-            }
         }
         let Some(sub_repo) = self.open_submodule_repo(path)? else {
             self.missing.push(MissingSubmodule {
-                path: path.to_owned(),
+                path: path_str,
                 reason: MissingSubmoduleReason::NotCheckedOut,
             });
             return Ok(());
         };
         if sub_repo.odb().read(&gitlink).is_err() {
             self.missing.push(MissingSubmodule {
-                path: path.to_owned(),
+                path: path_str,
                 reason: MissingSubmoduleReason::MissingCommit,
             });
             return Ok(());
@@ -315,11 +299,20 @@ impl ComputeCtx<'_> {
                 self.push_submodule_record(path, &sub_report.digest);
                 self.files += sub_report.files;
                 self.submodules += 1 + sub_report.submodules;
-                self.excluded.extend(sub_report.excluded);
-                self.cycles.extend(sub_report.cycles);
+                for (sub_path, oid) in sub_report.excluded {
+                    self.excluded
+                        .push((qualify_submodule_path(&path_str, &sub_path), oid));
+                }
+                for sub_path in sub_report.cycles {
+                    self.cycles
+                        .push(qualify_submodule_path(&path_str, &sub_path));
+                }
             }
             Err(Error::TreeSha256MissingSubmodules(mut miss)) => {
                 self.commit_chain.pop();
+                for m in &mut miss {
+                    m.path = qualify_submodule_path(&path_str, &m.path);
+                }
                 self.missing.append(&mut miss);
             }
             Err(e) => {
@@ -330,22 +323,27 @@ impl ComputeCtx<'_> {
         Ok(())
     }
 
-    fn is_excluded(&self, path: &str) -> bool {
-        if self.options.exclude_exact.iter().any(|p| p == path) {
+    fn is_excluded(&self, path: &[u8]) -> bool {
+        if self
+            .options
+            .exclude_exact
+            .iter()
+            .any(|p| path == p.as_bytes())
+        {
             return true;
         }
         self.options
             .exclude_globs
             .iter()
-            .any(|g| path_matches_glob(path, g))
+            .any(|g| path_matches_glob_bytes(path, g.as_bytes()))
     }
 
-    fn open_submodule_repo(&self, rel_path: &str) -> Result<Option<Repository>> {
+    fn open_submodule_repo(&self, rel_path: &[u8]) -> Result<Option<Repository>> {
         let wt = match self.repo.work_tree() {
             Some(w) => w,
             None => return Ok(None),
         };
-        let sub_wt = wt.join(rel_path);
+        let sub_wt = wt.join(path_bytes_to_os(rel_path));
         if !sub_wt.is_dir() {
             return Ok(None);
         }
@@ -354,7 +352,8 @@ impl ComputeCtx<'_> {
                 .map(Some);
         }
         let cfg = self.repo.config()?;
-        let name = submodule_name_for_path(&cfg, rel_path).unwrap_or_else(|| rel_path.to_owned());
+        let rel_str = path_bytes_to_string(rel_path);
+        let name = submodule_name_for_path(&cfg, &rel_str).unwrap_or(rel_str);
         let git_dir = resolve_submodule_git_dir(wt, self.repo.common_git_dir(), &cfg, &name)?;
         if !git_dir.join("HEAD").exists() {
             return Ok(None);
@@ -373,20 +372,23 @@ impl ComputeCtx<'_> {
             .resolve(ParallelOp::DiffContent, &cfg)
             .parallelism()
             .threads();
-        let total_bytes: usize = self.blob_jobs.iter().map(|j| j.oid.as_bytes().len()).sum();
         let odb = self.repo.odb();
-        let hashed: Vec<String> = try_par_hash_with(
-            &self.blob_jobs,
-            threads,
-            total_bytes.max(1),
-            |job: &BlobJob| {
-                let obj = odb.read(&job.oid)?;
-                if !matches!(obj.kind, ObjectKind::Blob) {
-                    return Err(Error::CorruptObject(format!("expected blob {}", job.oid)));
-                }
-                Ok(hex_sha256_content(&obj.data))
-            },
-        )
+        let mut total_bytes = 0_usize;
+        for job in &self.blob_jobs {
+            total_bytes += odb.read_info(&job.oid)?.size as usize;
+        }
+        let hash_one = |job: &BlobJob| {
+            let obj = odb.read(&job.oid)?;
+            if !matches!(obj.kind, ObjectKind::Blob) {
+                return Err(Error::CorruptObject(format!("expected blob {}", job.oid)));
+            }
+            Ok(hex_sha256_content(&obj.data))
+        };
+        let hashed: Vec<String> = if self.blob_jobs.len() >= PAR_HASH_MIN_ITEMS {
+            try_par_hash_with_force(&self.blob_jobs, threads, hash_one)
+        } else {
+            try_par_hash_with(&self.blob_jobs, threads, total_bytes.max(1), hash_one)
+        }
         .map_err(|e| match e {
             ParallelHashError::Task(err) => err,
         })?;
@@ -397,35 +399,35 @@ impl ComputeCtx<'_> {
         Ok(())
     }
 
-    fn push_submodule_record(&mut self, path: &str, digest: &TreeSha256) {
+    fn push_submodule_record(&mut self, path: &[u8], digest: &TreeSha256) {
         let mut rec = digest.to_hex().into_bytes();
         rec.push(b' ');
-        rec.extend_from_slice(path.as_bytes());
-        if !path.ends_with('/') {
+        rec.extend_from_slice(path);
+        if !path.ends_with(b"/") {
             rec.push(b'/');
         }
         rec.push(0);
         self.records.push(rec);
     }
 
-    fn push_cycle_record(&mut self, path: &str, commit: ObjectId) {
+    fn push_cycle_record(&mut self, path: &[u8], commit: ObjectId) {
         let mut rec = b"cycle:".to_vec();
         rec.extend_from_slice(commit.to_hex().as_bytes());
         rec.push(b' ');
-        rec.extend_from_slice(path.as_bytes());
-        if !path.ends_with('/') {
+        rec.extend_from_slice(path);
+        if !path.ends_with(b"/") {
             rec.push(b'/');
         }
         rec.push(0);
         self.records.push(rec);
     }
 
-    fn push_excluded_record(&mut self, path: &str, commit: ObjectId) {
+    fn push_excluded_record(&mut self, path: &[u8], commit: ObjectId) {
         let mut rec = b"excluded:".to_vec();
         rec.extend_from_slice(commit.to_hex().as_bytes());
         rec.push(b' ');
-        rec.extend_from_slice(path.as_bytes());
-        if !path.ends_with('/') {
+        rec.extend_from_slice(path);
+        if !path.ends_with(b"/") {
             rec.push(b'/');
         }
         rec.push(0);
@@ -433,11 +435,42 @@ impl ComputeCtx<'_> {
     }
 }
 
-fn file_record(content_hex: &str, path: &str) -> Vec<u8> {
+fn join_path_bytes(prefix: &[u8], name: &[u8]) -> Vec<u8> {
+    let mut path = Vec::with_capacity(prefix.len().saturating_add(name.len()));
+    path.extend_from_slice(prefix);
+    path.extend_from_slice(name);
+    path
+}
+
+fn path_bytes_to_string(path: &[u8]) -> String {
+    String::from_utf8_lossy(path).into_owned()
+}
+
+fn path_bytes_to_os(path: &[u8]) -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        std::ffi::OsStr::from_bytes(path).to_os_string()
+    }
+    #[cfg(not(unix))]
+    {
+        path_bytes_to_string(path).into()
+    }
+}
+
+fn qualify_submodule_path(gitlink_path: &str, sub_path: &str) -> String {
+    if sub_path.is_empty() {
+        return gitlink_path.to_owned();
+    }
+    let base = gitlink_path.trim_end_matches('/');
+    format!("{base}/{sub_path}")
+}
+
+fn file_record(content_hex: &str, path: &[u8]) -> Vec<u8> {
     let mut rec = Vec::with_capacity(content_hex.len() + path.len() + 2);
     rec.extend_from_slice(content_hex.as_bytes());
     rec.push(b' ');
-    rec.extend_from_slice(path.as_bytes());
+    rec.extend_from_slice(path);
     rec.push(0);
     rec
 }
@@ -502,7 +535,20 @@ pub fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> bool {
 #[must_use]
 pub fn path_matches_glob(path: &str, pattern: &str) -> bool {
     let pattern = pattern.trim_end_matches('/');
-    glob_match(path.as_bytes(), pattern.as_bytes())
+    path_matches_glob_bytes(path.as_bytes(), pattern.as_bytes())
+}
+
+/// Like [`path_matches_glob`], but `path` and `pattern` are raw bytes (`pattern` trailing `/` trimmed).
+#[must_use]
+pub fn path_matches_glob_bytes(path: &[u8], pattern: &[u8]) -> bool {
+    glob_match(path, trim_trailing_slash_bytes(pattern))
+}
+
+fn trim_trailing_slash_bytes(mut pat: &[u8]) -> &[u8] {
+    while pat.last() == Some(&b'/') {
+        pat = &pat[..pat.len() - 1];
+    }
+    pat
 }
 
 fn glob_match(path: &[u8], pat: &[u8]) -> bool {
