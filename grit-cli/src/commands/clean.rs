@@ -1,10 +1,9 @@
 //! `grit clean` — remove untracked files from the working tree.
 
-use anyhow::{bail, Context, Result};
+use crate::pathspec_args::PathspecArgs;
+use anyhow::Result;
 use grit_lib::porcelain::clean::{clean_untracked, CleanOptions};
 use grit_lib::progress::NullProgress;
-use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::{pathdiff, resolve_pathspec_in_worktree_with_git_dir};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -62,9 +61,14 @@ impl MarkdownRender for CleanOutcome {
     }
 }
 
-pub fn run(paths: &[String], force: bool, ignored: bool) -> Result<CleanOutcome> {
+pub fn run(args: &PathspecArgs, force: bool, ignored: bool) -> Result<CleanOutcome> {
     let repo = context::discover()?;
-    let pathspecs = resolve_clean_pathspecs(&repo, paths)?;
+    let resolved = args.resolve(&repo)?;
+    let pathspecs = if resolved.is_entire_tree() {
+        Vec::new()
+    } else {
+        resolved.specs.clone()
+    };
     let dry_run = !force;
     let lib_outcome = clean_untracked(
         &repo,
@@ -81,31 +85,4 @@ pub fn run(paths: &[String], force: bool, ignored: bool) -> Result<CleanOutcome>
         removed: lib_outcome.removed,
         dry_run,
     })
-}
-
-fn resolve_clean_pathspecs(repo: &Repository, selectors: &[String]) -> Result<Vec<String>> {
-    if selectors.is_empty() {
-        return Ok(Vec::new());
-    }
-    let work_tree = repo
-        .work_tree()
-        .context("grit clean needs a working tree")?;
-    let cwd = std::env::current_dir().context("could not read the current directory")?;
-    let prefix = pathdiff(&cwd, work_tree);
-    let mut specs = Vec::with_capacity(selectors.len());
-    for sel in selectors {
-        if sel.is_empty() {
-            bail!("invalid path ''");
-        }
-        let resolved = resolve_pathspec_in_worktree_with_git_dir(
-            sel,
-            sel,
-            work_tree,
-            prefix.as_deref(),
-            Some(repo.git_dir()),
-        )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-        specs.push(resolved);
-    }
-    Ok(specs)
 }

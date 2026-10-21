@@ -3,13 +3,13 @@
 use anyhow::{Context, Result};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreOutcome, RestoreSource};
 use grit_lib::revwalk::rev_parse::resolve_revision;
-use grit_lib::worktree::pathspec::{pathdiff, resolve_pathspec_in_worktree_with_git_dir};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::pathspec_args::PathspecArgs;
 
 /// CLI result (mirrors [`RestoreOutcome`]).
 #[derive(Serialize, JsonSchema, Clone)]
@@ -64,30 +64,15 @@ impl MarkdownRender for RestoreCliOutcome {
 
 /// Run `grit restore` with the given flags and path arguments.
 pub fn run(
-    paths: Vec<String>,
+    args: &PathspecArgs,
     staged: bool,
     worktree: bool,
     source: Option<String>,
 ) -> Result<RestoreCliOutcome> {
+    args.require_non_empty()?;
     let repo = context::discover()?;
-    let work_tree = repo
-        .work_tree()
-        .context("grit restore needs a working tree")?;
-    let cwd = std::env::current_dir().context("could not read the current directory")?;
-    let prefix = pathdiff(&cwd, work_tree);
-
-    let mut pathspecs = Vec::with_capacity(paths.len());
-    for sel in &paths {
-        let resolved = resolve_pathspec_in_worktree_with_git_dir(
-            sel,
-            sel,
-            work_tree,
-            prefix.as_deref(),
-            Some(repo.git_dir()),
-        )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-        pathspecs.push(resolved);
-    }
+    let resolved = args.resolve(&repo)?;
+    let pathspecs = resolved.specs.clone();
 
     let restore_source = match source {
         None => RestoreSource::Index,
@@ -109,7 +94,7 @@ pub fn run(
 
     let opts = RestoreOptions {
         pathspecs: pathspecs.clone(),
-        pathspec_sources: paths,
+        pathspec_sources: resolved.sources.clone(),
         source: restore_source,
         staged,
         worktree,

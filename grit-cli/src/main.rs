@@ -21,6 +21,7 @@ mod json_schema;
 mod log_display;
 mod markdown;
 mod output;
+mod pathspec_args;
 mod progress;
 mod ref_name_messages;
 mod rev_select;
@@ -568,8 +569,8 @@ enum Command {
     Shortlog,
     /// Stage changes. With no paths, stages everything.
     Add {
-        /// Files or directories to stage. Omit to stage all changes.
-        paths: Vec<String>,
+        #[command(flatten)]
+        pathspecs: pathspec_args::PathspecArgs,
         /// Mark staged regular files as executable (`100755`) in the index.
         #[arg(long = "executable", conflicts_with = "non_executable")]
         executable: bool,
@@ -579,8 +580,8 @@ enum Command {
     },
     /// Remove tracked paths from the working tree and index.
     Rm {
-        /// Files or directories to remove.
-        paths: Vec<String>,
+        #[command(flatten)]
+        pathspecs: pathspec_args::PathspecArgs,
         /// Remove from the index only; keep files in the working tree.
         #[arg(long)]
         cached: bool,
@@ -599,8 +600,8 @@ enum Command {
     },
     /// Remove untracked files from the working tree.
     Clean {
-        /// Limit cleaning to these paths. Omit to scan the whole tree.
-        paths: Vec<String>,
+        #[command(flatten)]
+        pathspecs: pathspec_args::PathspecArgs,
         /// Actually delete files. Without this flag, only prints what would be removed.
         #[arg(short, long)]
         force: bool,
@@ -776,9 +777,8 @@ enum Command {
     },
     /// Restore working tree and/or index paths.
     Restore {
-        /// Paths to restore (pathspecs).
-        #[arg(required = true)]
-        paths: Vec<String>,
+        #[command(flatten)]
+        pathspecs: pathspec_args::PathspecArgs,
         /// Restore the index from HEAD (or `--source`).
         #[arg(short = 'S', long = "staged")]
         staged: bool,
@@ -1232,25 +1232,29 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add {
-            paths,
+            pathspecs,
             executable,
             non_executable,
         } => emit(
-            &commands::add::run(&paths, executable, non_executable)?,
+            &commands::add::run(&pathspecs, executable, non_executable)?,
             opts,
             ctx,
         ),
         Command::Rm {
-            paths,
+            pathspecs,
             cached,
             force,
-        } => emit(&commands::rm::run(&paths, cached, force)?, opts, ctx),
+        } => emit(&commands::rm::run(&pathspecs, cached, force)?, opts, ctx),
         Command::Mv { paths, force } => emit(&commands::mv::run(&paths, force)?, opts, ctx),
         Command::Clean {
-            paths,
+            pathspecs,
             force,
             ignored,
-        } => emit(&commands::clean::run(&paths, force, ignored)?, opts, ctx),
+        } => emit(
+            &commands::clean::run(&pathspecs, force, ignored)?,
+            opts,
+            ctx,
+        ),
         Command::Repack { dry_run, quiet } => {
             emit(&commands::repack::run(dry_run, quiet)?, opts, ctx)
         }
@@ -1555,12 +1559,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             }
         },
         Command::Restore {
-            paths,
+            pathspecs,
             staged,
             worktree,
             source,
         } => emit(
-            &commands::restore::run(paths, staged, worktree, source)?,
+            &commands::restore::run(&pathspecs, staged, worktree, source)?,
             opts,
             ctx,
         ),

@@ -1,9 +1,10 @@
 //! `grit rm` — remove paths from the working tree and index.
 
+use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Context, Result};
+use grit_lib::pathspec::ResolvedPathspecs;
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions, RemoveOutcome};
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::{pathdiff, resolve_pathspec_in_worktree_with_git_dir};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -43,46 +44,37 @@ impl MarkdownRender for RmOutcome {
     }
 }
 
-pub fn run(paths: &[String], cached: bool, force: bool) -> Result<RmOutcome> {
-    if paths.is_empty() {
+pub fn run(args: &PathspecArgs, cached: bool, force: bool) -> Result<RmOutcome> {
+    if args.paths.is_empty() && args.pathspec_from_file.is_none() {
         bail!("you must specify path(s) to remove");
     }
     let repo = context::discover()?;
-    let outcome = rm(&repo, paths, cached, force)?;
+    let resolved = args.resolve(&repo)?;
+    let outcome = rm(&repo, &resolved, cached, force)?;
     Ok(RmOutcome {
         removed: outcome.removed,
     })
 }
 
-fn rm(repo: &Repository, selectors: &[String], cached: bool, force: bool) -> Result<RemoveOutcome> {
+fn rm(
+    repo: &Repository,
+    resolved: &ResolvedPathspecs,
+    cached: bool,
+    force: bool,
+) -> Result<RemoveOutcome> {
     let work_tree = repo.work_tree().context("grit rm needs a working tree")?;
-    let cwd = std::env::current_dir().context("could not read the current directory")?;
-    let prefix = pathdiff(&cwd, work_tree);
 
-    let mut pathspecs = Vec::with_capacity(selectors.len());
     let mut recursive = false;
-    for sel in selectors {
-        if sel.is_empty() {
-            bail!("invalid path ''");
-        }
+    for (sel, spec) in resolved.sources.iter().zip(resolved.specs.iter()) {
         let trailing_dir = sel.ends_with('/') || sel.ends_with('\\');
-        let resolved = resolve_pathspec_in_worktree_with_git_dir(
-            sel,
-            sel,
-            work_tree,
-            prefix.as_deref(),
-            Some(repo.git_dir()),
-        )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-        if trailing_dir || work_tree.join(&resolved).is_dir() {
+        if trailing_dir || work_tree.join(spec).is_dir() {
             recursive = true;
         }
-        pathspecs.push(resolved);
     }
 
     let opts = RemoveOptions {
-        pathspecs,
-        pathspec_sources: selectors.to_vec(),
+        pathspecs: resolved.specs.clone(),
+        pathspec_sources: resolved.sources.clone(),
         cached,
         force,
         recursive,
@@ -100,8 +92,7 @@ fn map_paths_error(err: grit_lib::error::Error) -> anyhow::Error {
                 msg.push_str(&path);
                 msg.push('\n');
             }
-            msg.push_str("(use --cached to keep the file, or -f to force removal)");
-            anyhow::anyhow!(msg)
+            anyhow::anyhow!("{msg}")
         }
         other => anyhow::anyhow!("{other}"),
     }
