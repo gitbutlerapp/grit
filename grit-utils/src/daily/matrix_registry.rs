@@ -76,6 +76,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Commit on small synth: grit commit bench vs git add+commit",
     },
     ScenarioSpec {
+        id: "commit/staged@synth-100k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Commit pre-staged index: grit commit --staged vs git commit",
+    },
+    ScenarioSpec {
+        id: "commit/paths@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Partial commit of ~1% paths: grit commit -- paths vs git commit --only",
+    },
+    ScenarioSpec {
         id: "restore/paths@synth-10k",
         area: Area::Worktree,
         headline: false,

@@ -689,15 +689,27 @@ enum Command {
         /// Commit message.
         #[arg(short = 'm', long = "message", conflicts_with = "message")]
         message_flag: Option<String>,
-        /// Stage every change first, then commit. This is the default behavior.
-        #[arg(short = 'a', long = "all")]
+        /// Stage every change first, then commit. This is the default when `commit.autoStage` is true.
+        #[arg(
+            short = 'a',
+            long = "all",
+            conflicts_with_all = ["staged", "paths", "pathspec_from_file"]
+        )]
         all: bool,
+        /// Commit only what is already staged (same as `git commit` without `-a`).
+        #[arg(
+            long = "staged",
+            conflicts_with_all = ["all", "paths", "pathspec_from_file"]
+        )]
+        staged: bool,
         /// Replace the tip commit instead of creating a new one.
         #[arg(long = "amend")]
         amend: bool,
         /// Record a commit even when the tree matches the parent (same as `git commit --allow-empty`).
         #[arg(long = "allow-empty")]
         allow_empty: bool,
+        #[command(flatten)]
+        paths: crate::pathspec_args::TrailingPathspecArgs,
     },
     /// List branches, or create / delete one.
     Branch {
@@ -1333,11 +1345,20 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Commit {
             message,
             message_flag,
-            all: _,
+            all,
+            staged,
             amend,
             allow_empty,
+            paths,
         } => emit(
-            &commands::commit::run(message.or(message_flag), amend, allow_empty)?,
+            &commands::commit::run(
+                message.or(message_flag),
+                amend,
+                allow_empty,
+                all,
+                staged,
+                paths,
+            )?,
             opts,
             ctx,
         ),

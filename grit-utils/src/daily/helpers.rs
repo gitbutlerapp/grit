@@ -21,9 +21,9 @@ use crate::scenarios::{merge_argv, pick_argv, switch_argv, PrepareKind};
 use crate::shell::shell_quote;
 use crate::worktree_fixture::{
     ensure_worktree_bench_repo, record_matrix_path_targets, set_worktree_bench_cwd,
-    shell_git_add_modified_set, shell_git_add_modified_set_and_commit, shell_grit_add_modified_set,
-    shell_mv_file, shell_redirect_devnull, shell_restore_modified_set, shell_rm_dir_git,
-    shell_rm_dir_grit,
+    shell_git_add_modified_set, shell_git_add_modified_set_and_commit, shell_git_commit_paths_only,
+    shell_grit_add_modified_set, shell_grit_commit_paths, shell_mv_file, shell_redirect_devnull,
+    shell_restore_modified_set, shell_rm_dir_git, shell_rm_dir_grit,
 };
 
 /// Shortlog/compare target for git-git matrix rows (tag present on pinned git.git).
@@ -374,6 +374,20 @@ pub fn commit_small_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     )
 }
 
+pub fn commit_staged_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["commit", "--staged", "bench"]),
+        sh_devnull(&ctx.git, &["commit", "-q", "-m", "bench"]),
+    )
+}
+
+pub fn commit_paths_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_script(shell_grit_commit_paths(&ctx.grit)),
+        sh_script(shell_git_commit_paths_only(&ctx.git)),
+    )
+}
+
 pub fn diff_worktree_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["diff"]),
@@ -578,6 +592,7 @@ pub fn prepare_bench_argv(
         PrepareKind::WorktreeStatusDirty => "prepare-worktree-status-dirty",
         PrepareKind::WorktreeAdd => "prepare-worktree-add",
         PrepareKind::WorktreeCommit => "prepare-worktree-commit",
+        PrepareKind::WorktreeCommitStaged => "prepare-worktree-commit-staged",
         PrepareKind::WorktreeDiff => "prepare-worktree-diff",
         PrepareKind::WorktreeStagedDiff => "prepare-worktree-staged-diff",
         PrepareKind::WorktreeRestorePaths => "prepare-worktree-restore-paths",
@@ -663,6 +678,12 @@ pub fn prepare_worktree_add(_: &super::plan::DailyHeadlineContext) -> super::pla
 
 pub fn prepare_worktree_commit(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
     super::plan::DailyPrepare::Hook(PrepareKind::WorktreeCommit)
+}
+
+pub fn prepare_worktree_commit_staged(
+    _: &super::plan::DailyHeadlineContext,
+) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::WorktreeCommitStaged)
 }
 
 pub fn prepare_worktree_diff(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {

@@ -1,9 +1,10 @@
 //! Worktree and related matrix scenarios (status, add, commit, restore, reset, rm, mv, clean, init).
 
 use super::super::helpers::{
-    add_all_bench, add_modified_bench, clean_untracked_bench, commit_small_bench, ctx,
-    headline_spec, init_empty_bench, mv_file_bench, prepare_stash_reset, prepare_switch_reset,
-    prepare_worktree_add, prepare_worktree_clean_untracked, prepare_worktree_commit,
+    add_all_bench, add_modified_bench, clean_untracked_bench, commit_paths_bench,
+    commit_small_bench, commit_staged_bench, ctx, headline_spec, init_empty_bench, mv_file_bench,
+    prepare_stash_reset, prepare_switch_reset, prepare_worktree_add,
+    prepare_worktree_clean_untracked, prepare_worktree_commit, prepare_worktree_commit_staged,
     prepare_worktree_init_empty, prepare_worktree_mv_file, prepare_worktree_restore_paths,
     prepare_worktree_rm_dir, prepare_worktree_status_clean, prepare_worktree_status_dirty,
     reset_hard_bench, reset_mixed_bench, restore_paths_bench, rm_dir_bench, scenario_spec,
@@ -132,6 +133,24 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: prepare_worktree_commit,
         build_git: |c| commit_small_bench(c).1,
         build_grit: |c| commit_small_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("commit/staged@synth-100k"),
+        pending: false,
+        setup: setup_synth100k,
+        prepare: prepare_worktree_commit_staged,
+        build_git: |c| commit_staged_bench(c).1,
+        build_grit: |c| commit_staged_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("commit/paths@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_worktree_commit,
+        build_git: |c| commit_paths_bench(c).1,
+        build_grit: |c| commit_paths_bench(c).0,
         correctness: None,
     });
 

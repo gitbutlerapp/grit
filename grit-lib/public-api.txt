@@ -4510,6 +4510,7 @@ pub grit_lib::error::Error::PathspecIgnored
 pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecNoMatch
 pub grit_lib::error::Error::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::error::Error::PartialCommitDuringMerge
 pub grit_lib::error::Error::PushOptionsUnsupported
 pub grit_lib::error::Error::ReceivedPackTempMissing
 pub grit_lib::error::Error::ReceivedPackTempMissing::path: std::path::PathBuf
@@ -9887,6 +9888,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::add::StageOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::add::StageOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::add::StageOutcome
 pub fn grit_lib::porcelain::add::stage(&grit_lib::repo::Repository, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
+pub fn grit_lib::porcelain::add::stage_on_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub fn grit_lib::porcelain::add::stage_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub mod grit_lib::porcelain::branch
 pub struct grit_lib::porcelain::branch::CreateBranchOutcome
@@ -10018,6 +10020,28 @@ impl core::marker::Unpin for grit_lib::porcelain::commit::CommitOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitOutcome
+pub enum grit_lib::porcelain::commit::CommitScope
+pub grit_lib::porcelain::commit::CommitScope::AutoStage
+pub grit_lib::porcelain::commit::CommitScope::Paths(grit_lib::pathspec::ResolvedPathspecs)
+pub grit_lib::porcelain::commit::CommitScope::Staged
+impl core::clone::Clone for grit_lib::porcelain::commit::CommitScope
+pub fn grit_lib::porcelain::commit::CommitScope::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::commit::CommitScope
+impl core::cmp::PartialEq for grit_lib::porcelain::commit::CommitScope
+pub fn grit_lib::porcelain::commit::CommitScope::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::commit::CommitScope
+pub fn grit_lib::porcelain::commit::CommitScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::commit::CommitScope
+impl core::marker::Freeze for grit_lib::porcelain::commit::CommitScope
+impl core::marker::Send for grit_lib::porcelain::commit::CommitScope
+impl core::marker::Sync for grit_lib::porcelain::commit::CommitScope
+impl core::marker::Unpin for grit_lib::porcelain::commit::CommitScope
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitScope
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitScope
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitScope
+pub fn grit_lib::porcelain::commit::commit_with_scope(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitScope, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
+pub fn grit_lib::porcelain::commit::default_commit_scope(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitScope>
+pub fn grit_lib::porcelain::commit::default_commit_scope_from_config(&grit_lib::config::ConfigSet) -> grit_lib::porcelain::commit::CommitScope
 pub struct grit_lib::porcelain::commit::CommitRequest
 pub grit_lib::porcelain::commit::CommitRequest::allow_empty: bool
 pub grit_lib::porcelain::commit::CommitRequest::amend: bool
@@ -11047,6 +11071,7 @@ pub grit_lib::prelude::Error::PathspecIgnored
 pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::prelude::Error::PartialCommitDuringMerge
 pub grit_lib::prelude::Error::PushOptionsUnsupported
 pub grit_lib::prelude::Error::ReceivedPackTempMissing
 pub grit_lib::prelude::Error::ReceivedPackTempMissing::path: std::path::PathBuf

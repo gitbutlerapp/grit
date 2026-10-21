@@ -10,13 +10,19 @@ order: 2
 ```text
 grit commit [-a] <message>
 grit commit [-a] -m <message>
+grit commit --staged -m <message>
+grit commit -m <message> -- [<path>…]
 grit commit --allow-empty -m <message>
 grit commit --amend [-m <message>]
 ```
 
 ## Description
 
-Stages every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch with the given message. This is the same as running [`grit add`](../add/) followed by a commit.
+By default, `grit commit` **auto-stages** every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch. That matches `commit.autoStage=true` (the default). Set `commit.autoStage=false` in config to make the default commit only what is already staged (same as passing `--staged`).
+
+Use **`--staged`** to commit the index as-is without auto-staging (Git’s `git commit` without `-a`). Use **`-a` / `--all`** to force auto-staging even when `commit.autoStage=false`.
+
+Use **trailing paths** (`grit commit -m msg -- a b`) or **`--pathspec-from-file`** to commit only those paths from the worktree while leaving other staged changes in the index (Git’s `git commit --only --` paths). Partial path commits are refused while a merge is in progress.
 
 The message can be given as an argument or with `-m`. A message with several lines is recorded as is; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stages your changes and stops with an error.
 
@@ -49,9 +55,18 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 | --- | --- |
 | `<message>` | The commit message. |
 | `-m`, `--message <message>` | The commit message, as an option. Use either this or the argument, not both. Optional with `--amend` (keeps the previous message). |
-| `-a`, `--all` | Stage every change first. This is always what `grit commit` does; the option is accepted so that `git` habits like `-am` keep working. |
+| `-a`, `--all` | Stage every change first, then commit. Conflicts with `--staged` and path arguments. |
+| `--staged` | Commit only what is already in the index (no auto-stage). Conflicts with `-a` and path arguments. |
+| `--pathspec-from-file`, `--pathspec-file-nul` | Same as on [`grit add`](../add/): read pathspecs from a file; combine with trailing `PATH` arguments. |
+| `<path>…` | After `--`, limit the commit to these paths (partial commit). |
 | `--amend` | Replace the tip commit on the current branch. |
 | `--allow-empty` | Record a commit even when staged content matches the parent tree (empty tree change). |
+
+### Config
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `commit.autoStage` | `true` | When true, `grit commit` with no scope flags auto-stages the whole worktree before committing. When false, the default is `--staged`. |
 
 ## Examples
 
@@ -104,6 +119,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `subject` | string | First line of the commit message |
 | `changes` | number | Path changes vs the parent commit tree |
 | `amended` | boolean | `true` when `--amend` was used |
+| `scope` | string | `auto_stage`, `staged`, or `paths` — how the index was prepared |
 
 Example:
 
@@ -113,8 +129,23 @@ Example:
   "branch": "main",
   "subject": "second",
   "changes": 1,
-  "amended": false
+  "amended": false,
+  "scope": "auto_stage"
 }
+```
+
+Commit only staged paths when another file is staged but should not be in this commit:
+
+```console
+$ grit add baz
+$ grit commit -m "file only" -- file
+```
+
+Commit the index without auto-staging (with `commit.autoStage=true`, or always with `--staged`):
+
+```console
+$ grit add a.txt
+$ grit commit --staged -m "index only"
 ```
 
 ## Markdown output

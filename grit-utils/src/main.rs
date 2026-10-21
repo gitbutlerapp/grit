@@ -52,7 +52,8 @@ use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
 use grit_utils::worktree_fixture::{
     prepare_add as prepare_worktree_add, prepare_clean_untracked as prepare_worktree_clean,
-    prepare_commit as prepare_worktree_commit, prepare_diff as prepare_worktree_diff,
+    prepare_commit as prepare_worktree_commit,
+    prepare_commit_staged as prepare_worktree_commit_staged, prepare_diff as prepare_worktree_diff,
     prepare_init_empty as prepare_worktree_init_empty, prepare_mv_file as prepare_worktree_mv,
     prepare_restore_paths as prepare_worktree_restore, prepare_rm_dir as prepare_worktree_rm,
     prepare_staged_diff as prepare_worktree_staged_diff,
@@ -505,6 +506,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareWorktreeCommit {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareWorktreeCommitStaged {
         #[arg(long)]
         git: PathBuf,
     },
@@ -1329,6 +1335,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_commit(&git);
         }
+        Cmd::PrepareWorktreeCommitStaged { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_commit_staged(&git);
+        }
         Cmd::PrepareWorktreeDiff { git } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_diff(&git);
@@ -1879,6 +1889,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareCampaignStatusDirty { .. }
         | Cmd::PrepareWorktreeAdd { .. }
         | Cmd::PrepareWorktreeCommit { .. }
+        | Cmd::PrepareWorktreeCommitStaged { .. }
         | Cmd::PrepareWorktreeDiff { .. }
         | Cmd::PrepareWorktreeStagedDiff { .. }
         | Cmd::PrepareWorktreeRestorePaths { .. }

@@ -129,6 +129,22 @@ pub(crate) fn stage_for_commit_on_index(
     stage_inner_on_index(repo, &opts, progress, true, index, false)
 }
 
+/// Stage paths into a caller-owned index without writing it to disk.
+///
+/// Same matching and validation rules as [`stage`].
+///
+/// # Errors
+///
+/// Same as [`stage`].
+pub fn stage_on_index(
+    repo: &Repository,
+    index: &mut Index,
+    opts: &StageOptions,
+    progress: &mut dyn ProgressSink,
+) -> Result<StageOutcome> {
+    stage_inner_on_index(repo, opts, progress, false, index, false)
+}
+
 /// Stage paths matching `opts` into the index.
 ///
 /// Loads the index, compares it to the work tree once, hashes only changed or new

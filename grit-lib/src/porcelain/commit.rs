@@ -12,6 +12,10 @@ use crate::error::{Error, Result};
 use crate::hooks::{run_commit_hook_checked, CommitHookEnv};
 use crate::index::Index;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
+use crate::pathspec::{pathspec_is_exclude, ResolvedPathspecs};
+use crate::porcelain::add::{stage_on_index, StageMode, StageOptions};
+use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
+use crate::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository;
 use crate::progress::ProgressSink;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
@@ -56,6 +60,144 @@ pub struct CommitRequest {
     pub staged_change_count: Option<usize>,
 }
 
+/// Which paths are included when recording a commit ([`commit_with_scope`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitScope {
+    /// Stage every worktree change, then commit (default `grit commit` behavior).
+    AutoStage,
+    /// Commit the index as-is (`git commit` without `-a`).
+    Staged,
+    /// Commit only matching paths from the worktree (`git commit --only --` paths).
+    Paths(ResolvedPathspecs),
+}
+
+/// Default [`CommitScope`] from `commit.autoStage` (default true → [`CommitScope::AutoStage`]).
+///
+/// # Errors
+///
+/// Propagates config read failures from [`Repository::config`].
+pub fn default_commit_scope(repo: &Repository) -> Result<CommitScope> {
+    let config = repo.config()?;
+    Ok(default_commit_scope_from_config(config.as_ref()))
+}
+
+/// Read `commit.autoStage` (default true).
+#[must_use]
+pub fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
+    let auto_stage = config
+        .get_bool("commit.autoStage")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    if auto_stage {
+        CommitScope::AutoStage
+    } else {
+        CommitScope::Staged
+    }
+}
+
+/// Record a commit using `scope` to decide how the index is prepared.
+///
+/// # Errors
+///
+/// Same as [`create_commit`] and [`commit_worktree`], plus [`Error::PartialCommitDuringMerge`]
+/// for [`CommitScope::Paths`] during an in-progress merge, and pathspec validation errors.
+pub fn commit_with_scope(
+    repo: &Repository,
+    req: &CommitRequest,
+    scope: CommitScope,
+    progress: &mut dyn ProgressSink,
+) -> Result<CommitOutcome> {
+    match scope {
+        CommitScope::AutoStage => commit_worktree(repo, req, progress),
+        CommitScope::Staged => create_commit(repo, req, progress),
+        CommitScope::Paths(paths) => commit_paths_scope(repo, req, &paths, progress),
+    }
+}
+
+fn commit_paths_scope(
+    repo: &Repository,
+    req: &CommitRequest,
+    paths: &ResolvedPathspecs,
+    progress: &mut dyn ProgressSink,
+) -> Result<CommitOutcome> {
+    if paths.specs.is_empty() {
+        return Err(Error::Message("you must specify path(s)".into()));
+    }
+    if !read_merge_heads(repo.git_dir())?.is_empty() {
+        return Err(Error::PartialCommitDuringMerge);
+    }
+    validate_commit_pathspecs(repo, paths)?;
+
+    let head = resolve_head(repo.git_dir())?;
+    let parent_tree = match head {
+        HeadState::Branch { oid: Some(p), .. } | HeadState::Detached { oid: p } => {
+            Some(commit_tree_oid(repo, &p)?)
+        }
+        HeadState::Branch { oid: None, .. } => None,
+        HeadState::Invalid => {
+            return Err(Error::Message("HEAD is in an unknown state".into()));
+        }
+    };
+
+    let mut real_index = repo.load_index()?;
+    let mut commit_index = match parent_tree.as_ref() {
+        Some(tree) => index_from_tree_with_worktree_stats(repo, tree)?,
+        None => Index::new(),
+    };
+
+    let stage_opts = StageOptions {
+        pathspecs: paths.specs.clone(),
+        pathspec_sources: if paths.sources.is_empty() {
+            paths.specs.clone()
+        } else {
+            paths.sources.clone()
+        },
+        mode: StageMode::All,
+        ..StageOptions::default()
+    };
+
+    let staged_commit = stage_on_index(repo, &mut commit_index, &stage_opts, progress)?;
+    let _staged_real = stage_on_index(repo, &mut real_index, &stage_opts, progress)?;
+
+    let mut req = req.clone();
+    req.assume_worktree_synced = true;
+    req.skip_pre_commit_tree_match = false;
+    req.staged_change_count = Some(staged_commit.total().max(1));
+
+    create_commit_with_index(
+        repo,
+        &mut commit_index,
+        &req,
+        progress,
+        Some(&mut real_index),
+    )
+}
+
+fn validate_commit_pathspecs(repo: &Repository, paths: &ResolvedPathspecs) -> Result<()> {
+    let pairs: Vec<(&str, &str)> =
+        if paths.sources.len() == paths.specs.len() && !paths.sources.is_empty() {
+            paths
+                .sources
+                .iter()
+                .zip(paths.specs.iter())
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect()
+        } else {
+            paths
+                .specs
+                .iter()
+                .map(|s| (s.as_str(), s.as_str()))
+                .collect()
+        };
+    for (source, resolved) in pairs {
+        if pathspec_is_exclude(source) {
+            continue;
+        }
+        ensure_pathspec_matches_known_in_repository(repo, source, resolved)?;
+    }
+    Ok(())
+}
+
 /// Result of [`create_commit`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -95,7 +237,7 @@ pub fn create_commit(
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
     let mut index = repo.load_index()?;
-    create_commit_with_index(repo, &mut index, req, progress)
+    create_commit_with_index(repo, &mut index, req, progress, None)
 }
 
 /// Stage every worktree change and record a commit using a single in-memory index (issue #1064).
@@ -119,7 +261,7 @@ pub fn commit_worktree(
     if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
         req.staged_change_count = Some(staged.total());
     }
-    create_commit_with_index(repo, &mut index, &req, progress)
+    create_commit_with_index(repo, &mut index, &req, progress, None)
 }
 
 fn create_commit_with_index(
@@ -127,6 +269,7 @@ fn create_commit_with_index(
     index: &mut Index,
     req: &CommitRequest,
     _progress: &mut dyn ProgressSink,
+    persist_index: Option<&mut Index>,
 ) -> Result<CommitOutcome> {
     let head = resolve_head(repo.git_dir())?;
     let (refname, short_name, mut parent) = match head {
@@ -313,23 +456,46 @@ fn create_commit_with_index(
         }
     });
 
-    if !req.assume_worktree_synced {
-        if let Some(work_tree) = repo.work_tree() {
-            let rules = WorktreeRules::from_repository(repo, index).ok();
-            let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
-            let _ = refresh_index_stat_content_verified_with_rules(
-                repo.odb(),
-                repo.git_dir(),
-                index,
-                work_tree,
-                None,
-                Some(config.as_ref()),
-                None,
-                rules_arc.as_ref(),
-            )?;
+    match persist_index {
+        Some(persist) => {
+            if !req.assume_worktree_synced {
+                if let Some(work_tree) = repo.work_tree() {
+                    let rules = WorktreeRules::from_repository(repo, persist).ok();
+                    let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
+                    let _ = refresh_index_stat_content_verified_with_rules(
+                        repo.odb(),
+                        repo.git_dir(),
+                        persist,
+                        work_tree,
+                        None,
+                        Some(config.as_ref()),
+                        None,
+                        rules_arc.as_ref(),
+                    )?;
+                }
+            }
+            repo.write_index(persist)?;
+        }
+        None => {
+            if !req.assume_worktree_synced {
+                if let Some(work_tree) = repo.work_tree() {
+                    let rules = WorktreeRules::from_repository(repo, index).ok();
+                    let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
+                    let _ = refresh_index_stat_content_verified_with_rules(
+                        repo.odb(),
+                        repo.git_dir(),
+                        index,
+                        work_tree,
+                        None,
+                        Some(config.as_ref()),
+                        None,
+                        rules_arc.as_ref(),
+                    )?;
+                }
+            }
+            repo.write_index(index)?;
         }
     }
-    repo.write_index(index)?;
 
     let changes = if parent_tree.as_ref() == Some(&tree) {
         0
@@ -477,6 +643,7 @@ mod tests {
     use super::*;
     use crate::index::{entry_from_stat, Index, MODE_REGULAR};
     use crate::objects::ObjectKind;
+    use crate::pathspec::ResolvedPathspecs;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
     use crate::reflog::read_reflog;
@@ -774,5 +941,176 @@ mod tests {
         assert_eq!(outcome.changes, 0);
         assert_eq!(outcome.parent, Some(parent));
         assert_ne!(outcome.oid, parent);
+    }
+
+    #[test]
+    fn scope_staged_commits_index_only() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        fs::write(root.join("b.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        fs::write(root.join("b.txt"), b"2\n").unwrap();
+        let mut index = repo.load_index().unwrap();
+        stage_file_in_index(&repo, &mut index, "a.txt", b"2\n");
+        write_index(&repo, &mut index);
+
+        let outcome = commit_with_scope(
+            &repo,
+            &commit_req("only a"),
+            CommitScope::Staged,
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.changes, 1);
+        let index = repo.load_index().unwrap();
+        let b_oid = index.get(b"b.txt", 0).unwrap().oid;
+        let b_blob = repo.odb().read(&b_oid).unwrap();
+        assert_eq!(b_blob.data, b"1\n", "unstaged paths stay in the index");
+    }
+
+    #[test]
+    fn scope_paths_leaves_other_staged_entries() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("file"), b"1\n").unwrap();
+        fs::write(root.join("baz"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("initial"), &mut NullProgress).unwrap();
+
+        fs::write(root.join("file"), b"2\n").unwrap();
+        fs::write(root.join("baz"), b"2\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["baz".into()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        let paths = ResolvedPathspecs {
+            specs: vec!["file".into()],
+            sources: vec!["file".into()],
+            scoped: true,
+        };
+        commit_with_scope(
+            &repo,
+            &commit_req("file only"),
+            CommitScope::Paths(paths),
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        let index = repo.load_index().unwrap();
+        let baz_oid = index.get(b"baz", 0).unwrap().oid;
+        assert_eq!(repo.odb().read(&baz_oid).unwrap().data, b"2\n");
+    }
+
+    #[test]
+    fn scope_paths_deleted_and_untracked() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("tracked.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+
+        fs::write(root.join("new.txt"), b"new\n").unwrap();
+        fs::remove_file(root.join("tracked.txt")).unwrap();
+
+        let paths = ResolvedPathspecs {
+            specs: vec!["new.txt".into(), "tracked.txt".into()],
+            sources: vec!["new.txt".into(), "tracked.txt".into()],
+            scoped: true,
+        };
+        commit_with_scope(
+            &repo,
+            &commit_req("add and remove"),
+            CommitScope::Paths(paths),
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"tracked.txt", 0).is_none());
+        assert!(index.get(b"new.txt", 0).is_some());
+    }
+
+    #[test]
+    fn scope_paths_no_match_errors() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+
+        let paths = ResolvedPathspecs {
+            specs: vec!["missing.txt".into()],
+            sources: vec!["missing.txt".into()],
+            scoped: true,
+        };
+        let err = commit_with_scope(
+            &repo,
+            &commit_req("nope"),
+            CommitScope::Paths(paths),
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::PathspecNoMatch { .. }));
+    }
+
+    #[test]
+    fn scope_paths_refused_during_merge() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+        let tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
+        fs::write(repo.git_dir().join("MERGE_HEAD"), format!("{tip}\n")).unwrap();
+
+        let paths = ResolvedPathspecs {
+            specs: vec!["a.txt".into()],
+            sources: vec!["a.txt".into()],
+            scoped: true,
+        };
+        let err = commit_with_scope(
+            &repo,
+            &commit_req("partial"),
+            CommitScope::Paths(paths),
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::PartialCommitDuringMerge));
+    }
+
+    #[test]
+    fn auto_stage_config_false_defaults_to_staged() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let git = root.join(".git");
+        fs::create_dir_all(git.join("objects")).unwrap();
+        fs::create_dir_all(git.join("refs/heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n[commit]\n\tautoStage = false\n",
+        )
+        .unwrap();
+        let repo =
+            Repository::open(&git, &RepositoryOptions::empty().with_work_tree(root)).unwrap();
+        assert_eq!(
+            default_commit_scope_from_config(&repo.config().unwrap()),
+            CommitScope::Staged
+        );
     }
 }

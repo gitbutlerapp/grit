@@ -1,11 +1,12 @@
-//! `grit commit` — stage every change and record a new commit.
+//! `grit commit` — record a new commit with configurable staging scope.
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
-use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{
+    commit_with_scope, default_commit_scope, CommitRequest, CommitScope,
+};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -15,6 +16,16 @@ use std::io::Write;
 use crate::context::{self, subject_line};
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::pathspec_args::TrailingPathspecArgs;
+
+/// JSON scope label for [`CommitOutcome::scope`].
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitScopeJson {
+    AutoStage,
+    Staged,
+    Paths,
+}
 
 /// Result of `grit commit`.
 #[derive(Serialize, JsonSchema)]
@@ -24,6 +35,7 @@ pub struct CommitOutcome {
     pub subject: String,
     pub changes: usize,
     pub amended: bool,
+    pub scope: CommitScopeJson,
 }
 
 impl HumanRender for CommitOutcome {
@@ -52,7 +64,15 @@ impl MarkdownRender for CommitOutcome {
     }
 }
 
-pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<CommitOutcome> {
+/// Run `grit commit` with the given message, flags, and optional path scope.
+pub fn run(
+    message: Option<String>,
+    amend: bool,
+    allow_empty: bool,
+    all: bool,
+    staged: bool,
+    paths: TrailingPathspecArgs,
+) -> Result<CommitOutcome> {
     let repo = context::discover()?;
 
     match resolve_head(repo.git_dir())? {
@@ -61,11 +81,8 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     }
 
-    let staged = stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    if repo.index_handle().load()?.has_unmerged_entries() {
-        return Err(map_commit_error(Error::IndexUnmerged));
-    }
+    let scope = resolve_commit_scope(&repo, all, staged, &paths)?;
+    let scope_json = scope_json(&scope);
 
     let message = match message {
         Some(m) if !m.trim().is_empty() => Some(m),
@@ -79,14 +96,12 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
     let now = crate::context::wall_clock_now(env);
     let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
     let author = if amend {
-        // `create_commit` reuses the tip commit's author when amending; strict author resolution
-        // is not required (and would wrongly fail committer-only amend flows).
         String::new()
     } else {
         context::identity(env, config.as_ref(), IdentRole::Author, now)?
     };
 
-    let outcome = create_commit(
+    let outcome = commit_with_scope(
         &repo,
         &CommitRequest {
             message: message_text.to_owned(),
@@ -95,10 +110,11 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
             allow_empty,
             sign_override: None,
             amend,
-            assume_worktree_synced: true,
-            skip_pre_commit_tree_match: true,
-            staged_change_count: Some(staged.total()),
+            assume_worktree_synced: false,
+            skip_pre_commit_tree_match: false,
+            staged_change_count: None,
         },
+        scope,
         &mut NullProgress,
     )
     .map_err(map_commit_error)?;
@@ -116,7 +132,41 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         subject,
         changes: outcome.changes,
         amended: amend,
+        scope: scope_json,
     })
+}
+
+fn resolve_commit_scope(
+    repo: &grit_lib::repo::Repository,
+    all: bool,
+    staged: bool,
+    paths: &TrailingPathspecArgs,
+) -> Result<CommitScope> {
+    let has_paths = !paths.paths.is_empty() || paths.pathspec_from_file.is_some();
+    let flags = usize::from(all) + usize::from(staged) + usize::from(has_paths);
+    if flags > 1 {
+        bail!("use only one of --all, --staged, or path arguments");
+    }
+    if all {
+        return Ok(CommitScope::AutoStage);
+    }
+    if staged {
+        return Ok(CommitScope::Staged);
+    }
+    if has_paths {
+        paths.require_non_empty()?;
+        let resolved = paths.resolve(repo)?;
+        return Ok(CommitScope::Paths(resolved));
+    }
+    default_commit_scope(repo).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn scope_json(scope: &CommitScope) -> CommitScopeJson {
+    match scope {
+        CommitScope::AutoStage => CommitScopeJson::AutoStage,
+        CommitScope::Staged => CommitScopeJson::Staged,
+        CommitScope::Paths(_) => CommitScopeJson::Paths,
+    }
 }
 
 fn map_commit_error(err: Error) -> anyhow::Error {
@@ -127,6 +177,12 @@ fn map_commit_error(err: Error) -> anyhow::Error {
             "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again"
         ),
         Error::AmendUnborn => anyhow::anyhow!("cannot amend: no commits on this branch yet"),
+        Error::PartialCommitDuringMerge => {
+            anyhow::anyhow!("cannot do a partial commit during a merge")
+        }
+        Error::PathspecNoMatch { spec } => anyhow::anyhow!(
+            "pathspec '{spec}' did not match any file(s) known to git"
+        ),
         other => anyhow::anyhow!("{other}"),
     }
 }

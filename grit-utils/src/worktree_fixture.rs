@@ -273,12 +273,49 @@ pub fn prepare_commit(git: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Like [`prepare_commit`], then stage the modified path set (for `--staged` vs `git commit`).
+pub fn prepare_commit_staged(git: &Path) -> Result<()> {
+    prepare_commit(git)?;
+    let script = shell_git_add_modified_set(git);
+    std::process::Command::new("sh")
+        .arg("-eu")
+        .arg("-c")
+        .arg(script)
+        .status()
+        .context("stage modified set for commit/staged bench")?;
+    Ok(())
+}
+
 /// Stage the modified path set and commit (matches grit `commit` staging + commit in one timed run).
 pub fn shell_git_add_modified_set_and_commit(git: &Path) -> String {
     format!(
         "set -eu\n{}\n{}",
         shell_git_add_modified_set(git).trim(),
         shell_redirect_devnull(git, &["commit", "-q", "-m", "bench"])
+    )
+}
+
+/// Shell snippet: partial commit of the modified path set (`git commit --only`).
+pub fn shell_git_commit_paths_only(git: &Path) -> String {
+    let prog_q = shell_quote(&git.to_string_lossy());
+    let paths_q = shell_quote(&scratch_dir().join(PATHS_MARKER).to_string_lossy());
+    format!(
+        r#"set -eu
+if [ -s {paths_q} ]; then
+  tr '\n' '\0' < {paths_q} | xargs -0 {prog_q} commit -q -m bench --only --
+fi"#
+    )
+}
+
+/// Shell snippet: partial commit of the modified path set (`grit commit --` paths).
+pub fn shell_grit_commit_paths(program: &Path) -> String {
+    let prog_q = shell_quote(&program.to_string_lossy());
+    let paths_q = shell_quote(&scratch_dir().join(PATHS_MARKER).to_string_lossy());
+    format!(
+        r#"set -eu
+if [ -s {paths_q} ]; then
+  tr '\n' '\0' < {paths_q} | xargs -0 {prog_q} commit -q -m bench --
+fi"#
     )
 }
 

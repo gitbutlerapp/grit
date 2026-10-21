@@ -21,7 +21,6 @@ pub struct PathspecArgs {
 
 /// Like [`PathspecArgs`], but paths are trailing (after other positionals).
 #[derive(Debug, Clone, Default, Args)]
-#[allow(dead_code)]
 pub struct TrailingPathspecArgs {
     /// Limit the command to these paths (after `--`).
     #[arg(value_name = "PATH", last = true, allow_hyphen_values = true)]
@@ -54,7 +53,6 @@ impl PathspecArgs {
     }
 }
 
-#[allow(dead_code)]
 impl TrailingPathspecArgs {
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
     pub fn resolve(&self, repo: &Repository) -> Result<ResolvedPathspecs> {
@@ -64,6 +62,14 @@ impl TrailingPathspecArgs {
             self.pathspec_from_file.as_deref(),
             self.pathspec_file_nul,
         )
+    }
+
+    /// Require at least one pathspec source (argv or from-file).
+    pub fn require_non_empty(&self) -> Result<()> {
+        if self.paths.is_empty() && self.pathspec_from_file.is_none() {
+            bail!("you must specify path(s)");
+        }
+        Ok(())
     }
 }
 
