@@ -3938,8 +3938,14 @@ pub grit_lib::error::Error::Auth(alloc::string::String)
 pub grit_lib::error::Error::BranchCheckedOutInWorktree
 pub grit_lib::error::Error::BranchCheckedOutInWorktree::branch: alloc::string::String
 pub grit_lib::error::Error::BranchCheckedOutInWorktree::worktree_path: alloc::string::String
+pub grit_lib::error::Error::BranchNotFound
+pub grit_lib::error::Error::BranchNotFound::branch: alloc::string::String
+pub grit_lib::error::Error::BranchNotMerged
+pub grit_lib::error::Error::BranchNotMerged::branch: alloc::string::String
 pub grit_lib::error::Error::BundleMissingPrerequisites
 pub grit_lib::error::Error::CacheTreeCorrupt
+pub grit_lib::error::Error::CannotDeleteCurrentBranch
+pub grit_lib::error::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
 pub grit_lib::error::Error::Config(grit_lib::error::ConfigError)
 pub grit_lib::error::Error::CorruptObject(alloc::string::String)
 pub grit_lib::error::Error::CorruptStash(&'static str)
@@ -4033,6 +4039,8 @@ pub grit_lib::error::Error::StashNotFound::n: usize
 pub grit_lib::error::Error::StashSymlinkNotUtf8
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
+pub grit_lib::error::Error::TagNotFound
+pub grit_lib::error::Error::TagNotFound::tag: alloc::string::String
 pub grit_lib::error::Error::UnbornHead
 pub grit_lib::error::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::error::Error::UnsupportedObjectStore
@@ -8957,6 +8965,24 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::add::StageOut
 pub fn grit_lib::porcelain::add::stage(&grit_lib::repo::Repository, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub fn grit_lib::porcelain::add::stage_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub mod grit_lib::porcelain::branch
+pub struct grit_lib::porcelain::branch::BranchList
+pub grit_lib::porcelain::branch::BranchList::branches: alloc::vec::Vec<grit_lib::porcelain::branch::LocalBranch>
+pub grit_lib::porcelain::branch::BranchList::current: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::branch::BranchList
+pub fn grit_lib::porcelain::branch::BranchList::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch::BranchList
+impl core::cmp::PartialEq for grit_lib::porcelain::branch::BranchList
+pub fn grit_lib::porcelain::branch::BranchList::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch::BranchList
+pub fn grit_lib::porcelain::branch::BranchList::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch::BranchList
+impl core::marker::Freeze for grit_lib::porcelain::branch::BranchList
+impl core::marker::Send for grit_lib::porcelain::branch::BranchList
+impl core::marker::Sync for grit_lib::porcelain::branch::BranchList
+impl core::marker::Unpin for grit_lib::porcelain::branch::BranchList
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::BranchList
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::BranchList
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::BranchList
 pub struct grit_lib::porcelain::branch::CreateBranchOutcome
 pub grit_lib::porcelain::branch::CreateBranchOutcome::name: alloc::string::String
 pub grit_lib::porcelain::branch::CreateBranchOutcome::oid: grit_lib::objects::ObjectId
@@ -8975,7 +9001,46 @@ impl core::marker::Unpin for grit_lib::porcelain::branch::CreateBranchOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::CreateBranchOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::CreateBranchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::CreateBranchOutcome
+pub struct grit_lib::porcelain::branch::DeletedBranch
+pub grit_lib::porcelain::branch::DeletedBranch::name: alloc::string::String
+pub grit_lib::porcelain::branch::DeletedBranch::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::branch::DeletedBranch
+pub fn grit_lib::porcelain::branch::DeletedBranch::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch::DeletedBranch
+impl core::cmp::PartialEq for grit_lib::porcelain::branch::DeletedBranch
+pub fn grit_lib::porcelain::branch::DeletedBranch::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch::DeletedBranch
+pub fn grit_lib::porcelain::branch::DeletedBranch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch::DeletedBranch
+impl core::marker::Freeze for grit_lib::porcelain::branch::DeletedBranch
+impl core::marker::Send for grit_lib::porcelain::branch::DeletedBranch
+impl core::marker::Sync for grit_lib::porcelain::branch::DeletedBranch
+impl core::marker::Unpin for grit_lib::porcelain::branch::DeletedBranch
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::DeletedBranch
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::DeletedBranch
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::DeletedBranch
+pub struct grit_lib::porcelain::branch::LocalBranch
+pub grit_lib::porcelain::branch::LocalBranch::current: bool
+pub grit_lib::porcelain::branch::LocalBranch::name: alloc::string::String
+pub grit_lib::porcelain::branch::LocalBranch::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::branch::LocalBranch
+pub fn grit_lib::porcelain::branch::LocalBranch::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch::LocalBranch
+impl core::cmp::PartialEq for grit_lib::porcelain::branch::LocalBranch
+pub fn grit_lib::porcelain::branch::LocalBranch::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch::LocalBranch
+pub fn grit_lib::porcelain::branch::LocalBranch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch::LocalBranch
+impl core::marker::Freeze for grit_lib::porcelain::branch::LocalBranch
+impl core::marker::Send for grit_lib::porcelain::branch::LocalBranch
+impl core::marker::Sync for grit_lib::porcelain::branch::LocalBranch
+impl core::marker::Unpin for grit_lib::porcelain::branch::LocalBranch
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::LocalBranch
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::LocalBranch
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::LocalBranch
 pub fn grit_lib::porcelain::branch::create_branch(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::branch::CreateBranchOutcome>
+pub fn grit_lib::porcelain::branch::delete_branch(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<grit_lib::porcelain::branch::DeletedBranch>
+pub fn grit_lib::porcelain::branch::list_branches(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::branch::BranchList>
 pub mod grit_lib::porcelain::checkout
 pub fn grit_lib::porcelain::checkout::apply_index_file_mode(&std::path::Path, u32) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_between_trees(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
@@ -9991,11 +10056,33 @@ impl core::marker::Unpin for grit_lib::porcelain::tag::CreateTagRequest
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::tag::CreateTagRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::tag::CreateTagRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::CreateTagRequest
+pub struct grit_lib::porcelain::tag::TagInfo
+pub grit_lib::porcelain::tag::TagInfo::kind: grit_lib::porcelain::tag::TagKind
+pub grit_lib::porcelain::tag::TagInfo::name: alloc::string::String
+pub grit_lib::porcelain::tag::TagInfo::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::tag::TagInfo::peeled: core::option::Option<grit_lib::objects::ObjectId>
+impl core::clone::Clone for grit_lib::porcelain::tag::TagInfo
+pub fn grit_lib::porcelain::tag::TagInfo::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::tag::TagInfo
+impl core::cmp::PartialEq for grit_lib::porcelain::tag::TagInfo
+pub fn grit_lib::porcelain::tag::TagInfo::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::tag::TagInfo
+pub fn grit_lib::porcelain::tag::TagInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::tag::TagInfo
+impl core::marker::Freeze for grit_lib::porcelain::tag::TagInfo
+impl core::marker::Send for grit_lib::porcelain::tag::TagInfo
+impl core::marker::Sync for grit_lib::porcelain::tag::TagInfo
+impl core::marker::Unpin for grit_lib::porcelain::tag::TagInfo
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::tag::TagInfo
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::tag::TagInfo
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::TagInfo
 pub fn grit_lib::porcelain::tag::compare_version(&str, &str) -> core::cmp::Ordering
 pub fn grit_lib::porcelain::tag::create_tag(&grit_lib::repo::Repository, &grit_lib::porcelain::tag::CreateTagRequest) -> grit_lib::error::Result<grit_lib::porcelain::tag::CreateTagOutcome>
 pub fn grit_lib::porcelain::tag::creator_date(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> i64
+pub fn grit_lib::porcelain::tag::delete_tag(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::porcelain::tag::get_tag_annotation(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, u32) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::porcelain::tag::glob_matches(&str, &str) -> bool
+pub fn grit_lib::porcelain::tag::list_tags(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::tag::TagInfo>>
 pub fn grit_lib::porcelain::tag::parse_epoch_from_ident(&str) -> i64
 pub fn grit_lib::porcelain::tag::strip_comments(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::tag::tag_contains(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
@@ -10042,8 +10129,14 @@ pub grit_lib::prelude::Error::Auth(alloc::string::String)
 pub grit_lib::prelude::Error::BranchCheckedOutInWorktree
 pub grit_lib::prelude::Error::BranchCheckedOutInWorktree::branch: alloc::string::String
 pub grit_lib::prelude::Error::BranchCheckedOutInWorktree::worktree_path: alloc::string::String
+pub grit_lib::prelude::Error::BranchNotFound
+pub grit_lib::prelude::Error::BranchNotFound::branch: alloc::string::String
+pub grit_lib::prelude::Error::BranchNotMerged
+pub grit_lib::prelude::Error::BranchNotMerged::branch: alloc::string::String
 pub grit_lib::prelude::Error::BundleMissingPrerequisites
 pub grit_lib::prelude::Error::CacheTreeCorrupt
+pub grit_lib::prelude::Error::CannotDeleteCurrentBranch
+pub grit_lib::prelude::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
 pub grit_lib::prelude::Error::Config(grit_lib::error::ConfigError)
 pub grit_lib::prelude::Error::CorruptObject(alloc::string::String)
 pub grit_lib::prelude::Error::CorruptStash(&'static str)
@@ -10137,6 +10230,8 @@ pub grit_lib::prelude::Error::StashNotFound::n: usize
 pub grit_lib::prelude::Error::StashSymlinkNotUtf8
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
+pub grit_lib::prelude::Error::TagNotFound
+pub grit_lib::prelude::Error::TagNotFound::tag: alloc::string::String
 pub grit_lib::prelude::Error::UnbornHead
 pub grit_lib::prelude::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::prelude::Error::UnsupportedObjectStore

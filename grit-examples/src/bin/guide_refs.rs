@@ -4,6 +4,8 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::branch::list_branches;
+use grit_lib::porcelain::tag::list_tags;
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::{self, Ref};
 use grit_lib::repo::Repository;
@@ -58,11 +60,12 @@ fn main() -> Result<(), grit_lib::error::Error> {
         println!("head_file_symbolic={target}");
     }
 
-    for (name, oid) in refs::list_refs(git_dir, "refs/heads/")? {
-        println!("branch {name} {}", oid.to_hex());
+    for branch in list_branches(&repo)?.branches {
+        let marker = if branch.current { "*" } else { " " };
+        println!("branch {marker} {} {}", branch.name, branch.oid.to_hex());
     }
-    for (name, oid) in refs::list_refs(git_dir, "refs/tags/")? {
-        println!("tag {name} {}", oid.to_hex());
+    for tag in list_tags(&repo)? {
+        println!("tag {} {} {:?}", tag.name, tag.oid.to_hex(), tag.kind);
     }
 
     println!("ref_storage={}", repo.refs().format());
