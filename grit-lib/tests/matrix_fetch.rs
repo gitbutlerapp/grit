@@ -1440,7 +1440,7 @@ fn fetch_outcome_identical_git_daemon_and_smart_http() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let all = drivers(scratch.path());
 
-    let mut scenarios: [(&str, FetchOptions); 4] = [
+    let mut scenarios: [(&str, FetchOptions); 3] = [
         (
             "shallow-v1",
             FetchOptions {
