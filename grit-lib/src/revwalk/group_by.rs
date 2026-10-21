@@ -1,6 +1,6 @@
 //! Group walked commits for summary views (author shortlog-style reports).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
@@ -8,9 +8,13 @@ use crate::commit_encoding;
 use crate::error::Result;
 use crate::mailmap::{load_mailmap_table, MailmapTable};
 use crate::objects::ObjectId;
-use crate::pack::{SingleLocalPackReader, COMMIT_HEADER_READ_PREFIX};
+use crate::pack::SingleLocalPackReader;
 use crate::repo::Repository;
-use crate::revwalk::queries::rev_list_commits_for_author_group;
+use crate::rev_list::try_for_each_bitmap_reachable_commit_from_specs;
+use crate::revwalk::queries::{
+    positive_specs_for_walk, rev_list_commits_for_author_group, rev_list_options_from_walk,
+    MergeFilter, RevWalkParsedSpecs,
+};
 use crate::revwalk::RevWalkListOptions;
 
 /// One author's commits after grouping a walk result.
@@ -86,8 +90,7 @@ pub fn group_commits_by_author_from_rev(
     options: GroupByAuthorOptions,
 ) -> Result<Vec<AuthorGroup>> {
     if options.count_only {
-        let oids = rev_list_commits_for_author_group(repo, tokens, walk_options)?;
-        return count_authors_from_commit_oids(repo, &oids, mailmap);
+        return count_authors_from_rev_walk(repo, tokens, walk_options, mailmap);
     }
     let oids = repo.rev_walk().commits(tokens, walk_options)?;
     group_commits_by_author(repo, &oids, mailmap, options)
@@ -164,6 +167,147 @@ impl AuthorCounter {
     }
 }
 
+fn count_authors_from_rev_walk(
+    repo: &Repository,
+    tokens: &[&str],
+    walk_options: &RevWalkListOptions,
+    mailmap: Option<&MailmapTable>,
+) -> Result<Vec<AuthorGroup>> {
+    let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, walk_options)?;
+    if shortlog_stack_walk_compatible(walk_options, &parsed) {
+        let mut tips = crate::rev_list::resolve_revision_specs_to_commits(repo, &positive)?;
+        if all_refs {
+            tips.extend(crate::rev_list::all_ref_commit_tips_for_walk(repo)?);
+        }
+        tips.sort();
+        tips.dedup();
+        let exclude = crate::rev_list::resolve_revision_specs_to_commits(repo, &parsed.negative)?;
+        if commit_graph_available(repo) {
+            if let Some(groups) = repo.odb().with_pack_read_context(|| {
+                count_authors_stack_walk(repo, &tips, &exclude, walk_options.first_parent, mailmap)
+            })? {
+                return Ok(groups);
+            }
+        }
+    }
+    let mut opts = rev_list_options_from_walk(repo, walk_options, &parsed, all_refs, false)?;
+    opts.use_bitmap_index = true;
+    let objects_dir = repo.git_dir().join("objects");
+    let mut counter = AuthorCounter::new();
+    let mut pack_reader: Option<SingleLocalPackReader> = None;
+    let ran = repo.odb().with_pack_read_context(|| {
+        try_for_each_bitmap_reachable_commit_from_specs(
+            repo,
+            &positive,
+            &parsed.negative,
+            &opts,
+            |oid| {
+                accumulate_author_for_oid(
+                    repo,
+                    &objects_dir,
+                    &mut pack_reader,
+                    oid,
+                    mailmap,
+                    &mut counter,
+                )
+            },
+        )
+    })?;
+    if ran {
+        return Ok(counter.into_sorted_groups());
+    }
+    let oids = rev_list_commits_for_author_group(repo, tokens, walk_options)?;
+    count_authors_from_commit_oids(repo, &oids, mailmap)
+}
+
+fn commit_graph_available(repo: &Repository) -> bool {
+    let objects = repo.git_dir().join("objects");
+    objects.join("info/commit-graph").is_file() || objects.join("info/commit-graphs").is_dir()
+}
+
+fn shortlog_stack_walk_compatible(walk: &RevWalkListOptions, parsed: &RevWalkParsedSpecs) -> bool {
+    walk.paths.is_empty()
+        && walk.since.is_none()
+        && walk.until.is_none()
+        && walk.merges == MergeFilter::Any
+        && !walk.reverse
+        && walk.skip == 0
+        && walk.limit.is_none()
+        && walk.commit_filter.as_ref().is_none_or(|f| !f.is_active())
+        && parsed.symmetric_left.is_none()
+        && parsed.symmetric_right.is_none()
+}
+
+fn count_authors_stack_walk(
+    repo: &Repository,
+    tips: &[ObjectId],
+    exclude: &[ObjectId],
+    first_parent: bool,
+    mailmap: Option<&MailmapTable>,
+) -> Result<Option<Vec<AuthorGroup>>> {
+    if tips.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let objects_dir = repo.git_dir().join("objects");
+    let mut pack_reader =
+        SingleLocalPackReader::open_allow_loose_for_commits(&objects_dir, &tips[0])?;
+    let Some(reader) = pack_reader.as_mut() else {
+        return Ok(None);
+    };
+    let excluded: HashSet<ObjectId> = if exclude.is_empty() {
+        HashSet::new()
+    } else {
+        let mut graph = crate::rev_list::CommitGraph::with_commit_graph(repo, false, true);
+        crate::rev_list::walk_closure(&mut graph, exclude)?
+    };
+    let mut graph = crate::rev_list::CommitGraph::with_commit_graph(repo, first_parent, true);
+    let mut counter = AuthorCounter::new();
+    let mut stack: Vec<ObjectId> = tips.to_vec();
+    let mut seen = HashSet::new();
+    while let Some(oid) = stack.pop() {
+        if excluded.contains(&oid) || !seen.insert(oid) {
+            continue;
+        }
+        if let Some(prefix) = reader.read_commit_author_prefix_unordered(&oid)? {
+            if accumulate_author_count(prefix, mailmap, &mut counter).is_err() {
+                let obj = reader.read_object(&oid)?;
+                accumulate_author_count(&obj.data, mailmap, &mut counter)?;
+            }
+        } else {
+            let obj = reader.read_object(&oid)?;
+            accumulate_author_count(&obj.data, mailmap, &mut counter)?;
+        }
+        stack.extend(graph.parents_of(oid)?);
+    }
+    Ok(Some(counter.into_sorted_groups()))
+}
+
+fn accumulate_author_for_oid(
+    repo: &Repository,
+    objects_dir: &Path,
+    pack_reader: &mut Option<SingleLocalPackReader>,
+    oid: ObjectId,
+    mailmap: Option<&MailmapTable>,
+    counter: &mut AuthorCounter,
+) -> Result<()> {
+    if pack_reader.is_none() {
+        *pack_reader = SingleLocalPackReader::open_allow_loose_for_commits(objects_dir, &oid)?;
+    }
+    if let Some(reader) = pack_reader.as_mut() {
+        if let Some(prefix) = reader.read_commit_author_prefix(&oid)? {
+            if accumulate_author_count(prefix, mailmap, counter).is_ok() {
+                return Ok(());
+            }
+        }
+        let obj = reader.read_object(&oid)?;
+        accumulate_author_count(&obj.data, mailmap, counter)?;
+        return Ok(());
+    }
+    let odb = repo.odb();
+    let obj = odb.read(&oid)?;
+    accumulate_author_count(&obj.data, mailmap, counter)
+}
+
 fn count_authors_from_commit_oids(
     repo: &Repository,
     oids: &[ObjectId],
@@ -191,14 +335,16 @@ fn count_authors_single_pack(
     mailmap: Option<&MailmapTable>,
     counter: &mut AuthorCounter,
 ) -> Result<bool> {
-    let Some(mut reader) = SingleLocalPackReader::open_allow_loose(objects_dir)? else {
+    let Some(first) = oids.first() else {
+        return Ok(true);
+    };
+    let Some(mut reader) = SingleLocalPackReader::open_allow_loose_for_commits(objects_dir, first)?
+    else {
         return Ok(false);
     };
     for oid in oids {
-        if let Some(prefix) =
-            reader.try_read_commit_header_prefix(oid, COMMIT_HEADER_READ_PREFIX)?
-        {
-            if accumulate_author_count(&prefix, mailmap, counter).is_ok() {
+        if let Some(prefix) = reader.read_commit_author_prefix(oid)? {
+            if accumulate_author_count(prefix, mailmap, counter).is_ok() {
                 continue;
             }
         }

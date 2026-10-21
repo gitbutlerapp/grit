@@ -188,7 +188,7 @@ fn merge_filter_to_parent_bounds(merges: MergeFilter) -> (Option<usize>, Option<
     }
 }
 
-fn rev_list_options_from_walk(
+pub(crate) fn rev_list_options_from_walk(
     repo: &Repository,
     walk: &RevWalkListOptions,
     parsed: &RevWalkParsedSpecs,
@@ -278,7 +278,7 @@ pub fn rev_list_commits_for_author_group(
     Ok(result.commits)
 }
 
-fn positive_specs_for_walk(
+pub(crate) fn positive_specs_for_walk(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
