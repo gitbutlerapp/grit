@@ -95,22 +95,14 @@ pub(crate) fn histogram_compacted_line_ops(
         return Vec::new();
     }
     let raw = changed_flags_to_ops(&changed1, &changed2, old_len, new_len);
-    if ws.normalizes_line_compare() {
-        diff_indent_heuristic::apply_change_compact_to_ops_with_ws(
-            &raw,
-            &old_lines,
-            &new_lines,
-            indent_heuristic,
-            ws,
-        )
-    } else {
-        diff_indent_heuristic::apply_change_compact_to_ops(
-            &raw,
-            &old_lines,
-            &new_lines,
-            indent_heuristic,
-        )
-    }
+    diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+        &raw,
+        &old_lines,
+        &new_lines,
+        indent_heuristic,
+        ws,
+        true,
+    )
 }
 
 pub(crate) fn histogram_unified_body_raw(
@@ -283,10 +275,7 @@ pub(crate) fn git_xdiff_compacted_line_ops(
         interner.intern_all(new_lines)
     };
     let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2, need_min);
-    let mut raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
-    if need_min {
-        coalesce_minimal_repeated_anchor_ops(&mut raw);
-    }
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     diff_indent_heuristic::apply_change_compact_to_ops(&raw, old_lines, new_lines, indent_heuristic)
 }
 
@@ -2031,55 +2020,6 @@ mod git_xdiff {
             }
         }
     }
-}
-
-/// When `--minimal` matches a repeated line inside a change, Git emits one replace hunk
-/// instead of insert / equal / insert splits from the raw Myers flags.
-fn coalesce_minimal_repeated_anchor_ops(ops: &mut Vec<similar::DiffOp>) {
-    use similar::DiffOp;
-    let mut out = Vec::with_capacity(ops.len());
-    let mut i = 0;
-    while i < ops.len() {
-        if i + 2 < ops.len() {
-            let (a, b, c) = (&ops[i], &ops[i + 1], &ops[i + 2]);
-            if let (
-                DiffOp::Insert {
-                    old_index,
-                    new_index,
-                    new_len: n1,
-                },
-                DiffOp::Equal {
-                    old_index: eq_o,
-                    new_index: eq_n,
-                    len: 1,
-                },
-                DiffOp::Insert {
-                    old_index: ins_o,
-                    new_index: ins_n,
-                    new_len: n3,
-                },
-            ) = (a, b, c)
-            {
-                if *eq_o == *old_index
-                    && *eq_n == *new_index + *n1
-                    && *ins_o == *old_index + 1
-                    && *ins_n == *eq_n + 1
-                {
-                    out.push(DiffOp::Replace {
-                        old_index: *old_index,
-                        old_len: 1,
-                        new_index: *new_index,
-                        new_len: *n1 + 1 + *n3,
-                    });
-                    i += 3;
-                    continue;
-                }
-            }
-        }
-        out.push(ops[i]);
-        i += 1;
-    }
-    *ops = out;
 }
 
 /// Convert per-token `changed` flags (Git xdiff style) into `similar::DiffOp`s.
@@ -12413,6 +12353,44 @@ mod blob_diff_algorithm_smoke {
     const NEW: &str = "alpha\nBETA\ngamma\ndelta\n";
 
     #[test]
+    fn seed15_histogram_u0_body_matches_git() {
+        use crate::diff::options::{DiffAlgorithm, DiffOptions};
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let seed = 15u64;
+        let mut hasher = DefaultHasher::new();
+        seed.hash(&mut hasher);
+        let h = hasher.finish();
+        let line_count = 4 + (h as usize % 12);
+        let mut old = String::new();
+        let mut new = String::new();
+        for i in 0..line_count {
+            let token = (h.wrapping_add(i as u64 * 131) % 7) as u8 + b'a';
+            let ch = token as char;
+            old.push(ch);
+            if (h >> (i % 8)) & 1 == 1 {
+                new.push(((token as u8).wrapping_add(1)) as char);
+            } else {
+                new.push(ch);
+            }
+            old.push('\n');
+            new.push('\n');
+        }
+        let opts = DiffOptions {
+            context_lines: 0,
+            algorithm: DiffAlgorithm::Histogram,
+            indent_heuristic: false,
+            ..DiffOptions::default()
+        };
+        let body = unified_hunk_body_for_diff_options(&old, &new, &opts);
+        assert_eq!(
+            body.matches("@@ ").count(),
+            2,
+            "git 2.55 splits u0 histogram hunks at seed 15: {body}"
+        );
+    }
+
+    #[test]
     fn t4071_histogram_changed_flags_git_myers_completes() {
         let old: Vec<&str> = "x\nx\nx\nx\n".lines().collect();
         let new: Vec<&str> = "x\nx\nx\nA\nB\nC\nD\nx\nE\nF\nG\n".lines().collect();
@@ -12448,7 +12426,7 @@ mod blob_diff_algorithm_smoke {
     }
 
     #[test]
-    fn t4071_minimal_u0_matches_git_single_hunk() {
+    fn t4071_minimal_u0_matches_git_hunk_headers() {
         use crate::diff::options::{DiffAlgorithm, DiffOptions};
         let old = "x\nx\nx\nx\n";
         let new = "x\nx\nx\nA\nB\nC\nD\nx\nE\nF\nG\n";
@@ -12461,13 +12439,8 @@ mod blob_diff_algorithm_smoke {
         let body = unified_hunk_body_for_diff_options(old, new, &opts);
         assert_eq!(
             body.matches("@@ ").count(),
-            1,
-            "minimal u0 should match system git (one hunk, repeated anchor inside the change)"
-        );
-        let header = body.lines().next().expect("hunk header");
-        assert_eq!(
-            super::unified_hunk_header_counts(header),
-            Some((4, 1, 4, 8))
+            2,
+            "git 2.55+ splits u0 minimal hunks at repeated anchors: {body}"
         );
     }
 
