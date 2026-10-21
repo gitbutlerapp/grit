@@ -103,12 +103,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
                 ..Default::default()
-||||||| Common ancestor
-=======
-                hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
             },
             &mut NullProgress,
         )
@@ -1219,12 +1214,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
-||||||| Common ancestor
-=======
-            hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -1247,12 +1237,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
-||||||| Common ancestor
-=======
-            hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )

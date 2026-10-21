@@ -5,24 +5,14 @@ use grit_lib::commit::parse_date_to_git_timestamp;
 use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::objects::parse_commit;
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 use grit_lib::porcelain::add::{stage_for_commit, stage_for_commit_in_memory};
 use grit_lib::porcelain::commit::{
     commit_with_scope, default_commit_scope, CommitRequest, CommitScope, HookPolicy,
 };
-||||||| Common ancestor
-use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-=======
-use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 use grit_lib::progress::NullProgress;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
-use grit_lib::HookName;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::{self, Read, Write};
@@ -58,14 +48,6 @@ pub struct CommitFileOutcome {
     pub old_path: Option<String>,
 }
 
-/// Author recorded on the new commit (`--json` / `--markdown`).
-#[derive(Serialize, JsonSchema, Clone)]
-pub struct CommitAuthorOutcome {
-    pub name: String,
-    pub email: String,
-    pub date: String,
-}
-
 /// Result of `grit commit`.
 #[derive(Serialize, JsonSchema)]
 pub struct CommitOutcome {
@@ -75,7 +57,6 @@ pub struct CommitOutcome {
     pub subject: String,
     pub changes: usize,
     pub amended: bool,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     pub dry_run: bool,
     pub scope: CommitScopeJson,
     pub files: Vec<CommitFileOutcome>,
@@ -84,12 +65,6 @@ pub struct CommitOutcome {
     pub parents: Vec<String>,
     pub author: CommitAuthorOutcome,
     pub hooks_run: Vec<String>,
-||||||| Common ancestor
-=======
-    pub parents: Vec<String>,
-    pub author: CommitAuthorOutcome,
-    pub hooks_run: Vec<String>,
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 }
 
 impl HumanRender for CommitOutcome {
@@ -141,7 +116,6 @@ impl MarkdownRender for CommitOutcome {
     }
 }
 
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 /// Run `grit commit` with the given message, flags, and optional path scope.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -163,19 +137,6 @@ pub fn run(
     staged: bool,
     paths: TrailingPathspecArgs,
 ) -> Result<CommitOutcome> {
-||||||| Common ancestor
-pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<CommitOutcome> {
-=======
-/// Stage the worktree and create a commit with the given message and options.
-pub fn run(
-    message: Option<String>,
-    message_file: Option<String>,
-    author_override: Option<String>,
-    no_verify: bool,
-    amend: bool,
-    allow_empty: bool,
-) -> Result<CommitOutcome> {
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     let repo = context::discover()?;
 
     match resolve_head(repo.git_dir())? {
@@ -187,7 +148,6 @@ pub fn run(
     let scope = resolve_commit_scope(&repo, all, staged, &paths)?;
     let scope_json = scope_json(&scope);
 
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     let reuse_message_from = if let Some(rev) = reuse_message.as_deref() {
         Some(
             resolve_revision_as_commit(&repo, rev)
@@ -206,31 +166,12 @@ pub fn run(
         &repo,
         dry_run,
     )?;
-||||||| Common ancestor
-    if repo.index_handle().load()?.has_unmerged_entries() {
-        return Err(map_commit_error(Error::IndexUnmerged));
-    }
-
-    let message = match message {
-        Some(m) if !m.trim().is_empty() => Some(m),
-        None if amend => None,
-        _ => bail!("provide a commit message, e.g. grit commit \"what changed\""),
-    };
-=======
-    if repo.index_handle().load()?.has_unmerged_entries() {
-        return Err(map_commit_error(Error::IndexUnmerged));
-    }
-
-    let message = resolve_commit_message(message, message_file, amend)?;
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     let message_text = message.as_deref().unwrap_or("");
 
     let config = repo.config().context("could not load config")?;
     let env = repo.environment();
     let now = crate::context::wall_clock_now(env);
     let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
-<<<<<<< New base: commit: message file, author override, and no-verify hooks
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     let author = if reset_author {
         String::new()
     } else if let Some(arg) = author_override.as_deref() {
@@ -239,32 +180,11 @@ pub fn run(
         let date_override = author_date.as_deref().or(env_author_date.as_deref());
         author_identity_line(&contact, date_override, now)
     } else if amend || reuse_message_from.is_some() {
-||||||| Common ancestor
-    let author = if amend {
-        // `create_commit` reuses the tip commit's author when amending; strict author resolution
-        // is not required (and would wrongly fail committer-only amend flows).
-=======
-    let author = if amend {
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
-        String::new()
-    } else if let Some(arg) = author_override {
-||||||| Common ancestor
-    let author = if amend {
-        String::new()
-    } else if let Some(arg) = author_override {
-=======
-    let author = if let Some(arg) = author_override {
->>>>>>> Current commit: Fix commit review blockers: message stripspace, post-commit, author parse, amend
-        let contact = parse_author_arg(&arg).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let date_override = env.var(IdentRole::Author.env_date_key());
-        author_identity_line(&contact, date_override.as_deref(), now)
-    } else if amend {
         String::new()
     } else {
         context::identity(env, config.as_ref(), IdentRole::Author, now)?
     };
 
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     let parsed_author_date = author_date.as_deref().map(parse_trailer_date).transpose()?;
     let parsed_trailers = trailers
         .iter()
@@ -286,17 +206,6 @@ pub fn run(
     };
 
     let outcome = commit_with_scope(
-||||||| Common ancestor
-    let outcome = create_commit(
-=======
-    let hooks = if no_verify {
-        HookPolicy::SkipVerify
-    } else {
-        HookPolicy::Run
-    };
-
-    let outcome = create_commit(
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         &repo,
         &CommitRequest {
             message: message_text.to_owned(),
@@ -305,7 +214,6 @@ pub fn run(
             allow_empty,
             sign_override,
             amend,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             hooks,
             author_date: parsed_author_date,
             trailers: parsed_trailers,
@@ -314,16 +222,6 @@ pub fn run(
             reuse_message_from,
             dry_run,
             ..Default::default()
-||||||| Common ancestor
-            assume_worktree_synced: true,
-            skip_pre_commit_tree_match: true,
-            staged_change_count: Some(staged.total()),
-=======
-            assume_worktree_synced: true,
-            skip_pre_commit_tree_match: true,
-            staged_change_count: Some(staged.total()),
-            hooks,
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         scope,
         &mut NullProgress,
@@ -371,7 +269,6 @@ pub fn run(
         subject,
         changes: outcome.changes,
         amended: amend,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
         dry_run,
         scope: scope_json,
         files,
@@ -387,24 +284,9 @@ pub fn run(
             .iter()
             .map(|h| h.as_str().to_owned())
             .collect(),
-||||||| Common ancestor
-=======
-        parents: outcome.parents.iter().map(|p| p.to_hex()).collect(),
-        author: CommitAuthorOutcome {
-            name: outcome.author.name,
-            email: outcome.author.email,
-            date: outcome.author.date,
-        },
-        hooks_run: outcome
-            .hooks_run
-            .iter()
-            .map(|h| hook_name_json(*h))
-            .collect(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     })
 }
 
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 fn resolve_commit_message(
     message: Option<String>,
     message_file: Option<String>,
@@ -521,38 +403,6 @@ fn scope_json(scope: &CommitScope) -> CommitScopeJson {
     }
 }
 
-||||||| Common ancestor
-=======
-fn hook_name_json(hook: HookName) -> String {
-    hook.as_str().to_owned()
-}
-
-fn resolve_commit_message(
-    message: Option<String>,
-    message_file: Option<String>,
-    amend: bool,
-) -> Result<Option<String>> {
-    match (message, message_file) {
-        (Some(m), None) => Ok(Some(m)),
-        (None, Some(path)) => read_message_file(&path).map(Some),
-        (None, None) if amend => Ok(None),
-        (None, None) => bail!("provide a commit message, e.g. grit commit \"what changed\""),
-        (Some(_), Some(_)) => unreachable!("clap rejects message and message-file together"),
-    }
-}
-
-fn read_message_file(path: &str) -> Result<String> {
-    if path == "-" {
-        let mut buf = String::new();
-        io::stdin()
-            .read_to_string(&mut buf)
-            .context("could not read message from stdin")?;
-        return Ok(buf);
-    }
-    std::fs::read_to_string(path).with_context(|| format!("could not read message file '{path}'"))
-}
-
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 fn map_commit_error(err: Error) -> anyhow::Error {
     match err {
         Error::NothingToCommit => anyhow::anyhow!("nothing to commit — working tree clean"),

@@ -27,14 +27,10 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
         ..Default::default()
-||||||| Common ancestor
-=======
-        hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     }
 }
+
 fn grit_index_all_stages(index: &grit_lib::index::Index) -> Vec<(String, u32, String, ObjectId)> {
     let mut rows: Vec<(String, u32, String, ObjectId)> = index
         .entries()

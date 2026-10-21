@@ -67,13 +67,7 @@ impl<'repo> References<'repo> {
     ///     amend: false,
     ///     assume_worktree_synced: false,
     ///     skip_pre_commit_tree_match: false,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     ///     ..Default::default()
-||||||| Common ancestor
-=======
-    ///     staged_change_count: None,
-    ///     hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     /// };
     /// let _ = create_commit(&repo, &req, &mut NullProgress)?;
     /// let main = RefName::try_from("refs/heads/main").expect("valid ref");
@@ -189,13 +183,7 @@ impl<'repo> References<'repo> {
     ///     amend: false,
     ///     assume_worktree_synced: false,
     ///     skip_pre_commit_tree_match: false,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     ///     ..Default::default()
-||||||| Common ancestor
-=======
-    ///     staged_change_count: None,
-    ///     hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     /// };
     /// let commit = create_commit(&repo, &req, &mut NullProgress)?.oid;
     /// let name = RefName::try_from("refs/heads/handle-demo").expect("valid ref");

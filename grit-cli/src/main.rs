@@ -732,7 +732,6 @@ enum Command {
         /// Commit message.
         #[arg(short = 'm', long = "message", conflicts_with_all = ["message", "message_file"])]
         message_flag: Option<String>,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
         /// Read the commit message from a file (`-` for stdin).
         #[arg(short = 'F', long = "message-file", conflicts_with_all = ["message", "message_flag"])]
         message_file: Option<String>,
@@ -769,22 +768,6 @@ enum Command {
             long = "all",
             conflicts_with_all = ["staged", "paths", "pathspec_from_file"]
         )]
-||||||| Common ancestor
-        /// Stage every change first, then commit. This is the default behavior.
-        #[arg(short = 'a', long = "all")]
-=======
-        /// Read the commit message from a file (`-` for stdin).
-        #[arg(short = 'F', long = "message-file", conflicts_with_all = ["message", "message_flag"])]
-        message_file: Option<String>,
-        /// Author for this commit (`Name <email>`); committer is unchanged.
-        #[arg(long = "author")]
-        author_override: Option<String>,
-        /// Skip the `pre-commit` and `commit-msg` hooks.
-        #[arg(long = "no-verify")]
-        no_verify: bool,
-        /// Stage every change first, then commit. This is the default behavior.
-        #[arg(short = 'a', long = "all")]
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         all: bool,
         /// Commit only what is already staged (same as `git commit` without `-a`).
         #[arg(
@@ -1526,7 +1509,6 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Commit {
             message,
             message_flag,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             message_file,
             author_override,
             author_date,
@@ -1539,20 +1521,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             no_verify,
             all,
             staged,
-||||||| Common ancestor
-            all: _,
-=======
-            message_file,
-            author_override,
-            no_verify,
-            all: _,
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
             amend,
             allow_empty,
             dry_run,
             paths,
         } => emit(
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             &commands::commit::run(
                 message.or(message_flag),
                 message_file,
@@ -1572,18 +1545,6 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 staged,
                 paths,
             )?,
-||||||| Common ancestor
-            &commands::commit::run(message.or(message_flag), amend, allow_empty)?,
-=======
-            &commands::commit::run(
-                message.or(message_flag),
-                message_file,
-                author_override,
-                no_verify,
-                amend,
-                allow_empty,
-            )?,
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
             opts,
             ctx,
         ),

@@ -10,19 +10,12 @@ order: 2
 ```text
 grit commit [-a] <message>
 grit commit [-a] -m <message>
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 grit commit --staged -m <message>
 grit commit -m <message> -- [<path>…]
 grit commit -F <file|->
 grit commit --author "Name <email>"
 grit commit --no-verify -m <message>
 grit commit --dry-run -m <message>
-||||||| Common ancestor
-=======
-grit commit -F <file|->
-grit commit --author "Name <email>"
-grit commit --no-verify -m <message>
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 grit commit --allow-empty -m <message>
 grit commit --amend [-m <message>]
 ```
@@ -31,7 +24,6 @@ grit commit --amend [-m <message>]
 
 By default, `grit commit` **auto-stages** every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch.
 
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 Use **`--staged`** to commit the index as-is without auto-staging (Git’s `git commit` without `-a`). Use **`-a` / `--all`** to force auto-staging even when `commit.autoStage=false`.
 
 Use **trailing paths** (`grit commit -m msg -- a b`) or **`--pathspec-from-file`** to commit only those paths from the worktree while leaving other staged changes in the index (Git’s `git commit --only --` paths). Partial path commits are refused while a merge is in progress.
@@ -39,11 +31,6 @@ Use **trailing paths** (`grit commit -m msg -- a b`) or **`--pathspec-from-file`
 The message can be given as an argument, with `-m`, or with `-F` / `--message-file` (`-` reads stdin). Message text is normalized with Git-style stripspace before hooks run (leading/trailing blank lines collapse; a trailing newline is added). A message with several lines is recorded as is after normalization; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stages your changes and stops with an error. You cannot combine `-m`, a positional message, and `--message-file`.
 
 Use **`--dry-run`** to preview what would be committed: path list, parents, and author, without writing objects, updating refs, running hooks, or changing the index on disk. Dry-run returns the same errors as a real commit for nothing-to-commit, unmerged index, and detached HEAD.
-||||||| Common ancestor
-The message can be given as an argument or with `-m`. A message with several lines is recorded as is; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stages your changes and stops with an error.
-=======
-The message can be given as an argument, with `-m`, or with `-F` / `--message-file` (`-` reads stdin). Message text is normalized with Git-style stripspace before hooks run (leading/trailing blank lines collapse; a trailing newline is added). A message with several lines is recorded as is after normalization; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stages your changes and stops with an error. You cannot combine `-m`, a positional message, and `--message-file`.
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 
 With `--amend`, `grit commit` replaces the **tip** commit on the current branch instead of adding a new one. It does not reword or squash older commits; positional arguments are always the commit message, not a revision (for example `grit commit --amend HEAD~1` records the message `HEAD~1`, it does not amend that commit). The new commit keeps the previous tip's parents and author; the committer and commit time come from your identity and `GIT_COMMITTER_DATE` as usual. If you omit the message while amending, the previous commit message is reused. Amending with no staged changes is allowed when the tree is unchanged (Git-compatible). You cannot amend on a branch that has no commits yet.
 
@@ -66,14 +53,8 @@ With `--allow-empty`, grit records a new commit whose tree matches the parent ev
 
 When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.
 
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 `pre-commit` and `commit-msg` hooks run before the commit object is written when they are installed (config `hook.*` entries or scripts under the hooks directory). Pass `--no-verify` to skip both; `post-commit` still runs afterward, matching Git. Dry-run skips all hooks. See [`grit hooks`](hooks.md).
 
-||||||| Common ancestor
-=======
-`pre-commit` and `commit-msg` hooks run before the commit object is written when they are installed (config `hook.*` entries or scripts under the hooks directory). Pass `--no-verify` to skip both; `post-commit` still runs afterward, matching Git. See [`grit hooks`](hooks.md).
-
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 ### Change ids
 
 Every commit `grit commit` creates gets a `change-id` header (reverse-hex by default) that stays with the same logical change across amends. Commits created without the header still have a deterministic id derived from the commit object id (Jujutsu-compatible); amending such a commit stores that derived value. Set `grit.changeIds=false` to omit the header (Git byte-identical commits for tests or importers that reject extra headers). See [Change ids](../library/change-ids/) for policy, testing knobs, and library APIs.
@@ -83,7 +64,6 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 | Option | Description |
 | --- | --- |
 | `<message>` | The commit message. |
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 | `-m`, `--message <message>` | The commit message, as an option. Use either this, the argument, or `--message-file`, not more than one. Optional with `--amend` (keeps the previous message). |
 | `-F`, `--message-file <file\|->` | Read the commit message from a file, or from stdin when the path is `-`. |
 | `--author <ident>` | Author for this commit (`Name <email>` or bare email). Committer unchanged. |
@@ -92,16 +72,6 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 | `-a`, `--all` | Stage every change first, then commit. Conflicts with `--staged` and path arguments. |
 | `--staged` | Commit only what is already in the index (no auto-stage). Conflicts with `-a` and path arguments. |
 | `--pathspec-from-file`, `--pathspec-file-nul` | Same as on [`grit add`](../add/): read pathspecs from a file; combine with trailing `PATH` arguments. |
-||||||| Common ancestor
-| `-m`, `--message <message>` | The commit message, as an option. Use either this or the argument, not both. Optional with `--amend` (keeps the previous message). |
-| `-a`, `--all` | Stage every change first. This is always what `grit commit` does; the option is accepted so that `git` habits like `-am` keep working. |
-=======
-| `-m`, `--message <message>` | The commit message, as an option. Use either this, the argument, or `--message-file`, not more than one. Optional with `--amend` (keeps the previous message). |
-| `-F`, `--message-file <file\|->` | Read the commit message from a file, or from stdin when the path is `-`. |
-| `--author <ident>` | Author for this commit (`Name <email>` or bare email). Committer unchanged. |
-| `--no-verify` | Skip `pre-commit` and `commit-msg` hooks. |
-| `-a`, `--all` | Stage every change first. This is always what `grit commit` does; the option is accepted so that `git` habits like `-am` keep working. |
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 | `--amend` | Replace the tip commit on the current branch. |
 | `--allow-empty` | Record a commit even when staged content matches the parent tree (empty tree change). |
 
@@ -179,7 +149,6 @@ Pass `--json` for stable, scripting-friendly output:
 | `subject` | string | First line of the commit message |
 | `changes` | number | Path changes vs the parent commit tree |
 | `amended` | boolean | `true` when `--amend` was used |
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 | `dry_run` | boolean | `true` when `--dry-run` was used |
 | `scope` | string | `auto_stage`, `staged`, or `paths` — how the index was prepared |
 | `files` | array | `{ "path", "status", "old_path"? }` per path (`status` is `A`, `M`, `D`, `R`, …) |
@@ -187,12 +156,6 @@ Pass `--json` for stable, scripting-friendly output:
 | `parents` | string[] | Parent commit OIDs (empty for the root commit) |
 | `author` | object | `{ "name", "email", "date" }` recorded on the commit (`date` is `<unix> <tz>`) |
 | `hooks_run` | string[] | Hook basenames that ran successfully (`pre-commit`, `commit-msg`, `post-commit`); empty on dry-run |
-||||||| Common ancestor
-=======
-| `parents` | string[] | Parent commit OIDs (empty for the root commit) |
-| `author` | object | `{ "name", "email", "date" }` recorded on the commit (`date` is `<unix> <tz>`) |
-| `hooks_run` | string[] | Hook basenames that were installed and ran successfully (`pre-commit`, `commit-msg`, `post-commit`) |
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 
 Example:
 
@@ -202,7 +165,6 @@ Example:
   "branch": "main",
   "subject": "second",
   "changes": 1,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
   "amended": false,
   "dry_run": false,
   "scope": "auto_stage",
@@ -215,18 +177,6 @@ Example:
     "date": "1700000000 +0000"
   },
   "hooks_run": ["pre-commit", "post-commit"]
-||||||| Common ancestor
-  "amended": false
-=======
-  "amended": false,
-  "parents": ["abc123…"],
-  "author": {
-    "name": "Your Name",
-    "email": "you@example.com",
-    "date": "1700000000 +0000"
-  },
-  "hooks_run": ["pre-commit", "post-commit"]
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 }
 ```
 

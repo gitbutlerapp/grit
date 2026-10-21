@@ -174,7 +174,6 @@ pub fn committer_unix_seconds_for_ordering(ident: &str) -> i64 {
     }
 }
 
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 /// Like [`committer_unix_seconds_for_ordering`] on raw identity bytes (ASCII commit headers).
 #[must_use]
 pub fn committer_unix_seconds_for_ordering_bytes(ident: &[u8]) -> i64 {
@@ -286,102 +285,6 @@ pub fn author_identity_line(
     assemble_identity(&contact.name, &contact.email, date_override, now)
 }
 
-||||||| Common ancestor
-=======
-/// Name and email from a `git commit --author`-style argument (`Name <email>` or bare email).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuthorContact {
-    /// Display name (may be empty when the argument is a bare email address).
-    pub name: String,
-    /// Email address inside `<…>`.
-    pub email: String,
-}
-
-/// Failure to parse [`parse_author_arg`].
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum AuthorArgError {
-    /// The string is not a recognized author form.
-    #[error("invalid author: expected 'Name <email>' or a bare email address")]
-    InvalidFormat,
-    /// Angle brackets present but the email portion is empty.
-    #[error("invalid author: empty email")]
-    EmptyEmail,
-    /// Non-whitespace remains after the closing `>`.
-    #[error("invalid author: trailing text after '>'")]
-    TrailingText,
-    /// Name or email contains control characters or other bytes invalid in a commit header line.
-    #[error("invalid author: name or email contains invalid characters")]
-    InvalidCharacter,
-}
-
-fn author_field_has_invalid_bytes(s: &str) -> bool {
-    s.bytes().any(|b| b < b' ' || b == 127)
-}
-
-fn validate_author_contact(contact: &AuthorContact) -> Result<(), AuthorArgError> {
-    if author_field_has_invalid_bytes(&contact.name)
-        || author_field_has_invalid_bytes(&contact.email)
-    {
-        return Err(AuthorArgError::InvalidCharacter);
-    }
-    Ok(())
-}
-
-/// Parse `git commit --author` values: `Name <email>` or a bare email (no whitespace).
-///
-/// Git's search-existing-authors fallback is not implemented.
-///
-/// # Errors
-///
-/// Returns [`AuthorArgError`] when the string cannot be interpreted as an author.
-pub fn parse_author_arg(raw: &str) -> Result<AuthorContact, AuthorArgError> {
-    let s = raw.trim();
-    if s.is_empty() {
-        return Err(AuthorArgError::InvalidFormat);
-    }
-    if let Some(lt) = s.find('<') {
-        let rest = &s[lt + 1..];
-        let gt = rest.find('>').ok_or(AuthorArgError::InvalidFormat)?;
-        let email = &rest[..gt];
-        if email.is_empty() {
-            return Err(AuthorArgError::EmptyEmail);
-        }
-        let after = rest[gt + 1..].trim();
-        if !after.is_empty() {
-            return Err(AuthorArgError::TrailingText);
-        }
-        let name = s[..lt].trim_end_matches(|c: char| c.is_ascii_whitespace());
-        let contact = AuthorContact {
-            name: name.to_owned(),
-            email: email.to_owned(),
-        };
-        validate_author_contact(&contact)?;
-        return Ok(contact);
-    }
-    if s.contains('@') && !s.chars().any(char::is_whitespace) {
-        let contact = AuthorContact {
-            name: String::new(),
-            email: s.to_owned(),
-        };
-        validate_author_contact(&contact)?;
-        return Ok(contact);
-    }
-    Err(AuthorArgError::InvalidFormat)
-}
-
-/// Build a full author/committer header line from a parsed contact and timestamp inputs.
-///
-/// `date_override` is the raw `GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE` value when set.
-#[must_use]
-pub fn author_identity_line(
-    contact: &AuthorContact,
-    date_override: Option<&str>,
-    now: OffsetDateTime,
-) -> String {
-    assemble_identity(&contact.name, &contact.email, date_override, now)
-}
-
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,7 +306,6 @@ mod tests {
             Some(SignatureTail::Overflow)
         ));
     }
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 
     #[test]
     fn parse_author_arg_name_and_email() {
@@ -439,46 +341,4 @@ mod tests {
             Err(AuthorArgError::InvalidCharacter)
         );
     }
-||||||| Common ancestor
-=======
-
-    #[test]
-    fn parse_author_arg_name_and_email() {
-        let c = parse_author_arg("A U Thor <author@example.com>").expect("parse");
-        assert_eq!(c.name, "A U Thor");
-        assert_eq!(c.email, "author@example.com");
-    }
-
-    #[test]
-    fn parse_author_arg_bare_email() {
-        let c = parse_author_arg("nobody@example.com").expect("parse");
-        assert!(c.name.is_empty());
-        assert_eq!(c.email, "nobody@example.com");
-    }
-
-    #[test]
-    fn parse_author_arg_rejects_empty_email_in_brackets() {
-        assert_eq!(parse_author_arg("Name <>"), Err(AuthorArgError::EmptyEmail));
-    }
-
-    #[test]
-    fn parse_author_arg_rejects_trailing_garbage() {
-        assert_eq!(
-            parse_author_arg("A <a@b.com> extra"),
-            Err(AuthorArgError::TrailingText)
-        );
-    }
-<<<<<<< New base: commit: message file, author override, and no-verify hooks
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
-||||||| Common ancestor
-=======
-
-    #[test]
-    fn parse_author_arg_rejects_control_characters_in_name() {
-        assert_eq!(
-            parse_author_arg("Bad\nInjected <x@y.example>"),
-            Err(AuthorArgError::InvalidCharacter)
-        );
-    }
->>>>>>> Current commit: Fix commit review blockers: message stripspace, post-commit, author parse, amend
 }

@@ -487,19 +487,12 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
         "changes"
     };
     outln!(w, "- **{}** {word} committed", outcome.changes);
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     if let Some(id) = outcome.change_id.as_deref() {
         outln!(w, "- change id `{short}`", short = short_change_id(id));
     }
     if !outcome.hooks_run.is_empty() {
         outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
     }
-||||||| Common ancestor
-=======
-    if !outcome.hooks_run.is_empty() {
-        outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
-    }
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     Ok(())
 }
 

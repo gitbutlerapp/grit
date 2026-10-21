@@ -257,12 +257,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
-||||||| Common ancestor
-=======
-            hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -297,12 +292,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
-||||||| Common ancestor
-=======
-            hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -427,12 +417,7 @@ fn pack_signature_not_restatted_per_object() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
-||||||| Common ancestor
-=======
-            hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -506,12 +491,7 @@ fn pack_signature_not_restatted_per_object() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
-<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
-||||||| Common ancestor
-=======
-            hooks: Default::default(),
->>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
