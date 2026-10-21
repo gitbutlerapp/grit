@@ -1503,117 +1503,125 @@ fn checkout_tree_changes_with_progress(
         parallel_deleted_paths.extend(per_file_deletes);
     }
 
-    for change in changes {
-        if change.status == DiffStatus::Deleted {
-            if let Some(path) = &change.old_path {
-                let old_mode = parse_git_mode(&change.old_mode);
-                if old_mode == MODE_GITLINK
-                    || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
-                {
-                    if old_mode == MODE_GITLINK {
-                        let abs = work_tree.join(path);
-                        remove_uninitialized_gitlink_worktree(&abs);
-                        deleted_abs_paths.push(abs);
-                    } else if !parallel_deleted_paths.contains(path) {
-                        let abs = work_tree.join(path);
-                        let _ = fs::remove_file(&abs);
-                        deleted_abs_paths.push(abs);
+    {
+        crate::trace::trace_span!("grit.checkout.plan");
+        for change in changes {
+            if change.status == DiffStatus::Deleted {
+                if let Some(path) = &change.old_path {
+                    let old_mode = parse_git_mode(&change.old_mode);
+                    if old_mode == MODE_GITLINK
+                        || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
+                    {
+                        if old_mode == MODE_GITLINK {
+                            let abs = work_tree.join(path);
+                            remove_uninitialized_gitlink_worktree(&abs);
+                            deleted_abs_paths.push(abs);
+                        } else if !parallel_deleted_paths.contains(path) {
+                            let abs = work_tree.join(path);
+                            let _ = fs::remove_file(&abs);
+                            deleted_abs_paths.push(abs);
+                        }
+                    }
+                    if !path_under_wholesale_directory(path, &wholesale_dirs_removed) {
+                        paths_to_remove.push(path.as_bytes().to_vec());
                     }
                 }
-                if !path_under_wholesale_directory(path, &wholesale_dirs_removed) {
-                    paths_to_remove.push(path.as_bytes().to_vec());
-                }
+                progress.inc(1);
+                continue;
             }
-            progress.inc(1);
-            continue;
-        }
 
-        let Some(path) = &change.new_path else {
-            progress.inc(1);
-            continue;
-        };
-        if rules.is_none() {
-            rules = Some(if tree_changes_touch_gitattributes(attr_changes) {
-                let prospective_index = prospective_index_for_checkout(index, attr_changes);
-                WorktreeRules::from_checkout_prospective_index(
-                    repo,
-                    &prospective_index,
-                    config.clone(),
-                )?
-            } else {
-                WorktreeRules::from_parts_index_attributes_only(repo, index, config.clone())?
-            });
-        }
-        let rules = rules.as_ref().ok_or_else(|| {
-            Error::PathError("internal error: missing checkout rules for write".into())
-        })?;
-        if conv.is_none() {
-            conv = Some(rules.conversion().clone());
-        }
-        let mode = parse_git_mode(&change.new_mode);
-        if mode == MODE_GITLINK {
+            let Some(path) = &change.new_path else {
+                progress.inc(1);
+                continue;
+            };
+            if rules.is_none() {
+                rules = Some(if tree_changes_touch_gitattributes(attr_changes) {
+                    let prospective_index = prospective_index_for_checkout(index, attr_changes);
+                    WorktreeRules::from_checkout_prospective_index(
+                        repo,
+                        &prospective_index,
+                        config.clone(),
+                    )?
+                } else {
+                    WorktreeRules::from_parts_index_attributes_only(repo, index, config.clone())?
+                });
+            }
+            let rules = rules.as_ref().ok_or_else(|| {
+                Error::PathError("internal error: missing checkout rules for write".into())
+            })?;
+            if conv.is_none() {
+                conv = Some(rules.conversion().clone());
+            }
+            let mode = parse_git_mode(&change.new_mode);
+            if mode == MODE_GITLINK {
+                if let Some(existing) = index.get(path.as_bytes(), 0) {
+                    if existing.oid == change.new_oid
+                        && existing.mode == MODE_GITLINK
+                        && gitlink_worktree_matches_index(&work_tree.join(path))
+                    {
+                        let abs = work_tree.join(path);
+                        let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
+                        let mut entry = entry_from_metadata(
+                            &meta,
+                            path.as_bytes(),
+                            change.new_oid,
+                            MODE_GITLINK,
+                        );
+                        entry.size = 0;
+                        plan.push(CheckoutPlanSlot::Ready(entry));
+                        progress.inc(1);
+                        continue;
+                    }
+                }
+                materialize_gitlink_worktree(work_tree, path, &mut dir_cache)?;
+                let abs = work_tree.join(path);
+                let mut entry =
+                    entry_from_stat(&abs, path.as_bytes(), change.new_oid, MODE_GITLINK)?;
+                entry.size = 0;
+                plan.push(CheckoutPlanSlot::Ready(entry));
+                progress.inc(1);
+                continue;
+            }
             if let Some(existing) = index.get(path.as_bytes(), 0) {
-                if existing.oid == change.new_oid
-                    && existing.mode == MODE_GITLINK
-                    && gitlink_worktree_matches_index(&work_tree.join(path))
-                {
+                if crate::diff::path_checkout_skip_blob_write_when_up_to_date_with_config(
+                    repo.odb(),
+                    repo.git_dir(),
+                    work_tree,
+                    index,
+                    existing,
+                    &change.new_oid,
+                    mode,
+                    path,
+                    Some(rules.filter_process()),
+                    Some(config.as_ref()),
+                )? {
                     let abs = work_tree.join(path);
                     let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-                    let mut entry =
-                        entry_from_metadata(&meta, path.as_bytes(), change.new_oid, MODE_GITLINK);
-                    entry.size = 0;
-                    plan.push(CheckoutPlanSlot::Ready(entry));
+                    plan.push(CheckoutPlanSlot::Ready(entry_from_metadata(
+                        &meta,
+                        path.as_bytes(),
+                        change.new_oid,
+                        mode,
+                    )));
                     progress.inc(1);
                     continue;
                 }
             }
-            materialize_gitlink_worktree(work_tree, path, &mut dir_cache)?;
-            let abs = work_tree.join(path);
-            let mut entry = entry_from_stat(&abs, path.as_bytes(), change.new_oid, MODE_GITLINK)?;
-            entry.size = 0;
-            plan.push(CheckoutPlanSlot::Ready(entry));
-            progress.inc(1);
-            continue;
-        }
-        if let Some(existing) = index.get(path.as_bytes(), 0) {
-            if crate::diff::path_checkout_skip_blob_write_when_up_to_date_with_config(
-                repo.odb(),
-                repo.git_dir(),
-                work_tree,
-                index,
-                existing,
-                &change.new_oid,
+            let file_attrs = rules.file_attrs(path, false);
+            let smudge_meta = crate::filter_process::smudge_meta_for_checkout_blob(
+                &checkout_smudge_ctx,
+                &change.new_oid.to_hex(),
+            );
+            write_jobs.push(CheckoutWriteJob {
+                path: path.clone(),
                 mode,
-                path,
-                Some(rules.filter_process()),
-                Some(config.as_ref()),
-            )? {
-                let abs = work_tree.join(path);
-                let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-                plan.push(CheckoutPlanSlot::Ready(entry_from_metadata(
-                    &meta,
-                    path.as_bytes(),
-                    change.new_oid,
-                    mode,
-                )));
-                progress.inc(1);
-                continue;
-            }
+                oid: change.new_oid,
+                change: change.clone(),
+                file_attrs,
+                smudge_meta,
+            });
+            plan.push(CheckoutPlanSlot::Write);
         }
-        let file_attrs = rules.file_attrs(path, false);
-        let smudge_meta = crate::filter_process::smudge_meta_for_checkout_blob(
-            &checkout_smudge_ctx,
-            &change.new_oid.to_hex(),
-        );
-        write_jobs.push(CheckoutWriteJob {
-            path: path.clone(),
-            mode,
-            oid: change.new_oid,
-            change: change.clone(),
-            file_attrs,
-            smudge_meta,
-        });
-        plan.push(CheckoutPlanSlot::Write);
     }
 
     let write_paths: Vec<String> = write_jobs.iter().map(|j| j.path.clone()).collect();
@@ -1645,6 +1653,7 @@ fn checkout_tree_changes_with_progress(
         let conv = conv.as_ref().ok_or_else(|| {
             Error::PathError("internal error: missing conversion config for write jobs".into())
         })?;
+        crate::trace::trace_span!("grit.checkout.write");
         execute_write_jobs(
             repo,
             rules,

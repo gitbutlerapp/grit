@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use grit_lib::change_id::{change_id, ChangeId, ChangeIdGenerator, ChangeIdPolicy};
@@ -13,6 +14,8 @@ use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::stage;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -23,6 +26,42 @@ impl ChangeIdGenerator for FixedGenerator {
     fn random_bytes(&self) -> std::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError> {
         Ok(self.0)
     }
+}
+
+struct SeqGenerator(Arc<AtomicUsize>);
+
+impl ChangeIdGenerator for SeqGenerator {
+    fn random_bytes(&self) -> std::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError> {
+        let n = self.0.fetch_add(1, Ordering::SeqCst);
+        let mut bytes = [0u8; 16];
+        bytes[0] = n as u8;
+        bytes[1] = (n >> 8) as u8;
+        Ok(bytes)
+    }
+}
+
+fn init_repo_with_generator(
+    root: &Path,
+    config_extra: &str,
+    gen: Arc<dyn ChangeIdGenerator>,
+) -> Repository {
+    fs::create_dir_all(root.join(".git/objects")).unwrap();
+    fs::create_dir_all(root.join(".git/refs/heads")).unwrap();
+    fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    fs::write(
+        root.join(".git/config"),
+        format!(
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n{config_extra}"
+        ),
+    )
+    .unwrap();
+    Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty()
+            .with_work_tree(root)
+            .with_change_id_generator(gen),
+    )
+    .unwrap()
 }
 
 fn ident() -> String {
@@ -278,6 +317,132 @@ fn testing_content_hash_is_deterministic() {
     let cat = git_out(root, &["cat-file", "-p", "HEAD"]);
     let header = change_id_line(&cat).expect("change-id in cat-file");
     assert_eq!(header.strip_prefix("change-id ").unwrap(), stored.as_str());
+}
+
+#[test]
+fn merge_commit_gets_change_id() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("shared.txt"), b"base\n").unwrap();
+    git(root, &["add", "shared.txt"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["switch", "-c", "topic"]);
+    fs::write(root.join("topic.txt"), b"topic\n").unwrap();
+    git(root, &["add", "topic.txt"]);
+    git(root, &["commit", "-qm", "topic"]);
+    git(root, &["switch", "main"]);
+    fs::write(root.join("main.txt"), b"main\n").unwrap();
+    git(root, &["add", "main.txt"]);
+    git(root, &["commit", "-qm", "main"]);
+    let main_oid = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("main");
+    let topic_oid = ObjectId::from_hex(&git_out(root, &["rev-parse", "topic"])).expect("topic");
+    let gen: Arc<dyn ChangeIdGenerator> = Arc::new(FixedGenerator([0xcd; 16]));
+    let repo = Repository::discover(
+        Some(root),
+        &RepositoryOptions::empty().with_change_id_generator(gen),
+    )
+    .expect("open");
+    let outcome =
+        integrate_branch(&repo, "refs/heads/main", main_oid, topic_oid, "topic").expect("merge");
+    let IntegrateBranchOutcome::Merged { oid } = outcome else {
+        panic!("expected merged, got {outcome:?}");
+    };
+
+    git_fsck_strict(root);
+    let cat = git_out(root, &["cat-file", "-p", &oid.to_hex()]);
+    let line = change_id_line(&cat).expect("change-id");
+    let value = line.strip_prefix("change-id ").expect("prefix");
+    assert!(ChangeId::parse_reverse_hex(value).is_ok());
+    assert_eq!(value, ChangeId::from_bytes(&[0xcd; 16]).as_str());
+}
+
+#[test]
+fn pick_copy_gets_new_change_id_not_source() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let gen: Arc<dyn ChangeIdGenerator> = Arc::new(SeqGenerator(Arc::new(AtomicUsize::new(0))));
+    let repo = init_repo_with_generator(root, "", gen);
+    fs::write(root.join("base.txt"), b"base\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("base"), &mut NullProgress).unwrap();
+
+    git(root, &["switch", "-c", "topic"]);
+    fs::write(root.join("picked.txt"), b"pick me\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("topic commit"), &mut NullProgress).unwrap();
+    let source_oid = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("source");
+    let source_id = change_id_line(&git_out(root, &["cat-file", "-p", &source_oid.to_hex()]))
+        .expect("source change-id");
+
+    git(root, &["switch", "main"]);
+    fs::write(root.join("main.txt"), b"main\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("main commit"), &mut NullProgress).unwrap();
+
+    let outcome = replay_commit(
+        &repo,
+        &ReplayRequest {
+            commit: source_oid,
+            direction: ReplayDirection::Pick,
+            committer: ident(),
+            message_override: None,
+        },
+    )
+    .expect("pick");
+    let ReplayOutcome::Committed { oid, .. } = outcome else {
+        panic!("expected committed pick, got {outcome:?}");
+    };
+
+    git_fsck_strict(root);
+    let pick_id =
+        change_id_line(&git_out(root, &["cat-file", "-p", &oid.to_hex()])).expect("pick change-id");
+    let source_value = source_id.strip_prefix("change-id ").expect("prefix");
+    let pick_value = pick_id.strip_prefix("change-id ").expect("prefix");
+    assert_ne!(source_value, pick_value);
+    assert!(ChangeId::parse_reverse_hex(source_value).is_ok());
+    assert!(ChangeId::parse_reverse_hex(pick_value).is_ok());
+}
+
+#[test]
+fn revert_gets_new_change_id() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let gen: Arc<dyn ChangeIdGenerator> = Arc::new(SeqGenerator(Arc::new(AtomicUsize::new(0))));
+    let repo = init_repo_with_generator(root, "", gen);
+    fs::write(root.join("a.txt"), b"v1\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("add a"), &mut NullProgress).unwrap();
+    fs::write(root.join("a.txt"), b"v2\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("change a"), &mut NullProgress).unwrap();
+    let reverted = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("head");
+    let before_id = change_id_line(&git_out(root, &["cat-file", "-p", &reverted.to_hex()]))
+        .expect("reverted change-id");
+
+    let outcome = replay_commit(
+        &repo,
+        &ReplayRequest {
+            commit: reverted,
+            direction: ReplayDirection::Revert,
+            committer: ident(),
+            message_override: None,
+        },
+    )
+    .expect("revert");
+    let ReplayOutcome::Committed { oid, .. } = outcome else {
+        panic!("expected committed revert, got {outcome:?}");
+    };
+
+    git_fsck_strict(root);
+    let revert_id = change_id_line(&git_out(root, &["cat-file", "-p", &oid.to_hex()]))
+        .expect("revert change-id");
+    let before_value = before_id.strip_prefix("change-id ").expect("prefix");
+    let revert_value = revert_id.strip_prefix("change-id ").expect("prefix");
+    assert_ne!(before_value, revert_value);
+    assert!(ChangeId::parse_reverse_hex(revert_value).is_ok());
 }
 
 #[test]

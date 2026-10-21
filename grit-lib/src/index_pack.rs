@@ -230,6 +230,7 @@ pub fn ingest_received_pack_path_with_progress(
     opts: &IngestPackOptions,
     progress: Option<&mut dyn ProgressSink>,
 ) -> Result<IngestedPack> {
+    crate::trace::trace_span!("grit.pack.index");
     let pack_path = wait_for_received_pack_path(pack_path)?;
     install_pack_path_with_progress(&pack_path, odb, opts, progress)
 }

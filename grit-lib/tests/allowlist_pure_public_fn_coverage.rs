@@ -25,6 +25,7 @@ use grit_lib::diff::{
     detect_copies, format_stat_line, read_submodule_head_for_checkout,
     submodule_commit_subject_line, unified_diff, unified_diff_with_prefix,
 };
+use grit_lib::lockfile::{LockFile, LockWait, SystemLockJitter};
 use grit_lib::objects::hash::try_par_hash_with_force;
 use grit_lib::objects::pack_receive::copy_reader_to_writer;
 use grit_lib::objects::promisor_remote::parse_advertisement;
@@ -51,6 +52,20 @@ use grit_lib::worktree::attributes::builtin_objectmode_index;
 use grit_lib::worktree::resolve_linked_worktree_add_path;
 use grit_lib::worktree::worktree_cwd::cwd_would_be_removed_with_dir;
 use tempfile::tempdir;
+
+#[test]
+fn lockfile_public_surface() {
+    let dir = tempdir().expect("tempdir");
+    let lock_path = dir.path().join("sample.lock");
+    let wait = LockWait::files_ref_lock(None);
+    let _ = LockWait::parse_files_ref_lock_timeout_ms(None);
+    let _jitter = SystemLockJitter;
+    let mut lock = LockFile::acquire(&lock_path, wait).expect("acquire");
+    let _ = lock.as_file().expect("as_file");
+    let _ = lock.as_file_mut().expect("as_file_mut");
+    lock.rollback();
+    assert!(!lock_path.exists());
+}
 
 fn init_repo(dir: &Path) -> Repository {
     Repository::init(

@@ -1186,6 +1186,7 @@ fn create_temp_textconv_file(data: &[u8]) -> Result<std::path::PathBuf> {
     for attempt in 0..32u32 {
         let now = crate::git_date::tm::process_wall_clock_sec() as u128;
         let path = std::env::temp_dir().join(format!("grit-blame-textconv-{pid}-{now}-{attempt}"));
+        // Ephemeral textconv input (not a repo lock); retry on name collision.
         match OpenOptions::new().create_new(true).write(true).open(&path) {
             Ok(mut file) => {
                 file.write_all(data)?;

@@ -151,7 +151,7 @@ impl LooseStore {
         let file = fs::File::open(path).map_err(Error::Io)?;
         let raw = read_zlib_loose_payload(file)?;
         let obj = parse_object_bytes_with_oid(&raw, expected_oid)?;
-        let computed = hash::hash_object(expected_oid.algo(), obj.kind, &obj.data);
+        let computed = hash::try_hash_object(expected_oid.algo(), obj.kind, &obj.data)?;
         if computed != *expected_oid {
             return Err(Error::LooseHashMismatch {
                 path: path.display().to_string(),
@@ -263,7 +263,7 @@ impl ObjectStore for LooseStore {
 impl WritableObjectStore for LooseStore {
     fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId> {
         let store_bytes = build_store_bytes(kind, data);
-        let oid = hash::hash_object(self.hash_algo, kind, data);
+        let oid = hash::try_hash_object(self.hash_algo, kind, data)?;
         debug_assert_eq!(oid, hash::hash_object(self.hash_algo, kind, data));
         if let Some(existing) = self.try_finish_if_loose_present(&oid, options)? {
             return Ok(existing);

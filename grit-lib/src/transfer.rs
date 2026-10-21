@@ -1235,13 +1235,14 @@ pub fn fetch_local_with_progress(
     let mut tag_shallow = local_shallow.clone();
     tag_shallow.extend(remote_shallow.iter().copied());
 
+    let mut following_only = HashSet::new();
     if matches!(opts.tags, TagMode::All | TagMode::Following) {
         let tags_present = if opts.tags == TagMode::Following {
             crate::fetch::tags_already_local(local_git_dir, &remote_refs)
         } else {
             HashSet::new()
         };
-        apply_tag_mode(
+        following_only = apply_tag_mode(
             opts.tags,
             &remote_refs,
             &remote_odb,
@@ -1254,12 +1255,51 @@ pub fn fetch_local_with_progress(
         )?;
     }
 
+    let fetch_commit_oids: HashSet<ObjectId> = matched
+        .iter()
+        .filter(|m| !m.is_tag)
+        .map(|m| m.oid)
+        .collect();
+    let mut following_tag_wants =
+        crate::fetch::following_tag_wants_with_local_peel(&matched, &following_only, &local_odb);
+    let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
+    if shallow_request {
+        let peel_set = crate::fetch::following_peel_commit_set_for_shallow(
+            &remote_odb,
+            &fetch_commit_oids,
+            opts.depth,
+            &tag_shallow,
+        );
+        following_tag_wants.extend(
+            crate::fetch::following_tag_wants_peel_among_fetched_commits(
+                &matched,
+                &following_only,
+                &peel_set,
+            ),
+        );
+    }
+
     // 3. Determine wants (matched oids not present locally) and haves (current
     //    local tracking-ref tips) and copy the minimal object set.
-    let wants: Vec<ObjectId> = matched_oids
+    let mut wants: Vec<ObjectId> = if shallow_request {
+        matched_oids
+            .iter()
+            .copied()
+            .filter(|oid| !following_only.contains(oid) || following_tag_wants.contains(oid))
+            .collect()
+    } else {
+        matched_oids
+            .iter()
+            .copied()
+            .filter(|oid| !local_odb.exists(oid))
+            .collect()
+    };
+
+    let shallow_wants: Vec<ObjectId> = matched
         .iter()
-        .copied()
-        .filter(|oid| !local_odb.exists(oid))
+        .filter(|m| !m.is_tag)
+        .map(|m| m.oid)
+        .filter(|oid| wants.contains(oid))
         .collect();
 
     let mut haves: Vec<ObjectId> = Vec::new();
@@ -1276,6 +1316,64 @@ pub fn fetch_local_with_progress(
 
     let mut pack_oids: HashSet<ObjectId> = HashSet::new();
     let mut transfer = TransferStats::default();
+    let mut shallow_new: Vec<ObjectId> = Vec::new();
+    let mut shallow_unshallow: Vec<ObjectId> = Vec::new();
+    let mut copy_source_shallow = remote_shallow.clone();
+    if opts.has_deepen_request() {
+        let remote_repo =
+            crate::repo::Repository::open(remote_git_dir, &RepositoryOptions::empty())?;
+        let req = crate::serve::ShallowRequest {
+            client_shallow: local_shallow.iter().copied().collect(),
+            depth: if opts.unshallow {
+                Some(crate::shallow::INFINITE_DEPTH)
+            } else {
+                opts.depth
+            },
+            deepen_since: opts
+                .deepen_since
+                .as_deref()
+                .and_then(|s| s.parse::<i64>().ok()),
+            deepen_not: Vec::new(),
+            deepen_relative: false,
+        };
+        let resp = crate::serve::compute_shallow_response(&remote_repo, &shallow_wants, &req)?;
+        shallow_new = resp.shallow;
+        shallow_unshallow = resp.unshallow;
+        copy_source_shallow = resp.pack_shallow_grafts;
+        if opts.tags == TagMode::Following {
+            if let Some(depth) = opts.depth.filter(|d| *d > 0) {
+                let mut effective_shallow = tag_shallow.clone();
+                effective_shallow.extend(shallow_new.iter().copied());
+                for oid in &shallow_unshallow {
+                    effective_shallow.remove(oid);
+                }
+                let fetch_commits = crate::fetch::shallow_fetched_commit_oids(
+                    &remote_odb,
+                    &fetch_commit_oids.iter().copied().collect::<Vec<_>>(),
+                    depth,
+                    &effective_shallow,
+                );
+                for m in &matched {
+                    if !m.is_tag || local_odb.exists(&m.oid) || wants.contains(&m.oid) {
+                        continue;
+                    }
+                    let peel = remote_odb
+                        .peel_tags(m.oid)
+                        .ok()
+                        .map(|(p, _)| p)
+                        .unwrap_or(m.oid);
+                    if fetch_commits.contains(&peel) {
+                        wants.push(m.oid);
+                    }
+                }
+            }
+        }
+        for oid in &fetch_commit_oids {
+            if !wants.contains(oid) {
+                wants.push(*oid);
+            }
+        }
+    }
     if !wants.is_empty() && !opts.dry_run {
         let remote_cfg = config_for_git_dir(remote_git_dir);
         let pack_opts = PackBuildOptions::for_local_copy(remote_cfg.as_ref());
@@ -1286,9 +1384,9 @@ pub fn fetch_local_with_progress(
             &local_odb,
             &wants,
             &haves,
-            &remote_shallow,
+            &copy_source_shallow,
             &local_shallow,
-            true,
+            !opts.has_deepen_request(),
             &pack_opts,
             opts,
             progress,
@@ -1297,13 +1395,21 @@ pub fn fetch_local_with_progress(
         transfer = fetch_transfer;
     }
 
-    if opts.initial_remote_fetch && !remote_shallow.is_empty() && !opts.dry_run {
+    if opts.initial_remote_fetch
+        && !remote_shallow.is_empty()
+        && !opts.has_deepen_request()
+        && !opts.dry_run
+    {
         let remote_shallow_vec: Vec<ObjectId> = remote_shallow.iter().copied().collect();
         crate::shallow::apply_shallow_updates(local_git_dir, &remote_shallow_vec, &[])?;
     }
+    if (!shallow_new.is_empty() || !shallow_unshallow.is_empty()) && !opts.dry_run {
+        crate::shallow::apply_shallow_updates(local_git_dir, &shallow_new, &shallow_unshallow)?;
+    }
 
     if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &local_shallow)?;
+        let boundaries = crate::shallow::load_shallow_boundaries(local_git_dir);
+        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &boundaries)?;
     }
 
     // 4. Classify and apply ref updates. Ancestry checks use the local repo,
@@ -1452,7 +1558,9 @@ pub fn fetch_local_with_progress(
         &remote_refs,
         &matched,
     )?;
-    let new_shallow = if opts.initial_remote_fetch {
+    let new_shallow = if opts.has_deepen_request() {
+        shallow_new
+    } else if opts.initial_remote_fetch {
         remote_shallow.iter().copied().collect()
     } else {
         Vec::new()
@@ -1461,7 +1569,7 @@ pub fn fetch_local_with_progress(
         updates,
         default_branch,
         new_shallow,
-        new_unshallow: Vec::new(),
+        new_unshallow: shallow_unshallow,
         transfer,
     })
 }
@@ -2169,9 +2277,10 @@ pub(crate) fn apply_tag_mode(
     matched: &mut Vec<MatchedRef>,
     matched_oids: &mut HashSet<ObjectId>,
     seen_remote_ref: &mut HashSet<String>,
-) -> Result<()> {
+) -> Result<HashSet<ObjectId>> {
+    let mut following_only = HashSet::new();
     if mode == TagMode::None {
-        return Ok(());
+        return Ok(following_only);
     }
 
     // Tags this call may add, with the object each one peels to (`None` when
@@ -2223,18 +2332,20 @@ pub(crate) fn apply_tag_mode(
             TagMode::None => false,
         };
         if keep && seen_remote_ref.insert(name.clone()) {
-            matched_oids.insert(oid);
+            if matched_oids.insert(oid) && mode == TagMode::Following {
+                following_only.insert(oid);
+            }
             matched.push(MatchedRef {
                 remote_ref: name.clone(),
                 local_ref: Some(name.clone()),
                 oid,
                 force: false,
                 is_tag: true,
-                advertised_peel: None,
+                advertised_peel: peeled,
             });
         }
     }
-    Ok(())
+    Ok(following_only)
 }
 
 /// Whether a tag ref's peeled target (or the oid itself for lightweight tags)

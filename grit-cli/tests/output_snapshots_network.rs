@@ -66,6 +66,24 @@ fn snapshot_clone_local() {
 }
 
 #[test]
+fn snapshot_clone_shallow() {
+    let net = CliFixture::new().with_upstream();
+    let upstream = net
+        .upstream_path()
+        .to_str()
+        .expect("upstream utf8")
+        .to_owned();
+    net.snapshot_network("clone_shallow", snapshot_dir(), noop_opts(), |mode| {
+        let dest = format!("cloned-shallow-{}", mode.suffix());
+        PreparedNetworkRun::from_shared_upstream(
+            &net,
+            net.workspace_path().to_path_buf(),
+            vec!["clone".into(), "--shallow".into(), upstream.clone(), dest],
+        )
+    });
+}
+
+#[test]
 fn snapshot_fetch_noop() {
     let net = CliFixture::new().with_upstream();
     net.snapshot_network("fetch_noop", snapshot_dir(), noop_opts(), |mode| {

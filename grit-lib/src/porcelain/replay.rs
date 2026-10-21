@@ -8,6 +8,7 @@
 
 use std::fs;
 
+use crate::change_id::ChangeIdPolicy;
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::MergeFavor;
@@ -16,7 +17,7 @@ use crate::merge_trees::{
 };
 use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_between_trees;
-use crate::porcelain::commit::write_commit_object;
+use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
 use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
@@ -75,6 +76,10 @@ pub enum ReplayOutcome {
 /// Requires a clean worktree (same checks as `grit pick`), a branch `HEAD`, and a
 /// resolvable first-parent chain for the source commit. The source must not be a
 /// merge commit.
+///
+/// Successful pick and revert commits receive a fresh [`change-id`](crate::change_id::change_id);
+/// the source commit's id is not copied. When conflicted replay with `--continue` is
+/// added later, the concluding commit must assign a new id the same way.
 ///
 /// # Errors
 ///
@@ -144,13 +149,14 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
         return Ok(ReplayOutcome::AlreadyApplied);
     }
 
+    let config = repo.config()?;
     let message = commit_message(req, &source)?;
     let author = match req.direction {
         ReplayDirection::Pick => source.author.clone(),
         ReplayDirection::Revert => req.committer.clone(),
     };
 
-    let commit_data = CommitData {
+    let mut commit_data = CommitData {
         tree: new_tree,
         parents: vec![head_oid],
         author,
@@ -162,9 +168,10 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
         raw_message: None,
         extra_headers: Vec::new(),
     };
+    let policy = ChangeIdPolicy::from_config(config.as_ref());
+    stamp_change_id_on_new_commit(repo, &policy, &mut commit_data)?;
     let new_oid = write_commit_object(repo, &commit_data, None)?;
 
-    let config = repo.config()?;
     let subject = commit_data.message.lines().next().unwrap_or("").trim_end();
     let reflog_msg = match req.direction {
         ReplayDirection::Pick => format!("cherry-pick: {subject}"),

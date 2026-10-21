@@ -283,7 +283,7 @@ fn complete_bundle_fetch(
     } else {
         HashSet::new()
     };
-    apply_tag_mode(
+    let _following_only = apply_tag_mode(
         opts.tags,
         remote_refs,
         local_odb,

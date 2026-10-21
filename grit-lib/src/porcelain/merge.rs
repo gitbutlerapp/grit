@@ -30,6 +30,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+use crate::change_id::ChangeIdPolicy;
 use crate::config::ConfigSet;
 use crate::diff::diff_trees;
 use crate::error::{Error, Result};
@@ -45,7 +46,7 @@ use crate::merge_trees::{
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::checkout;
-use crate::porcelain::commit::write_commit_object;
+use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
 };
@@ -347,7 +348,7 @@ pub fn integrate_branch(
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, &merged)?;
     repo.write_index(&mut snapshot.index)?;
 
-    let commit = CommitData {
+    let mut commit = CommitData {
         tree: merged.result_tree,
         parents: vec![into_oid, other_oid],
         author,
@@ -359,6 +360,8 @@ pub fn integrate_branch(
         raw_message: None,
         extra_headers: Vec::new(),
     };
+    let policy = ChangeIdPolicy::from_config(config.as_ref());
+    stamp_change_id_on_new_commit(repo, &policy, &mut commit)?;
     let oid = write_commit_object(repo, &commit, None)?;
     move_branch(repo, into_ref, into_oid, oid, &format!("merge {label}"))?;
     Ok(IntegrateBranchOutcome::Merged { oid })

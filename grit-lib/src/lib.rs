@@ -225,6 +225,7 @@ pub(crate) mod index_pack;
 pub(crate) mod init_filesystem;
 pub(crate) mod interpret_trailers;
 pub(crate) mod local_object_copy;
+pub mod lockfile;
 pub(crate) mod log_walk;
 pub(crate) mod mailmap;
 pub mod maintenance;
@@ -262,6 +263,7 @@ pub(crate) mod pack_zlib;
 pub mod parallel;
 pub(crate) mod patch_ids;
 pub(crate) mod path_icase;
+pub mod path_validate;
 pub(crate) mod pathspec;
 pub(crate) mod pkt_line;
 pub(crate) mod precompose_config;
@@ -308,6 +310,7 @@ pub(crate) mod stripspace;
 pub(crate) mod submodule_gitdir;
 pub(crate) mod terminal;
 pub(crate) mod textconv_cache;
+pub(crate) mod trace;
 mod tracked_path_tree;
 pub(crate) mod transfer;
 pub(crate) mod transport;
@@ -332,6 +335,9 @@ pub use worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_c
 pub(crate) mod write_tree;
 pub(crate) mod ws;
 pub(crate) mod zlib_inflate;
+
+#[doc(hidden)]
+pub mod fuzz;
 
 pub use ref_storage::RefStorageFormat;
 

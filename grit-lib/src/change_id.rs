@@ -4,6 +4,12 @@
 //! legacy `gitbutler-change-id` name). Identifiers can be randomly generated,
 //! derived from a commit id (Jujutsu-compatible), or controlled via
 //! [`ChangeIdPolicy`] and repository config.
+//!
+//! ```rust
+//! use grit_lib::change_id::ChangeId;
+//! let id = ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").unwrap();
+//! assert_eq!(id.as_str(), "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
+//! ```
 
 use std::fmt;
 

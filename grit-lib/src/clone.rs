@@ -15,7 +15,7 @@ use crate::fetch::{fetch_operation_identity, Progress};
 use crate::objects::ObjectId;
 use crate::ref_storage::RefStorageFormat;
 use crate::refs;
-use crate::remote::{HttpClientFactory, Remote, DEFAULT_REMOTE};
+use crate::remote::{HttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
 use crate::repo::{init_repository, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode, TransferStats};
 use crate::transport_path::{
@@ -77,6 +77,9 @@ pub struct CloneOptions {
     pub initial_branch: String,
     /// Global thread policy for fetch pack ingest and the opened repository (`--threads`).
     pub thread_policy: crate::parallel::ThreadPolicy,
+    /// Truncate fetched history to this many commits per ref tip
+    /// (`git clone --depth N`). `Some(1)` matches a shallow clone.
+    pub depth: Option<u32>,
 }
 
 impl CloneOptions {
@@ -90,6 +93,7 @@ impl CloneOptions {
             environment: Environment::capture_process(), // hygiene: CLI boundary — snapshot process environment for clone
             initial_branch: "main".to_owned(),
             thread_policy: crate::parallel::ThreadPolicy::default(),
+            depth: None,
         }
     }
 }
@@ -219,21 +223,24 @@ pub fn clone(
     let origin_url = stored_clone_remote_url(&opts.url);
     set_local_config(
         &repo,
-        &[
-            (
-                &format!("remote.{}.url", opts.remote_name),
-                origin_url.clone(),
-            ),
-            (
-                &format!("remote.{}.fetch", opts.remote_name),
-                format!("+refs/heads/*:refs/remotes/{}/*", opts.remote_name),
-            ),
-        ],
+        &[(
+            &format!("remote.{}.url", opts.remote_name),
+            origin_url.clone(),
+        )],
     )?;
 
     let config = ConfigSet::load(&opts.environment, Some(repo.git_dir()), true)
         .map_err(CloneError::Library)?;
     let remote = Remote::from_config(&config, &opts.remote_name)?;
+    let fetch_refspec = clone_initial_fetch_refspec(&opts, &remote, &repo, http_factory)?;
+    set_local_config(
+        &repo,
+        &[(
+            &format!("remote.{}.fetch", opts.remote_name),
+            fetch_refspec.clone(),
+        )],
+    )?;
+
     let clone_message = format!("clone: from {}", opts.url);
     let identity =
         fetch_operation_identity(&opts.environment, repo.git_dir()).map_err(CloneError::Library)?;
@@ -241,14 +248,21 @@ pub fn clone(
         identity: identity.clone(),
         message: clone_message.clone(),
     };
+    let shallow_clone = opts.depth.is_some();
     let mut fetch_opts = FetchOptions {
-        tags: TagMode::All,
+        refspecs: vec![fetch_refspec],
+        tags: if shallow_clone {
+            TagMode::Following
+        } else {
+            TagMode::All
+        },
         initial_remote_fetch: true,
         remote_name: Some(opts.remote_name.clone()),
         clone_reflog: Some(clone_reflog),
         environment: opts.environment.clone(),
         thread_policy: opts.thread_policy,
         remote_progress: progress.remote_sideband_progress(),
+        depth: opts.depth,
         ..Default::default()
     };
     if let Ok(v) = crate::protocol::try_effective_client_protocol_version_from_config(&config) {
@@ -362,6 +376,82 @@ fn classify_clone_checkout(
         return CloneCheckout::UnbornDefaultBranch;
     }
     CloneCheckout::EmptyRemote
+}
+
+/// Initial `remote.*.fetch` refspec and the refspec used for the first fetch.
+///
+/// A depth-limited clone matches `git clone --depth`: only the remote's default
+/// branch is fetched (`--single-branch` behavior), not every `refs/heads/*` tip.
+fn clone_initial_fetch_refspec(
+    opts: &CloneOptions,
+    remote: &Remote,
+    repo: &Repository,
+    http_factory: Option<&dyn HttpClientFactory>,
+) -> std::result::Result<String, CloneError> {
+    if let Some(depth) = opts.depth.filter(|d| *d > 0) {
+        let _ = depth;
+        let branch = advertised_default_branch_from_remote(
+            remote,
+            repo,
+            http_factory,
+            &opts.url,
+            &opts.initial_branch,
+        )?;
+        return Ok(format!(
+            "+refs/heads/{branch}:refs/remotes/{}/{}",
+            opts.remote_name, branch
+        ));
+    }
+    Ok(format!("+refs/heads/*:refs/remotes/{}/*", opts.remote_name))
+}
+
+fn advertised_default_branch_from_remote(
+    remote: &Remote,
+    repo: &Repository,
+    http_factory: Option<&dyn HttpClientFactory>,
+    url: &str,
+    initial_branch: &str,
+) -> std::result::Result<String, CloneError> {
+    let refs = remote
+        .list_refs(
+            Some(repo),
+            &ListRefsOptions {
+                symrefs: true,
+                ..Default::default()
+            },
+            http_factory,
+        )
+        .map_err(CloneError::Remote)?;
+    for entry in &refs {
+        if entry.name == "HEAD" {
+            if let Some(target) = &entry.symref_target {
+                let name = target
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(target.as_str());
+                if !name.is_empty() {
+                    return Ok(name.to_owned());
+                }
+            }
+        }
+    }
+    if let Some(name) = pick_default_branch_from_remote_refs(&refs) {
+        return Ok(name);
+    }
+    if let Some(name) = default_branch_from_local_remote(url, repo) {
+        return Ok(name);
+    }
+    Ok(initial_branch.to_owned())
+}
+
+fn pick_default_branch_from_remote_refs(refs: &[crate::remote::RemoteRef]) -> Option<String> {
+    for candidate in ["main", "master"] {
+        let full = format!("refs/heads/{candidate}");
+        if refs.iter().any(|r| r.name == full) {
+            return Some(candidate.to_owned());
+        }
+    }
+    refs.iter()
+        .find_map(|r| r.name.strip_prefix("refs/heads/").map(str::to_owned))
 }
 
 fn stored_clone_remote_url(url: &str) -> String {

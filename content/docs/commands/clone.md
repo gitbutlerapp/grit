@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit clone <url> [<dir>]
+grit clone <url> [<dir>] [--shallow]
 ```
 
 ## Description
@@ -40,7 +40,9 @@ When the remote has no commits yet (an empty bare repository), grit still create
 
 When the remote advertises a default branch that has no commits yet but other branches (or tags) were fetched, grit configures `HEAD` to that default branch without checking out files — the same situation as `git clone` when `HEAD` on the server points at an unborn branch. Human output prints a **warning** on stderr that the default branch has no commits, lists remote branches that do have commits, and may suggest `grit switch <branch>`. `--json` sets `"no_checkout_reason": "unborn_default_branch"` and `"branches_with_commits"` to those branch names; `"files"` stays `0` until you switch.
 
-You can clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
+Pass `--shallow` for the same result as `git clone --depth=1`: only the remote's default branch is fetched (single-branch), with a `.git/shallow` boundary at its tip. Other branches are not downloaded until you fetch them explicitly. Later [`grit fetch`](../fetch/) respects the shallow boundary.
+
+You can also clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
 
 Working-tree materialization after fetch uses the same parallel checkout path as [`grit switch`](../switch/). Configure [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism` in the repository config, or pass global [`--threads`](../global-options.md) to override worker count for this process.
 
@@ -56,6 +58,7 @@ If a large receive fails with `received pack file missing` pointing at a `pack-r
 | --- | --- |
 | `<url>` | The repository to clone: a URL or a local path. |
 | `<dir>` | The directory to clone into. Defaults to the repository's name. |
+| `--shallow` | Shallow clone of the default branch only (`git clone --depth=1`). |
 
 ## Examples
 
@@ -95,6 +98,12 @@ Clone a local repository:
 
 ```console
 $ grit clone /srv/git/project.git
+```
+
+Shallow clone (single commit of history on the default branch):
+
+```console
+$ grit clone --shallow https://github.com/BurntSushi/ripgrep.git
 ```
 
 ## JSON output

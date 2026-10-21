@@ -91,6 +91,37 @@ cargo test -p grit-lib --features http-ureq \
 
 Add `-- --nocapture` and look for `SKIP:` lines to confirm nothing was skipped.
 
+### Parser fuzzing (`grit-lib/fuzz`)
+
+`grit-lib/fuzz/` is a **standalone** `cargo-fuzz` crate (not a workspace member; **nightly Rust only**). It exercises parser entry points in [`grit_lib::fuzz`](grit-lib/src/fuzz/mod.rs) for trees, commits, tags, the index, pkt-lines, protocol v2 responses, config, refspecs, ref names, transport URLs, dates, pack `.idx` files, and `packed-refs`.
+
+**Stable replay (CI / `make gate`):** committed seeds and crash files under `grit-lib/fuzz/corpus/<target>/` are replayed by:
+
+```bash
+cargo test -p grit-lib --test fuzz_corpus_replay
+```
+
+**Nightly fuzzing locally:**
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz --locked
+cd grit-lib/fuzz
+# If `libfuzzer-sys` fails to compile C++ (missing `<cassert>`), use g++:
+export CXX=g++ CC=gcc RUSTFLAGS="-C linker=g++"
+cargo +nightly fuzz build
+# One target, 10 minutes, using the seed corpus:
+cargo +nightly fuzz run tree_parse -- -max_total_time=600 corpus/tree_parse
+```
+
+Regenerate seeds from system `git` after changing corpus layout:
+
+```bash
+grit-lib/fuzz/scripts/generate_corpus.sh
+```
+
+Scheduled **non-blocking** runs: [`.github/workflows/fuzz.yml`](.github/workflows/fuzz.yml) (weekly, 10 minutes per target).
+
 ## Lint, format, and pre-integration gate
 
 The repo root [`rust-toolchain.toml`](rust-toolchain.toml) pins **Rust 1.99.0** with **`rustfmt`** and **`clippy`**. From the repository root, `rustup show` should report that toolchain as active (rustup auto-installs it on first use).

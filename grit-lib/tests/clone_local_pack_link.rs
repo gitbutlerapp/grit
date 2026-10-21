@@ -74,6 +74,7 @@ fn clone_local_repacked_source_links_pack_and_reports_index_stats() {
             remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
             initial_branch: "main".to_owned(),
             thread_policy: grit_lib::parallel::ThreadPolicy::default(),
+            depth: None,
         },
         &mut NoProgress,
         None,

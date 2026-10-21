@@ -33,6 +33,7 @@ The `grit` CLI snapshots the process environment into [`Environment`](../library
 | `GIT_ATTR_SOURCE`, `GIT_INDEX_VERSION`, `GIT_PRINT_SHA1_ELLIPSIS` | Attributes, index format, diff OID display |
 | `GIT_NAMESPACE`, `GIT_REPLACE_REF_BASE`, `GIT_NO_REPLACE_OBJECTS` | Ref namespaces and replace refs |
 | `GIT_TRACE`, `GIT_TRACE_SETUP`, `GIT_TRACE2_PERF` | Trace output |
+| `GRIT_TRACE` | Grit operation spans to stderr (`1` / `true` / `yes`; see [Debugging and tracing](../debugging/)) |
 | `PATH` | Helper lookup (e.g. signing programs) |
 | `TZ` | Local timezone for dates when no explicit offset is given |
 | `GIT_EXEC_PATH`, `GIT_INSTALL_ROOT` | Git helper discovery (credentials) |

@@ -1252,37 +1252,19 @@ pub(crate) fn read_packed_refs_map_for_prefix(
     view.map_for_prefix(&packed_path, filter)
 }
 
-fn acquire_packed_refs_lock(git_dir: &Path, lock: &Path, lock_display: &Path) -> Result<()> {
-    let timeout_ms = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(git_dir),
-        true,
-    )
-    .ok()
-    .and_then(|cfg| cfg.get("core.packedrefstimeout"))
-    .and_then(|v| v.trim().parse::<i64>().ok())
-    .unwrap_or(0);
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
-    loop {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(lock)
-        {
-            Ok(_) => return Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                if timeout_ms > 0 && std::time::Instant::now() < deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    continue;
-                }
-                return Err(Error::from(RefLockError::PackedRefsLockHeld {
-                    lock_path: lock_display.display().to_string(),
-                }));
-            }
-            Err(e) => return Err(Error::Io(e)),
-        }
-    }
+fn acquire_packed_refs_lock(
+    git_dir: &Path,
+    lock: &Path,
+    lock_display: &Path,
+) -> Result<crate::lockfile::LockFile> {
+    use crate::lockfile::{LockError, LockFile, LockWait};
+    let wait = LockWait::packed_refs_for_git_dir(git_dir);
+    LockFile::acquire(lock, wait).map_err(|err| match err {
+        LockError::Held { .. } => Error::from(RefLockError::PackedRefsLockHeld {
+            lock_path: lock_display.display().to_string(),
+        }),
+        LockError::Io { source, .. } => Error::Io(source),
+    })
 }
 
 /// Look up a refname in `packed-refs`.
@@ -1413,7 +1395,12 @@ pub fn create_ref_with_reflog(
 
 /// Write a loose ref file under `storage_dir`: the body shared by [`write_ref`]
 /// and [`write_ref_cached`], run after the packed-refs namespace-conflict check.
-fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
+fn write_ref_at_storage(
+    git_dir: &Path,
+    storage_dir: &Path,
+    refname: &str,
+    oid: &ObjectId,
+) -> Result<()> {
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let path = storage_dir.join(stor);
     // An empty directory left over from a previously deleted nested ref can sit exactly where
@@ -1449,22 +1436,30 @@ fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Re
         fs::create_dir_all(parent)?;
     }
     let content = format!("{oid}\n");
-    // Write via lock file for atomicity. Use `O_CREAT | O_EXCL` (create_new) so
-    // that a pre-existing `<ref>.lock` surfaces an `AlreadyExists` error instead
-    // of being silently clobbered, matching Git's `lock_ref_oid_basic`. Callers
-    // (e.g. fetch) translate that into the
-    // "cannot lock ref '<ref>': Unable to create '<lock>': File exists." message
-    // and skip just that ref while still updating the rest.
+    // Write via lock file for atomicity (`O_CREAT|O_EXCL`), with optional backoff
+    // per `core.filesRefLockTimeout`. Callers (e.g. fetch) map a held lock to
+    // "cannot lock ref … File exists." and skip that ref while updating the rest.
     let lock = lock_path_for_ref(&path);
-    {
-        use std::io::Write as _;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock)?;
-        file.write_all(content.as_bytes())?;
-    }
-    fs::rename(&lock, &path)?;
+    use crate::lockfile::{LockError, LockFile, LockWait};
+    use std::io::Write as _;
+    let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
+    let mut lock = LockFile::acquire(&lock, wait).map_err(|err| match err {
+        LockError::Held { path } => {
+            Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
+                path,
+            }))
+        }
+        LockError::Io { source, .. } => Error::Io(source),
+    })?;
+    lock.write_all(content.as_bytes()).map_err(Error::Io)?;
+    lock.commit_to(&path).map_err(|err| match err {
+        LockError::Io { source, .. } => Error::Io(source),
+        LockError::Held { path } => {
+            Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
+                path,
+            }))
+        }
+    })?;
     Ok(())
 }
 
@@ -1516,18 +1511,11 @@ pub(crate) fn prune_loose_ref_cas(
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let path = storage_dir.join(&stor);
-    let lock = lock_path_for_ref(&path);
-    if fs::symlink_metadata(&lock).is_ok() {
-        return Err(Error::Io(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("ref lock present: {}", lock.display()),
-        )));
-    }
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock)
-        .map_err(Error::Io)?;
+    let lock_path = lock_path_for_ref(&path);
+    use crate::lockfile::{LockFile, LockWait};
+    let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
+    let _lock = LockFile::acquire(&lock_path, wait)
+        .map_err(|err| Error::Io(crate::lockfile::lock_held_as_ref_present(err)))?;
     let outcome = (|| -> Result<bool> {
         if !path.is_file() {
             return Ok(true);
@@ -1545,7 +1533,6 @@ pub(crate) fn prune_loose_ref_cas(
         }
         Ok(true)
     })();
-    let _ = fs::remove_file(&lock);
     outcome
 }
 
@@ -1724,7 +1711,7 @@ pub fn write_ref_cached(
         )));
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
-    write_ref_at_storage(&storage_dir, refname, oid)?;
+    write_ref_at_storage(git_dir, &storage_dir, refname, oid)?;
     packed.record_loose_write(refname, *oid);
     Ok(())
 }
@@ -1992,16 +1979,19 @@ fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: boo
         // already present (t0600 "delete fails cleanly if packed-refs file is locked / .new
         // write fails").
         let lock = lock_path_for_ref(&packed_path); // packed-refs.lock
-        if !lock_already_held {
+        let _packed_lock = if !lock_already_held {
             let abs_lock = fs::canonicalize(git_dir)
                 .map(|d| d.join("packed-refs.lock"))
                 .unwrap_or_else(|_| lock.clone());
-            acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
-        }
+            Some(acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?)
+        } else {
+            None
+        };
 
         let tmp = packed_path.with_extension("new");
         let mut created_tmp = false;
         let write_result = (|| -> Result<()> {
+            // Staged packed-refs body (not a lock file); exclusive create avoids clobber.
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -2016,10 +2006,6 @@ fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: boo
             Ok(())
         })();
 
-        // Release the lock unless the caller is holding it through a transaction.
-        if !lock_already_held {
-            let _ = fs::remove_file(&lock);
-        }
         if write_result.is_err() && created_tmp {
             let _ = fs::remove_file(&tmp);
         }
@@ -2643,10 +2629,6 @@ fn read_loose_or_packed_oid(git_dir: &Path, refname: &str) -> Result<Option<Obje
     Ok(None)
 }
 
-fn abort_loose_ref_lock(lock: &Path) {
-    let _ = fs::remove_file(lock);
-}
-
 #[cfg(test)]
 mod test_pause_inject_serial {
     use std::sync::{Mutex, OnceLock};
@@ -2832,7 +2814,7 @@ pub(crate) fn test_ref_store_batch_pause_after_ref_write(_idx: usize, _git_dir: 
 ///
 /// Dropping without [`commit_branch_commit_ref_lock`](Self::commit) aborts the lock file.
 pub struct BranchCommitRefLock {
-    lock_path: PathBuf,
+    lock: Option<crate::lockfile::LockFile>,
     disarmed: bool,
 }
 
@@ -2873,20 +2855,23 @@ impl BranchCommitRefLock {
             fs::create_dir_all(parent)?;
         }
 
-        let lock = lock_path_for_ref(&path);
-        fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock)?;
+        let lock_path = lock_path_for_ref(&path);
+        use crate::lockfile::{LockError, LockFile, LockWait};
+        let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
+        let lock = LockFile::acquire(&lock_path, wait).map_err(|err| match err {
+            LockError::Held { path } => {
+                Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
+                    path,
+                }))
+            }
+            LockError::Io { source, .. } => Error::Io(source),
+        })?;
 
         let current = read_loose_or_packed_oid(git_dir, branch_ref)?;
-        if let Err(err) = verify_branch_cas(expected_old, current, branch_ref) {
-            abort_loose_ref_lock(&lock);
-            return Err(err);
-        }
+        verify_branch_cas(expected_old, current, branch_ref)?;
 
         Ok(Self {
-            lock_path: lock,
+            lock: Some(lock),
             disarmed: false,
         })
     }
@@ -2948,9 +2933,7 @@ impl BranchCommitRefLock {
 
 impl Drop for BranchCommitRefLock {
     fn drop(&mut self) {
-        if !self.disarmed {
-            abort_loose_ref_lock(&self.lock_path);
-        }
+        drop(self.lock.take());
     }
 }
 
@@ -2975,7 +2958,7 @@ fn write_branch_commit_reflogs(
         ) {
             Ok(()) => branch_reflog_written = true,
             Err(err) => {
-                abort_loose_ref_lock(&lock.lock_path);
+                drop(lock.lock.take());
                 return Err(err);
             }
         }
@@ -2995,7 +2978,7 @@ fn write_branch_commit_reflogs(
             if branch_reflog_written {
                 let _ = crate::reflog::truncate_last_reflog_line(git_dir, update.branch_ref);
             }
-            abort_loose_ref_lock(&lock.lock_path);
+            drop(lock.lock.take());
             return Err(err);
         }
     }
@@ -3014,13 +2997,20 @@ fn finish_branch_commit_ref_lock_files(
     let stor = crate::ref_namespace::storage_ref_name(update.branch_ref);
     let path = storage_dir.join(&stor);
     let content = format!("{}\n", update.new_oid);
-    {
-        use std::io::Write as _;
-        let mut file = fs::OpenOptions::new().write(true).open(&lock.lock_path)?;
-        file.write_all(content.as_bytes())?;
-    }
-    fs::rename(&lock.lock_path, &path).inspect_err(|_err| {
-        abort_loose_ref_lock(&lock.lock_path);
+    use crate::lockfile::LockError;
+    use std::io::Write as _;
+    let mut file_lock = lock
+        .lock
+        .take()
+        .ok_or_else(|| Error::Message("branch ref lock already released".into()))?;
+    file_lock.write_all(content.as_bytes()).map_err(Error::Io)?;
+    file_lock.commit_to(&path).map_err(|err| match err {
+        LockError::Io { source, .. } => Error::Io(source),
+        LockError::Held { path } => {
+            Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
+                path,
+            }))
+        }
     })?;
     Ok(())
 }
@@ -3271,11 +3261,12 @@ fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
     let abs_lock = fs::canonicalize(git_dir)
         .map(|d| d.join("packed-refs.lock"))
         .unwrap_or_else(|_| lock.clone());
-    acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
+    let _packed_lock = acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
 
     let tmp = packed_path.with_extension("new");
     let mut created_tmp = false;
     let write_result = (|| -> Result<()> {
+        // Staged packed-refs body (not a lock file); exclusive create avoids clobber.
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -3289,7 +3280,6 @@ fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
         created_tmp = false;
         Ok(())
     })();
-    let _ = fs::remove_file(&lock);
     if write_result.is_err() && created_tmp {
         let _ = fs::remove_file(&tmp);
     }

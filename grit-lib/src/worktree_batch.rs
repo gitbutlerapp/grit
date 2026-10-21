@@ -8,7 +8,7 @@ use crate::diff::{mode_from_metadata, worktree_blob_bytes};
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
 use crate::hash::{
-    hash_object, try_par_hash_with, try_par_hash_with_force, ParallelHashError, Parallelism,
+    try_hash_object, try_par_hash_with, try_par_hash_with_force, ParallelHashError, Parallelism,
 };
 use crate::index::IndexEntry;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
@@ -85,7 +85,7 @@ pub(crate) fn prepare_worktree_blobs_parallel(
             filter_process,
         )?;
         let store_bytes = odb::blob_store_bytes(&data);
-        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data);
+        let oid = try_hash_object(ctx.algo, ObjectKind::Blob, &data)?;
         let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
         let mode = mode_from_metadata(&meta);
         Ok(PreparedWorktreeBlob {
@@ -141,7 +141,7 @@ pub(crate) fn prepare_and_store_worktree_blobs_parallel(
             filter_process,
         )?;
         let store_bytes = odb::blob_store_bytes(&data);
-        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data);
+        let oid = try_hash_object(ctx.algo, ObjectKind::Blob, &data)?;
         let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
         odb.write_loose_zlib_prehashed(&oid, &zlib_store, write_opts)
             .map_err(|e| match e {

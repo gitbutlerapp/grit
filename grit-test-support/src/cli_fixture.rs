@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output as ProcessOutput};
 
-use serde::de::Deserialize;
 use serde::Serialize;
+use serde::de::Deserialize;
 
 use crate::git_fsck;
 
@@ -700,7 +700,25 @@ pub fn register_common_cli_snapshot_filters(settings: &mut insta::Settings) {
     for (pattern, replacement) in CRATE_VERSION_SNAPSHOT_FILTERS {
         settings.add_filter(pattern, *replacement);
     }
+    for (pattern, replacement) in FILESYSTEM_CONFIG_SNAPSHOT_FILTERS {
+        settings.add_filter(pattern, *replacement);
+    }
 }
+
+/// Drop the config keys `init` writes only on case-insensitive or Unicode-normalizing
+/// filesystems (macOS defaults), so snapshots match on every platform. Patterns cover the
+/// human, JSON-escaped, and Markdown forms inside insta snapshot files.
+const FILESYSTEM_CONFIG_SNAPSHOT_FILTERS: &[(&str, &str)] = &[
+    (r"core\.(?:precomposeunicode|ignorecase)=true\\n", ""),
+    (
+        r#"\{\\"key\\":\\"core\.(?:precomposeunicode|ignorecase)\\",\\"value\\":\\"true\\",[^}]*\},"#,
+        "",
+    ),
+    (
+        r"\| `core\.(?:precomposeunicode|ignorecase)` \| true \|\\n",
+        "",
+    ),
+];
 
 /// Register shared insta redactions for CLI snapshots in `settings`.
 pub fn register_cli_snapshot_filters(settings: &mut insta::Settings, fixture: &CliFixture) {
@@ -754,6 +772,18 @@ pub fn with_cli_snapshot_filters<F: FnOnce()>(fixture: &CliFixture, callback: F)
 }
 
 fn redact_path(settings: &mut insta::Settings, path: &Path, label: &str) {
+    // Commands report canonical paths, which differ from the tempdir path when the temp
+    // root is a symlink (macOS `/var` → `/private/var`). Filters run in order, so the
+    // longer canonical form goes first.
+    if let Ok(canonical) = path.canonicalize() {
+        if canonical != path {
+            add_path_filter(settings, &canonical, label);
+        }
+    }
+    add_path_filter(settings, path, label);
+}
+
+fn add_path_filter(settings: &mut insta::Settings, path: &Path, label: &str) {
     let escaped = regex::escape(path.to_string_lossy().as_ref());
     if !escaped.is_empty() {
         settings.add_filter(&escaped, label);

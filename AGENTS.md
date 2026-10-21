@@ -77,7 +77,7 @@ The library and CLI must be **as fast as possible.**
 - Benchmark widely; speed up everything you touch.
 - Build and benchmark **real-world scenarios**: large repos, deep history, big packs, many refs, wide trees, network operations — no shortcuts that sacrifice compatibility. Benchmark **`grit-lib` operations and `grit` commands** (Criterion in `grit-lib`, `grit-bench` in `grit-utils`); the old `bench/` suite drove `grit-git` and was removed (ROADMAP item 2 rebuilds it).
 - Compare core operations against the equivalent **Git core** commands.
-- **Do not implement sha1dc.** Use plain SHA-1 and accelerate it (hardware SHA extensions, SIMD, parallel hashing).
+- **Object ids use the sha1dc crate** for collision detection on ingestion; **checksums use plain accelerated SHA-1** from the `sha1` crate. Never hand-roll sha1dc logic in application code—use [`ObjectHasher::try_finalize`](grit-lib) / [`HashAlgo::try_hash_object`](grit-lib).
 
 ### Testing
 

@@ -445,3 +445,62 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
         String::from_utf8_lossy(&fsck.stderr)
     );
 }
+
+#[test]
+fn git_daemon_shallow_depth_two_keeps_parent_tag() {
+    use grit_lib::refs::resolve_ref;
+    use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_linear_source(&work, 3);
+    let parent = rev_parse(&work, "HEAD~1");
+    git(
+        &work,
+        &["tag", "-a", "parent-tag", "-m", "parent", &parent.to_hex()],
+    );
+
+    let base = tmp.path().join("srv");
+    std::fs::create_dir_all(&base).unwrap();
+    let source = base.join("repo.git");
+    git(
+        &work,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            source.to_str().expect("utf8 path"),
+        ],
+    );
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_daemon(&base, port) else {
+        eprintln!("SKIP: `git daemon` is unavailable");
+        return;
+    };
+    let _guard = DaemonGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: git daemon not ready");
+        return;
+    }
+
+    let url = format!("git://127.0.0.1:{port}/repo.git");
+    let dest = tmp.path().join("clone");
+    clone_repo(
+        CloneOptions {
+            depth: Some(2),
+            ..CloneOptions::new(url, dest.clone())
+        },
+        &mut NoProgress,
+        None,
+    )
+    .expect("git:// depth-2 clone");
+
+    resolve_ref(&dest.join(".git"), "refs/tags/parent-tag")
+        .expect("parent-tag after depth-2 clone over git://");
+}

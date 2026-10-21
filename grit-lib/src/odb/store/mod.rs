@@ -333,7 +333,7 @@ impl ObjectStore for MemoryStore {
 
 impl WritableObjectStore for MemoryStore {
     fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
-        let oid = hash::hash_object(self.algo, kind, data);
+        let oid = hash::try_hash_object(self.algo, kind, data)?;
         let mut guard = self
             .objects
             .write()

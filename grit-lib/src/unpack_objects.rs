@@ -543,7 +543,7 @@ fn pack_is_thin_with_ofs_deltas(
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
                 let obj_data = rd.decompress(size)?;
-                let oid = crate::hash::hash_object(algo, kind, &obj_data);
+                let oid = crate::hash::try_hash_object(algo, kind, &obj_data)?;
                 by_offset.insert(obj_offset, (kind, obj_data.clone()));
                 by_oid.insert(oid, (kind, obj_data));
             }
@@ -592,7 +592,7 @@ fn pack_is_thin_with_ofs_deltas(
             };
             if let Some((base_kind, base_data)) = base {
                 let result = apply_delta(&base_data, &delta.delta_data)?;
-                let oid = crate::hash::hash_object(algo, base_kind, &result);
+                let oid = crate::hash::try_hash_object(algo, base_kind, &result)?;
                 by_offset.insert(delta.offset, (base_kind, result.clone()));
                 by_oid.insert(oid, (base_kind, result));
             } else {
@@ -811,7 +811,7 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
 /// [`ObjectId`] without touching the filesystem.
 fn write_or_hash(kind: ObjectKind, data: &[u8], odb: &Odb, dry_run: bool) -> Result<ObjectId> {
     if dry_run {
-        Ok(odb.hash(kind, data))
+        odb.try_hash(kind, data)
     } else {
         // Always materialize into this ODB: objects reachable only via alternates must still be
         // written locally (matches git unpack-objects; t5519-push-alternates).

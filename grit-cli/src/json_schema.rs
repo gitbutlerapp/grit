@@ -621,6 +621,10 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("cat_blob", &["cat", "HEAD:tracked.txt"]),
         ("cat_commit", &["cat", "HEAD^{commit}"]),
         ("clone_local", &["clone", "UPSTREAM", "cloned"]),
+        (
+            "clone_shallow",
+            &["clone", "--shallow", "UPSTREAM", "cloned"],
+        ),
         ("fetch_noop", &["fetch"]),
         ("fetch_new", &["fetch"]),
         ("fetch_prune", &["fetch", "--prune"]),

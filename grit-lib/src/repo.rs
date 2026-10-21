@@ -640,6 +640,7 @@ impl Repository {
     }
 
     fn refresh_config_session(&self) -> Result<()> {
+        crate::trace::trace_span!("grit.config.load");
         let opts = self.config_load_options(true);
         if let Ok(guard) = self.config_session.lock() {
             if let Some(session) = guard.as_ref() {
@@ -1128,6 +1129,7 @@ impl Repository {
     }
 
     fn open_internal(options: &RepositoryOptions, git_dir: &Path) -> Result<Self> {
+        crate::trace::trace_span!("grit.repository.open");
         let work_tree = options.work_tree.as_deref();
         let git_dir = git_dir
             .canonicalize()
@@ -1504,6 +1506,7 @@ impl Repository {
     /// Like [`Repository::load_index`], but reads from an explicit index file path
     /// (e.g. `GIT_INDEX_FILE` or a worktree-specific index).
     pub(crate) fn load_index_at(&self, path: &std::path::Path) -> Result<Index> {
+        crate::trace::trace_span!("grit.index.read");
         let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         if let Some(res) = cfg.as_ref().get_bool("index.sparse") {
             res.map_err(|s| Error::Config(s.into()))?;
@@ -1800,6 +1803,7 @@ impl Repository {
         updated_workdir: bool,
         updated_skipworktree: bool,
     ) -> Result<()> {
+        crate::trace::trace_span!("grit.index.write");
         test_inject_index_write_fail()?;
         // The on-disk index format (entry OID width and trailing checksum) is
         // fixed by the repository's hash algorithm. Stamp it here so every

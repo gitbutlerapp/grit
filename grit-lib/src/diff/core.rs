@@ -2437,6 +2437,7 @@ pub fn diff_trees(
     new_tree_oid: Option<&ObjectId>,
     prefix: &str,
 ) -> Result<Vec<DiffEntry>> {
+    crate::trace::trace_span!("grit.diff.tree");
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, false, None)
 }
 
@@ -10294,6 +10295,7 @@ fn hash_blob_spans(buf: &[u8], is_text: bool) -> SpanHashTop {
 /// `diffcore_count_changes` semantics (used for `--dirstat=changes` damage).
 #[must_use]
 pub fn diffcore_count_changes(old: &[u8], new: &[u8]) -> (u64, u64) {
+    crate::trace::trace_span!("grit.diff.blob");
     let src_is_text = !crate::merge_file::is_binary(old);
     let dst_is_text = !crate::merge_file::is_binary(new);
     let src_count = hash_blob_spans(old, src_is_text);

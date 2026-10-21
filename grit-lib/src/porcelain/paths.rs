@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_TREE};
 use crate::objects::{parse_commit, ObjectId};
 use crate::path_icase::paths_equal;
+use crate::path_validate::{validate_path, EntryMode, ProtectOptions};
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::checkout::remove_empty_parent_dirs;
 use crate::repo::Repository;
@@ -571,6 +572,10 @@ fn normalize_and_validate_repo_relative(_work_tree: &Path, path: &str) -> Result
     if rel.is_empty() {
         return Err(Error::InvalidPath("empty path".into()));
     }
+    let opts = ProtectOptions::default();
+    validate_path(rel.as_bytes(), EntryMode::new(0o100644), opts).map_err(|e| {
+        Error::InvalidPath(format!("'{path}' is not a valid repository path ({e})"))
+    })?;
     Ok(rel.to_string())
 }
 

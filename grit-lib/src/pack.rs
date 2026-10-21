@@ -879,6 +879,7 @@ pub(crate) mod pack_cache {
                 return Ok(hit);
             }
         }
+        crate::trace::trace_span!("grit.pack.index.open");
         let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
         store.with_catalog(|g| {
             g.by_idx.insert(
@@ -1746,7 +1747,9 @@ pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Re
             "unsupported object hash width: {hash_bytes}"
         )));
     };
-    Ok(hash_object(algo, kind, data).as_bytes().to_vec())
+    Ok(crate::hash::try_hash_object(algo, kind, data)?
+        .as_bytes()
+        .to_vec())
 }
 
 /// Parse a pack index file (version 1 legacy or version 2), verifying the SHA-1

@@ -12,7 +12,8 @@ use crate::parallel::{
 pub use crate::parallel::index_parallelism_from_config;
 pub use crate::parallel::{ParallelHashError, Parallelism};
 
-use super::hash_object;
+use super::{hash_object, try_hash_object};
+use crate::error::Error;
 
 /// Minimum item count before parallel helpers use more than one thread.
 pub const PAR_HASH_MIN_ITEMS: usize = 32;
@@ -53,6 +54,18 @@ pub fn hash_objects_parallel(
     let total_bytes: usize = items.iter().map(|(_, data)| data.len()).sum();
     par_hash_with(items, threads, total_bytes, |(kind, data)| {
         hash_object(algo, *kind, data)
+    })
+}
+
+/// Fallible variant of [`hash_objects_parallel`] (SHA-1 collision detection).
+pub fn try_hash_objects_parallel(
+    algo: HashAlgo,
+    items: &[(ObjectKind, &[u8])],
+    threads: NonZeroUsize,
+) -> Result<Vec<ObjectId>, ParallelHashError<Error>> {
+    let total_bytes: usize = items.iter().map(|(_, data)| data.len()).sum();
+    try_par_hash_with(items, threads, total_bytes, |(kind, data)| {
+        try_hash_object(algo, *kind, data)
     })
 }
 

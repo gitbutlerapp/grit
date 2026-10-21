@@ -14,6 +14,7 @@ mod diagnostics;
 mod diff_args;
 mod diff_format;
 mod diff_render;
+mod grit_trace;
 mod json_error;
 mod json_filter;
 #[cfg(test)]
@@ -432,6 +433,9 @@ enum Command {
         url: String,
         /// Directory to clone into (defaults to the repository name).
         dir: Option<String>,
+        /// Fetch only the tip commit on each branch (same as `git clone --depth=1`).
+        #[arg(long)]
+        shallow: bool,
     },
     /// List remotes, or add one.
     Remote {
@@ -914,6 +918,7 @@ struct ServeArgs {
 
 fn main() {
     stdio::configure();
+    grit_trace::maybe_init_from_env();
     let parse_argv = diff_args::normalize_diff_argv(std::env::args().collect());
     let cli = match Cli::try_parse_from(parse_argv) {
         Ok(cli) => cli,
@@ -1063,9 +1068,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             bare,
             ref_format,
         } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
-        Command::Clone { url, dir } => {
-            emit(&commands::clone::run(&url, dir, opts.mode)?, opts, ctx)
-        }
+        Command::Clone { url, dir, shallow } => emit(
+            &commands::clone::run(&url, dir, shallow, opts.mode)?,
+            opts,
+            ctx,
+        ),
         Command::Remote { action } => match action {
             None => emit(&commands::remote::run_list_or_add(None)?, opts, ctx),
             Some(RemoteAction::Add { name, url }) => emit(

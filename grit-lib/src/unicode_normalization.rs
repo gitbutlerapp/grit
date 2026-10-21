@@ -60,6 +60,7 @@ pub fn probe_filesystem_normalizes_nfd_to_nfc(git_dir: &Path) -> std::io::Result
     const NFC: &str = "\u{00e4}";
     const NFD: &str = "\u{0061}\u{0308}";
     let nfc_path: PathBuf = git_dir.join(NFC);
+    // Probe tempfile (not a repo lock); exclusive create detects pre-existing paths.
     let mut f = match OpenOptions::new()
         .create_new(true)
         .write(true)
