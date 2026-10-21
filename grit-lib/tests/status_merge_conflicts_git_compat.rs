@@ -1,9 +1,10 @@
 //! Issue #940: merge conflicts should appear once in status with merge-in-progress state.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::status::{status, ConflictKind, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::state::{InProgressOperation, NextStep};
 use grit_test_support::git;
 use tempfile::TempDir;
 
@@ -48,6 +49,11 @@ fn status_lists_each_conflict_path_once_and_sets_merge_state() {
         "MERGE_HEAD should be detected"
     );
     assert_eq!(model.conflicts, vec!["f".to_owned()]);
+    assert_eq!(model.conflict_details.len(), 1);
+    assert_eq!(model.conflict_details[0].kind, ConflictKind::BothModified);
+    let op = model.operation.as_ref().expect("merge operation");
+    assert_eq!(op.kind, InProgressOperation::Merge);
+    assert!(op.next_steps.contains(&NextStep::ResolveConflicts));
     assert!(
         model.staged.iter().filter(|e| e.path() == "f").count() == 1,
         "staged: {:?}",

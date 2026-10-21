@@ -4,13 +4,14 @@
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::status::Conflict;
 use grit_lib::porcelain::status::{
     status, untracked_mode_from_config, StatusOptions, UntrackedMode,
 };
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::branch_tracking::{comparison_base, Standing, TipComparison};
 use grit_lib::repo::Repository;
-use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
+use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation, NextStep};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -39,6 +40,24 @@ enum HeaderKind {
     OtherInProgress,
 }
 
+/// One unmerged path in `--json` output.
+#[derive(Serialize, JsonSchema)]
+pub struct ConflictJson {
+    /// Repository-relative path.
+    pub path: String,
+    /// Conflict category (`both_modified`, `both_added`, …).
+    pub kind: String,
+}
+
+/// Paused operation and suggested `grit` commands.
+#[derive(Serialize, JsonSchema)]
+pub struct OperationJson {
+    /// Stable operation id (for example `merge`).
+    pub kind: String,
+    /// Suggested follow-up commands, in order.
+    pub next_steps: Vec<String>,
+}
+
 /// Result of `grit status`.
 #[derive(Serialize, JsonSchema)]
 pub struct StatusOutcome {
@@ -59,16 +78,20 @@ pub struct StatusOutcome {
     pub unstaged: Vec<ChangeJson>,
     pub untracked: Vec<String>,
     pub clean: bool,
-    /// True when a merge is in progress (`MERGE_HEAD` exists).
+    /// True when a merge is in progress (`MERGE_HEAD` exists). Deprecated: prefer `operation`.
     pub merging: bool,
-    /// In-progress operations (e.g. `merge`, `rebase`), when any apply.
+    /// In-progress operations (e.g. `merge`, `rebase`), when any apply. Deprecated: prefer `operation`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub in_progress: Vec<String>,
-    /// Unmerged paths from the index (stages 1–3).
+    /// Unmerged paths with conflict kind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
-    pub conflicts: Vec<String>,
+    pub conflicts: Vec<ConflictJson>,
+    /// Primary paused operation and suggested next commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub operation: Option<OperationJson>,
 
     // Human-only state, not part of the JSON schema.
     #[serde(skip)]
@@ -86,6 +109,30 @@ pub struct StatusOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     path_display: Option<PathDisplayOptions>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    conflict_entries: Vec<Conflict>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    next_steps: Vec<NextStep>,
+}
+
+fn conflict_json(c: &Conflict) -> ConflictJson {
+    ConflictJson {
+        path: c.path.clone(),
+        kind: c.kind.as_str().to_owned(),
+    }
+}
+
+fn operation_json(op: &grit_lib::state::Operation) -> OperationJson {
+    OperationJson {
+        kind: in_progress_label(op.kind),
+        next_steps: op
+            .next_steps
+            .iter()
+            .filter_map(NextStep::grit_command)
+            .collect(),
+    }
 }
 
 impl HumanRender for StatusOutcome {
@@ -172,13 +219,49 @@ impl StatusOutcome {
         let display = self.path_display.as_ref();
         ui::print_change_group(w, "Staged", &self.staged_entries, display)?;
         ui::print_change_group(w, "Changed (not staged)", &self.unstaged_entries, display)?;
+        if !self.conflict_entries.is_empty() {
+            self.render_conflicts_by_kind(w, display)?;
+        }
         ui::print_untracked(w, &self.untracked, display)?;
         Ok(())
     }
 
+    fn render_conflicts_by_kind(
+        &self,
+        w: &mut dyn Write,
+        display: Option<&PathDisplayOptions>,
+    ) -> Result<()> {
+        use grit_lib::porcelain::status::ConflictKind;
+        use std::collections::BTreeMap;
+
+        let mut by_kind: BTreeMap<ConflictKind, Vec<&Conflict>> = BTreeMap::new();
+        for c in &self.conflict_entries {
+            by_kind.entry(c.kind).or_default().push(c);
+        }
+        outln!(w, "Conflicts");
+        for (kind, entries) in by_kind {
+            outln!(w, "  {} ({})", kind_label(kind), entries.len());
+            for c in entries {
+                let path = display
+                    .map(|d| d.format_path_for_human(&c.path))
+                    .unwrap_or_else(|| c.path.clone());
+                outln!(w, "    {path}");
+            }
+        }
+        Ok(())
+    }
+
     fn render_hints(&self, w: &mut dyn Write) -> Result<()> {
-        if !self.conflicts.is_empty() {
-            outln!(w, "→ resolve conflicts, then grit commit \"message\"");
+        if let Some(step) = self.next_steps.iter().find_map(NextStep::grit_command) {
+            outln!(w, "→ {step}");
+            for extra in self
+                .next_steps
+                .iter()
+                .filter_map(NextStep::grit_command)
+                .skip(1)
+            {
+                outln!(w, "→ {extra}");
+            }
             return Ok(());
         }
         if self.merging {
@@ -220,8 +303,16 @@ impl StatusOutcome {
     }
 
     fn render_markdown_hints(&self, w: &mut dyn Write) -> Result<()> {
-        if !self.conflicts.is_empty() {
-            outln!(w, "→ resolve conflicts, then grit commit `\"message\"`");
+        if let Some(step) = self.next_steps.iter().find_map(NextStep::grit_command) {
+            outln!(w, "→ `{step}`");
+            for extra in self
+                .next_steps
+                .iter()
+                .filter_map(NextStep::grit_command)
+                .skip(1)
+            {
+                outln!(w, "→ `{extra}`");
+            }
             return Ok(());
         }
         if self.merging {
@@ -332,8 +423,48 @@ impl StatusOutcome {
         let display = self.path_display.as_ref();
         markdown::print_change_section(w, "Staged", &self.staged_entries, display)?;
         markdown::print_change_section(w, "Changed (not staged)", &self.unstaged_entries, display)?;
+        if !self.conflict_entries.is_empty() {
+            self.render_markdown_conflicts(w, display)?;
+        }
         markdown::print_untracked(w, &self.untracked, display)?;
         Ok(())
+    }
+
+    fn render_markdown_conflicts(
+        &self,
+        w: &mut dyn Write,
+        display: Option<&PathDisplayOptions>,
+    ) -> Result<()> {
+        use grit_lib::porcelain::status::ConflictKind;
+        use std::collections::BTreeMap;
+
+        let mut by_kind: BTreeMap<ConflictKind, Vec<&Conflict>> = BTreeMap::new();
+        for c in &self.conflict_entries {
+            by_kind.entry(c.kind).or_default().push(c);
+        }
+        outln!(w, "Conflicts");
+        for (kind, entries) in by_kind {
+            outln!(w, "- **{}** ({} paths)", kind_label(kind), entries.len());
+            for c in entries {
+                let path = display
+                    .map(|d| d.format_path_for_human(&c.path))
+                    .unwrap_or_else(|| c.path.clone());
+                outln!(w, "  - `{path}`");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn kind_label(kind: grit_lib::porcelain::status::ConflictKind) -> &'static str {
+    match kind {
+        grit_lib::porcelain::status::ConflictKind::BothModified => "both modified",
+        grit_lib::porcelain::status::ConflictKind::BothAdded => "both added",
+        grit_lib::porcelain::status::ConflictKind::BothDeleted => "both deleted",
+        grit_lib::porcelain::status::ConflictKind::AddedByUs => "added by us",
+        grit_lib::porcelain::status::ConflictKind::AddedByThem => "added by them",
+        grit_lib::porcelain::status::ConflictKind::DeletedByUs => "deleted by us",
+        grit_lib::porcelain::status::ConflictKind::DeletedByThem => "deleted by them",
     }
 }
 
@@ -398,7 +529,14 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
 
     let operations = detect_in_progress(repo.git_dir());
     let merging = model.state.merge_in_progress;
-    let conflicts = model.conflicts.clone();
+    let conflict_entries = model.conflict_details.clone();
+    let conflicts: Vec<ConflictJson> = conflict_entries.iter().map(conflict_json).collect();
+    let operation = model.operation.as_ref().map(operation_json);
+    let next_steps = model
+        .operation
+        .as_ref()
+        .map(|op| op.next_steps.clone())
+        .unwrap_or_default();
 
     let summary = summarize_head(&repo, &model.head, in_progress_header(merging, &operations))?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
@@ -414,7 +552,7 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
     let clean = model.staged.is_empty()
         && model.unstaged.is_empty()
         && model.untracked.is_empty()
-        && conflicts.is_empty()
+        && conflict_entries.is_empty()
         && !merging;
 
     let path_display = PathDisplayOptions::from_repo(&repo).ok();
@@ -434,11 +572,14 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
         merging,
         in_progress: operations.into_iter().map(in_progress_label).collect(),
         conflicts,
+        operation,
         header: summary.header,
         commit_rows: summary.ahead_commits,
         staged_entries: model.staged,
         unstaged_entries: model.unstaged,
         path_display,
+        conflict_entries,
+        next_steps,
     })
 }
 

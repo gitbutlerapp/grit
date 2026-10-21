@@ -121,6 +121,45 @@
       ],
       "type": "string"
     },
+    "ConflictJson": {
+      "description": "One unmerged path in `--json` output.",
+      "properties": {
+        "kind": {
+          "description": "Conflict category (`both_modified`, `both_added`, …).",
+          "type": "string"
+        },
+        "path": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "OperationJson": {
+      "description": "Paused operation and suggested `grit` commands.",
+      "properties": {
+        "kind": {
+          "description": "Stable operation id (for example `merge`).",
+          "type": "string"
+        },
+        "next_steps": {
+          "description": "Suggested follow-up commands, in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "next_steps"
+      ],
+      "type": "object"
+    },
     "Person": {
       "description": "A parsed identity line (`Name <email> <epoch> <tz>`) for stable `--json` output.",
       "properties": {
@@ -175,9 +214,9 @@
       "type": "array"
     },
     "conflicts": {
-      "description": "Unmerged paths from the index (stages 1–3).",
+      "description": "Unmerged paths with conflict kind.",
       "items": {
-        "type": "string"
+        "$ref": "#/definitions/ConflictJson"
       },
       "type": "array"
     },
@@ -192,15 +231,26 @@
       ]
     },
     "in_progress": {
-      "description": "In-progress operations (e.g. `merge`, `rebase`), when any apply.",
+      "description": "In-progress operations (e.g. `merge`, `rebase`), when any apply. Deprecated: prefer `operation`.",
       "items": {
         "type": "string"
       },
       "type": "array"
     },
     "merging": {
-      "description": "True when a merge is in progress (`MERGE_HEAD` exists).",
+      "description": "True when a merge is in progress (`MERGE_HEAD` exists). Deprecated: prefer `operation`.",
       "type": "boolean"
+    },
+    "operation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/OperationJson"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Primary paused operation and suggested next commands."
     },
     "staged": {
       "items": {

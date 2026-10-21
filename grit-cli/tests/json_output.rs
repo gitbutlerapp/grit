@@ -261,7 +261,13 @@ fn status_json_merge_conflict_lists_path_once_with_merge_fields() -> TestResult 
     let v = gs_json(&repo, &["status"]);
     assert_eq!(v["merging"], Value::Bool(true));
     assert_eq!(v["in_progress"], serde_json::json!(["merge"]));
-    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    assert_eq!(
+        v["conflicts"],
+        serde_json::json!([{"path": "f", "kind": "both_modified"}])
+    );
+    let op = v.get("operation").expect("operation");
+    assert_eq!(op["kind"], "merge");
+    assert!(op["next_steps"].as_array().unwrap().len() >= 2);
     assert_eq!(v["staged"].as_array().unwrap().len(), 1);
     assert_eq!(v["staged"][0]["path"], "f");
     assert_eq!(v["staged"][0]["status"], "unmerged");
@@ -310,7 +316,10 @@ fn status_json_merge_conflict_keeps_ahead_of_target() -> TestResult {
     assert_eq!(v["ahead"], 1);
     assert_eq!(v["behind"], 0);
     assert_eq!(v["commits"].as_array().unwrap().len(), 1);
-    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    assert_eq!(
+        v["conflicts"],
+        serde_json::json!([{"path": "f", "kind": "both_modified"}])
+    );
     Ok(())
 }
 

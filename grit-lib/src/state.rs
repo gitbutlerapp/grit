@@ -122,19 +122,108 @@ impl InProgressOperation {
             Self::Am => "am",
         }
     }
+}
 
-    /// Hint text for how to continue or abort.
+/// A suggested follow-up action while an operation is paused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NextStep {
+    /// Edit conflicted files in the worktree (inspect with `grit diff`).
+    ResolveConflicts,
+    /// Stage resolved paths after editing.
+    StageResolved,
+    /// Record the merge or sequencer result.
+    Commit,
+    /// Cancel the in-progress operation.
+    Abort(InProgressOperation),
+    /// Advance a sequencer operation after conflicts are resolved.
+    Continue(InProgressOperation),
+    /// Skip the current sequencer step.
+    Skip(InProgressOperation),
+}
+
+impl NextStep {
+    /// Render a non-interactive `grit` invocation for this step, when one exists.
     #[must_use]
-    pub fn hint(&self) -> &'static str {
+    pub fn grit_command(&self) -> Option<String> {
         match self {
-            Self::Merge => "fix conflicts and run \"git commit\"\n  (use \"git merge --abort\" to abort the merge)",
-            Self::RebaseInteractive => "fix conflicts and then run \"git rebase --continue\"\n  (use \"git rebase --abort\" to abort the rebase)",
-            Self::Rebase => "fix conflicts and then run \"git rebase --continue\"\n  (use \"git rebase --abort\" to abort the rebase)",
-            Self::CherryPick => "fix conflicts and run \"git cherry-pick --continue\"\n  (use \"git cherry-pick --abort\" to abort the cherry-pick)",
-            Self::Revert => "fix conflicts and run \"git revert --continue\"\n  (use \"git revert --abort\" to abort the revert)",
-            Self::Bisect => "use \"git bisect reset\" to get back to the original branch",
-            Self::Am => "fix conflicts and then run \"git am --continue\"\n  (use \"git am --abort\" to abort the am)",
+            Self::ResolveConflicts => Some("grit diff".to_owned()),
+            Self::StageResolved => Some("grit add .".to_owned()),
+            Self::Commit => Some("grit commit \"message\"".to_owned()),
+            Self::Abort(InProgressOperation::Merge) => Some("grit merge --abort".to_owned()),
+            Self::Abort(_) | Self::Continue(_) | Self::Skip(_) => None,
         }
+    }
+}
+
+/// In-progress operation plus the steps grit can suggest today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Operation {
+    /// Which operation is paused.
+    pub kind: InProgressOperation,
+    /// Ordered follow-ups (resolve → stage → commit, or abort).
+    pub next_steps: Vec<NextStep>,
+}
+
+/// Map [`WtStatusState`] to the primary paused operation, if any.
+#[must_use]
+pub fn primary_in_progress_operation(state: &WtStatusState) -> Option<InProgressOperation> {
+    if state.merge_in_progress {
+        return Some(InProgressOperation::Merge);
+    }
+    if state.rebase_interactive_in_progress {
+        return Some(InProgressOperation::RebaseInteractive);
+    }
+    if state.rebase_in_progress {
+        return Some(InProgressOperation::Rebase);
+    }
+    if state.am_in_progress {
+        return Some(InProgressOperation::Am);
+    }
+    if state.cherry_pick_in_progress {
+        return Some(InProgressOperation::CherryPick);
+    }
+    if state.revert_in_progress {
+        return Some(InProgressOperation::Revert);
+    }
+    if state.bisect_in_progress {
+        return Some(InProgressOperation::Bisect);
+    }
+    None
+}
+
+/// Suggested next steps for a paused operation given whether unmerged index entries remain.
+#[must_use]
+pub fn operation_next_steps(
+    kind: InProgressOperation,
+    has_unmerged_conflicts: bool,
+) -> Vec<NextStep> {
+    match kind {
+        InProgressOperation::Merge => {
+            if has_unmerged_conflicts {
+                vec![
+                    NextStep::ResolveConflicts,
+                    NextStep::StageResolved,
+                    NextStep::Abort(InProgressOperation::Merge),
+                ]
+            } else {
+                vec![
+                    NextStep::Commit,
+                    NextStep::Abort(InProgressOperation::Merge),
+                ]
+            }
+        }
+        InProgressOperation::CherryPick
+        | InProgressOperation::Revert
+        | InProgressOperation::Rebase
+        | InProgressOperation::RebaseInteractive
+        | InProgressOperation::Am => {
+            if has_unmerged_conflicts {
+                vec![NextStep::ResolveConflicts, NextStep::StageResolved]
+            } else {
+                vec![NextStep::Commit]
+            }
+        }
+        InProgressOperation::Bisect => vec![],
     }
 }
 

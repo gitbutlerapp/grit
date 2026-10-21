@@ -42,5 +42,6 @@ grit-lib = { path = "../grit-lib" }
 grit-test-support = { path = "../grit-test-support" }
 insta = { version = "1.42", features = ["json", "filters"] }
 serde_json.workspace = true
+shell-words.workspace = true
 tempfile = "3"
 jsonschema = "0.29"

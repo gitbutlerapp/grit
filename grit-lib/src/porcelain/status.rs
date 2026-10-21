@@ -37,7 +37,9 @@ use crate::objects::ObjectId;
 use crate::parallel::ParallelOp;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
-use crate::state::{HeadState, WtStatusState};
+use crate::state::{
+    operation_next_steps, primary_in_progress_operation, HeadState, Operation, WtStatusState,
+};
 use crate::unicode_normalization::precompose_utf8_segment;
 
 /// How untracked files are reported (`git status --untracked-files=<mode>`).
@@ -149,6 +151,88 @@ impl Default for StatusOptions {
     }
 }
 
+/// Unmerged index conflict category (matches `git status --porcelain=v2` `u` XY codes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConflictKind {
+    /// `UU` — both sides modified the same file.
+    BothModified,
+    /// `AA` — both sides added the same path.
+    BothAdded,
+    /// `DD` — both sides deleted the path.
+    BothDeleted,
+    /// `AU` — we added the path; they did not have it in the merge base.
+    AddedByUs,
+    /// `UA` — they added the path; we did not have it in the merge base.
+    AddedByThem,
+    /// `DU` — we deleted; they modified (or kept) the path.
+    DeletedByUs,
+    /// `UD` — we modified (or kept) the path; they deleted.
+    DeletedByThem,
+}
+
+impl ConflictKind {
+    /// Stable snake-case id for JSON and docs.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::BothModified => "both_modified",
+            Self::BothAdded => "both_added",
+            Self::BothDeleted => "both_deleted",
+            Self::AddedByUs => "added_by_us",
+            Self::AddedByThem => "added_by_them",
+            Self::DeletedByUs => "deleted_by_us",
+            Self::DeletedByThem => "deleted_by_them",
+        }
+    }
+}
+
+/// One unmerged path reported by status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conflict {
+    /// Repository-relative path.
+    pub path: String,
+    /// How the two sides collided (from index stages 1–3).
+    pub kind: ConflictKind,
+}
+
+/// Derive [`ConflictKind`] from which unmerged index stages exist for a path.
+#[must_use]
+pub fn conflict_kind_from_stages(stage1: bool, stage2: bool, stage3: bool) -> ConflictKind {
+    conflict_kind_from_stagemask(stagemask_from_stages(stage1, stage2, stage3))
+}
+
+fn stagemask_from_stages(stage1: bool, stage2: bool, stage3: bool) -> u8 {
+    let mut mask = 0u8;
+    if stage1 {
+        mask |= 1;
+    }
+    if stage2 {
+        mask |= 2;
+    }
+    if stage3 {
+        mask |= 4;
+    }
+    mask
+}
+
+/// Map Git's unmerged stage bitmask to [`ConflictKind`] (see upstream `wt-status.c`).
+#[must_use]
+pub fn conflict_kind_from_stagemask(stagemask: u8) -> ConflictKind {
+    match stagemask {
+        1 => ConflictKind::BothDeleted,
+        2 => ConflictKind::AddedByUs,
+        3 => ConflictKind::DeletedByThem,
+        4 => ConflictKind::AddedByThem,
+        5 => ConflictKind::DeletedByUs,
+        6 => ConflictKind::BothAdded,
+        7 => ConflictKind::BothModified,
+        other => {
+            debug_assert!(false, "unexpected unmerged stagemask {other:#x}");
+            ConflictKind::BothModified
+        }
+    }
+}
+
 /// The computed result of `git status`: everything the renderers need, with no
 /// presentation applied.
 ///
@@ -176,6 +260,10 @@ pub struct StatusModel {
     pub ignored: Vec<String>,
     /// Paths with unmerged index stages (1–3), sorted and deduplicated.
     pub conflicts: Vec<String>,
+    /// Unmerged paths with a [`ConflictKind`] derived from index stages 1–3.
+    pub conflict_details: Vec<Conflict>,
+    /// Paused operation and suggested follow-up steps, when any apply.
+    pub operation: Option<Operation>,
     /// Number of stash entries (for the optional stash footer / `--show-stash`).
     pub stash_count: usize,
     /// Whether the on-disk index used the sparse-directory format.
@@ -1458,6 +1546,32 @@ use crate::diff::DiffStatus;
 /// Collect repository-relative paths that have unmerged index stages (1–3).
 #[must_use]
 pub fn conflict_paths_from_index(index: &Index) -> Vec<String> {
+    conflicts_from_index(index)
+        .into_iter()
+        .map(|c| c.path)
+        .collect()
+}
+
+/// Collect unmerged paths and their [`ConflictKind`] from the index.
+#[must_use]
+pub fn conflicts_from_index(index: &Index) -> Vec<Conflict> {
+    let paths = conflict_paths_from_index_raw(index);
+    paths
+        .into_iter()
+        .map(|path| {
+            let path_bytes = path.as_bytes();
+            let stage1 = index.get(path_bytes, 1).is_some();
+            let stage2 = index.get(path_bytes, 2).is_some();
+            let stage3 = index.get(path_bytes, 3).is_some();
+            Conflict {
+                path,
+                kind: conflict_kind_from_stages(stage1, stage2, stage3),
+            }
+        })
+        .collect()
+}
+
+fn conflict_paths_from_index_raw(index: &Index) -> Vec<String> {
     let mut paths = BTreeSet::new();
     for entry in &index.entries {
         let stage = entry.stage();
@@ -1616,7 +1730,8 @@ pub fn status(
         )?;
     }
 
-    let conflicts = conflict_paths_from_index(&index);
+    let conflict_details = conflicts_from_index(&index);
+    let conflicts: Vec<String> = conflict_details.iter().map(|c| c.path.clone()).collect();
     normalize_status_conflicts(&mut staged, &mut unstaged, &conflicts);
 
     let (untracked, ignored) = if opts.untracked == UntrackedMode::No {
@@ -1646,6 +1761,11 @@ pub fn status(
         .map(|e| e.len())
         .unwrap_or(0);
 
+    let operation = primary_in_progress_operation(&state).map(|kind| Operation {
+        kind,
+        next_steps: operation_next_steps(kind, !conflicts.is_empty()),
+    });
+
     Ok(StatusModel {
         head,
         head_tree,
@@ -1656,6 +1776,8 @@ pub fn status(
         untracked,
         ignored,
         conflicts,
+        conflict_details,
+        operation,
         stash_count,
         index_sparse_on_disk,
         sparse_directory_prefixes,
@@ -2287,6 +2409,106 @@ mod status_op_tests {
             "populated UNTR must answer warm status without a full worktree rescan \
              (read {entries_read} directory entries)"
         );
+    }
+
+    #[test]
+    fn conflict_kind_from_stages_both_modified() {
+        assert_eq!(
+            conflict_kind_from_stages(true, true, true),
+            ConflictKind::BothModified
+        );
+    }
+
+    #[test]
+    fn conflict_kind_from_stages_both_added() {
+        assert_eq!(
+            conflict_kind_from_stages(false, true, true),
+            ConflictKind::BothAdded
+        );
+    }
+
+    #[test]
+    fn conflict_kind_from_stages_both_deleted() {
+        assert_eq!(
+            conflict_kind_from_stages(true, false, false),
+            ConflictKind::BothDeleted
+        );
+    }
+
+    #[test]
+    fn conflict_kind_from_stages_added_by_us() {
+        assert_eq!(
+            conflict_kind_from_stages(false, true, false),
+            ConflictKind::AddedByUs
+        );
+    }
+
+    #[test]
+    fn conflict_kind_from_stages_added_by_them() {
+        assert_eq!(
+            conflict_kind_from_stages(false, false, true),
+            ConflictKind::AddedByThem
+        );
+    }
+
+    #[test]
+    fn conflict_kind_from_stages_deleted_by_us() {
+        assert_eq!(
+            conflict_kind_from_stages(true, false, true),
+            ConflictKind::DeletedByUs
+        );
+    }
+
+    #[test]
+    fn conflict_kind_from_stages_deleted_by_them() {
+        assert_eq!(
+            conflict_kind_from_stages(true, true, false),
+            ConflictKind::DeletedByThem
+        );
+    }
+
+    #[test]
+    fn operation_next_steps_merge() {
+        use crate::state::{operation_next_steps, InProgressOperation, NextStep};
+
+        let tmp = merge_conflict_repo_for_tests();
+        let root = tmp.path();
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        let model = status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
+        let op = model.operation.expect("merge operation");
+        assert_eq!(op.kind, InProgressOperation::Merge);
+        assert_eq!(
+            op.next_steps,
+            operation_next_steps(InProgressOperation::Merge, true)
+        );
+        assert!(op.next_steps.contains(&NextStep::ResolveConflicts));
+        assert!(op
+            .next_steps
+            .contains(&NextStep::Abort(InProgressOperation::Merge)));
+    }
+
+    fn merge_conflict_repo_for_tests() -> TempDir {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        grit_test_support::git(root, &["init", "-q", "-b", "main"]);
+        grit_test_support::git(root, &["config", "user.name", "T"]);
+        grit_test_support::git(root, &["config", "user.email", "t@e.com"]);
+        std::fs::write(root.join("f"), "base\n").unwrap();
+        grit_test_support::git(root, &["add", "f"]);
+        grit_test_support::git(root, &["commit", "-qm", "base"]);
+        grit_test_support::git(root, &["checkout", "-qb", "side"]);
+        std::fs::write(root.join("f"), "side\n").unwrap();
+        grit_test_support::git(root, &["commit", "-qam", "side"]);
+        grit_test_support::git(root, &["checkout", "-q", "main"]);
+        std::fs::write(root.join("f"), "main\n").unwrap();
+        grit_test_support::git(root, &["commit", "-qam", "main"]);
+        let merge = std::process::Command::new("git")
+            .args(["merge", "side"])
+            .current_dir(root)
+            .output()
+            .expect("git merge");
+        assert_ne!(merge.status.code(), Some(0), "expected merge conflict");
+        tmp
     }
 
     #[test]
