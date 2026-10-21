@@ -15239,6 +15239,7 @@ pub mod grit_lib::remote::shallow
 pub const grit_lib::remote::shallow::INFINITE_DEPTH: u32
 pub fn grit_lib::remote::shallow::add_shallow_boundaries(&std::path::Path, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> core::io::error::Result<()>
 pub fn grit_lib::remote::shallow::apply_shallow_updates(&std::path::Path, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::shallow::dedupe_shallow_list(alloc::vec::Vec<grit_lib::objects::ObjectId>) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub fn grit_lib::remote::shallow::deepen_since_wire_value(&str) -> alloc::string::String
 pub fn grit_lib::remote::shallow::load_shallow_boundaries(&std::path::Path) -> std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub fn grit_lib::remote::shallow::load_shallow_oids(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
