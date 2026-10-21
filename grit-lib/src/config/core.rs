@@ -1678,11 +1678,6 @@ impl ConfigFile {
     /// `{path}.lock` already exists.
     pub fn write(&self) -> Result<()> {
         let lock_path = config_lock_path(&self.path);
-        if lock_path.exists() {
-            return Err(Error::Config(ConfigError::ConfigFileLocked {
-                path: lock_path.display().to_string(),
-            }));
-        }
 
         let content = self.raw_lines.join("\n");
         let bytes: Vec<u8> = if content.trim().is_empty() {
@@ -1693,43 +1688,40 @@ impl ConfigFile {
             format!("{content}\n").into_bytes()
         };
 
-        let mut lock_file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    Error::Config(ConfigError::ConfigFileLocked {
-                        path: lock_path.display().to_string(),
-                    })
-                } else {
-                    Error::Io(e)
-                }
-            })?;
+        use crate::lockfile::{LockError, LockFile, LockWait};
+        use std::io::Write as _;
+        let git_dir = self.path.parent();
+        let wait = git_dir
+            .map(LockWait::files_ref_lock_for_git_dir)
+            .unwrap_or(LockWait::Immediately);
+        let mut lock = LockFile::acquire(&lock_path, wait).map_err(|err| match err {
+            LockError::Held { .. } => Error::Config(ConfigError::ConfigFileLocked {
+                path: lock_path.display().to_string(),
+            }),
+            LockError::Io { source, .. } => Error::Io(source),
+        })?;
 
         if let Ok(meta) = fs::metadata(&self.path) {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let mode = meta.permissions().mode();
-                let _ = fs::set_permissions(&lock_path, fs::Permissions::from_mode(mode));
+                let _ = fs::set_permissions(lock.lock_path(), fs::Permissions::from_mode(mode));
             }
         }
 
-        use std::io::Write as _;
-        lock_file.write_all(&bytes).map_err(|e| {
+        lock.write_all(&bytes).map_err(|e| {
             let _ = fs::remove_file(&lock_path);
             Error::Io(e)
         })?;
-        lock_file.sync_all().map_err(|e| {
-            let _ = fs::remove_file(&lock_path);
-            Error::Io(e)
-        })?;
-        drop(lock_file);
-
-        fs::rename(&lock_path, &self.path).map_err(|e| {
-            let _ = fs::remove_file(&lock_path);
-            Error::Io(e)
+        lock.commit_to(&self.path).map_err(|err| match err {
+            LockError::Io { source, .. } => {
+                let _ = fs::remove_file(&lock_path);
+                Error::Io(source)
+            }
+            LockError::Held { .. } => Error::Config(ConfigError::ConfigFileLocked {
+                path: lock_path.display().to_string(),
+            }),
         })?;
         Ok(())
     }

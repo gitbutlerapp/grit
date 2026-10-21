@@ -610,6 +610,7 @@ fn ensure_pack_receive_incoming_dir(objects_dir: &Path) -> Result<PathBuf> {
 }
 
 fn create_private_spool_file(path: &Path) -> Result<File> {
+    // Receive-pack spool segment (not a lock file); exclusive create avoids clobber.
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;

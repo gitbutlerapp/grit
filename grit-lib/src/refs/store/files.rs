@@ -446,17 +446,16 @@ impl FilesRefStore {
     }
 
     fn acquire_ref_lock(&self, lock: &Path, refname: &str) -> StoreResult<()> {
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(lock)
-        {
-            Ok(_) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(RefStoreError::LockHeld {
-                name: refname.to_owned(),
-            }),
-            Err(e) => Err(RefStoreError::Corrupt(e.to_string())),
-        }
+        use crate::lockfile::{LockError, LockFile, LockWait};
+        let wait = LockWait::files_ref_lock_for_git_dir(&self.common_dir);
+        LockFile::acquire(lock, wait)
+            .map(|guard| guard.detach())
+            .map_err(|err| match err {
+                LockError::Held { .. } => RefStoreError::LockHeld {
+                    name: refname.to_owned(),
+                },
+                LockError::Io { source, .. } => RefStoreError::Corrupt(source.to_string()),
+            })
     }
 
     fn release_locks(batch: &PreparedFilesBatch) {
@@ -960,17 +959,17 @@ impl RefStore for FilesRefStore {
         if self.needs_packed_lock(&updates) {
             let packed_path = super::paths::packed_refs_path(&self.common_dir);
             let lock = lock_path_for_ref(&packed_path);
-            if fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock)
-                .is_err()
-            {
+            use crate::lockfile::{LockError, LockFile, LockWait};
+            let wait = LockWait::packed_refs_for_git_dir(&self.common_dir);
+            if let Err(err) = LockFile::acquire(&lock, wait).map(|guard| guard.detach()) {
                 for acquired in ref_locks.values() {
                     let _ = fs::remove_file(acquired);
                 }
-                return Err(RefStoreError::LockHeld {
-                    name: super::paths::PACKED_REFS.to_owned(),
+                return Err(match err {
+                    LockError::Held { .. } => RefStoreError::LockHeld {
+                        name: super::paths::PACKED_REFS.to_owned(),
+                    },
+                    LockError::Io { source, .. } => RefStoreError::Corrupt(source.to_string()),
                 });
             }
             packed_lock = Some(lock);

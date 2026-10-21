@@ -225,6 +225,7 @@ pub(crate) mod index_pack;
 pub(crate) mod init_filesystem;
 pub(crate) mod interpret_trailers;
 pub(crate) mod local_object_copy;
+pub mod lockfile;
 pub(crate) mod log_walk;
 pub(crate) mod mailmap;
 pub mod maintenance;

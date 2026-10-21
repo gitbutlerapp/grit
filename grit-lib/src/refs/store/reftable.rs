@@ -652,7 +652,7 @@ impl PreparedRefTransaction for ReftablePrepared<'_> {
                 stack_batch
                     .stack
                     .write_transaction_under_lock(
-                        &stack_batch.lock,
+                        &mut stack_batch.lock,
                         stack_batch.updates,
                         &stack_batch.opts,
                     )

@@ -1482,21 +1482,27 @@ impl Index {
         let pid_path = pid_path_for_lock(&tmp_path);
         let lockfile_pid_enabled = lockfile_pid_enabled(path, config);
 
-        let mut lock_file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp_path)
-        {
-            Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let message = build_lock_exists_message(&tmp_path, &pid_path, &e);
-                return Err(Error::Io(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    message,
-                )));
-            }
-            Err(e) => return Err(Error::Io(e)),
-        };
+        use crate::lockfile::{LockError, LockFile, LockWait};
+        let wait = LockWait::files_ref_lock(config);
+        let (tmp_path, mut lock_file) = LockFile::acquire(&tmp_path, wait)
+            .map_err(|err| match err {
+                LockError::Held { .. } => {
+                    let message = build_lock_exists_message(
+                        &tmp_path,
+                        &pid_path,
+                        &io::Error::from(io::ErrorKind::AlreadyExists),
+                    );
+                    Error::Io(io::Error::new(io::ErrorKind::AlreadyExists, message))
+                }
+                LockError::Io { source, .. } => Error::Io(source),
+            })?
+            .into_open_file()
+            .map_err(|err| match err {
+                LockError::Io { source, .. } => Error::Io(source),
+                LockError::Held { path } => Error::Io(crate::lockfile::lock_held_as_ref_present(
+                    LockError::Held { path },
+                )),
+            })?;
 
         let mut wrote_pid_file = false;
         if lockfile_pid_enabled {
@@ -3557,21 +3563,27 @@ impl IndexLock {
         let pid_path = pid_path_for_lock(&lock_path);
         let lockfile_pid_enabled = lockfile_pid_enabled(index_path, config);
 
-        let file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let message = build_lock_exists_message(&lock_path, &pid_path, &e);
-                return Err(Error::Io(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    message,
-                )));
-            }
-            Err(e) => return Err(Error::Io(e)),
-        };
+        use crate::lockfile::{LockError, LockFile, LockWait};
+        let wait = LockWait::files_ref_lock(config);
+        let (lock_path, file) = LockFile::acquire(&lock_path, wait)
+            .map_err(|err| match err {
+                LockError::Held { .. } => {
+                    let message = build_lock_exists_message(
+                        &lock_path,
+                        &pid_path,
+                        &io::Error::from(io::ErrorKind::AlreadyExists),
+                    );
+                    Error::Io(io::Error::new(io::ErrorKind::AlreadyExists, message))
+                }
+                LockError::Io { source, .. } => Error::Io(source),
+            })?
+            .into_open_file()
+            .map_err(|err| match err {
+                LockError::Io { source, .. } => Error::Io(source),
+                LockError::Held { path } => Error::Io(crate::lockfile::lock_held_as_ref_present(
+                    LockError::Held { path },
+                )),
+            })?;
 
         let mut wrote_pid = false;
         if lockfile_pid_enabled {

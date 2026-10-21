@@ -31,9 +31,6 @@ use std::io::{Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread;
-use std::time::{Duration, Instant};
-
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
@@ -1960,30 +1957,25 @@ fn read_tables_list_names(reftable_dir: &Path) -> Result<Vec<String>> {
 /// RAII guard for `tables.list.lock`. Removes the lock file on drop unless it was
 /// consumed (renamed onto `tables.list`) via [`disarm`].
 pub(crate) struct TablesListLock {
-    path: PathBuf,
-    armed: std::cell::Cell<bool>,
+    lock: Option<crate::lockfile::LockFile>,
 }
 
 impl TablesListLock {
-    fn new(path: PathBuf) -> Self {
-        Self {
-            path,
-            armed: std::cell::Cell::new(true),
-        }
+    fn new(lock: crate::lockfile::LockFile) -> Self {
+        Self { lock: Some(lock) }
     }
 
-    /// Mark the lock as consumed so its `Drop` does not remove the path (it has
-    /// been renamed onto `tables.list`).
-    fn disarm(&self) {
-        self.armed.set(false);
+    fn path(&self) -> Result<&Path> {
+        self.lock
+            .as_ref()
+            .map(|lock| lock.lock_path())
+            .ok_or_else(|| Error::Message("tables.list lock was released".into()))
     }
 }
 
 impl Drop for TablesListLock {
     fn drop(&mut self) {
-        if self.armed.get() {
-            let _ = fs::remove_file(&self.path);
-        }
+        drop(self.lock.take());
     }
 }
 
@@ -2239,7 +2231,7 @@ impl ReftableStack {
     }
 
     fn compact_range(&mut self, first: usize, last: usize, opts: &WriteOptions) -> Result<()> {
-        let guard = self.acquire_tables_list_lock()?;
+        let mut guard = self.acquire_tables_list_lock()?;
         self.reload_table_names();
         if first >= self.table_names.len() || last >= self.table_names.len() || first > last {
             return Ok(());
@@ -2280,7 +2272,7 @@ impl ReftableStack {
         new_names.push(filename.clone());
         new_names.extend_from_slice(&self.table_names[last + 1..]);
         self.table_names = new_names;
-        self.write_tables_list_locked(&guard)?;
+        self.write_tables_list_locked(&mut guard)?;
         invalidate_stack_table_cache(&self.reftable_dir);
         for old in &compact_names {
             if old == &filename {
@@ -2484,10 +2476,10 @@ impl ReftableStack {
         // peer just appended). Re-read the on-disk stack under the lock before
         // extending it — our in-memory `table_names` may be stale.
         {
-            let guard = self.acquire_tables_list_lock()?;
+            let mut guard = self.acquire_tables_list_lock()?;
             self.reload_table_names();
             self.table_names.push(filename.clone());
-            self.write_tables_list_locked(&guard)?;
+            self.write_tables_list_locked(&mut guard)?;
         }
 
         // Auto-compact small write bursts into a single table. A plain commit writes several small
@@ -2514,7 +2506,7 @@ impl ReftableStack {
         if !opts.autocompaction_enabled {
             return Ok(());
         }
-        let guard = self.acquire_tables_list_lock()?;
+        let mut guard = self.acquire_tables_list_lock()?;
         self.reload_table_names();
         if self.table_names.len() <= 2 {
             return Ok(());
@@ -2556,7 +2548,7 @@ impl ReftableStack {
         let filename = self.write_table_file(&data, max_idx)?;
         let keep: Vec<String> = vec![filename.clone(), newest.clone()];
         self.table_names = keep;
-        self.write_tables_list_locked(&guard)?;
+        self.write_tables_list_locked(&mut guard)?;
         for old in &old_names {
             if old == &filename || old == &newest {
                 continue;
@@ -2571,7 +2563,7 @@ impl ReftableStack {
     }
 
     fn compact_unlocked_suffix(&mut self) -> Result<()> {
-        let guard = self.acquire_tables_list_lock()?;
+        let mut guard = self.acquire_tables_list_lock()?;
         self.reload_table_names();
         let first_unlocked = self
             .table_names
@@ -2617,7 +2609,7 @@ impl ReftableStack {
 
         self.table_names = locked_prefix;
         self.table_names.push(compacted.clone());
-        self.write_tables_list_locked(&guard)?;
+        self.write_tables_list_locked(&mut guard)?;
         for old in &old_suffix {
             if old == &compacted {
                 continue;
@@ -2644,7 +2636,7 @@ impl ReftableStack {
         // writers') — otherwise two writers can pick the same base list and the
         // second overwrites the first's `tables.list`, dropping a ref.
         {
-            let guard = self.acquire_tables_list_lock()?;
+            let mut guard = self.acquire_tables_list_lock()?;
             self.reload_table_names();
             let update_index = self.max_update_index_unlocked()? + 1;
             let mut writer = ReftableWriter::new(opts.clone(), update_index, update_index);
@@ -2661,7 +2653,7 @@ impl ReftableStack {
             let data = writer.finish()?;
             let filename = self.write_table_file(&data, update_index)?;
             self.table_names.push(filename);
-            self.write_tables_list_locked(&guard)?;
+            self.write_tables_list_locked(&mut guard)?;
         }
 
         // Auto-compaction runs after releasing the append lock; it re-acquires
@@ -2683,8 +2675,8 @@ impl ReftableStack {
         if updates.is_empty() {
             return Ok(());
         }
-        let guard = self.acquire_tables_list_lock()?;
-        self.write_transaction_under_lock(&guard, updates, opts)?;
+        let mut guard = self.acquire_tables_list_lock()?;
+        self.write_transaction_under_lock(&mut guard, updates, opts)?;
         self.maybe_auto_compact(opts)?;
         Ok(())
     }
@@ -2692,7 +2684,7 @@ impl ReftableStack {
     /// Apply a batch while holding `tables.list.lock` (used by [`crate::refs::store::ReftableRefStore`]).
     pub(crate) fn write_transaction_under_lock(
         &mut self,
-        guard: &TablesListLock,
+        guard: &mut TablesListLock,
         mut updates: Vec<ReftableTransactionUpdate>,
         opts: &WriteOptions,
     ) -> Result<()> {
@@ -2837,7 +2829,7 @@ impl ReftableStack {
         // compacted table -> rewrite tables.list -> delete old tables) and work
         // from the freshly-read on-disk list, so a concurrent writer that
         // appended a table after we opened the stack is not silently dropped.
-        let guard = self.acquire_tables_list_lock()?;
+        let mut guard = self.acquire_tables_list_lock()?;
         self.reload_table_names();
         if self.table_names.is_empty() {
             return Ok(());
@@ -2893,7 +2885,7 @@ impl ReftableStack {
         self.table_names.clear();
         let name = self.write_table_file(&data, max_idx)?;
         self.table_names.push(name.clone());
-        self.write_tables_list_locked(&guard)?;
+        self.write_tables_list_locked(&mut guard)?;
 
         // Remove old table files (never the freshly written compacted table).
         for old in &old_names {
@@ -2932,12 +2924,12 @@ impl ReftableStack {
     /// lock with [`acquire_tables_list_lock`] and call
     /// [`write_tables_list_locked`] while holding it.
     fn write_tables_list(&self) -> Result<()> {
-        let guard = self.acquire_tables_list_lock()?;
-        self.write_tables_list_locked(&guard)
+        let mut guard = self.acquire_tables_list_lock()?;
+        self.write_tables_list_locked(&mut guard)
     }
 
     /// Write `tables.list` while already holding the lock guard.
-    fn write_tables_list_locked(&self, guard: &TablesListLock) -> Result<()> {
+    fn write_tables_list_locked(&self, guard: &mut TablesListLock) -> Result<()> {
         let tables_list = self.reftable_dir.join("tables.list");
         let content = self.table_names.join("\n")
             + if self.table_names.is_empty() {
@@ -2945,16 +2937,27 @@ impl ReftableStack {
             } else {
                 "\n"
             };
-        fs::write(&guard.path, &content).map_err(Error::Io)?;
-        // `fs::rename` consumes the lock file; mark the guard disarmed so its
-        // Drop does not try to remove the (now-renamed) path.
-        fs::rename(&guard.path, &tables_list).map_err(Error::Io)?;
-        guard.disarm();
+        fs::write(guard.path()?, &content).map_err(Error::Io)?;
+        let lock = guard.lock.take().ok_or_else(|| {
+            Error::Message("tables.list lock was released".into())
+        })?;
+        lock.commit_to(&tables_list).map_err(|err| match err {
+            crate::lockfile::LockError::Io { source, .. } => Error::Io(source),
+            crate::lockfile::LockError::Held { .. } => {
+                Error::InvalidRef("cannot lock references: data is locked".to_owned())
+            }
+        })?;
         invalidate_stack_table_cache(&self.reftable_dir);
         Ok(())
     }
 
-    fn lock_timeout_ms(&self) -> u64 {
+    /// Atomically acquire `tables.list.lock` (O_CREAT|O_EXCL), retrying up to the
+    /// configured `reftable.lockTimeout`. Mirrors git's reftable stack locking so
+    /// concurrent writers serialize instead of clobbering each other's
+    /// `tables.list` (t0610 'ref transaction: many concurrent writers').
+    fn acquire_tables_list_lock(&self) -> Result<TablesListLock> {
+        use crate::lockfile::{LockError, LockFile, LockWait};
+        let lock = self.reftable_dir.join("tables.list.lock");
         let git_dir = self
             .reftable_dir
             .parent()
@@ -2965,38 +2968,14 @@ impl ReftableStack {
             true,
         )
         .unwrap_or_else(|_| ConfigSet::new());
-        config
-            .get("reftable.lockTimeout")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(1000)
-    }
-
-    /// Atomically acquire `tables.list.lock` (O_CREAT|O_EXCL), retrying up to the
-    /// configured `reftable.lockTimeout`. Mirrors git's reftable stack locking so
-    /// concurrent writers serialize instead of clobbering each other's
-    /// `tables.list` (t0610 'ref transaction: many concurrent writers').
-    fn acquire_tables_list_lock(&self) -> Result<TablesListLock> {
-        let lock = self.reftable_dir.join("tables.list.lock");
-        let timeout_ms = self.lock_timeout_ms();
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        loop {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock)
-            {
-                Ok(_) => return Ok(TablesListLock::new(lock)),
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if timeout_ms == 0 || Instant::now() >= deadline {
-                        return Err(Error::InvalidRef(
-                            "cannot lock references: data is locked".to_owned(),
-                        ));
-                    }
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Err(err) => return Err(Error::Io(err)),
+        let wait = LockWait::reftable_tables_list(Some(&config));
+        let file_lock = LockFile::acquire(&lock, wait).map_err(|err| match err {
+            LockError::Held { .. } => {
+                Error::InvalidRef("cannot lock references: data is locked".to_owned())
             }
-        }
+            LockError::Io { source, .. } => Error::Io(source),
+        })?;
+        Ok(TablesListLock::new(file_lock))
     }
 
     /// Re-read `tables.list` from disk, replacing the in-memory view. Used while

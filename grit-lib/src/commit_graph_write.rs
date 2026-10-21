@@ -678,25 +678,24 @@ pub fn atomic_replace_commit_graph(
     fs::create_dir_all(&info).map_err(crate::error::Error::Io)?;
     let graph_path = info.join("commit-graph");
     let lock_path = info.join("commit-graph.lock");
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-    {
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(crate::error::Error::from(
-                crate::error::RefLockError::PackedRefsLockHeld {
+    use crate::lockfile::{LockError, LockFile, LockWait};
+    let git_dir = objects_dir.parent().unwrap_or(objects_dir);
+    let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
+    LockFile::acquire(&lock_path, wait)
+        .map(|guard| guard.detach())
+        .map_err(|err| match err {
+            LockError::Held { .. } => {
+                crate::error::Error::from(crate::error::RefLockError::PackedRefsLockHeld {
                     lock_path: lock_path.display().to_string(),
-                },
-            ));
-        }
-        Err(e) => return Err(crate::error::Error::Io(e)),
-    }
+                })
+            }
+            LockError::Io { source, .. } => crate::error::Error::Io(source),
+        })?;
 
     let tmp = info.join("commit-graph.new");
     let mut created_tmp = false;
     let write_result = (|| -> crate::error::Result<()> {
+        // Staged commit-graph bytes (not a lock file); exclusive create avoids clobber.
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
