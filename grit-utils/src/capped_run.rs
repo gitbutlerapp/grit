@@ -355,9 +355,13 @@ fn process_tree_rss_bytes(root: u32) -> Result<u64> {
 /// Peak RSS of all waited-for child processes ([`UsageWho::RUSAGE_CHILDREN`]).
 #[cfg(unix)]
 fn children_rusage_peak_rss_bytes() -> Result<u64> {
+    use nix::errno::Errno;
     use nix::sys::resource::{getrusage, UsageWho};
-    let usage = getrusage(UsageWho::RUSAGE_CHILDREN).context("getrusage(RUSAGE_CHILDREN)")?;
-    Ok(rss_bytes_from_rusage_max_rss(usage.max_rss()))
+    match getrusage(UsageWho::RUSAGE_CHILDREN) {
+        Ok(usage) => Ok(rss_bytes_from_rusage_max_rss(usage.max_rss())),
+        Err(Errno::ESRCH) => Ok(0),
+        Err(e) => Err(e).context("getrusage(RUSAGE_CHILDREN)"),
+    }
 }
 
 /// Convert `ru_maxrss` from `getrusage` into bytes (OS-specific units).

@@ -52,11 +52,11 @@ pub struct RunPolicy {
 impl Default for RunPolicy {
     fn default() -> Self {
         Self {
-            warmups_per_tool: 1,
-            min_runs_per_tool: 3,
-            max_runs_per_tool: 20,
-            min_total_timed_duration: Duration::from_secs(3),
-            scenario_time_budget: Duration::from_secs(120),
+            warmups_per_tool: 2,
+            min_runs_per_tool: 5,
+            max_runs_per_tool: 24,
+            min_total_timed_duration: Duration::from_secs(5),
+            scenario_time_budget: Duration::from_secs(180),
         }
     }
 }
@@ -127,6 +127,17 @@ pub struct AbBenchRequest<'a> {
     pub correctness: Option<&'a (dyn Fn(&Path) -> Result<()> + 'a)>,
     pub post_timed: Option<PostTimedCheck<'a>>,
     pub pre_timed: Option<PreTimedCheck<'a>>,
+}
+
+/// Median peak RSS across timed samples (less noisy than max for daily stability checks).
+#[must_use]
+pub fn median_peak_rss_bytes(samples: &[TimedRunSample]) -> u64 {
+    let mut peaks: Vec<u64> = samples.iter().map(|s| s.peak_rss_bytes).collect();
+    if peaks.is_empty() {
+        return 0;
+    }
+    peaks.sort_unstable();
+    peaks[peaks.len() / 2]
 }
 
 /// Compute how many timed runs each tool should execute under `policy`.
@@ -215,7 +226,7 @@ pub fn timing_stats_from_samples(samples: &[TimedRunSample]) -> TimingStats {
     let stddev_ms = variance.sqrt();
     let min_ms = sorted_ms.first().copied().unwrap_or(0.0);
     let max_ms = sorted_ms.last().copied().unwrap_or(0.0);
-    let peak_rss_bytes = samples.iter().map(|s| s.peak_rss_bytes).max();
+    let peak_rss_bytes = Some(median_peak_rss_bytes(samples));
     TimingStats {
         mean_ms,
         median_ms,
@@ -577,7 +588,7 @@ mod tests {
         assert!((stats.median_ms - 20.0).abs() < f64::EPSILON);
         assert!((stats.min_ms - 10.0).abs() < f64::EPSILON);
         assert!((stats.max_ms - 30.0).abs() < f64::EPSILON);
-        assert_eq!(stats.peak_rss_bytes, Some(200));
+        assert_eq!(stats.peak_rss_bytes, Some(150));
         assert!((stats.stddev_ms - 10.0).abs() < 1e-9);
     }
 

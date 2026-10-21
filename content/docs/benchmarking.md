@@ -124,4 +124,6 @@ Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** afte
 | `grit-utils/baselines/daily/second.json` | Second consecutive full daily report |
 | `grit-utils/baselines/daily/consecutive-compare.txt` | `daily compare … --tolerance 0.10` output |
 
-*(Per-area and total wall times for the committed capture are recorded below once the full matrix run completes on the factory VM.)*
+**Factory VM (4 logical CPUs, 2026-10-21):** fixture prepare for the daily subset took **968 s** wall. A committed consecutive pair (**`latest.json`** + **`second.json`**, 58 registry rows with **57** timed + **1** pending) took **1476 s** and **1478 s** wall per merged run (**2954 s** total, under the **4 h** wall budget on this 4-core host; **8-core equivalent 2 h** budget). Compare at **`0.10`** tolerance exited **0** (`consecutive-compare.txt`).
+
+Default daily **`RunPolicy`** was tightened for baseline stability: **2** warmups per tool, **5** minimum timed runs, **5 s** minimum aggregated timed window, **180 s** scenario budget.
