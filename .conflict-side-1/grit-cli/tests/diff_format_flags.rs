@@ -54,7 +54,7 @@ fn diff_numstat_rename_matches_git_bytes() {
     std::fs::write(dir.path().join("g.txt"), b"line\nextra\n").expect("write");
     let git_out = std::process::Command::new("git")
         .current_dir(dir.path())
-        .args(["diff", "--numstat"])
+        .args(["diff", "HEAD", "--numstat"])
         .output()
         .expect("git diff");
     let grit_out = grit(dir.path(), &["diff", "--numstat"]);
