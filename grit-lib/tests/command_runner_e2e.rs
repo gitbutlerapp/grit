@@ -108,6 +108,7 @@ fn create_commit_aborts_on_pre_commit_hook_failure() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -149,6 +150,7 @@ fn commit_msg_hook_receives_editmsg_path_argument() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )

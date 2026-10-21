@@ -53,6 +53,7 @@ impl<'repo> RevWalk<'repo> {
     ///     skip_pre_commit_tree_match: false,
     ///     staged_change_count: None,
     ///     hooks: Default::default(),
+    ///     ..Default::default()
     /// };
     /// let _ = create_commit(&repo, &req, &mut NullProgress)?;
     /// let _ = repo.rev_walk().resolve("refs/heads/main")?;

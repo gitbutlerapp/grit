@@ -12,6 +12,13 @@ grit commit [-a] <message>
 grit commit [-a] -m <message>
 grit commit -F <file|->
 grit commit --author "Name <email>"
+grit commit --date <date>
+grit commit --trailer "Key: value"
+grit commit -s
+grit commit --reset-author -m <message>
+grit commit -C <commit>
+grit commit -S
+grit commit --no-gpg-sign -m <message>
 grit commit --no-verify -m <message>
 grit commit --allow-empty -m <message>
 grit commit --amend [-m <message>]
@@ -32,7 +39,9 @@ $ grit config --global user.name "Your Name"
 $ grit config --global user.email "you@example.com"
 ```
 
-To set the recorded time, use the `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` environment variables. On amend, the author line is taken from the commit being replaced, not from a fresh author identity.
+To set the recorded time, use the `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` environment variables, or pass `--date` for the author timestamp on this commit (Git date formats, RFC 3339, `@epoch`, and the same loose strings Git accepts). On amend, the author line is taken from the commit being replaced unless you pass `--author` or `--reset-author`.
+
+Repeat `--trailer key=value` (or `key: value`) to append trailers the same way `git interpret-trailers` would. `-s` / `--signoff` adds a `Signed-off-by` line for the committer. `--reset-author` sets the author to the committer with a fresh author date (also when amending). `-C` / `--reuse-message <commit>` reuses that commit's message and author; it is a copy and gets a new change id. `-S` / `--gpg-sign` and `--no-gpg-sign` override `commit.gpgsign` for one commit.
 
 When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new commit object the same way Git does: OpenPGP and X.509 via your configured `gpg`/`gpgsm` program, or SSH via `ssh-keygen -Y sign` when `gpg.format` is `ssh`. Signing uses `user.signingkey` and the same `gpg.*` settings Git reads. [`grit merge`](../merge/) and [`grit pick`](../pick/) honor the same policy when they create commits.
 
@@ -56,6 +65,13 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 | `-m`, `--message <message>` | The commit message, as an option. Use either this, the argument, or `--message-file`, not more than one. Optional with `--amend` (keeps the previous message). |
 | `-F`, `--message-file <file\|->` | Read the commit message from a file, or from stdin when the path is `-`. |
 | `--author <ident>` | Author for this commit (`Name <email>` or bare email). Committer unchanged. |
+| `--date <date>` | Author date for this commit (Git-compatible date string). |
+| `--trailer <key=value>` | Append a commit trailer; repeat for multiple trailers. |
+| `-s`, `--signoff` | Append `Signed-off-by` for the committer. |
+| `--reset-author` | Set author to committer with a fresh author date. |
+| `-C`, `--reuse-message <commit>` | Reuse message and author from another commit. |
+| `-S`, `--gpg-sign` | Sign this commit. |
+| `--no-gpg-sign` | Do not sign this commit. |
 | `--no-verify` | Skip `pre-commit` and `commit-msg` hooks. |
 | `-a`, `--all` | Stage every change first. This is always what `grit commit` does; the option is accepted so that `git` habits like `-am` keep working. |
 | `--amend` | Replace the tip commit on the current branch. |

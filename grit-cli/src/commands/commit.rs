@@ -1,13 +1,15 @@
 //! `grit commit` — stage every change and record a new commit.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::commit::parse_date_to_git_timestamp;
+use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
+use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::HookName;
 use schemars::JsonSchema;
@@ -69,10 +71,18 @@ impl MarkdownRender for CommitOutcome {
 }
 
 /// Stage the worktree and create a commit with the given message and options.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     message: Option<String>,
     message_file: Option<String>,
     author_override: Option<String>,
+    author_date: Option<String>,
+    trailers: Vec<String>,
+    signoff: bool,
+    reset_author: bool,
+    reuse_message: Option<String>,
+    gpg_sign: bool,
+    no_gpg_sign: bool,
     no_verify: bool,
     amend: bool,
     allow_empty: bool,
@@ -91,21 +101,48 @@ pub fn run(
         return Err(map_commit_error(Error::IndexUnmerged));
     }
 
-    let message = resolve_commit_message(message, message_file, amend)?;
+    let reuse_message_from = if let Some(rev) = reuse_message.as_deref() {
+        Some(
+            resolve_revision_as_commit(&repo, rev)
+                .with_context(|| format!("could not resolve reuse-message commit '{rev}'"))?,
+        )
+    } else {
+        None
+    };
+
+    let message =
+        resolve_commit_message(message, message_file, amend, reuse_message_from.is_some())?;
     let message_text = message.as_deref().unwrap_or("");
 
     let config = repo.config().context("could not load config")?;
     let env = repo.environment();
     let now = crate::context::wall_clock_now(env);
     let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
-    let author = if let Some(arg) = author_override {
-        let contact = parse_author_arg(&arg).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let date_override = env.var(IdentRole::Author.env_date_key());
-        author_identity_line(&contact, date_override.as_deref(), now)
-    } else if amend {
+    let author = if reset_author {
+        String::new()
+    } else if let Some(arg) = author_override.as_deref() {
+        let contact = parse_author_arg(arg).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let env_author_date = env.var(IdentRole::Author.env_date_key());
+        let date_override = author_date.as_deref().or(env_author_date.as_deref());
+        author_identity_line(&contact, date_override, now)
+    } else if amend || reuse_message_from.is_some() {
         String::new()
     } else {
         context::identity(env, config.as_ref(), IdentRole::Author, now)?
+    };
+
+    let parsed_author_date = author_date.as_deref().map(parse_trailer_date).transpose()?;
+    let parsed_trailers = trailers
+        .iter()
+        .map(|t| parse_trailer_arg(t))
+        .collect::<Result<Vec<_>>>()?;
+
+    let sign_override = if gpg_sign {
+        Some(true)
+    } else if no_gpg_sign {
+        Some(false)
+    } else {
+        None
     };
 
     let hooks = if no_verify {
@@ -121,12 +158,17 @@ pub fn run(
             author,
             committer,
             allow_empty,
-            sign_override: None,
+            sign_override,
             amend,
             assume_worktree_synced: true,
             skip_pre_commit_tree_match: true,
             staged_change_count: Some(staged.total()),
             hooks,
+            author_date: parsed_author_date,
+            trailers: parsed_trailers,
+            signoff,
+            reset_author,
+            reuse_message_from,
         },
         &mut NullProgress,
     )
@@ -167,14 +209,31 @@ fn resolve_commit_message(
     message: Option<String>,
     message_file: Option<String>,
     amend: bool,
+    reuse_message: bool,
 ) -> Result<Option<String>> {
     match (message, message_file) {
         (Some(m), None) => Ok(Some(m)),
         (None, Some(path)) => read_message_file(&path).map(Some),
-        (None, None) if amend => Ok(None),
+        (None, None) if amend || reuse_message => Ok(None),
         (None, None) => bail!("provide a commit message, e.g. grit commit \"what changed\""),
         (Some(_), Some(_)) => unreachable!("clap rejects message and message-file together"),
     }
+}
+
+fn parse_trailer_arg(raw: &str) -> Result<(String, String)> {
+    let raw = raw.trim();
+    if let Some((key, value)) = raw.split_once('=') {
+        return Ok((key.trim().to_owned(), value.trim().to_owned()));
+    }
+    if let Some((key, value)) = raw.split_once(':') {
+        return Ok((key.trim().to_owned(), value.trim().to_owned()));
+    }
+    bail!("trailer must be key=value or key: value (got '{raw}')");
+}
+
+fn parse_trailer_date(raw: &str) -> Result<String> {
+    parse_date_to_git_timestamp(raw.trim())
+        .ok_or_else(|| anyhow::anyhow!("could not parse --date '{raw}'"))
 }
 
 fn read_message_file(path: &str) -> Result<String> {

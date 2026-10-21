@@ -5,6 +5,12 @@
 //! reflogs through [`crate::refs::update_branch_for_commit`].
 
 use crate::change_id::{change_id, set_change_id, ChangeId, ChangeIdPolicy};
+use crate::commit::assemble_identity;
+use crate::commit::trailers::interpret::{
+    process_trailers, NewTrailerArg, ProcessTrailerOptions, TrailerIfExists, TrailerIfMissing,
+    TrailerWhere,
+};
+use crate::commit_trailers::{append_signoff_trailer_with_dedup, format_signoff_line};
 use crate::config::ConfigSet;
 use crate::diff::refresh_index_stat_content_verified_with_rules;
 use crate::diff::{diff_tree_path_change_count, zero_oid};
@@ -51,7 +57,7 @@ pub struct CommitAuthorInfo {
 }
 
 /// Inputs for [`create_commit`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CommitRequest {
     /// Commit message body (first line becomes the subject). A trailing newline is added when missing.
     pub message: String,
@@ -80,6 +86,16 @@ pub struct CommitRequest {
     /// Hook execution policy for `pre-commit` and `commit-msg`.
     #[doc(alias = "no-verify")]
     pub hooks: HookPolicy,
+    /// Author timestamp suffix (`<unix> <+HHMM>`) replacing the author line date when set.
+    pub author_date: Option<String>,
+    /// Trailers to append via [`process_trailers`] (same semantics as `git commit --trailer`).
+    pub trailers: Vec<(String, String)>,
+    /// Append `Signed-off-by` using the committer identity (`-s` / `--signoff`).
+    pub signoff: bool,
+    /// Use the committer as the author with a fresh author date (`--reset-author`).
+    pub reset_author: bool,
+    /// Reuse log message and author from this commit (`-C` / `--reuse-message`); copies get a new change id.
+    pub reuse_message_from: Option<ObjectId>,
 }
 
 /// Result of [`create_commit`].
@@ -181,6 +197,66 @@ fn author_info_from_header_line(line: &str) -> CommitAuthorInfo {
     }
 }
 
+fn apply_author_date_suffix(author: &str, date_suffix: &str) -> String {
+    let info = author_info_from_header_line(author);
+    if info.email.is_empty() && !info.name.is_empty() && info.name.contains('@') {
+        format!("{} {}", info.name.trim(), date_suffix.trim())
+    } else if info.email.is_empty() {
+        format!("{} {}", author.trim_end(), date_suffix.trim())
+    } else {
+        format!("{} <{}> {}", info.name, info.email, date_suffix.trim())
+    }
+}
+
+fn author_line_from_committer(
+    committer: &str,
+    author_date: Option<&str>,
+    now: time::OffsetDateTime,
+) -> String {
+    let info = author_info_from_header_line(committer);
+    assemble_identity(&info.name, &info.email, author_date, now)
+}
+
+fn enrich_commit_message(
+    message: String,
+    trailers: &[(String, String)],
+    signoff: bool,
+    committer: &str,
+    config: &ConfigSet,
+    git_dir: &Path,
+) -> Result<String> {
+    let mut out = message;
+    if !trailers.is_empty() {
+        let new_args: Vec<NewTrailerArg> = trailers
+            .iter()
+            .map(|(key, value)| NewTrailerArg {
+                text: if value.is_empty() {
+                    format!("{key}:")
+                } else {
+                    format!("{key}: {value}")
+                },
+                where_: TrailerWhere::End,
+                if_exists: TrailerIfExists::AddIfDifferent,
+                if_missing: TrailerIfMissing::Add,
+            })
+            .collect();
+        let opts = ProcessTrailerOptions {
+            only_trailers: false,
+            trim_empty: true,
+            only_input: false,
+            unfold: false,
+            no_divider: false,
+        };
+        out = process_trailers(&out, &opts, &new_args, Some(git_dir));
+    }
+    if signoff {
+        let info = author_info_from_header_line(committer);
+        let sob = format_signoff_line(&info.name, &info.email);
+        append_signoff_trailer_with_dedup(&mut out, &sob, config, true);
+    }
+    Ok(out)
+}
+
 /// Write a commit from the current index and advance the checked-out branch.
 ///
 /// Loads the index from disk, builds the commit tree with an incremental cache-tree
@@ -259,6 +335,22 @@ fn create_commit_with_index(
     let mut amend_extra_headers = Vec::new();
     let mut amend_default_message = None;
     let mut replaced_tip = None;
+    let mut reuse_author = None;
+    let mut reuse_author_raw = Vec::new();
+    let mut reuse_message = None;
+    if let Some(reuse_oid) = req.reuse_message_from {
+        let obj = repo.odb().read(&reuse_oid)?;
+        if obj.kind != ObjectKind::Commit {
+            return Err(Error::CorruptObject(format!(
+                "expected commit for reuse-message, got {}",
+                obj.kind.as_str()
+            )));
+        }
+        let source = parse_commit(&obj.data)?;
+        reuse_message = Some(source.message);
+        reuse_author = Some(source.author);
+        reuse_author_raw = source.author_raw;
+    }
     if req.amend {
         let Some(tip) = parent.take() else {
             return Err(Error::AmendUnborn);
@@ -334,11 +426,30 @@ fn create_commit_with_index(
         }
     }
 
-    let mut message = if req.amend && req.message.trim().is_empty() {
-        amend_default_message.unwrap_or_default()
-    } else {
+    let mut message = if !req.message.trim().is_empty() {
         normalize_commit_message(&req.message)?
+    } else if req.amend {
+        amend_default_message.unwrap_or_default()
+    } else if let Some(reuse_msg) = reuse_message {
+        reuse_msg
+    } else {
+        return Err(Error::Message("empty commit message".into()));
     };
+    if message.trim().is_empty() {
+        return Err(Error::Message("empty commit message".into()));
+    }
+    if !message.ends_with('\n') {
+        message.push('\n');
+    }
+    let config = repo.config()?;
+    message = enrich_commit_message(
+        message,
+        &req.trailers,
+        req.signoff,
+        &req.committer,
+        config.as_ref(),
+        repo.git_dir(),
+    )?;
     let editmsg_path = repo.git_dir().join("COMMIT_EDITMSG");
     fs::write(&editmsg_path, &message).map_err(Error::Io)?;
     let editmsg_arg = commit_editmsg_hook_argument(repo, &editmsg_path);
@@ -361,13 +472,30 @@ fn create_commit_with_index(
         message.push('\n');
     }
 
-    let (author, author_raw) = if req.amend && !req.author.is_empty() {
+    let (mut author, mut author_raw) = if req.reset_author {
+        (
+            author_line_from_committer(
+                &req.committer,
+                req.author_date.as_deref(),
+                repo.identity_now(),
+            ),
+            Vec::new(),
+        )
+    } else if !req.author.is_empty() {
         (req.author.clone(), Vec::new())
-    } else if let Some(a) = amend_author {
-        (a, amend_author_raw)
+    } else if req.amend {
+        (amend_author.unwrap_or_default(), amend_author_raw)
+    } else if let Some(a) = reuse_author {
+        (a, reuse_author_raw)
     } else {
         (req.author.clone(), Vec::new())
     };
+    if !req.reset_author {
+        if let Some(ref date) = req.author_date {
+            author = apply_author_date_suffix(&author, date);
+            author_raw = Vec::new();
+        }
+    }
     let mut commit_parents = if req.amend {
         amend_parents
     } else {
@@ -393,7 +521,6 @@ fn create_commit_with_index(
         raw_message: None,
         extra_headers: amend_extra_headers,
     };
-    let config = repo.config()?;
     let policy = ChangeIdPolicy::from_config(config.as_ref());
     if policy.enabled() {
         if req.amend {
@@ -654,13 +781,7 @@ mod tests {
             message: message.to_owned(),
             author: ident.clone(),
             committer: ident,
-            allow_empty: false,
-            sign_override: None,
-            amend: false,
-            assume_worktree_synced: false,
-            skip_pre_commit_tree_match: false,
-            staged_change_count: None,
-            hooks: HookPolicy::default(),
+            ..Default::default()
         }
     }
 
@@ -995,6 +1116,159 @@ mod tests {
                 HookName::PostCommit
             ]
         );
+    }
+
+    #[test]
+    fn author_date_override() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut req = commit_req("dated");
+        req.author_date = Some("946684800 +0000".to_owned());
+        let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        assert_eq!(outcome.author.date, "946684800 +0000");
+    }
+
+    #[test]
+    fn trailers_appended_and_deduped() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut req = commit_req("trailers");
+        req.trailers = vec![
+            ("Acked-by".to_owned(), "Alice".to_owned()),
+            ("Acked-by".to_owned(), "Alice".to_owned()),
+        ];
+        let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        let msg = parse_commit(&repo.odb().read(&outcome.oid).unwrap().data)
+            .unwrap()
+            .message;
+        assert_eq!(msg.matches("Acked-by: Alice").count(), 1);
+    }
+
+    #[test]
+    fn signoff_uses_committer() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut req = commit_req("signoff");
+        req.committer = "Committer Name <committer@example.com> 2 +0000".to_owned();
+        req.signoff = true;
+        let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        let msg = parse_commit(&repo.odb().read(&outcome.oid).unwrap().data)
+            .unwrap()
+            .message;
+        assert!(msg.contains("Signed-off-by: Committer Name <committer@example.com>"));
+    }
+
+    #[test]
+    fn reuse_message_keeps_author() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut first = commit_req("source");
+        first.author = "Source Author <source@example.com> 99 +0000".to_owned();
+        first.committer = ident();
+        let first_out = create_commit(&repo, &first, &mut NullProgress).unwrap();
+
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut req = commit_req("");
+        req.author = String::new();
+        req.reuse_message_from = Some(first_out.oid);
+        let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        assert_eq!(outcome.author.name, "Source Author");
+        assert_eq!(outcome.author.email, "source@example.com");
+        assert_eq!(outcome.author.date, "99 +0000");
+    }
+
+    #[test]
+    fn reset_author_with_reuse_and_amend() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut first = commit_req("source");
+        first.author = "Old <old@example.com> 1 +0000".to_owned();
+        create_commit(&repo, &first, &mut NullProgress).unwrap();
+
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("second"), &mut NullProgress).unwrap();
+
+        let mut amend = commit_req("");
+        amend.amend = true;
+        amend.author = String::new();
+        amend.reset_author = true;
+        amend.committer = "New Committer <new@example.com> 2000 +0000".to_owned();
+        let outcome = create_commit(&repo, &amend, &mut NullProgress).unwrap();
+        assert_eq!(outcome.author.name, "New Committer");
+        assert_eq!(outcome.author.email, "new@example.com");
+    }
+
+    #[test]
+    fn reuse_message_gets_new_change_id() {
+        use crate::change_id::{change_id, ChangeIdError, ChangeIdGenerator};
+        use std::sync::Arc;
+
+        struct FixedGenerator([u8; 16]);
+        impl ChangeIdGenerator for FixedGenerator {
+            fn random_bytes(&self) -> std::result::Result<[u8; 16], ChangeIdError> {
+                Ok(self.0)
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let gen1: Arc<dyn ChangeIdGenerator> = Arc::new(FixedGenerator([0x11; 16]));
+        let git = root.join(".git");
+        fs::create_dir_all(git.join("objects")).unwrap();
+        fs::create_dir_all(git.join("refs/heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n",
+        )
+        .unwrap();
+        let repo = Repository::open(
+            &git,
+            &RepositoryOptions::empty()
+                .with_work_tree(root)
+                .with_change_id_generator(gen1),
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let source = create_commit(&repo, &commit_req("source"), &mut NullProgress).unwrap();
+        let source_data = parse_commit(&repo.odb().read(&source.oid).unwrap().data).unwrap();
+        let source_id = change_id(&source_data).expect("source change id");
+
+        let gen2: Arc<dyn ChangeIdGenerator> = Arc::new(FixedGenerator([0x22; 16]));
+        let repo = Repository::open(
+            &git,
+            &RepositoryOptions::empty()
+                .with_work_tree(root)
+                .with_change_id_generator(gen2),
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut req = commit_req("");
+        req.author = String::new();
+        req.reuse_message_from = Some(source.oid);
+        let copy = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        let copy_data = parse_commit(&repo.odb().read(&copy.oid).unwrap().data).unwrap();
+        let copy_id = change_id(&copy_data).expect("copy change id");
+        assert_ne!(copy_id, source_id);
     }
 
     #[test]

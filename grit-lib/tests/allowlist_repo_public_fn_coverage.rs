@@ -101,6 +101,7 @@ fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )

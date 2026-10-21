@@ -494,6 +494,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )

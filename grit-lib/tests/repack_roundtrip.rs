@@ -71,6 +71,7 @@ fn many_commits(repo: &Repository, n: usize) {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )

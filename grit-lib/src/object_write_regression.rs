@@ -258,6 +258,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -293,6 +294,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -418,6 +420,7 @@ fn pack_signature_not_restatted_per_object() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -492,6 +495,7 @@ fn pack_signature_not_restatted_per_object() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )

@@ -121,6 +121,7 @@ fn one_commit(repo: &Repository) -> ObjectId {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -383,6 +384,7 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -436,6 +438,7 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -1344,6 +1347,7 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )

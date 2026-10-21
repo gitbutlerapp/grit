@@ -9986,12 +9986,19 @@ pub grit_lib::porcelain::commit::CommitRequest::allow_empty: bool
 pub grit_lib::porcelain::commit::CommitRequest::amend: bool
 pub grit_lib::porcelain::commit::CommitRequest::assume_worktree_synced: bool
 pub grit_lib::porcelain::commit::CommitRequest::author: alloc::string::String
+pub grit_lib::porcelain::commit::CommitRequest::author_date: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::commit::CommitRequest::committer: alloc::string::String
+pub grit_lib::porcelain::commit::CommitRequest::reset_author: bool
+pub grit_lib::porcelain::commit::CommitRequest::reuse_message_from: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::commit::CommitRequest::signoff: bool
+pub grit_lib::porcelain::commit::CommitRequest::trailers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
 pub grit_lib::porcelain::commit::CommitRequest::hooks: grit_lib::porcelain::commit::HookPolicy
 pub grit_lib::porcelain::commit::CommitRequest::message: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::sign_override: core::option::Option<bool>
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitRequest
 pub fn grit_lib::porcelain::commit::CommitRequest::clone(&self) -> Self
+impl core::default::Default for grit_lib::porcelain::commit::CommitRequest
+pub fn grit_lib::porcelain::commit::CommitRequest::default() -> Self
 impl core::fmt::Debug for grit_lib::porcelain::commit::CommitRequest
 pub fn grit_lib::porcelain::commit::CommitRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for grit_lib::porcelain::commit::CommitRequest

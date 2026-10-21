@@ -251,6 +251,7 @@ fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )

@@ -97,6 +97,7 @@ fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
         hooks: Default::default(),
+        ..Default::default()
     }
 }
 #[test]

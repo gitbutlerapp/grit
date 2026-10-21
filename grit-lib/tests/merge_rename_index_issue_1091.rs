@@ -28,6 +28,7 @@ fn commit_req(message: &str) -> CommitRequest {
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
         hooks: Default::default(),
+        ..Default::default()
     }
 }
 fn grit_index_all_stages(index: &grit_lib::index::Index) -> Vec<(String, u32, String, ObjectId)> {

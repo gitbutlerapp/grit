@@ -39,6 +39,7 @@ fn commit_req(message: &str) -> CommitRequest {
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
         hooks: Default::default(),
+        ..Default::default()
     }
 }
 
@@ -261,6 +262,7 @@ fn commit_worktree_req(message: &str) -> CommitRequest {
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
         hooks: Default::default(),
+        ..Default::default()
     }
 }
 

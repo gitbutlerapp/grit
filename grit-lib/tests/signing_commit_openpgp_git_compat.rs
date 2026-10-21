@@ -136,6 +136,7 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )

@@ -96,6 +96,7 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -161,6 +162,7 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -277,6 +279,7 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
         hooks: Default::default(),
+        ..Default::default()
     };
 
     let _probe = reset_worktree_metadata_probe(root);

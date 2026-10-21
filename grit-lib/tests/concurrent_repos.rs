@@ -204,6 +204,7 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -407,6 +408,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )

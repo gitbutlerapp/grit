@@ -104,6 +104,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -1215,6 +1216,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )
@@ -1238,6 +1240,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
             hooks: Default::default(),
+            ..Default::default()
         },
         &mut NullProgress,
     )

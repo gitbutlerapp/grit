@@ -1512,6 +1512,7 @@ mod tests {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -1574,6 +1575,7 @@ mod tests {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -1612,6 +1614,7 @@ mod tests {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -1642,6 +1645,7 @@ mod tests {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -1719,6 +1723,7 @@ mod tests {
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
                 hooks: Default::default(),
+                ..Default::default()
             },
             &mut NullProgress,
         )
@@ -1748,6 +1753,7 @@ mod tests {
                     skip_pre_commit_tree_match: false,
                     staged_change_count: None,
                     hooks: Default::default(),
+                    ..Default::default()
                 },
                 &mut NullProgress,
             )
@@ -1812,6 +1818,7 @@ mod tests {
                     skip_pre_commit_tree_match: false,
                     staged_change_count: None,
                     hooks: Default::default(),
+                    ..Default::default()
                 },
                 &mut NullProgress,
             )
