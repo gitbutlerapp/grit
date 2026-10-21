@@ -418,6 +418,10 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
+fn short_change_id(id: &str) -> &str {
+    id.get(..7).unwrap_or(id)
+}
+
 /// Result of `grit commit` / `grit commit --amend`.
 pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyhow::Result<()> {
     outln!(w, "## Commit");
@@ -444,6 +448,9 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
         "changes"
     };
     outln!(w, "- **{}** {word} committed", outcome.changes);
+    if let Some(id) = outcome.change_id.as_deref() {
+        outln!(w, "- change id `{short}`", short = short_change_id(id));
+    }
     Ok(())
 }
 
@@ -458,6 +465,9 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         MergeResult::FastForward => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
             outln!(w, "- Fast-forwarded **`{}`** → `{short}`", outcome.branch);
+            if let Some(id) = outcome.change_id.as_deref() {
+                outln!(w, "- change id `{short}`", short = short_change_id(id));
+            }
         }
         MergeResult::Merged => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
@@ -466,6 +476,9 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
                 "- Merged **`{}`** into the current branch · `{short}`",
                 outcome.branch
             );
+            if let Some(id) = outcome.change_id.as_deref() {
+                outln!(w, "- change id `{short}`", short = short_change_id(id));
+            }
         }
         MergeResult::Conflicts => {
             outln!(w, "- Merge **`{}`** stopped with conflicts", outcome.branch);
@@ -510,6 +523,9 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
     let src = short_hex(&outcome.source);
     let new = short_hex(&outcome.oid);
     outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
+    if let Some(id) = outcome.change_id.as_deref() {
+        outln!(w, "- change id `{short}`", short = short_change_id(id));
+    }
     Ok(())
 }
 
@@ -520,6 +536,9 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
     let src = short_hex(&outcome.source);
     let new = short_hex(&outcome.oid);
     outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
+    if let Some(id) = outcome.change_id.as_deref() {
+        outln!(w, "- change id `{short}`", short = short_change_id(id));
+    }
     Ok(())
 }
 
@@ -545,12 +564,17 @@ fn print_history_rewrite_rows(
 ) -> anyhow::Result<()> {
     for pair in rewritten {
         match &pair.new {
-            Some(new) => outln!(
-                w,
-                "- commit `{}` → `{}`",
-                short_hex(&pair.old),
-                short_hex(new)
-            ),
+            Some(new) => {
+                outln!(
+                    w,
+                    "- commit `{}` → `{}`",
+                    short_hex(&pair.old),
+                    short_hex(new)
+                );
+                if let Some(id) = pair.change_id.as_deref() {
+                    outln!(w, "  - change id `{short}`", short = short_change_id(id));
+                }
+            }
             None => outln!(w, "- commit `{}` → (dropped)", short_hex(&pair.old)),
         }
     }

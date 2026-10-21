@@ -7,6 +7,13 @@
       "description": "The new commit created on the current branch (full hex oid).",
       "type": "string"
     },
+    "change_id": {
+      "description": "Stored `change-id` on the new pick commit, or null when absent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source": {
       "description": "The original commit that was picked (full hex oid).",
       "type": "string"

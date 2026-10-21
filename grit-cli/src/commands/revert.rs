@@ -22,6 +22,8 @@ pub struct RevertOutcome {
     pub oid: String,
     /// Subject line of the revert commit.
     pub subject: String,
+    /// Stored `change-id` on the new revert commit, or JSON `null` when absent.
+    pub change_id: Option<String>,
 }
 
 impl HumanRender for RevertOutcome {
@@ -66,12 +68,17 @@ pub fn run(commit: &str) -> Result<RevertOutcome> {
     .map_err(map_replay_error)?;
     let short = &source_oid.to_hex()[..7];
     match outcome {
-        ReplayOutcome::Committed { oid, .. } => {
+        ReplayOutcome::Committed {
+            oid,
+            change_id,
+            ..
+        } => {
             let reverted = context::read_commit(&repo, &oid)?;
             Ok(RevertOutcome {
                 source: source_oid.to_hex(),
                 oid: oid.to_hex(),
                 subject: context::subject_line(&reverted.message),
+                change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
             })
         }
         ReplayOutcome::Conflicts { paths } => bail!(

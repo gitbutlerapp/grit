@@ -30,7 +30,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use crate::change_id::ChangeIdPolicy;
+use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::diff::diff_trees;
 use crate::error::{Error, Result};
@@ -251,11 +251,15 @@ pub enum IntegrateBranchOutcome {
     FastForward {
         /// New branch tip after the fast-forward.
         oid: ObjectId,
+        /// Stored `change-id` on the fast-forward tip when present.
+        change_id: Option<ChangeId>,
     },
     /// A merge commit was created without conflicts.
     Merged {
         /// New merge commit OID.
         oid: ObjectId,
+        /// Stored `change-id` on the merge commit when present.
+        change_id: Option<ChangeId>,
     },
     /// The merge has conflicts; the repository is left in a merge-in-progress state.
     Conflicts {
@@ -299,7 +303,10 @@ pub fn integrate_branch(
             other_oid,
             &format!("merge {label}: fast-forward"),
         )?;
-        return Ok(IntegrateBranchOutcome::FastForward { oid: other_oid });
+        return Ok(IntegrateBranchOutcome::FastForward {
+            oid: other_oid,
+            change_id: stored_change_id_for_commit(repo, other_oid)?,
+        });
     }
 
     let base_oid = merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?
@@ -364,7 +371,15 @@ pub fn integrate_branch(
     stamp_change_id_on_new_commit(repo, &policy, &mut commit)?;
     let oid = write_commit_object(repo, &commit, None)?;
     move_branch(repo, into_ref, into_oid, oid, &format!("merge {label}"))?;
-    Ok(IntegrateBranchOutcome::Merged { oid })
+    Ok(IntegrateBranchOutcome::Merged {
+        oid,
+        change_id: change_id(&commit),
+    })
+}
+
+fn stored_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<Option<ChangeId>> {
+    let obj = repo.odb().read(&oid)?;
+    Ok(change_id(&parse_commit(&obj.data)?))
 }
 
 /// Abort an in-progress merge, restoring index and worktree to [`read_orig_head`].
@@ -809,7 +824,7 @@ mod integrate_tests {
             .expect("main");
         let outcome =
             integrate_branch(&repo, "refs/heads/main", main, topic, "topic").expect("merge");
-        let IntegrateBranchOutcome::Merged { oid } = outcome else {
+        let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
             panic!("expected clean merge, got {outcome:?}");
         };
         let tip: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "refs/heads/main"])

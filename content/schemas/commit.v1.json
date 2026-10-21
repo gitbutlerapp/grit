@@ -9,6 +9,13 @@
     "branch": {
       "type": "string"
     },
+    "change_id": {
+      "description": "Stored `change-id` header on the new commit, or null when absent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "changes": {
       "format": "uint",
       "minimum": 0.0,

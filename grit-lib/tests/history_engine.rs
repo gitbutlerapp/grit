@@ -1134,6 +1134,7 @@ fn history_public_api_coverage_smoke() {
         commits: vec![RewrittenCommit {
             old: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
             new: None,
+            change_id: None,
         }],
         ref_updates: vec![PlannedRefUpdate {
             name: "refs/heads/x".into(),

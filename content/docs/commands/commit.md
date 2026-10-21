@@ -104,6 +104,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `subject` | string | First line of the commit message |
 | `changes` | number | Path changes vs the parent commit tree |
 | `amended` | boolean | `true` when `--amend` was used |
+| `change_id` | string or null | Stored `change-id` header on the new commit, or `null` when absent |
 
 Example:
 
@@ -113,7 +114,8 @@ Example:
   "branch": "main",
   "subject": "second",
   "changes": 1,
-  "amended": false
+  "amended": false,
+  "change_id": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
 }
 ```
 

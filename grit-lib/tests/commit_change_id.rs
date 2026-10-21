@@ -347,7 +347,7 @@ fn merge_commit_gets_change_id() {
     .expect("open");
     let outcome =
         integrate_branch(&repo, "refs/heads/main", main_oid, topic_oid, "topic").expect("merge");
-    let IntegrateBranchOutcome::Merged { oid } = outcome else {
+    let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
         panic!("expected merged, got {outcome:?}");
     };
 
@@ -497,4 +497,92 @@ fn signed_commit_with_change_id_verifies() {
     let change_pos = cat.find("change-id ").expect("change-id");
     let sig_pos = cat.find("gpgsig ").expect("gpgsig");
     assert!(change_pos < sig_pos);
+}
+
+#[test]
+fn rewritten_commit_records_change_id_on_reword() {
+    use grit_lib::revwalk::history::{reword, EmptyPolicy, RefScope, RewriteOptions};
+
+    let root = grit_test_support::unique_tmp("rewrite-change-id", "lib");
+    let repo = init_repo(&root, "");
+    fs::write(root.join("a.txt"), b"a\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("first\n"), &mut NullProgress).unwrap();
+    fs::write(root.join("b.txt"), b"b\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("second\n"), &mut NullProgress).unwrap();
+    let target = ObjectId::from_hex(git_out(&root, &["rev-parse", "HEAD~1"]).trim()).unwrap();
+
+    let plan = reword(
+        &repo,
+        target,
+        "first reworded\n".into(),
+        &RewriteOptions {
+            scope: RefScope::Head,
+            empty: EmptyPolicy::Drop,
+            committer: ident(),
+            preserve_committer: false,
+        },
+    )
+    .expect("reword plan");
+    let row = plan
+        .commits
+        .iter()
+        .find(|c| c.old == target)
+        .expect("rewritten row");
+    let new_oid = row.new.expect("new oid");
+    let stored = row.change_id.as_ref().expect("plan change_id").as_str();
+    let cat = git_out(&root, &["cat-file", "-p", &new_oid.to_hex()]);
+    let header =
+        change_id_line(&cat).and_then(|line| line.strip_prefix("change-id ").map(str::to_owned));
+    assert_eq!(header.as_deref(), Some(stored));
+}
+
+#[test]
+fn squash_fold_preserves_oldest_change_id() {
+    use grit_lib::revwalk::history::{
+        squash, EmptyPolicy, RefScope, RewriteOptions, SquashMessage, SquashOptions,
+    };
+
+    let root = grit_test_support::unique_tmp("squash-change-id", "lib");
+    let repo = init_repo(&root, "");
+    fs::write(root.join("a.txt"), b"a\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("first\n"), &mut NullProgress).unwrap();
+    let oldest = ObjectId::from_hex(git_out(&root, &["rev-parse", "HEAD"]).trim()).unwrap();
+    let oldest_id = change_id_line(&git_out(&root, &["cat-file", "-p", &oldest.to_hex()]))
+        .and_then(|l| l.strip_prefix("change-id ").map(str::to_owned))
+        .expect("oldest header");
+    fs::write(root.join("b.txt"), b"b\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("second\n"), &mut NullProgress).unwrap();
+    fs::write(root.join("c.txt"), b"c\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    create_commit(&repo, &commit_req("third\n"), &mut NullProgress).unwrap();
+    let tip = ObjectId::from_hex(git_out(&root, &["rev-parse", "HEAD"]).trim()).unwrap();
+    let range = format!("{}..{}", oldest.to_hex(), tip.to_hex());
+
+    let plan = squash(
+        &repo,
+        &[range.as_str()],
+        &SquashOptions {
+            message: SquashMessage::Custom("squashed\n".into()),
+            rewrite: RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: ident(),
+                preserve_committer: false,
+            },
+        },
+    )
+    .expect("squash plan");
+    let row = plan
+        .commits
+        .iter()
+        .find(|r| r.new.is_some())
+        .expect("replacement row");
+    assert_eq!(
+        row.change_id.as_ref().map(|id| id.as_str()),
+        Some(oldest_id.as_str())
+    );
 }

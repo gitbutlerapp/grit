@@ -67,6 +67,8 @@ pub struct CommitOutcome {
     pub parent: Option<ObjectId>,
     /// Number of path-level changes between the parent commit tree and this commit's tree.
     pub changes: usize,
+    /// Stored `change-id` header when present on the new commit object.
+    pub change_id: Option<ChangeId>,
 }
 
 /// Write a commit from the current index and advance the checked-out branch.
@@ -367,6 +369,7 @@ fn create_commit_with_index(
         branch: short_name,
         parent,
         changes,
+        change_id: change_id(&commit_data),
     })
 }
 

@@ -64,6 +64,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `source` | string | Full id of the commit that was picked. |
 | `oid` | string | Full id of the new commit on the current branch. |
 | `subject` | string | Subject line of the picked commit. |
+| `change_id` | string or null | Stored `change-id` on the new pick commit, or `null` when absent. |
 
 Example:
 

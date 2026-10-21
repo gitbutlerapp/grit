@@ -8,7 +8,7 @@
 
 use std::fs;
 
-use crate::change_id::ChangeIdPolicy;
+use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::MergeFavor;
@@ -59,6 +59,8 @@ pub enum ReplayOutcome {
         oid: ObjectId,
         /// Tree OID stored in the new commit.
         tree: ObjectId,
+        /// Stored `change-id` header on the new commit when present.
+        change_id: Option<ChangeId>,
     },
     /// The three-way merge had conflicts; repository state is unchanged.
     Conflicts {
@@ -229,6 +231,7 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
     Ok(ReplayOutcome::Committed {
         oid: new_oid,
         tree: new_tree,
+        change_id: change_id(&commit_data),
     })
 }
 

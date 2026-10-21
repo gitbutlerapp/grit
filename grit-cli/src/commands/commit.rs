@@ -24,6 +24,8 @@ pub struct CommitOutcome {
     pub subject: String,
     pub changes: usize,
     pub amended: bool,
+    /// Stored `change-id` header on the new commit, or JSON `null` when absent.
+    pub change_id: Option<String>,
 }
 
 impl HumanRender for CommitOutcome {
@@ -116,6 +118,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         subject,
         changes: outcome.changes,
         amended: amend,
+        change_id: outcome.change_id.as_ref().map(|id| id.as_str().to_owned()),
     })
 }
 

@@ -322,7 +322,7 @@ fn replay_revert_head_restores_parent_tree_like_git() {
 
     let repo = open_repo(root.path());
     let outcome = replay_revert(&repo, head).expect("revert HEAD");
-    let ReplayOutcome::Committed { oid, tree } = outcome else {
+    let ReplayOutcome::Committed { oid, tree, .. } = outcome else {
         panic!("expected revert commit, got {outcome:?}");
     };
 

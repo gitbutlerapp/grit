@@ -100,6 +100,7 @@ impl HistoryRewriteOutcome {
                 .map(|row| RewrittenPair {
                     old: row.old.to_hex(),
                     new: row.new.map(|new| new.to_hex()),
+                    change_id: row.change_id.as_ref().map(|id| id.as_str().to_owned()),
                 })
                 .collect(),
             refs: plan
@@ -127,6 +128,8 @@ pub struct RewrittenPair {
     pub old: String,
     /// Replacement commit OID (full hex), or JSON `null` when the commit was dropped.
     pub new: Option<String>,
+    /// Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.
+    pub change_id: Option<String>,
 }
 
 /// One ref tip before and after rewrite.

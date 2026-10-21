@@ -43,6 +43,13 @@
       "description": "The merge source label (for `set_upstream`, the branch being set).",
       "type": "string"
     },
+    "change_id": {
+      "description": "Stored `change-id` on the resulting commit when `oid` is set and a header is present.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "conflict_details": {
       "description": "Structured conflict metadata when `result` is `conflicts`.",
       "items": {

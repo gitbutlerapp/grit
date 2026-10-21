@@ -22,6 +22,8 @@ pub struct PickOutcome {
     pub oid: String,
     /// Subject line of the picked commit.
     pub subject: String,
+    /// Stored `change-id` on the new commit, or JSON `null` when absent.
+    pub change_id: Option<String>,
 }
 
 impl HumanRender for PickOutcome {
@@ -67,10 +69,11 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
     .map_err(map_replay_error)?;
     let short = &source_oid.to_hex()[..7];
     match outcome {
-        ReplayOutcome::Committed { oid, .. } => Ok(PickOutcome {
+        ReplayOutcome::Committed { oid, change_id, .. } => Ok(PickOutcome {
             source: source_oid.to_hex(),
             oid: oid.to_hex(),
             subject: context::subject_line(&source.message),
+            change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
         }),
         ReplayOutcome::Conflicts { mut paths } => {
             paths.sort();

@@ -92,6 +92,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `result` | string | `up_to_date`, `fast_forward`, `merged`, `conflicts`, `aborted`, or `set_upstream`. |
 | `branch` | string | The branch that was merged in (or set as upstream). |
 | `oid` | string or null | Commit the current branch points at after the merge, when applicable. |
+| `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
 | `conflicts` | array or null | Sorted paths with unresolved conflicts when `result` is `conflicts`. |
 | `conflict_details` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text. |

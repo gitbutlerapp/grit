@@ -154,7 +154,7 @@ Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, or `"squash"`. |
-| `rewritten` | array | `{old,new}` full hex OIDs for each rewritten commit. |
+| `rewritten` | array | `{old,new,change_id}` full hex OIDs and stored change id (`null` when dropped or absent). |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
 | `dry_run` | boolean | `true` when `--dry-run` was set. |
@@ -174,7 +174,8 @@ Example:
   "rewritten": [
     {
       "old": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
-      "new": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+      "new": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+      "change_id": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
     }
   ],
   "refs": [

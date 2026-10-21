@@ -8,6 +8,7 @@ use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
+use grit_lib::change_id::ChangeId;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{
     abort_branch_merge, integrate_branch, IntegrateBranchOutcome, MergeConflictDetail,
@@ -42,6 +43,10 @@ pub struct MergeOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub oid: Option<String>,
+    /// Stored `change-id` on the resulting commit when `oid` is set and a header is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub change_id: Option<String>,
     /// For `set_upstream` (unborn `grit pull`): the upstream the branch was set to.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -72,28 +77,31 @@ impl MergeOutcome {
             result: MergeResult::UpToDate,
             branch: label.to_owned(),
             oid: None,
+            change_id: None,
             upstream: None,
             conflicts: None,
             conflict_details: None,
         }
     }
 
-    fn fast_forward(label: &str, oid: ObjectId) -> Self {
+    fn fast_forward(label: &str, oid: ObjectId, change_id: Option<ChangeId>) -> Self {
         Self {
             result: MergeResult::FastForward,
             branch: label.to_owned(),
             oid: Some(oid.to_hex()),
+            change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
             upstream: None,
             conflicts: None,
             conflict_details: None,
         }
     }
 
-    fn merged(label: &str, oid: ObjectId) -> Self {
+    fn merged(label: &str, oid: ObjectId, change_id: Option<ChangeId>) -> Self {
         Self {
             result: MergeResult::Merged,
             branch: label.to_owned(),
             oid: Some(oid.to_hex()),
+            change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
             upstream: None,
             conflicts: None,
             conflict_details: None,
@@ -112,6 +120,7 @@ impl MergeOutcome {
             result: MergeResult::Conflicts,
             branch: label.to_owned(),
             oid: None,
+            change_id: None,
             upstream: None,
             conflicts: Some(paths),
             conflict_details,
@@ -123,6 +132,7 @@ impl MergeOutcome {
             result: MergeResult::Aborted,
             branch: String::new(),
             oid: None,
+            change_id: None,
             upstream: None,
             conflicts: None,
             conflict_details: None,
@@ -135,6 +145,7 @@ impl MergeOutcome {
             result: MergeResult::SetUpstream,
             branch: branch.to_owned(),
             oid: Some(oid.to_hex()),
+            change_id: None,
             upstream: Some(upstream.to_owned()),
             conflicts: None,
             conflict_details: None,
@@ -257,8 +268,12 @@ pub fn integrate(
 ) -> Result<MergeOutcome> {
     match integrate_branch(repo, into_ref, into_oid, other_oid, label)? {
         IntegrateBranchOutcome::UpToDate => Ok(MergeOutcome::up_to_date(label)),
-        IntegrateBranchOutcome::FastForward { oid } => Ok(MergeOutcome::fast_forward(label, oid)),
-        IntegrateBranchOutcome::Merged { oid } => Ok(MergeOutcome::merged(label, oid)),
+        IntegrateBranchOutcome::FastForward { oid, change_id } => {
+            Ok(MergeOutcome::fast_forward(label, oid, change_id))
+        }
+        IntegrateBranchOutcome::Merged { oid, change_id } => {
+            Ok(MergeOutcome::merged(label, oid, change_id))
+        }
         IntegrateBranchOutcome::Conflicts { details, .. } => {
             Ok(MergeOutcome::conflicts(label, details))
         }
@@ -289,8 +304,11 @@ mod tests {
         let oid = ObjectId::from_hex("0000000000000000000000000000000000000001").expect("oid");
         let cases = [
             (MergeOutcome::up_to_date("topic"), "up_to_date"),
-            (MergeOutcome::fast_forward("topic", oid), "fast_forward"),
-            (MergeOutcome::merged("topic", oid), "merged"),
+            (
+                MergeOutcome::fast_forward("topic", oid, None),
+                "fast_forward",
+            ),
+            (MergeOutcome::merged("topic", oid, None), "merged"),
             (
                 MergeOutcome::conflicts(
                     "topic",

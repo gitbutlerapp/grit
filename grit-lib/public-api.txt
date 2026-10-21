@@ -9724,6 +9724,7 @@ pub grit_lib::porcelain::commit::CommitOutcome::branch: alloc::string::String
 pub grit_lib::porcelain::commit::CommitOutcome::changes: usize
 pub grit_lib::porcelain::commit::CommitOutcome::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::commit::CommitOutcome::parent: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::commit::CommitOutcome::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitOutcome
 pub fn grit_lib::porcelain::commit::CommitOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::commit::CommitOutcome
@@ -9901,8 +9902,10 @@ pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::details: allo
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Merged
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Merged::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Merged::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::UpToDate
 impl core::clone::Clone for grit_lib::porcelain::merge::IntegrateBranchOutcome
 pub fn grit_lib::porcelain::merge::IntegrateBranchOutcome::clone(&self) -> Self
@@ -10116,6 +10119,7 @@ pub grit_lib::porcelain::replay::ReplayOutcome::AlreadyApplied
 pub grit_lib::porcelain::replay::ReplayOutcome::Committed
 pub grit_lib::porcelain::replay::ReplayOutcome::Committed::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay::ReplayOutcome::Committed::tree: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay::ReplayOutcome::Committed::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::replay::ReplayOutcome::Conflicts
 pub grit_lib::porcelain::replay::ReplayOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::replay::ReplayOutcome::Empty
@@ -16275,6 +16279,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::Rewrit
 pub struct grit_lib::revwalk::history::RewrittenCommit
 pub grit_lib::revwalk::history::RewrittenCommit::new: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::history::RewrittenCommit::old: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::history::RewrittenCommit::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 impl core::clone::Clone for grit_lib::revwalk::history::RewrittenCommit
 pub fn grit_lib::revwalk::history::RewrittenCommit::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::RewrittenCommit

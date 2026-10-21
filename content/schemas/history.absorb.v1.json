@@ -116,6 +116,13 @@
             "null"
           ]
         },
+        "change_id": {
+          "description": "Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "old": {
           "description": "Commit OID before rewrite (full hex).",
           "type": "string"

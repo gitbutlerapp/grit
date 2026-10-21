@@ -7,6 +7,13 @@
       "description": "The new revert commit on the current branch (full hex oid).",
       "type": "string"
     },
+    "change_id": {
+      "description": "Stored `change-id` on the new revert commit, or null when absent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source": {
       "description": "The commit that was reverted (full hex oid).",
       "type": "string"

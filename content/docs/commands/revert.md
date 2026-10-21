@@ -68,6 +68,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `source` | string | Full id of the commit that was reverted. |
 | `oid` | string | Full id of the new revert commit on the current branch. |
 | `subject` | string | Subject line of the revert commit (for example `Revert "Add feature"`). |
+| `change_id` | string or null | Stored `change-id` on the new revert commit, or `null` when absent. |
 
 Example:
 

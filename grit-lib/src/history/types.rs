@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::change_id::ChangeId;
 use crate::objects::ObjectId;
 
 /// Description of a new commit to insert immediately before an existing one.
@@ -105,6 +106,8 @@ pub struct RewrittenCommit {
     pub old: ObjectId,
     /// Replacement OID, or `None` when the commit was dropped from history.
     pub new: Option<ObjectId>,
+    /// `change-id` header on the replacement commit, or `None` when dropped or absent.
+    pub change_id: Option<ChangeId>,
 }
 
 /// Planned movement of one ref (refs, index, and worktree are not updated by [`super::plan_rewrite`](crate::history::plan_rewrite)).
@@ -233,6 +236,7 @@ mod tests {
                 .map(|&(old, new)| RewrittenCommit {
                     old: oid(old),
                     new: new.map(oid),
+                    change_id: None,
                 })
                 .collect(),
             ref_updates: ref_updates
