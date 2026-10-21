@@ -12,11 +12,13 @@
 //! # Ok(())
 //! # }
 //! ```
+mod commit_show;
 mod core;
 mod filter;
 mod git_histogram;
 pub mod handle;
 mod has_changes;
+mod merge_commit;
 mod no_index;
 mod options;
 mod patch_log;
@@ -47,6 +49,10 @@ pub fn line_diff_unified_hunk_body(
 ) -> String {
     core::unified_hunk_body_for_diff_options(old_content, new_content, options)
 }
+pub use commit_show::{
+    DiffDetail, DiffFilesOutput, DiffTotals, FileDiff as CommitShowFileDiff, LineStat,
+};
+pub use merge_commit::{combined_structured_patch_body, commit_diff_files, DiffMerges};
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
     write_diff_entry_log_patch, write_patch, write_patch_resolved, write_patch_structured,

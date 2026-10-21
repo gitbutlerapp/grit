@@ -8,22 +8,30 @@ order: 3
 ## Synopsis
 
 ```text
-grit show [<object>]
+grit show [<object>…] [--diff-merges first-parent|combined] [-- <path>…]
 ```
 
 ## Description
 
-Shows a commit's id, author, date and full message, followed by a summary of the files it changed and how many lines were added and removed in each. With no argument, it shows the current commit. File stats use rename detection (Git `-M50`), so a rename with minor edits is shown as `old => new` with insertion/deletion counts for the content delta, not as deleting the old path and adding the new one.
+Shows a commit's id, author, date and full message, followed by the change that commit introduced (same delta-style patch as [`grit diff <commit>`](../diff/)). With no argument, it shows the current commit.
 
 `<object>` can be a commit id (full or short), an expression like `HEAD~2`, a branch or a tag. For a branch or tag, the first line names it. For an annotated tag, the tag's own author, date and message come before the commit it points at.
 
-To see the full change a commit made, use [`grit diff <commit>`](../diff/).
+**Merge commits** default to **combined** parent diffs (`--diff-merges=combined`, like `git show --cc`). Use `--diff-merges=first-parent` for a diff against the first parent only.
+
+Pass several `<object>` values to show more than one commit. With `--json`, multiple objects are wrapped as `{ "objects": [ … ] }`; a single object keeps the usual top-level shape.
+
+`revision:path` specs show blob contents or list tree entries (same resolution as [`grit cat`](cat.md)) without commit metadata.
+
+Limit the commit diff to paths with `-- <path>…` after the object arguments.
 
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `<object>` | The commit, branch or tag to show. Defaults to the current commit. |
+| `<object>…` | Commits, branches, tags, or `rev:path` specs. Defaults to `HEAD`. |
+| `--diff-merges` | `combined` (default) or `first-parent` for merge commits. |
+| `-- <path>…` | Limit the diff to these paths (pathspecs). |
 
 ## Examples
 
@@ -68,6 +76,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `ref_name` | string | Branch or tag name when you named a ref; omitted for a raw commit id. |
 | `tag` | object | For an annotated tag: `name`, `tagger`, and `message`. |
 | `commit` | object | Shared [`CommitJson`](../README.md#commit-json-object-commitjson): `oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, optional `relative_date`. |
+| `files` | array | Per-file diff rows (same shape as [`grit diff --json`](../diff/)). |
 | `stat` | object | Change stats with `files`, `files_changed`, `insertions`, and `deletions`. |
 
 Example:

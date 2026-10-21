@@ -75,6 +75,13 @@
     "Hunk": {
       "description": "A contiguous run of changes plus surrounding context.",
       "properties": {
+        "combined_header": {
+          "description": "Combined merge hunk header (`@@@ …`) when present.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "context": {
           "description": "The enclosing definition line (function/struct/…), when found.",
           "type": [

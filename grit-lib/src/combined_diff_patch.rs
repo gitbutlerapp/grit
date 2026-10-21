@@ -442,6 +442,154 @@ fn show_parent_lno(slines: &[Sline], l0: usize, l1: usize, n: usize, null_ctx: u
     format!(" -{a},{}", b.saturating_sub(a).saturating_sub(null_ctx))
 }
 
+/// Line role in a combined (`--cc`) hunk (derived from parent-column markers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombinedStructuredLineKind {
+    /// Unchanged relative to all parents that have the line.
+    Context,
+    /// Present on the merge result but not on at least one parent (`+` column).
+    Add,
+    /// Removed from at least one parent (`-` column).
+    Del,
+}
+
+impl CombinedStructuredLineKind {
+    /// Classify a combined line from Git parent-column markers.
+    #[must_use]
+    pub fn from_parent_markers(parents: &[char]) -> Self {
+        if parents.contains(&'-') {
+            Self::Del
+        } else if parents.contains(&'+') {
+            Self::Add
+        } else {
+            Self::Context
+        }
+    }
+}
+
+/// One line in a combined (`--cc`) hunk: parent-column markers plus text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CombinedStructuredLine {
+    /// One marker per parent: space, `+`, or `-` (Git combined diff columns).
+    pub parents: Vec<char>,
+    /// Line text without parent-column prefixes.
+    pub text: String,
+    /// Add / delete / context for JSON and CLI rendering.
+    pub kind: CombinedStructuredLineKind,
+}
+
+/// A combined hunk (`@@@` header and body lines).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CombinedStructuredHunk {
+    /// Full `@@@` header line (without trailing newline).
+    pub header: String,
+    /// Body lines in display order.
+    pub lines: Vec<CombinedStructuredLine>,
+}
+
+/// Structured combined diff body (no `diff --cc` file header).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CombinedStructuredTextDiff {
+    /// Hunks in file order.
+    pub hunks: Vec<CombinedStructuredHunk>,
+}
+
+fn dump_slines_structured(
+    slines: &[Sline],
+    cnt: usize,
+    num_parent: usize,
+    context: usize,
+) -> CombinedStructuredTextDiff {
+    let mark = 1u32 << num_parent;
+    let no_pre_delete = 2u32 << num_parent;
+    let mut hunks = Vec::new();
+    let mut lno = 0usize;
+
+    loop {
+        while lno <= cnt && slines[lno].flag & mark == 0 {
+            lno += 1;
+        }
+        if cnt < lno {
+            break;
+        }
+        let h_start = lno;
+        let mut h_end = lno + 1;
+        while h_end <= cnt && slines[h_end].flag & mark != 0 {
+            h_end += 1;
+        }
+        let mut rlines = h_end - h_start;
+        if cnt < h_end {
+            rlines = rlines.saturating_sub(1);
+        }
+        let mut null_ctx = 0u32;
+        if context == 0 {
+            for sl in slines.iter().take(h_end).skip(h_start) {
+                if sl.flag & (mark - 1) == 0 {
+                    null_ctx = null_ctx.saturating_add(1);
+                }
+            }
+            rlines = rlines.saturating_sub(null_ctx as usize);
+        }
+        let mut header = String::new();
+        for _ in 0..=num_parent {
+            header.push('@');
+        }
+        for n in 0..num_parent {
+            header.push_str(&show_parent_lno(slines, h_start, h_end, n, null_ctx));
+        }
+        header.push_str(&format!(" +{},{} ", h_start + 1, rlines));
+        for _ in 0..=num_parent {
+            header.push('@');
+        }
+        let mut lines = Vec::new();
+
+        while lno < h_end {
+            let sl = &slines[lno];
+            lno += 1;
+            let show_lost = if sl.flag & no_pre_delete == 0 {
+                sl.lost.as_slice()
+            } else {
+                &[][..]
+            };
+            for seg in show_lost {
+                let mut parents = Vec::with_capacity(num_parent);
+                for j in 0..num_parent {
+                    parents.push(if seg.parent_map & (1u32 << j) != 0 {
+                        '-'
+                    } else {
+                        ' '
+                    });
+                }
+                lines.push(CombinedStructuredLine {
+                    kind: CombinedStructuredLineKind::from_parent_markers(&parents),
+                    parents,
+                    text: seg.text.clone(),
+                });
+            }
+            if cnt < lno {
+                break;
+            }
+            let sl = &slines[lno - 1];
+            if sl.flag & (mark - 1) == 0 && context == 0 {
+                continue;
+            }
+            let mut parents = Vec::with_capacity(num_parent);
+            let mut p_mask = 1u32;
+            for _ in 0..num_parent {
+                parents.push(if p_mask & sl.flag != 0 { '+' } else { ' ' });
+                p_mask <<= 1;
+            }
+            lines.push(CombinedStructuredLine {
+                kind: CombinedStructuredLineKind::from_parent_markers(&parents),
+                parents,
+                text: sl.bol.clone(),
+            });
+        }
+        hunks.push(CombinedStructuredHunk { header, lines });
+    }
+    CombinedStructuredTextDiff { hunks }
+}
+
 fn dump_slines(slines: &[Sline], cnt: usize, num_parent: usize, context: usize) -> String {
     let mark = 1u32 << num_parent;
     let no_pre_delete = 2u32 << num_parent;
@@ -554,28 +702,19 @@ fn reuse_parent(slines: &mut [Sline], cnt: usize, i: usize, j: usize) {
     }
 }
 
-/// Combined diff body: `@@@` hunks and parent/result lines (no `diff --cc` header).
-#[must_use]
-pub fn format_combined_diff_body(
+fn prepare_combined_slines(
     parent_texts: &[String],
     result_text: &str,
-    context: usize,
-    dense: bool,
     ws: CombinedDiffWsOptions,
-) -> String {
+) -> Option<(Vec<Sline>, usize, usize)> {
     let num_parent = parent_texts.len();
     if num_parent == 0 {
-        return String::new();
+        return None;
     }
-
     let (res_lines, cnt) = split_lines_with_incomplete(result_text);
-    // An empty result with non-empty parents still produces a combined diff that
-    // shows every parent line as a deletion (e.g. a merge that empties a file).
-    // Only bail out when there is genuinely nothing on either side.
     if cnt == 0 && result_text.is_empty() && parent_texts.iter().all(String::is_empty) {
-        return String::new();
+        return None;
     }
-
     let mut slines: Vec<Sline> = (0..=cnt + 1)
         .map(|idx| Sline {
             lost: Vec::new(),
@@ -589,12 +728,10 @@ pub fn format_combined_diff_body(
             p_lno: vec![0; num_parent],
         })
         .collect();
-
     let parents: Vec<Vec<String>> = parent_texts
         .iter()
         .map(|p| p.lines().map(str::to_owned).collect())
         .collect();
-
     for i in 0..num_parent {
         let mut reused = false;
         for j in 0..i {
@@ -608,7 +745,59 @@ pub fn format_combined_diff_body(
             combine_one_parent(&mut slines, cnt, &parents[i], i, num_parent, ws);
         }
     }
+    Some((slines, cnt, num_parent))
+}
 
+/// Structured combined diff body: `@@@` hunks with per-parent columns on each line.
+#[must_use]
+pub fn structured_combined_diff_body(
+    parent_texts: &[String],
+    result_text: &str,
+    context: usize,
+    dense: bool,
+    ws: CombinedDiffWsOptions,
+) -> CombinedStructuredTextDiff {
+    let Some((mut slines, cnt, num_parent)) =
+        prepare_combined_slines(parent_texts, result_text, ws)
+    else {
+        return CombinedStructuredTextDiff::default();
+    };
+    make_hunks(&mut slines, cnt, num_parent, dense, context);
+    dump_slines_structured(&slines, cnt, num_parent, context)
+}
+
+/// Serialize [`CombinedStructuredTextDiff`] to Git combined patch body text.
+#[must_use]
+pub fn format_combined_structured_body(diff: &CombinedStructuredTextDiff) -> String {
+    let mut out = String::new();
+    for hunk in &diff.hunks {
+        out.push_str(&hunk.header);
+        out.push('\n');
+        for line in &hunk.lines {
+            for ch in &line.parents {
+                out.push(*ch);
+            }
+            out.push_str(&line.text);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Combined diff body: `@@@` hunks and parent/result lines (no `diff --cc` header).
+#[must_use]
+pub fn format_combined_diff_body(
+    parent_texts: &[String],
+    result_text: &str,
+    context: usize,
+    dense: bool,
+    ws: CombinedDiffWsOptions,
+) -> String {
+    let Some((mut slines, cnt, num_parent)) =
+        prepare_combined_slines(parent_texts, result_text, ws)
+    else {
+        return String::new();
+    };
     make_hunks(&mut slines, cnt, num_parent, dense, context);
     dump_slines(&slines, cnt, num_parent, context)
 }

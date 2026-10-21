@@ -22,12 +22,13 @@ use crate::ui::{self, PathDisplayOptions};
 use anyhow::{Context, Result};
 use grit_lib::diff::structured::{format_hunk_range, StructuredHunk, StructuredLineKind};
 use grit_lib::diff::{
-    apply_rename_detection_to_diff_entries, diff_commits_with_renames_and_policy,
-    diff_index_to_tree_with_renames, diff_index_to_worktree_with_renames, diff_paths,
-    diff_trees_with_renames_and_policy, read_submodule_head_oid, read_worktree_side_bytes_for_diff,
-    resolve_diff_arguments, structured::SideBytes, submodule_porcelain_flags,
-    tree_diff_structured_parallel, write_patch, write_patch_resolved, write_patch_structured,
-    DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffTarget, PatchResolvedSide,
+    apply_rename_detection_to_diff_entries, commit_diff_files,
+    diff_commits_with_renames_and_policy, diff_index_to_tree_with_renames,
+    diff_index_to_worktree_with_renames, diff_paths, diff_trees_with_renames_and_policy,
+    read_submodule_head_oid, read_worktree_side_bytes_for_diff, resolve_diff_arguments,
+    structured::SideBytes, submodule_porcelain_flags, tree_diff_structured_parallel, write_patch,
+    write_patch_resolved, write_patch_structured, DiffDetail, DiffEntry, DiffFilesOutput,
+    DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, PatchResolvedSide,
     PatchTextOptions, TreeDiffStructured,
 };
 use grit_lib::index::Index;
@@ -92,7 +93,7 @@ pub struct DiffOutcome {
 }
 
 /// One changed file.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct FileDiff {
     /// Display path (the new path, or the old path for a deletion).
     pub path: String,
@@ -126,7 +127,7 @@ pub struct FileDiff {
 }
 
 /// A contiguous run of changes plus surrounding context.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct Hunk {
     /// 1-based first old/new line numbers in the hunk.
     pub old_start: usize,
@@ -139,6 +140,10 @@ pub struct Hunk {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Combined merge hunk header (`@@@ …`) when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub combined_header: Option<String>,
     pub lines: Vec<Line>,
 }
 
@@ -175,6 +180,7 @@ impl JsonSchema for Line {
 }
 
 /// One rendered line of a hunk.
+#[derive(Clone)]
 pub struct Line {
     pub kind: LineKind,
     /// 1-based old/new line numbers (absent on the side where the line is new/gone).
@@ -184,6 +190,8 @@ pub struct Line {
     pub segments: Vec<Segment>,
     /// Missing newline at end of file on this side (Git `\ No newline at end of file`).
     pub no_newline_at_eof: bool,
+    /// Parent-column markers for combined merge diffs (`+`, `-`, space per parent).
+    pub parents: Option<Vec<String>>,
 }
 
 impl Serialize for Line {
@@ -196,6 +204,7 @@ impl Serialize for Line {
             + usize::from(self.old.is_some())
             + usize::from(self.new.is_some())
             + usize::from(self.no_newline_at_eof)
+            + usize::from(self.parents.is_some())
             + 1;
         let mut state = serializer.serialize_struct("Line", field_count)?;
         state.serialize_field("kind", &self.kind)?;
@@ -212,6 +221,9 @@ impl Serialize for Line {
         }
         if self.no_newline_at_eof {
             state.serialize_field("no_newline_at_eof", &true)?;
+        }
+        if let Some(parents) = &self.parents {
+            state.serialize_field("parents", parents)?;
         }
         state.end()
     }
@@ -234,7 +246,7 @@ pub enum LineKind {
 }
 
 /// A run of text within a line, flagged if it's part of the word-level change.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct Segment {
     pub text: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -718,24 +730,139 @@ fn run_no_index(opts: &DiffRunOptions) -> Result<DiffOutcome> {
     })
 }
 
-/// The diff a single commit introduced, as a [`DiffOutcome`]. Reused by `grit show`.
-pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<DiffOutcome> {
+/// Options for diffing a single commit's patch (first parent vs combined merge).
+pub struct CommitDiffOptions {
+    /// Pathspecs from trailing `PATH` arguments (after `--`).
+    pub paths: Vec<String>,
+    pub format: DiffFormatArgs,
+    pub word_level_inline: bool,
+    /// Merge commit parent diff mode (`first-parent` or `combined`).
+    pub diff_merges: DiffMerges,
+}
+
+/// Diff the change one commit introduced (first-parent or combined merge).
+pub fn diff_for_commit(
+    repo: &grit_lib::repo::Repository,
+    oid: &ObjectId,
+    opts: CommitDiffOptions,
+) -> Result<DiffOutcome> {
     let config = repo.config().context("could not load config")?;
+    let thread_policy = repo.thread_policy();
+    let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
-    diff_options.word_level_inline = false;
-    let files = repo
-        .diff()
-        .files(&DiffTarget::Commit(*oid), &[], &diff_options)
-        .context("could not build diff")?;
-    let files: Vec<FileDiff> = files.into_iter().map(FileDiff::from).collect();
+    diff_options.context_lines = CONTEXT_LINES;
+    diff_options = opts.format.to_options(diff_options)?;
+    diff_options.word_level_inline = opts.word_level_inline;
+    let detail = DiffDetail::Patch;
+    let output = commit_diff_files(
+        repo,
+        oid,
+        opts.diff_merges,
+        detail,
+        &diff_options,
+        &pathspecs,
+        config.as_ref(),
+        &thread_policy,
+    )?;
     Ok(attach_path_display(
         repo,
-        DiffOutcome {
-            changed: !files.is_empty(),
-            files,
-            path_display: None,
-        },
+        outcome_from_commit_show_lib(output),
     ))
+}
+
+fn outcome_from_commit_show_lib(output: DiffFilesOutput) -> DiffOutcome {
+    let files = output
+        .files
+        .into_iter()
+        .map(commit_show_file_to_cli)
+        .collect::<Vec<_>>();
+    DiffOutcome {
+        changed: !files.is_empty(),
+        files,
+        path_display: None,
+    }
+}
+
+fn commit_show_file_to_cli(f: grit_lib::diff::CommitShowFileDiff) -> FileDiff {
+    let old_encoding_lossy = f
+        .structured
+        .as_ref()
+        .map(|s| s.old_encoding_lossy)
+        .unwrap_or(false);
+    let new_encoding_lossy = f
+        .structured
+        .as_ref()
+        .map(|s| s.new_encoding_lossy)
+        .unwrap_or(false);
+    let hunks = if let Some(combined) = f.combined {
+        combined
+            .hunks
+            .into_iter()
+            .map(|h| Hunk {
+                old_start: 0,
+                new_start: 0,
+                old_lines: 0,
+                new_lines: 0,
+                context: None,
+                combined_header: Some(h.header),
+                lines: h
+                    .lines
+                    .into_iter()
+                    .map(|l| Line {
+                        kind: match l.kind {
+                            grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Context => {
+                                LineKind::Context
+                            }
+                            grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Add => {
+                                LineKind::Add
+                            }
+                            grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Del => {
+                                LineKind::Del
+                            }
+                        },
+                        old: None,
+                        new: None,
+                        segments: vec![Segment {
+                            text: l.text,
+                            emphasis: false,
+                        }],
+                        no_newline_at_eof: false,
+                        parents: Some(l.parents.iter().map(|c| c.to_string()).collect()),
+                    })
+                    .collect(),
+            })
+            .collect()
+    } else if let Some(structured) = f.structured {
+        structured.hunks.into_iter().map(Hunk::from).collect()
+    } else {
+        Vec::new()
+    };
+    FileDiff {
+        path: f.path,
+        old_path: f.old_path,
+        status: f.status.into(),
+        old_mode: f.old_mode,
+        new_mode: f.new_mode,
+        old_encoding_lossy,
+        new_encoding_lossy,
+        binary: f.binary,
+        content_changed: true,
+        hunks,
+    }
+}
+
+/// The diff a single commit introduced, as a [`DiffOutcome`]. Reused by `grit show`.
+pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<DiffOutcome> {
+    diff_for_commit(
+        repo,
+        oid,
+        CommitDiffOptions {
+            paths: Vec::new(),
+            format: DiffFormatArgs::default(),
+            word_level_inline: false,
+            diff_merges: DiffMerges::Combined,
+        },
+    )
 }
 
 /// Build a full patch-style [`DiffOutcome`] from tree diff entries (e.g. stash W vs base).
@@ -786,6 +913,7 @@ impl From<StructuredHunk> for Hunk {
             old_lines: h.old_lines,
             new_lines: h.new_lines,
             context: h.context,
+            combined_header: None,
             lines: h.lines.into_iter().map(Line::from).collect(),
         }
     }
@@ -810,6 +938,7 @@ impl From<grit_lib::diff::structured::StructuredLine> for Line {
                 })
                 .collect(),
             no_newline_at_eof: l.no_newline_at_eof,
+            parents: None,
         }
     }
 }
