@@ -27,6 +27,8 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 
 ## Options
 
+Diff format and line-diff flags are documented in [Diff output options](diff.md#diff-output-options). Flags on `grit show`: `-p`, `--patch`, `--stat`, `--numstat`, `--shortstat`, `--name-only`, `--name-status`, `-U`, `--unified`, `-W`, `--function-context`, `-w`, `--ignore-all-space`, `-b`, `--ignore-space-change`, `--ignore-blank-lines`, `-M`, `--find-renames`, `--no-renames`, `--diff-algorithm`, `--diff-filter`.
+
 | Option | Description |
 | --- | --- |
 | `<object>…` | Commits, branches, tags, or `rev:path` specs. Defaults to `HEAD`. |

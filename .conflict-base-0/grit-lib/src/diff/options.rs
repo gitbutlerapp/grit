@@ -2,7 +2,8 @@
 
 use crate::config::ConfigSet;
 
-use super::{indent_heuristic_from_config, resolve_indent_heuristic};
+use super::filter::DiffFilter;
+use super::{indent_heuristic_from_config, resolve_indent_heuristic, WhitespaceMode};
 
 /// Line diff algorithm names matching Git's `diff.algorithm` and `--diff-algorithm`.
 #[non_exhaustive]
@@ -100,10 +101,14 @@ pub struct DiffOptions {
     pub indent_heuristic: bool,
     /// Rename detection for tree diffs.
     pub renames: RenameDetection,
+    /// `--diff-filter` status selection (applied after rename detection).
+    pub filter: Option<DiffFilter>,
     /// When false, skip intra-line word emphasis (line-level hunks only).
     pub word_level_inline: bool,
     /// Expand hunks to enclosing function boundaries (Git `-W` / `--function-context`).
     pub function_context: bool,
+    /// `-w`, `-b`, `--ignore-space-at-eol`, and `--ignore-blank-lines`.
+    pub whitespace: WhitespaceMode,
 }
 
 impl Default for DiffOptions {
@@ -114,8 +119,10 @@ impl Default for DiffOptions {
             algorithm: DiffAlgorithm::Myers,
             indent_heuristic: true,
             renames: RenameDetection::default(),
+            filter: None,
             word_level_inline: true,
             function_context: false,
+            whitespace: WhitespaceMode::default(),
         }
     }
 }
@@ -153,6 +160,29 @@ impl DiffOptions {
     #[must_use]
     pub fn with_renames(mut self, renames: RenameDetection) -> Self {
         self.renames = renames;
+        self
+    }
+
+    /// Builder-style update of diff status filter.
+    #[must_use]
+    pub fn with_filter(mut self, filter: Option<DiffFilter>) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Git `-M` threshold in percent, or `100` when rename detection is off.
+    #[must_use]
+    pub fn rename_threshold_percent(self) -> u32 {
+        match self.renames {
+            RenameDetection::Off => 100,
+            RenameDetection::Similarity(p) => u32::from(p),
+        }
+    }
+
+    /// Builder-style update of whitespace comparison rules.
+    #[must_use]
+    pub fn with_whitespace(mut self, whitespace: WhitespaceMode) -> Self {
+        self.whitespace = whitespace;
         self
     }
 
