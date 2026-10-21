@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 export PATH="/usr/local/cargo/bin:${PATH:-}"
+export GRIT_BENCH_DAILY_LOW_MEMORY="${GRIT_BENCH_DAILY_LOW_MEMORY:-1}"
 
 BENCH="./target/release/grit-bench"
 RUN1="/tmp/daily-production-run1.json"
@@ -13,11 +14,6 @@ BASELINE_DIR="grit-utils/baselines/daily"
 MAX_COMPARE_ATTEMPTS="${GRIT_BENCH_DAILY_COMPARE_ATTEMPTS:-8}"
 TOLERANCE="${GRIT_BENCH_DAILY_TOLERANCE:-0.10}"
 
-# Run one functional area at a time to cap peak RSS on memory-tight factory VMs.
-DAILY_AREAS=(
-  odb packs refs index worktree diff revwalk blame branching remotes maintenance config ignore hooks notes bundles worktrees
-)
-
 BASELINE_GRIT="${GRIT_BENCH_BASELINE_GRIT:-}"
 if [[ -z "${BASELINE_GRIT}" ]]; then
   echo "Set GRIT_BENCH_BASELINE_GRIT to the latest release grit binary" >&2
@@ -25,6 +21,8 @@ if [[ -z "${BASELINE_GRIT}" ]]; then
 fi
 
 mkdir -p "${BASELINE_DIR}"
+
+mapfile -t DAILY_IDS < <("$BENCH" daily list-ids)
 
 merge_daily_parts() {
   local out=$1
@@ -44,14 +42,14 @@ merge_daily_parts() {
 run_daily_merged() {
   local label=$1
   local out=$2
-  local tmpdir start end
+  local tmpdir start end id
   tmpdir=$(mktemp -d)
   start=$(date +%s)
-  echo "${label} started $(date -Is) (sequential --area batches)"
-  for area in "${DAILY_AREAS[@]}"; do
-    echo "  area=${area} …"
-    "$BENCH" daily --offline --area "$area" --baseline-grit "${BASELINE_GRIT}" \
-      --output "${tmpdir}/${area}.json"
+  echo "${label} started $(date -Is) (sequential --only ${#DAILY_IDS[@]} scenarios)"
+  for id in "${DAILY_IDS[@]}"; do
+    echo "  scenario=${id} …"
+    "$BENCH" daily --offline --only "$id" --baseline-grit "${BASELINE_GRIT}" \
+      --output "${tmpdir}/${id//\//@-}.json"
   done
   merge_daily_parts "$out" "${tmpdir}"/*.json
   rm -rf "${tmpdir}"
