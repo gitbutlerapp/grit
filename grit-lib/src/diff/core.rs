@@ -5462,10 +5462,9 @@ pub fn worktree_differs_from_index_entry(
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(&file_path) {
-            if let Ok(raw_oid) = odb.hash(ObjectKind::Blob, &raw) {
-                if raw_oid == ie.oid {
-                    eff_oid = ie.oid;
-                }
+            let raw_oid = odb.hash(ObjectKind::Blob, &raw)?;
+            if raw_oid == ie.oid {
+                eff_oid = ie.oid;
             }
         }
     }
@@ -5631,10 +5630,9 @@ fn worktree_effective_oid_matches_index(
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(abs_path) {
-            if let Ok(raw_oid) = odb.hash(ObjectKind::Blob, &raw) {
-                if raw_oid == ie.oid {
-                    eff_oid = ie.oid;
-                }
+            let raw_oid = odb.hash(ObjectKind::Blob, &raw)?;
+            if raw_oid == ie.oid {
+                eff_oid = ie.oid;
             }
         }
     }
@@ -6932,19 +6930,21 @@ fn modified_as_copy_from_sources(
     sources: &[(String, ObjectId, bool)],
     source_contents: &[Option<Vec<u8>>],
     source_tree_entries: &[(String, String, ObjectId)],
-) -> Option<DiffEntry> {
+) -> Result<Option<DiffEntry>> {
     fn regular_file_mode(mode: &str) -> bool {
         mode == "100644" || mode == "100755"
     }
 
     if e.status != DiffStatus::Modified || !regular_file_mode(&e.new_mode) {
-        return None;
+        return Ok(None);
     }
-    let new_data = read_added_entry_bytes(odb, e, work_root)?;
+    let Some(new_data) = read_added_entry_bytes(odb, e, work_root) else {
+        return Ok(None);
+    };
     let new_oid_eff = if e.new_oid != zero_oid() {
         e.new_oid
     } else {
-        odb.hash(ObjectKind::Blob, &new_data).ok()?
+        odb.hash(ObjectKind::Blob, &new_data)?
     };
 
     let mut best: Option<(usize, u32)> = None;
@@ -6983,7 +6983,9 @@ fn modified_as_copy_from_sources(
         }
     }
 
-    let (si, score) = best?;
+    let Some((si, score)) = best else {
+        return Ok(None);
+    };
     let (src_path, src_oid, _) = &sources[si];
     let src_mode = source_tree_entries
         .iter()
@@ -6991,7 +6993,7 @@ fn modified_as_copy_from_sources(
         .map(|(_, m, _)| m.clone())
         .unwrap_or_else(|| e.old_mode.clone());
 
-    Some(DiffEntry {
+    Ok(Some(DiffEntry {
         status: DiffStatus::Copied,
         old_path: Some(src_path.clone()),
         new_path: e.new_path.clone(),
@@ -7000,7 +7002,7 @@ fn modified_as_copy_from_sources(
         old_oid: *src_oid,
         new_oid: e.new_oid,
         score: Some(score),
-    })
+    }))
 }
 
 /// Detect renames by pairing Deleted and Added entries with similar content.
@@ -7634,7 +7636,7 @@ pub fn detect_copies_with_policy(
             &sources,
             &source_contents,
             source_tree_entries,
-        ) {
+        )? {
             final_result.push(c);
         } else {
             final_result.push(e);

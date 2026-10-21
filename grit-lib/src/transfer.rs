@@ -951,7 +951,7 @@ pub(crate) fn fix_thin_pack(mut pack: Vec<u8>, odb: &Odb) -> Result<Vec<u8>> {
     }
     let mut missing: Vec<ObjectId> = Vec::new();
     let mut seen = HashSet::new();
-    let in_pack = in_pack_whole_object_ids(&pack, algo);
+    let in_pack = in_pack_whole_object_ids(&pack, algo)?;
     let mut pos = 12usize;
     let pack_end = pack.len() - hb;
     while pos < pack_end {
@@ -1005,11 +1005,11 @@ pub(crate) fn fix_thin_pack(mut pack: Vec<u8>, odb: &Odb) -> Result<Vec<u8>> {
     Ok(pack)
 }
 
-fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
+fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> Result<HashSet<ObjectId>> {
     let mut out = HashSet::new();
     let hb = algo.len();
     if pack.len() < 12 + hb {
-        return out;
+        return Ok(out);
     }
     let pack_end = pack.len() - hb;
     let mut pos = 12usize;
@@ -1021,9 +1021,8 @@ fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
         if (1..=4).contains(&type_code) {
             if let Ok(data) = zlib_decompress_fixed(&pack[payload_start..], size) {
                 if let Ok(kind) = pack_type_code_to_kind(type_code) {
-                    if let Ok(oid) = hash::hash_object(algo, kind, &data) {
-                        out.insert(oid);
-                    }
+                    let oid = hash::hash_object(algo, kind, &data)?;
+                    out.insert(oid);
                 }
             }
         }
@@ -1044,7 +1043,7 @@ fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
         };
         pos += advance;
     }
-    out
+    Ok(out)
 }
 
 fn pack_type_code_to_kind(code: u8) -> Result<ObjectKind> {
