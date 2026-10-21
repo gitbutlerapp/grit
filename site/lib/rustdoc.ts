@@ -63,7 +63,7 @@ function memberFragmentInRustdocHtml(htmlPath: string, member: string): string |
   const html = fs.readFileSync(htmlPath, "utf8");
   const prefixes = isRustTypeSegment(member)
     ? [`variant.${member}`]
-    : [`method.${member}`, `structfield.${member}`, `variant.${member}`];
+    : [`method.${member}`, `tymethod.${member}`, `structfield.${member}`, `variant.${member}`];
   for (const frag of prefixes) {
     if (html.includes(`id="${frag}"`) || html.includes(`href="#${frag}"`)) {
       return frag;
