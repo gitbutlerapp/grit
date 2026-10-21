@@ -9,7 +9,6 @@ use crate::ref_storage::RefStorageFormat as OnDiskFormat;
 
 use super::routing::resolve_common_dir;
 use super::{FilesRefStore, FilesRefStoreConfig, RefStore, ReftableRefStore};
-use crate::refs::LogRefsConfig;
 
 /// Select and open the ref store for `git_dir` (detects backend via [`OnDiskFormat::detect`]).
 ///
@@ -43,8 +42,6 @@ pub(crate) fn open_ref_store_uncached(
                 git_dir: git_dir_canon,
                 common_dir,
                 namespace_prefix: crate::ref_namespace::ref_storage_prefix(env),
-                // Avoid loading full config while config conditionals may call `resolve_ref`.
-                log_refs: LogRefsConfig::Unset,
             }))
         }
         OnDiskFormat::Reftable => Arc::new(ReftableRefStore::open(git_dir.to_path_buf())?),

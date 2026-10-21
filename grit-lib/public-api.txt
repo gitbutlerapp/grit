@@ -13784,7 +13784,6 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::FilesRefSto
 pub struct grit_lib::refs::store::FilesRefStoreConfig
 pub grit_lib::refs::store::FilesRefStoreConfig::common_dir: std::path::PathBuf
 pub grit_lib::refs::store::FilesRefStoreConfig::git_dir: std::path::PathBuf
-pub grit_lib::refs::store::FilesRefStoreConfig::log_refs: grit_lib::refs::LogRefsConfig
 pub grit_lib::refs::store::FilesRefStoreConfig::namespace_prefix: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::refs::store::FilesRefStoreConfig
 pub fn grit_lib::refs::store::FilesRefStoreConfig::clone(&self) -> Self

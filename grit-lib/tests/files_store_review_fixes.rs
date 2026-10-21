@@ -10,7 +10,6 @@ use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefStore, RefStoreError, RefTransaction,
     RefUpdate, ReflogUpdate,
 };
-use grit_lib::refs::LogRefsConfig;
 use std::ops::ControlFlow;
 use time::OffsetDateTime;
 
@@ -41,7 +40,6 @@ fn open_namespaced(git_dir: &std::path::Path) -> FilesRefStore {
         git_dir: git_dir.to_path_buf(),
         common_dir: git_dir.to_path_buf(),
         namespace_prefix: Some("refs/namespaces/acme/".to_owned()),
-        log_refs: LogRefsConfig::Normal,
     })
 }
 

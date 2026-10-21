@@ -13,8 +13,7 @@ use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
     lock_path_for_ref, loose_ref_list_walk_root, prune_empty_loose_ref_parents,
     read_packed_refs_file_view, read_packed_refs_map_for_prefix, read_ref_file,
-    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, LogRefsConfig,
-    Ref,
+    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, Ref,
 };
 
 use super::apply::{
@@ -40,8 +39,6 @@ pub struct FilesRefStoreConfig {
     pub common_dir: PathBuf,
     /// Optional `GIT_NAMESPACE`-style prefix applied to storage paths (not read from env).
     pub namespace_prefix: Option<String>,
-    /// Reflog auto-create policy for this store.
-    pub log_refs: LogRefsConfig,
 }
 
 /// Loose + packed ref storage on disk.
@@ -50,8 +47,6 @@ pub struct FilesRefStore {
     git_dir: PathBuf,
     common_dir: PathBuf,
     namespace_prefix: Option<String>,
-    #[allow(dead_code)]
-    log_refs: LogRefsConfig,
     packed_cache: Mutex<PackedCacheEntry>,
     prepared: Mutex<Option<PreparedFilesBatch>>,
 }
@@ -92,7 +87,6 @@ impl FilesRefStore {
             git_dir: config.git_dir,
             common_dir: config.common_dir,
             namespace_prefix: config.namespace_prefix,
-            log_refs: config.log_refs,
             packed_cache: Mutex::new(PackedCacheEntry {
                 stamp,
                 loaded: false,
@@ -113,7 +107,6 @@ impl FilesRefStore {
             git_dir: git_dir.clone(),
             common_dir,
             namespace_prefix: crate::ref_namespace::ref_storage_prefix_default(),
-            log_refs: crate::refs::effective_log_refs_config(&git_dir),
         }))
     }
 
@@ -1340,7 +1333,6 @@ mod tests {
             git_dir: git_dir.to_path_buf(),
             common_dir: git_dir.to_path_buf(),
             namespace_prefix: None,
-            log_refs: LogRefsConfig::None,
         })
     }
 
