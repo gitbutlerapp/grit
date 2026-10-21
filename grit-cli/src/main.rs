@@ -24,6 +24,7 @@ mod output;
 mod progress;
 mod ref_name_messages;
 mod rev_select;
+mod revision_errors;
 mod stdio;
 mod terminal_progress;
 mod ui;

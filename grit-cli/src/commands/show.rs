@@ -11,11 +11,12 @@
 
 use std::io::Write;
 
+use crate::revision_errors::map_resolve_error;
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::diff::DiffMerges;
 use grit_lib::object_inspect::{
-    format_tree_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p, ResolveError,
+    format_tree_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
 };
 use grit_lib::objects::{parse_tag, ObjectId, ObjectKind};
 use grit_lib::refs;
@@ -389,35 +390,6 @@ fn blob_json_fields(data: &[u8]) -> (Option<String>, Option<String>, bool) {
         )
     } else {
         (None, Some(STANDARD.encode(data)), true)
-    }
-}
-
-fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
-    match err {
-        ResolveError::AmbiguousShortObject { candidates, .. } => {
-            let mut msg = format!("ambiguous short object id '{spec}'");
-            for hint in candidates {
-                let kind = hint.kind.unwrap_or("object");
-                msg.push_str(&format!("\n  {} {}", kind, hint.oid_hex));
-            }
-            anyhow::anyhow!(msg)
-        }
-        ResolveError::AmbiguousChangeId { candidates, .. } => {
-            let mut msg = format!("ambiguous change id '{spec}'");
-            for hint in candidates {
-                let short_id = hint.change_id.chars().take(8).collect::<String>();
-                msg.push_str(&format!(
-                    "\n  {} {} {}",
-                    hint.oid_hex, short_id, hint.subject
-                ));
-            }
-            anyhow::anyhow!(msg)
-        }
-        ResolveError::PathNotInTree { path, revision } => {
-            anyhow::anyhow!("path '{path}' does not exist in '{revision}'")
-        }
-        ResolveError::UnknownRevision { .. } => anyhow::anyhow!("unknown revision '{spec}'"),
-        _ => anyhow::anyhow!("could not resolve '{spec}'"),
     }
 }
 

@@ -3,13 +3,14 @@
 use std::io::Write;
 
 use anyhow::{Context, Result};
-use grit_lib::object_inspect::{abbreviate_for_display, ResolveError, ResolvedObject};
+use grit_lib::object_inspect::{abbreviate_for_display, ResolvedObject};
 use grit_lib::objects::ObjectKind;
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::revision_errors::map_resolve_error;
 
 /// One resolved spec (`--json` row).
 #[derive(Serialize, JsonSchema)]
@@ -99,36 +100,5 @@ fn kind_label(kind: ObjectKind) -> &'static str {
         ObjectKind::Tree => "tree",
         ObjectKind::Commit => "commit",
         ObjectKind::Tag => "tag",
-    }
-}
-
-fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
-    match err {
-        ResolveError::AmbiguousShortObject { candidates, .. } => {
-            let mut msg = format!("ambiguous short object id '{spec}'");
-            for hint in candidates {
-                let kind = hint.kind.unwrap_or("object");
-                msg.push_str(&format!("\n  {} {}", kind, hint.oid_hex));
-            }
-            anyhow::anyhow!(msg)
-        }
-        ResolveError::AmbiguousChangeId { candidates, .. } => {
-            let mut msg = format!("ambiguous change id '{spec}'");
-            for hint in candidates {
-                let short_id = hint.change_id.chars().take(8).collect::<String>();
-                msg.push_str(&format!(
-                    "\n  {} {} {}",
-                    hint.oid_hex, short_id, hint.subject
-                ));
-            }
-            anyhow::anyhow!(msg)
-        }
-        ResolveError::PathNotInTree { path, revision } => {
-            anyhow::anyhow!("path '{path}' does not exist in '{revision}'")
-        }
-        ResolveError::UnknownRevision { .. } => {
-            anyhow::anyhow!("unknown revision '{spec}'")
-        }
-        _ => anyhow::anyhow!("could not resolve '{spec}'"),
     }
 }

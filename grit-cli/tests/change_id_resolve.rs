@@ -116,3 +116,72 @@ fn resolve_ambiguous_change_id_exits_nonzero() {
     assert!(stderr.contains("ambiguous change id"), "stderr={stderr}");
     assert!(stderr.contains("zzzzzzzz"));
 }
+
+fn seed_ambiguous_shared_change_id() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    git(
+        dir.path(),
+        &[
+            "commit",
+            "--allow-empty",
+            "-m",
+            "root",
+            "--author",
+            "T <t@example.com>",
+        ],
+    );
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let root_hex = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    let root = root_hex.parse().expect("oid");
+    let shared = ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").expect("id");
+    let tree = parse_commit(&repo.odb().read(&root).expect("read").data)
+        .expect("parse")
+        .tree;
+    for (name, msg) in [("a", "subject-a"), ("b", "subject-b")] {
+        let mut data = CommitData {
+            tree,
+            parents: vec![root],
+            author: "T <t@example.com> 1 +0000".into(),
+            committer: "T <t@example.com> 1 +0000".into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: format!("{msg}\n"),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        };
+        set_change_id(&mut data, &shared);
+        let oid = repo
+            .odb()
+            .write(ObjectKind::Commit, &serialize_commit(&data))
+            .expect("write");
+        git(
+            dir.path(),
+            &["update-ref", &format!("refs/heads/{name}"), &oid.to_hex()],
+        );
+    }
+    dir
+}
+
+#[test]
+fn log_lists_ambiguous_change_id_candidates() {
+    let dir = seed_ambiguous_shared_change_id();
+    let shared = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+    let out = grit(dir.path(), &["log", shared, "-n", "1"]);
+    assert!(!out.ok());
+    assert!(out.stderr.contains("ambiguous change id"));
+    assert!(out.stderr.contains("subject-a"));
+    assert!(out.stderr.contains("subject-b"));
+}
+
+#[test]
+fn pick_lists_ambiguous_change_id_candidates() {
+    let dir = seed_ambiguous_shared_change_id();
+    let shared = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+    let out = grit(dir.path(), &["pick", shared]);
+    assert!(!out.ok());
+    assert!(out.stderr.contains("ambiguous change id"));
+    assert!(out.stderr.contains("subject-a"));
+    assert!(out.stderr.contains("subject-b"));
+}

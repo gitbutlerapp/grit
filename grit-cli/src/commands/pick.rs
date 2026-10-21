@@ -87,6 +87,9 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
 }
 
 fn map_pick_committish_error(err: Error, spec: &str) -> anyhow::Error {
+    if let Some(msg) = crate::revision_errors::map_lib_revision_error(&err) {
+        return anyhow::anyhow!(msg);
+    }
     match err {
         Error::InvalidRef(msg) => anyhow::anyhow!(msg),
         Error::ObjectNotFound(msg) => {

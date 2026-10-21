@@ -79,6 +79,14 @@ Schema: [v1](/schemas/resolve/v1.json)
 
 Pass `--markdown` for a table of resolved specs, oids, kinds, and sizes.
 
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Every spec resolved successfully. |
+| `1` | At least one spec failed (unknown revision, ambiguous short object id, or ambiguous change id with candidate rows on stderr). |
+| `2` | Usage error (unknown flag or command). |
+
 ## See also
 
 - [`grit cat`](cat.md) — show object contents for a spec

@@ -298,37 +298,79 @@ pub fn find_commits_by_change_id_prefix(
     repo: &Repository,
     prefix: &str,
 ) -> Result<Vec<ChangeIdMatch>> {
-    debug_assert!(is_change_id_spec_token(prefix));
+    if !is_change_id_spec_token(prefix) {
+        return Err(Error::InvalidRef(format!(
+            "invalid change id revision token '{prefix}'"
+        )));
+    }
     let tips = all_ref_commit_tips_for_walk(repo)?;
     let mut graph = CommitGraph::with_commit_graph(repo, false, true);
     let (_, order) = walk_closure_ordered(&mut graph, &tips)?;
+
+    let mut derived_hits = Vec::new();
+    for oid in &order {
+        let derived = ChangeId::derived_from_commit_id(oid);
+        if derived.as_str().starts_with(prefix) {
+            derived_hits.push(*oid);
+        }
+    }
+
+    let mut matches = if derived_hits.is_empty() {
+        find_stored_change_id_matches(repo, &order, prefix)?
+    } else {
+        let mut out = Vec::with_capacity(derived_hits.len());
+        for oid in derived_hits {
+            let id = effective_change_id_for_commit(repo, oid)?;
+            if id.as_str().starts_with(prefix) {
+                out.push(ChangeIdMatch { oid, change_id: id });
+            }
+        }
+        out
+    };
+
+    matches.sort_by_key(|m| m.oid.to_hex());
+    Ok(matches)
+}
+
+fn effective_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<ChangeId> {
+    let obj = repo.read_replaced(&oid)?;
+    if obj.kind != ObjectKind::Commit {
+        return Ok(ChangeId::derived_from_commit_id(&oid));
+    }
+    if commit_bytes_contain_change_id_header(&obj.data) {
+        let data = parse_commit(&obj.data)?;
+        return Ok(resolved_change_id(&oid, &data).id);
+    }
+    Ok(ChangeId::derived_from_commit_id(&oid))
+}
+
+fn find_stored_change_id_matches(
+    repo: &Repository,
+    order: &[ObjectId],
+    prefix: &str,
+) -> Result<Vec<ChangeIdMatch>> {
     let mut matches = Vec::new();
     for oid in order {
-        let Ok(obj) = repo.read_replaced(&oid) else {
+        let Ok(obj) = repo.read_replaced(oid) else {
             continue;
         };
         if obj.kind != ObjectKind::Commit {
             continue;
         }
-        let resolved = if commit_bytes_contain_change_id_header(&obj.data) {
-            let Ok(data) = parse_commit(&obj.data) else {
-                continue;
-            };
-            resolved_change_id(&oid, &data)
-        } else {
-            ResolvedChangeId {
-                id: ChangeId::derived_from_commit_id(&oid),
-                stored: false,
-            }
+        if !commit_bytes_contain_change_id_header(&obj.data) {
+            continue;
+        }
+        let Ok(data) = parse_commit(&obj.data) else {
+            continue;
         };
+        let resolved = resolved_change_id(oid, &data);
         if resolved.id.as_str().starts_with(prefix) {
             matches.push(ChangeIdMatch {
-                oid,
+                oid: *oid,
                 change_id: resolved.id,
             });
         }
     }
-    matches.sort_by_key(|m| m.oid.to_hex());
     Ok(matches)
 }
 
