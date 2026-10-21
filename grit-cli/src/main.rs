@@ -513,6 +513,9 @@ enum Command {
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
     Diff {
+        /// Compare two filesystem paths outside any repository (like `git diff --no-index`).
+        #[arg(long = "no-index")]
+        no_index: bool,
         /// Staged changes only (index vs HEAD).
         #[arg(short = 'S', long = "staged", visible_aliases = ["cached"])]
         staged: bool,
@@ -1156,6 +1159,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Diff {
+            no_index,
             staged,
             unstaged,
             against,
@@ -1166,7 +1170,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             format,
         } => {
             let wants_exit_code = exit_code || quiet;
-            match commands::diff::run(commands::diff::DiffRunOptions {
+            let run_opts = commands::diff::DiffRunOptions {
                 staged,
                 unstaged,
                 against,
@@ -1177,12 +1181,18 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     && commands::diff::diff_word_level_inline_for_output(),
                 exit_code: wants_exit_code,
                 quiet,
-            }) {
+            };
+            let run_result = if no_index {
+                commands::diff::run_no_index(run_opts)
+            } else {
+                commands::diff::run(run_opts)
+            };
+            match run_result {
                 Ok(outcome) => {
                     if !quiet {
                         emit(&outcome, opts, ctx)?;
                     }
-                    if wants_exit_code {
+                    if no_index || wants_exit_code {
                         std::process::exit(commands::diff::exit_code(&outcome));
                     }
                     Ok(())
@@ -2197,7 +2207,25 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     }
 
     fn schema_top_level_field_names(schema: &serde_json::Value) -> HashSet<String> {
+        schema_top_level_field_names_inner(schema, schema.get("definitions"))
+    }
+
+    fn schema_top_level_field_names_inner(
+        schema: &serde_json::Value,
+        definitions: Option<&serde_json::Value>,
+    ) -> HashSet<String> {
         let mut keys = HashSet::new();
+        if let Some(ref_name) = schema
+            .get("$ref")
+            .and_then(|r| r.as_str())
+            .and_then(|r| r.strip_prefix("#/definitions/"))
+        {
+            if let Some(defs) = definitions {
+                if let Some(target) = defs.get(ref_name) {
+                    return schema_top_level_field_names_inner(target, Some(defs));
+                }
+            }
+        }
         if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
             keys.extend(props.keys().cloned());
             return keys;
@@ -2205,7 +2233,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         for branch_key in ["anyOf", "oneOf"] {
             if let Some(items) = schema.get(branch_key).and_then(|v| v.as_array()) {
                 for item in items {
-                    keys.extend(schema_top_level_field_names(item));
+                    keys.extend(schema_top_level_field_names_inner(item, definitions));
                 }
                 return keys;
             }
@@ -2216,11 +2244,13 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                 .and_then(|r| r.as_str())
                 .and_then(|r| r.strip_prefix("#/definitions/"))
             {
-                if let Some(def) = schema.get("definitions").and_then(|d| d.get(ref_name)) {
-                    return schema_top_level_field_names(def);
+                if let Some(defs) = definitions {
+                    if let Some(def) = defs.get(ref_name) {
+                        return schema_top_level_field_names_inner(def, Some(defs));
+                    }
                 }
             }
-            keys.extend(schema_top_level_field_names(items));
+            keys.extend(schema_top_level_field_names_inner(items, definitions));
         }
         keys
     }

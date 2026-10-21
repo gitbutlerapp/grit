@@ -8,6 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
+grit diff [--no-index] <path> <path>
 grit diff [--staged] [--unstaged] [--against <ref>] [<commit> [<commit>]] [-- <path>…]
 grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>] [-- <path>…]
 ```
@@ -28,11 +29,15 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 | Option | Description |
 | --- | --- |
+| `--no-index` | Compare two filesystem paths without a repository (exit 1 when they differ, like `git diff --no-index`). |
 | `--stat` | Per-file change counts with `+`/`-` bars and a summary line (like `git diff --stat`). Mutually exclusive with the other format flags below. |
 | `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines (`-<TAB>-` for binary). |
 | `--shortstat` | Only the summary line (`N files changed, …`). |
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
+| `-p`, `--patch` | Unified patch (default when no other format flag is set). |
+| `--exit-code` | Exit with status 1 when any selected change exists (errors still exit 2). |
+| `--quiet` | Print nothing; implies `--exit-code`. |
 | `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (bare `-U` means 3). |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
@@ -111,6 +116,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
+| `changed` | boolean | Whether any selected change exists (matches `--quiet` / `--exit-code`). |
 | `files` | array | Changed files (see nested fields below). |
 | `totals` | object | Present for `--stat`, `--numstat`, and `--shortstat`: `files_changed`, `insertions`, `deletions`. |
 
