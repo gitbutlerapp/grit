@@ -432,6 +432,9 @@ enum Command {
         url: String,
         /// Directory to clone into (defaults to the repository name).
         dir: Option<String>,
+        /// Fetch only the tip commit on each branch (same as `git clone --depth=1`).
+        #[arg(long)]
+        shallow: bool,
     },
     /// List remotes, or add one.
     Remote {
@@ -1060,9 +1063,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             bare,
             ref_format,
         } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
-        Command::Clone { url, dir } => {
-            emit(&commands::clone::run(&url, dir, opts.mode)?, opts, ctx)
-        }
+        Command::Clone { url, dir, shallow } => emit(
+            &commands::clone::run(&url, dir, shallow, opts.mode)?,
+            opts,
+            ctx,
+        ),
         Command::Remote { action } => match action {
             None => emit(&commands::remote::run_list_or_add(None)?, opts, ctx),
             Some(RemoteAction::Add { name, url }) => emit(

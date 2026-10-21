@@ -77,6 +77,9 @@ pub struct CloneOptions {
     pub initial_branch: String,
     /// Global thread policy for fetch pack ingest and the opened repository (`--threads`).
     pub thread_policy: crate::parallel::ThreadPolicy,
+    /// Truncate fetched history to this many commits per ref tip
+    /// (`git clone --depth N`). `Some(1)` matches a shallow clone.
+    pub depth: Option<u32>,
 }
 
 impl CloneOptions {
@@ -90,6 +93,7 @@ impl CloneOptions {
             environment: Environment::capture_process(), // hygiene: CLI boundary — snapshot process environment for clone
             initial_branch: "main".to_owned(),
             thread_policy: crate::parallel::ThreadPolicy::default(),
+            depth: None,
         }
     }
 }
@@ -249,6 +253,7 @@ pub fn clone(
         environment: opts.environment.clone(),
         thread_policy: opts.thread_policy,
         remote_progress: progress.remote_sideband_progress(),
+        depth: opts.depth,
         ..Default::default()
     };
     if let Ok(v) = crate::protocol::try_effective_client_protocol_version_from_config(&config) {

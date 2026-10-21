@@ -1276,6 +1276,31 @@ pub fn fetch_local_with_progress(
 
     let mut pack_oids: HashSet<ObjectId> = HashSet::new();
     let mut transfer = TransferStats::default();
+    let mut shallow_new: Vec<ObjectId> = Vec::new();
+    let mut shallow_unshallow: Vec<ObjectId> = Vec::new();
+    let mut copy_source_shallow = remote_shallow.clone();
+    if opts.has_deepen_request() {
+        let remote_repo =
+            crate::repo::Repository::open(remote_git_dir, &RepositoryOptions::empty())?;
+        let req = crate::serve::ShallowRequest {
+            client_shallow: local_shallow.iter().copied().collect(),
+            depth: if opts.unshallow {
+                Some(crate::shallow::INFINITE_DEPTH)
+            } else {
+                opts.depth
+            },
+            deepen_since: opts
+                .deepen_since
+                .as_deref()
+                .and_then(|s| s.parse::<i64>().ok()),
+            deepen_not: Vec::new(),
+            deepen_relative: false,
+        };
+        let resp = crate::serve::compute_shallow_response(&remote_repo, &wants, &req)?;
+        shallow_new = resp.shallow;
+        shallow_unshallow = resp.unshallow;
+        copy_source_shallow = resp.pack_shallow_grafts;
+    }
     if !wants.is_empty() && !opts.dry_run {
         let remote_cfg = config_for_git_dir(remote_git_dir);
         let pack_opts = PackBuildOptions::for_local_copy(remote_cfg.as_ref());
@@ -1286,9 +1311,9 @@ pub fn fetch_local_with_progress(
             &local_odb,
             &wants,
             &haves,
-            &remote_shallow,
+            &copy_source_shallow,
             &local_shallow,
-            true,
+            !opts.has_deepen_request(),
             &pack_opts,
             opts,
             progress,
@@ -1300,6 +1325,9 @@ pub fn fetch_local_with_progress(
     if opts.initial_remote_fetch && !remote_shallow.is_empty() && !opts.dry_run {
         let remote_shallow_vec: Vec<ObjectId> = remote_shallow.iter().copied().collect();
         crate::shallow::apply_shallow_updates(local_git_dir, &remote_shallow_vec, &[])?;
+    }
+    if (!shallow_new.is_empty() || !shallow_unshallow.is_empty()) && !opts.dry_run {
+        crate::shallow::apply_shallow_updates(local_git_dir, &shallow_new, &shallow_unshallow)?;
     }
 
     if opts.tags == TagMode::Following {

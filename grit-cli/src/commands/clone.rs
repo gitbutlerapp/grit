@@ -405,7 +405,12 @@ fn emit_no_checkout_note(mode: OutputMode, outcome: &LibCloneOutcome) {
     }
 }
 
-pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutcome> {
+pub fn run(
+    url: &str,
+    dir: Option<String>,
+    shallow: bool,
+    mode: OutputMode,
+) -> Result<CloneOutcome> {
     let dir = match dir {
         Some(d) => d,
         None => derive_clone_dir(url).map_err(|e| anyhow::anyhow!("{e}"))?,
@@ -428,7 +433,7 @@ pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutc
     } else {
         progress(mode, &format!("Cloning into '{dir}' ..."));
     }
-    match clone_into(url, &path, &dir, mode, started, &mut term_progress) {
+    match clone_into(url, &path, &dir, shallow, mode, started, &mut term_progress) {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let skip_cleanup = matches!(
@@ -447,6 +452,7 @@ fn clone_into(
     url: &str,
     path: &Path,
     dir: &str,
+    shallow: bool,
     mode: OutputMode,
     started: Instant,
     term_progress: &mut TerminalProgress,
@@ -459,6 +465,7 @@ fn clone_into(
         remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
         initial_branch: "main".to_owned(),
         thread_policy: crate::context::thread_policy_for_repo(),
+        depth: shallow.then_some(1),
     };
     let outcome = clone_repo(clone_opts, &mut *term_progress, Some(&factory))?;
 

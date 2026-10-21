@@ -13056,6 +13056,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::Clone
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneError
 pub struct grit_lib::remote::clone::CloneOptions
 pub grit_lib::remote::clone::CloneOptions::dest: std::path::PathBuf
+pub grit_lib::remote::clone::CloneOptions::depth: core::option::Option<u32>
 pub grit_lib::remote::clone::CloneOptions::environment: grit_lib::config::environment::Environment
 pub grit_lib::remote::clone::CloneOptions::initial_branch: alloc::string::String
 pub grit_lib::remote::clone::CloneOptions::remote_name: alloc::string::String
