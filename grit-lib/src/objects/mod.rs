@@ -22,6 +22,11 @@ pub mod handle;
 pub use core::*;
 pub use handle::Objects;
 
+pub use crate::change_id::{
+    change_id, resolved_change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator,
+    ChangeIdPolicy, OsChangeIdGenerator, ResolvedChangeId,
+};
+
 pub mod odb {
     //! Object database backends and loose/packed storage.
     pub use crate::odb::builder;

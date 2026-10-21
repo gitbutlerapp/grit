@@ -634,6 +634,117 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bundle::UnbundledRef
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::bundle::UnbundledRef
 pub fn grit_lib::bundle::read_header(&mut dyn alloc::io::buf_read::BufRead) -> core::result::Result<grit_lib::bundle::BundleHeader, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub mod grit_lib::change_id
+pub enum grit_lib::change_id::ChangeIdError
+pub grit_lib::change_id::ChangeIdError::InvalidCharacter
+pub grit_lib::change_id::ChangeIdError::RandomFailed(getrandom::error::Error)
+pub grit_lib::change_id::ChangeIdError::WrongLength
+impl core::cmp::Eq for grit_lib::change_id::ChangeIdError
+impl core::cmp::PartialEq for grit_lib::change_id::ChangeIdError
+pub fn grit_lib::change_id::ChangeIdError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::change_id::ChangeIdError
+impl core::fmt::Debug for grit_lib::change_id::ChangeIdError
+pub fn grit_lib::change_id::ChangeIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::change_id::ChangeIdError
+pub fn grit_lib::change_id::ChangeIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ChangeIdError
+impl core::marker::Freeze for grit_lib::change_id::ChangeIdError
+impl core::marker::Send for grit_lib::change_id::ChangeIdError
+impl core::marker::Sync for grit_lib::change_id::ChangeIdError
+impl core::marker::Unpin for grit_lib::change_id::ChangeIdError
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ChangeIdError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ChangeIdError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ChangeIdError
+pub struct grit_lib::change_id::ChangeId(_)
+impl grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::as_str(&self) -> &str
+pub fn grit_lib::change_id::ChangeId::derived_from_commit_id(&grit_lib::objects::ObjectId) -> Self
+pub fn grit_lib::change_id::ChangeId::from_bytes(&[u8; 16]) -> Self
+pub fn grit_lib::change_id::ChangeId::generate(&dyn grit_lib::change_id::ChangeIdGenerator) -> core::result::Result<Self, grit_lib::change_id::ChangeIdError>
+pub fn grit_lib::change_id::ChangeId::is_reverse_hex(&self) -> bool
+pub fn grit_lib::change_id::ChangeId::parse_reverse_hex(&str) -> core::result::Result<Self, grit_lib::change_id::ChangeIdError>
+pub fn grit_lib::change_id::ChangeId::short(&self, usize) -> &str
+impl core::clone::Clone for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::change_id::ChangeId
+impl core::cmp::PartialEq for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ChangeId
+impl core::marker::Freeze for grit_lib::change_id::ChangeId
+impl core::marker::Send for grit_lib::change_id::ChangeId
+impl core::marker::Sync for grit_lib::change_id::ChangeId
+impl core::marker::Unpin for grit_lib::change_id::ChangeId
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ChangeId
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ChangeId
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ChangeId
+pub struct grit_lib::change_id::ChangeIdPolicy
+impl grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::enabled(&self) -> bool
+pub fn grit_lib::change_id::ChangeIdPolicy::from_config(&grit_lib::config::ConfigSet) -> Self
+pub fn grit_lib::change_id::ChangeIdPolicy::id_for_new_commit(&self, &grit_lib::objects::CommitData, grit_lib::objects::HashAlgo, &dyn grit_lib::change_id::ChangeIdGenerator) -> core::result::Result<core::option::Option<grit_lib::change_id::ChangeId>, grit_lib::change_id::ChangeIdError>
+impl core::clone::Clone for grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::change_id::ChangeIdPolicy
+impl core::cmp::PartialEq for grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Freeze for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Send for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Sync for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Unpin for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ChangeIdPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ChangeIdPolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ChangeIdPolicy
+pub struct grit_lib::change_id::OsChangeIdGenerator
+impl core::clone::Clone for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::clone(&self) -> Self
+impl core::default::Default for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::default() -> Self
+impl core::fmt::Debug for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::change_id::OsChangeIdGenerator
+impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
+impl core::marker::Freeze for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::Send for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::Sync for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::Unpin for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::UnsafeUnpin for grit_lib::change_id::OsChangeIdGenerator
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::OsChangeIdGenerator
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::OsChangeIdGenerator
+pub struct grit_lib::change_id::ResolvedChangeId
+pub grit_lib::change_id::ResolvedChangeId::id: grit_lib::change_id::ChangeId
+pub grit_lib::change_id::ResolvedChangeId::stored: bool
+impl core::clone::Clone for grit_lib::change_id::ResolvedChangeId
+pub fn grit_lib::change_id::ResolvedChangeId::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::change_id::ResolvedChangeId
+impl core::cmp::PartialEq for grit_lib::change_id::ResolvedChangeId
+pub fn grit_lib::change_id::ResolvedChangeId::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::change_id::ResolvedChangeId
+pub fn grit_lib::change_id::ResolvedChangeId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Freeze for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Send for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Sync for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Unpin for grit_lib::change_id::ResolvedChangeId
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ResolvedChangeId
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ResolvedChangeId
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ResolvedChangeId
+pub trait grit_lib::change_id::ChangeIdGenerator: core::marker::Send + core::marker::Sync
+pub fn grit_lib::change_id::ChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
+impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
+pub fn grit_lib::change_id::change_id(&grit_lib::objects::CommitData) -> core::option::Option<grit_lib::change_id::ChangeId>
+pub fn grit_lib::change_id::resolved_change_id(&grit_lib::objects::ObjectId, &grit_lib::objects::CommitData) -> grit_lib::change_id::ResolvedChangeId
+pub fn grit_lib::change_id::set_change_id(&mut grit_lib::objects::CommitData, &grit_lib::change_id::ChangeId)
 pub mod grit_lib::command_runner
 pub mod grit_lib::command_runner::hooks
 pub enum grit_lib::command_runner::hooks::HookError
@@ -1327,6 +1438,7 @@ impl core::marker::UnsafeUnpin for grit_lib::config::environment::Environment
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::environment::Environment
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::environment::Environment
 #[non_exhaustive] pub struct grit_lib::config::environment::RepositoryOptions
+pub grit_lib::config::environment::RepositoryOptions::change_id_generator: alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
 pub grit_lib::config::environment::RepositoryOptions::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub grit_lib::config::environment::RepositoryOptions::diagnostics: grit_lib::diagnostics::DiagnosticsHandle
 pub grit_lib::config::environment::RepositoryOptions::environment: grit_lib::config::environment::Environment
@@ -1341,6 +1453,7 @@ pub grit_lib::config::environment::RepositoryOptions::work_tree: core::option::O
 impl grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_environment(grit_lib::config::environment::Environment) -> Self
@@ -8807,6 +8920,26 @@ pub fn grit_lib::objects::unpack_objects::pack_index_records_with_threads_with_p
 pub fn grit_lib::objects::unpack_objects::pack_is_thin(&[u8], grit_lib::objects::HashAlgo) -> bool
 pub fn grit_lib::objects::unpack_objects::strict_verify_packed_references(core::option::Option<&grit_lib::objects::odb::Odb>, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, (grit_lib::objects::ObjectKind, alloc::vec::Vec<u8>)>) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::unpack_objects::unpack_objects(&mut dyn alloc::io::read::Read, &grit_lib::objects::odb::Odb, &grit_lib::objects::unpack_objects::UnpackOptions) -> grit_lib::error::Result<usize>
+pub enum grit_lib::objects::ChangeIdError
+pub grit_lib::objects::ChangeIdError::InvalidCharacter
+pub grit_lib::objects::ChangeIdError::RandomFailed(getrandom::error::Error)
+pub grit_lib::objects::ChangeIdError::WrongLength
+impl core::cmp::Eq for grit_lib::change_id::ChangeIdError
+impl core::cmp::PartialEq for grit_lib::change_id::ChangeIdError
+pub fn grit_lib::change_id::ChangeIdError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::change_id::ChangeIdError
+impl core::fmt::Debug for grit_lib::change_id::ChangeIdError
+pub fn grit_lib::change_id::ChangeIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::change_id::ChangeIdError
+pub fn grit_lib::change_id::ChangeIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ChangeIdError
+impl core::marker::Freeze for grit_lib::change_id::ChangeIdError
+impl core::marker::Send for grit_lib::change_id::ChangeIdError
+impl core::marker::Sync for grit_lib::change_id::ChangeIdError
+impl core::marker::Unpin for grit_lib::change_id::ChangeIdError
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ChangeIdError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ChangeIdError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ChangeIdError
 pub enum grit_lib::objects::HashAlgo
 pub grit_lib::objects::HashAlgo::Sha1
 pub grit_lib::objects::HashAlgo::Sha256
@@ -8883,6 +9016,54 @@ impl core::marker::Unpin for grit_lib::objects::ObjectKind
 impl core::marker::UnsafeUnpin for grit_lib::objects::ObjectKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::ObjectKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ObjectKind
+pub struct grit_lib::objects::ChangeId(_)
+impl grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::as_str(&self) -> &str
+pub fn grit_lib::change_id::ChangeId::derived_from_commit_id(&grit_lib::objects::ObjectId) -> Self
+pub fn grit_lib::change_id::ChangeId::from_bytes(&[u8; 16]) -> Self
+pub fn grit_lib::change_id::ChangeId::generate(&dyn grit_lib::change_id::ChangeIdGenerator) -> core::result::Result<Self, grit_lib::change_id::ChangeIdError>
+pub fn grit_lib::change_id::ChangeId::is_reverse_hex(&self) -> bool
+pub fn grit_lib::change_id::ChangeId::parse_reverse_hex(&str) -> core::result::Result<Self, grit_lib::change_id::ChangeIdError>
+pub fn grit_lib::change_id::ChangeId::short(&self, usize) -> &str
+impl core::clone::Clone for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::change_id::ChangeId
+impl core::cmp::PartialEq for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::change_id::ChangeId
+pub fn grit_lib::change_id::ChangeId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ChangeId
+impl core::marker::Freeze for grit_lib::change_id::ChangeId
+impl core::marker::Send for grit_lib::change_id::ChangeId
+impl core::marker::Sync for grit_lib::change_id::ChangeId
+impl core::marker::Unpin for grit_lib::change_id::ChangeId
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ChangeId
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ChangeId
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ChangeId
+pub struct grit_lib::objects::ChangeIdPolicy
+impl grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::enabled(&self) -> bool
+pub fn grit_lib::change_id::ChangeIdPolicy::from_config(&grit_lib::config::ConfigSet) -> Self
+pub fn grit_lib::change_id::ChangeIdPolicy::id_for_new_commit(&self, &grit_lib::objects::CommitData, grit_lib::objects::HashAlgo, &dyn grit_lib::change_id::ChangeIdGenerator) -> core::result::Result<core::option::Option<grit_lib::change_id::ChangeId>, grit_lib::change_id::ChangeIdError>
+impl core::clone::Clone for grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::change_id::ChangeIdPolicy
+impl core::cmp::PartialEq for grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::change_id::ChangeIdPolicy
+pub fn grit_lib::change_id::ChangeIdPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Freeze for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Send for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Sync for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::Unpin for grit_lib::change_id::ChangeIdPolicy
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ChangeIdPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ChangeIdPolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ChangeIdPolicy
 pub struct grit_lib::objects::CommitData
 pub grit_lib::objects::CommitData::author: alloc::string::String
 pub grit_lib::objects::CommitData::author_raw: alloc::vec::Vec<u8>
@@ -9025,6 +9206,41 @@ impl<'repo> core::marker::Unpin for grit_lib::objects::handle::Objects<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::objects::handle::Objects<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::handle::Objects<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::handle::Objects<'repo>
+pub struct grit_lib::objects::OsChangeIdGenerator
+impl core::clone::Clone for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::clone(&self) -> Self
+impl core::default::Default for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::default() -> Self
+impl core::fmt::Debug for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::change_id::OsChangeIdGenerator
+impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
+impl core::marker::Freeze for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::Send for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::Sync for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::Unpin for grit_lib::change_id::OsChangeIdGenerator
+impl core::marker::UnsafeUnpin for grit_lib::change_id::OsChangeIdGenerator
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::OsChangeIdGenerator
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::OsChangeIdGenerator
+pub struct grit_lib::objects::ResolvedChangeId
+pub grit_lib::objects::ResolvedChangeId::id: grit_lib::change_id::ChangeId
+pub grit_lib::objects::ResolvedChangeId::stored: bool
+impl core::clone::Clone for grit_lib::change_id::ResolvedChangeId
+pub fn grit_lib::change_id::ResolvedChangeId::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::change_id::ResolvedChangeId
+impl core::cmp::PartialEq for grit_lib::change_id::ResolvedChangeId
+pub fn grit_lib::change_id::ResolvedChangeId::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::change_id::ResolvedChangeId
+pub fn grit_lib::change_id::ResolvedChangeId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Freeze for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Send for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Sync for grit_lib::change_id::ResolvedChangeId
+impl core::marker::Unpin for grit_lib::change_id::ResolvedChangeId
+impl core::marker::UnsafeUnpin for grit_lib::change_id::ResolvedChangeId
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ResolvedChangeId
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ResolvedChangeId
 pub struct grit_lib::objects::TagData
 pub grit_lib::objects::TagData::message: alloc::string::String
 pub grit_lib::objects::TagData::object: grit_lib::objects::ObjectId
@@ -9063,6 +9279,11 @@ impl core::marker::Unpin for grit_lib::objects::TreeEntry
 impl core::marker::UnsafeUnpin for grit_lib::objects::TreeEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::TreeEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::TreeEntry
+pub trait grit_lib::objects::ChangeIdGenerator: core::marker::Send + core::marker::Sync
+pub fn grit_lib::objects::ChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
+impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator
+pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
+pub fn grit_lib::objects::change_id(&grit_lib::objects::CommitData) -> core::option::Option<grit_lib::change_id::ChangeId>
 pub fn grit_lib::objects::find_tree_entry_by_name<'a>(&'a [grit_lib::objects::TreeEntry], &[u8], bool) -> core::option::Option<&'a grit_lib::objects::TreeEntry>
 pub fn grit_lib::objects::find_tree_entry_by_name_dir_or_file<'a>(&'a [grit_lib::objects::TreeEntry], &[u8]) -> core::option::Option<&'a grit_lib::objects::TreeEntry>
 pub fn grit_lib::objects::parse_commit(&[u8]) -> grit_lib::error::Result<grit_lib::objects::CommitData>
@@ -9070,9 +9291,11 @@ pub fn grit_lib::objects::parse_tag(&[u8]) -> grit_lib::error::Result<grit_lib::
 pub fn grit_lib::objects::parse_tree(&[u8]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::TreeEntry>>
 pub fn grit_lib::objects::parse_tree_with_oid_len(&[u8], usize) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::TreeEntry>>
 pub fn grit_lib::objects::read_commit_subject_line(&[u8]) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::objects::resolved_change_id(&grit_lib::objects::ObjectId, &grit_lib::objects::CommitData) -> grit_lib::change_id::ResolvedChangeId
 pub fn grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::serialize_tag(&grit_lib::objects::TagData) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::serialize_tree(&[grit_lib::objects::TreeEntry]) -> alloc::vec::Vec<u8>
+pub fn grit_lib::objects::set_change_id(&mut grit_lib::objects::CommitData, &grit_lib::change_id::ChangeId)
 pub fn grit_lib::objects::tag_header_field(&[u8], &[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::objects::tag_object_line_oid(&[u8]) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::tree_entry_cmp(&[u8], bool, &[u8], bool) -> core::cmp::Ordering
@@ -11258,6 +11481,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::Recordin
 pub struct grit_lib::prelude::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
+pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -11338,6 +11562,7 @@ impl core::marker::UnsafeUnpin for grit_lib::repo::RepositoryBuilder
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryBuilder
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryBuilder
 #[non_exhaustive] pub struct grit_lib::prelude::RepositoryOptions
+pub grit_lib::prelude::RepositoryOptions::change_id_generator: alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
 pub grit_lib::prelude::RepositoryOptions::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub grit_lib::prelude::RepositoryOptions::diagnostics: grit_lib::diagnostics::DiagnosticsHandle
 pub grit_lib::prelude::RepositoryOptions::environment: grit_lib::config::environment::Environment
@@ -11352,6 +11577,7 @@ pub grit_lib::prelude::RepositoryOptions::work_tree: core::option::Option<std::p
 impl grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_environment(grit_lib::config::environment::Environment) -> Self
@@ -14701,6 +14927,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOptions
 pub struct grit_lib::repo::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
+pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>

@@ -33,6 +33,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::change_id::ChangeIdGenerator;
 use crate::command_runner::CommandRunner;
 use crate::config::{
     config_file_stamps, stamp_for_path, ConfigCacheKey, ConfigFile, ConfigScope, ConfigSet,
@@ -287,6 +288,8 @@ pub struct Repository {
     git_prefix: Option<String>,
     /// Injectable subprocess runner (hooks, filters, helpers).
     command_runner: Arc<dyn CommandRunner>,
+    /// Injectable random bytes for new change ids.
+    change_id_generator: Arc<dyn ChangeIdGenerator>,
     diagnostics: DiagnosticsHandle,
     network_trace: bool,
     /// Embedder override for rev-parse relative dates (`@{yesterday}`, etc.).
@@ -390,6 +393,7 @@ impl Repository {
     ) -> Result<Self> {
         let environment = Arc::new(options.environment.clone());
         let command_runner = Arc::clone(&options.command_runner);
+        let change_id_generator = Arc::clone(&options.change_id_generator);
         // Check HEAD exists or is a symlink (linked worktrees have a symlink HEAD)
         let head_path = git_dir.join("HEAD");
         if !head_path.exists() && !head_path.is_symlink() {
@@ -463,6 +467,7 @@ impl Repository {
             environment,
             git_prefix,
             command_runner,
+            change_id_generator,
             diagnostics: Arc::clone(&options.diagnostics),
             network_trace: options.network_trace,
             reference_unix_time: options.reference_unix_time,
@@ -538,6 +543,12 @@ impl Repository {
         Arc::clone(&self.command_runner)
     }
 
+    /// Generator used for random change ids on new commits.
+    #[must_use]
+    pub fn change_id_generator(&self) -> Arc<dyn ChangeIdGenerator> {
+        Arc::clone(&self.change_id_generator)
+    }
+
     /// [`RepositoryOptions`] for discovering a linked worktree of this repository.
     ///
     /// Inherits config discovery ([`Environment`], command runner, diagnostics, thread policy)
@@ -554,6 +565,7 @@ impl Repository {
         RepositoryOptions {
             environment,
             command_runner: Arc::clone(&self.command_runner),
+            change_id_generator: Arc::clone(&self.change_id_generator),
             diagnostics: Arc::clone(&self.diagnostics),
             network_trace: self.network_trace,
             test_assume_different_owner: self.test_assume_different_owner,
@@ -1164,6 +1176,7 @@ impl Repository {
 
         let environment = Arc::new(options.environment.clone());
         let command_runner = Arc::clone(&options.command_runner);
+        let change_id_generator = Arc::clone(&options.change_id_generator);
 
         let head_path = git_dir.join("HEAD");
         if !head_path.exists() && !head_path.is_symlink() {
@@ -1239,6 +1252,7 @@ impl Repository {
             environment,
             git_prefix,
             command_runner,
+            change_id_generator,
             diagnostics: Arc::clone(&options.diagnostics),
             network_trace: options.network_trace,
             reference_unix_time: options.reference_unix_time,

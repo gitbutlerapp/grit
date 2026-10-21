@@ -891,6 +891,7 @@ dependencies = [
  "encoding_rs",
  "filetime",
  "flate2",
+ "getrandom 0.2.17",
  "grit-test-support",
  "hex",
  "icu_normalizer",

@@ -59,6 +59,7 @@ shell-words.workspace = true
 ureq = { workspace = true, optional = true, default-features = false, features = ["gzip"] }
 base64 = { workspace = true, optional = true }
 crc32fast.workspace = true
+getrandom = "0.2"
 memmap2.workspace = true
 tzdb = "0.7.3"
 tz = { package = "tz-rs", version = "0.7.3" }
