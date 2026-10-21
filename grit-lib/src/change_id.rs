@@ -30,8 +30,8 @@ use thiserror::Error;
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::{
-    insert_header_before_signature, read_commit_subject_line, remove_header_lines,
-    serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind,
+    extra_header_values, insert_header_before_signature, read_commit_subject_line,
+    remove_header_lines, serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind,
 };
 use crate::pack::SingleLocalPackReader;
 use crate::parallel::{try_par_map_with_local, ParallelOp};
@@ -291,9 +291,14 @@ pub fn change_id(data: &CommitData) -> Option<ChangeId> {
 /// Set or replace the `change-id` header (before any signature block).
 pub fn set_change_id(data: &mut CommitData, id: &ChangeId) {
     let line = format!("change-id {}\n", id.as_str());
+    let had_canonical = !extra_header_values(&data.extra_headers, "change-id").is_empty();
     data.extra_headers =
         insert_header_before_signature(&data.extra_headers, line.as_bytes(), |key| {
-            key == CHANGE_ID_KEY || key == LEGACY_CHANGE_ID_KEY
+            if key == CHANGE_ID_KEY {
+                return true;
+            }
+            // Legacy-only commits migrate to `change-id`; keep legacy when both are present.
+            key == LEGACY_CHANGE_ID_KEY && !had_canonical
         });
 }
 
@@ -1009,6 +1014,14 @@ mod tests {
         assert!(!raw.contains("gitbutler-change-id"));
         assert!(!raw.contains("legacy-only"));
         assert_eq!(raw.matches("change-id new-id").count(), 1);
+
+        data.extra_headers =
+            b"change-id canonical\ngitbutler-change-id legacy\nencoding UTF-8\n".to_vec();
+        set_change_id(&mut data, &new_id);
+        let raw = String::from_utf8_lossy(&data.extra_headers);
+        assert!(raw.contains("gitbutler-change-id legacy"));
+        assert!(raw.contains("change-id new-id"));
+        assert!(!raw.contains("change-id canonical"));
     }
 
     #[test]
