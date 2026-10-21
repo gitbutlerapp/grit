@@ -774,6 +774,7 @@ mod tests {
         assert_eq!(second, "/tmp/grit-bench-scratch/daily-second");
         assert!(!second.contains("daily-first/daily-second"));
         std::env::remove_var("GRIT_BENCH_DAILY_ROOT");
+        std::env::remove_var("GRIT_BENCH_SCRATCH");
     }
 
     fn sample_ctx() -> DailyHeadlineContext {
