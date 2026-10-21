@@ -289,11 +289,16 @@ pub fn change_id(data: &CommitData) -> Option<ChangeId> {
 }
 
 /// Set or replace the `change-id` header (before any signature block).
+///
+/// When a canonical `change-id` header already exists, a coexisting legacy
+/// `gitbutler-change-id` line is left intact (history rewrite preserves both).
+/// Legacy-only commits are migrated by replacing the legacy header.
 pub fn set_change_id(data: &mut CommitData, id: &ChangeId) {
     let line = format!("change-id {}\n", id.as_str());
+    let has_canonical = header_key_present(&data.extra_headers, CHANGE_ID_KEY);
     data.extra_headers =
         insert_header_before_signature(&data.extra_headers, line.as_bytes(), |key| {
-            key == CHANGE_ID_KEY || key == LEGACY_CHANGE_ID_KEY
+            key == CHANGE_ID_KEY || (!has_canonical && key == LEGACY_CHANGE_ID_KEY)
         });
 }
 
@@ -1009,6 +1014,14 @@ mod tests {
         assert!(!raw.contains("gitbutler-change-id"));
         assert!(!raw.contains("legacy-only"));
         assert_eq!(raw.matches("change-id new-id").count(), 1);
+
+        data.extra_headers = b"change-id jj-style-id\ngitbutler-change-id legacy-should-stay\nx-custom custom-value\n"
+            .to_vec();
+        set_change_id(&mut data, &ChangeId::from_opaque("jj-style-id".to_owned()));
+        let raw = String::from_utf8_lossy(&data.extra_headers);
+        assert!(raw.contains("change-id jj-style-id"));
+        assert!(raw.contains("gitbutler-change-id legacy-should-stay"));
+        assert!(raw.contains("x-custom custom-value"));
     }
 
     #[test]

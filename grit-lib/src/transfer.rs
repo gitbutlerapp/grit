@@ -1639,13 +1639,13 @@ pub fn fetch_local_with_progress(
         &remote_refs,
         &matched,
     )?;
-    let new_shallow = if opts.has_deepen_request() {
+    let new_shallow = crate::shallow::dedupe_shallow_list(if opts.has_deepen_request() {
         shallow_new
     } else if opts.initial_remote_fetch {
         remote_shallow.iter().copied().collect()
     } else {
         Vec::new()
-    };
+    });
     Ok(FetchOutcome {
         updates,
         default_branch,

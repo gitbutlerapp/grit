@@ -162,6 +162,16 @@ fn show_unified_and_w_flags() {
     let u5 = grit(&repo, &["show", "HEAD", "-U5"]);
     assert!(u5.ok(), "{}", u5.dump("-U5"));
     assert_ne!(u0.stdout, u5.stdout, "context width should change output");
+
+    // Function-context hunks are the default for human patch output (see json_output
+    // `diff_human_shows_hunk_range_with_function_context`). Global `-W` is `--worktree`.
+    let diff = grit(&repo, &["diff", "HEAD~1", "HEAD"]);
+    assert!(diff.ok(), "{}", diff.dump("diff"));
+    assert!(
+        diff.stdout.contains("@@"),
+        "expected patch hunks: {}",
+        diff.stdout
+    );
 }
 
 #[test]

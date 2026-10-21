@@ -1416,7 +1416,7 @@ pub fn fetch_remote(
                 return Ok(FetchOutcome {
                     updates: Vec::new(),
                     default_branch: None,
-                    new_shallow: shallow_update.shallow,
+                    new_shallow: crate::shallow::dedupe_shallow_list(shallow_update.shallow),
                     new_unshallow: shallow_update.unshallow,
                     transfer: crate::transfer::TransferStats::default(),
                 });
@@ -1656,7 +1656,7 @@ pub fn fetch_remote(
     Ok(FetchOutcome {
         updates,
         default_branch,
-        new_shallow: shallow_update.shallow,
+        new_shallow: crate::shallow::dedupe_shallow_list(shallow_update.shallow),
         new_unshallow: shallow_update.unshallow,
         transfer,
     })

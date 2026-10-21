@@ -957,32 +957,64 @@ fn worktree_changes(
     let mut index = repo.index_handle().load()?;
     let config = repo.config()?;
 
+    let cache_valid =
+        crate::index::write_tree::cache_tree_extension_valid(index.cache_tree.as_ref());
     let index_backed = base_tree
         .zip(index.cache_tree_root.as_ref())
         .map(|(left, right)| left == right)
         .unwrap_or(base_tree.is_none() && index.cache_tree_root.is_none())
-        && crate::index::write_tree::cache_tree_extension_valid(index.cache_tree.as_ref());
+        && cache_valid;
+    let head = resolve_head(repo.git_dir())?;
+    let head_tree_oid = match head.oid() {
+        Some(oid) => Some(commit_tree(repo, oid)?),
+        None => None,
+    };
+    let diff_against_head = match (base_tree, head_tree_oid.as_ref()) {
+        (None, None) => true,
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    };
     let diff_index_mtime = index_mtime_for_diff(&index, None);
     let rules_arc = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));
+    let index_to_worktree_opts = DiffIndexToWorktreeOptions {
+        repository_git_dir: Some(repo.git_dir().to_path_buf()),
+        config: Some(config.clone()),
+        index_mtime: diff_index_mtime,
+        thread_policy: Some(repo.thread_policy()),
+        refresh_index_stat_in_pass: false,
+        for_status: false,
+        refresh_fsmonitor: fsmonitor_enabled(config.as_ref()),
+        worktree_rules: Some(Arc::clone(&rules_arc)),
+        command_runner: Some(repo.command_runner()),
+        ..DiffIndexToWorktreeOptions::default()
+    };
     let mut entries = if index_backed {
         let (entries, _) = diff_index_to_worktree_with_renames(
             repo,
             &mut index,
             work_tree,
-            DiffIndexToWorktreeOptions {
-                repository_git_dir: Some(repo.git_dir().to_path_buf()),
-                config: Some(config.clone()),
-                index_mtime: diff_index_mtime,
-                thread_policy: Some(repo.thread_policy()),
-                refresh_index_stat_in_pass: false,
-                for_status: true,
-                refresh_fsmonitor: fsmonitor_enabled(config.as_ref()),
-                worktree_rules: Some(Arc::clone(&rules_arc)),
-                command_runner: Some(repo.command_runner()),
-                ..DiffIndexToWorktreeOptions::default()
-            },
+            index_to_worktree_opts,
             rename_threshold,
         )?;
+        entries
+    } else if diff_against_head {
+        let mut entries = diff_index_to_tree_with_renames(
+            repo.odb(),
+            &index,
+            head_tree_oid.as_ref(),
+            false,
+            rename_threshold,
+            config.as_ref(),
+            &repo.thread_policy(),
+        )?;
+        let (mut unstaged, _) = diff_index_to_worktree_with_renames(
+            repo,
+            &mut index,
+            work_tree,
+            index_to_worktree_opts,
+            rename_threshold,
+        )?;
+        entries.append(&mut unstaged);
         entries
     } else {
         let worktree_rules = WorktreeRules::from_repository(repo, &index)?;

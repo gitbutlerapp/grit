@@ -37,6 +37,13 @@ pub fn load_shallow_boundaries(git_dir: &Path) -> HashSet<ObjectId> {
     set
 }
 
+/// Drop duplicate OIDs while preserving first-seen order.
+#[must_use]
+pub fn dedupe_shallow_list(ids: Vec<ObjectId>) -> Vec<ObjectId> {
+    let mut seen = HashSet::new();
+    ids.into_iter().filter(|oid| seen.insert(*oid)).collect()
+}
+
 /// Add `new_boundaries` to `.git/shallow`, preserving any boundaries already recorded.
 ///
 /// Mirrors `update_shallow_ref` in upstream `receive-pack`, which appends the grafts introduced by
