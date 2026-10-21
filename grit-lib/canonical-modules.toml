@@ -13,7 +13,6 @@ bundle = "bundle"
 bundle_remote = "bundle::bundle_remote"
 change_id = "change_id"
 check_ref_format = "refs::check_ref_format"
-change_id = "change_id"
 clone = "remote::clone"
 combined_diff_patch = "diff::combined_diff_patch"
 combined_tree_diff = "diff::combined_tree_diff"
@@ -36,6 +35,7 @@ ewah_bench = "objects::ewah_bench"
 fetch = "remote::fetch"
 fetch_negotiator = "remote::fetch_negotiator"
 fmt_merge_msg = "diff::fmt_merge_msg"
+fuzz = "fuzz"
 fsck = "maintenance::repository_fsck"
 fsck_standalone = "maintenance::fsck"
 fsmonitor = "worktree::fsmonitor"
@@ -56,6 +56,7 @@ index_name_hash_lazy = "index::index_name_hash_lazy"
 index_pack = "objects::index_pack"
 init_filesystem = "config::init_filesystem"
 log_walk = "revwalk::log_walk"
+lockfile = "lockfile"
 merge_base = "revwalk::merge_base"
 merge_diff = "diff::merge_diff"
 merge_file = "diff::merge_file"
@@ -78,6 +79,7 @@ pack_rev = "objects::pack_rev"
 pack_store = "objects::pack_store"
 parallel = "parallel"
 patch_ids = "diff::patch_ids"
+path_validate = "path_validate"
 pathspec = "worktree::pathspec"
 pkt_line = "remote::pkt_line"
 porcelain = "porcelain"
@@ -143,13 +145,16 @@ modules = [
   "diagnostics",
   "diff",
   "error",
+  "fuzz",
   "history",
   "ident",
+  "lockfile",
   "index",
   "maintenance",
   "notes",
   "objects",
   "parallel",
+  "path_validate",
   "porcelain",
   "progress",
   "refs",

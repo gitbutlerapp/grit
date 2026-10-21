@@ -292,6 +292,75 @@ fn post_commit_hook_failure_still_succeeds() -> TestResult {
 }
 
 #[test]
+fn amend_empty_message_flag_leaves_head_unchanged() -> TestResult {
+    let scratch = Scratch::new("amend-empty-m")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), "1\n")?;
+    assert!(gs(root, ["commit", "-m", "keep this subject"]).success());
+    let head_before = git(root, &["rev-parse", "HEAD"]).stdout.trim().to_owned();
+    let out = gs(root, ["commit", "--amend", "-m", ""]);
+    assert!(!out.success(), "{}", out.dump());
+    assert!(
+        out.stderr.contains("provide a commit message"),
+        "{}",
+        out.dump()
+    );
+    assert_eq!(git(root, &["rev-parse", "HEAD"]).stdout.trim(), head_before);
+    assert_eq!(
+        git(root, &["log", "-1", "--format=%s"]).stdout.trim(),
+        "keep this subject"
+    );
+    Ok(())
+}
+
+#[test]
+fn amend_empty_message_file_fails() -> TestResult {
+    let scratch = Scratch::new("amend-empty-f")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), "1\n")?;
+    assert!(gs(root, ["commit", "-m", "original"]).success());
+    let head_before = git(root, &["rev-parse", "HEAD"]).stdout.trim().to_owned();
+    let empty_msg = root.join("empty.txt");
+    fs::write(&empty_msg, "")?;
+    let out = gs(
+        root,
+        ["commit", "--amend", "-F", empty_msg.to_str().unwrap()],
+    );
+    assert!(!out.success(), "{}", out.dump());
+    assert!(
+        out.stderr.contains("provide a commit message"),
+        "{}",
+        out.dump()
+    );
+    assert_eq!(git(root, &["rev-parse", "HEAD"]).stdout.trim(), head_before);
+    Ok(())
+}
+
+#[test]
+fn amend_without_message_reuses_previous() -> TestResult {
+    let scratch = Scratch::new("amend-reuse")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), "1\n")?;
+    assert!(gs(root, ["commit", "-m", "first line\n\nbody"]).success());
+    fs::write(root.join("a.txt"), "2\n")?;
+    let out = gs(root, ["commit", "--amend"]);
+    assert!(out.success(), "{}", out.dump());
+    let body = git(root, &["log", "-1", "--format=%B"]).stdout;
+    assert!(
+        body.starts_with("first line\n\nbody"),
+        "unexpected message body: {body:?}"
+    );
+    assert_eq!(
+        git(root, &["log", "-1", "--format=%s"]).stdout.trim(),
+        "first line"
+    );
+    Ok(())
+}
+
+#[test]
 fn no_verify_skips_blocking_hooks() -> TestResult {
     let scratch = Scratch::new("no-verify")?;
     let root = scratch.path();

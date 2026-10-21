@@ -488,6 +488,7 @@ fn create_commit_with_index(
         hooks_run.push(HookName::PostCommit);
     }
 
+    let stored_change_id = change_id(&commit_data);
     Ok(CommitOutcome {
         oid,
         branch: short_name,
@@ -496,7 +497,7 @@ fn create_commit_with_index(
         author: author_info,
         hooks_run,
         changes,
-        change_id: change_id(&commit_data),
+        change_id: stored_change_id,
     })
 }
 

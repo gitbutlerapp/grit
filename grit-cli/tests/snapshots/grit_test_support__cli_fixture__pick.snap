@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Picked d5d832b → 31fb26e pick me\n",
+    "stdout": "Picked d5d832b → d5d832b pick me\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"source\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"oid\":\"31fb26e2acef644741ed0a240f69765ab38e0343\",\"subject\":\"pick me\"}\n",
+    "stdout": "{\"source\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"oid\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"subject\":\"pick me\",\"change_id\":\"voklnxqkuvvwxnmsmlvpwsopstkmwvnv\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Pick\n\n- `d5d832b` → `31fb26e` — pick me\n",
+    "stdout": "## Pick\n\n- `d5d832b` → `d5d832b` — pick me\n- change id `voklnxq`\n",
     "stderr": ""
   }
 }

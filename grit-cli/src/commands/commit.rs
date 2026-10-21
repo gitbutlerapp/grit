@@ -1,12 +1,14 @@
 //! `grit commit` — stage every change and record a new commit.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{
+    create_commit, normalize_commit_message, CommitRequest, HookPolicy,
+};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::HookName;
@@ -166,17 +168,30 @@ fn hook_name_json(hook: HookName) -> String {
     hook.as_str().to_owned()
 }
 
+const COMMIT_MESSAGE_REQUIRED: &str = "provide a commit message, e.g. grit commit \"what changed\"";
+
 fn resolve_commit_message(
     message: Option<String>,
     message_file: Option<String>,
     amend: bool,
 ) -> Result<Option<String>> {
     match (message, message_file) {
-        (Some(m), None) => Ok(Some(m)),
-        (None, Some(path)) => read_message_file(&path).map(Some),
+        (Some(m), None) => normalize_explicit_commit_message(&m),
+        (None, Some(path)) => {
+            let raw = read_message_file(&path)?;
+            normalize_explicit_commit_message(&raw)
+        }
         (None, None) if amend => Ok(None),
-        (None, None) => bail!("provide a commit message, e.g. grit commit \"what changed\""),
+        (None, None) => bail!(COMMIT_MESSAGE_REQUIRED),
         (Some(_), Some(_)) => unreachable!("clap rejects message and message-file together"),
+    }
+}
+
+fn normalize_explicit_commit_message(raw: &str) -> Result<Option<String>> {
+    match normalize_commit_message(raw) {
+        Ok(normalized) => Ok(Some(normalized)),
+        Err(Error::Message(_)) => bail!(COMMIT_MESSAGE_REQUIRED),
+        Err(err) => Err(anyhow::anyhow!("{err}")),
     }
 }
 

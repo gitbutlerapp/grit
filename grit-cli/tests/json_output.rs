@@ -549,6 +549,8 @@ fn assert_commit_json_shape(commit: &Value) {
         commit_json_keys(commit),
         [
             "author",
+            "change_id",
+            "change_id_stored",
             "committer",
             "message",
             "oid",
@@ -2245,7 +2247,17 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     let committed = gs_json(&seed, &["commit", "first"]);
     assert_eq!(
         keys(&committed),
-        ["amended", "branch", "changes", "oid", "subject"]
+        [
+            "amended",
+            "author",
+            "branch",
+            "change_id",
+            "changes",
+            "hooks_run",
+            "oid",
+            "parents",
+            "subject",
+        ]
     );
 
     let status = gs_json(&seed, &["status"]);
