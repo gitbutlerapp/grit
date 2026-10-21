@@ -1596,15 +1596,19 @@ pub fn fetch_remote(
         t_begin.elapsed()
     );
     finish_initial_remote_fetch_layout(local_git_dir, opts, default_branch.as_deref())?;
-    let remote = opts
-        .remote_name
-        .as_deref()
-        .unwrap_or(crate::remote::DEFAULT_REMOTE);
-    ensure_remote_tracking_head_symref(
+    if let Some(remote) = opts.remote_name.as_deref() {
+        ensure_remote_tracking_head_symref(
+            local_git_dir,
+            remote,
+            default_branch.as_deref(),
+            opts.dry_run,
+        )?;
+    }
+    crate::transfer::finish_anonymous_url_fetch(
         local_git_dir,
-        remote,
+        opts,
         default_branch.as_deref(),
-        opts.dry_run,
+        &remote_refs,
     )?;
     Ok(FetchOutcome {
         updates,

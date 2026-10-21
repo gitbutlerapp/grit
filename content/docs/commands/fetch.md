@@ -17,6 +17,8 @@ Downloads everything new from a remote and updates your remote-tracking branches
 
 `<remote>` may be a configured remote name or a path to a [git bundle](https://git-scm.com/docs/git-bundle) file (detected by the bundle signature, not the file extension). Bundle fetches verify that prerequisite commits are already in your repository before applying the pack.
 
+When the argument is a **literal path or URL** (not a configured remote name), grit downloads objects for advertised heads but does **not** update `refs/remotes/origin/*` or any other configured remote-tracking namespace. Only [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) is updated (with the remote’s default branch tip), matching Git. Pass an explicit refspec on the command line when you need to store tracking refs from an ad-hoc source.
+
 Each ref that actually changed locally is listed with its old and new commit. Removed remote-tracking refs (after `--prune`) show `deleted` on the human line and `new_oid: null` in JSON.
 
 Existing tags are not overwritten when the same tag name moves on the remote (Git-compatible behavior). A fetch in that situation downloads any new objects but leaves `refs/tags/*` alone; the command reports no tag update, and a repeat fetch stays up to date.

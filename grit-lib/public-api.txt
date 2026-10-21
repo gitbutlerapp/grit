@@ -12599,6 +12599,7 @@ pub fn grit_lib::remote::fetch::fetch_operation_identity(&grit_lib::config::envi
 pub fn grit_lib::remote::fetch::fetch_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
 pub mod grit_lib::remote::fetch_head
 pub fn grit_lib::remote::fetch_head::merge_object_ids_hex(&str) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::remote::fetch_head::write_anonymous_fetch_head(&std::path::Path, grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<()>
 pub mod grit_lib::remote::fetch_negotiator
 pub struct grit_lib::remote::fetch_negotiator::SkippingNegotiator
 impl grit_lib::remote::fetch_negotiator::SkippingNegotiator
@@ -13358,6 +13359,7 @@ pub grit_lib::remote::transfer::FetchOptions::network_trace: bool
 pub grit_lib::remote::transfer::FetchOptions::pack_spool_only: bool
 pub grit_lib::remote::transfer::FetchOptions::prune: bool
 pub grit_lib::remote::transfer::FetchOptions::refspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::transfer::FetchOptions::fetch_source: core::option::Option<alloc::string::String>
 pub grit_lib::remote::transfer::FetchOptions::remote_name: core::option::Option<alloc::string::String>
 pub grit_lib::remote::transfer::FetchOptions::remote_progress: bool
 pub grit_lib::remote::transfer::FetchOptions::tags: grit_lib::remote::transfer::TagMode
@@ -14108,6 +14110,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::ListRefsOptions
 pub struct grit_lib::remote::Remote
 pub grit_lib::remote::Remote::fetch_refspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::Remote::name: core::option::Option<alloc::string::String>
+pub const grit_lib::remote::Remote::ANONYMOUS_FETCH_REFSPEC: &'static str
 impl grit_lib::remote::Remote
 pub fn grit_lib::remote::Remote::fetch(&self, &grit_lib::repo::Repository, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::FetchOutcome, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::Remote::fetch_url(&self) -> &grit_lib::remote::RemoteUrl

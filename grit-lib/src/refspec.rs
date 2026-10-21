@@ -134,7 +134,10 @@ fn parse_refspec(refspec: &str, fetch: bool) -> Result<RefspecItem, RefspecError
     let llen = lhs_str.len();
     if llen >= 1 && lhs_str.contains('*') {
         // LHS has a '*'.
-        if (rhs_opt.is_some() && !is_glob) || (rhs_opt.is_none() && !item.negative && fetch) {
+        let rhs_empty = rhs_opt.is_some_and(|r| r.is_empty());
+        if (rhs_opt.is_some() && !is_glob && !rhs_empty)
+            || (rhs_opt.is_none() && !item.negative && fetch)
+        {
             return Err(invalid());
         }
         is_glob = true;
@@ -281,6 +284,7 @@ mod tests {
         push_valid("refs/heads/main:refs/remotes/frotz/xyzzy");
 
         fetch_valid("refs/heads/*:refs/remotes/frotz/*");
+        fetch_valid("refs/heads/*:");
         fetch_invalid("refs/heads/*:refs/remotes/frotz");
         fetch_invalid("refs/heads:refs/remotes/frotz/*");
         fetch_valid("refs/heads/main:refs/remotes/frotz/xyzzy");

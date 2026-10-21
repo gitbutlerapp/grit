@@ -263,7 +263,14 @@ impl Remote {
         })
     }
 
-    /// Build a remote from a literal URL with the default fetch refspec layout for `origin`.
+    /// Default refspec for [`Self::from_url`] — match Git's anonymous fetch: download
+    /// advertised heads but do not write remote-tracking refs (only [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion)).
+    pub const ANONYMOUS_FETCH_REFSPEC: &'static str = "refs/heads/*:";
+
+    /// Build a remote from a literal URL or path (not a configured remote name).
+    ///
+    /// Uses [`Self::ANONYMOUS_FETCH_REFSPEC`]; callers that need tracking refs must
+    /// pass explicit [`FetchOptions::refspecs`].
     ///
     /// # Errors
     ///
@@ -273,7 +280,7 @@ impl Remote {
             name: None,
             fetch_url: RemoteUrl::try_from(url)?,
             push_url: None,
-            fetch_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            fetch_refspecs: vec![Self::ANONYMOUS_FETCH_REFSPEC.to_owned()],
         })
     }
 
@@ -309,6 +316,9 @@ impl Remote {
         }
         if opts.remote_name.is_none() {
             opts.remote_name = self.name.clone();
+        }
+        if self.name.is_none() && opts.fetch_source.is_none() {
+            opts.fetch_source = Some(self.fetch_url.to_url_string());
         }
         if opts.diagnostics.is_none() {
             opts.diagnostics = Some(repo.diagnostics());

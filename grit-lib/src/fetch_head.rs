@@ -1,6 +1,21 @@
 //! Parsing [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) lines.
 
+use crate::error::{Error, Result};
 use crate::objects::ObjectId;
+use std::path::Path;
+
+/// Overwrite `.git/FETCH_HEAD` with a single for-merge line for an anonymous URL/path fetch.
+///
+/// Matches `git fetch <url>` when no remote-tracking refspec applies: one line
+/// `<oid>` + two tab characters + `<source>`.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] if the file cannot be written.
+pub fn write_anonymous_fetch_head(git_dir: &Path, tip: ObjectId, source: &str) -> Result<()> {
+    let line = format!("{}\t\t{source}\n", tip.to_hex());
+    std::fs::write(git_dir.join("FETCH_HEAD"), line).map_err(Error::Io)
+}
 
 /// Collect 40-character hex object IDs from `FETCH_HEAD` content for lines that are **for merge**.
 ///
