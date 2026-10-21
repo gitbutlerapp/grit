@@ -335,7 +335,71 @@ fn diff_ops_to_edit_spans(ops: &[similar::DiffOp]) -> Vec<EditSpan> {
     out
 }
 
+fn diff_ops_to_ignorable_edit_spans<F>(
+    ops: &[similar::DiffOp],
+    old_lines: &[&str],
+    new_lines: &[&str],
+    is_ignorable_change: F,
+) -> Vec<EditSpan>
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
+    use similar::DiffOp;
+    let mut out = Vec::new();
+    for op in ops {
+        match *op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete {
+                old_index,
+                old_len,
+                new_index,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: 0,
+                    skip_in_output: is_ignorable_change(removed, &[]),
+                });
+            }
+            DiffOp::Insert {
+                old_index,
+                new_index,
+                new_len,
+            } => {
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: 0,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(&[], added),
+                });
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(removed, added),
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Unified hunk body using Git's xdiff engine (no `---` / `+++`).
+#[allow(clippy::too_many_arguments)]
 fn git_xdiff_unified_body_raw(
     old_content: &str,
     new_content: &str,
@@ -10015,23 +10079,7 @@ pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str
 /// Normalise one line like Git's `-b` / `--ignore-space-change`.
 #[must_use]
 pub fn normalize_ignore_space_change_line(line: &str) -> String {
-    let mut result = String::with_capacity(line.len());
-    let mut in_space = false;
-    for c in line.chars() {
-        if c.is_whitespace() {
-            if !in_space {
-                result.push(' ');
-                in_space = true;
-            }
-        } else {
-            result.push(c);
-            in_space = false;
-        }
-    }
-    while result.ends_with(' ') {
-        result.pop();
-    }
-    result
+    super::whitespace_mode::normalize_ignore_space_change_line(line)
 }
 
 /// Normalise text like Git's `-b` / `--ignore-space-change`: on each line, collapse runs of

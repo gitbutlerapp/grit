@@ -69,6 +69,7 @@ pub use tree_content::{
     tree_diff_contents_parallel, tree_diff_stat_parallel, tree_diff_structured_parallel,
     TreeDiffContent, TreeDiffStructured,
 };
+pub use whitespace_mode::{normalize_ignore_space_change_line, WhitespaceMode};
 
 pub mod bloom {
     //! bloom API (re-exported at this path).

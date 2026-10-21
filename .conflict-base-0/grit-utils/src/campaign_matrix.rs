@@ -5,6 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
+use crate::campaign_diff_scenarios::append_diff_output_benchmark_scenarios;
 use crate::campaign_prep::{
     ensure_campaign_hot_path, load_campaign_hot_path_meta, reset_campaign_worktree_clean,
     restore_campaign_worktree_to_main, switch_wide_meta, sync_grit_index_to_git,
@@ -85,7 +86,7 @@ pub fn run_fixture_cli_matrix(
     hyperfine: &Path,
     git: &Path,
     grit: &Path,
-    bench_exe: &Path,
+    _bench_exe: &Path,
     cfg: &RunConfig,
     fixture: &CampaignFixture,
     smoke: bool,
@@ -260,6 +261,18 @@ pub fn run_fixture_cli_matrix(
         &fixture.worktree,
     )?);
 
+    append_diff_output_benchmark_scenarios(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        fixture.id,
+        &fixture.label,
+        &fixture.worktree,
+        smoke,
+        &mut out,
+    )?;
+
     let log_limit: usize = if smoke { 20 } else { 1000 };
     let page_size = LOG_BENCH_GRIT_PAGE_COUNT.max(1);
     let log_pages = log_limit.div_ceil(page_size);
@@ -291,66 +304,6 @@ pub fn run_fixture_cli_matrix(
         &fixture.worktree,
         log_allows_grit_failure,
     )?);
-
-    if !smoke {
-        let patch_limit = 200;
-        let grit_patch = shell_command(
-            bench_exe,
-            &[
-                "drive".into(),
-                "log-patch".into(),
-                fixture.worktree.display().to_string(),
-                patch_limit.to_string(),
-            ],
-        );
-        let log_patch = Scenario {
-            id: sid(fixture.id, "log-patch"),
-            group: "log".into(),
-            fixture: fixture.label.clone(),
-            description: format!("log -p over {patch_limit} commits"),
-            grit_argv: sh_script(grit_patch),
-            git_argv: vec!["log".into(), "-p".into(), format!("-{patch_limit}")],
-            driver: Driver::Lib,
-            prepare_kind: None,
-            grit_via_shell: true,
-            git_via_shell: false,
-        };
-        if matches!(fixture.id, "git-dot-git" | "chromium-synth" | "linux") {
-            let message = match fixture.id {
-                "git-dot-git" => {
-                    "grit log-patch on git.git exceeds factory campaign time budget; git side timed for ratio ledger"
-                }
-                "chromium-synth" => {
-                    "grit log-patch on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
-                }
-                _ => {
-                    "grit log-patch on linux exceeds factory campaign time budget; git side timed for ratio ledger"
-                }
-            };
-            out.push(run_scenario_git_only_with_grit_failure(
-                hyperfine,
-                git,
-                grit,
-                cfg,
-                &log_patch,
-                &fixture.worktree,
-                BenchFailure {
-                    kind: "runtime_cap".into(),
-                    message: message.into(),
-                },
-            )?);
-        } else {
-            out.push(run_matrix_scenario(
-                hyperfine,
-                git,
-                grit,
-                cfg,
-                &log_patch,
-                &fixture.worktree,
-                log_allows_grit_failure,
-            )?);
-        }
-    }
 
     if !smoke && fixture.id == "git-dot-git" {
         append_git_dot_git_path_limited_rev_scenarios(
