@@ -1,6 +1,8 @@
 //! Change ids as revision specs (prefix resolution via rev-parse).
 
-use grit_lib::change_id::{set_change_id, ChangeId};
+use std::collections::HashSet;
+
+use grit_lib::change_id::{find_commits_by_change_id_prefix, set_change_id, ChangeId};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
@@ -11,6 +13,45 @@ use grit_test_support::git;
 
 fn open_repo(dir: &std::path::Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open")
+}
+
+fn write_headerless_commit(
+    repo: &Repository,
+    parent: Option<grit_lib::objects::ObjectId>,
+    message: &str,
+) -> grit_lib::objects::ObjectId {
+    let tree = parent
+        .and_then(|p| {
+            repo.odb()
+                .read(&p)
+                .ok()
+                .and_then(|o| parse_commit(&o.data).ok())
+        })
+        .map(|c| c.tree)
+        .unwrap_or_else(|| {
+            grit_lib::objects::ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+                .unwrap()
+        });
+    let mut parents = Vec::new();
+    if let Some(p) = parent {
+        parents.push(p);
+    }
+    let data = CommitData {
+        tree,
+        parents,
+        author: "T <t@example.com> 1 +0000".into(),
+        committer: "T <t@example.com> 1 +0000".into(),
+        author_raw: Vec::new(),
+        committer_raw: Vec::new(),
+        encoding: None,
+        message: format!("{message}\n"),
+        raw_message: None,
+        extra_headers: Vec::new(),
+    };
+    let bytes = serialize_commit(&data);
+    repo.odb()
+        .write(ObjectKind::Commit, &bytes)
+        .expect("write commit")
 }
 
 fn write_commit_with_id(
@@ -237,6 +278,69 @@ fn ambiguous_change_id_prefix_lists_candidates() {
     git(dir.path(), &["update-ref", "refs/heads/c2", &cb.to_hex()]);
 
     let err = resolve_revision(&repo, "zzzzzzzzzzzzzzzz").expect_err("prefix ambiguous");
+    match err {
+        Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
+            assert_eq!(candidates.len(), 2);
+        }
+        other => panic!("expected AmbiguousChangeId, got {other:?}"),
+    }
+}
+
+#[test]
+fn ambiguous_when_derived_prefix_collides_with_stored_prefix() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    git(
+        dir.path(),
+        &[
+            "commit",
+            "--allow-empty",
+            "-m",
+            "root",
+            "--author",
+            "T <t@example.com>",
+        ],
+    );
+    let repo = open_repo(dir.path());
+    let root = resolve_revision(&repo, "HEAD").expect("head");
+    let headerless = write_headerless_commit(&repo, Some(root), "headerless");
+    let derived = ChangeId::derived_from_commit_id(&headerless);
+    let prefix = derived.short(4);
+    assert!(
+        grit_lib::change_id::is_change_id_spec_token(&prefix),
+        "test prefix must be a valid change-id token"
+    );
+    let mut stored_id_str = prefix.to_string();
+    while stored_id_str.len() < 32 {
+        stored_id_str.push('z');
+    }
+    let stored_id = ChangeId::parse_reverse_hex(&stored_id_str).expect("stored id");
+    assert_ne!(
+        ChangeId::derived_from_commit_id(&headerless),
+        stored_id,
+        "stored id must not equal headerless derived id"
+    );
+    let with_header = write_commit_with_id(&repo, Some(root), "stored header", &stored_id);
+    git(
+        dir.path(),
+        &["update-ref", "refs/heads/headerless", &headerless.to_hex()],
+    );
+    git(
+        dir.path(),
+        &["update-ref", "refs/heads/stored", &with_header.to_hex()],
+    );
+
+    let matches = find_commits_by_change_id_prefix(&repo, &prefix).expect("lookup");
+    assert_eq!(
+        matches.len(),
+        2,
+        "prefix {prefix} must match headerless derived and stored header"
+    );
+    let oids: HashSet<_> = matches.iter().map(|m| m.oid).collect();
+    assert!(oids.contains(&headerless));
+    assert!(oids.contains(&with_header));
+
+    let err = resolve_revision(&repo, &prefix).expect_err("ambiguous");
     match err {
         Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
             assert_eq!(candidates.len(), 2);

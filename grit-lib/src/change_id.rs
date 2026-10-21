@@ -5,6 +5,7 @@
 //! derived from a commit id (Jujutsu-compatible), or controlled via
 //! [`ChangeIdPolicy`] and repository config.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use thiserror::Error;
@@ -307,26 +308,40 @@ pub fn find_commits_by_change_id_prefix(
     let mut graph = CommitGraph::with_commit_graph(repo, false, true);
     let (_, order) = walk_closure_ordered(&mut graph, &tips)?;
 
-    let mut derived_hits = Vec::new();
+    let mut matches = Vec::new();
+    let mut seen = HashSet::new();
     for oid in &order {
         let derived = ChangeId::derived_from_commit_id(oid);
         if derived.as_str().starts_with(prefix) {
-            derived_hits.push(*oid);
+            let id = effective_change_id_for_commit(repo, *oid)?;
+            if id.as_str().starts_with(prefix) && seen.insert(*oid) {
+                matches.push(ChangeIdMatch {
+                    oid: *oid,
+                    change_id: id,
+                });
+            }
+            continue;
+        }
+        let Ok(obj) = repo.read_replaced(oid) else {
+            continue;
+        };
+        if obj.kind != ObjectKind::Commit {
+            continue;
+        }
+        if !commit_bytes_contain_change_id_header(&obj.data) {
+            continue;
+        }
+        let Ok(data) = parse_commit(&obj.data) else {
+            continue;
+        };
+        let resolved = resolved_change_id(oid, &data);
+        if resolved.id.as_str().starts_with(prefix) && seen.insert(*oid) {
+            matches.push(ChangeIdMatch {
+                oid: *oid,
+                change_id: resolved.id,
+            });
         }
     }
-
-    let mut matches = if derived_hits.is_empty() {
-        find_stored_change_id_matches(repo, &order, prefix)?
-    } else {
-        let mut out = Vec::with_capacity(derived_hits.len());
-        for oid in derived_hits {
-            let id = effective_change_id_for_commit(repo, oid)?;
-            if id.as_str().starts_with(prefix) {
-                out.push(ChangeIdMatch { oid, change_id: id });
-            }
-        }
-        out
-    };
 
     matches.sort_by_key(|m| m.oid.to_hex());
     Ok(matches)
@@ -342,36 +357,6 @@ fn effective_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<Ch
         return Ok(resolved_change_id(&oid, &data).id);
     }
     Ok(ChangeId::derived_from_commit_id(&oid))
-}
-
-fn find_stored_change_id_matches(
-    repo: &Repository,
-    order: &[ObjectId],
-    prefix: &str,
-) -> Result<Vec<ChangeIdMatch>> {
-    let mut matches = Vec::new();
-    for oid in order {
-        let Ok(obj) = repo.read_replaced(oid) else {
-            continue;
-        };
-        if obj.kind != ObjectKind::Commit {
-            continue;
-        }
-        if !commit_bytes_contain_change_id_header(&obj.data) {
-            continue;
-        }
-        let Ok(data) = parse_commit(&obj.data) else {
-            continue;
-        };
-        let resolved = resolved_change_id(oid, &data);
-        if resolved.id.as_str().starts_with(prefix) {
-            matches.push(ChangeIdMatch {
-                oid: *oid,
-                change_id: resolved.id,
-            });
-        }
-    }
-    Ok(matches)
 }
 
 /// Resolve a change-id token (full id or unique prefix) to a commit oid.
