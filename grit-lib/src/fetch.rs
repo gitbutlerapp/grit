@@ -2220,8 +2220,9 @@ mod fetch_advertised_ref_tests {
         let c = ObjectId::from_hex("cccccccccccccccccccccccccccccccccccccccc").unwrap();
         std::fs::write(git_dir.join("refs/tags/loose"), format!("{}\n", a.to_hex()))
             .expect("loose tag");
+        const PACKED_REFS: &str = "packed-refs";
         std::fs::write(
-            git_dir.join("packed-refs"),
+            git_dir.join(PACKED_REFS),
             format!(
                 "# pack-refs with: peeled fully-peeled sorted \n{} refs/tags/moved\n{} refs/tags/packed\n",
                 a.to_hex(),
