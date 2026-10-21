@@ -363,7 +363,7 @@ fn read_process_rss_bytes(pid: u32) -> Result<Option<u64>> {
     let path = format!("/proc/{pid}/status");
     let status = match std::fs::read_to_string(&path) {
         Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if is_vanished_process_error(&e) => return Ok(None),
         Err(e) => return Err(e.into()),
     };
     for line in status.lines() {
@@ -378,6 +378,17 @@ fn read_process_rss_bytes(pid: u32) -> Result<Option<u64>> {
         }
     }
     Ok(None)
+}
+
+/// Whether reading `/proc/<pid>/…` failed because the process exited meanwhile.
+///
+/// A process that exits after it was listed as a descendant either has no
+/// `/proc` entry anymore (`NotFound`) or fails the read with `ESRCH` while it
+/// is being torn down; both mean "nothing left to sample", not a harness error.
+#[cfg(unix)]
+fn is_vanished_process_error(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::NotFound
+        || err.raw_os_error() == Some(nix::errno::Errno::ESRCH as i32)
 }
 
 #[cfg(test)]
@@ -407,6 +418,48 @@ mod tests {
         } else {
             assert_eq!(rss_bytes_from_rusage_max_rss(1024), 1024 * 1024);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vanished_process_errors_are_not_harness_failures() {
+        let esrch = std::io::Error::from_raw_os_error(nix::errno::Errno::ESRCH as i32);
+        assert!(is_vanished_process_error(&esrch));
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(is_vanished_process_error(&missing));
+        let denied = std::io::Error::from_raw_os_error(nix::errno::Errno::EACCES as i32);
+        assert!(!is_vanished_process_error(&denied));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exited_process_has_no_rss_sample() {
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+        let pid = child.id();
+        child.wait().expect("wait true");
+        assert_eq!(read_process_rss_bytes(pid).expect("read rss"), None);
+        assert_eq!(process_tree_rss_bytes(pid).expect("tree rss"), 0);
+    }
+
+    /// Prepare steps spawn many short-lived processes; sampling the tree while
+    /// they exit must never fail the run.
+    #[cfg(unix)]
+    #[test]
+    fn sampling_a_tree_of_exiting_processes_never_errors() {
+        let mut shell = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("i=0; while [ $i -lt 4000 ]; do /bin/true; i=$((i+1)); done")
+            .spawn()
+            .expect("spawn shell loop");
+        let pid = shell.id();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && shell.try_wait().expect("poll").is_none() {
+            process_tree_rss_bytes(pid).expect("sample process tree");
+        }
+        let _ = shell.kill();
+        let _ = shell.wait();
     }
 
     #[cfg(unix)]
