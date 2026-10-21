@@ -29,11 +29,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install reftable-capable Git (>= 2.45)
-        run: |
-          sudo add-apt-repository -y ppa:git-core/ppa
-          sudo apt-get update
-          sudo apt-get install -y git
-          git version
+        run: ./scripts/ci-install-git.sh
 
       - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
         run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
@@ -195,11 +191,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install reftable-capable Git (>= 2.45)
-        run: |
-          sudo add-apt-repository -y ppa:git-core/ppa
-          sudo apt-get update
-          sudo apt-get install -y git
-          git version
+        run: ./scripts/ci-install-git.sh
 
       - name: Install hyperfine (grit-bench scenario suite)
         run: |
@@ -231,11 +223,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install reftable-capable Git (>= 2.45)
-        run: |
-          sudo add-apt-repository -y ppa:git-core/ppa
-          sudo apt-get update
-          sudo apt-get install -y git
-          git version
+        run: ./scripts/ci-install-git.sh
 
       - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
         run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
@@ -270,11 +258,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install reftable-capable Git (>= 2.45)
-        run: |
-          sudo add-apt-repository -y ppa:git-core/ppa
-          sudo apt-get update
-          sudo apt-get install -y git
-          git version
+        run: ./scripts/ci-install-git.sh
 
       - name: Install hyperfine (grit-bench network smoke)
         run: |
@@ -342,11 +326,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install reftable-capable Git (>= 2.45)
-        run: |
-          sudo add-apt-repository -y ppa:git-core/ppa
-          sudo apt-get update
-          sudo apt-get install -y git
-          git version
+        run: ./scripts/ci-install-git.sh
 
       - name: Install hyperfine (grit-bench network smoke)
         run: |
