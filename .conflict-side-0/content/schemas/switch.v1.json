@@ -1,0 +1,29 @@
+{
+  "$id": "https://grit-scm.com/schemas/switch/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit switch`.",
+  "properties": {
+    "branch": {
+      "type": "string"
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created": {
+      "type": "boolean"
+    },
+    "detached": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "branch",
+    "created",
+    "detached"
+  ],
+  "title": "SwitchOutcome",
+  "type": "object"
+}

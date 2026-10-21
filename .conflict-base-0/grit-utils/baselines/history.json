@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-17T04:02:37.490099625Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.11",
+    "grit_commit": "7bc5b7dd62ef71aea0465ea6fcd6cbc7deb7e9ce"
+  },
+  "scenarios": [
+    {
+      "id": "history-reword-1000",
+      "group": "history",
+      "fixture": "history-rewrite-prod",
+      "description": "reword deep commit vs git rebase -i (system git < 2.54, no git history)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 6617.380090366666,
+        "median_ms": 6527.7338977,
+        "stddev_ms": 155.7709309644188,
+        "min_ms": 6527.157812699999,
+        "max_ms": 6797.2485607,
+        "runs_ms": [
+          6527.157812699999,
+          6527.7338977,
+          6797.2485607
+        ]
+      },
+      "grit": {
+        "mean_ms": 188.14769227333332,
+        "median_ms": 185.91845444,
+        "stddev_ms": 6.643828812813902,
+        "min_ms": 182.26199744,
+        "max_ms": 201.04925944,
+        "runs_ms": [
+          186.02619543999998,
+          185.81071344,
+          182.26199744,
+          188.65478644000004,
+          201.04925944,
+          185.08320144
+        ]
+      },
+      "ratio": 0.02848131638844945
+    },
+    {
+      "id": "history-reword-1000-rebase",
+      "group": "history",
+      "fixture": "history-rewrite-prod",
+      "description": "reword deep commit vs scripted git rebase -i (rebase baseline)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 6765.730800886668,
+        "median_ms": 6719.0127132200005,
+        "stddev_ms": 675.4945766454512,
+        "min_ms": 6114.80801322,
+        "max_ms": 7463.37167622,
+        "runs_ms": [
+          7463.37167622,
+          6114.80801322,
+          6719.0127132200005
+        ]
+      },
+      "grit": {
+        "mean_ms": 185.0040163742857,
+        "median_ms": 184.94147565999998,
+        "stddev_ms": 4.724614993473989,
+        "min_ms": 179.00662066000004,
+        "max_ms": 190.76650266000004,
+        "runs_ms": [
+          181.52560166000004,
+          189.19979066000002,
+          190.76650266000004,
+          180.61309566000003,
+          179.00662066000004,
+          188.97502766,
+          184.94147565999998
+        ]
+      },
+      "ratio": 0.0275250968488448
+    },
+    {
+      "id": "history-reword-update-refs-head",
+      "group": "history",
+      "fixture": "history-rewrite-prod",
+      "description": "reword with --update-refs=head vs git history",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 6598.590562193334,
+        "median_ms": 6559.471388860001,
+        "stddev_ms": 82.08921736214486,
+        "min_ms": 6543.37777886,
+        "max_ms": 6692.92251886,
+        "runs_ms": [
+          6559.471388860001,
+          6692.92251886,
+          6543.37777886
+        ]
+      },
+      "grit": {
+        "mean_ms": 197.87886569999998,
+        "median_ms": 197.9425507,
+        "stddev_ms": 1.1203211935681687,
+        "min_ms": 196.24583470000002,
+        "max_ms": 199.1655767,
+        "runs_ms": [
+          197.0088907,
+          196.24583470000002,
+          198.9677907,
+          199.1655767,
+          197.97759870000002,
+          197.90750269999998
+        ]
+      },
+      "ratio": 0.030176600973695428
+    },
+    {
+      "id": "history-drop-100",
+      "group": "history",
+      "fixture": "history-rewrite-prod",
+      "description": "drop commit vs git rebase -i drop",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 762.88845932,
+        "median_ms": 758.0339793200001,
+        "stddev_ms": 26.30506420981561,
+        "min_ms": 739.3487603200001,
+        "max_ms": 791.2826383200002,
+        "runs_ms": [
+          739.3487603200001,
+          758.0339793200001,
+          791.2826383200002
+        ]
+      },
+      "grit": {
+        "mean_ms": 169.89865451142856,
+        "median_ms": 169.90258294000003,
+        "stddev_ms": 2.403464845066171,
+        "min_ms": 167.27074794,
+        "max_ms": 173.21665994000003,
+        "runs_ms": [
+          172.07292894,
+          167.27074794,
+          173.21665994000003,
+          171.37605094000003,
+          168.16856694,
+          169.90258294000003,
+          167.28304394
+        ]
+      },
+      "ratio": 0.22413584031208256
+    },
+    {
+      "id": "history-fixup-500",
+      "group": "history",
+      "fixture": "history-rewrite-prod",
+      "description": "fixup with one staged file vs git rebase fixup",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 152.5680583542857,
+        "median_ms": 164.21783064000002,
+        "stddev_ms": 38.23949220454705,
+        "min_ms": 66.40947764,
+        "max_ms": 173.50176464000003,
+        "runs_ms": [
+          172.50272364000003,
+          163.70910164000003,
+          162.89872864000003,
+          164.21783064000002,
+          66.40947764,
+          173.50176464000003,
+          164.73678164000003
+        ]
+      },
+      "grit": {
+        "mean_ms": 560.8972348733333,
+        "median_ms": 562.72832854,
+        "stddev_ms": 7.608331513936697,
+        "min_ms": 552.54044954,
+        "max_ms": 567.42292654,
+        "runs_ms": [
+          552.54044954,
+          562.72832854,
+          567.42292654
+        ]
+      },
+      "ratio": 3.4267188060328158
+    },
+    {
+      "id": "history-squash-10",
+      "group": "history",
+      "fixture": "history-rewrite-prod",
+      "description": "squash newest commits vs git rebase fixup chain",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 40.65986405454546,
+        "median_ms": 43.0163126,
+        "stddev_ms": 8.578855156478415,
+        "min_ms": 14.9286406,
+        "max_ms": 44.9333386,
+        "runs_ms": [
+          43.9447926,
+          42.36998760000001,
+          43.0163126,
+          44.9333386,
+          42.263977600000004,
+          42.976062600000006,
+          41.99446160000001,
+          43.1185336,
+          43.5881376,
+          14.9286406,
+          44.1242596
+        ]
+      },
+      "grit": {
+        "mean_ms": 34.82224571000001,
+        "median_ms": 34.659224460000004,
+        "stddev_ms": 1.0567202618007319,
+        "min_ms": 33.513238460000004,
+        "max_ms": 36.36706346000001,
+        "runs_ms": [
+          35.79869946000001,
+          34.400632460000004,
+          34.148411460000005,
+          33.55335846,
+          33.513238460000004,
+          34.57660646000001,
+          34.74184246000001,
+          34.84259146,
+          36.36706346000001,
+          36.08731446000001,
+          33.633732460000004,
+          36.20345746
+        ]
+      },
+      "ratio": 0.8057228145584939
+    }
+  ]
+}

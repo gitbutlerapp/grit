@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Created tag v2.0\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"create\",\"name\":\"v2.0\",\"oid\":\"e95b0bb5cac1b12984f68a9f3f2ea3b1bea29691\",\"kind\":\"annotated\",\"peeled\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Created tag `v2.0` (annotated) at `e95b0bb` → `b5ea30d`.\n",
+    "stderr": ""
+  }
+}

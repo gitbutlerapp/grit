@@ -1,0 +1,112 @@
+{
+  "$id": "https://grit-scm.com/schemas/history.reword/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "HeadPair": {
+      "description": "`HEAD` commit before and after rewrite.",
+      "properties": {
+        "new": {
+          "description": "Commit OID at `HEAD` after rewrite (full hex).",
+          "type": "string"
+        },
+        "old": {
+          "description": "Commit OID at `HEAD` before rewrite (full hex).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "new",
+        "old"
+      ],
+      "type": "object"
+    },
+    "RefPair": {
+      "description": "One ref tip before and after rewrite.",
+      "properties": {
+        "name": {
+          "description": "Full ref name.",
+          "type": "string"
+        },
+        "new": {
+          "description": "New tip OID (full hex).",
+          "type": "string"
+        },
+        "old": {
+          "description": "Previous tip OID (full hex).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "new",
+        "old"
+      ],
+      "type": "object"
+    },
+    "RewrittenPair": {
+      "description": "One commit OID before and after rewrite.",
+      "properties": {
+        "new": {
+          "description": "Replacement commit OID (full hex), or JSON `null` when the commit was dropped.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old": {
+          "description": "Commit OID before rewrite (full hex).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "old"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit history reword`.",
+  "properties": {
+    "dry_run": {
+      "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
+      "type": "boolean"
+    },
+    "head": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HeadPair"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
+    },
+    "operation": {
+      "description": "Operation name (`reword`).",
+      "type": "string"
+    },
+    "refs": {
+      "description": "Planned or applied ref tip updates.",
+      "items": {
+        "$ref": "#/definitions/RefPair"
+      },
+      "type": "array"
+    },
+    "rewritten": {
+      "description": "Original and replacement commit OIDs for every rewritten commit.",
+      "items": {
+        "$ref": "#/definitions/RewrittenPair"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "dry_run",
+    "head",
+    "operation",
+    "refs",
+    "rewritten"
+  ],
+  "title": "HistoryRewordOutcome",
+  "type": "object"
+}

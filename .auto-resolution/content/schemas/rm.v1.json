@@ -1,0 +1,19 @@
+{
+  "$id": "https://grit-scm.com/schemas/rm/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "CLI outcome for `grit rm`.",
+  "properties": {
+    "removed": {
+      "description": "Paths removed from the index (and work tree unless `--cached`).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "removed"
+  ],
+  "title": "RmOutcome",
+  "type": "object"
+}

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Reverted 9244cbd → bbbca73 Revert \"third\"\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"source\":\"9244cbde6917078809df2efb49409a61e601fc8b\",\"oid\":\"bbbca732cb199d982cb6be0ecc71bacd855f0079\",\"subject\":\"Revert \\\"third\\\"\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Revert\n\n- `9244cbd` → `bbbca73` — Revert \"third\"\n",
+    "stderr": ""
+  }
+}
