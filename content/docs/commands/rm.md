@@ -8,7 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
-grit rm [--cached] [-f|--force] <path>...
+grit rm [--cached] [-f|--force] [--pathspec-from-file <file|->] [--pathspec-file-nul] <path>...
 ```
 
 ## Description
@@ -23,7 +23,9 @@ Directory pathspecs remove every tracked file under that directory; trailing sla
 
 | Option | Description |
 | --- | --- |
-| `<path>...` | Files or directories to remove (required). |
+| `<path>...` | Files or directories to remove (required unless `--pathspec-from-file` is set). |
+| `--pathspec-from-file` | Read pathspecs from a file, or `-` for stdin (same rules as Git). |
+| `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
 | `--cached` | Remove from the index only; keep the working tree copy. |
 | `-f`, `--force` | Remove even when paths have local modifications. |
 

@@ -8,7 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
-grit restore [--staged] [--worktree] [--source=<rev>] -- <path>…
+grit restore [--staged] [--worktree] [--source=<rev>] [--pathspec-from-file <file|->] [--pathspec-file-nul] -- <path>…
 ```
 
 ## Description
@@ -24,7 +24,9 @@ Discards local changes for tracked paths you name. By default, `grit restore` re
 
 | Option | Description |
 | --- | --- |
-| `<path>…` | One or more pathspecs (required). |
+| `<path>…` | One or more pathspecs (required unless `--pathspec-from-file` is set). |
+| `--pathspec-from-file` | Read pathspecs from a file, or `-` for stdin (same rules as Git). |
+| `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
 | `-S`, `--staged` | Restore the index. |
 | `-W`, `--worktree` | Restore the working tree. |
 | `--source` | Commit or tree to restore from. |

@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit add [--executable | --non-executable] [<path>...]
+grit add [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
 ```
 
 ## Description
@@ -26,6 +26,8 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 | Option | Description |
 | --- | --- |
 | `<path>...` | Files or directories to stage. Omit to stage every change. |
+| `--pathspec-from-file` | Read additional pathspecs from a file, or `-` for stdin (same rules as Git). |
+| `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
 | `--executable` | Stage listed regular files with mode `100755` in the index (requires at least one path). |
 | `--non-executable` | Stage listed regular files with mode `100644` in the index (requires at least one path). |
 

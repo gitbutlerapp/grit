@@ -8,8 +8,8 @@ order: 1
 ## Synopsis
 
 ```text
-grit clean [<path>...]
-grit clean -f [<path>...]
+grit clean [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
+grit clean -f [--pathspec-from-file <file|->] [<path>...]
 grit clean -f --ignored [<path>...]
 ```
 
@@ -28,6 +28,8 @@ With path arguments, only untracked paths matching those pathspecs are considere
 | Option | Description |
 | --- | --- |
 | `<path>...` | Limit cleaning to these paths. Omit to scan the whole tree. |
+| `--pathspec-from-file` | Read pathspecs from a file, or `-` for stdin (same rules as Git). |
+| `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
 | `-f`, `--force` | Delete untracked paths instead of only listing them. |
 | `--ignored` | Remove ignored files and directories as well. |
 
