@@ -447,7 +447,18 @@ fn short_change_id(id: &str) -> &str {
 pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyhow::Result<()> {
     outln!(w, "## Commit");
     outln!(w);
-    let short = short_hex(&outcome.oid);
+    if outcome.dry_run {
+        outln!(
+            w,
+            "- **Dry run** — would commit on **`{}`**",
+            outcome.branch
+        );
+        outln!(w, "- **Subject:** {}", outcome.subject);
+        outln!(w, "- **Files:** {}", outcome.files.len());
+        return Ok(());
+    }
+    let oid = outcome.oid.as_deref().unwrap_or("");
+    let short = short_hex(oid);
     if outcome.amended {
         outln!(
             w,

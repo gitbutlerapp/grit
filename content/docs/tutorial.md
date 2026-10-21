@@ -61,7 +61,7 @@ $ grit commit "Start the project"
 2 changes committed
 ```
 
-There is no separate staging step to remember. [`grit add`](../add/) exists for when you want to stage particular files and check them in `grit status` first, but `grit commit` always records every change.
+By default `grit commit` records every change in one step. When you need tighter control, use [`grit add`](../add/) (`--dry-run`, `-u`, or path lists) and [`grit commit --staged`](../commit/) or `grit commit -m "…" -- <paths>` to commit only part of the work while leaving other staged edits in the index.
 
 Each grit commit also gets a stable [change id](../change-ids/) that stays with the same logical change when you amend or rewrite history; `grit log` shows a short `change …` prefix beside each commit.
 

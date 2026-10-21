@@ -27,6 +27,7 @@ pub struct AddOutcome {
     pub added: Vec<String>,
     pub modified: Vec<String>,
     pub removed: Vec<String>,
+    pub intent_to_add: Vec<String>,
     pub dry_run: bool,
     /// Total paths touched (same as `staged`; kept for one release).
     pub count: usize,
@@ -45,6 +46,7 @@ impl AddOutcome {
             added: outcome.added,
             modified: outcome.modified,
             removed: outcome.removed,
+            intent_to_add: outcome.intent_to_add,
             dry_run,
             count,
             staged: count,
@@ -91,6 +93,7 @@ impl AddOutcome {
         out.extend(self.added.iter().map(String::as_str));
         out.extend(self.modified.iter().map(String::as_str));
         out.extend(self.removed.iter().map(String::as_str));
+        out.extend(self.intent_to_add.iter().map(String::as_str));
         out
     }
 }
@@ -99,6 +102,8 @@ pub fn run(
     args: &PathspecArgs,
     update: bool,
     dry_run: bool,
+    intent_to_add: bool,
+    force: bool,
     executable: bool,
     non_executable: bool,
 ) -> Result<AddOutcome> {
@@ -111,6 +116,12 @@ pub fn run(
     if (executable || non_executable) && no_paths {
         bail!("--executable and --non-executable require at least one path");
     }
+    if intent_to_add && no_paths {
+        bail!("--intent-to-add requires at least one path");
+    }
+    if intent_to_add && update {
+        bail!("--intent-to-add cannot be used with --update");
+    }
     let outcome = stage_with_hint(
         &repo,
         resolved,
@@ -120,6 +131,8 @@ pub fn run(
             StageMode::All
         },
         dry_run,
+        intent_to_add,
+        force,
         if executable {
             StageExecutableHint::SetExecutable
         } else if non_executable {
@@ -136,6 +149,8 @@ fn stage_with_hint(
     resolved: grit_lib::worktree::pathspec::ResolvedPathspecs,
     mode: StageMode,
     dry_run: bool,
+    intent_to_add: bool,
+    force_ignored: bool,
     executable_hint: StageExecutableHint,
 ) -> Result<StageOutcome> {
     let (pathspecs, pathspec_sources) = if resolved.is_entire_tree() {
@@ -150,6 +165,8 @@ fn stage_with_hint(
         executable_hint,
         staging_thresholds: None,
         dry_run,
+        intent_to_add,
+        force_ignored,
     };
     stage_paths(repo, &opts, &mut NullProgress).map_err(map_add_error)
 }
@@ -164,8 +181,8 @@ fn map_add_error(err: LibError) -> anyhow::Error {
                 msg.push_str(&path);
                 msg.push('\n');
             }
-            msg.push_str("(ignored paths cannot be staged; adjust ignore rules or use a future force option)");
-            anyhow::anyhow!(msg)
+            msg.push_str("Use --force if you really want to add them.");
+            anyhow::anyhow!("{msg}")
         }
         other => json_error::map_lib_error(other),
     }

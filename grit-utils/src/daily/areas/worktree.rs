@@ -10,8 +10,8 @@ use super::super::helpers::{
     prepare_worktree_status_dirty, reset_hard_bench, reset_mixed_bench, restore_paths_bench,
     rm_dir_bench, scenario_spec, setup_big_blobs, setup_deep_tree, setup_hot_path_switch,
     setup_init_empty, setup_shape_worktree, setup_small, setup_stash_repo, setup_synth100k,
-    stash_bench, status_clean_bench, status_dirty_bench, status_paths_bench,
-    status_renamed_bench, switch_bench,
+    stash_bench, status_clean_bench, status_dirty_bench, status_paths_bench, status_renamed_bench,
+    switch_bench,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;

@@ -7,9 +7,13 @@
 use crate::change_id::{change_id, set_change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::diff::refresh_index_stat_content_verified_with_rules;
-use crate::diff::{diff_tree_path_change_count, zero_oid};
+use crate::diff::{
+    diff_tree_path_change_count, diff_trees_with_renames, flatten_tree_entries, zero_oid,
+    DiffEntry, DiffStatus,
+};
 use crate::error::{Error, Result};
-use crate::hooks::{run_commit_hook_checked, CommitHookEnv};
+use crate::hooks::{run_commit_hook, CommitHookEnv, HookError, HookName, HookResult};
+use crate::ident::parse_signature_times;
 use crate::index::Index;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::pathspec::{pathspec_is_exclude, ResolvedPathspecs};
@@ -23,14 +27,37 @@ use crate::signing::{
     extra_headers_without_commit_signatures, should_sign_commit, sign_serialized_commit, GpgConfig,
 };
 use crate::state::{finish_merge_state, read_merge_heads, resolve_head, HeadState};
+use crate::stripspace::{process, Mode};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{
     cache_tree_extension_valid, is_empty_tree_oid, write_tree_update_index, WriteTreeFlags,
 };
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, Mutex};
+
+/// Whether commit hooks run before the object is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HookPolicy {
+    /// Run `pre-commit` and `commit-msg` when installed (default).
+    #[default]
+    Run,
+    /// Skip `pre-commit` and `commit-msg` (`--no-verify`); `post-commit` still runs.
+    SkipVerify,
+}
+
+/// Author name, email, and date suffix from a written commit header line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitAuthorInfo {
+    /// Author display name.
+    pub name: String,
+    /// Author email.
+    pub email: String,
+    /// Git timestamp suffix (`<unix> <+HHMM>`).
+    pub date: String,
+}
 
 /// Inputs for [`create_commit`].
 #[derive(Debug, Clone)]
@@ -59,6 +86,35 @@ pub struct CommitRequest {
     /// [`CommitOutcome::changes`] (issue #1064).
     #[doc(hidden)]
     pub staged_change_count: Option<usize>,
+    /// Hook execution policy for `pre-commit` and `commit-msg`.
+    #[doc(alias = "no-verify")]
+    pub hooks: HookPolicy,
+    /// When true, compute the commit tree and file list without writing objects, updating refs, or running hooks.
+    pub dry_run: bool,
+}
+
+/// One path-level change that would be recorded in a commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitFile {
+    /// Primary path (`git diff --name-status` path column).
+    pub path: String,
+    /// Kind of change vs the parent commit tree.
+    pub status: DiffStatus,
+    /// Previous path for renames and copies.
+    pub old_path: Option<String>,
+}
+
+/// Planned commit contents and metadata (see [`plan_commit`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitPlan {
+    /// Paths that differ from the parent tree, in `git diff --name-status` order.
+    pub files: Vec<CommitFile>,
+    /// Parent OIDs that would be stored on the new commit.
+    pub parents: Vec<ObjectId>,
+    /// Author line that would be recorded.
+    pub author: CommitAuthorInfo,
+    /// Whether the computed tree OID equals the parent tree.
+    pub tree_unchanged: bool,
 }
 
 /// Which paths are included when recording a commit ([`commit_with_scope`]).
@@ -115,6 +171,31 @@ pub fn commit_with_scope(
     }
 }
 
+/// Preview a commit for `scope` without mutating the repository (objects, index on disk, refs, hooks).
+///
+/// Uses in-memory tree hashing ([`WriteTreePersistence::DryRun`]) and returns the same validation
+/// errors as [`commit_with_scope`] for detached HEAD, unmerged index, and nothing-to-commit.
+///
+/// # Errors
+///
+/// Same as [`commit_with_scope`].
+pub fn plan_commit(
+    repo: &Repository,
+    req: &CommitRequest,
+    scope: CommitScope,
+    progress: &mut dyn ProgressSink,
+) -> Result<CommitPlan> {
+    let mut req = req.clone();
+    req.dry_run = true;
+    let outcome = commit_with_scope(repo, &req, scope, progress)?;
+    Ok(CommitPlan {
+        files: outcome.files,
+        parents: outcome.parents,
+        author: outcome.author,
+        tree_unchanged: outcome.changes == 0,
+    })
+}
+
 fn commit_paths_scope(
     repo: &Repository,
     req: &CommitRequest,
@@ -157,6 +238,7 @@ fn commit_paths_scope(
             paths.sources.clone()
         },
         mode: StageMode::All,
+        dry_run: req.dry_run,
         ..StageOptions::default()
     };
 
@@ -211,10 +293,86 @@ pub struct CommitOutcome {
     pub branch: String,
     /// Parent commit OID, or `None` for the root commit on an unborn branch.
     pub parent: Option<ObjectId>,
+    /// Every parent OID stored in the new commit object (empty only before the first commit is written).
+    pub parents: Vec<ObjectId>,
+    /// Author recorded on the commit object.
+    pub author: CommitAuthorInfo,
+    /// Commit hooks that were installed and executed successfully during this commit.
+    pub hooks_run: Vec<HookName>,
     /// Number of path-level changes between the parent commit tree and this commit's tree.
     pub changes: usize,
     /// Stored `change-id` header when present on the new commit object.
     pub change_id: Option<ChangeId>,
+    /// Path-level changes vs the parent tree (`git diff --name-status` between parent and new tree).
+    pub files: Vec<CommitFile>,
+}
+
+/// Normalize a commit message body the same way [`create_commit`] does before hooks: stripspace,
+/// reject empty bodies, ensure a trailing newline.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when the cleaned body would be empty.
+pub fn normalize_commit_message(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    let processed = process(trimmed.as_bytes(), &Mode::Default);
+    let message = String::from_utf8(processed)
+        .map_err(|_| Error::Message("invalid commit message".into()))?;
+    if message.is_empty() {
+        return Err(Error::Message("empty commit message".into()));
+    }
+    let mut message = message;
+    if !message.ends_with('\n') {
+        message.push('\n');
+    }
+    Ok(message)
+}
+
+fn run_commit_hook_recorded(
+    repo: &Repository,
+    hook: HookName,
+    args: &[&str],
+    stdin_data: Option<&[u8]>,
+    commit_env: &CommitHookEnv<'_>,
+) -> std::result::Result<bool, HookError> {
+    match run_commit_hook(repo, hook.as_str(), args, stdin_data, commit_env)
+        .map_err(HookError::Internal)?
+    {
+        HookResult::Success => Ok(true),
+        HookResult::NotFound => Ok(false),
+        HookResult::Failed(status) => Err(HookError::Failed {
+            hook_name: hook.as_str().to_owned(),
+            status,
+        }),
+    }
+}
+
+fn author_info_from_header_line(line: &str) -> CommitAuthorInfo {
+    let line = line.trim();
+    let date = parse_signature_times(line)
+        .map(|p| {
+            let tz = &line[p.tz_hhmm_range];
+            format!("{} {tz}", p.unix_seconds)
+        })
+        .unwrap_or_default();
+    let contact_end = line.rfind('>').map(|i| i + 1).unwrap_or(line.len());
+    let contact = line[..contact_end].trim();
+    let (name, email) = if let Some(lt) = contact.find('<') {
+        if let Some(gt) = contact.find('>') {
+            (contact[..lt].trim(), contact[lt + 1..gt].trim())
+        } else {
+            (contact, "")
+        }
+    } else if contact.contains('@') && !contact.chars().any(char::is_whitespace) {
+        ("", contact)
+    } else {
+        (contact, "")
+    };
+    CommitAuthorInfo {
+        name: name.to_owned(),
+        email: email.to_owned(),
+        date,
+    }
 }
 
 /// Write a commit from the current index and advance the checked-out branch.
@@ -259,7 +417,8 @@ pub fn commit_worktree(
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
     let mut index = repo.load_index()?;
-    let staged = crate::porcelain::add::stage_for_commit_on_index(repo, &mut index, progress)?;
+    let staged =
+        crate::porcelain::add::stage_for_commit_on_index(repo, &mut index, progress, req.dry_run)?;
     if index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged);
     }
@@ -277,6 +436,148 @@ impl Drop for TempHookIndexFile {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
     }
+}
+
+fn commit_files_from_diff_entries(entries: &[DiffEntry]) -> Vec<CommitFile> {
+    let mut files: Vec<CommitFile> = entries
+        .iter()
+        .filter(|e| e.status != DiffStatus::Unmerged)
+        .map(|e| {
+            let (path, old_path) = match e.status {
+                DiffStatus::Renamed | DiffStatus::Copied => {
+                    (e.new_path.clone().unwrap_or_default(), e.old_path.clone())
+                }
+                DiffStatus::Deleted => (e.old_path.clone().unwrap_or_default(), None),
+                _ => (e.new_path.clone().unwrap_or_default(), None),
+            };
+            CommitFile {
+                path,
+                status: e.status,
+                old_path,
+            }
+        })
+        .collect();
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    files
+}
+
+fn commit_files_between_trees(
+    odb: &crate::odb::Odb,
+    old_tree: Option<&ObjectId>,
+    new_tree: &ObjectId,
+) -> Result<Vec<CommitFile>> {
+    let entries = diff_trees_with_renames(odb, old_tree, Some(new_tree), "", 50)?;
+    Ok(commit_files_from_diff_entries(&entries))
+}
+
+fn commit_files_index_vs_parent_tree(
+    odb: &crate::odb::Odb,
+    index: &Index,
+    parent_tree: Option<&ObjectId>,
+) -> Result<Vec<CommitFile>> {
+    let mut parent: BTreeMap<String, ObjectId> = BTreeMap::new();
+    if let Some(tree) = parent_tree {
+        for (path, _mode, oid) in flatten_tree_entries(odb, tree)? {
+            parent.insert(path, oid);
+        }
+    }
+    let mut files = Vec::new();
+    for entry in index.entries() {
+        if entry.stage() != 0 || entry.intent_to_add() {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        match parent.remove(&path) {
+            None => files.push(CommitFile {
+                path,
+                status: DiffStatus::Added,
+                old_path: None,
+            }),
+            Some(old_oid) if old_oid != entry.oid => files.push(CommitFile {
+                path,
+                status: DiffStatus::Modified,
+                old_path: None,
+            }),
+            _ => {}
+        }
+    }
+    for (path, _) in parent {
+        files.push(CommitFile {
+            path,
+            status: DiffStatus::Deleted,
+            old_path: None,
+        });
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
+fn finish_commit_dry_run(
+    repo: &Repository,
+    index: &mut Index,
+    req: &CommitRequest,
+    short_name: String,
+    parent: Option<ObjectId>,
+    parent_tree: Option<ObjectId>,
+    merge_heads: Vec<ObjectId>,
+    concluding_merge: bool,
+    amend_author: Option<String>,
+    amend_author_raw: Vec<u8>,
+    amend_parents: Vec<ObjectId>,
+    amend_default_message: Option<String>,
+    req_amend: bool,
+) -> Result<CommitOutcome> {
+    let files = commit_files_index_vs_parent_tree(repo.odb(), index, parent_tree.as_ref())?;
+
+    if !req.allow_empty && !req_amend {
+        if parent_tree.is_none() && index.entries.is_empty() {
+            return Err(Error::NothingToCommit);
+        }
+        if !concluding_merge && files.is_empty() {
+            return Err(Error::NothingToCommit);
+        }
+    }
+
+    let message = if req_amend && req.message.trim().is_empty() {
+        amend_default_message.unwrap_or_default()
+    } else {
+        normalize_commit_message(&req.message)?
+    };
+    if message.trim().is_empty() {
+        return Err(Error::Message("empty commit message".into()));
+    }
+
+    let (author, _author_raw) = if let Some(a) = amend_author {
+        (a, amend_author_raw)
+    } else {
+        (req.author.clone(), Vec::new())
+    };
+    let mut commit_parents = if req_amend {
+        amend_parents
+    } else {
+        parent.into_iter().collect()
+    };
+    if !req_amend {
+        for merge_head in merge_heads {
+            if !commit_parents.iter().any(|p| p == &merge_head) {
+                commit_parents.push(merge_head);
+            }
+        }
+    }
+    let author_info = author_info_from_header_line(&author);
+    let changes = files.len();
+
+    Ok(CommitOutcome {
+        oid: zero_oid(),
+        branch: short_name,
+        parent,
+        parents: commit_parents,
+        author: author_info,
+        hooks_run: Vec::new(),
+        changes,
+        change_id: None,
+        files,
+    })
 }
 
 fn create_commit_with_index(
@@ -350,6 +651,24 @@ fn create_commit_with_index(
         }
     }
 
+    if req.dry_run {
+        return finish_commit_dry_run(
+            repo,
+            index,
+            req,
+            short_name,
+            parent,
+            parent_tree,
+            merge_heads,
+            concluding_merge,
+            amend_author,
+            amend_author_raw,
+            amend_parents,
+            amend_default_message,
+            req.amend,
+        );
+    }
+
     let partial_commit = persist_index.is_some();
     let _temp_hook_index_guard = if partial_commit {
         let path = repo.git_dir().join(format!("next-index-{}", process::id()));
@@ -372,9 +691,15 @@ fn create_commit_with_index(
         git_prefix: None,
         extra_env: &[],
     };
-    run_commit_hook_checked(repo, "pre-commit", &[], None, &commit_env)?;
+    let mut hooks_run = Vec::new();
+    if req.hooks != HookPolicy::SkipVerify
+        && run_commit_hook_recorded(repo, HookName::PreCommit, &[], None, &commit_env)?
+    {
+        hooks_run.push(HookName::PreCommit);
+    }
 
     let tree = write_tree_update_index(repo.odb(), index, "", WriteTreeFlags::silent())?;
+    let commit_files = commit_files_between_trees(repo.odb(), parent_tree.as_ref(), &tree)?;
 
     if !req.allow_empty && !req.amend {
         if parent_tree.is_none() && is_empty_tree_oid(repo.odb(), &tree) {
@@ -389,25 +714,27 @@ fn create_commit_with_index(
         }
     }
 
-    let mut message = req.message.trim().to_owned();
-    if req.amend && message.is_empty() {
-        message = amend_default_message.unwrap_or_default();
-    }
-    if !message.is_empty() && !message.ends_with('\n') {
-        message.push('\n');
-    }
+    let mut message = if req.amend && req.message.trim().is_empty() {
+        amend_default_message.unwrap_or_default()
+    } else {
+        normalize_commit_message(&req.message)?
+    };
     let editmsg_path = repo.git_dir().join("COMMIT_EDITMSG");
     fs::write(&editmsg_path, &message).map_err(Error::Io)?;
     let editmsg_arg = commit_editmsg_hook_argument(repo, &editmsg_path);
-    run_commit_hook_checked(
-        repo,
-        "commit-msg",
-        &[editmsg_arg.as_str()],
-        None,
-        &commit_env,
-    )?;
+    if req.hooks != HookPolicy::SkipVerify
+        && run_commit_hook_recorded(
+            repo,
+            HookName::CommitMsg,
+            &[editmsg_arg.as_str()],
+            None,
+            &commit_env,
+        )?
+    {
+        hooks_run.push(HookName::CommitMsg);
+    }
     message = fs::read_to_string(&editmsg_path).map_err(Error::Io)?;
-    if message.is_empty() {
+    if message.trim().is_empty() {
         return Err(Error::Message("empty commit message".into()));
     }
     if !message.ends_with('\n') {
@@ -431,9 +758,10 @@ fn create_commit_with_index(
             }
         }
     }
+    let author_info = author_info_from_header_line(&author);
     let mut commit_data = CommitData {
         tree,
-        parents: commit_parents,
+        parents: commit_parents.clone(),
         author,
         committer: req.committer.clone(),
         author_raw,
@@ -452,8 +780,15 @@ fn create_commit_with_index(
                     set_change_id(&mut commit_data, &ChangeId::derived_from_commit_id(&tip));
                 }
             }
-        } else {
-            stamp_change_id_on_new_commit(repo, &policy, &mut commit_data)?;
+        } else if let Some(id) = policy
+            .id_for_new_commit(
+                &commit_data,
+                repo.odb().hash_algo(),
+                repo.change_id_generator().as_ref(),
+            )
+            .map_err(|e| Error::Message(format!("change id: {e}")))?
+        {
+            set_change_id(&mut commit_data, &id);
         }
     }
     let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
@@ -500,6 +835,8 @@ fn create_commit_with_index(
 
     let changes = if parent_tree.as_ref() == Some(&tree) {
         0
+    } else if !commit_files.is_empty() {
+        commit_files.len()
     } else if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
         // Large-index commits skip the tree diff for speed (issue #1064); smaller repos keep
         // accurate path counts for pre-staged and JSON output.
@@ -554,31 +891,24 @@ fn create_commit_with_index(
         repo.write_index(persist)?;
     }
 
-    let post_commit_env = CommitHookEnv {
-        index_file: Some(index_path.as_path()),
-        git_editor: Some(":"),
-        git_prefix: None,
-        extra_env: &[],
-    };
-    let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &post_commit_env);
+    if run_commit_hook_recorded(repo, HookName::PostCommit, &[], None, &commit_env)? {
+        hooks_run.push(HookName::PostCommit);
+    }
 
+    let stored_change_id = change_id(&commit_data);
     Ok(CommitOutcome {
         oid,
         branch: short_name,
         parent,
+        parents: commit_data.parents,
+        author: author_info,
+        hooks_run,
         changes,
-        change_id: change_id(&commit_data),
+        change_id: stored_change_id,
+        files: commit_files,
     })
 }
 
-/// When [`ChangeIdPolicy`] is enabled, assign a fresh id to a newly written commit.
-///
-/// Does not run on amends or history rewrites; callers pass an empty `extra_headers`
-/// so source change ids never carry over (pick, revert, clean merge).
-///
-/// # Errors
-///
-/// Propagates change-id generation failures as [`Error::Message`].
 pub(crate) fn stamp_change_id_on_new_commit(
     repo: &Repository,
     policy: &ChangeIdPolicy,
@@ -706,6 +1036,7 @@ mod tests {
     use crate::write_tree::{cache_tree_fully_valid, verify_cache_tree};
     use std::fs;
     use std::path::Path;
+    use std::process::Command;
     use tempfile::TempDir;
 
     fn init_repo(root: &Path) -> Repository {
@@ -754,6 +1085,8 @@ mod tests {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         }
     }
 
@@ -1166,5 +1499,216 @@ mod tests {
             default_commit_scope_from_config(&repo.config().unwrap()),
             CommitScope::Staged
         );
+    }
+
+    #[test]
+    fn message_file_stripspace() {
+        let msg = normalize_commit_message("  subject\n\n  body line  \n\n").unwrap();
+        assert_eq!(msg, "subject\n\n  body line\n");
+    }
+
+    #[test]
+    fn no_verify_skips_pre_commit_and_commit_msg() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        std::fs::write(
+            repo.git_dir().join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n[hook \"hc\"]\n\tcommand = exit 1\n\tevent = pre-commit\n[hook \"hc2\"]\n\tcommand = exit 1\n\tevent = commit-msg\n",
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        let mut req = commit_req("blocked");
+        req.hooks = HookPolicy::Run;
+        assert!(create_commit(&repo, &req, &mut NullProgress).is_err());
+
+        req.hooks = HookPolicy::SkipVerify;
+        let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        assert!(outcome.hooks_run.is_empty());
+    }
+
+    #[test]
+    fn hooks_run_lists_executed_hooks() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        std::fs::write(
+            repo.git_dir().join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n[hook \"hc\"]\n\tcommand = true\n\tevent = pre-commit\n[hook \"hc2\"]\n\tcommand = true\n\tevent = commit-msg\n[hook \"hc3\"]\n\tcommand = true\n\tevent = post-commit\n",
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let outcome = create_commit(&repo, &commit_req("hooks"), &mut NullProgress).unwrap();
+        assert_eq!(
+            outcome.hooks_run,
+            vec![
+                HookName::PreCommit,
+                HookName::CommitMsg,
+                HookName::PostCommit
+            ]
+        );
+    }
+
+    #[test]
+    fn outcome_parents_merge_commit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let first = create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+
+        fs::write(root.join("b.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let second = create_commit(&repo, &commit_req("second"), &mut NullProgress).unwrap();
+
+        fs::write(
+            repo.git_dir().join("MERGE_HEAD"),
+            format!("{}\n", first.oid.to_hex()),
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"merged\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let merge = create_commit(&repo, &commit_req("merge"), &mut NullProgress).unwrap();
+        assert_eq!(merge.parents.len(), 2);
+        assert_eq!(merge.parents[0], second.oid);
+        assert_eq!(merge.parents[1], first.oid);
+    }
+
+    fn repo_snapshot(repo: &Repository) -> (Vec<u8>, String, usize, bool, usize) {
+        let index_path = repo.git_dir().join("index");
+        let index_bytes = fs::read(&index_path).unwrap_or_default();
+        let head = fs::read_to_string(repo.git_dir().join("HEAD")).unwrap_or_default();
+        let reflog_len = read_reflog(repo.git_dir(), "refs/heads/main")
+            .map(|e| e.len())
+            .unwrap_or(0);
+        let editmsg = repo.git_dir().join("COMMIT_EDITMSG").exists();
+        let mut objects = 0usize;
+        if let Ok(entries) = fs::read_dir(repo.git_dir().join("objects")) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.file_name().is_some_and(|n| n.len() == 2) {
+                    objects += fs::read_dir(path).map(|d| d.count()).unwrap_or(0);
+                } else if path.is_file() {
+                    objects += 1;
+                }
+            }
+        }
+        (index_bytes, head, reflog_len, editmsg, objects)
+    }
+
+    fn dry_run_req(message: &str) -> CommitRequest {
+        let mut req = commit_req(message);
+        req.dry_run = true;
+        req
+    }
+
+    #[test]
+    fn dry_run_writes_nothing() {
+        for scope in [
+            CommitScope::AutoStage,
+            CommitScope::Staged,
+            CommitScope::Paths(ResolvedPathspecs {
+                specs: vec!["a.txt".into()],
+                sources: vec!["a.txt".into()],
+                scoped: true,
+            }),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            let repo = init_repo(root);
+            fs::write(root.join("a.txt"), b"1\n").unwrap();
+            fs::write(root.join("b.txt"), b"1\n").unwrap();
+            stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+            create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+            fs::write(root.join("a.txt"), b"2\n").unwrap();
+            fs::write(root.join("b.txt"), b"2\n").unwrap();
+            if scope == CommitScope::Staged {
+                let mut index = repo.load_index().unwrap();
+                stage_file_in_index(&repo, &mut index, "a.txt", b"2\n");
+                write_index(&repo, &mut index);
+            }
+            let before = repo_snapshot(&repo);
+            let outcome =
+                commit_with_scope(&repo, &dry_run_req("dry"), scope.clone(), &mut NullProgress)
+                    .unwrap();
+            assert_eq!(outcome.oid, zero_oid());
+            assert_eq!(repo_snapshot(&repo), before);
+        }
+    }
+
+    #[test]
+    fn dry_run_predicts_nothing_to_commit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+        let err = commit_with_scope(
+            &repo,
+            &dry_run_req("noop"),
+            CommitScope::AutoStage,
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::NothingToCommit));
+    }
+
+    #[test]
+    fn dry_run_files_match_real_commit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        fs::write(root.join("b.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        fs::write(root.join("b.txt"), b"2\n").unwrap();
+
+        let plan = plan_commit(
+            &repo,
+            &commit_req("second"),
+            CommitScope::AutoStage,
+            &mut NullProgress,
+        )
+        .unwrap();
+        let real = commit_with_scope(
+            &repo,
+            &commit_req("second"),
+            CommitScope::AutoStage,
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(plan.files, real.files);
+
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--name-status", "HEAD~1", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let git_lines: Vec<String> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let grit_lines: Vec<String> = real
+            .files
+            .iter()
+            .map(|f| {
+                if let Some(ref old) = f.old_path {
+                    format!("{}\t{}\t{}", f.status.letter(), old, f.path)
+                } else {
+                    format!("{}\t{}", f.status.letter(), f.path)
+                }
+            })
+            .collect();
+        assert_eq!(grit_lines, git_lines);
     }
 }

@@ -587,6 +587,12 @@ enum Command {
         /// Report paths that would be staged without writing the index or object database.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Record intent to add (empty index entries) instead of staging file content.
+        #[arg(short = 'N', long = "intent-to-add")]
+        intent_to_add: bool,
+        /// Stage paths that would otherwise be rejected as ignored.
+        #[arg(short = 'f', long = "force")]
+        force: bool,
         /// Mark staged regular files as executable (`100755`) in the index.
         #[arg(long = "executable", conflicts_with = "non_executable")]
         executable: bool,
@@ -701,10 +707,23 @@ enum Command {
     /// Stage every change and record a new commit.
     Commit {
         /// Commit message (you can also pass it with -m).
+        #[arg(conflicts_with = "message_file")]
         message: Option<String>,
         /// Commit message.
-        #[arg(short = 'm', long = "message", conflicts_with = "message")]
+        #[arg(short = 'm', long = "message", conflicts_with_all = ["message", "message_file"])]
         message_flag: Option<String>,
+        /// Read the commit message from a file (`-` for stdin).
+        #[arg(short = 'F', long = "message-file", conflicts_with_all = ["message", "message_flag"])]
+        message_file: Option<String>,
+        /// Author for this commit (`Name <email>`); committer is unchanged.
+        #[arg(long = "author")]
+        author_override: Option<String>,
+        /// Skip the `pre-commit` and `commit-msg` hooks.
+        #[arg(long = "no-verify")]
+        no_verify: bool,
+        /// Preview the commit without writing objects, updating refs, or running hooks.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
         /// Stage every change first, then commit. This is the default when `commit.autoStage` is true.
         #[arg(
             short = 'a',
@@ -1283,10 +1302,20 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             pathspecs,
             update,
             dry_run,
+            intent_to_add,
+            force,
             executable,
             non_executable,
         } => emit(
-            &commands::add::run(&pathspecs, update, dry_run, executable, non_executable)?,
+            &commands::add::run(
+                &pathspecs,
+                update,
+                dry_run,
+                intent_to_add,
+                force,
+                executable,
+                non_executable,
+            )?,
             opts,
             ctx,
         ),
@@ -1383,6 +1412,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Commit {
             message,
             message_flag,
+            message_file,
+            author_override,
+            no_verify,
+            dry_run,
             all,
             staged,
             amend,
@@ -1391,6 +1424,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         } => emit(
             &commands::commit::run(
                 message.or(message_flag),
+                message_file,
+                author_override,
+                no_verify,
+                dry_run,
                 amend,
                 allow_empty,
                 all,
