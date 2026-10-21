@@ -699,6 +699,14 @@ pub(crate) fn path_under_wholesale_directory(
     })
 }
 
+fn checkout_stored_worktree_abs(work_tree: &Path, stored_path: &str) -> PathBuf {
+    crate::repo_relpath::worktree_abs(work_tree, stored_path)
+}
+
+fn checkout_stored_index_path_bytes(stored_path: &str) -> Vec<u8> {
+    crate::repo_relpath::storage_bytes(stored_path).into_owned()
+}
+
 const BULK_ADD_CHECKOUT_MIN: usize = 32;
 const BULK_DELETE_CHECKOUT_MIN: usize = 32;
 
@@ -1061,8 +1069,10 @@ fn checkout_bulk_mod_delete_tree_changes(
     if per_file_deletes.len() >= PARALLEL_PER_FILE_DELETE_MIN {
         let policy = repo.thread_policy();
         let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
-        let wt = work_tree.to_path_buf();
-        let abs_paths: Vec<PathBuf> = per_file_deletes.iter().map(|p| wt.join(p)).collect();
+        let abs_paths: Vec<PathBuf> = per_file_deletes
+            .iter()
+            .map(|p| checkout_stored_worktree_abs(work_tree, p))
+            .collect();
         try_par_map(&abs_paths, options, 0, |abs| {
             let _ = fs::remove_file(abs);
             Ok(())
@@ -1085,17 +1095,17 @@ fn checkout_bulk_mod_delete_tree_changes(
             || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
         {
             if old_mode == MODE_GITLINK {
-                let abs = work_tree.join(path);
+                let abs = checkout_stored_worktree_abs(work_tree, path);
                 remove_uninitialized_gitlink_worktree(&abs);
                 deleted_abs_paths.push(abs);
             } else if !parallel_deleted_paths.contains(path) {
-                let abs = work_tree.join(path);
+                let abs = checkout_stored_worktree_abs(work_tree, path);
                 let _ = fs::remove_file(&abs);
                 deleted_abs_paths.push(abs);
             }
         }
         if !path_under_wholesale_directory(path, wholesale_index_prefixes) {
-            paths_to_remove.push(path.as_bytes().to_vec());
+            paths_to_remove.push(checkout_stored_index_path_bytes(path));
         }
         progress.inc(1);
     }
@@ -1189,8 +1199,10 @@ fn checkout_bulk_deleted_tree_changes(
         let config = repo.config()?;
         let policy = repo.thread_policy();
         let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
-        let wt = work_tree.to_path_buf();
-        let abs_paths: Vec<PathBuf> = per_file_deletes.iter().map(|p| wt.join(p)).collect();
+        let abs_paths: Vec<PathBuf> = per_file_deletes
+            .iter()
+            .map(|p| checkout_stored_worktree_abs(work_tree, p))
+            .collect();
         try_par_map(&abs_paths, options, 0, |abs| {
             let _ = fs::remove_file(abs);
             Ok(())
@@ -1215,17 +1227,17 @@ fn checkout_bulk_deleted_tree_changes(
         if old_mode == MODE_GITLINK || !path_under_wholesale_directory(path, wholesale_dirs_removed)
         {
             if old_mode == MODE_GITLINK {
-                let abs = work_tree.join(path);
+                let abs = checkout_stored_worktree_abs(work_tree, path);
                 remove_uninitialized_gitlink_worktree(&abs);
                 deleted_abs_paths.push(abs);
             } else if !parallel_deleted_paths.contains(path) {
-                let abs = work_tree.join(path);
+                let abs = checkout_stored_worktree_abs(work_tree, path);
                 let _ = fs::remove_file(&abs);
                 deleted_abs_paths.push(abs);
             }
         }
         if !path_under_wholesale_directory(path, wholesale_index_prefixes) {
-            paths_to_remove.push(path.as_bytes().to_vec());
+            paths_to_remove.push(checkout_stored_index_path_bytes(path));
         }
         progress.inc(1);
     }
@@ -1496,8 +1508,10 @@ fn checkout_tree_changes_with_progress(
     if per_file_deletes.len() >= PARALLEL_PER_FILE_DELETE_MIN {
         let policy = repo.thread_policy();
         let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
-        let wt = work_tree.to_path_buf();
-        let abs_paths: Vec<PathBuf> = per_file_deletes.iter().map(|p| wt.join(p)).collect();
+        let abs_paths: Vec<PathBuf> = per_file_deletes
+            .iter()
+            .map(|p| checkout_stored_worktree_abs(work_tree, p))
+            .collect();
         try_par_map(&abs_paths, options, 0, |abs| {
             let _ = fs::remove_file(abs);
             Ok(())
@@ -1521,17 +1535,17 @@ fn checkout_tree_changes_with_progress(
                         || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
                     {
                         if old_mode == MODE_GITLINK {
-                            let abs = work_tree.join(path);
+                            let abs = checkout_stored_worktree_abs(work_tree, path);
                             remove_uninitialized_gitlink_worktree(&abs);
                             deleted_abs_paths.push(abs);
                         } else if !parallel_deleted_paths.contains(path) {
-                            let abs = work_tree.join(path);
+                            let abs = checkout_stored_worktree_abs(work_tree, path);
                             let _ = fs::remove_file(&abs);
                             deleted_abs_paths.push(abs);
                         }
                     }
                     if !path_under_wholesale_directory(path, &wholesale_dirs_removed) {
-                        paths_to_remove.push(path.as_bytes().to_vec());
+                        paths_to_remove.push(checkout_stored_index_path_bytes(path));
                     }
                 }
                 progress.inc(1);

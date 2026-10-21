@@ -10,6 +10,7 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diff::diff_index_to_worktree;
 use grit_lib::objects::parse_commit;
+use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
@@ -40,6 +41,22 @@ fn path_is_bad_name(stored: &str) -> bool {
     repo_relpath::storage_bytes(stored) == BAD_NAME
 }
 
+fn git_stdout(root: &std::path::Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .current_dir(root)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(args)
+        .output()
+        .expect("git");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
 fn git_porcelain(root: &std::path::Path) -> String {
     let out = Command::new("git")
         .current_dir(root)
@@ -54,6 +71,49 @@ fn git_porcelain(root: &std::path::Path) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn non_utf8_file_deleted_by_checkout_between_trees() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("checkout-del");
+    std::fs::create_dir(&root).expect("mkdir");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["config", "user.email", "t@example.com"]);
+    git(&root, &["config", "user.name", "Test"]);
+    std::fs::write(bad_path(&root), b"v1\n").expect("write bad");
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "with bad"]);
+    let tree_with_bad =
+        ObjectId::from_hex(&git_stdout(&root, &["rev-parse", "HEAD^{tree}"])).expect("tree oid");
+
+    std::fs::remove_file(bad_path(&root)).expect("remove bad");
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "without bad"]);
+    let tree_without_bad =
+        ObjectId::from_hex(&git_stdout(&root, &["rev-parse", "HEAD^{tree}"])).expect("tree oid");
+
+    git(&root, &["reset", "--hard", "HEAD~1"]);
+    assert!(
+        bad_path(&root).exists(),
+        "setup: non-UTF-8 file must exist after reset to first commit"
+    );
+
+    let repo = open_repo(&root);
+    checkout_between_trees(&repo, Some(&tree_with_bad), &tree_without_bad)
+        .expect("checkout_between_trees old→new");
+    assert!(
+        !bad_path(&root).exists(),
+        "deleted non-UTF-8 path must be removed from worktree"
+    );
+    assert!(
+        repo.index_handle()
+            .load()
+            .expect("index")
+            .get(BAD_NAME, 0)
+            .is_none(),
+        "deleted non-UTF-8 path must be removed from index"
+    );
 }
 
 #[test]
