@@ -2,6 +2,7 @@
 //!
 //! Ported from Git's `xdiff/xdiffi.c` (`xdl_change_compact`, `score_split`, etc.).
 
+use crate::diff::WhitespaceMode;
 use similar::{Algorithm, DiffOp, DiffTag, TextDiff};
 
 const MAX_INDENT: i32 = 200;
@@ -245,7 +246,7 @@ fn group_previous(xdf: &XdFile<'_>, g: &mut XdlGroup) -> bool {
     true
 }
 
-fn recs_match(xdf: &XdFile<'_>, i: isize, j: isize) -> bool {
+fn recs_match(xdf: &XdFile<'_>, i: isize, j: isize, ws: WhitespaceMode) -> bool {
     if i < 0 || j < 0 {
         return false;
     }
@@ -254,12 +255,16 @@ fn recs_match(xdf: &XdFile<'_>, i: isize, j: isize) -> bool {
     if ui >= xdf.nrec() || uj >= xdf.nrec() {
         return false;
     }
-    xdf.lines[ui] == xdf.lines[uj]
+    if ws.normalizes_line_compare() {
+        ws.normalize_line_for_compare(xdf.lines[ui]) == ws.normalize_line_for_compare(xdf.lines[uj])
+    } else {
+        xdf.lines[ui] == xdf.lines[uj]
+    }
 }
 
-fn group_slide_down(xdf: &mut XdFile<'_>, g: &mut XdlGroup) -> bool {
+fn group_slide_down(xdf: &mut XdFile<'_>, g: &mut XdlGroup, ws: WhitespaceMode) -> bool {
     let n = xdf.nrec() as isize;
-    if g.end < n && recs_match(xdf, g.start, g.end) {
+    if g.end < n && recs_match(xdf, g.start, g.end, ws) {
         xdf.set_changed(g.start as usize, false);
         xdf.set_changed(g.end as usize, true);
         g.start += 1;
@@ -272,8 +277,8 @@ fn group_slide_down(xdf: &mut XdFile<'_>, g: &mut XdlGroup) -> bool {
     false
 }
 
-fn group_slide_up(xdf: &mut XdFile<'_>, g: &mut XdlGroup) -> bool {
-    if g.start > 0 && recs_match(xdf, g.start - 1, g.end - 1) {
+fn group_slide_up(xdf: &mut XdFile<'_>, g: &mut XdlGroup, ws: WhitespaceMode) -> bool {
+    if g.start > 0 && recs_match(xdf, g.start - 1, g.end - 1, ws) {
         g.start -= 1;
         g.end -= 1;
         xdf.set_changed(g.start as usize, true);
@@ -286,7 +291,12 @@ fn group_slide_up(xdf: &mut XdFile<'_>, g: &mut XdlGroup) -> bool {
     false
 }
 
-fn change_compact_one(xdf: &mut XdFile<'_>, xdfo: &mut XdFile<'_>, indent_heuristic: bool) {
+fn change_compact_one(
+    xdf: &mut XdFile<'_>,
+    xdfo: &mut XdFile<'_>,
+    indent_heuristic: bool,
+    ws: WhitespaceMode,
+) {
     let mut g = XdlGroup { start: 0, end: 0 };
     let mut go = XdlGroup { start: 0, end: 0 };
     group_init(xdf, &mut g);
@@ -299,7 +309,7 @@ fn change_compact_one(xdf: &mut XdFile<'_>, xdfo: &mut XdFile<'_>, indent_heuris
                 let mut end_matching_other = -1_isize;
 
                 // Git's C uses `while (!group_slide_up)` with 0=success; here bool true=success.
-                while group_slide_up(xdf, &mut g) {
+                while group_slide_up(xdf, &mut g, ws) {
                     let slid = group_previous(xdfo, &mut go);
                     debug_assert!(slid, "group sync broken sliding up");
                 }
@@ -310,7 +320,7 @@ fn change_compact_one(xdf: &mut XdFile<'_>, xdfo: &mut XdFile<'_>, indent_heuris
                 }
 
                 loop {
-                    if !group_slide_down(xdf, &mut g) {
+                    if !group_slide_down(xdf, &mut g, ws) {
                         break;
                     }
                     let slid = group_next(xdfo, &mut go);
@@ -328,7 +338,7 @@ fn change_compact_one(xdf: &mut XdFile<'_>, xdfo: &mut XdFile<'_>, indent_heuris
                     // no shifting was possible
                 } else if end_matching_other != -1 {
                     while go.end == go.start {
-                        let slid = group_slide_up(xdf, &mut g);
+                        let slid = group_slide_up(xdf, &mut g, ws);
                         debug_assert!(slid, "match disappeared");
                         let p = group_previous(xdfo, &mut go);
                         debug_assert!(p, "group sync broken sliding to match");
@@ -341,6 +351,7 @@ fn change_compact_one(xdf: &mut XdFile<'_>, xdfo: &mut XdFile<'_>, indent_heuris
                         &mut go,
                         groupsize,
                         earliest_end,
+                        ws,
                     );
                 }
                 break;
@@ -362,6 +373,7 @@ fn apply_indent_heuristic_shift(
     go: &mut XdlGroup,
     groupsize: isize,
     earliest_end: isize,
+    ws: WhitespaceMode,
 ) {
     let mut shift = earliest_end;
     if g.end - groupsize - 1 > shift {
@@ -395,7 +407,7 @@ fn apply_indent_heuristic_shift(
         return;
     };
     while g.end > best_shift {
-        let _ = group_slide_up(xdf, g);
+        let _ = group_slide_up(xdf, g, ws);
         let _ = group_previous(xdfo, go);
     }
 }
@@ -406,19 +418,20 @@ fn change_compact_both_passes(
     changed_old: &mut Vec<bool>,
     changed_new: &mut Vec<bool>,
     indent_heuristic: bool,
+    ws: WhitespaceMode,
 ) {
     let c_old = std::mem::take(changed_old);
     let c_new = std::mem::take(changed_new);
     let mut xdf = XdFile::from_mask(old_lines, c_old);
     let mut xdfo = XdFile::from_mask(new_lines, c_new);
 
-    change_compact_one(&mut xdf, &mut xdfo, indent_heuristic);
+    change_compact_one(&mut xdf, &mut xdfo, indent_heuristic, ws);
     *changed_old = xdf.into_changed();
     *changed_new = xdfo.into_changed();
 
     let mut xdf2 = XdFile::from_mask(new_lines, std::mem::take(changed_new));
     let mut xdfo2 = XdFile::from_mask(old_lines, std::mem::take(changed_old));
-    change_compact_one(&mut xdf2, &mut xdfo2, indent_heuristic);
+    change_compact_one(&mut xdf2, &mut xdfo2, indent_heuristic, ws);
     *changed_new = xdf2.into_changed();
     *changed_old = xdfo2.into_changed();
 }
@@ -572,8 +585,25 @@ pub fn apply_change_compact_to_ops(
     new_lines: &[&str],
     indent_heuristic: bool,
 ) -> Vec<DiffOp> {
+    apply_change_compact_to_ops_with_ws(
+        ops,
+        old_lines,
+        new_lines,
+        indent_heuristic,
+        WhitespaceMode::default(),
+    )
+}
+
+/// Like [`apply_change_compact_to_ops`], but line sliding uses whitespace-aware equality when `ws` is active.
+pub fn apply_change_compact_to_ops_with_ws(
+    ops: &[DiffOp],
+    old_lines: &[&str],
+    new_lines: &[&str],
+    indent_heuristic: bool,
+    ws: WhitespaceMode,
+) -> Vec<DiffOp> {
     let (mut c1, mut c2) = masks_from_ops(ops, old_lines.len(), new_lines.len());
-    change_compact_both_passes(old_lines, new_lines, &mut c1, &mut c2, indent_heuristic);
+    change_compact_both_passes(old_lines, new_lines, &mut c1, &mut c2, indent_heuristic, ws);
     ops_from_masks(old_lines, new_lines, &c1, &c2)
 }
 

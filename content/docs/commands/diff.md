@@ -29,6 +29,9 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | Option | Description |
 | --- | --- |
 | `-U <lines>`, `--unified <lines>` | Lines of unchanged context around each hunk (default `3`, same as Git `-U`). |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines (Git `-w`). Files whose only changes are whitespace are omitted. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace (Git `-b`). |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank (Git `--ignore-blank-lines`). |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
@@ -41,6 +44,12 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--diff-filter <letters>` | Show only changes whose status matches the filter (Git letter syntax: `A` added, `D` deleted, `M` modified, `R` renamed, `T` type change, `U` unmerged; uppercase includes, lowercase excludes). Copy/broken/unknown letters (`C`, `X`, `B`) are rejected. Applied after rename detection, so `--diff-filter=A` omits renames. |
 
 ## Examples
+
+Review reformatted code without whitespace noise:
+
+```console
+$ grit diff -w
+```
 
 What have I changed since the last commit?
 

@@ -3,7 +3,7 @@
 use crate::config::ConfigSet;
 
 use super::filter::DiffFilter;
-use super::{indent_heuristic_from_config, resolve_indent_heuristic};
+use super::{indent_heuristic_from_config, resolve_indent_heuristic, WhitespaceMode};
 
 /// Line diff algorithm names matching Git's `diff.algorithm` and `--diff-algorithm`.
 #[non_exhaustive]
@@ -109,6 +109,8 @@ pub struct DiffOptions {
     pub filter: Option<DiffFilter>,
     /// When false, skip intra-line word emphasis (line-level hunks only).
     pub word_level_inline: bool,
+    /// `-w`, `-b`, `--ignore-space-at-eol`, and `--ignore-blank-lines`.
+    pub whitespace: WhitespaceMode,
 }
 
 impl Default for DiffOptions {
@@ -121,6 +123,7 @@ impl Default for DiffOptions {
             renames: RenameDetection::default(),
             filter: None,
             word_level_inline: true,
+            whitespace: WhitespaceMode::default(),
         }
     }
 }
@@ -188,6 +191,13 @@ impl DiffOptions {
     #[must_use]
     pub fn with_word_level_inline(mut self, word_level_inline: bool) -> Self {
         self.word_level_inline = word_level_inline;
+        self
+    }
+
+    /// Builder-style update of whitespace comparison rules.
+    #[must_use]
+    pub fn with_whitespace(mut self, whitespace: WhitespaceMode) -> Self {
+        self.whitespace = whitespace;
         self
     }
 

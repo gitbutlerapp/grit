@@ -39,6 +39,15 @@ pub struct DiffFormatArgs {
     /// Limit output to these change types (Git letter syntax: `ADMR…`).
     #[arg(long = "diff-filter", value_name = "LETTERS")]
     diff_filter: Option<String>,
+    /// Ignore whitespace when comparing lines (`git diff -w`).
+    #[arg(short = 'w', long = "ignore-all-space")]
+    pub ignore_all_space: bool,
+    /// Ignore changes in the amount of whitespace (`git diff -b`).
+    #[arg(short = 'b', long = "ignore-space-change")]
+    pub ignore_space_change: bool,
+    /// Ignore changes whose lines are all blank (`git diff --ignore-blank-lines`).
+    #[arg(long = "ignore-blank-lines")]
+    pub ignore_blank_lines: bool,
 }
 
 impl DiffFormatArgs {
@@ -69,6 +78,12 @@ impl DiffFormatArgs {
                     .map_err(|e: grit_lib::diff::InvalidDiffFilter| anyhow::anyhow!("{e}"))?,
             );
         }
+
+        let mut ws = options.whitespace;
+        ws.ignore_all_space |= self.ignore_all_space;
+        ws.ignore_space_change |= self.ignore_space_change;
+        ws.ignore_blank_lines |= self.ignore_blank_lines;
+        options.whitespace = ws;
 
         Ok(options)
     }
