@@ -4,9 +4,7 @@
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::status::{
-    status, status_options_from_config, Conflict, UntrackedMode,
-};
+use grit_lib::porcelain::status::{status, status_options_from_config, Conflict, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::branch_tracking::{
     status_ahead_behind_enabled, BranchStanding, Standing, StandingHeader, StandingOptions,
@@ -469,7 +467,35 @@ impl StatusOutcome {
         let display = self.path_display.as_ref();
         ui::print_change_group(w, "Staged", &self.staged_entries, display)?;
         ui::print_change_group(w, "Changed (not staged)", &self.unstaged_entries, display)?;
+        if !self.conflict_entries.is_empty() {
+            self.render_conflicts_by_kind(w, display)?;
+        }
         ui::print_untracked(w, &self.untracked, display)?;
+        Ok(())
+    }
+
+    fn render_conflicts_by_kind(
+        &self,
+        w: &mut dyn Write,
+        display: Option<&PathDisplayOptions>,
+    ) -> Result<()> {
+        use grit_lib::porcelain::status::ConflictKind;
+        use std::collections::BTreeMap;
+
+        let mut by_kind: BTreeMap<ConflictKind, Vec<&Conflict>> = BTreeMap::new();
+        for c in &self.conflict_entries {
+            by_kind.entry(c.kind).or_default().push(c);
+        }
+        outln!(w, "Conflicts");
+        for (kind, entries) in by_kind {
+            outln!(w, "  {} ({})", kind_label(kind), entries.len());
+            for c in entries {
+                let path = display
+                    .map(|d| d.format_path_for_human(&c.path))
+                    .unwrap_or_else(|| c.path.clone());
+                outln!(w, "    {path}");
+            }
+        }
         Ok(())
     }
 
@@ -682,7 +708,35 @@ impl StatusOutcome {
         let display = self.path_display.as_ref();
         markdown::print_change_section(w, "Staged", &self.staged_entries, display)?;
         markdown::print_change_section(w, "Changed (not staged)", &self.unstaged_entries, display)?;
+        if !self.conflict_entries.is_empty() {
+            self.render_markdown_conflicts_by_kind(w, display)?;
+        }
         markdown::print_untracked(w, &self.untracked, display)?;
+        Ok(())
+    }
+
+    fn render_markdown_conflicts_by_kind(
+        &self,
+        w: &mut dyn Write,
+        display: Option<&PathDisplayOptions>,
+    ) -> Result<()> {
+        use grit_lib::porcelain::status::ConflictKind;
+        use std::collections::BTreeMap;
+
+        let mut by_kind: BTreeMap<ConflictKind, Vec<&Conflict>> = BTreeMap::new();
+        for c in &self.conflict_entries {
+            by_kind.entry(c.kind).or_default().push(c);
+        }
+        outln!(w, "### Conflicts");
+        for (kind, entries) in by_kind {
+            outln!(w, "- **{}** ({} paths)", kind_label(kind), entries.len());
+            for c in entries {
+                let path = display
+                    .map(|d| d.format_path_for_human(&c.path))
+                    .unwrap_or_else(|| c.path.clone());
+                outln!(w, "  - `{path}`");
+            }
+        }
         Ok(())
     }
 }
