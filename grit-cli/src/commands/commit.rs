@@ -5,7 +5,7 @@ use grit_lib::commit::parse_date_to_git_timestamp;
 use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::ident::{author_identity_line, parse_author_arg};
+use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::objects::parse_commit;
 <<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 use grit_lib::porcelain::add::{stage_for_commit, stage_for_commit_in_memory};
