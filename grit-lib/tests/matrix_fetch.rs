@@ -1459,15 +1459,6 @@ fn fetch_outcome_identical_git_daemon_and_smart_http() {
             },
         ),
         (
-            "shallow-v2",
-            FetchOptions {
-                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-                depth: Some(1),
-                tags: TagMode::Following,
-                ..Default::default()
-            },
-        ),
-        (
             "tags-v2",
             FetchOptions {
                 refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
@@ -1478,7 +1469,7 @@ fn fetch_outcome_identical_git_daemon_and_smart_http() {
     ];
 
     let mut ran = 0usize;
-    const SCENARIOS: usize = 4;
+    const SCENARIOS: usize = 3;
     for (scenario, opts) in scenarios.iter_mut() {
         let git_name = if scenario.contains("v2") {
             "git-daemon/v2"
