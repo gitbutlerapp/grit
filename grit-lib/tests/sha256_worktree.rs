@@ -114,7 +114,7 @@ fn sha256_stat_refresh_staging_patch_id_and_prune_packed() {
     fs::write(repo_root.join("tracked.txt"), "modified body\n").expect("modify");
     let outcome = stage(&grit_repo, &StageOptions::default(), &mut NullProgress).expect("stage");
     assert!(
-        outcome.modified >= 1,
+        outcome.modified.len() >= 1,
         "expected at least one staged modification"
     );
 

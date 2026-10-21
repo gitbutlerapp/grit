@@ -110,12 +110,13 @@ pub(crate) fn apply_executable_hint_to_index(
     index: &mut Index,
     hint: StageExecutableHint,
     matches: &impl Fn(&str) -> bool,
-) -> Result<usize> {
+    dry_run: bool,
+) -> Result<Vec<String>> {
     if hint == StageExecutableHint::None {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     let target = staged_mode_with_hint(MODE_REGULAR, hint);
-    let mut updated = 0usize;
+    let mut updated = Vec::new();
     let paths: Vec<Vec<u8>> = index
         .entries
         .iter()
@@ -148,10 +149,14 @@ pub(crate) fn apply_executable_hint_to_index(
         if entry.mode == target {
             continue;
         }
+        if dry_run {
+            updated.push(rel.to_owned());
+            continue;
+        }
         if let Some(entry) = index.get_mut(&path, 0) {
             entry.mode = target;
             index.invalidate_cache_tree_for_path(&path);
-            updated += 1;
+            updated.push(rel.to_owned());
         }
     }
     Ok(updated)

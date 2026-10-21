@@ -872,13 +872,31 @@ pub fn print_update_outcome(w: &mut dyn Write, outcome: &UpdateOutcome) -> anyho
 pub fn print_add_outcome(w: &mut dyn Write, outcome: &AddOutcome) -> anyhow::Result<()> {
     outln!(w, "## Add");
     outln!(w);
-    match outcome.staged {
-        0 if outcome.no_paths => {
-            outln!(w, "Nothing to stage — working tree clean.");
-        }
-        0 => {}
-        1 => outln!(w, "- Staged **1** change"),
-        n => outln!(w, "- Staged **{n}** changes"),
+    let verb = if outcome.dry_run {
+        "Would stage"
+    } else {
+        "Staged"
+    };
+    if outcome.count == 0 && outcome.no_paths {
+        outln!(w, "Nothing to stage — working tree clean.");
+        return Ok(());
+    }
+    if outcome.count == 0 {
+        return Ok(());
+    }
+    outln!(w, "- {verb} **{}** change(s)", outcome.count);
+    for path in outcome
+        .added
+        .iter()
+        .chain(&outcome.modified)
+        .chain(&outcome.removed)
+        .take(10)
+    {
+        outln!(w, "  - `{path}`");
+    }
+    let listed = outcome.added.len() + outcome.modified.len() + outcome.removed.len();
+    if listed > 10 {
+        outln!(w, "  - … and {} more", listed - 10);
     }
     Ok(())
 }

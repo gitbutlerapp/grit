@@ -80,7 +80,7 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
         &mut NullProgress,
     )
     .expect("add keep");
-    assert_eq!(add_keep.modified, 1);
+    assert_eq!(add_keep.modified.len(), 1);
     let index = repo.index_handle().load().expect("index after add");
     assert!(!index.has_unmerged_entries());
     assert!(index.get(b"f", 0).is_some());

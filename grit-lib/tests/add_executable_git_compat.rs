@@ -127,7 +127,8 @@ fn add_executable_mode_only_on_tracked_file() {
     )
     .expect("chmod stage");
     assert_eq!(
-        outcome.modified, 1,
+        outcome.modified.len(),
+        1,
         "mode-only update should stage one path"
     );
 

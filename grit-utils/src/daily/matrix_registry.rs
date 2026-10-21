@@ -69,6 +69,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Stage all changes: grit add vs git add -A (after ~1% modified)",
     },
     ScenarioSpec {
+        id: "add/update@synth-100k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Stage tracked changes: grit add -u vs git add -u (after ~1% modified)",
+    },
+    ScenarioSpec {
+        id: "add/dry-run@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Preview staging: grit add --dry-run vs git add -n -A",
+    },
+    ScenarioSpec {
         id: "add/modified@big-blobs",
         area: Area::Worktree,
         headline: false,

@@ -365,7 +365,7 @@ fn stage_one_modified_file_hashes_one_blob() {
     metrics.set_blob_counting(true);
     let staged = stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
     metrics.set_blob_counting(false);
-    assert_eq!(staged.modified, 1, "expected exactly one staged path");
+    assert_eq!(staged.modified.len(), 1, "expected exactly one staged path");
     assert_eq!(
         metrics.blob_content_reads(),
         1,

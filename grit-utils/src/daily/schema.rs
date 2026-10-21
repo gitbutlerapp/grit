@@ -264,6 +264,8 @@ mod tests {
             ("status/clean@synth-10k", "status-clean"),
             ("status/dirty@synth-10k", "status-dirty"),
             ("add/modified@synth-10k", "add"),
+            ("add/update@synth-100k", "add"),
+            ("add/dry-run@synth-10k", "add"),
             ("commit/small@synth-10k", "commit"),
             ("diff/worktree@synth-10k", "diff"),
             ("log/oneline-100@git-git", "log"),
