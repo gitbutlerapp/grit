@@ -3,7 +3,12 @@
 //! `relative_path`, `strip_path_suffix`) and `git/remote.c` (`relative_url`).
 
 use std::borrow::Cow;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
+
+use crate::path_icase::worktree_path_for_index_entry;
+use crate::pathspec::has_glob_chars;
+use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
 /// Errors returned by Git-compatible path helper routines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -872,6 +877,49 @@ pub fn path_for_disk_compare(path: &Path) -> PathBuf {
     apply_macos_private_alias_for_compare(canon)
 }
 
+/// Returns whether `rel_path` has a symlink among its directory components.
+///
+/// Git rejects pathspecs that traverse through a symlinked directory (for example
+/// `dl/f` when `dl` is a symlink). Staging the symlink blob at `dl` itself is allowed.
+#[must_use]
+pub(crate) fn pathspec_traverses_symlink_dir(
+    work_tree: &Path,
+    rel_path: &str,
+    precompose_unicode: bool,
+    ignorecase: bool,
+) -> bool {
+    if rel_path.is_empty()
+        || has_glob_chars(rel_path)
+        || rel_path.starts_with(":(")
+        || rel_path.starts_with(':')
+    {
+        return false;
+    }
+    let components: Vec<&str> = rel_path.split('/').filter(|c| !c.is_empty()).collect();
+    if components.len() <= 1 {
+        return false;
+    }
+    let mut prefix = String::new();
+    for component in &components[..components.len() - 1] {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(component);
+        let abs = if precompose_unicode {
+            resolve_worktree_path_for_staging(work_tree, &prefix, true).abs
+        } else {
+            worktree_path_for_index_entry(work_tree, &prefix, ignorecase)
+        };
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Git `setup.c` `prefix_path_gently` (POSIX).
 pub fn prefix_path_gently(prefix: &str, path: &str, work_tree: &Path) -> Option<String> {
     if path.starts_with('/') {
@@ -886,6 +934,23 @@ pub fn prefix_path_gently(prefix: &str, path: &str, work_tree: &Path) -> Option<
 #[cfg(test)]
 mod git_path_component_tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn pathspec_traverses_symlink_dir_detects_intermediate_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("real")).expect("mkdir");
+        std::fs::write(root.join("real/f"), b"x").expect("write");
+        symlink("real", root.join("dl")).expect("symlink");
+        assert!(pathspec_traverses_symlink_dir(root, "dl/f", false, false));
+        assert!(!pathspec_traverses_symlink_dir(root, "dl", false, false));
+        assert!(!pathspec_traverses_symlink_dir(
+            root, "real/f", false, false
+        ));
+    }
 
     #[test]
     fn cleanup_path_strips_leading_dot_slash() {

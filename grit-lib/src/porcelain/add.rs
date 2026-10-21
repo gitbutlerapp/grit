@@ -14,6 +14,7 @@ use crate::diff::{
     read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
+use crate::git_path::pathspec_traverses_symlink_dir;
 use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
 use crate::ignore::IgnoreMatcher;
 use crate::index::{
@@ -972,6 +973,21 @@ fn validate_pathspecs(
         if sorted_paths_match_pathspec(resolved, head, ctx) {
             continue;
         }
+        let ignorecase = rules
+            .config()
+            .get_bool("core.ignorecase")
+            .and_then(|r| r.ok())
+            .unwrap_or(false);
+        if pathspec_traverses_symlink_dir(
+            work_tree,
+            resolved,
+            repo.pathspec_precompose_enabled(),
+            ignorecase,
+        ) {
+            return Err(Error::PathspecBeyondSymlink {
+                spec: label.to_owned(),
+            });
+        }
         if !pathspec_matches_known_in_repository(repo, resolved)? {
             return Err(Error::Message(format!(
                 "pathspec '{label}' did not match any files"
@@ -1330,6 +1346,42 @@ mod tests {
                 "{missing}: {err:?}"
             );
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn stage_errors_on_pathspec_beyond_symlink_dir() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir_all(root.join("real")).unwrap();
+        fs::write(root.join("real/f"), b"base\n").unwrap();
+        symlink("real", root.join("dl")).expect("symlink");
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "real/f", b"base\n");
+        write_index(&repo, &mut index);
+        fs::write(root.join("real/f"), b"base\nmod\n").unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["dl/f".to_owned()],
+                pathspec_sources: vec!["dl/f".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        match err {
+            Error::PathspecBeyondSymlink { spec } => assert_eq!(spec, "dl/f"),
+            other => panic!("expected PathspecBeyondSymlink, got {other:?}"),
+        }
+
+        let index = repo.load_index().unwrap();
+        let entry = index.get(b"real/f", 0).expect("tracked file");
+        assert_eq!(entry.size, 5, "modified file must stay unstaged");
     }
 
     #[test]

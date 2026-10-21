@@ -686,6 +686,13 @@ pub enum Error {
         spec: String,
     },
 
+    /// A literal pathspec names a file under a symlink directory component.
+    #[error("pathspec '{spec}' is beyond a symbolic link")]
+    PathspecBeyondSymlink {
+        /// User-supplied pathspec that crosses a symlink directory.
+        spec: String,
+    },
+
     /// [`crate::porcelain::commit::CommitScope::Paths`] was used while a merge is in progress.
     #[error("cannot do a partial commit during a merge")]
     PartialCommitDuringMerge,

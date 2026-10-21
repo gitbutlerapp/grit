@@ -1,6 +1,7 @@
 //! Shared pathspec matching against index, HEAD tree, and worktree paths.
 
 use crate::error::{Error, Result};
+use crate::git_path::pathspec_traverses_symlink_dir;
 use crate::index::MODE_TREE;
 use crate::objects::{parse_commit, parse_tree, ObjectId};
 use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
@@ -26,6 +27,18 @@ pub fn ensure_pathspec_matches_known_in_repository(
     display_spec: &str,
     resolved: &str,
 ) -> Result<()> {
+    if let Some(work_tree) = repo.work_tree() {
+        if pathspec_traverses_symlink_dir(
+            work_tree,
+            resolved,
+            repo.pathspec_precompose_enabled(),
+            repo_pathspec_ignorecase(repo),
+        ) {
+            return Err(Error::PathspecBeyondSymlink {
+                spec: display_spec.to_owned(),
+            });
+        }
+    }
     if pathspec_matches_known_in_repository(repo, resolved)? {
         Ok(())
     } else {
@@ -52,6 +65,10 @@ fn pathspec_matches_known_in_paths(
     if !resolved.starts_with(':') {
         if let Some(work_tree) = repo.work_tree() {
             let precompose = repo.pathspec_precompose_enabled();
+            let ignorecase = repo_pathspec_ignorecase(repo);
+            if pathspec_traverses_symlink_dir(work_tree, resolved, precompose, ignorecase) {
+                return Ok(false);
+            }
             if precompose {
                 let staged = resolve_worktree_path_for_staging(work_tree, resolved, true);
                 if staged.abs.exists() {
@@ -63,6 +80,13 @@ fn pathspec_matches_known_in_paths(
         }
     }
     Ok(false)
+}
+
+fn repo_pathspec_ignorecase(repo: &Repository) -> bool {
+    repo.config()
+        .ok()
+        .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
+        .unwrap_or(false)
 }
 
 fn known_paths(repo: &Repository) -> Result<Vec<String>> {
@@ -142,6 +166,31 @@ mod tests {
         let repo =
             Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("discover");
         assert!(!pathspec_matches_known_in_repository(&repo, "does-not-exist").expect("check"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn literal_pathspec_through_symlink_dir_is_not_known() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new().expect("tempdir");
+        crate::repo::init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        std::fs::create_dir_all(dir.path().join("real")).expect("mkdir");
+        std::fs::write(dir.path().join("real/f"), b"x").expect("write");
+        symlink("real", dir.path().join("dl")).expect("symlink");
+        let repo =
+            Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("discover");
+        assert!(
+            !pathspec_matches_known_in_repository(&repo, "dl/f").expect("check"),
+            "must not follow symlink directory for pathspec matching"
+        );
     }
 
     #[test]
