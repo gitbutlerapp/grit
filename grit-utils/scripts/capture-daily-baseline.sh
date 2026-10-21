@@ -59,11 +59,11 @@ run_daily_merged() {
     while ! "$BENCH" daily --offline --only "$id" --baseline-grit "${BASELINE_GRIT}" \
       --output "${tmpdir}/${id//\//@-}.json"; do
       attempt=$((attempt + 1))
-      if [[ "$attempt" -gt 3 ]]; then
-        echo "scenario ${id} failed after 3 attempts" >&2
+      if [[ "$attempt" -gt 5 ]]; then
+        echo "scenario ${id} failed after 5 attempts" >&2
         return 1
       fi
-      echo "  retry ${id} (attempt ${attempt}/3)…" >&2
+      echo "  retry ${id} (attempt ${attempt}/5)…" >&2
     done
     t1=$(date +%s.%N)
     elapsed=$(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.3f", b - a }')
