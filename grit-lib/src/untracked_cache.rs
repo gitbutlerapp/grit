@@ -775,7 +775,7 @@ fn has_hidden_untracked_file_or_dir(
             )? {
                 return Ok(true);
             }
-        } else {
+        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
             let is_ign = matcher.is_path_ignored(repo, Some(index), &child_rel, false)?;
             if !is_ign && name.starts_with('.') {
                 return Ok(true);
@@ -822,7 +822,7 @@ fn has_ignored_entry_or_dir(
             {
                 return Ok(true);
             }
-        } else {
+        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
             let is_ign = matcher.is_path_ignored(repo, Some(index), &child_rel, false)?;
             if is_ign {
                 return Ok(true);
@@ -1213,6 +1213,9 @@ fn read_directory_recursive(
                 }
                 let path = entry.path();
                 let is_dir = crate::read_dir_kind::entry_is_dir(&entry)?;
+                if !is_dir && crate::read_dir_kind::entry_is_git_ignored_special(&entry)? {
+                    continue;
+                }
                 Some((name, path, is_dir))
             }
             DirSource::Cache {
@@ -1728,7 +1731,7 @@ fn visit_untracked_node_full(
                 ignored_out,
                 uc,
             )?;
-        } else {
+        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
             let is_ign = matcher.is_path_ignored(repo, Some(index), &child_rel, false)?;
             if is_ign {
                 if ignored_mode != UntrackedIgnoredMode::No {
@@ -1899,7 +1902,7 @@ fn traditional_normal_directory_only(
             }
             if is_dir {
                 stack.push(path);
-            } else {
+            } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
                 any_file = true;
                 let (ig, _) = matcher.check_path(repo, Some(index), &rel_child, false)?;
                 if !ig {

@@ -753,7 +753,7 @@ fn collect_untracked_parallel_top_level(
         }
         if crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false) {
             root_dirs.push(entry);
-        } else {
+        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
             root_files.push(entry);
         }
     }
@@ -952,6 +952,9 @@ fn visit_untracked_dir_entry(
             return Ok(UntrackedWalkStep::Stop);
         }
     } else {
+        if crate::read_dir_kind::entry_is_git_ignored_special(entry).unwrap_or(true) {
+            return Ok(UntrackedWalkStep::Continue);
+        }
         if !status_path_matches_worktree_with_rules(
             repo, index, work_tree, &child_rel, pathspecs, rules,
         ) {

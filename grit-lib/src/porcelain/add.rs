@@ -780,6 +780,12 @@ fn stage_untracked_paths_parallel(
             continue;
         }
         let resolved = resolve_worktree_path_for_staging(work_tree, path, precompose_unicode);
+        if fs::symlink_metadata(&resolved.abs)
+            .ok()
+            .is_some_and(|meta| crate::read_dir_kind::metadata_is_git_ignored_special(&meta))
+        {
+            continue;
+        }
         if is_unregistered_embedded_git_repo(index, &resolved.index_relpath, &resolved.abs) {
             deferred.push(resolved.index_relpath.trim_end_matches('/').to_owned());
             continue;
@@ -901,6 +907,10 @@ fn stage_untracked_path(
             format!("could not read {rel_path}: {e}"),
         ))
     })?;
+
+    if crate::read_dir_kind::metadata_is_git_ignored_special(&meta) {
+        return Ok(());
+    }
 
     if meta.is_dir() && !meta.file_type().is_symlink() && read_submodule_head_oid(&abs).is_some() {
         let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
