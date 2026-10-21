@@ -2,9 +2,9 @@
 //!
 //! Git object ids are already cryptographic digests; hashing them again with
 //! SipHash over the full 20–32 byte value is wasted work on hot paths. These
-//! types use only the first eight digest bytes for bucket selection, mixed with
-//! a per-process random odd multiplier so placement is not predictable to an
-//! attacker who can choose object ids.
+//! types use only the first eight digest bytes for bucket selection. [`OidHasher::finish`]
+//! XORs that prefix with a process-wide random value from [`OidBuildHasher::default`]
+//! so bucket placement is not predictable to an attacker who can choose object ids.
 //!
 //! Backing storage is [`hashbrown`] (same approach as `gix-hashtable`): it
 //! lowers insert and lookup overhead versus the standard library map for large
@@ -34,7 +34,7 @@ impl Default for OidBuildHasher {
 }
 
 impl OidBuildHasher {
-    /// Creates a hasher with a fresh random odd multiplier.
+    /// Creates a hasher with a fresh process-local random value for [`OidHasher::finish`].
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -127,7 +127,7 @@ pub type OidHashMap<V> = HashMap<ObjectId, V, OidBuildHasher>;
 /// [`HashSet`] of [`ObjectId`] with [`OidBuildHasher`].
 pub type OidHashSet = HashSet<ObjectId, OidBuildHasher>;
 
-/// Shared [`OidBuildHasher`] for this process (one random odd multiplier).
+/// Shared [`OidBuildHasher`] for this process (one process-wide random value for [`OidHasher::finish`]).
 #[inline]
 fn shared_oid_build_hasher() -> OidBuildHasher {
     static HASHER: OnceLock<OidBuildHasher> = OnceLock::new();

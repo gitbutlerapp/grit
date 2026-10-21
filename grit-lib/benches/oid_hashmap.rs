@@ -7,8 +7,8 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use grit_lib::objects::{
-    hash::ObjectHasher, oid_hash_map, oid_hash_map_with_capacity, oid_hash_set,
-    oid_hash_set_with_capacity, HashAlgo, ObjectId, OidHashMap, OidHashSet,
+    hash::ObjectHasher, oid_hash_map, oid_hash_map_with_capacity, oid_hash_set, HashAlgo, ObjectId,
+    OidHashMap, OidHashSet,
 };
 
 const COUNT: usize = 1_000_000;
@@ -25,14 +25,40 @@ fn sample_ids(count: usize) -> Vec<ObjectId> {
         .collect()
 }
 
-fn bench_insert(c: &mut Criterion) {
+fn bench_insert_presized(c: &mut Criterion) {
     let ids = sample_ids(COUNT);
-    let mut group = c.benchmark_group("oid_hashmap_insert");
+    let mut group = c.benchmark_group("oid_hashmap_insert_presized");
     group.sample_size(10);
 
     group.bench_with_input(BenchmarkId::new("siphash", COUNT), &ids, |b, ids| {
         b.iter(|| {
-            // Same default growth as typical `HashMap::new()` call sites.
+            let mut map: HashMap<ObjectId, u32> = HashMap::with_capacity(COUNT);
+            for (i, id) in ids.iter().enumerate() {
+                map.insert(black_box(*id), black_box(i as u32));
+            }
+            black_box(map.len())
+        });
+    });
+
+    group.bench_with_input(BenchmarkId::new("oid_hasher", COUNT), &ids, |b, ids| {
+        b.iter(|| {
+            let mut map: OidHashMap<u32> = oid_hash_map_with_capacity(COUNT);
+            for (i, id) in ids.iter().enumerate() {
+                map.insert(black_box(*id), black_box(i as u32));
+            }
+            black_box(map.len())
+        });
+    });
+    group.finish();
+}
+
+fn bench_insert_default_growth(c: &mut Criterion) {
+    let ids = sample_ids(COUNT);
+    let mut group = c.benchmark_group("oid_hashmap_insert_default_growth");
+    group.sample_size(10);
+
+    group.bench_with_input(BenchmarkId::new("siphash", COUNT), &ids, |b, ids| {
+        b.iter(|| {
             let mut map: HashMap<ObjectId, u32> = HashMap::new();
             for (i, id) in ids.iter().enumerate() {
                 map.insert(black_box(*id), black_box(i as u32));
@@ -43,8 +69,7 @@ fn bench_insert(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::new("oid_hasher", COUNT), &ids, |b, ids| {
         b.iter(|| {
-            // Bulk OID tables (pack, fsck, rev-list) know approximate counts up front.
-            let mut map: OidHashMap<u32> = oid_hash_map_with_capacity(COUNT);
+            let mut map: OidHashMap<u32> = oid_hash_map();
             for (i, id) in ids.iter().enumerate() {
                 map.insert(black_box(*id), black_box(i as u32));
             }
@@ -141,5 +166,11 @@ fn bench_contains(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_insert, bench_lookup, bench_contains);
+criterion_group!(
+    benches,
+    bench_insert_presized,
+    bench_insert_default_growth,
+    bench_lookup,
+    bench_contains
+);
 criterion_main!(benches);

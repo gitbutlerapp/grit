@@ -15,9 +15,9 @@ use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::error::{Error, Result};
 use crate::hash::HashingWriter;
 use crate::objects::{
-    empty_object_id_hash_set, oid_hash_map, oid_hash_map_from, oid_hash_set, oid_hash_set_from,
-    parse_commit, parse_tag, HashAlgo, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet,
-    TreeRefIter,
+    empty_object_id_hash_set, oid_hash_map, oid_hash_map_from, oid_hash_map_with_capacity,
+    oid_hash_set, oid_hash_set_from, parse_commit, parse_tag, HashAlgo, Object, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -1057,7 +1057,8 @@ pub(crate) fn plan_deltas(
     // Reuse-only repacks (`window == 0`) stream from disk at serialize time; avoid
     // materializing every payload during planning.
     let lazy_payloads = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
-    let mut objects: OidHashMap<Object> = oid_hash_map();
+    let send_cap = send.len().max(1);
+    let mut objects: OidHashMap<Object> = oid_hash_map_with_capacity(send_cap);
     if !lazy_payloads {
         for &oid in send {
             objects.insert(oid, odb.read(&oid)?);
@@ -1072,7 +1073,7 @@ pub(crate) fn plan_deltas(
     let islands = load_islands_for_pack(odb, &in_pack, opts);
 
     // target oid -> base oid (the object `target` deltas against).
-    let mut delta_to_base: OidHashMap<ObjectId> = oid_hash_map();
+    let mut delta_to_base: OidHashMap<ObjectId> = oid_hash_map_with_capacity(send_cap);
     // Deltas whose instruction stream is reused verbatim from an existing pack.
     let mut reused_zlib: HashMap<
         ObjectId,
@@ -1083,16 +1084,12 @@ pub(crate) fn plan_deltas(
     if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
         let objects_dir = odb.objects_dir();
         let in_pack_std: HashSet<ObjectId> = in_pack.iter().copied().collect();
-        let objects_std: HashMap<ObjectId, Object> = if lazy_payloads {
-            HashMap::new()
-        } else {
-            objects.iter().map(|(k, v)| (*k, v.clone())).collect()
-        };
+        let empty_resolved: HashMap<ObjectId, Object> = HashMap::new();
         let candidates = crate::pack::collect_packed_delta_reuse_for_send(
             objects_dir,
             &in_pack_std,
             &in_pack_std,
-            &objects_std,
+            &empty_resolved,
         )?;
         for (t, (base, size, pack_bytes, zlib_start, zlib_end)) in candidates {
             if lazy_payloads {

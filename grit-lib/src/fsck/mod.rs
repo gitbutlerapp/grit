@@ -941,6 +941,8 @@ fn verify_pack_objects(
         }
         let object_count = prep.records.len();
         checked += object_count;
+        validated.reserve(object_count);
+        links.reserve(object_count);
         if cancel.is_cancelled() {
             return Err(Error::Message("cancelled".into()));
         }
