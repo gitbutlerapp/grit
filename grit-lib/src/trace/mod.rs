@@ -3,8 +3,6 @@
 //! When the `tracing` feature is disabled, [`trace_span!`] expands to nothing.
 //! Embedders install a `tracing` subscriber; `grit-lib` does not set global tracing state.
 
-pub mod names;
-
 /// Emit a tracing span for the current scope when feature `tracing` is enabled.
 ///
 /// The span `name` must be a string literal (required by the `tracing` crate).
@@ -21,7 +19,6 @@ pub(crate) use trace_span;
 
 #[cfg(all(test, feature = "tracing"))]
 mod tests {
-    use super::names;
     use crate::environment::RepositoryOptions;
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::NullProgress;
@@ -90,23 +87,19 @@ mod tests {
 
         let seen = events.lock().unwrap();
         assert!(
-            seen.iter().any(|e| e.name == names::REPOSITORY_OPEN),
-            "expected {} in {:?}",
-            names::REPOSITORY_OPEN,
+            seen.iter().any(|e| e.name == "grit.repository.open"),
+            "expected grit.repository.open in {:?}",
             *seen
         );
         assert!(
-            seen.iter().any(|e| e.name == names::STATUS_SCAN),
-            "expected {} in {:?}",
-            names::STATUS_SCAN,
+            seen.iter().any(|e| e.name == "grit.status.scan"),
+            "expected grit.status.scan in {:?}",
             *seen
         );
         assert!(
             seen.iter()
-                .any(|e| { e.name == names::INDEX_READ && e.parent == Some(names::STATUS_SCAN) }),
-            "expected {} nested under {} in {:?}",
-            names::INDEX_READ,
-            names::STATUS_SCAN,
+                .any(|e| { e.name == "grit.index.read" && e.parent == Some("grit.status.scan") }),
+            "expected grit.index.read nested under grit.status.scan in {:?}",
             *seen
         );
     }

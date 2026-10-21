@@ -314,11 +314,7 @@ pub struct DiffRunOptions {
     pub line_format: DiffCompareArgs,
     /// Intra-line word highlights in structured hunks (human TTY output only).
     pub word_level_inline: bool,
-    /// Exit with status 1 when there are changes (Git `--exit-code`). Handled in `main`.
-    #[allow(dead_code)]
-    pub exit_code: bool,
-    /// Print nothing; implies [`Self::exit_code`].
-    #[allow(dead_code)]
+    /// Print nothing; `main` then exits with the `--exit-code` status.
     pub quiet: bool,
 }
 

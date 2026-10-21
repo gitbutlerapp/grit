@@ -76,7 +76,6 @@ impl CommitJsonLoader {
     }
 
     /// Build a single [`CommitJson`] row.
-    #[allow(dead_code)]
     pub fn load_one(&self, repo: &Repository, oid: &ObjectId, now: i64) -> Result<CommitJson> {
         self.load(repo, std::slice::from_ref(oid), now)?
             .into_iter()

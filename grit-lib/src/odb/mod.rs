@@ -2116,12 +2116,10 @@ fn try_hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> R
 }
 
 /// Build canonical blob store bytes (`"blob <len>\\0<payload>"`).
-#[allow(dead_code)]
 pub(crate) fn blob_store_bytes(data: &[u8]) -> Vec<u8> {
     build_store_bytes(ObjectKind::Blob, data)
 }
 
-#[allow(dead_code)]
 pub(crate) fn zlib_compress_loose_store_from_bytes(
     store_bytes: &[u8],
     compression: flate2::Compression,

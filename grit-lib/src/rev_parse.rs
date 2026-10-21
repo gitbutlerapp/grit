@@ -1857,31 +1857,10 @@ pub(crate) fn abbreviate_object_id_with_prefix_cache(
     min_len: usize,
     prefix_ambiguous: &mut HashMap<String, bool>,
 ) -> Result<String> {
-    abbreviate_object_id_with_prefix_cache_inner(repo, oid, min_len, prefix_ambiguous, false)
-}
-
-/// Like [`abbreviate_object_id_with_prefix_cache`], optionally skipping an ODB existence probe.
-#[allow(dead_code)]
-pub(crate) fn abbreviate_object_id_with_prefix_cache_assume_exists(
-    repo: &Repository,
-    oid: ObjectId,
-    min_len: usize,
-    prefix_ambiguous: &mut HashMap<String, bool>,
-) -> Result<String> {
-    abbreviate_object_id_with_prefix_cache_inner(repo, oid, min_len, prefix_ambiguous, true)
-}
-
-fn abbreviate_object_id_with_prefix_cache_inner(
-    repo: &Repository,
-    oid: ObjectId,
-    min_len: usize,
-    prefix_ambiguous: &mut HashMap<String, bool>,
-    assume_exists: bool,
-) -> Result<String> {
     let min_len = min_len.clamp(4, 40);
     let target = oid.to_hex();
 
-    if !assume_exists && !repo.odb().exists(&oid) {
+    if !repo.odb().exists(&oid) {
         return Ok(target[..min_len].to_owned());
     }
 

@@ -1227,7 +1227,6 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 line_format,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
-                exit_code: wants_exit_code,
                 quiet,
             };
             let run_result = commands::diff::run(run_opts);

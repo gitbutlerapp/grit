@@ -1072,19 +1072,14 @@ pub struct ReftableReader {
     log_position: u64,
 }
 
-/// Parsed footer fields.
+/// Footer fields the reader uses (object and log index positions are not consulted).
 #[derive(Debug)]
-#[allow(dead_code)]
 struct Footer {
-    version: u8,
     block_size: u32,
     min_update_index: u64,
     max_update_index: u64,
     ref_index_position: u64,
-    obj_position_and_id_len: u64,
-    obj_index_position: u64,
     log_position: u64,
-    log_index_position: u64,
 }
 
 impl ReftableReader {
@@ -1112,18 +1107,6 @@ impl ReftableReader {
                 "reftable: unsupported version {version}"
             )));
         }
-        let _block_size = ((data[5] as u32) << 16) | ((data[6] as u32) << 8) | (data[7] as u32);
-        let _min_update_index = u64::from_be_bytes(
-            data[8..16]
-                .try_into()
-                .map_err(|_| Error::InvalidRef("reftable: truncated header".into()))?,
-        );
-        let _max_update_index = u64::from_be_bytes(
-            data[16..24]
-                .try_into()
-                .map_err(|_| Error::InvalidRef("reftable: truncated header".into()))?,
-        );
-
         // Parse footer
         let footer_size = if version == 2 { 72 } else { FOOTER_V1_SIZE };
         if data.len() < footer_size {
@@ -3935,10 +3918,7 @@ fn parse_footer(data: &[u8], version: u8) -> Result<Footer> {
     // (24 bytes for v1, 28 for v2 — the extra 4 bytes are the hash-id).
     let off = if version == 2 { 28 } else { 24 };
     let ref_index_position = read_u64(&data[off..off + 8])?;
-    let obj_position_and_id_len = read_u64(&data[off + 8..off + 16])?;
-    let obj_index_position = read_u64(&data[off + 16..off + 24])?;
     let log_position = read_u64(&data[off + 24..off + 32])?;
-    let log_index_position = read_u64(&data[off + 32..off + 40])?;
 
     // CRC-32 check
     let crc_bytes: [u8; 4] = data[footer_size - 4..footer_size]
@@ -3953,15 +3933,11 @@ fn parse_footer(data: &[u8], version: u8) -> Result<Footer> {
     }
 
     Ok(Footer {
-        version: fver,
         block_size,
         min_update_index,
         max_update_index,
         ref_index_position,
-        obj_position_and_id_len,
-        obj_index_position,
         log_position,
-        log_index_position,
     })
 }
 

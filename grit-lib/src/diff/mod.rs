@@ -18,7 +18,6 @@ pub(crate) use core::myers_rediff_changed_masks_for_region;
 mod detail;
 mod files;
 mod filter;
-#[allow(dead_code)]
 mod git_histogram;
 pub mod handle;
 mod has_changes;

@@ -2232,8 +2232,8 @@ pub(crate) fn line_diff_ops_git_xdiff_compacted_ids(
 }
 
 /// Whether each new-side line is marked changed by Git's xdiff engine (after change compaction).
+#[cfg(test)]
 #[must_use]
-#[allow(dead_code)]
 pub(crate) fn xdiff_new_line_changed_flags(
     old_lines: &[&str],
     new_lines: &[&str],

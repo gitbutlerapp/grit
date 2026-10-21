@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use crate::capped_run::{run_capped_shell_command, TerminationKind, EXIT_MEMORY_CAP, EXIT_TIMEOUT};
-use crate::hyperfine::{run_hyperfine, HyperfineResultEntry, HyperfineRun};
+use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::schema::TimingStats;
 use crate::shell::shell_quote;
 use crate::stats::timing_from_hyperfine;
@@ -196,11 +196,6 @@ pub fn median_wall_ms(
     }
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     Ok(samples[samples.len() / 2])
-}
-
-#[allow(dead_code)]
-pub fn hyperfine_entry_mean_ms(entry: &HyperfineResultEntry) -> f64 {
-    entry.mean * 1000.0
 }
 
 /// Limits for grit `serve-clone` benchmark runs (avoid OOM hangs).
