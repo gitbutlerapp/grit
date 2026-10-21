@@ -2,11 +2,20 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::areas;
 use super::matrix_registry::MATRIX_SCENARIOS;
 use super::registry::{ScenarioSpec, HEADLINE_SCENARIOS, REMOTE_MATRIX_SCENARIOS};
 
 /// Every registered daily scenario descriptor, deduplicated by id (headlines first).
 #[must_use]
+/// Scenario ids the daily runner can execute today (headlines + matrix, stable order).
+pub fn executable_scenario_ids() -> Vec<&'static str> {
+    areas::all_daily_plans()
+        .iter()
+        .map(|plan| plan.spec.id)
+        .collect()
+}
+
 pub fn all_registry_scenarios() -> Vec<&'static ScenarioSpec> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();

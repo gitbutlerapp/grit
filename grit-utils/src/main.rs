@@ -761,6 +761,18 @@ enum DailySubCmd {
         /// Daily census JSON report path
         report: PathBuf,
     },
+    /// Print executable daily scenario ids (one per line)
+    ListIds,
+    /// Compare two daily reports; exit non-zero when ratios drift beyond tolerance
+    Compare {
+        baseline: PathBuf,
+        candidate: PathBuf,
+        #[arg(long, default_value = "0.10")]
+        tolerance: f64,
+        /// Print a markdown drift table on stdout
+        #[arg(long)]
+        markdown: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1279,6 +1291,12 @@ fn main() -> Result<()> {
             Some(DailySubCmd::Validate { report }) => {
                 grit_utils::validate_daily_report(report)?;
                 eprintln!("daily report valid: {}", report.display());
+                return Ok(());
+            }
+            Some(DailySubCmd::ListIds) => {
+                for id in grit_utils::daily::executable_scenario_ids() {
+                    println!("{id}");
+                }
                 return Ok(());
             }
             Some(DailySubCmd::Compare {

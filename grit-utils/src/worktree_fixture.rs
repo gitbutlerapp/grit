@@ -24,11 +24,29 @@ pub const GIT_GIT_BENCH_BRANCH: &str = "grit-bench-worktree";
 pub const MODIFY_FRACTION_DENOM: usize = 100;
 
 /// Return the sorted path list used for ~1% modifications (relative paths).
+fn skip_big_blob_worktree_path(path: &Path) -> bool {
+    path.components().any(|c| c.as_os_str() == "bin")
+        || path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("bin"))
+}
+
+fn exclude_big_blobs_from_worktree(git: &Path, repo: &Path) -> Result<()> {
+    run_git(git, repo, &["sparse-checkout", "init", "--no-cone"])?;
+    run_git(
+        git,
+        repo,
+        &["sparse-checkout", "set", "/*", "!bin", "!bin/**"],
+    )?;
+    Ok(())
+}
+
 pub fn modified_path_list(git: &Path, repo: &Path) -> Result<Vec<PathBuf>> {
     let count = read_modify_count()?;
     let mut rel = list_tracked_files(git, repo)?
         .into_iter()
         .filter(|p| p.to_string_lossy() != ".gitmodules")
+        .filter(|p| !skip_big_blob_worktree_path(p))
         .collect::<Vec<_>>();
     rel.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
     Ok(rel.into_iter().take(count).collect())
@@ -165,13 +183,24 @@ pub fn ensure_worktree_bench_repo(
     if kind == FixtureKind::GitGit {
         run_git(git, parent, &["clone", "-q", "--local", src, name])?;
         run_git(git, &dest, &["checkout", "-B", GIT_GIT_BENCH_BRANCH])?;
+        pin_worktree_bench_config(git, &dest)?;
+    } else if kind == FixtureKind::BigBlobs {
+        run_git(
+            git,
+            parent,
+            &["clone", "--local", "-q", "--no-checkout", src, name],
+        )?;
+        pin_worktree_bench_config(git, &dest)?;
+        let head = fixture_registry::git_head_oid(git, &dest)?;
+        exclude_big_blobs_from_worktree(git, &dest)?;
+        run_git(git, &dest, &["checkout", "-f", &head])?;
     } else {
         fixture_registry::copy_for_use(git, &cached, &dest)?;
         if kind == FixtureKind::GitGitWt {
             run_git(git, &dest, &["checkout", "-B", GIT_GIT_BENCH_BRANCH])?;
         }
+        pin_worktree_bench_config(git, &dest)?;
     }
-    pin_worktree_bench_config(git, &dest)?;
 
     let head = fixture_registry::git_head_oid(git, &dest)?;
     write_base_oid(&head)?;

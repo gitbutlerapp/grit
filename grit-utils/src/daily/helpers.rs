@@ -229,7 +229,13 @@ pub fn ctx(repo: PathBuf, setup: &DailySetup<'_>) -> DailyHeadlineContext {
     DailyHeadlineContext::new(repo, setup.git, setup.grit, setup.bench, setup.smoke)
 }
 
+fn daily_low_memory_fixtures() -> bool {
+    std::env::var("GRIT_BENCH_DAILY_LOW_MEMORY")
+        .is_ok_and(|v| !v.is_empty() && v != "0" && v != "false")
+}
+
 pub fn fixture_kind(shape: RepoShape, smoke: bool) -> FixtureKind {
+    let smoke = smoke || daily_low_memory_fixtures();
     match shape {
         RepoShape::Small => {
             if smoke {
