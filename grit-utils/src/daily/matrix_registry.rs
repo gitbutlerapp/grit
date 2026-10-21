@@ -55,6 +55,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Stage all changes: grit add vs git add -A (after ~1% modified)",
     },
     ScenarioSpec {
+        id: "add/update@synth-100k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Stage tracked changes: grit add -u vs git add -u (after ~1% modified)",
+    },
+    ScenarioSpec {
+        id: "add/dry-run@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Preview staging: grit add --dry-run vs git add -n -A",
+    },
+    ScenarioSpec {
         id: "add/modified@big-blobs",
         area: Area::Worktree,
         headline: false,
@@ -171,7 +185,7 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
     ScenarioSpec {
         id: "log/json-100@git-git",
         area: Area::Revwalk,
-        headline: true,
+        headline: false,
         name: None,
         description: "Last 100 commits JSON: grit log --limit 100 --json vs git log -100 with verbose --format",
     },
@@ -230,13 +244,6 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         headline: false,
         name: None,
         description: "Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD",
-    },
-    ScenarioSpec {
-        id: "resolve/change-id@git-git",
-        area: Area::Revwalk,
-        headline: false,
-        name: None,
-        description: "Resolve change id prefix: grit resolve <cid> vs git log --all --format=%H",
     },
     ScenarioSpec {
         id: "cat/blob@git-git",

@@ -171,7 +171,7 @@ fn issue_1227_new_file_in_git_warmed_cached_dir() {
 
     let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage for commit");
     assert!(
-        outcome.added >= 1,
+        outcome.added.len() >= 1,
         "commit staging must include new untracked file, got {outcome:?}"
     );
     fsck_strict(root);

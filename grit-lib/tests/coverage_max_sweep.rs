@@ -187,6 +187,7 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
             ..DiffIndexToWorktreeOptions::default()
         },
+        true,
     )?;
     let rules = WorktreeRules::from_repository(&repo, &index)?;
     let _ = diff_tree_to_worktree_with_git_dir_and_rules(

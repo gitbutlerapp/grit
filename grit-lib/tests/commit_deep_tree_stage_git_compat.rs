@@ -64,9 +64,10 @@ fn stage_for_commit_stages_single_edit_on_deep_tree_without_new_untracked() {
     fs::write(root.join(".gitattributes"), "*.txt text eol=lf\n# edit\n").expect("attrs");
 
     let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage for commit");
-    assert_eq!(outcome.modified, 1, "expected one staged path");
+    assert_eq!(outcome.modified.len(), 1, "expected one staged path");
     assert_eq!(
-        outcome.added, 0,
+        outcome.added.len(),
+        0,
         "clean tree should not stage untracked paths"
     );
 }
@@ -125,8 +126,8 @@ fn stage_for_commit_untracked_cache_eligible_tree_stages_one_edit() {
     fs::write(root.join(".gitattributes"), "*.txt text eol=lf\n# edit\n").expect("edit");
 
     let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage");
-    assert_eq!(outcome.modified, 1);
-    assert_eq!(outcome.added, 0);
+    assert_eq!(outcome.modified.len(), 1);
+    assert_eq!(outcome.added.len(), 0);
 }
 
 #[test]
@@ -198,8 +199,8 @@ fn stage_for_commit_ignorecase_autocrlf_uses_tracked_scan_on_deep_tree() {
 
     let _probe = reset_worktree_metadata_probe(root);
     let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage");
-    assert_eq!(outcome.modified, 1);
-    assert_eq!(outcome.added, 0);
+    assert_eq!(outcome.modified.len(), 1);
+    assert_eq!(outcome.added.len(), 0);
 
     let tracked = git(root, &["ls-files"]).lines().count();
     let dir_budget = 25 * 25 + 64;
@@ -225,9 +226,9 @@ fn stage_for_commit_ignorecase_tracked_scan_updates_case_only_spelling() {
 
     let repo = open_repo(root);
     let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage case rename");
-    assert_eq!(outcome.added, 0);
+    assert_eq!(outcome.added.len(), 0);
     assert!(
-        outcome.modified >= 1,
+        outcome.modified.len() >= 1,
         "case-only rename must refresh index spelling via tracked scan + icase update"
     );
 

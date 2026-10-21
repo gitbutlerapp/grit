@@ -9,8 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::diff::{
-    entry_is_racy, index_entry_worktree_abs, materialize_worktree_blob, read_submodule_head_oid,
-    symlink_target_bytes, SymlinkDirCache,
+    entry_is_racy, hash_worktree_blob, index_entry_worktree_abs, materialize_worktree_blob,
+    read_submodule_head_oid, symlink_target_bytes, SymlinkDirCache,
 };
 use crate::error::{Error, Result};
 use crate::hash::Parallelism;
@@ -24,7 +24,10 @@ pub use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
-use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeBlobReadInput};
+use crate::worktree_batch::{
+    prepare_and_store_worktree_blobs_parallel, prepare_worktree_blobs_parallel,
+    WorktreeBlobReadInput,
+};
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
     collect_blob_lookup_batches, group_blob_entries_by_dir, stat_scan_thread_count,
@@ -165,7 +168,7 @@ pub fn stage_tracked_modifications_in_index_with_thresholds(
 ) -> Result<StageTrackedSummary> {
     let mut rules = WorktreeRules::from_repository(repo, index)?;
     stage_tracked_modifications_in_index_with_rules(
-        repo, work_tree, index_path, index, &mut rules, thresholds,
+        repo, work_tree, index_path, index, &mut rules, thresholds, false,
     )
 }
 
@@ -177,6 +180,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     index: &mut Index,
     rules: &mut WorktreeRules,
     thresholds: IndexStagingThresholds,
+    dry_run: bool,
 ) -> Result<StageTrackedSummary> {
     let entry_count_at_start = index.entries.len();
     let bulk_untr_defer = entry_count_at_start >= thresholds.large_index_restage;
@@ -184,7 +188,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     // serial on campaign-scale indexes so bulk add stays under the factory RSS ceiling.
     let parallel_restage = entry_count_at_start >= thresholds.parallel_tracked_restage
         && entry_count_at_start < PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES;
-    if bulk_untr_defer {
+    if bulk_untr_defer && !dry_run {
         index.defer_untracked_cache_invalidation = true;
     }
 
@@ -196,8 +200,9 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         bulk_untr_defer,
         parallel_restage,
         rules,
+        dry_run,
     );
-    if bulk_untr_defer {
+    if bulk_untr_defer && !dry_run {
         index.defer_untracked_cache_invalidation = false;
     }
     result
@@ -230,6 +235,15 @@ pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &Stag
     }
 }
 
+fn tracked_index_remove(index: &mut Index, raw_path: &[u8], dry_run: bool) -> bool {
+    if dry_run {
+        index.get(raw_path, 0).is_some()
+    } else {
+        index.remove(raw_path)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn stage_tracked_modifications_in_index_body(
     repo: &Repository,
     work_tree: &Path,
@@ -238,6 +252,7 @@ fn stage_tracked_modifications_in_index_body(
     bulk_untr_defer: bool,
     parallel_restage: bool,
     rules: &mut WorktreeRules,
+    dry_run: bool,
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
     let precompose_unicode = effective_core_precomposeunicode_with_config(
@@ -265,7 +280,7 @@ fn stage_tracked_modifications_in_index_body(
 
     let mut symlink_parent_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut summary = StageTrackedSummary {
-        untracked_invalidation_deferred: bulk_untr_defer,
+        untracked_invalidation_deferred: bulk_untr_defer && !dry_run,
         ..StageTrackedSummary::default()
     };
     let ignorecase = repo
@@ -278,7 +293,15 @@ fn stage_tracked_modifications_in_index_body(
     for raw_path in &unmerged_paths {
         let abs_path =
             abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
-        refresh_unmerged_tracked_path(repo, index, raw_path, &abs_path, rules, &mut summary)?;
+        refresh_unmerged_tracked_path(
+            repo,
+            index,
+            raw_path,
+            &abs_path,
+            rules,
+            &mut summary,
+            dry_run,
+        )?;
     }
 
     for (raw_path, idx_e) in &special_stage0 {
@@ -295,6 +318,7 @@ fn stage_tracked_modifications_in_index_body(
             &mut symlink_parent_cache,
             rules,
             &mut summary,
+            dry_run,
         )?;
     }
 
@@ -428,6 +452,7 @@ fn stage_tracked_modifications_in_index_body(
                     index_mtime,
                     trust_filemode,
                     rules,
+                    dry_run,
                 };
                 let defer = parallel_restage.then_some(&mut deferred_restage);
                 if refresh_present_tracked_path(ctx, stat, defer, entry_index)? {
@@ -438,7 +463,7 @@ fn stage_tracked_modifications_in_index_body(
         Ok(())
     })?;
     for raw_path in pending_removals {
-        if index.remove(&raw_path) {
+        if tracked_index_remove(index, &raw_path, dry_run) {
             summary.removed.push(raw_path);
         }
     }
@@ -457,6 +482,7 @@ fn stage_tracked_modifications_in_index_body(
             parallelism,
             restage_ctx,
             &deferred_restage,
+            dry_run,
         )?);
     }
 
@@ -474,6 +500,7 @@ struct PresentRefreshCtx<'a> {
     index_mtime: Option<(u32, u32)>,
     trust_filemode: bool,
     rules: &'a mut WorktreeRules,
+    dry_run: bool,
 }
 
 fn refresh_unmerged_tracked_path(
@@ -483,6 +510,7 @@ fn refresh_unmerged_tracked_path(
     abs_path: &Path,
     rules: &mut WorktreeRules,
     summary: &mut StageTrackedSummary,
+    dry_run: bool,
 ) -> Result<()> {
     let idx_mode = index
         .entries
@@ -499,14 +527,20 @@ fn refresh_unmerged_tracked_path(
         .unwrap_or(0o100644);
     match symlink_metadata_for_staging(abs_path)? {
         Some(_) => {
-            index.remove(raw_path);
+            if !dry_run {
+                index.remove(raw_path);
+            }
             if idx_mode == 0o160000 {
                 if let Some(oid) = read_submodule_head_oid(abs_path) {
-                    stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
+                    if !dry_run {
+                        stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
+                    }
                     summary.modified.push(raw_path.to_vec());
                 }
             } else {
-                stage_blob_from_worktree(repo, index, abs_path, raw_path, None, rules)?;
+                if !dry_run {
+                    stage_blob_from_worktree(repo, index, abs_path, raw_path, None, rules)?;
+                }
                 summary.modified.push(raw_path.to_vec());
             }
         }
@@ -560,10 +594,11 @@ fn stage_tracked_path_individual(
     symlink_parent_cache: &mut HashMap<PathBuf, bool>,
     rules: &mut WorktreeRules,
     summary: &mut StageTrackedSummary,
+    dry_run: bool,
 ) -> Result<()> {
     let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
     if path_has_symlink_parent_cached(work_tree, &abs_path, symlink_parent_cache) {
-        if index.remove(raw_path) {
+        if tracked_index_remove(index, raw_path, dry_run) {
             summary.removed.push(raw_path.to_vec());
         }
         return Ok(());
@@ -579,6 +614,7 @@ fn stage_tracked_path_individual(
                 index_mtime,
                 trust_filemode,
                 rules,
+                dry_run,
             };
             if refresh_present_tracked_path(ctx, BlobDiskStat::from_metadata(&meta), None, 0)? {
                 summary.modified.push(raw_path.to_vec());
@@ -586,7 +622,7 @@ fn stage_tracked_path_individual(
         }
         None if idx_e.skip_worktree() => {}
         None => {
-            if index.remove(raw_path) {
+            if tracked_index_remove(index, raw_path, dry_run) {
                 summary.removed.push(raw_path.to_vec());
             }
         }
@@ -620,13 +656,14 @@ fn refresh_present_tracked_path(
         index_mtime,
         trust_filemode,
         rules,
+        dry_run,
     } = ctx;
     let idx_mode = idx_e.mode;
     let idx_intent_to_add = idx_e.intent_to_add();
     let idx_oid = idx_e.oid;
 
     if idx_mode == 0o160000 {
-        return refresh_gitlink(repo, index, raw_path, abs_path, idx_e);
+        return refresh_gitlink(repo, index, raw_path, abs_path, idx_e, dry_run);
     }
 
     if stat.is_dir {
@@ -640,12 +677,16 @@ fn refresh_present_tracked_path(
                 {
                     return Ok(false);
                 }
+                if dry_run {
+                    return Ok(true);
+                }
                 stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
                 return Ok(true);
             }
-        } else {
-            index.remove(raw_path);
+        } else if tracked_index_remove(index, raw_path, dry_run) {
             return Ok(true);
+        } else {
+            return Ok(false);
         }
     }
 
@@ -657,6 +698,9 @@ fn refresh_present_tracked_path(
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
         if wt_mode == idx_mode || !trust_filemode {
             return Ok(false);
+        }
+        if dry_run {
+            return Ok(true);
         }
         let entry = entry_from_stat(abs_path, raw_path, idx_oid, wt_mode)?;
         index.stage_file(entry);
@@ -676,7 +720,7 @@ fn refresh_present_tracked_path(
             let file_attrs = rules.file_attrs(rel_path, false);
             let conv = rules.conversion();
             let filter_fp = Some(rules.filter_process());
-            let staged_oid = materialize_worktree_blob(
+            let staged_oid = hash_worktree_blob(
                 repo.odb(),
                 abs_path,
                 &meta,
@@ -685,6 +729,7 @@ fn refresh_present_tracked_path(
                 rel_path,
                 Some(idx_e),
                 filter_fp,
+                !dry_run,
             )?;
             if !idx_intent_to_add
                 && staged_oid == idx_oid
@@ -703,12 +748,16 @@ fn refresh_present_tracked_path(
             oid
         }
     };
+    if dry_run {
+        return Ok(true);
+    }
     let mode_for_index = if trust_filemode { wt_mode } else { idx_mode };
     let entry = entry_from_stat(abs_path, raw_path, oid, mode_for_index)?;
     index.stage_file(entry);
     Ok(true)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn restage_deferred_jobs(
     repo: &Repository,
     index: &mut Index,
@@ -717,6 +766,7 @@ fn restage_deferred_jobs(
     parallelism: Parallelism,
     ctx: DeferredRestageContext<'_>,
     jobs: &[DeferredRestageJob],
+    dry_run: bool,
 ) -> Result<Vec<Vec<u8>>> {
     let DeferredRestageContext {
         work_tree,
@@ -748,17 +798,27 @@ fn restage_deferred_jobs(
             cached_meta: None,
         });
     }
-    if !batch_inputs.is_empty() {
-        repo.odb().ensure_all_loose_prefix_dirs()?;
-    }
-    let prepared = prepare_and_store_worktree_blobs_parallel(
-        repo.odb(),
-        &batch_inputs,
-        rules.conversion(),
-        parallelism,
-        Some(rules.filter_process()),
-        BULK_NEW_LOOSE_WRITE,
-    )?;
+    let prepared = if dry_run {
+        prepare_worktree_blobs_parallel(
+            repo.odb(),
+            &batch_inputs,
+            rules.conversion(),
+            parallelism,
+            Some(rules.filter_process()),
+        )?
+    } else {
+        if !batch_inputs.is_empty() {
+            repo.odb().ensure_all_loose_prefix_dirs()?;
+        }
+        prepare_and_store_worktree_blobs_parallel(
+            repo.odb(),
+            &batch_inputs,
+            rules.conversion(),
+            parallelism,
+            Some(rules.filter_process()),
+            BULK_NEW_LOOSE_WRITE,
+        )?
+    };
 
     let mut replacements = Vec::new();
     let mut modified = Vec::new();
@@ -781,9 +841,11 @@ fn restage_deferred_jobs(
             abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
         let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
         modified.push(raw_path.to_vec());
-        replacements.push(entry);
+        if !dry_run {
+            replacements.push(entry);
+        }
     }
-    if !replacements.is_empty() {
+    if !dry_run && !replacements.is_empty() {
         index.replace_stage0_entries_batch(replacements);
     }
     Ok(modified)
@@ -795,6 +857,7 @@ fn refresh_gitlink(
     raw_path: &[u8],
     abs_path: &Path,
     idx_e: &IndexEntry,
+    dry_run: bool,
 ) -> Result<bool> {
     if let Some(oid) = read_submodule_head_oid(abs_path) {
         if index
@@ -804,6 +867,9 @@ fn refresh_gitlink(
             .is_some_and(|e| e.oid == oid && e.mode == 0o160000)
         {
             return Ok(false);
+        }
+        if dry_run {
+            return Ok(true);
         }
         stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
         return Ok(true);
@@ -1450,7 +1516,11 @@ mod tests {
         use crate::porcelain::add::{stage, StageOptions};
         use crate::progress::NullProgress;
         let outcome = stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
-        assert_eq!(outcome.modified, 1, "pathless add must promote -N entry");
+        assert_eq!(
+            outcome.modified.len(),
+            1,
+            "pathless add must promote -N entry"
+        );
 
         let after = repo.load_index().unwrap();
         let ie = after.get(b"f.txt", 0).expect("staged f.txt");

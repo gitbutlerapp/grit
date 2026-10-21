@@ -583,6 +583,12 @@ enum Command {
     Add {
         /// Files or directories to stage. Omit to stage all changes.
         paths: Vec<String>,
+        /// Stage tracked changes only (modified and deleted paths; no untracked files).
+        #[arg(short = 'u', long = "update")]
+        update: bool,
+        /// Report paths that would be staged without writing the index or object database.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
         /// Mark staged regular files as executable (`100755`) in the index.
         #[arg(long = "executable", conflicts_with = "non_executable")]
         executable: bool,
@@ -1264,10 +1270,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add {
             paths,
+            update,
+            dry_run,
             executable,
             non_executable,
         } => emit(
-            &commands::add::run(&paths, executable, non_executable)?,
+            &commands::add::run(&paths, update, dry_run, executable, non_executable)?,
             opts,
             ctx,
         ),

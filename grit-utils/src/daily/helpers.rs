@@ -401,6 +401,20 @@ pub fn add_all_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+pub fn add_update_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["add", "-u"]),
+        sh_devnull(&ctx.git, &["add", "-u"]),
+    )
+}
+
+pub fn add_dry_run_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["add", "--dry-run"]),
+        sh_devnull(&ctx.git, &["add", "-n", "-A"]),
+    )
+}
+
 pub fn restore_paths_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_script(shell_restore_modified_set(&ctx.grit)),

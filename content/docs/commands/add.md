@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit add [--executable | --non-executable] [<path>...]
+grit add [-u | --update] [--dry-run] [--executable | --non-executable] [<path>...]
 ```
 
 ## Description
@@ -26,6 +26,8 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 | Option | Description |
 | --- | --- |
 | `<path>...` | Files or directories to stage. Omit to stage every change. |
+| `-u`, `--update` | Stage tracked changes only (modified and deleted paths). Untracked files are left alone. With no paths, applies to the whole tree. |
+| `--dry-run` | List paths that would be staged without updating the index or writing objects. |
 | `--executable` | Stage listed regular files with mode `100755` in the index (requires at least one path). |
 | `--non-executable` | Stage listed regular files with mode `100644` in the index (requires at least one path). |
 
@@ -60,17 +62,25 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `staged` | number | How many paths were staged by this invocation. |
+| `added` | string[] | New paths staged (untracked → index). |
+| `modified` | string[] | Tracked paths updated in the index. |
+| `removed` | string[] | Tracked paths removed from the index (deleted in the worktree). |
+| `dry_run` | boolean | True when `--dry-run` was passed. |
+| `count` | number | Total paths in `added`, `modified`, and `removed`. |
+| `staged` | number | Same as `count` (kept for older scripts). |
 
 Example:
 
 ```json
 {
+  "added": ["src/new.rs"],
+  "modified": ["README.md"],
+  "removed": [],
+  "dry_run": false,
+  "count": 2,
   "staged": 2
 }
 ```
-
-When staging would hash blob data that triggers an SHA-1 chosen-prefix collision, the command fails (exit **1**). With `--json`, stdout is the shared [error object](../scripting.md) with `kind` `hash_collision` and `oid` set to the unsafe digest hex (see [error schema](/schemas/error/v1.json)).
 
 ## Markdown output
 

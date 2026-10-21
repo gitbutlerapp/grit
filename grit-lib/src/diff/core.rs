@@ -2437,7 +2437,6 @@ pub fn diff_trees(
     new_tree_oid: Option<&ObjectId>,
     prefix: &str,
 ) -> Result<Vec<DiffEntry>> {
-    crate::trace::trace_span!("grit.diff.tree");
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, false, None)
 }
 
@@ -4434,12 +4433,20 @@ pub fn diff_index_to_worktree_for_staging(
     index: &mut Index,
     work_tree: &Path,
     options: DiffIndexToWorktreeOptions,
+    materialize_dirty_blobs: bool,
 ) -> Result<(
     Vec<DiffEntry>,
     bool,
     std::collections::BTreeMap<String, crate::index::IndexStatFields>,
 )> {
-    diff_index_to_worktree_inner(odb, index, work_tree, repository_git_dir, options, true)
+    diff_index_to_worktree_inner(
+        odb,
+        index,
+        work_tree,
+        repository_git_dir,
+        options,
+        materialize_dirty_blobs,
+    )
 }
 
 /// First pass of [`diff_index_to_worktree_inner`]: gitlinks and intent-to-add paths only.
@@ -6402,6 +6409,32 @@ pub fn materialize_worktree_blob(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
+    hash_worktree_blob(
+        odb,
+        path,
+        meta,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
+        filter_process,
+        true,
+    )
+}
+
+/// Hash a worktree blob for staging; optionally persist it in `odb`.
+#[allow(clippy::too_many_arguments)]
+pub fn hash_worktree_blob(
+    odb: &Odb,
+    path: &Path,
+    meta: &fs::Metadata,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
+    materialize: bool,
+) -> Result<ObjectId> {
     worktree_file_oid(
         odb,
         path,
@@ -6410,7 +6443,7 @@ pub fn materialize_worktree_blob(
         file_attrs,
         rel_path,
         index_entry,
-        true,
+        materialize,
         filter_process,
     )
 }
@@ -10295,7 +10328,6 @@ fn hash_blob_spans(buf: &[u8], is_text: bool) -> SpanHashTop {
 /// `diffcore_count_changes` semantics (used for `--dirstat=changes` damage).
 #[must_use]
 pub fn diffcore_count_changes(old: &[u8], new: &[u8]) -> (u64, u64) {
-    crate::trace::trace_span!("grit.diff.blob");
     let src_is_text = !crate::merge_file::is_binary(old);
     let dst_is_text = !crate::merge_file::is_binary(new);
     let src_count = hash_blob_spans(old, src_is_text);
