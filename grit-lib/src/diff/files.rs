@@ -71,10 +71,7 @@ fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
 
 fn include_file_in_diff(file: &FileDiff, opts: DiffOptions) -> bool {
     if opts.whitespace.is_active() && !file.binary {
-        let empty = file
-            .structured
-            .as_ref()
-            .is_none_or(|s| s.hunks.is_empty());
+        let empty = file.structured.as_ref().is_none_or(|s| s.hunks.is_empty());
         if empty {
             return false;
         }
