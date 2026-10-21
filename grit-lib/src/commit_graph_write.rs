@@ -626,6 +626,8 @@ fn clear_readonly_attribute(path: &std::path::Path, required: bool) -> crate::er
             }
         }
     }
+    #[cfg(windows)]
+    let _ = required;
     Ok(())
 }
 
