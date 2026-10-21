@@ -261,8 +261,6 @@ mod tests {
 
     #[test]
     fn flags_ratio_drift_over_tolerance() {
-        let mut row_b = sample_row("status/clean@synth-10k", 100.0, 100.0, 1_000_000, 900_000);
-        row_b.ratio = 1.25;
         let a = sample_report(vec![sample_row(
             "status/clean@synth-10k",
             100.0,
@@ -270,7 +268,13 @@ mod tests {
             1_000_000,
             900_000,
         )]);
-        let b = sample_report(vec![row_b]);
+        let b = sample_report(vec![sample_row(
+            "status/clean@synth-10k",
+            100.0,
+            125.0,
+            1_000_000,
+            900_000,
+        )]);
         let outcome = compare_daily_reports(&a, &b, 0.10);
         assert_eq!(outcome.skipped_sub_20ms_time, 0);
         assert!(!outcome.is_success());

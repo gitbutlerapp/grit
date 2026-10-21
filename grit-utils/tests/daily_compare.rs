@@ -66,6 +66,8 @@ fn sample_report(rows: Vec<DailyScenarioResult>) -> DailyBenchReport {
 
 #[test]
 fn flags_ratio_drift_over_tolerance() {
+    // Git median unchanged; grit 100→125 ms makes ratio 1.25. The old comparator skipped
+    // time-ratio checks when raw grit median drift exceeded tolerance, missing this regression.
     let a = sample_report(vec![sample_row(
         "status/clean@synth-10k",
         100.0,
