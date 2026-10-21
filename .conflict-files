@@ -1,3 +1,0 @@
-ancestorEntries = ["grit-lib/src/diff/handle.rs"]
-ourEntries = ["grit-lib/src/diff/handle.rs"]
-theirEntries = ["grit-lib/src/diff/handle.rs"]

@@ -43,8 +43,7 @@ use crate::userdiff::FuncnameMatcher;
 use crate::worktree_rules::WorktreeRules;
 
 use super::unified_emit::{
-    emit_unified_body_from_edits, line_ending_only_edits, write_patch_line, EditSpan, LineSide,
-    UnifiedEmitOptions,
+    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineSide, UnifiedEmitOptions,
 };
 
 #[path = "../structured_diff.rs"]
@@ -120,6 +119,40 @@ pub(crate) fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
     starts.windows(2).map(|w| &body[w[0]..w[1]]).collect()
 }
 
+/// Histogram changed flags via Git's `xhistogram`, then `xdl_change_compact`.
+pub(crate) fn histogram_compacted_line_ops(
+    old_content: &str,
+    new_content: &str,
+    indent_heuristic: bool,
+) -> Vec<similar::DiffOp> {
+    let before = LineSide::from_text(old_content);
+    let after = LineSide::from_text(new_content);
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let (mut changed1, mut changed2) = git_xdiff::histogram_changed_flags(&old_lines, &new_lines);
+    let n = old_lines
+        .len()
+        .min(new_lines.len())
+        .min(changed1.len())
+        .min(changed2.len());
+    for i in 0..n {
+        if old_lines[i] == new_lines[i] {
+            changed1[i] = false;
+            changed2[i] = false;
+        }
+    }
+    if !changed1.iter().any(|c| *c) && !changed2.iter().any(|c| *c) {
+        return Vec::new();
+    }
+    let raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
+    diff_indent_heuristic::apply_change_compact_to_ops(
+        &raw,
+        &old_lines,
+        &new_lines,
+        indent_heuristic,
+    )
+}
+
 pub(crate) fn histogram_unified_body_raw(
     old_content: &str,
     new_content: &str,
@@ -127,122 +160,29 @@ pub(crate) fn histogram_unified_body_raw(
     inter_hunk_context: usize,
     indent_heuristic: bool,
 ) -> String {
-    use imara_diff::{Algorithm, Diff, Hunk, InternedInput};
-
-    let input = InternedInput::new(old_content, new_content);
-    let mut diff = Diff::compute(Algorithm::Histogram, &input);
-    diff.postprocess_lines(&input);
     let before_side = LineSide::from_text(old_content);
     let after_side = LineSide::from_text(new_content);
-
-    // Assemble hunks ourselves: imara's `UnifiedDiff` printer starts the first
-    // hunk's context at line 0 whenever the first change is within
-    // `2 * context_len` of the file start, emitting more leading context than
-    // its own header claims (t4061), and its gap threshold cannot express
-    // Git's odd `2 * U + inter_hunk_context` fuse limits (t4032).
-    let hunks: Vec<Hunk> = diff.hunks().collect();
-    if hunks.is_empty() {
+    let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic);
+    let mut edits = diff_ops_to_edit_spans(&ops);
+    if edits.is_empty() {
         if old_content != new_content {
-            let edits = line_ending_only_edits(&before_side, &after_side);
-            if !edits.is_empty() {
-                return emit_unified_body_from_edits(
-                    &before_side,
-                    &after_side,
-                    &edits,
-                    UnifiedEmitOptions {
-                        context_lines,
-                        inter_hunk_context,
-                        function_context: false,
-                    },
-                    None,
-                );
-            }
+            edits = line_ending_only_edits(&before_side, &after_side);
         }
-        return String::new();
-    }
-
-    if indent_heuristic {
-        let old_refs: Vec<&str> = before_side.lines.iter().map(|l| l.body.as_str()).collect();
-        let new_refs: Vec<&str> = after_side.lines.iter().map(|l| l.body.as_str()).collect();
-        let ops = imara_hunks_to_diff_ops(&hunks, old_refs.len(), new_refs.len());
-        let compacted =
-            diff_indent_heuristic::apply_change_compact_to_ops(&ops, &old_refs, &new_refs, true);
-        let edits = diff_ops_to_edit_spans(&compacted);
-        return emit_unified_body_from_edits(
-            &before_side,
-            &after_side,
-            &edits,
-            UnifiedEmitOptions {
-                context_lines,
-                inter_hunk_context,
-                function_context: false,
-            },
-            None,
-        );
-    }
-
-    let ctx = context_lines.min(u32::MAX as usize) as u32;
-    let max_gap = (2usize.saturating_mul(context_lines))
-        .saturating_add(inter_hunk_context)
-        .min(u32::MAX as usize) as u32;
-    let before_len = input.before.len() as u32;
-    let after_len = input.after.len() as u32;
-
-    let mut groups: Vec<&[Hunk]> = Vec::new();
-    let mut group_start = 0usize;
-    for i in 1..hunks.len() {
-        if hunks[i].before.start - hunks[i - 1].before.end > max_gap {
-            groups.push(&hunks[group_start..i]);
-            group_start = i;
+        if edits.is_empty() {
+            return String::new();
         }
     }
-    groups.push(&hunks[group_start..]);
-
-    fn fmt_side(start: u32, count: u32) -> String {
-        let shown_start = if count == 0 { start } else { start + 1 };
-        if count == 1 {
-            format!("{shown_start}")
-        } else {
-            format!("{shown_start},{count}")
-        }
-    }
-
-    use std::fmt::Write as _;
-    let mut out = String::new();
-    for group in groups {
-        let first = &group[0];
-        let last = &group[group.len() - 1];
-        let b_start = first.before.start.saturating_sub(ctx);
-        let a_start = first.after.start.saturating_sub(ctx);
-        let b_end = (last.before.end.saturating_add(ctx)).min(before_len);
-        let a_end = (last.after.end.saturating_add(ctx)).min(after_len);
-
-        let _ = writeln!(
-            out,
-            "@@ -{} +{} @@",
-            fmt_side(b_start, b_end - b_start),
-            fmt_side(a_start, a_end - a_start)
-        );
-
-        let mut pos = b_start;
-        for hunk in group {
-            for idx in pos..hunk.before.start {
-                write_patch_line(&mut out, ' ', before_side.line(idx as usize));
-            }
-            for idx in hunk.before.start..hunk.before.end {
-                write_patch_line(&mut out, '-', before_side.line(idx as usize));
-            }
-            for idx in hunk.after.start..hunk.after.end {
-                write_patch_line(&mut out, '+', after_side.line(idx as usize));
-            }
-            pos = hunk.before.end;
-        }
-        for idx in pos..b_end {
-            write_patch_line(&mut out, ' ', before_side.line(idx as usize));
-        }
-    }
-
-    out
+    emit_unified_body_from_edits(
+        &before_side,
+        &after_side,
+        &edits,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context: false,
+        },
+        None,
+    )
 }
 
 /// Build the unified-diff body (no `---`/`+++` header) using Git's histogram
@@ -1842,6 +1782,21 @@ mod git_xdiff {
                 changed2[n_start + j] = true;
             }
         }
+    }
+
+    pub(crate) fn histogram_changed_flags(
+        lines1: &[&str],
+        lines2: &[&str],
+    ) -> (Vec<bool>, Vec<bool>) {
+        crate::diff::git_histogram::histogram_changed_flags(
+            lines1,
+            lines2,
+            |changed1, changed2, o_start, o_end, n_start, n_end| {
+                merge_myers_region(
+                    lines1, lines2, changed1, changed2, o_start, o_end, n_start, n_end,
+                );
+            },
+        )
     }
 }
 
