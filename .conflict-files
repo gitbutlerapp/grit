@@ -1,3 +1,3 @@
-ancestorEntries = ["grit-cli/src/commands/show.rs", "grit-cli/src/main.rs"]
-ourEntries = ["grit-cli/src/commands/show.rs", "grit-cli/src/main.rs"]
-theirEntries = ["grit-cli/src/commands/show.rs", "grit-cli/src/main.rs"]
+ancestorEntries = ["grit-lib/src/diff/options.rs"]
+ourEntries = ["grit-lib/src/diff/options.rs"]
+theirEntries = ["grit-lib/src/diff/options.rs"]

@@ -123,7 +123,7 @@ pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
         &commit_oid,
         CommitDiffOptions {
             paths: opts.paths.clone(),
-            format: opts.format,
+            format: opts.format.clone(),
             word_level_inline: opts.word_level_inline,
         },
     )?;
@@ -135,7 +135,7 @@ pub fn run(opts: ShowRunOptions) -> Result<ShowOutcome> {
                 CommitDiffOptions {
                     paths: opts.paths,
                     format: {
-                        let mut f = opts.format;
+                        let mut f = opts.format.clone();
                         f.stat = true;
                         f.name_only = false;
                         f.name_status = false;

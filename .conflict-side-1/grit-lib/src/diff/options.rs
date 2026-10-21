@@ -107,7 +107,7 @@ pub struct DiffOptions {
     pub word_level_inline: bool,
     /// Expand hunks to enclosing function boundaries (Git `-W` / `--function-context`).
     pub function_context: bool,
-    /// `-w`, `-b`, `--ignore-space-at-eol`, and `--ignore-blank-lines`.
+    /// Whitespace rules (`-w`, `-b`, `--ignore-space-at-eol`, `--ignore-blank-lines`).
     pub whitespace: WhitespaceMode,
 }
 
