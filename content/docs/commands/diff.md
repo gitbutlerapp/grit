@@ -24,17 +24,34 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 `<commit>` can be anything that names a commit: a full or short commit id, a branch or tag name, or an expression like `HEAD~2`.
 
+### Diff output options
+
+These flags are shared by [`grit diff`](diff.md), [`grit show`](show.md), and [`grit log`](log.md). Only one **format** flag applies at a time (`--patch`, `--stat`, `--numstat`, `--shortstat`, `--name-only`, `--name-status`); patch tuning and tree-diff flags can combine with any format.
+
+| Option | Description |
+| --- | --- |
+| `-p`, `--patch` | Full unified patch (default for `grit diff` and `grit show` when no other format is set). |
+| `--stat` | Per-file change counts with `+`/`-` bars and a summary line. |
+| `--numstat` | `insertions<TAB>deletions<TAB>path` lines (`-<TAB>-` for binary). |
+| `--shortstat` | Summary line only (`N files changed, …`). |
+| `--name-only` | Changed paths, one per line. |
+| `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
+| `-U`, `--unified <n>` | Context lines around each hunk in patch output (bare `-U` means 3). |
+| `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
+| `-M[<n>]`, `--find-renames[=<n>]` | Detect renames; optional similarity percent (default 50). Glued forms like `-M30` and `-M30%` are accepted. |
+| `--no-renames` | Disable rename detection. |
+| `--diff-algorithm <algo>` | Line diff algorithm: `myers`, `minimal`, `patience`, or `histogram`. |
+| `--diff-filter <letters>` | Include/exclude change types (`A`, `D`, `M`, `R`, …). |
+| `--exit-code` | Exit 1 when there are changes, 0 when clean (no extra stdout in human mode). |
+| `--quiet` | Print nothing; implies `--exit-code`. |
+
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `--stat` | Per-file change counts with `+`/`-` bars and a summary line (like `git diff --stat`). Mutually exclusive with the other format flags below. |
-| `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines (`-<TAB>-` for binary). |
-| `--shortstat` | Only the summary line (`N files changed, …`). |
-| `--name-only` | Changed paths, one per line. |
-| `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
-| `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (bare `-U` means 3). |
-| `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |

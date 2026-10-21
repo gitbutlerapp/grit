@@ -121,7 +121,7 @@ fn locate_diff_subcommand(args: &[String]) -> Option<usize> {
             i = skip_global_flag(args, i);
             continue;
         }
-        if token == "diff" {
+        if matches!(token, "diff" | "show" | "log") {
             return Some(i);
         }
         return None;
@@ -161,7 +161,10 @@ fn rewrite_attached_find_renames(token: &str) -> Option<String> {
     if rest.is_empty() || rest.starts_with('=') {
         return None;
     }
-    Some(format!("-M={rest}"))
+    let Some(pct) = parse_diff_rename_threshold_percent(rest) else {
+        return None;
+    };
+    Some(format!("-M={pct}"))
 }
 
 #[cfg(test)]

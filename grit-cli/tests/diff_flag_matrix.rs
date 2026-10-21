@@ -4,7 +4,7 @@
 //! changes. Each command mode runs a small set of flag combinations (each listed flag
 //! appears at least once across the matrix).
 
-use grit_test_support::{assert_eq_nice, git, git_cmd, grit, grit_cmd, write_file};
+use grit_test_support::{git, git_cmd, grit, grit_cmd, write_file};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -293,11 +293,10 @@ fn compare_text_case(fx: &Fixture, case: &Case) {
             grit_stdout = sort_name_status_lines(&grit_stdout);
             git_stdout = sort_name_status_lines(&git_stdout);
         }
-        assert_eq_nice!(
-            grit_stdout,
-            git_stdout,
+        assert_eq!(
+            grit_stdout, git_stdout,
             "{}: stdout mismatch\ngrit: {:?}\ngit: {:?}",
-            &case_label(case),
+            case_label(case),
             build_grit_args(fx, case.mode, case.out, case.flags),
             git_args,
         );

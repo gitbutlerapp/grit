@@ -1,3 +1,0 @@
-ancestorEntries = ["grit-cli/src/main.rs"]
-ourEntries = ["grit-cli/src/main.rs"]
-theirEntries = ["grit-cli/src/main.rs"]

@@ -27,8 +27,6 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 
 ## Options
 
-Diff format and line-diff flags are documented in [Diff output options](diff.md#diff-output-options). Flags on `grit show`: `-p`, `--patch`, `--stat`, `--numstat`, `--shortstat`, `--name-only`, `--name-status`, `-U`, `--unified`, `-W`, `--function-context`, `-w`, `--ignore-all-space`, `-b`, `--ignore-space-change`, `--ignore-blank-lines`, `-M`, `--find-renames`, `--no-renames`, `--diff-algorithm`, `--diff-filter`.
-
 | Option | Description |
 | --- | --- |
 | `<object>…` | Commits, branches, tags, or `rev:path` specs. Defaults to `HEAD`. |
@@ -38,8 +36,16 @@ Diff format and line-diff flags are documented in [Diff output options](diff.md#
 | `--shortstat` | Only the summary line (`N files changed, …`). |
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line. |
+| `-p`, `--patch` | Full unified patch (default when no other format flag is set). |
 | `-U`, `--unified <n>` | Lines of context around each change in patch mode (bare `-U` means 3). |
 | `-W`, `--function-context` | Expand hunks to enclosing function boundaries (patch mode). |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
+| `--find-renames` | Detect renames (Git `-M`; default threshold 50). |
+| `--no-renames` | Disable rename detection. |
+| `--diff-algorithm <algo>` | Line diff algorithm for the patch. |
+| `--diff-filter <letters>` | Limit diff output to selected change types. |
 | `-- <path>…` | Limit the diff to these paths (pathspecs). |
 
 ## Examples

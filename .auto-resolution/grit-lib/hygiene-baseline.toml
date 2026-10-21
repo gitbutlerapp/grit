@@ -1,6 +1,0 @@
-# grit-lib/src hygiene counts — ratchet baseline
-# Regenerate with: HYGIENE_REGEN=1 cargo test -p grit-lib --test hygiene
-
-[meta]
-updated = "2026-10-08"
-

@@ -29,7 +29,7 @@ When there's more history on a cursor-eligible walk, the last line shows the com
 
 Author, committer, and message filters match [`grit revs`](../revs/): patterns use Git's default POSIX BRE rules unless `-F` / `--fixed-strings` is set; multiple `--author` or `--committer` patterns OR together; multiple `--grep` patterns OR together unless `--all-match`; `--invert-grep` negates only the grep group; `-i` applies to all. When `log.mailmap` is unset or true (and `--no-mailmap` is not passed), `.mailmap` is applied before matching author or committer (same sources as Git). Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
 
-Diff detail flags (same family as [`grit diff`](../diff/)) append output under each commit line: `-p` / `--patch` (unified patch), `--stat`, `--numstat`, `--shortstat`, `--name-only`, or `--name-status`. Only one format at a time. `-U` sets unified context lines for patches (default from `diff.context`).
+Diff detail flags append output under each commit line; see [Diff output options](../diff/#diff-output-options). Only one format flag at a time (`--patch`, `--stat`, …).
 
 With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape matching [`grit show`](../show/)). Merge commits show the change against their first parent for stat and name modes; `-p` skips merge patches (like `git log -p`). Path operands limit both which commits appear and the paths included in each patch.
 
@@ -59,6 +59,14 @@ With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape
 | `--name-only` | Changed paths only, one per line per commit. |
 | `--name-status` | Status letter and path(s) per line per commit. |
 | `-U`, `--unified <N>` | Context lines for `-p` (Git `-U`). |
+| `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries. |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
+| `--find-renames` | Detect renames in per-commit diffs (Git `-M`; default threshold 50). |
+| `--no-renames` | Disable rename detection. |
+| `--diff-algorithm <algo>` | Line diff algorithm for patches. |
+| `--diff-filter <letters>` | Limit diff output to selected change types. |
 | `--oneline` | One line per commit: short oid and subject (`--json` unchanged). With `--decorate`, refs appear in parentheses after the oid. |
 | `--decorate` | Show branch/tag/`HEAD` labels on each commit in human and Markdown output (refs are always in `--json`). |
 | `--group-by author` | Aggregate by author (mailmap-aware, sorted like `git shortlog -sne`). Uses the rev walk for the full selection (no cursor paging). |
