@@ -1318,12 +1318,10 @@ fn main() -> Result<()> {
                 if outcome.is_success() {
                     eprintln!("All daily scenario ratios within tolerance {tolerance}");
                     eprintln!(
-                        "Compared {} rows; skipped {} pending, {} sub-20ms time, {} git median drift, {} grit median drift; {} missing in candidate",
+                        "Compared {} rows; skipped {} pending, {} sub-20ms time, {} missing in candidate",
                         outcome.compared,
                         outcome.skipped_pending,
                         outcome.skipped_sub_20ms_time,
-                        outcome.skipped_git_median_drift,
-                        outcome.skipped_grit_median_drift,
                         outcome.missing_in_candidate
                     );
                     return Ok(());
