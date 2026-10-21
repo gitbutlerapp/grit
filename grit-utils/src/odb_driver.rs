@@ -1,7 +1,7 @@
 //! Library-backed workloads matched to common `git` ODB-heavy commands.
 
 use std::fmt::Write as FmtWrite;
-use std::io::{self, BufRead, BufWriter, Write};
+use std::io::{self, BufRead, BufWriter, Read, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -12,7 +12,7 @@ use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
 use grit_lib::objects::pack::{
     read_object_from_pack_at_offset, read_pack_index_cached, PackIndex, SingleLocalPackReader,
 };
-use grit_lib::objects::{parse_commit, Object, ObjectId};
+use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::filter::CommitFilterBuilder;
@@ -697,6 +697,18 @@ fn resolve_rev(repo: &Repository, rev: &str) -> Result<ObjectId> {
 /// Write a reachable commit-graph with changed-path Bloom filters (maintenance API).
 pub fn commit_graph_write(repo: &Repository) -> Result<()> {
     write_commit_graph(repo, &CommitGraphOptions::with_changed_paths(true))?;
+    Ok(())
+}
+
+/// Read stdin and write one blob to the loose object store (matches `git hash-object -w --stdin`).
+pub fn hash_object_stdin_write(repo: &Repository) -> Result<()> {
+    let mut data = Vec::new();
+    io::stdin()
+        .read_to_end(&mut data)
+        .context("read stdin for hash-object")?;
+    repo.odb()
+        .write(ObjectKind::Blob, &data)
+        .context("write blob from stdin")?;
     Ok(())
 }
 

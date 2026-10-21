@@ -11,6 +11,7 @@ use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::fixture::{DeepLeafDogfoodSpec, DenseLeafDogfoodSpec};
 use grit_utils::fixture_registry::{self, FixtureKind};
 use grit_utils::fsck_suite::run_fsck_suite;
+use grit_utils::hash_suite::{prepare_hash_object, run_hash_suite, HashRunConfig};
 use grit_utils::history_rewrite_prepare::run_prepare_history_rewrite;
 use grit_utils::history_rewrite_suite::run_history_rewrite_suite;
 use grit_utils::history_suite::run_history_suite;
@@ -165,6 +166,11 @@ enum Cmd {
     },
     /// `grit fsck` vs `git fsck` on a deep-history worktree (medium fixture)
     Fsck {
+        #[arg(long)]
+        smoke: bool,
+    },
+    /// Hash-object, index-pack, and fsck baselines for checksum vs object-id work
+    Hash {
         #[arg(long)]
         smoke: bool,
     },
@@ -572,6 +578,13 @@ enum Cmd {
         #[arg(long)]
         dest: PathBuf,
     },
+    #[command(hide = true)]
+    PrepareHashObject {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        repo: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -859,6 +872,10 @@ enum DriveCmd {
         #[arg(long)]
         threads: Option<u32>,
     },
+    HashObjectStdin {
+        #[arg(long)]
+        repo: PathBuf,
+    },
     PackBuildAll {
         repo: PathBuf,
         #[arg(long)]
@@ -1028,6 +1045,10 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
         } => {
             let repo = open_repo(repo)?;
             odb_driver::index_pack_records(pack, &repo, threads.map(|t| t as usize))?;
+        }
+        DriveCmd::HashObjectStdin { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::hash_object_stdin_write(&repo)?;
         }
         DriveCmd::PackBuildAll {
             repo,
@@ -1355,6 +1376,10 @@ fn main() -> Result<()> {
         Cmd::PrepareParallelIndexPack { pack, dest } => {
             return prepare_parallel_index_pack(pack.as_path(), dest.as_path());
         }
+        Cmd::PrepareHashObject { git, repo } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_hash_object(&git, repo.as_path());
+        }
         _ => {}
     }
 
@@ -1595,6 +1620,17 @@ fn main() -> Result<()> {
             eprintln!("Running fsck benchmarks...");
             let cfg = run_config(&cli, true);
             run_fsck_suite(&hyperfine, &git, &grit, &cfg, *smoke, timestamp)?
+        }
+        Cmd::Hash { smoke } => {
+            eprintln!("Running hash benchmarks...");
+            let cfg = HashRunConfig {
+                warmup: cli.warmup,
+                min_runs: cli.min_runs,
+                exact_runs: None,
+                prepare_bin: std::env::current_exe()
+                    .unwrap_or_else(|_| PathBuf::from("grit-bench")),
+            };
+            run_hash_suite(&hyperfine, &git, &grit, &cfg, *smoke, timestamp)?
         }
         Cmd::Maintenance { smoke } => {
             eprintln!("Running maintenance (gc) benchmarks...");
@@ -1857,6 +1893,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareParallelCheckout { .. }
         | Cmd::PrepareParallelClone { .. }
         | Cmd::PrepareParallelIndexPack { .. }
+        | Cmd::PrepareHashObject { .. }
         | Cmd::RefsDriver { .. }
         | Cmd::LibOp { .. }
         | Cmd::Fixture { .. }

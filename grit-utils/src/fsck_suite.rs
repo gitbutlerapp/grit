@@ -18,7 +18,7 @@ fn git_env(cmd: &mut Command) {
         .env("GIT_CONFIG_SYSTEM", "/dev/null");
 }
 
-fn clone_deep_worktree(git: &Path, bare: &Path) -> Result<PathBuf> {
+pub(crate) fn clone_deep_worktree(git: &Path, bare: &Path) -> Result<PathBuf> {
     let dest = scratch_dir().join("fsck-medium-worktree");
     remove_dir_robust(&dest);
     let mut cmd = Command::new(git);
@@ -37,6 +37,22 @@ fn clone_deep_worktree(git: &Path, bare: &Path) -> Result<PathBuf> {
     Ok(dest)
 }
 
+/// Scenario row for fsck on the deep-history medium fixture.
+pub fn fsck_medium_scenario(bare: &Path) -> Scenario {
+    Scenario {
+        id: "fsck-medium".into(),
+        group: "maintenance".into(),
+        fixture: bare.display().to_string(),
+        description: "fsck on deep-history worktree (medium fixture)".into(),
+        grit_argv: vec!["fsck".into(), "--no-dangling".into()],
+        git_argv: vec!["fsck".into(), "--no-dangling".into()],
+        driver: Driver::Cli,
+        prepare_kind: None,
+        grit_via_shell: false,
+        git_via_shell: false,
+    }
+}
+
 /// Fsck on a medium deep-history worktree vs `git fsck --no-dangling`.
 pub fn run_fsck_suite(
     hyperfine: &Path,
@@ -53,25 +69,8 @@ pub fn run_fsck_suite(
     };
     let bare = ensure_fixture(git, profile, NetworkFixtureKind::DeepHistory)?;
     let worktree = clone_deep_worktree(git, &bare)?;
-    let scenario = run_scenario(
-        hyperfine,
-        git,
-        grit,
-        cfg,
-        &Scenario {
-            id: "fsck-medium".into(),
-            group: "maintenance".into(),
-            fixture: bare.display().to_string(),
-            description: "fsck on deep-history worktree (medium fixture)".into(),
-            grit_argv: vec!["fsck".into(), "--no-dangling".into()],
-            git_argv: vec!["fsck".into(), "--no-dangling".into()],
-            driver: Driver::Cli,
-            prepare_kind: None,
-            grit_via_shell: false,
-            git_via_shell: false,
-        },
-        &worktree,
-    )?;
+    let scenario = fsck_medium_scenario(&bare);
+    let scenario = run_scenario(hyperfine, git, grit, cfg, &scenario, &worktree)?;
 
     let scratch = scratch_dir();
     Ok(BenchReport {
