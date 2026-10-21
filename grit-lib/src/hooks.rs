@@ -502,6 +502,29 @@ fn spawn_configured_hook(
 
 fn report_spawn_error(_path: &Path, _err: &std::io::Error) {}
 
+/// Well-known commit lifecycle hooks tracked in [`crate::porcelain::commit::CommitOutcome`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookName {
+    /// `.git/hooks/pre-commit` or `hook.pre-commit.*`.
+    PreCommit,
+    /// `.git/hooks/commit-msg` or `hook.commit-msg.*`.
+    CommitMsg,
+    /// `.git/hooks/post-commit` or `hook.post-commit.*`.
+    PostCommit,
+}
+
+impl HookName {
+    /// Git hook basename (`pre-commit`, `commit-msg`, `post-commit`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PreCommit => "pre-commit",
+            Self::CommitMsg => "commit-msg",
+            Self::PostCommit => "post-commit",
+        }
+    }
+}
+
 /// Result of running a hook.
 #[derive(Debug)]
 pub enum HookResult {

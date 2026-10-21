@@ -745,6 +745,21 @@ pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::re
 pub fn grit_lib::change_id::change_id(&grit_lib::objects::CommitData) -> core::option::Option<grit_lib::change_id::ChangeId>
 pub fn grit_lib::change_id::resolved_change_id(&grit_lib::objects::ObjectId, &grit_lib::objects::CommitData) -> grit_lib::change_id::ResolvedChangeId
 pub fn grit_lib::change_id::set_change_id(&mut grit_lib::objects::CommitData, &grit_lib::change_id::ChangeId)
+pub enum grit_lib::HookName
+pub grit_lib::HookName::CommitMsg
+pub grit_lib::HookName::PostCommit
+pub grit_lib::HookName::PreCommit
+pub fn grit_lib::HookName::as_str(self) -> &'static str
+pub mod grit_lib::ident
+pub struct grit_lib::ident::AuthorContact
+pub grit_lib::ident::AuthorContact::email: alloc::string::String
+pub grit_lib::ident::AuthorContact::name: alloc::string::String
+pub enum grit_lib::ident::AuthorArgError
+pub grit_lib::ident::AuthorArgError::EmptyEmail
+pub grit_lib::ident::AuthorArgError::InvalidFormat
+pub grit_lib::ident::AuthorArgError::TrailingText
+pub fn grit_lib::ident::parse_author_arg(&str) -> core::result::Result<grit_lib::ident::AuthorContact, grit_lib::ident::AuthorArgError>
+pub fn grit_lib::ident::author_identity_line(&grit_lib::ident::AuthorContact, core::option::Option<&str>, time::OffsetDateTime) -> alloc::string::String
 pub mod grit_lib::command_runner
 pub mod grit_lib::command_runner::hooks
 pub enum grit_lib::command_runner::hooks::HookError
@@ -10099,6 +10114,17 @@ pub grit_lib::porcelain::commit::CommitOutcome::change_id: core::option::Option<
 pub grit_lib::porcelain::commit::CommitOutcome::changes: usize
 pub grit_lib::porcelain::commit::CommitOutcome::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::commit::CommitOutcome::parent: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::commit::CommitOutcome::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::commit::CommitOutcome::author: grit_lib::porcelain::commit::CommitAuthorInfo
+pub grit_lib::porcelain::commit::CommitOutcome::hooks_run: alloc::vec::Vec<grit_lib::HookName>
+pub struct grit_lib::porcelain::commit::CommitAuthorInfo
+pub grit_lib::porcelain::commit::CommitAuthorInfo::name: alloc::string::String
+pub grit_lib::porcelain::commit::CommitAuthorInfo::email: alloc::string::String
+pub grit_lib::porcelain::commit::CommitAuthorInfo::date: alloc::string::String
+pub enum grit_lib::porcelain::commit::HookPolicy
+pub grit_lib::porcelain::commit::HookPolicy::Run
+pub grit_lib::porcelain::commit::HookPolicy::SkipVerify
+pub fn grit_lib::porcelain::commit::normalize_commit_message(&str) -> grit_lib::error::Result<alloc::string::String>
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitOutcome
 pub fn grit_lib::porcelain::commit::CommitOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::commit::CommitOutcome
@@ -10122,6 +10148,7 @@ pub grit_lib::porcelain::commit::CommitRequest::author: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::committer: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::message: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::sign_override: core::option::Option<bool>
+pub grit_lib::porcelain::commit::CommitRequest::hooks: grit_lib::porcelain::commit::HookPolicy
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitRequest
 pub fn grit_lib::porcelain::commit::CommitRequest::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::porcelain::commit::CommitRequest

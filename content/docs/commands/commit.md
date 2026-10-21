@@ -10,6 +10,9 @@ order: 2
 ```text
 grit commit [-a] <message>
 grit commit [-a] -m <message>
+grit commit -F <file|->
+grit commit --author "Name <email>"
+grit commit --no-verify -m <message>
 grit commit --allow-empty -m <message>
 grit commit --amend [-m <message>]
 ```
@@ -18,11 +21,11 @@ grit commit --amend [-m <message>]
 
 Stages every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch with the given message. This is the same as running [`grit add`](../add/) followed by a commit.
 
-The message can be given as an argument or with `-m`. A message with several lines is recorded as is; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stages your changes and stops with an error.
+The message can be given as an argument, with `-m`, or with `-F` / `--message-file` (`-` reads stdin). Message text is normalized with Git-style stripspace before hooks run (leading/trailing blank lines collapse; a trailing newline is added). A message with several lines is recorded as is after normalization; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stages your changes and stops with an error. You cannot combine `-m`, a positional message, and `--message-file`.
 
 With `--amend`, `grit commit` replaces the **tip** commit on the current branch instead of adding a new one. It does not reword or squash older commits; positional arguments are always the commit message, not a revision (for example `grit commit --amend HEAD~1` records the message `HEAD~1`, it does not amend that commit). The new commit keeps the previous tip's parents and author; the committer and commit time come from your identity and `GIT_COMMITTER_DATE` as usual. If you omit the message while amending, the previous commit message is reused. Amending with no staged changes is allowed when the tree is unchanged (Git-compatible). You cannot amend on a branch that has no commits yet.
 
-The author and committer come from `user.name` and `user.email` (see [`grit config`](../config/)), or from `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` and `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`. If none of those are set and no repo or global `user.email` is configured, `grit commit` fails with an identity error instead of inventing an address (the same sources Git uses before it refuses with “unable to auto-detect email address”). Set identity once with:
+The author and committer come from `user.name` and `user.email` (see [`grit config`](../config/)), or from `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` and `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`. Use `--author "Name <email>"` (or a bare email) to override the author for one commit; the committer line still comes from your committer identity. If none of those are set and no repo or global `user.email` is configured, `grit commit` fails with an identity error instead of inventing an address (the same sources Git uses before it refuses with “unable to auto-detect email address”). Set identity once with:
 
 ```console
 $ grit config --global user.name "Your Name"
@@ -39,6 +42,8 @@ With `--allow-empty`, grit records a new commit whose tree matches the parent ev
 
 When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.
 
+`pre-commit` and `commit-msg` hooks run before the commit object is written when they are installed (config `hook.*` entries or scripts under the hooks directory). Pass `--no-verify` to skip both; `post-commit` still runs afterward, matching Git. See [`grit hooks`](hooks.md).
+
 ### Change ids
 
 Every commit `grit commit` creates gets a `change-id` header (reverse-hex by default) that stays with the same logical change across amends. Commits created without the header still have a deterministic id derived from the commit object id (Jujutsu-compatible); amending such a commit stores that derived value. Set `grit.changeIds=false` to omit the header (Git byte-identical commits for tests or importers that reject extra headers). See [Change ids](../library/change-ids/) for policy, testing knobs, and library APIs.
@@ -48,7 +53,10 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 | Option | Description |
 | --- | --- |
 | `<message>` | The commit message. |
-| `-m`, `--message <message>` | The commit message, as an option. Use either this or the argument, not both. Optional with `--amend` (keeps the previous message). |
+| `-m`, `--message <message>` | The commit message, as an option. Use either this, the argument, or `--message-file`, not more than one. Optional with `--amend` (keeps the previous message). |
+| `-F`, `--message-file <file\|->` | Read the commit message from a file, or from stdin when the path is `-`. |
+| `--author <ident>` | Author for this commit (`Name <email>` or bare email). Committer unchanged. |
+| `--no-verify` | Skip `pre-commit` and `commit-msg` hooks. |
 | `-a`, `--all` | Stage every change first. This is always what `grit commit` does; the option is accepted so that `git` habits like `-am` keep working. |
 | `--amend` | Replace the tip commit on the current branch. |
 | `--allow-empty` | Record a commit even when staged content matches the parent tree (empty tree change). |
@@ -105,6 +113,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `changes` | number | Path changes vs the parent commit tree |
 | `amended` | boolean | `true` when `--amend` was used |
 | `change_id` | string or null | Stored `change-id` header on the new commit, or `null` when absent |
+| `parents` | string[] | Parent commit OIDs (empty for the root commit) |
+| `author` | object | `{ "name", "email", "date" }` recorded on the commit (`date` is `<unix> <tz>`) |
+| `hooks_run` | string[] | Hook basenames that were installed and ran successfully (`pre-commit`, `commit-msg`, `post-commit`) |
 
 Example:
 
@@ -115,9 +126,18 @@ Example:
   "subject": "second",
   "changes": 1,
   "amended": false,
-  "change_id": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+  "change_id": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+  "parents": ["abc123…"],
+  "author": {
+    "name": "Your Name",
+    "email": "you@example.com",
+    "date": "1700000000 +0000"
+  },
+  "hooks_run": ["pre-commit", "post-commit"]
 }
 ```
+
+Human output includes a `hooks:` line only when at least one hook ran.
 
 ## Markdown output
 

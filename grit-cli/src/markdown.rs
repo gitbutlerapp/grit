@@ -452,6 +452,9 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
     if let Some(id) = outcome.change_id.as_deref() {
         outln!(w, "- change id `{short}`", short = short_change_id(id));
     }
+    if !outcome.hooks_run.is_empty() {
+        outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
+    }
     Ok(())
 }
 

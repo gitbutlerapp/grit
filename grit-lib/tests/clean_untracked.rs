@@ -28,9 +28,9 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: Default::default(),
     }
 }
-
 fn git_out(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .current_dir(dir)

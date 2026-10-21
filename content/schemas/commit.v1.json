@@ -1,10 +1,35 @@
 {
   "$id": "https://grit-scm.com/schemas/commit/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "CommitAuthorOutcome": {
+      "description": "Author recorded on the new commit (`--json` / `--markdown`).",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
   "description": "Result of `grit commit`.",
   "properties": {
     "amended": {
       "type": "boolean"
+    },
+    "author": {
+      "$ref": "#/definitions/CommitAuthorOutcome"
     },
     "branch": {
       "type": "string"
@@ -21,8 +46,20 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "hooks_run": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "oid": {
       "type": "string"
+    },
+    "parents": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "subject": {
       "type": "string"
@@ -30,9 +67,12 @@
   },
   "required": [
     "amended",
+    "author",
     "branch",
     "changes",
+    "hooks_run",
     "oid",
+    "parents",
     "subject"
   ],
   "title": "CommitOutcome",

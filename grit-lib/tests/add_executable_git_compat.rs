@@ -44,9 +44,9 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: Default::default(),
     }
 }
-
 #[test]
 fn add_executable_stages_100755_when_filemode_false() {
     let tmp = tempfile::tempdir().expect("tempdir");

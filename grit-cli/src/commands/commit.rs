@@ -3,18 +3,28 @@
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
+use grit_lib::ident::{author_identity_line, parse_author_arg};
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::HookName;
 use schemars::JsonSchema;
 use serde::Serialize;
-use std::io::Write;
+use std::io::{self, Read, Write};
 
 use crate::context::{self, subject_line};
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+
+/// Author recorded on the new commit (`--json` / `--markdown`).
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct CommitAuthorOutcome {
+    pub name: String,
+    pub email: String,
+    pub date: String,
+}
 
 /// Result of `grit commit`.
 #[derive(Serialize, JsonSchema)]
@@ -26,6 +36,9 @@ pub struct CommitOutcome {
     pub amended: bool,
     /// Stored `change-id` header on the new commit, or JSON `null` when absent.
     pub change_id: Option<String>,
+    pub parents: Vec<String>,
+    pub author: CommitAuthorOutcome,
+    pub hooks_run: Vec<String>,
 }
 
 impl HumanRender for CommitOutcome {
@@ -43,6 +56,9 @@ impl HumanRender for CommitOutcome {
             self.changes,
             if self.changes == 1 { "" } else { "s" }
         );
+        if !self.hooks_run.is_empty() {
+            outln!(w, "hooks: {}", self.hooks_run.join(", "));
+        }
         Ok(())
     }
 }
@@ -54,7 +70,15 @@ impl MarkdownRender for CommitOutcome {
     }
 }
 
-pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<CommitOutcome> {
+/// Stage the worktree and create a commit with the given message and options.
+pub fn run(
+    message: Option<String>,
+    message_file: Option<String>,
+    author_override: Option<String>,
+    no_verify: bool,
+    amend: bool,
+    allow_empty: bool,
+) -> Result<CommitOutcome> {
     let repo = context::discover()?;
 
     match resolve_head(repo.git_dir())? {
@@ -69,23 +93,27 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         return Err(map_commit_error(Error::IndexUnmerged));
     }
 
-    let message = match message {
-        Some(m) if !m.trim().is_empty() => Some(m),
-        None if amend => None,
-        _ => bail!("provide a commit message, e.g. grit commit \"what changed\""),
-    };
+    let message = resolve_commit_message(message, message_file, amend)?;
     let message_text = message.as_deref().unwrap_or("");
 
     let config = repo.config().context("could not load config")?;
     let env = repo.environment();
     let now = crate::context::wall_clock_now(env);
     let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
-    let author = if amend {
-        // `create_commit` reuses the tip commit's author when amending; strict author resolution
-        // is not required (and would wrongly fail committer-only amend flows).
+    let author = if let Some(arg) = author_override {
+        let contact = parse_author_arg(&arg).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let date_override = env.var(IdentRole::Author.env_date_key());
+        author_identity_line(&contact, date_override.as_deref(), now)
+    } else if amend {
         String::new()
     } else {
         context::identity(env, config.as_ref(), IdentRole::Author, now)?
+    };
+
+    let hooks = if no_verify {
+        HookPolicy::SkipVerify
+    } else {
+        HookPolicy::Run
     };
 
     let outcome = create_commit(
@@ -100,6 +128,7 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
             assume_worktree_synced: true,
             skip_pre_commit_tree_match: true,
             staged_change_count: Some(staged.total()),
+            hooks,
         },
         &mut NullProgress,
     )
@@ -119,7 +148,47 @@ pub fn run(message: Option<String>, amend: bool, allow_empty: bool) -> Result<Co
         changes: outcome.changes,
         amended: amend,
         change_id: outcome.change_id.as_ref().map(|id| id.as_str().to_owned()),
+        parents: outcome.parents.iter().map(|p| p.to_hex()).collect(),
+        author: CommitAuthorOutcome {
+            name: outcome.author.name,
+            email: outcome.author.email,
+            date: outcome.author.date,
+        },
+        hooks_run: outcome
+            .hooks_run
+            .iter()
+            .map(|h| hook_name_json(*h))
+            .collect(),
     })
+}
+
+fn hook_name_json(hook: HookName) -> String {
+    hook.as_str().to_owned()
+}
+
+fn resolve_commit_message(
+    message: Option<String>,
+    message_file: Option<String>,
+    amend: bool,
+) -> Result<Option<String>> {
+    match (message, message_file) {
+        (Some(m), None) => Ok(Some(m)),
+        (None, Some(path)) => read_message_file(&path).map(Some),
+        (None, None) if amend => Ok(None),
+        (None, None) => bail!("provide a commit message, e.g. grit commit \"what changed\""),
+        (Some(_), Some(_)) => unreachable!("clap rejects message and message-file together"),
+    }
+}
+
+fn read_message_file(path: &str) -> Result<String> {
+    if path == "-" {
+        let mut buf = String::new();
+        io::stdin()
+            .read_to_string(&mut buf)
+            .context("could not read message from stdin")?;
+        return Ok(buf);
+    }
+    std::fs::read_to_string(path).with_context(|| format!("could not read message file '{path}'"))
 }
 
 fn map_commit_error(err: Error) -> anyhow::Error {
