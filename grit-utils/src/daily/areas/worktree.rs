@@ -1,15 +1,15 @@
 //! Worktree and related matrix scenarios (status, add, commit, restore, reset, rm, mv, clean, init).
 
 use super::super::helpers::{
-    add_all_bench, add_modified_bench, clean_untracked_bench, commit_small_bench, ctx,
-    headline_spec, init_empty_bench, mv_file_bench, prepare_stash_reset, prepare_switch_reset,
-    prepare_worktree_add, prepare_worktree_clean_untracked, prepare_worktree_commit,
-    prepare_worktree_init_empty, prepare_worktree_mv_file, prepare_worktree_restore_paths,
-    prepare_worktree_rm_dir, prepare_worktree_status_clean, prepare_worktree_status_dirty,
-    reset_hard_bench, reset_mixed_bench, restore_paths_bench, rm_dir_bench, scenario_spec,
-    setup_big_blobs, setup_deep_tree, setup_hot_path_switch, setup_init_empty,
-    setup_shape_worktree, setup_small, setup_stash_repo, setup_synth100k, stash_bench,
-    status_clean_bench, status_dirty_bench, switch_bench,
+    add_all_bench, add_dry_run_bench, add_modified_bench, add_update_bench, clean_untracked_bench,
+    commit_small_bench, ctx, headline_spec, init_empty_bench, mv_file_bench, prepare_stash_reset,
+    prepare_switch_reset, prepare_worktree_add, prepare_worktree_clean_untracked,
+    prepare_worktree_commit, prepare_worktree_init_empty, prepare_worktree_mv_file,
+    prepare_worktree_restore_paths, prepare_worktree_rm_dir, prepare_worktree_status_clean,
+    prepare_worktree_status_dirty, reset_hard_bench, reset_mixed_bench, restore_paths_bench,
+    rm_dir_bench, scenario_spec, setup_big_blobs, setup_deep_tree, setup_hot_path_switch,
+    setup_init_empty, setup_shape_worktree, setup_small, setup_stash_repo, setup_synth100k,
+    stash_bench, status_clean_bench, status_dirty_bench, switch_bench,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;
@@ -105,6 +105,24 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: prepare_worktree_status_dirty,
         build_git: |c| add_all_bench(c).1,
         build_grit: |c| add_all_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("add/update@synth-100k"),
+        pending: false,
+        setup: setup_synth100k,
+        prepare: prepare_worktree_status_dirty,
+        build_git: |c| add_update_bench(c).1,
+        build_grit: |c| add_update_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("add/dry-run@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_worktree_status_dirty,
+        build_git: |c| add_dry_run_bench(c).1,
+        build_grit: |c| add_dry_run_bench(c).0,
         correctness: None,
     });
     plans.push(DailyHeadlinePlan {

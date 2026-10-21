@@ -1450,7 +1450,11 @@ mod tests {
         use crate::porcelain::add::{stage, StageOptions};
         use crate::progress::NullProgress;
         let outcome = stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
-        assert_eq!(outcome.modified, 1, "pathless add must promote -N entry");
+        assert_eq!(
+            outcome.modified.len(),
+            1,
+            "pathless add must promote -N entry"
+        );
 
         let after = repo.load_index().unwrap();
         let ie = after.get(b"f.txt", 0).expect("staged f.txt");

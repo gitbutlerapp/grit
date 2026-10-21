@@ -17,9 +17,9 @@ fn main() -> grit_lib::error::Result<()> {
     println!(
         "staged {} paths ({} new, {} modified, {} removed)",
         outcome.total(),
-        outcome.added,
-        outcome.modified,
-        outcome.removed
+        outcome.added.len(),
+        outcome.modified.len(),
+        outcome.removed.len()
     );
     Ok(())
 }

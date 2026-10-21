@@ -95,9 +95,10 @@ fn stage_for_commit_stages_untracked_at_auto_cache_entry_threshold() {
 
     let repo = open_repo(root);
     let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage");
-    assert_eq!(outcome.modified, 1, "one tracked edit");
+    assert_eq!(outcome.modified.len(), 1, "one tracked edit");
     assert_eq!(
-        outcome.added, 1,
+        outcome.added.len(),
+        1,
         "brand-new untracked must be staged at 4096+ scale"
     );
 }
@@ -216,8 +217,8 @@ fn stage_for_commit_stages_untracked_below_auto_cache_threshold() {
 
     let repo = open_repo(root);
     let outcome = stage_for_commit(&repo, &mut NullProgress).expect("stage");
-    assert_eq!(outcome.added, 1);
-    assert_eq!(outcome.modified, 1);
+    assert_eq!(outcome.added.len(), 1);
+    assert_eq!(outcome.modified.len(), 1);
 
     // Explicit `stage` with default options should behave the same for untracked.
     let repo2_root = tmp.path().join("small2");
@@ -229,7 +230,7 @@ fn stage_for_commit_stages_untracked_below_auto_cache_threshold() {
     fs::write(repo2_root.join("b.txt"), "b\n").expect("new");
     let repo2 = open_repo(&repo2_root);
     let out2 = stage(&repo2, &StageOptions::default(), &mut NullProgress).expect("stage");
-    assert_eq!(out2.added, 1);
+    assert_eq!(out2.added.len(), 1);
 }
 
 fn large_index_fixture(root: &std::path::Path) {

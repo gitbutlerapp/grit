@@ -44,6 +44,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | id | notes |
 | --- | --- |
 | `add/all@synth-100k` | Stage all changes: grit add vs git add -A (after ~1% modified) |
+| `add/update@synth-100k` | Stage tracked changes: grit add -u vs git add -u (after ~1% modified) |
+| `add/dry-run@synth-10k` | Preview staging: grit add --dry-run vs git add -n -A |
 | `add/modified@big-blobs` | Stage ~1% modified paths: grit add -- <paths> vs git add -- <paths> |
 | `add/modified@synth-10k` | Stage modified files vs git add -A |
 | `clean/untracked@synth-10k` | Remove untracked files: grit clean -f vs git clean -fd |

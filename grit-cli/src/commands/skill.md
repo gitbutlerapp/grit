@@ -54,6 +54,17 @@ $ grit commit -m "Explain what changed and why"
 
 `grit commit` stages **every** change first (modified, deleted and untracked files) and then commits. There is no way to commit only some files: if only part of the work belongs in this commit, finish or move the rest aside first. `grit add [<path>…]` stages files so you can review them in `grit status`, but it doesn't limit what `grit commit` records.
 
+### Staging (`grit add`)
+
+| Task | Command |
+| --- | --- |
+| Stage everything (modified, deleted, untracked) | `grit add` |
+| Stage only tracked edits and deletions | `grit add -u` (or `grit add --update`) |
+| Preview without writing the index | `grit add --dry-run` (combine with `-u` or paths) |
+| Stage specific paths | `grit add -- path/to/file` |
+
+`grit add --json` returns `{added, modified, removed, dry_run, count, staged}` with repository-relative paths. Use `--dry-run` before bulk staging to bound agent work; path lists are sorted and stable.
+
 `grit commit` fails with "nothing to commit" on a clean tree unless you pass `--allow-empty`. It also refuses a detached HEAD.
 
 Each commit gets a stable **`change-id`** header (on by default) that survives `--amend`. Disable with `grit config grit.changeIds false` when you need Git-identical commit objects. See the docs site section on change ids for derivation and testing config.

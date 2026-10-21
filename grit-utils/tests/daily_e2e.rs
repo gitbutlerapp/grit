@@ -319,6 +319,8 @@ const MATRIX_SMOKE_IDS: [&str; 35] = [
     "status/dirty@deep-tree",
     "status/dirty@small",
     "add/all@synth-100k",
+    "add/update@synth-100k",
+    "add/dry-run@synth-10k",
     "add/modified@big-blobs",
     "commit/small@synth-100k",
     "commit/small@small",

@@ -54,7 +54,9 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let outcome = stage(&repo, &StageOptions::default(), &mut NullProgress)?;
     println!(
         "staged added={} modified={} removed={}",
-        outcome.added, outcome.modified, outcome.removed
+        outcome.added.len(),
+        outcome.modified.len(),
+        outcome.removed.len()
     );
 
     let index = repo.index_handle().load()?;
