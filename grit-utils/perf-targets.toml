@@ -266,3 +266,27 @@ followup = "ROADMAP item 29"
 documented = "Full fsck on 400k-file synthetic worktree remains above 1.1×"
 followup = "ROADMAP item 30"
 
+[scenario."medium/diff-name-only"]
+documented = "Tree diff name-only on synth-10k smoke worktree ≈2.5× git (campaign smoke 2026-10-21)"
+followup = "Factory speed: diff list modes on medium fixture"
+
+[scenario."medium/diff-w"]
+documented = "Worktree diff -w on synth-10k smoke ≈3.6× git (campaign smoke 2026-10-21)"
+followup = "Factory speed: whitespace-normalized diff on medium fixture"
+
+[scenario."medium/show-patch"]
+documented = "Show largest-commit patch on synth-10k smoke ≈1.36× git (campaign smoke 2026-10-21)"
+followup = "Factory speed: show patch on medium fixture"
+
+[scenario."medium/diff-quiet-clean"]
+documented = "diff --quiet timing on synth-10k smoke ≈2.4× git (uses full diff path today)"
+followup = "Factory speed: diff --quiet / has_changes fast path (step 6)"
+
+[scenario."medium/diff-quiet-dirty"]
+documented = "diff --quiet on dirty synth-10k smoke ≈3.3× git"
+followup = "Factory speed: diff --quiet / has_changes fast path (step 6)"
+
+[scenario."medium/log-name-status"]
+documented = "log --name-status --limit 20 on synth-10k smoke ≈2.1× git"
+followup = "Factory speed: log diff detail on medium fixture"
+
