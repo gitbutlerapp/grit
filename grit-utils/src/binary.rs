@@ -22,13 +22,10 @@ pub fn resolve_binary(name: &str, user_path: Option<&Path>) -> Result<PathBuf> {
         if let Some(p) = workspace_executable("grit-http-server") {
             return Ok(p);
         }
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let debug = manifest.join("../target/debug/grit-http-server");
-        if debug.is_file() {
-            return debug
-                .canonicalize()
-                .context("canonicalize grit-http-server path");
-        }
+        bail!(
+            "grit-http-server not found under target/dist or target/release; \
+             build with `cargo build --release -p grit-http-server` (debug builds are not used for HTTP benches)"
+        );
     }
     find_on_path(name).with_context(|| format!("could not find `{name}` on PATH"))
 }

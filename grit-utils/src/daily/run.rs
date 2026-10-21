@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use super::areas;
 use super::coverage::all_registry_scenarios;
-use super::helpers::{pin_daily_scratch_root, prepare_bench_argv};
+use super::helpers::{daily_fixture_policy_note, pin_daily_scratch_root, prepare_bench_argv};
 use super::plan::{DailyHeadlinePlan, DailyPrepare, DailySetup};
 use super::registry::{Area, ScenarioSpec};
 use super::remote_fixture::{post_timed_for, pre_timed_for, refresh_grit_http_server};
@@ -17,6 +17,7 @@ use super::runner::{
     run_ab_bench, run_prepare, run_timed_via_helper, timing_stats_from_samples, AbBenchRequest,
     BenchArgv, PostTimedCheck, PreTimedCheck, RunLimits, RunPolicy,
 };
+use super::schema::DailyCaptureInfo;
 use super::schema::{
     DailyBenchReport, DailyScenarioResult, DailyToolRun, DailyToolVersions, SCHEMA_TAG,
 };
@@ -331,6 +332,12 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
             baseline_grit: baseline_version,
             baseline_grit_commit: baseline_commit,
         },
+        capture: daily_fixture_policy_note().map(|fixture_policy| DailyCaptureInfo {
+            fixture_policy,
+            area_wall_seconds: None,
+            total_wall_seconds: None,
+            logical_cores: None,
+        }),
         scenarios,
     };
 

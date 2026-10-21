@@ -59,14 +59,13 @@ fn sample_report(rows: Vec<DailyScenarioResult>) -> DailyBenchReport {
             baseline_grit: None,
             baseline_grit_commit: None,
         },
+        capture: None,
         scenarios: rows,
     }
 }
 
 #[test]
 fn flags_ratio_drift_over_tolerance() {
-    let mut row_b = sample_row("status/clean@synth-10k", 100.0, 108.0, 1_000_000, 900_000);
-    row_b.ratio = 1.25;
     let a = sample_report(vec![sample_row(
         "status/clean@synth-10k",
         100.0,
@@ -74,13 +73,36 @@ fn flags_ratio_drift_over_tolerance() {
         1_000_000,
         900_000,
     )]);
-    let b = sample_report(vec![row_b]);
+    let b = sample_report(vec![sample_row(
+        "status/clean@synth-10k",
+        100.0,
+        125.0,
+        1_000_000,
+        900_000,
+    )]);
     let outcome = compare_daily_reports(&a, &b, 0.10);
     assert!(!outcome.is_success());
     assert!(outcome
         .mismatches
         .iter()
         .any(|m| m.metric == DailyCompareMetric::Time));
+}
+
+#[test]
+fn skips_time_ratio_when_either_git_median_sub_20ms() {
+    let mut row_b = sample_row("status/clean@synth-10k", 30.0, 60.0, 1_000_000, 900_000);
+    row_b.ratio = 3.0;
+    let a = sample_report(vec![sample_row(
+        "status/clean@synth-10k",
+        19.0,
+        19.0,
+        1_000_000,
+        900_000,
+    )]);
+    let b = sample_report(vec![row_b]);
+    let outcome = compare_daily_reports(&a, &b, 0.10);
+    assert!(outcome.is_success());
+    assert_eq!(outcome.skipped_sub_20ms_time, 1);
 }
 
 #[test]
@@ -122,4 +144,28 @@ fn compares_memory_ratios() {
         .mismatches
         .iter()
         .any(|m| m.metric == DailyCompareMetric::Memory));
+}
+
+#[test]
+fn rejects_memory_drift_just_over_tenth_boundary() {
+    let mem_a = 2.365_442_860_3;
+    let mem_b = 2.111_474_971_6;
+    let git_rss_a = 55_447_552_u64;
+    let git_rss_b = 61_288_448_u64;
+    let a = sample_report(vec![sample_row(
+        "fetch/incremental@git-git",
+        50.0,
+        50.0,
+        git_rss_a,
+        (mem_a * git_rss_a as f64) as u64,
+    )]);
+    let b = sample_report(vec![sample_row(
+        "fetch/incremental@git-git",
+        50.0,
+        50.0,
+        git_rss_b,
+        (mem_b * git_rss_b as f64) as u64,
+    )]);
+    let outcome = compare_daily_reports(&a, &b, 0.10);
+    assert!(!outcome.is_success());
 }

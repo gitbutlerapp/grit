@@ -229,13 +229,32 @@ pub fn ctx(repo: PathBuf, setup: &DailySetup<'_>) -> DailyHeadlineContext {
     DailyHeadlineContext::new(repo, setup.git, setup.grit, setup.bench, setup.smoke)
 }
 
-fn daily_low_memory_fixtures() -> bool {
+/// Legacy env hook (ignored for fixture selection). Daily baselines use full registry repo ids;
+/// use explicit `--smoke` or distinct scenario ids for smaller shapes, not silent substitution.
+#[must_use]
+pub fn daily_low_memory_fixtures() -> bool {
     std::env::var("GRIT_BENCH_DAILY_LOW_MEMORY")
         .is_ok_and(|v| !v.is_empty() && v != "0" && v != "false")
 }
 
+fn smoke_for_shape(_shape: RepoShape, smoke: bool) -> bool {
+    smoke
+}
+
+/// Describe fixture policy for daily report headers.
+#[must_use]
+pub fn daily_fixture_policy_note() -> Option<String> {
+    if daily_low_memory_fixtures() {
+        Some(
+            "GRIT_BENCH_DAILY_LOW_MEMORY is set but ignored for fixture tiers: scenarios keep full @repo ids (use --smoke or separate ids for smoke-sized shapes)".into(),
+        )
+    } else {
+        Some("full-size fixture cache tiers for every @repo id in the daily matrix".into())
+    }
+}
+
 pub fn fixture_kind(shape: RepoShape, smoke: bool) -> FixtureKind {
-    let smoke = smoke || daily_low_memory_fixtures();
+    let smoke = smoke_for_shape(shape, smoke);
     match shape {
         RepoShape::Small => {
             if smoke {

@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use super::schema::{DailyBenchReport, DailyScenarioResult};
 
-/// Minimum git median wall time (ms) before time-ratio drift is enforced.
+/// Minimum git median wall time (ms) on **both** captures before time-ratio drift is enforced.
 pub const TIME_RATIO_MIN_GIT_MS: f64 = 20.0;
 
 /// One ratio drift beyond tolerance.
@@ -33,8 +33,6 @@ pub struct DailyCompareOutcome {
     pub mismatches: Vec<DailyCompareMismatch>,
     pub compared: usize,
     pub skipped_pending: usize,
-    pub skipped_git_median_drift: usize,
-    pub skipped_grit_median_drift: usize,
     pub skipped_sub_20ms_time: usize,
     pub missing_in_candidate: usize,
 }
@@ -56,7 +54,7 @@ fn relative_ratio_drift(a: f64, b: f64) -> f64 {
 }
 
 fn ratio_drift_exceeds_tolerance(delta: f64, tolerance: f64) -> bool {
-    (delta * 100.0).floor() > (tolerance * 100.0).floor()
+    delta > tolerance
 }
 
 fn memory_ratio(scenario: &DailyScenarioResult) -> f64 {
@@ -72,11 +70,11 @@ fn git_median_ms(scenario: &DailyScenarioResult) -> f64 {
     scenario.git.median_wall_ms
 }
 
-/// Compare per-scenario time and memory ratios between two daily reports.
+/// Compare per-scenario time and memory **ratios** between two daily reports.
 ///
-/// Time-ratio drift applies only when both captures have git median wall time above
-/// [`TIME_RATIO_MIN_GIT_MS`]. Memory ratios are compared whenever medians are stable.
-/// Rows with `pending` or median drift beyond `tolerance` on either tool are skipped.
+/// Time-ratio drift applies only when git median wall time on **both** captures is above
+/// [`TIME_RATIO_MIN_GIT_MS`]. Raw git/grit median movement between runs does not skip rows;
+/// only stored ratio drift is checked.
 pub fn compare_daily_reports(
     a: &DailyBenchReport,
     b: &DailyBenchReport,
@@ -106,21 +104,11 @@ pub fn compare_daily_reports(
             outcome.skipped_pending += 1;
             continue;
         }
-        let git_delta = relative_ratio_drift(git_median_ms(scenario), git_median_ms(scenario_b));
-        let grit_delta =
-            relative_ratio_drift(scenario.grit.median_wall_ms, scenario_b.grit.median_wall_ms);
-        if git_delta > tolerance {
-            outcome.skipped_git_median_drift += 1;
-            continue;
-        }
-        if grit_delta > tolerance {
-            outcome.skipped_grit_median_drift += 1;
-            continue;
-        }
         outcome.compared += 1;
 
-        let git_ms = git_median_ms(scenario).max(git_median_ms(scenario_b));
-        if git_ms > TIME_RATIO_MIN_GIT_MS {
+        let git_ms_a = git_median_ms(scenario);
+        let git_ms_b = git_median_ms(scenario_b);
+        if git_ms_a > TIME_RATIO_MIN_GIT_MS && git_ms_b > TIME_RATIO_MIN_GIT_MS {
             let ratio_b = scenario_b.ratio;
             let delta = relative_ratio_drift(scenario.ratio, ratio_b);
             if ratio_drift_exceeds_tolerance(delta, tolerance) {
@@ -177,21 +165,13 @@ pub fn render_daily_compare_markdown(
             tolerance = tolerance
         ),
         String::new(),
+        format!("- baseline: `{}`", path_a.display()),
+        format!("- candidate: `{}`", path_b.display()),
         format!(
-            "- baseline: `{}`",
-            path_a.display()
-        ),
-        format!(
-            "- candidate: `{}`",
-            path_b.display()
-        ),
-        format!(
-            "- compared rows: **{}** (skipped pending {}, sub-20ms time {}, git median drift {}, grit median drift {}, missing {})",
+            "- compared rows: **{}** (skipped pending {}, sub-20ms time {}, missing {})",
             outcome.compared,
             outcome.skipped_pending,
             outcome.skipped_sub_20ms_time,
-            outcome.skipped_git_median_drift,
-            outcome.skipped_grit_median_drift,
             outcome.missing_in_candidate
         ),
         String::new(),
@@ -275,12 +255,13 @@ mod tests {
                 baseline_grit_commit: None,
             },
             scenarios: rows,
+            capture: None,
         }
     }
 
     #[test]
     fn flags_ratio_drift_over_tolerance() {
-        let mut row_b = sample_row("status/clean@synth-10k", 100.0, 108.0, 1_000_000, 900_000);
+        let mut row_b = sample_row("status/clean@synth-10k", 100.0, 100.0, 1_000_000, 900_000);
         row_b.ratio = 1.25;
         let a = sample_report(vec![sample_row(
             "status/clean@synth-10k",
@@ -291,6 +272,7 @@ mod tests {
         )]);
         let b = sample_report(vec![row_b]);
         let outcome = compare_daily_reports(&a, &b, 0.10);
+        assert_eq!(outcome.skipped_sub_20ms_time, 0);
         assert!(!outcome.is_success());
         assert!(outcome
             .mismatches
@@ -313,10 +295,6 @@ mod tests {
         let outcome = compare_daily_reports(&a, &b, 0.10);
         assert!(outcome.is_success());
         assert_eq!(outcome.skipped_sub_20ms_time, 1);
-        assert!(outcome
-            .mismatches
-            .iter()
-            .all(|m| m.metric != DailyCompareMetric::Time));
     }
 
     #[test]
@@ -341,5 +319,34 @@ mod tests {
             .mismatches
             .iter()
             .any(|m| m.metric == DailyCompareMetric::Memory));
+    }
+
+    #[test]
+    fn rejects_memory_drift_just_over_tenth_boundary() {
+        let mem_a = 2.365_442_860_3;
+        let mem_b = 2.111_474_971_6;
+        let git_rss_a = 55_447_552_u64;
+        let git_rss_b = 61_288_448_u64;
+        let grit_rss_a = (mem_a * git_rss_a as f64) as u64;
+        let grit_rss_b = (mem_b * git_rss_b as f64) as u64;
+        let a = sample_report(vec![sample_row(
+            "fetch/incremental@git-git",
+            50.0,
+            50.0,
+            git_rss_a,
+            grit_rss_a,
+        )]);
+        let b = sample_report(vec![sample_row(
+            "fetch/incremental@git-git",
+            50.0,
+            50.0,
+            git_rss_b,
+            grit_rss_b,
+        )]);
+        let delta = relative_ratio_drift(mem_a, mem_b);
+        assert!(delta > 0.10);
+        assert!(delta < 0.11);
+        let outcome = compare_daily_reports(&a, &b, 0.10);
+        assert!(!outcome.is_success());
     }
 }
