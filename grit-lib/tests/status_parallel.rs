@@ -340,7 +340,12 @@ fn large_index_stat_refresh_parallel_matches_serial() {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
         ..Default::default()
+||||||| Common ancestor
+=======
+        hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     };
     grit_lib::porcelain::commit::create_commit(&repo, &req, &mut NullProgress).expect("commit");
     for rel in ["mix/00030.txt", "mix/00040.txt", "mix/00050.txt"] {

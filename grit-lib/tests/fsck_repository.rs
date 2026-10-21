@@ -120,7 +120,12 @@ fn one_commit(repo: &Repository) -> ObjectId {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -382,7 +387,12 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
                 ..Default::default()
+||||||| Common ancestor
+=======
+                hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
             },
             &mut NullProgress,
         )
@@ -435,7 +445,12 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
                 ..Default::default()
+||||||| Common ancestor
+=======
+                hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
             },
             &mut NullProgress,
         )
@@ -1343,7 +1358,12 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )

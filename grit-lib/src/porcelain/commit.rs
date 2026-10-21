@@ -92,6 +92,7 @@ pub struct CommitRequest {
     /// [`CommitOutcome::changes`] (issue #1064).
     #[doc(hidden)]
     pub staged_change_count: Option<usize>,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     /// Hook execution policy for `pre-commit` and `commit-msg`.
     #[doc(alias = "no-verify")]
     pub hooks: HookPolicy,
@@ -440,6 +441,12 @@ fn enrich_commit_message(
         out = process_trailers(&out, &opts, &new_args, Some(git_dir));
     }
     Ok(out)
+||||||| Common ancestor
+=======
+    /// Hook execution policy for `pre-commit` and `commit-msg`.
+    #[doc(alias = "no-verify")]
+    pub hooks: HookPolicy,
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 }
 
 /// Result of [`create_commit`].
@@ -463,6 +470,74 @@ pub struct CommitOutcome {
     pub change_id: Option<ChangeId>,
     /// Path-level changes vs the parent tree (`git diff --name-status` between parent and new tree).
     pub files: Vec<CommitFile>,
+}
+
+/// Normalize a commit message body the same way [`create_commit`] does before hooks: stripspace,
+/// reject empty bodies, ensure a trailing newline.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when the cleaned body would be empty.
+pub fn normalize_commit_message(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    let processed = process(trimmed.as_bytes(), &Mode::Default);
+    let message = String::from_utf8(processed)
+        .map_err(|_| Error::Message("invalid commit message".into()))?;
+    if message.is_empty() {
+        return Err(Error::Message("empty commit message".into()));
+    }
+    let mut message = message;
+    if !message.ends_with('\n') {
+        message.push('\n');
+    }
+    Ok(message)
+}
+
+fn run_commit_hook_recorded(
+    repo: &Repository,
+    hook: HookName,
+    args: &[&str],
+    stdin_data: Option<&[u8]>,
+    commit_env: &CommitHookEnv<'_>,
+) -> std::result::Result<bool, HookError> {
+    match run_commit_hook(repo, hook.as_str(), args, stdin_data, commit_env)
+        .map_err(HookError::Internal)?
+    {
+        HookResult::Success => Ok(true),
+        HookResult::NotFound => Ok(false),
+        HookResult::Failed(status) => Err(HookError::Failed {
+            hook_name: hook.as_str().to_owned(),
+            status,
+        }),
+    }
+}
+
+fn author_info_from_header_line(line: &str) -> CommitAuthorInfo {
+    let line = line.trim();
+    let date = parse_signature_times(line)
+        .map(|p| {
+            let tz = &line[p.tz_hhmm_range];
+            format!("{} {tz}", p.unix_seconds)
+        })
+        .unwrap_or_default();
+    let contact_end = line.rfind('>').map(|i| i + 1).unwrap_or(line.len());
+    let contact = line[..contact_end].trim();
+    let (name, email) = if let Some(lt) = contact.find('<') {
+        if let Some(gt) = contact.find('>') {
+            (contact[..lt].trim(), contact[lt + 1..gt].trim())
+        } else {
+            (contact, "")
+        }
+    } else if contact.contains('@') && !contact.chars().any(char::is_whitespace) {
+        ("", contact)
+    } else {
+        (contact, "")
+    };
+    CommitAuthorInfo {
+        name: name.to_owned(),
+        email: email.to_owned(),
+        date,
+    }
 }
 
 /// Write a commit from the current index and advance the checked-out branch.
@@ -905,6 +980,7 @@ fn create_commit_with_index(
         }
     }
 
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     let mut message = if !req.message.trim().is_empty() {
         normalize_commit_message(&req.message)?
     } else if let Some(reuse_msg) = reuse_message {
@@ -929,6 +1005,21 @@ fn create_commit_with_index(
         config.as_ref(),
         repo.git_dir(),
     )?;
+||||||| Common ancestor
+    let mut message = req.message.trim().to_owned();
+    if req.amend && message.is_empty() {
+        message = amend_default_message.unwrap_or_default();
+    }
+    if !message.is_empty() && !message.ends_with('\n') {
+        message.push('\n');
+    }
+=======
+    let mut message = if req.amend && req.message.trim().is_empty() {
+        amend_default_message.unwrap_or_default()
+    } else {
+        normalize_commit_message(&req.message)?
+    };
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     let editmsg_path = repo.git_dir().join("COMMIT_EDITMSG");
     fs::write(&editmsg_path, &message).map_err(Error::Io)?;
     let editmsg_arg = commit_editmsg_hook_argument(repo, &editmsg_path);
@@ -1092,6 +1183,7 @@ fn create_commit_with_index(
         let _ = finish_merge_state(repo)?;
     }
 
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     if let Some(persist) = persist_index {
         if !req.assume_worktree_synced {
             if let Some(work_tree) = repo.work_tree() {
@@ -1111,7 +1203,15 @@ fn create_commit_with_index(
         }
         repo.write_index(persist)?;
     }
+||||||| Common ancestor
+    let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &commit_env);
+=======
+    if run_commit_hook_recorded(repo, HookName::PostCommit, &[], None, &commit_env)? {
+        hooks_run.push(HookName::PostCommit);
+    }
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     let post_commit_env = CommitHookEnv {
         index_file: Some(
             temp_hook_index_path
@@ -1134,6 +1234,20 @@ fn create_commit_with_index(
         parents: commit_data.parents,
         author: author_info,
         hooks_run,
+||||||| Common ancestor
+    Ok(CommitOutcome {
+        oid,
+        branch: short_name,
+        parent,
+=======
+    Ok(CommitOutcome {
+        oid,
+        branch: short_name,
+        parent,
+        parents: commit_data.parents,
+        author: author_info,
+        hooks_run,
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         changes,
         change_id: stored_change_id,
         files: commit_files,
@@ -1317,7 +1431,24 @@ mod tests {
             message: message.to_owned(),
             author: ident.clone(),
             committer: ident,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+            allow_empty: false,
+            sign_override: None,
+            amend: false,
+            assume_worktree_synced: false,
+            skip_pre_commit_tree_match: false,
+            staged_change_count: None,
+=======
+            allow_empty: false,
+            sign_override: None,
+            amend: false,
+            assume_worktree_synced: false,
+            skip_pre_commit_tree_match: false,
+            staged_change_count: None,
+            hooks: HookPolicy::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         }
     }
 
@@ -1560,6 +1691,7 @@ mod tests {
         assert_eq!(outcome.parent, Some(parent));
         assert_ne!(outcome.oid, parent);
     }
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
 
     #[test]
     fn scope_staged_commits_index_only() {
@@ -2078,4 +2210,84 @@ mod tests {
             CommitScope::Staged
         );
     }
+||||||| Common ancestor
+=======
+
+    #[test]
+    fn message_file_stripspace() {
+        let msg = normalize_commit_message("  subject\n\n  body line  \n\n").unwrap();
+        assert_eq!(msg, "subject\n\n  body line\n");
+    }
+
+    #[test]
+    fn no_verify_skips_pre_commit_and_commit_msg() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        std::fs::write(
+            repo.git_dir().join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n[hook \"hc\"]\n\tcommand = exit 1\n\tevent = pre-commit\n[hook \"hc2\"]\n\tcommand = exit 1\n\tevent = commit-msg\n",
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        let mut req = commit_req("blocked");
+        req.hooks = HookPolicy::Run;
+        assert!(create_commit(&repo, &req, &mut NullProgress).is_err());
+
+        req.hooks = HookPolicy::SkipVerify;
+        let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        assert!(outcome.hooks_run.is_empty());
+    }
+
+    #[test]
+    fn hooks_run_lists_executed_hooks() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        std::fs::write(
+            repo.git_dir().join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n[hook \"hc\"]\n\tcommand = true\n\tevent = pre-commit\n[hook \"hc2\"]\n\tcommand = true\n\tevent = commit-msg\n[hook \"hc3\"]\n\tcommand = true\n\tevent = post-commit\n",
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let outcome = create_commit(&repo, &commit_req("hooks"), &mut NullProgress).unwrap();
+        assert_eq!(
+            outcome.hooks_run,
+            vec![
+                HookName::PreCommit,
+                HookName::CommitMsg,
+                HookName::PostCommit
+            ]
+        );
+    }
+
+    #[test]
+    fn outcome_parents_merge_commit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let first = create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+
+        fs::write(root.join("b.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let second = create_commit(&repo, &commit_req("second"), &mut NullProgress).unwrap();
+
+        fs::write(
+            repo.git_dir().join("MERGE_HEAD"),
+            format!("{}\n", first.oid.to_hex()),
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"merged\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let merge = create_commit(&repo, &commit_req("merge"), &mut NullProgress).unwrap();
+        assert_eq!(merge.parents.len(), 2);
+        assert_eq!(merge.parents[0], second.oid);
+        assert_eq!(merge.parents[1], first.oid);
+    }
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
 }

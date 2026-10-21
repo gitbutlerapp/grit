@@ -92,7 +92,12 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -181,7 +186,12 @@ fn amend_unsigned_drops_signed_tip_signature() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -202,7 +212,12 @@ fn amend_unsigned_drops_signed_tip_signature() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -277,7 +292,12 @@ fn amend_resigns_with_single_fresh_signature() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -297,7 +317,12 @@ fn amend_resigns_with_single_fresh_signature() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )

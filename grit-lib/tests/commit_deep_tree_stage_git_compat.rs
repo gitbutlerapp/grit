@@ -96,7 +96,12 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
             assume_worktree_synced: true,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -161,7 +166,12 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
             assume_worktree_synced: true,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         },
         &mut NullProgress,
     )
@@ -277,7 +287,12 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
         ..Default::default()
+||||||| Common ancestor
+=======
+        hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     };
 
     let _probe = reset_worktree_metadata_probe(root);

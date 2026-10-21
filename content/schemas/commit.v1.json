@@ -1,6 +1,7 @@
 {
   "$id": "https://grit-scm.com/schemas/commit/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
   "definitions": {
     "CommitAuthorOutcome": {
       "description": "Author recorded on the new commit (`--json` / `--markdown`).",
@@ -54,6 +55,31 @@
       "type": "string"
     }
   },
+||||||| Common ancestor
+=======
+  "definitions": {
+    "CommitAuthorOutcome": {
+      "description": "Author recorded on the new commit (`--json` / `--markdown`).",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
   "description": "Result of `grit commit`.",
   "properties": {
     "amended": {
@@ -77,6 +103,7 @@
       "minimum": 0.0,
       "type": "integer"
     },
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     "dry_run": {
       "type": "boolean"
     },
@@ -92,6 +119,15 @@
       },
       "type": "array"
     },
+||||||| Common ancestor
+=======
+    "hooks_run": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     "oid": {
       "type": [
         "string",
@@ -107,6 +143,12 @@
     "scope": {
       "$ref": "#/definitions/CommitScopeJson"
     },
+    "parents": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "subject": {
       "type": "string"
     }
@@ -116,11 +158,19 @@
     "author",
     "branch",
     "changes",
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
     "dry_run",
     "files",
     "hooks_run",
     "parents",
     "scope",
+||||||| Common ancestor
+    "oid",
+=======
+    "hooks_run",
+    "oid",
+    "parents",
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     "subject"
   ],
   "title": "CommitOutcome",

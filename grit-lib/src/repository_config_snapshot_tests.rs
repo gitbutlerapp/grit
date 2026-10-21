@@ -78,7 +78,12 @@ mod tests {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
             ..Default::default()
+||||||| Common ancestor
+=======
+            hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
         };
         cascade_load_counters::measure(|| {
             create_commit(&repo3, &req, &mut NullProgress).unwrap();

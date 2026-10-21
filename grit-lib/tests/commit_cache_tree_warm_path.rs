@@ -96,10 +96,14 @@ fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
+<<<<<<< New base: Merge branch 'factory/commit-dry-run-3068'
         ..Default::default()
+||||||| Common ancestor
+=======
+        hooks: Default::default(),
+>>>>>>> Current commit: commit: message file, author override, and no-verify hooks
     }
 }
-
 #[test]
 fn allow_empty_commit_preserves_cache_tree_without_full_restage() {
     let tmp = tempfile::tempdir().expect("tempdir");
