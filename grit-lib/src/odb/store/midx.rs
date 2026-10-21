@@ -167,6 +167,9 @@ impl ObjectStore for MidxObjects {
     }
 
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+        if prefix.len() > self.hash_algo().hex_len() {
+            return Ok(());
+        }
         let Some(chain) = self.active_chain()? else {
             return Ok(());
         };
