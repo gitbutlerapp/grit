@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "72934dedd47ecaf7e340fd6c5ef46620187fb317\n",
+    "stdout": "062ca6e74f5603f4d09063c0f46cd07d8c96e019\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"merge_bases\":[\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"],\"is_ancestor\":null}\n",
+    "stdout": "{\"merge_bases\":[\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\"],\"is_ancestor\":null}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "# Merge bases\n\n- `72934dedd47ecaf7e340fd6c5ef46620187fb317`\n",
+    "stdout": "# Merge bases\n\n- `062ca6e74f5603f4d09063c0f46cd07d8c96e019`\n",
     "stderr": ""
   }
 }

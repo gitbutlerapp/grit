@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "  b5ea30d  Test  [TIME_AGO]  second\n  72934de  Test  [TIME_AGO]  first\n",
+    "stdout": "  83352a6  Test  [TIME_AGO]  second\n  062ca6e  Test  [TIME_AGO]  first\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"commits\":[{\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"parents\":[\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"second\",\"message\":\"second\",\"refs\":[{\"name\":\"HEAD\",\"kind\":\"head\"},{\"name\":\"main\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\"},{\"oid\":\"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\"parents\":[],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"first\",\"message\":\"first\",\"refs\":[{\"name\":\"feature\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\"}],\"next\":null,\"truncated\":false}\n",
+    "stdout": "{\"commits\":[{\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"parents\":[\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"second\",\"message\":\"second\",\"refs\":[{\"name\":\"HEAD\",\"kind\":\"head\"},{\"name\":\"main\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\"},{\"oid\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"parents\":[],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"first\",\"message\":\"first\",\"refs\":[{\"name\":\"feature\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\"}],\"next\":null,\"truncated\":false}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "- `b5ea30d` second (Test, [TIME_AGO])\n- `72934de` first (Test, [TIME_AGO])\n",
+    "stdout": "- `83352a6` second (Test, [TIME_AGO])\n- `062ca6e` first (Test, [TIME_AGO])\n",
     "stderr": ""
   }
 }

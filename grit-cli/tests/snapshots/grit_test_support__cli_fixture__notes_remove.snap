@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Removed note for b5ea30d\n",
+    "stdout": "Removed note for 83352a6\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"remove\",\"notes_ref\":\"refs/notes/commits\",\"objects\":[\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"]}\n",
+    "stdout": "{\"action\":\"remove\",\"notes_ref\":\"refs/notes/commits\",\"objects\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "Removed notes on `refs/notes/commits`:\n- `b5ea30d`\n",
+    "stdout": "Removed notes on `refs/notes/commits`:\n- `83352a6`\n",
     "stderr": ""
   }
 }

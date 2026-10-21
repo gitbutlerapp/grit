@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"create\",\"name\":\"v2.0\",\"oid\":\"e95b0bb5cac1b12984f68a9f3f2ea3b1bea29691\",\"kind\":\"annotated\",\"peeled\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}\n",
+    "stdout": "{\"action\":\"create\",\"name\":\"v2.0\",\"oid\":\"43b0a416a9f16db17f911bdd3bf83bb79a700ec1\",\"kind\":\"annotated\",\"peeled\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "Created tag `v2.0` (annotated) at `e95b0bb` → `b5ea30d`.\n",
+    "stdout": "Created tag `v2.0` (annotated) at `43b0a41` → `83352a6`.\n",
     "stderr": ""
   }
 }

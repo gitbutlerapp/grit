@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "core.repositoryformatversion=0\ncore.filemode=true\ncore.bare=false\ncore.logallrefupdates=true\nuser.email=snap@example.com\n",
+    "stdout": "core.repositoryformatversion=0\ncore.filemode=true\ncore.bare=false\ncore.logallrefupdates=true\nuser.email=snap@example.com\ngc.auto=0\nmaintenance.auto=false\ngrit.testing.changeid=content-hash\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"list\",\"entries\":[{\"key\":\"core.repositoryformatversion\",\"value\":\"0\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.filemode\",\"value\":\"true\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.bare\",\"value\":\"false\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.logallrefupdates\",\"value\":\"true\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"user.email\",\"value\":\"snap@example.com\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"}]}\n",
+    "stdout": "{\"action\":\"list\",\"entries\":[{\"key\":\"core.repositoryformatversion\",\"value\":\"0\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.filemode\",\"value\":\"true\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.bare\",\"value\":\"false\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"core.logallrefupdates\",\"value\":\"true\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"user.email\",\"value\":\"snap@example.com\",\"scope\":\"local\",\"file\":\"[REPO]/.git/config\"},{\"key\":\"gc.auto\",\"value\":\"0\",\"scope\":\"command\"},{\"key\":\"maintenance.auto\",\"value\":\"false\",\"scope\":\"command\"},{\"key\":\"grit.testing.changeid\",\"value\":\"content-hash\",\"scope\":\"command\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "| Key | Value |\n| --- | --- |\n| `core.repositoryformatversion` | 0 |\n| `core.filemode` | true |\n| `core.bare` | false |\n| `core.logallrefupdates` | true |\n| `user.email` | snap@example.com |\n",
+    "stdout": "| Key | Value |\n| --- | --- |\n| `core.repositoryformatversion` | 0 |\n| `core.filemode` | true |\n| `core.bare` | false |\n| `core.logallrefupdates` | true |\n| `user.email` | snap@example.com |\n| `gc.auto` | 0 |\n| `maintenance.auto` | false |\n| `grit.testing.changeid` | content-hash |\n",
     "stderr": ""
   }
 }

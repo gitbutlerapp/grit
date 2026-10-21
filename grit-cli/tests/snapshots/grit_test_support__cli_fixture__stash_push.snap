@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Saved working directory and index state On main: wip 074d35b\n",
+    "stdout": "Saved working directory and index state On main: wip 690b7a6\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"oid\":\"074d35b2ff7d12740d75df81826c91a613458885\",\"message\":\"On main: wip\"}\n",
+    "stdout": "{\"oid\":\"690b7a61123da1a9217d19b7d9ab22657864b71f\",\"message\":\"On main: wip\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Stash\n\n- Saved **On main: wip** · `074d35b`\n",
+    "stdout": "## Stash\n\n- Saved **On main: wip** · `690b7a6`\n",
     "stderr": ""
   }
 }

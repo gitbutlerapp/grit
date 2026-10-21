@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"add\",\"path\":\"[REPO]/linked-wt\",\"branch\":\"wt-new\",\"head\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}\n",
+    "stdout": "{\"action\":\"add\",\"path\":\"[REPO]/linked-wt\",\"branch\":\"wt-new\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Worktree add\n\n- Created **`[REPO]/linked-wt`** on branch **`wt-new`** · `b5ea30d`\n",
+    "stdout": "## Worktree add\n\n- Created **`[REPO]/linked-wt`** on branch **`wt-new`** · `83352a6`\n",
     "stderr": ""
   }
 }

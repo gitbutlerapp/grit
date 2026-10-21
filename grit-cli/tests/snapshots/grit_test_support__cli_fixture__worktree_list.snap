@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"list\",\"worktrees\":[{\"path\":\"[REPO]\",\"head\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"branch\":\"main\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false},{\"path\":\"[REPO]/linked-wt\",\"head\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"branch\":\"wt|branch\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false}]}\n",
+    "stdout": "{\"action\":\"list\",\"worktrees\":[{\"path\":\"[REPO]\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"branch\":\"main\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false},{\"path\":\"[REPO]/linked-wt\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"branch\":\"wt|branch\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Worktrees\n\n| Path | Branch | HEAD |\n| --- | --- | --- |\n| [REPO] | `main` | `b5ea30d` |\n| [REPO]/linked-wt | `wt\\|branch` | `b5ea30d` |\n",
+    "stdout": "## Worktrees\n\n| Path | Branch | HEAD |\n| --- | --- | --- |\n| [REPO] | `main` | `83352a6` |\n| [REPO]/linked-wt | `wt\\|branch` | `83352a6` |\n",
     "stderr": ""
   }
 }

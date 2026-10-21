@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "  refs/remotes/origin/prune-me  b5ea30d → deleted\nFetched 1 update from origin.\n",
+    "stdout": "  refs/remotes/origin/prune-me  83352a6 → deleted\nFetched 1 update from origin.\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"remote\":\"origin\",\"updates\":[{\"ref\":\"refs/remotes/origin/prune-me\",\"old_oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"new_oid\":null}],\"updated\":1}\n",
+    "stdout": "{\"remote\":\"origin\",\"updates\":[{\"ref\":\"refs/remotes/origin/prune-me\",\"old_oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new_oid\":null}],\"updated\":1}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Updates from `origin`\n- `refs/remotes/origin/prune-me` · `b5ea30d` → `deleted`\n\nFetched **1** update.\n",
+    "stdout": "## Updates from `origin`\n- `refs/remotes/origin/prune-me` · `83352a6` → `deleted`\n\nFetched **1** update.\n",
     "stderr": ""
   }
 }

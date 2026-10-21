@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Unbundled snap.bundle (7 objects, 475 bytes).\nb5ea30de417ac84c09b8cfc0acf5f2c39efc611f HEAD\n",
+    "stdout": "Unbundled snap.bundle (7 objects, 543 bytes).\n83352a61f6715ec3f0a297c6d6150725154fb833 HEAD\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"path\":\"snap.bundle\",\"references\":[{\"name\":\"HEAD\",\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}],\"objects\":7,\"bytes\":475}\n",
+    "stdout": "{\"path\":\"snap.bundle\",\"references\":[{\"name\":\"HEAD\",\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}],\"objects\":7,\"bytes\":543}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Bundle unbundle\n\n- **path:** `snap.bundle`\n- **objects:** 7\n- **bytes:** 475\n\n| Ref | OID |\n| --- | --- |\n| `HEAD` | `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f` |\n\n",
+    "stdout": "## Bundle unbundle\n\n- **path:** `snap.bundle`\n- **objects:** 7\n- **bytes:** 543\n\n| Ref | OID |\n| --- | --- |\n| `HEAD` | `83352a61f6715ec3f0a297c6d6150725154fb833` |\n\n",
     "stderr": ""
   }
 }

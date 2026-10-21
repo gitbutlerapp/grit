@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "72934dedd47ecaf7e340fd6c5ef46620187fb317\trefs/heads/feature\nb5ea30de417ac84c09b8cfc0acf5f2c39efc611f\trefs/heads/main\n",
+    "stdout": "062ca6e74f5603f4d09063c0f46cd07d8c96e019\trefs/heads/feature\n83352a61f6715ec3f0a297c6d6150725154fb833\trefs/heads/main\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"refs\",\"refs\":[{\"name\":\"refs/heads/feature\",\"oid\":\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"},{\"name\":\"refs/heads/main\",\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}]}\n",
+    "stdout": "{\"action\":\"refs\",\"refs\":[{\"name\":\"refs/heads/feature\",\"oid\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\"},{\"name\":\"refs/heads/main\",\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Remote refs\n\n| Ref | Object | Peeled | Symref target |\n| --- | --- | --- | --- |\n| `refs/heads/feature` | `72934dedd47ecaf7e340fd6c5ef46620187fb317` | — | — |\n| `refs/heads/main` | `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f` | — | — |\n\n",
+    "stdout": "## Remote refs\n\n| Ref | Object | Peeled | Symref target |\n| --- | --- | --- | --- |\n| `refs/heads/feature` | `062ca6e74f5603f4d09063c0f46cd07d8c96e019` | — | — |\n| `refs/heads/main` | `83352a61f6715ec3f0a297c6d6150725154fb833` | — | — |\n\n",
     "stderr": ""
   }
 }

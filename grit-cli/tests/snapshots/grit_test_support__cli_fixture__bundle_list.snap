@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "b5ea30de417ac84c09b8cfc0acf5f2c39efc611f HEAD\n",
+    "stdout": "83352a61f6715ec3f0a297c6d6150725154fb833 HEAD\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"path\":\"snap.bundle\",\"references\":[{\"name\":\"HEAD\",\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}]}\n",
+    "stdout": "{\"path\":\"snap.bundle\",\"references\":[{\"name\":\"HEAD\",\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Bundle list\n\n- **path:** `snap.bundle`\n\n| Ref | OID |\n| --- | --- |\n| `HEAD` | `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f` |\n\n",
+    "stdout": "## Bundle list\n\n- **path:** `snap.bundle`\n\n| Ref | OID |\n| --- | --- |\n| `HEAD` | `83352a61f6715ec3f0a297c6d6150725154fb833` |\n\n",
     "stderr": ""
   }
 }

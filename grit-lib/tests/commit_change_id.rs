@@ -1,5 +1,7 @@
 //! Change ids on commits created through [`grit_lib::porcelain::commit::create_commit`].
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -7,7 +9,6 @@ use std::sync::Arc;
 
 use grit_lib::change_id::{change_id, ChangeId, ChangeIdGenerator, ChangeIdPolicy};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::config::ConfigSet;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::stage;
 use grit_lib::porcelain::add::StageOptions;
@@ -272,6 +273,14 @@ fn testing_content_hash_is_deterministic() {
         .expect("some");
     assert_eq!(expected_once, expected_twice);
     assert_eq!(stored, expected_once);
+
+    git_fsck_strict(root);
+    let cat = git_out(root, &["cat-file", "-p", "HEAD"]);
+    let header = change_id_line(&cat).expect("change-id in cat-file");
+    assert_eq!(
+        header.strip_prefix("change-id ").unwrap(),
+        stored.as_str()
+    );
 }
 
 #[test]

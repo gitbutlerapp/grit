@@ -67,6 +67,17 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
     )
     .expect("init");
 
+    let disable_change_ids = Command::new("git")
+        .current_dir(root)
+        .args(["config", "grit.changeIds", "false"])
+        .output()
+        .expect("git config grit.changeIds");
+    assert!(
+        disable_change_ids.status.success(),
+        "git config grit.changeIds: {}",
+        String::from_utf8_lossy(&disable_change_ids.stderr)
+    );
+
     let vars = [
         ("TZ", "America/New_York"),
         ("GIT_AUTHOR_NAME", "A U Thor"),
