@@ -704,16 +704,9 @@ fn copy_objects_for_local_fetch(
         progress.finish();
     }
 
-    let mut still_missing: Vec<ObjectId> = send
-        .iter()
-        .copied()
-        .filter(|oid| !local_odb.exists(oid))
-        .collect();
+    let mut still_missing = objects_missing_from_peer(local_odb, send);
     if still_missing.is_empty() {
-        return Ok((
-            linked_object_set(local_odb, send),
-            TransferStats::default(),
-        ));
+        return Ok((linked_object_set(local_odb, send), TransferStats::default()));
     }
 
     // Hard-link loose objects only for incremental transfers; initial clones should
@@ -729,10 +722,7 @@ fn copy_objects_for_local_fetch(
         }
         progress.finish();
         if still_missing.is_empty() {
-            return Ok((
-                linked_object_set(local_odb, send),
-                TransferStats::default(),
-            ));
+            return Ok((linked_object_set(local_odb, send), TransferStats::default()));
         }
     }
 
@@ -799,11 +789,7 @@ fn copy_objects_for_local_push(
         return Ok(());
     }
 
-    let mut still_missing: Vec<ObjectId> = send
-        .iter()
-        .copied()
-        .filter(|oid| !remote_odb.exists(oid))
-        .collect();
+    let mut still_missing = objects_missing_from_peer(remote_odb, send);
     if still_missing.is_empty() {
         return Ok(());
     }
@@ -841,6 +827,19 @@ fn copy_objects_for_local_push(
     )?;
     refresh_local_odb_after_link(remote_odb);
     Ok(())
+}
+
+/// The objects of `send` that `peer_odb` does not store on disk.
+///
+/// Uses the on-disk check rather than [`Odb::exists`], which reports the empty
+/// tree as present even without an object file: the result may be packed
+/// as-is, and the peer must end up with every object it references.
+fn objects_missing_from_peer(peer_odb: &Odb, send: &[ObjectId]) -> Vec<ObjectId> {
+    peer_odb.reprepare_local_packs();
+    send.iter()
+        .copied()
+        .filter(|oid| !peer_odb.exists_materialized_local_without_rescan(oid))
+        .collect()
 }
 
 /// Build the pack that copies `missing` (a subset of `send_set`) into the peer.
