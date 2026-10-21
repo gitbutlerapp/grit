@@ -114,7 +114,7 @@ Full factory captures run **`grit-bench daily`** twice back-to-back (release bui
   grit-utils/baselines/daily/second.json --tolerance 0.10 --markdown
 ```
 
-Time-ratio drift applies when git median wall time is **above 20 ms** on both captures; peak-RSS ratios are always compared when medians are stable. The committed transcript lives in **`grit-utils/baselines/daily/consecutive-compare.txt`** (exit **0** at ±10% tolerance).
+Time-ratio drift compares stored **grit/git** time ratios when git median wall time is **above 20 ms** on **both** captures (raw median movement between runs does not skip rows). Memory drift compares **grit/git peak-RSS** ratios on every non-pending row. Tolerance is a strict **`delta > tolerance`** check (not rounded to whole percent). The committed transcript lives in **`grit-utils/baselines/daily/consecutive-compare.txt`** (exit **0** at ±10% tolerance after a passing consecutive pair).
 
 Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** after building release binaries and setting **`GRIT_BENCH_BASELINE_GRIT`**. The capture script prepares only fixtures the daily matrix uses (not full **`synth-l`**), sets **`GRIT_BENCH_DAILY_LOW_MEMORY=1`** (smoke-sized **big-blobs** / **deep-tree** / **many-refs** fixtures while keeping `@big-blobs` scenario ids), runs **`daily --only <id>`** once per executable scenario (`daily list-ids`), and merges partial JSON reports so peak RSS stays within factory VM limits.
 
@@ -124,6 +124,6 @@ Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** afte
 | `grit-utils/baselines/daily/second.json` | Second consecutive full daily report |
 | `grit-utils/baselines/daily/consecutive-compare.txt` | `daily compare … --tolerance 0.10` output |
 
-**Factory VM (4 logical CPUs, 2026-10-21):** fixture prepare for the daily subset took **968 s** wall. A committed consecutive pair (**`latest.json`** + **`second.json`**, 58 registry rows with **57** timed + **1** pending) took **1476 s** and **1478 s** wall per merged run (**2954 s** total, under the **4 h** wall budget on this 4-core host; **8-core equivalent 2 h** budget). Compare at **`0.10`** tolerance exited **0** (`consecutive-compare.txt`).
+Reports may include optional **`capture.fixture_policy`** and **`capture.area_wall_seconds`** (per functional area) when generated via **`capture-daily-baseline.sh`**. Regenerate **`latest.json`**, **`second.json`**, and **`consecutive-compare.txt`** after comparator or fixture-policy changes; the pair must pass **`daily compare --tolerance 0.10`** before committing.
 
 Default daily **`RunPolicy`** was tightened for baseline stability: **2** warmups per tool, **5** minimum timed runs, **5 s** minimum aggregated timed window, **180 s** scenario budget.
