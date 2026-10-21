@@ -6,44 +6,93 @@ use grit_lib::diff::DiffOptions;
 
 /// Mutually exclusive diff output formats (default: patch for `grit diff`; none for `grit log`).
 #[derive(Debug, Default, Args, Clone, Copy)]
+#[group(id = "diff_output_format")]
 pub struct DiffFormatArgs {
     /// Unified patch for each commit (`git log -p`).
     #[arg(
         short = 'p',
         long = "patch",
-        conflicts_with_all = ["stat", "numstat", "shortstat", "name_only", "name_status"]
+        conflicts_with_all = [
+            "stat",
+            "numstat",
+            "shortstat",
+            "name_only",
+            "name_status",
+            "patch_text"
+        ]
     )]
     pub patch: bool,
     /// Summary with change bars per file (like `git diff --stat`).
     #[arg(
         long = "stat",
-        conflicts_with_all = ["patch", "numstat", "shortstat", "name_only", "name_status"]
+        conflicts_with_all = [
+            "patch",
+            "numstat",
+            "shortstat",
+            "name_only",
+            "name_status",
+            "patch_text"
+        ]
     )]
     pub stat: bool,
     /// Machine-readable `insertions<TAB>deletions<TAB>path` lines.
     #[arg(
         long = "numstat",
-        conflicts_with_all = ["patch", "stat", "shortstat", "name_only", "name_status"]
+        conflicts_with_all = [
+            "patch",
+            "stat",
+            "shortstat",
+            "name_only",
+            "name_status",
+            "patch_text"
+        ]
     )]
     pub numstat: bool,
     /// Only the summary line (`N files changed, …`).
     #[arg(
         long = "shortstat",
-        conflicts_with_all = ["patch", "stat", "numstat", "name_only", "name_status"]
+        conflicts_with_all = [
+            "patch",
+            "stat",
+            "numstat",
+            "name_only",
+            "name_status",
+            "patch_text"
+        ]
     )]
     pub shortstat: bool,
     /// Paths only, one per line.
     #[arg(
         long = "name-only",
-        conflicts_with_all = ["patch", "stat", "numstat", "shortstat", "name_status"]
+        conflicts_with_all = [
+            "patch",
+            "stat",
+            "numstat",
+            "shortstat",
+            "name_status",
+            "patch_text"
+        ]
     )]
     pub name_only: bool,
     /// Status letter and path(s) per line.
     #[arg(
         long = "name-status",
-        conflicts_with_all = ["patch", "stat", "numstat", "shortstat", "name_only"]
+        conflicts_with_all = ["patch", "stat", "numstat", "shortstat", "name_only", "patch_text"]
     )]
     pub name_status: bool,
+    /// Git-apply-compatible unified patch (`git diff --binary` shape); not combinable with `--json`.
+    #[arg(
+        long = "patch-text",
+        conflicts_with_all = [
+            "patch",
+            "stat",
+            "numstat",
+            "shortstat",
+            "name_only",
+            "name_status"
+        ]
+    )]
+    pub patch_text: bool,
     /// Lines of context around each change (Git `-U`).
     #[arg(short = 'U', long = "unified", value_name = "N")]
     pub unified_context: Option<usize>,
@@ -54,6 +103,7 @@ impl DiffFormatArgs {
     #[must_use]
     pub fn any_format_flag(self) -> bool {
         self.patch
+            || self.patch_text
             || self.stat
             || self.numstat
             || self.shortstat

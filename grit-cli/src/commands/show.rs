@@ -24,7 +24,8 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::commands::diff::{CommitDiffOptions, DiffOutcome, DiffTotalsJson, FileDiff};
-use crate::context::{self, subject_line};
+use crate::commits_json::CommitJsonLoader;
+use crate::context;
 use crate::diff_format::DiffFormatArgs;
 pub use crate::diff_render::DiffStat;
 use crate::diff_render::{self, diffstat_from_files};
@@ -239,6 +240,10 @@ pub struct CommitInfo {
     pub committer: Person,
     pub subject: String,
     pub message: String,
+    pub refs: Vec<crate::output::CommitRefJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub relative_date: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -287,19 +292,18 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
     let resolved = grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, spec)
         .with_context(|| format!("could not resolve '{spec}'"))?;
     let commit_oid = peel_to_commit(&repo, resolved)?;
-    let data = context::read_commit(&repo, &commit_oid)?;
 
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
+    let commit_json = CommitJsonLoader::new(&repo)?.load_one(&repo, &commit_oid, now)?;
     let commit = CommitInfo {
-        oid: commit_oid.to_hex(),
-        parents: data
-            .parents
-            .iter()
-            .map(grit_lib::objects::ObjectId::to_hex)
-            .collect(),
-        author: Person::from_identity_line(&data.author),
-        committer: Person::from_identity_line(&data.committer),
-        subject: subject_line(&data.message),
-        message: data.message.trim_end().to_owned(),
+        oid: commit_json.oid,
+        parents: commit_json.parents,
+        author: commit_json.author,
+        committer: commit_json.committer,
+        subject: commit_json.subject,
+        message: commit_json.message,
+        refs: commit_json.refs,
+        relative_date: commit_json.relative_date,
     };
 
     let diff_opts = CommitDiffOptions {

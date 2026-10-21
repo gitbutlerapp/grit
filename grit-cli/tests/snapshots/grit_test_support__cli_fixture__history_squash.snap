@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Squashed 2 commit(s)\n  commit b5ea30d → 11ec169\n  commit 1443ec0 → 11ec169\n  refs/heads/main 1443ec0 → 11ec169\n",
+    "stdout": "Squashed 2 commit(s)\n  commit b5ea30d → 1a8e9a0\n  commit 1443ec0 → 1a8e9a0\n  refs/heads/main 1443ec0 → 1a8e9a0\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"operation\":\"squash\",\"rewritten\":[{\"old\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"},{\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"}],\"refs\":[{\"name\":\"refs/heads/main\",\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"}],\"head\":{\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"11ec1698903b13b5f62e0341a3821b2570876cfe\"},\"dry_run\":false}\n",
+    "stdout": "{\"operation\":\"squash\",\"rewritten\":[{\"old\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"new\":\"1a8e9a084518ccd00b943920e0d2b10548525a34\"},{\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"1a8e9a084518ccd00b943920e0d2b10548525a34\"}],\"refs\":[{\"name\":\"refs/heads/main\",\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"1a8e9a084518ccd00b943920e0d2b10548525a34\"}],\"head\":{\"old\":\"1443ec0ab4aeeec347520353ec72a8daae7b6004\",\"new\":\"1a8e9a084518ccd00b943920e0d2b10548525a34\"},\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## History squash\n\n- commit `b5ea30d` → `11ec169`\n- commit `1443ec0` → `11ec169`\n- `refs/heads/main` `1443ec0` → `11ec169`\n- HEAD `1443ec0` → `11ec169`\n",
+    "stdout": "## History squash\n\n- commit `b5ea30d` → `1a8e9a0`\n- commit `1443ec0` → `1a8e9a0`\n- `refs/heads/main` `1443ec0` → `1a8e9a0`\n- HEAD `1443ec0` → `1a8e9a0`\n",
     "stderr": ""
   }
 }

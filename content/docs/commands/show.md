@@ -32,6 +32,7 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 | `<object>…` | Commits, branches, tags, or `rev:path` specs. Defaults to `HEAD`. |
 | `--diff-merges` | `combined` (default) or `first-parent` for merge commits. |
 | `-p`, `--patch` | Full patch (the default). |
+| `--patch-text` | Accepted for CLI parity with [`grit diff`](diff.md); use `grit diff --patch-text` for git-apply output. |
 | `--stat` | Summary with change bars per file instead of a full patch. |
 | `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines. |
 | `--shortstat` | Only the summary line (`N files changed, …`). |

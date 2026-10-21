@@ -55,6 +55,7 @@ With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape
 | `--tags[=<glob>]` | Tag tips, optionally filtered by glob under `refs/tags/`. |
 | `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob under `refs/remotes/`. |
 | `-p`, `--patch` | Unified patch under each commit (merge commits omit the patch). |
+| `--patch-text` | Accepted for CLI parity with [`grit diff`](diff.md); use `grit diff --patch-text` for git-apply output. |
 | `--stat` | Per-file change bars and totals under each commit. |
 | `--numstat` | Tab-separated insertion/deletion/path lines per commit. |
 | `--shortstat` | One summary line per commit. |

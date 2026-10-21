@@ -35,6 +35,18 @@
           },
           "type": "array"
         },
+        "refs": {
+          "items": {
+            "$ref": "#/definitions/CommitRefJson"
+          },
+          "type": "array"
+        },
+        "relative_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "subject": {
           "type": "string"
         }
@@ -45,9 +57,39 @@
         "message",
         "oid",
         "parents",
+        "refs",
         "subject"
       ],
       "type": "object"
+    },
+    "CommitRefJson": {
+      "description": "Ref decoration attached to a commit in JSON output.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/CommitRefKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CommitRefKind": {
+      "description": "Decoration category in JSON (`--json` contract).",
+      "enum": [
+        "branch",
+        "remote_branch",
+        "tag",
+        "stash",
+        "head",
+        "grafted",
+        "other"
+      ],
+      "type": "string"
     },
     "DiffStat": {
       "description": "A diffstat: per-file insertion/deletion counts plus totals.",

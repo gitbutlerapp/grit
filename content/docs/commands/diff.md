@@ -35,6 +35,14 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--shortstat` | Only the summary line (`N files changed, …`). |
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
+| `--patch-text` | Git-apply-compatible unified patch on stdout (`git diff --binary` shape). Human output only; not combinable with `--json` or `--markdown`. |
+| `-M`, `--find-renames[=<n>]` | Detect renames (default similarity 50). Long form requires `=` when a threshold is given. |
+| `--no-renames` | Do not detect renames. |
+| `--diff-algorithm <algo>` | Line diff algorithm (`myers`, `minimal`, `patience`, `histogram`). |
+| `--diff-filter <letters>` | Limit to change types (`A` added, `D` deleted, `M` modified, `R` renamed, …). |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
 | `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (bare `-U` means 3). |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
 | `-p`, `--patch` | Unified patch output (default when no other format flag is set). |
