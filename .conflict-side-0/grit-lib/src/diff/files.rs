@@ -65,6 +65,19 @@ fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
     }
 }
 
+fn include_file_in_diff(file: &FileDiff, opts: DiffOptions) -> bool {
+    if opts.whitespace.is_active() && !file.binary {
+        let empty = file
+            .structured
+            .as_ref()
+            .is_none_or(|s| s.hunks.is_empty());
+        if empty {
+            return false;
+        }
+    }
+    true
+}
+
 fn file_diff_from_stat(entry: DiffEntry, binary: bool, stat: Option<LineStat>) -> FileDiff {
     let path = path_from_entry(&entry);
     FileDiff {
@@ -128,6 +141,7 @@ pub fn build_file_diffs(
             let files: Vec<FileDiff> = structured
                 .into_iter()
                 .map(file_diff_from_structured)
+                .filter(|f| include_file_in_diff(f, diff_options))
                 .collect();
             Ok(DiffFilesOutput {
                 files,

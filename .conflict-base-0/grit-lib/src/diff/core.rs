@@ -345,12 +345,21 @@ pub(crate) fn git_xdiff_compacted_line_ops(
     new_lines: &[&str],
     indent_heuristic: bool,
     need_min: bool,
+    ws: super::WhitespaceMode,
 ) -> Vec<similar::DiffOp> {
     use crate::line_interner::LineInterner;
 
     let mut interner = LineInterner::default();
-    let ids1 = interner.intern_all(old_lines);
-    let ids2 = interner.intern_all(new_lines);
+    let ids1 = if ws.normalizes_line_compare() {
+        interner.intern_all_normalized(old_lines, |line| ws.normalize_line_for_compare(line))
+    } else {
+        interner.intern_all(old_lines)
+    };
+    let ids2 = if ws.normalizes_line_compare() {
+        interner.intern_all_normalized(new_lines, |line| ws.normalize_line_for_compare(line))
+    } else {
+        interner.intern_all(new_lines)
+    };
     let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2, need_min);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
     diff_indent_heuristic::apply_change_compact_to_ops(&raw, old_lines, new_lines, indent_heuristic)
@@ -401,7 +410,71 @@ fn diff_ops_to_edit_spans(ops: &[similar::DiffOp]) -> Vec<EditSpan> {
     out
 }
 
+fn diff_ops_to_ignorable_edit_spans<F>(
+    ops: &[similar::DiffOp],
+    old_lines: &[&str],
+    new_lines: &[&str],
+    is_ignorable_change: F,
+) -> Vec<EditSpan>
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
+    use similar::DiffOp;
+    let mut out = Vec::new();
+    for op in ops {
+        match *op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete {
+                old_index,
+                old_len,
+                new_index,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: 0,
+                    skip_in_output: is_ignorable_change(removed, &[]),
+                });
+            }
+            DiffOp::Insert {
+                old_index,
+                new_index,
+                new_len,
+            } => {
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: 0,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(&[], added),
+                });
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                let removed = &old_lines[old_index..old_index + old_len];
+                let added = &new_lines[new_index..new_index + new_len];
+                out.push(EditSpan {
+                    before_start: old_index as i64,
+                    before_len: old_len as i64,
+                    after_start: new_index as i64,
+                    after_len: new_len as i64,
+                    skip_in_output: is_ignorable_change(removed, added),
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Unified hunk body using Git's xdiff engine (no `---` / `+++`).
+#[allow(clippy::too_many_arguments)]
 fn git_xdiff_unified_body_raw(
     old_content: &str,
     new_content: &str,
@@ -410,7 +483,36 @@ fn git_xdiff_unified_body_raw(
     indent_heuristic: bool,
     need_min: bool,
     function_context: bool,
+    ws: super::WhitespaceMode,
 ) -> String {
+    git_xdiff_unified_body_raw_with_ignorable(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
+        indent_heuristic,
+        need_min,
+        function_context,
+        ws,
+        None::<fn(&[&str], &[&str]) -> bool>,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn git_xdiff_unified_body_raw_with_ignorable<F>(
+    old_content: &str,
+    new_content: &str,
+    context_lines: usize,
+    inter_hunk_context: usize,
+    indent_heuristic: bool,
+    need_min: bool,
+    function_context: bool,
+    ws: super::WhitespaceMode,
+    is_ignorable_change: Option<F>,
+) -> String
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
     if before.is_empty() && after.is_empty() {
@@ -418,10 +520,14 @@ fn git_xdiff_unified_body_raw(
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
-    let ops = git_xdiff_compacted_line_ops(&old_refs, &new_refs, indent_heuristic, need_min);
-    let mut edits = diff_ops_to_edit_spans(&ops);
+    let ops = git_xdiff_compacted_line_ops(&old_refs, &new_refs, indent_heuristic, need_min, ws);
+    let mut edits = if let Some(is_ignorable) = is_ignorable_change {
+        diff_ops_to_ignorable_edit_spans(&ops, &old_refs, &new_refs, is_ignorable)
+    } else {
+        diff_ops_to_edit_spans(&ops)
+    };
     if edits.is_empty() {
-        if old_content != new_content {
+        if old_content != new_content && !ws.is_active() {
             edits = line_ending_only_edits(&before, &after);
         }
         if edits.is_empty() {
@@ -448,6 +554,40 @@ pub(crate) fn unified_hunk_body_for_diff_options(
     options: &crate::diff::options::DiffOptions,
 ) -> String {
     use crate::diff::options::DiffAlgorithm;
+    use crate::ws::ws_blank_line;
+
+    let ws = options.whitespace;
+    if ws.is_active() {
+        let blank_only = |removed: &[&str], added: &[&str]| {
+            ws.ignore_blank_lines
+                && removed.iter().all(|l| ws_blank_line(l))
+                && added.iter().all(|l| ws_blank_line(l))
+        };
+        if ws.ignore_blank_lines && !ws.normalizes_line_compare() {
+            return histogram_unified_body_ignore_fc(
+                old_content,
+                new_content,
+                options.context_lines,
+                options.inter_hunk_context,
+                options.function_context,
+                None,
+                blank_only,
+            );
+        }
+        let need_min = matches!(options.algorithm, DiffAlgorithm::Minimal);
+        let ignorable = ws.ignore_blank_lines.then_some(blank_only);
+        return git_xdiff_unified_body_raw_with_ignorable(
+            old_content,
+            new_content,
+            options.context_lines,
+            options.inter_hunk_context,
+            options.indent_heuristic,
+            need_min,
+            false,
+            ws,
+            ignorable,
+        );
+    }
     let fc = options.function_context;
     match options.algorithm {
         DiffAlgorithm::Myers => git_xdiff_unified_body_raw(
@@ -458,6 +598,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
             options.indent_heuristic,
             false,
             fc,
+            ws,
         ),
         DiffAlgorithm::Minimal => git_xdiff_unified_body_raw(
             old_content,
@@ -467,6 +608,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
             options.indent_heuristic,
             true,
             fc,
+            ws,
         ),
         DiffAlgorithm::Patience => git_patience_unified_body_raw(
             old_content,
@@ -644,6 +786,7 @@ fn unified_diff_git_myers_with_prefix_and_funcname(
         indent_heuristic,
         false,
         false,
+        super::WhitespaceMode::default(),
     );
 
     let mut output = String::new();
@@ -724,6 +867,7 @@ fn unified_diff_git_minimal_with_prefix_and_funcname(
         indent_heuristic,
         true,
         false,
+        super::WhitespaceMode::default(),
     );
 
     let mut output = String::new();
@@ -9609,23 +9753,7 @@ pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str
 /// Normalise one line like Git's `-b` / `--ignore-space-change`.
 #[must_use]
 pub fn normalize_ignore_space_change_line(line: &str) -> String {
-    let mut result = String::with_capacity(line.len());
-    let mut in_space = false;
-    for c in line.chars() {
-        if c.is_whitespace() {
-            if !in_space {
-                result.push(' ');
-                in_space = true;
-            }
-        } else {
-            result.push(c);
-            in_space = false;
-        }
-    }
-    while result.ends_with(' ') {
-        result.pop();
-    }
-    result
+    super::whitespace_mode::normalize_ignore_space_change_line(line)
 }
 
 /// Normalise text like Git's `-b` / `--ignore-space-change`: on each line, collapse runs of
@@ -9943,6 +10071,26 @@ pub fn should_break_rewrite_for_stat(old: &[u8], new: &[u8]) -> bool {
 #[must_use]
 pub fn should_break_rewrite_pair(old: &[u8], new: &[u8], break_score: u64) -> bool {
     should_break_rewrite_inner(old, new, break_score)
+}
+
+/// Parse `-M` / `--find-renames` threshold into Git's 0–100 similarity percent.
+#[must_use]
+pub fn parse_diff_rename_threshold_percent(arg: &str) -> Option<u8> {
+    let token = if arg.is_empty() { "50" } else { arg };
+    let internal = parse_diff_rename_score_token(token)?;
+    Some((internal.saturating_mul(100) / GIT_DIFF_MAX_SCORE).min(100) as u8)
+}
+
+/// Drop entries that do not match `filter` (Git `--diff-filter`, after rename detection).
+#[must_use]
+pub fn apply_diff_filter(
+    entries: Vec<DiffEntry>,
+    filter: Option<super::filter::DiffFilter>,
+) -> Vec<DiffEntry> {
+    match filter {
+        Some(f) => f.filter_entries(entries),
+        None => entries,
+    }
 }
 
 /// Parse a single Git `parse_rename_score` token (`50`, `50%`, decimal forms) into internal

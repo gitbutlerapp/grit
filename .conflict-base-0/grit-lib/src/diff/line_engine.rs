@@ -13,7 +13,7 @@ pub(crate) fn line_hunks(
     options: &DiffOptions,
     enclosing_function_context: bool,
 ) -> Vec<StructuredHunk> {
-    if old_content == new_content {
+    if !options.whitespace.is_active() && old_content == new_content {
         return Vec::new();
     }
     let body = unified_hunk_body_for_diff_options(old_content, new_content, options);
