@@ -2,11 +2,6 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::str::FromStr;
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{serialize_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
@@ -14,6 +9,9 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::tree_sha256::{
     path_matches_glob, tree_sha256, MissingSubmoduleReason, TreeSha256, TreeSha256Options,
 };
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn init_repo(dir: &Path) -> Repository {
     Repository::init(dir, &InitOptions::default()).expect("init")

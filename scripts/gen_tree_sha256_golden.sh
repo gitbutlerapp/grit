@@ -55,7 +55,7 @@ cat >"$OUT" <<EOF
 EOF
 REF="${TREE_SHA256_BIN:-tree-sha256}"
 if command -v "$REF" >/dev/null 2>&1; then
-  REF_DIG="$("$REF" "$TMP/repo")"
+  REF_DIG="$("$REF" --repo "$TMP/repo" HEAD)"
   if [[ "$REF_DIG" != "$DIG" ]]; then
     echo "reference tool digest $REF_DIG != grit $DIG" >&2
     exit 1

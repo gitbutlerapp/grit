@@ -9,7 +9,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::tree_sha256::{TreeSha256, TreeSha256Options};
+use grit_lib::tree_sha256::TreeSha256Options;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     grit_test_support::git(dir, args)

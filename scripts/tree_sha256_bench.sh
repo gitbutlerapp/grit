@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Compare grit-lib tree_sha256 vs reference tree-sha256 on a warm-cache 1776-file loose-object repo.
+# This script measures whole-process median latency (bash + guide_tree_sha256). For in-process
+# Criterion numbers, run `cargo bench -p grit-lib --bench tree_sha256`.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIX="${TREE_SHA256_FIXTURE:-$ROOT/grit-lib/tests/fixtures/tree_sha256/git-dot-git-1776}"
