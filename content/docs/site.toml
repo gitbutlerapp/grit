@@ -106,6 +106,7 @@ baseline = [
   "grit-utils/baselines/resolve-cat.json",
   "grit-utils/baselines/fsck-medium.json",
   "grit-utils/baselines/hash-before.json",
+  "grit-utils/baselines/hash-after.json",
   "grit-utils/baselines/maintenance-medium.json",
   "grit-utils/baselines/history.json",
   "grit-utils/baselines/campaign-before.json",

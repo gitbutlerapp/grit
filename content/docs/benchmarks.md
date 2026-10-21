@@ -153,17 +153,33 @@ Integration coverage uses a **≥ 50 000** object fixture built with `git fa
 
 ## Hashing
 
-Raw digest throughput uses [`grit_lib::objects::hash::ObjectHasher`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) (release build, Criterion). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
+Checksum throughput uses plain accelerated SHA-1/256 from the `sha1` / `sha2` crates ([`HashingWriter`](https://docs.rs/grit-lib/latest/grit_lib/hash/struct.HashingWriter.html), Criterion `hash_sha1` / `hashing_writer_sha1`). Object-id hashing on ingestion uses [`ObjectHasher::for_object`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) with the **sha1dc** crate (collision detection on the canonical object header + payload). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
 
-**Environment (2026-10-07):** Intel Xeon (SHA-NI present), Linux, `git` 2.43.0, OpenSSL 3.0.13, Rust stable. `hash-info --json` reports `{"sha1":"x86_sha_ni","sha256":"x86_sha_ni"}`.
+**Environment (2026-10-21):** Intel Xeon (SHA-NI present), Linux, `git` 2.43.0, OpenSSL 3.0.13, Rust stable 1.99. `hash-info --json` reports `{"sha1":"x86_sha_ni","sha256":"x86_sha_ni"}`.
+
+### Micro (Criterion + hyperfine)
 
 | Workload | grit-lib | Reference | grit / reference |
 | -------- | -------- | --------- | ---------------- |
-| SHA-1, 1 MiB buffer | 1.98 GiB/s | OpenSSL SHA-1 @ 16 KiB: 1.98 GiB/s | **100%** |
-| SHA-256, 1 MiB buffer | 1.80 GiB/s | OpenSSL SHA-256 @ 16 KiB: 1.78 GiB/s | **101%** |
-| SHA-1 blob, 256 MiB file | 0.31 s | `git hash-object`: 0.48 s | **1.55× faster** |
+| SHA-1 checksum, 1 MiB buffer | 1.59 GiB/s | OpenSSL SHA-1 @ 16 KiB: 1.88 GiB/s | **85%** |
+| SHA-1 checksum via `HashingWriter`, 1 MiB | 1.93 GiB/s | OpenSSL SHA-1 @ 16 KiB: 1.88 GiB/s | **103%** |
+| SHA-256, 1 MiB buffer | 1.76 GiB/s | OpenSSL SHA-256 @ 16 KiB: 1.73 GiB/s | **101%** |
+| SHA-1 object id (`hash_object_sha1`), 1 MiB | 1.57 GiB/s | effective `git hash-object` throughput on 256 MiB: ~0.50 GiB/s | **~3.1× throughput** |
+| SHA-1 blob, 256 MiB file (hyperfine) | 452 ms | `git hash-object`: 511 ms | **1.13× faster** |
 
-SHA-1 at 1 MiB and above meets the project bar (≥ 95% of OpenSSL on the same CPU). SHA-256 meets ≥ 90% of OpenSSL. End-to-end blob id for a large file beats stock Git 2.43, which still uses sha1dc for object hashing.
+Plain SHA-1 checksums at 1 MiB meet the project bar (≥ 95% of OpenSSL on the same CPU) on the `HashingWriter` path used for pack checksums. SHA-256 meets ≥ 90% of OpenSSL. Object-id hashing keeps collision detection (sha1dc) while staying well above stock Git’s sha1dc-backed `hash-object` throughput on large blobs; wall-clock `gritx-hash-file` vs `git hash-object` on a 256 MiB file remains faster on this VM.
+
+### End-to-end (`hash-after.json`, factory VM 2026-10-21)
+
+Committed baseline **`grit-utils/baselines/hash-after.json`** (paired with **`hash-before.json`**) from `grit-bench hash`: 256 MiB `hash-object -w`, repacked 100k-object **`index-pack`** (SHAttered blobs excluded so grit and git compare fairly), and medium **`fsck`**.
+
+| Scenario | Grit median | Git median | Grit / Git |
+| -------- | ----------- | ---------- | ---------- |
+| `hash-object-256mib` | 4.21 s | 5.76 s | **0.73×** (1.37× faster) |
+| `index-pack-git-git` (100k repacked) | 99.5 ms | 165.2 ms | **0.60×** (1.66× faster) |
+| `fsck-medium` | 375 ms | 196 ms | 1.91× (grit slower) |
+
+Versus **`hash-before.json`**, grit median on `hash-object-256mib` is **~6%** slower (expected sha1dc on the checked object-id path; within run-to-run spread). `fsck-medium` improved; `index-pack` switched to the repacked 100k fixture (see dependency **`factory/checked-object-hash-2718`**) so before/after medians are not directly comparable.
 
 ### Commands
 
