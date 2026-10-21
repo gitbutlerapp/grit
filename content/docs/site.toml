@@ -20,6 +20,11 @@ slug = "tutorial"
 label = "Tutorial"
 
 [[section.page]]
+file = "change-ids.md"
+slug = "change-ids"
+label = "Change ids"
+
+[[section.page]]
 file = "library-quickstart.md"
 slug = "library-quickstart"
 label = "Library quick start"

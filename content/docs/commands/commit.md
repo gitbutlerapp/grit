@@ -41,7 +41,7 @@ When a merge is in progress (`MERGE_HEAD` is present) and every conflict is reso
 
 ### Change ids
 
-Every commit `grit commit` creates gets a `change-id` header (reverse-hex by default) that stays with the same logical change across amends. Commits created without the header still have a deterministic id derived from the commit object id (Jujutsu-compatible); amending such a commit stores that derived value. Set `grit.changeIds=false` to omit the header (Git byte-identical commits for tests or importers that reject extra headers). See [Change ids](../library/change-ids/) for policy, testing knobs, and library APIs.
+Every commit `grit commit` creates gets a `change-id` header (reverse-hex by default) that stays with the same logical change across amends. Commits created without the header still have a deterministic id derived from the commit object id (Jujutsu-compatible); amending such a commit stores that derived value. Set `grit.changeIds=false` to omit the header (Git byte-identical commits for tests or importers that reject extra headers). See [Change ids](../change-ids/) for interop, display, revision syntax, and library APIs.
 
 ## Options
 

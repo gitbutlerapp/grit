@@ -63,6 +63,8 @@ $ grit commit "Start the project"
 
 There is no separate staging step to remember. [`grit add`](../add/) exists for when you want to stage particular files and check them in `grit status` first, but `grit commit` always records every change.
 
+Each grit commit also gets a stable [change id](../change-ids/) that stays with the same logical change when you amend or rewrite history; `grit log` shows a short `change …` prefix beside each commit.
+
 Look at the history with [`grit log`](../log/):
 
 ```console

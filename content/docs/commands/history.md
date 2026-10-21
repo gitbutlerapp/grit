@@ -20,7 +20,7 @@ grit history absorb [--base <rev>]
 
 ## Description
 
-`grit history` groups **stateless** rewrite operations: grit plans how commits and refs should change, writes new commit objects into the object database, then applies ref updates in one atomic batch. There is no sequencer state file and **no Git hooks** run during planning or apply.
+`grit history` groups **stateless** rewrite operations: grit plans how commits and refs should change, writes new commit objects into the object database, then applies ref updates in one atomic batch. There is no sequencer state file and **no Git hooks** run during planning or apply. Rewrites preserve stable [change ids](../change-ids/) on surviving logical changes and store derived ids when the source commit had no header.
 
 Shared behavior for every subcommand:
 

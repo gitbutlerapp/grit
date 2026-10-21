@@ -5,6 +5,8 @@ summary: Stable change-id commit headers, derivation, and grit.changeIds config.
 
 Every commit Grit creates can carry a **`change-id`** header: an opaque token that stays with the same logical change across rewrites (amend, rebase, history edits). Commits without the header still have a **derived** id (Jujutsu-compatible) computed from the commit object id.
 
+For CLI usage, interop, config, and revision syntax, see the [Change ids](../change-ids/) guide.
+
 ## Header format
 
 - Primary header: `change-id <value>`
