@@ -328,11 +328,8 @@ fn golden_vectors_match_reference_tool() {
     let entries: Vec<GoldenEntry> = serde_json::from_str(&raw).unwrap();
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for entry in entries {
-        let repo_path = if entry.repo.is_absolute() {
-            entry.repo.clone()
-        } else {
-            manifest.join(&entry.repo)
-        };
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_path = open_golden_repo(&manifest, &entry, tmp.path());
         let repo = Repository::discover(Some(&repo_path), &RepositoryOptions::empty()).unwrap();
         let oid: ObjectId = entry.rev.parse().unwrap();
         let report = tree_sha256(&repo, oid, &TreeSha256Options::default()).unwrap();
@@ -345,10 +342,45 @@ fn golden_vectors_match_reference_tool() {
     }
 }
 
+fn open_golden_repo(manifest: &Path, entry: &GoldenEntry, scratch: &Path) -> PathBuf {
+    if let Some(bundle) = &entry.bundle {
+        let bundle_path = if bundle.is_absolute() {
+            bundle.clone()
+        } else {
+            manifest.join(bundle)
+        };
+        let dest = scratch.join("repo");
+        let status = Command::new("git")
+            .args([
+                "clone",
+                "--quiet",
+                bundle_path.to_str().expect("bundle path utf-8"),
+                dest.to_str().expect("dest utf-8"),
+            ])
+            .status()
+            .expect("git clone bundle");
+        assert!(status.success(), "git clone from bundle failed");
+        dest
+    } else {
+        let repo = entry
+            .repo
+            .as_ref()
+            .expect("golden entry needs repo or bundle");
+        if repo.is_absolute() {
+            repo.clone()
+        } else {
+            manifest.join(repo)
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct GoldenEntry {
     name: String,
-    repo: PathBuf,
+    #[serde(default)]
+    repo: Option<PathBuf>,
+    #[serde(default)]
+    bundle: Option<PathBuf>,
     rev: String,
     digest: String,
 }
