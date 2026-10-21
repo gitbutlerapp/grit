@@ -939,6 +939,17 @@ pub enum Error {
         operation: &'static str,
     },
 
+    /// Parsing a [`crate::tree_sha256::TreeSha256`] from hex failed (expected 64 hex digits).
+    #[error("invalid tree-sha256 hex")]
+    TreeSha256InvalidHex,
+
+    /// A revision passed to [`crate::tree_sha256::tree_sha256`] did not peel to a commit or tree.
+    #[error("tree-sha256: revision resolves to {found:?}, not a commit or tree")]
+    TreeSha256InvalidRevision {
+        /// Object kind after peeling annotated tags.
+        found: crate::objects::ObjectKind,
+    },
+
     /// One or more submodules required for [`crate::tree_sha256::tree_sha256`] are missing.
     #[error("tree-sha256: missing submodules")]
     TreeSha256MissingSubmodules(Vec<crate::tree_sha256::MissingSubmodule>),

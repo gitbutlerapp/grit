@@ -159,5 +159,6 @@ modules = [
   "revwalk",
   "stash",
   "state",
+  "tree_sha256",
   "worktree",
 ]

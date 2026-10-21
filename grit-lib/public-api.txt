@@ -4577,6 +4577,10 @@ pub grit_lib::error::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
 pub grit_lib::error::Error::TagNotFound
 pub grit_lib::error::Error::TagNotFound::tag: alloc::string::String
+pub grit_lib::error::Error::TreeSha256InvalidHex
+pub grit_lib::error::Error::TreeSha256InvalidRevision
+pub grit_lib::error::Error::TreeSha256InvalidRevision::found: grit_lib::objects::ObjectKind
+pub grit_lib::error::Error::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
 pub grit_lib::error::Error::UnbornHead
 pub grit_lib::error::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::error::Error::UnsupportedObjectStore
@@ -11892,6 +11896,10 @@ pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
 pub grit_lib::prelude::Error::TagNotFound
 pub grit_lib::prelude::Error::TagNotFound::tag: alloc::string::String
+pub grit_lib::prelude::Error::TreeSha256InvalidHex
+pub grit_lib::prelude::Error::TreeSha256InvalidRevision
+pub grit_lib::prelude::Error::TreeSha256InvalidRevision::found: grit_lib::objects::ObjectKind
+pub grit_lib::prelude::Error::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
 pub grit_lib::prelude::Error::UnbornHead
 pub grit_lib::prelude::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::prelude::Error::UnsupportedObjectStore
@@ -12670,6 +12678,7 @@ pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnost
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)
 pub fn grit_lib::repo::Repository::stash(&self) -> grit_lib::repo_handles::RepositoryStash<'_>
 pub fn grit_lib::repo::Repository::thread_policy(&self) -> grit_lib::parallel::ThreadPolicy
+pub fn grit_lib::repo::Repository::tree_sha256(&self, grit_lib::objects::ObjectId, &grit_lib::tree_sha256::TreeSha256Options) -> grit_lib::error::Result<grit_lib::tree_sha256::TreeSha256Report>
 pub fn grit_lib::repo::Repository::wall_clock_epoch(&self) -> i64
 pub fn grit_lib::repo::Repository::with_ref_store(self, alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>) -> Self
 pub fn grit_lib::repo::Repository::with_thread_policy(self, grit_lib::parallel::ThreadPolicy) -> Self
@@ -16274,6 +16283,7 @@ pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnost
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)
 pub fn grit_lib::repo::Repository::stash(&self) -> grit_lib::repo_handles::RepositoryStash<'_>
 pub fn grit_lib::repo::Repository::thread_policy(&self) -> grit_lib::parallel::ThreadPolicy
+pub fn grit_lib::repo::Repository::tree_sha256(&self, grit_lib::objects::ObjectId, &grit_lib::tree_sha256::TreeSha256Options) -> grit_lib::error::Result<grit_lib::tree_sha256::TreeSha256Report>
 pub fn grit_lib::repo::Repository::wall_clock_epoch(&self) -> i64
 pub fn grit_lib::repo::Repository::with_ref_store(self, alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>) -> Self
 pub fn grit_lib::repo::Repository::with_thread_policy(self, grit_lib::parallel::ThreadPolicy) -> Self
@@ -19314,6 +19324,114 @@ pub fn grit_lib::state::resolve_head_for_repository(&grit_lib::repo::Repository)
 pub fn grit_lib::state::split_commit_in_progress(&std::path::Path, &grit_lib::state::HeadState) -> bool
 pub fn grit_lib::state::status_operation(&grit_lib::state::WtStatusState, bool) -> core::option::Option<grit_lib::state::Operation>
 pub fn grit_lib::state::wt_status_get_state(&std::path::Path, &grit_lib::state::HeadState, bool) -> grit_lib::error::Result<grit_lib::state::WtStatusState>
+pub mod grit_lib::tree_sha256
+#[non_exhaustive] pub enum grit_lib::tree_sha256::MissingSubmoduleReason
+pub grit_lib::tree_sha256::MissingSubmoduleReason::MissingCommit
+pub grit_lib::tree_sha256::MissingSubmoduleReason::NotCheckedOut
+impl core::clone::Clone for grit_lib::tree_sha256::MissingSubmoduleReason
+pub fn grit_lib::tree_sha256::MissingSubmoduleReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::cmp::PartialEq for grit_lib::tree_sha256::MissingSubmoduleReason
+pub fn grit_lib::tree_sha256::MissingSubmoduleReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::tree_sha256::MissingSubmoduleReason
+pub fn grit_lib::tree_sha256::MissingSubmoduleReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::marker::Freeze for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::marker::Send for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::marker::Sync for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::marker::Unpin for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::marker::UnsafeUnpin for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::tree_sha256::MissingSubmoduleReason
+pub struct grit_lib::tree_sha256::MissingSubmodule
+pub grit_lib::tree_sha256::MissingSubmodule::path: alloc::string::String
+pub grit_lib::tree_sha256::MissingSubmodule::reason: grit_lib::tree_sha256::MissingSubmoduleReason
+impl core::clone::Clone for grit_lib::tree_sha256::MissingSubmodule
+pub fn grit_lib::tree_sha256::MissingSubmodule::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::tree_sha256::MissingSubmodule
+impl core::cmp::PartialEq for grit_lib::tree_sha256::MissingSubmodule
+pub fn grit_lib::tree_sha256::MissingSubmodule::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::tree_sha256::MissingSubmodule
+pub fn grit_lib::tree_sha256::MissingSubmodule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::tree_sha256::MissingSubmodule
+impl core::marker::Freeze for grit_lib::tree_sha256::MissingSubmodule
+impl core::marker::Send for grit_lib::tree_sha256::MissingSubmodule
+impl core::marker::Sync for grit_lib::tree_sha256::MissingSubmodule
+impl core::marker::Unpin for grit_lib::tree_sha256::MissingSubmodule
+impl core::marker::UnsafeUnpin for grit_lib::tree_sha256::MissingSubmodule
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::tree_sha256::MissingSubmodule
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::tree_sha256::MissingSubmodule
+pub struct grit_lib::tree_sha256::TreeSha256(pub [u8; 32])
+impl grit_lib::tree_sha256::TreeSha256
+pub const fn grit_lib::tree_sha256::TreeSha256::bytes(&self) -> &[u8; 32]
+pub fn grit_lib::tree_sha256::TreeSha256::to_hex(&self) -> alloc::string::String
+impl core::clone::Clone for grit_lib::tree_sha256::TreeSha256
+pub fn grit_lib::tree_sha256::TreeSha256::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::tree_sha256::TreeSha256
+impl core::cmp::PartialEq for grit_lib::tree_sha256::TreeSha256
+pub fn grit_lib::tree_sha256::TreeSha256::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::tree_sha256::TreeSha256
+pub fn grit_lib::tree_sha256::TreeSha256::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::tree_sha256::TreeSha256
+pub fn grit_lib::tree_sha256::TreeSha256::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::tree_sha256::TreeSha256
+pub fn grit_lib::tree_sha256::TreeSha256::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::tree_sha256::TreeSha256
+impl core::marker::StructuralPartialEq for grit_lib::tree_sha256::TreeSha256
+impl core::str::traits::FromStr for grit_lib::tree_sha256::TreeSha256
+pub type grit_lib::tree_sha256::TreeSha256::Err = grit_lib::error::Error
+pub fn grit_lib::tree_sha256::TreeSha256::from_str(&str) -> grit_lib::error::Result<Self>
+impl core::marker::Freeze for grit_lib::tree_sha256::TreeSha256
+impl core::marker::Send for grit_lib::tree_sha256::TreeSha256
+impl core::marker::Sync for grit_lib::tree_sha256::TreeSha256
+impl core::marker::Unpin for grit_lib::tree_sha256::TreeSha256
+impl core::marker::UnsafeUnpin for grit_lib::tree_sha256::TreeSha256
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::tree_sha256::TreeSha256
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::tree_sha256::TreeSha256
+#[non_exhaustive] pub struct grit_lib::tree_sha256::TreeSha256Options
+pub grit_lib::tree_sha256::TreeSha256Options::exclude_exact: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::tree_sha256::TreeSha256Options::exclude_globs: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::tree_sha256::TreeSha256Options
+pub fn grit_lib::tree_sha256::TreeSha256Options::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::tree_sha256::TreeSha256Options
+impl core::cmp::PartialEq for grit_lib::tree_sha256::TreeSha256Options
+pub fn grit_lib::tree_sha256::TreeSha256Options::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::tree_sha256::TreeSha256Options
+pub fn grit_lib::tree_sha256::TreeSha256Options::default() -> Self
+impl core::fmt::Debug for grit_lib::tree_sha256::TreeSha256Options
+pub fn grit_lib::tree_sha256::TreeSha256Options::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::tree_sha256::TreeSha256Options
+impl core::marker::Freeze for grit_lib::tree_sha256::TreeSha256Options
+impl core::marker::Send for grit_lib::tree_sha256::TreeSha256Options
+impl core::marker::Sync for grit_lib::tree_sha256::TreeSha256Options
+impl core::marker::Unpin for grit_lib::tree_sha256::TreeSha256Options
+impl core::marker::UnsafeUnpin for grit_lib::tree_sha256::TreeSha256Options
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::tree_sha256::TreeSha256Options
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::tree_sha256::TreeSha256Options
+pub struct grit_lib::tree_sha256::TreeSha256Report
+pub grit_lib::tree_sha256::TreeSha256Report::cycles: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::tree_sha256::TreeSha256Report::digest: grit_lib::tree_sha256::TreeSha256
+pub grit_lib::tree_sha256::TreeSha256Report::excluded: alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>
+pub grit_lib::tree_sha256::TreeSha256Report::files: usize
+pub grit_lib::tree_sha256::TreeSha256Report::submodules: usize
+impl core::clone::Clone for grit_lib::tree_sha256::TreeSha256Report
+pub fn grit_lib::tree_sha256::TreeSha256Report::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::tree_sha256::TreeSha256Report
+impl core::cmp::PartialEq for grit_lib::tree_sha256::TreeSha256Report
+pub fn grit_lib::tree_sha256::TreeSha256Report::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::tree_sha256::TreeSha256Report
+pub fn grit_lib::tree_sha256::TreeSha256Report::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::tree_sha256::TreeSha256Report
+impl core::marker::Freeze for grit_lib::tree_sha256::TreeSha256Report
+impl core::marker::Send for grit_lib::tree_sha256::TreeSha256Report
+impl core::marker::Sync for grit_lib::tree_sha256::TreeSha256Report
+impl core::marker::Unpin for grit_lib::tree_sha256::TreeSha256Report
+impl core::marker::UnsafeUnpin for grit_lib::tree_sha256::TreeSha256Report
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::tree_sha256::TreeSha256Report
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::tree_sha256::TreeSha256Report
+pub fn grit_lib::tree_sha256::path_matches_glob(&str, &str) -> bool
+pub fn grit_lib::tree_sha256::path_matches_glob_bytes(&[u8], &[u8]) -> bool
+pub fn grit_lib::tree_sha256::tree_sha256(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::tree_sha256::TreeSha256Options) -> grit_lib::error::Result<grit_lib::tree_sha256::TreeSha256Report>
 pub mod grit_lib::worktree
 pub mod grit_lib::worktree::attributes
 pub enum grit_lib::worktree::attributes::AttrValue

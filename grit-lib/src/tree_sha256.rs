@@ -1,6 +1,13 @@
 //! SHA-256 tree digest over repository file contents ([tree-sha256] spec).
 //!
 //! [tree-sha256]: https://github.com/schacon/tree-sha256
+//!
+//! ```rust
+//! use grit_lib::tree_sha256::TreeSha256Options;
+//! # fn main() {
+//! let _ = TreeSha256Options::default();
+//! # }
+//! ```
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -58,7 +65,7 @@ impl FromStr for TreeSha256 {
     fn from_str(s: &str) -> Result<Self> {
         let s = s.trim();
         if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(Error::Message("invalid tree-sha256 hex".into()));
+            return Err(Error::TreeSha256InvalidHex);
         }
         let mut out = [0_u8; 32];
         for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
@@ -75,7 +82,7 @@ fn hex_nibble(b: u8) -> Result<u8> {
         b'0'..=b'9' => Ok(b - b'0'),
         b'a'..=b'f' => Ok(b - b'a' + 10),
         b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(Error::Message("invalid tree-sha256 hex".into())),
+        _ => Err(Error::TreeSha256InvalidHex),
     }
 }
 
@@ -197,9 +204,7 @@ fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
             let obj = repo.odb().read(&peeled)?;
             Ok(parse_commit(&obj.data)?.tree)
         }
-        other => Err(Error::Message(format!(
-            "tree-sha256: revision resolves to {other:?}, not a tree"
-        ))),
+        other => Err(Error::TreeSha256InvalidRevision { found: other }),
     }
 }
 
@@ -366,17 +371,21 @@ impl ComputeCtx<'_> {
             return Ok(());
         }
         let cfg = self.repo.config()?;
+        // Blob SHA-256 is CPU-bound; use `pack.threads` (defaults to all CPUs), not
+        // `DiffContent` (serial unless `core.preloadIndex` is enabled).
         let threads = self
             .repo
             .thread_policy()
-            .resolve(ParallelOp::DiffContent, &cfg)
-            .parallelism()
-            .threads();
+            .try_resolve(ParallelOp::PackWrite, &cfg)
+            .map(|opts| opts.parallelism().threads())
+            .unwrap_or_else(|_| {
+                self.repo
+                    .thread_policy()
+                    .resolve(ParallelOp::DiffContent, &cfg)
+                    .parallelism()
+                    .threads()
+            });
         let odb = self.repo.odb();
-        let mut total_bytes = 0_usize;
-        for job in &self.blob_jobs {
-            total_bytes += odb.read_info(&job.oid)?.size as usize;
-        }
         let hash_one = |job: &BlobJob| {
             let obj = odb.read(&job.oid)?;
             if !matches!(obj.kind, ObjectKind::Blob) {
@@ -387,6 +396,10 @@ impl ComputeCtx<'_> {
         let hashed: Vec<String> = if self.blob_jobs.len() >= PAR_HASH_MIN_ITEMS {
             try_par_hash_with_force(&self.blob_jobs, threads, hash_one)
         } else {
+            let mut total_bytes = 0_usize;
+            for job in &self.blob_jobs {
+                total_bytes += odb.read_info(&job.oid)?.size as usize;
+            }
             try_par_hash_with(&self.blob_jobs, threads, total_bytes.max(1), hash_one)
         }
         .map_err(|e| match e {
@@ -525,9 +538,8 @@ fn submodule_name_for_path(cfg: &ConfigSet, path: &str) -> Option<String> {
     None
 }
 
-/// Returns true when `gitlink` appears in `commit_chain` (cycle detection helper).
 #[must_use]
-pub fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> bool {
+pub(crate) fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> bool {
     chain.contains(&gitlink)
 }
 
@@ -594,7 +606,16 @@ fn glob_match_at(path: &[u8], pat: &[u8], mut pi: usize, mut si: usize) -> bool 
 
 #[cfg(test)]
 mod glob_tests {
-    use super::path_matches_glob;
+    use super::{gitlink_in_commit_chain, path_matches_glob};
+    use crate::objects::ObjectId;
+
+    #[test]
+    fn gitlink_cycle_helper() {
+        let a: ObjectId = "0000000000000000000000000000000000000001".parse().unwrap();
+        let b: ObjectId = "0000000000000000000000000000000000000002".parse().unwrap();
+        assert!(gitlink_in_commit_chain(&[a, b, a], a));
+        assert!(!gitlink_in_commit_chain(&[b], a));
+    }
 
     #[test]
     fn star_matches_slash() {

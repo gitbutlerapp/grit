@@ -37,5 +37,28 @@ fn bench_tree_sha256_small(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_tree_sha256_small);
+fn bench_tree_sha256_git_dot_git_1776(c: &mut Criterion) {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = manifest.join("tests/fixtures/tree_sha256/git-dot-git-1776");
+    if !dir.join(".git").is_dir() {
+        return;
+    }
+    let repo = Repository::discover(Some(&dir), &RepositoryOptions::empty()).expect("open");
+    let head: ObjectId = git(&dir, &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .expect("oid");
+    let opts = TreeSha256Options::default();
+    c.bench_function("tree_sha256_1776_loose_files", |b| {
+        b.iter(|| {
+            black_box(repo.tree_sha256(head, &opts).expect("tree_sha256").digest);
+        });
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_tree_sha256_small,
+    bench_tree_sha256_git_dot_git_1776
+);
 criterion_main!(benches);

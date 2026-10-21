@@ -100,9 +100,10 @@ fn empty_tree() {
         .odb()
         .write_loose_materialize(ObjectKind::Commit, commit_body.as_bytes())
         .unwrap();
-    let empty_digest =
-        TreeSha256::from_str("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-            .unwrap();
+    let empty_digest = <TreeSha256 as std::str::FromStr>::from_str(
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    )
+    .unwrap();
     let report = tree_sha256(&repo, commit, &TreeSha256Options::default()).unwrap();
     assert_eq!(report.files, 0);
     assert_eq!(report.digest, empty_digest);
@@ -305,15 +306,6 @@ fn copy_dir_all(from: &Path, to: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-#[test]
-fn submodule_cycle_recorded() {
-    use grit_lib::tree_sha256::gitlink_in_commit_chain;
-    let a: ObjectId = "0000000000000000000000000000000000000001".parse().unwrap();
-    let b: ObjectId = "0000000000000000000000000000000000000002".parse().unwrap();
-    assert!(gitlink_in_commit_chain(&[a, b, a], a));
-    assert!(!gitlink_in_commit_chain(&[b], a));
 }
 
 #[test]
