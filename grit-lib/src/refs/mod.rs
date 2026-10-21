@@ -414,7 +414,7 @@ fn first_packed_descendant_ref(store: &Path, refname: &str) -> Result<Option<Str
 }
 
 fn packed_ref_name_exists(git_dir: &Path, refname: &str) -> Result<bool> {
-    Ok(read_packed_refs_map(git_dir)?.contains_key(refname))
+    Ok(lookup_packed_ref(git_dir, refname)?.is_some())
 }
 
 /// Whether any name in `sorted_packed` namespace-conflicts with `candidate`.
@@ -843,6 +843,15 @@ fn parse_packed_ref_data_line(
     line: &str,
     ref_opts: &RefNameOptions,
 ) -> Result<(String, ObjectId)> {
+    let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, ref_opts)?;
+    Ok((refname.to_owned(), oid))
+}
+
+fn parse_packed_ref_data_line_borrowed<'a>(
+    path: &Path,
+    line: &'a str,
+    ref_opts: &RefNameOptions,
+) -> Result<(&'a str, ObjectId)> {
     let bytes = line.as_bytes();
     let mut j = 0usize;
     while j < bytes.len() && bytes[j].is_ascii_hexdigit() {
@@ -859,7 +868,7 @@ fn parse_packed_ref_data_line(
         return Err(packed_refs_unexpected_line(path, line));
     }
     let oid: ObjectId = line[..j].parse()?;
-    Ok((refname.to_owned(), oid))
+    Ok((refname, oid))
 }
 
 /// Parse `packed-refs` bytes the way Git reads them for ref listing (strict).
@@ -872,10 +881,6 @@ pub(crate) struct PackedRefsFileView {
 }
 
 impl PackedRefsFileView {
-    pub(crate) fn data(&self) -> &[u8] {
-        &self.data
-    }
-
     fn from_bytes(path: &Path, data: Vec<u8>) -> Result<Self> {
         if data.is_empty() {
             return Ok(Self {
@@ -884,7 +889,7 @@ impl PackedRefsFileView {
                 data_line_starts: Vec::new(),
             });
         }
-        if data.contains(&b'\r') {
+        if memchr::memchr(b'\r', &data).is_some() {
             return Err(packed_refs_unexpected_line(
                 path,
                 "<contains carriage return>",
@@ -898,6 +903,15 @@ impl PackedRefsFileView {
         }
         let text = std::str::from_utf8(&data)
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
+        // Ranged scans never reach the end of a sorted file, so check the last record up front
+        // (as Git does): a ref or peel line holds at least a full SHA-1 hex id.
+        let body = &text[..text.len() - 1];
+        let last_line = body.rfind('\n').map_or(body, |nl| &body[nl + 1..]);
+        if !last_line.starts_with('#')
+            && last_line.len() < crate::objects::HashAlgo::Sha1.hex_len() + 1
+        {
+            return Err(packed_refs_unexpected_line(path, last_line));
+        }
         let sorted = packed_refs_file_declares_sorted(text);
         Ok(Self {
             data_line_starts: packed_refs_data_line_starts(&data),
@@ -942,54 +956,92 @@ impl PackedRefsFileView {
         Ok(self.lookup_entry(path, refname)?.map(|(oid, _)| oid))
     }
 
+    /// Refs whose names start with `prefix` (all refs for `None`).
+    ///
+    /// Every line the scan covers is parsed strictly, peel and comment lines included. In a
+    /// sorted file a prefix scan only covers the binary-searched range of matching records,
+    /// so like Git it neither reads nor validates records outside that range. Scans without a
+    /// prefix, of all of `refs/`, or of an unsorted file cover the whole file.
     fn map_for_prefix(
         &self,
         path: &Path,
         prefix: Option<&str>,
     ) -> Result<HashMap<String, ObjectId>> {
-        let ref_opts = RefNameOptions {
-            allow_onelevel: false,
-            refspec_pattern: false,
-            normalize: false,
-        };
         let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
-        let prefix_upper = if self.sorted {
-            prefix_trim.and_then(list_prefix_upper_bound)
-        } else {
-            None
-        };
-        let mut map = HashMap::new();
-        let (lo, hi) = if self.sorted {
-            if let Some(prefix) = prefix_trim {
+        let range_prefix = prefix_trim.filter(|p| self.sorted && !p.is_empty() && *p != "refs");
+        let (lo, hi) = match range_prefix {
+            Some(prefix) => {
                 let lo = lower_bound_packed_data_line(&self.data, &self.data_line_starts, prefix);
-                let hi = prefix_upper
-                    .as_ref()
+                let hi = list_prefix_upper_bound(prefix)
                     .map(|upper| {
-                        lower_bound_packed_data_line(
-                            &self.data,
-                            &self.data_line_starts,
-                            upper.as_str(),
-                        )
+                        lower_bound_packed_data_line(&self.data, &self.data_line_starts, &upper)
                     })
                     .unwrap_or(self.data_line_starts.len());
                 (lo, hi)
-            } else {
-                (0, self.data_line_starts.len())
             }
-        } else {
-            (0, self.data_line_starts.len())
+            None => (0, self.data_line_starts.len()),
         };
-        for &start in &self.data_line_starts[lo..hi] {
-            let (refname, oid) = parse_packed_line_at(path, &self.data, start, &ref_opts)?;
-            if let Some(prefix) = prefix_trim {
-                if !ref_name_matches_list_prefix(&refname, prefix) {
-                    continue;
-                }
-            }
-            map.insert(refname, oid);
+        let whole_file = lo == 0 && hi == self.data_line_starts.len();
+        if lo >= hi && !whole_file {
+            return Ok(HashMap::new());
         }
-        Ok(map)
+        let begin = if lo == 0 {
+            0
+        } else {
+            self.data_line_starts[lo]
+        };
+        let end = self
+            .data_line_starts
+            .get(hi)
+            .copied()
+            .unwrap_or(self.data.len());
+        // `from_bytes` validated the whole buffer as UTF-8 and line starts follow a `\n`.
+        let region = std::str::from_utf8(&self.data[begin..end])
+            .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
+        parse_packed_refs_region(path, region, prefix_trim)
     }
+}
+
+/// Strictly parse the `packed-refs` lines of `region`, keeping refs that match `prefix`.
+///
+/// `region` starts at the beginning of the file or of a ref line and ends at the end of the
+/// file or just before a ref line, so peel lines stay attached to their ref.
+fn parse_packed_refs_region(
+    path: &Path,
+    region: &str,
+    prefix: Option<&str>,
+) -> Result<HashMap<String, ObjectId>> {
+    let ref_opts = RefNameOptions {
+        allow_onelevel: false,
+        refspec_pattern: false,
+        normalize: false,
+    };
+    let mut map = HashMap::new();
+    let mut expect_peel = false;
+    let mut lines = region.split('\n').peekable();
+    while let Some(line) = lines.next() {
+        if line.is_empty() {
+            if lines.peek().is_some() {
+                return Err(packed_refs_unexpected_line(path, line));
+            }
+            break;
+        }
+        if line.starts_with('#') {
+            expect_peel = false;
+            continue;
+        }
+        if line.starts_with('^') {
+            parse_packed_ref_peel_line(path, line, expect_peel)?;
+            expect_peel = false;
+            continue;
+        }
+        let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)?;
+        if prefix.is_none_or(|p| ref_name_matches_list_prefix(refname, p)) {
+            map.insert(refname.to_owned(), oid);
+        }
+        expect_peel = true;
+    }
+    Ok(map)
 }
 
 fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>> {
@@ -1004,28 +1056,12 @@ fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>
 
 fn packed_refs_data_line_starts(data: &[u8]) -> Vec<usize> {
     let mut out = Vec::new();
-    let mut i = 0usize;
-    while i < data.len() {
-        match data[i] {
-            b'#' | b'^' => {
-                while i < data.len() && data[i] != b'\n' {
-                    i += 1;
-                }
-                if i < data.len() {
-                    i += 1;
-                }
-            }
-            b'\n' => i += 1,
-            _ => {
-                out.push(i);
-                while i < data.len() && data[i] != b'\n' {
-                    i += 1;
-                }
-                if i < data.len() {
-                    i += 1;
-                }
-            }
+    let mut start = 0usize;
+    while start < data.len() {
+        if !matches!(data[start], b'#' | b'^' | b'\n') {
+            out.push(start);
         }
+        start = memchr::memchr(b'\n', &data[start..]).map_or(data.len(), |p| start + p + 1);
     }
     out
 }
@@ -1238,7 +1274,6 @@ pub(crate) fn read_packed_refs_map_for_prefix(
         return Ok(HashMap::new());
     };
     let packed_path = store::paths::packed_refs_path(store);
-    parse_packed_refs_to_map(&packed_path, view.data())?;
     let filter = if prefix.is_empty() {
         None
     } else {
@@ -4415,6 +4450,114 @@ mod packed_refs_parse_tests {
             view.map_for_prefix(&path, Some("refs")).unwrap(),
             parse_packed_refs_to_map_with_prefix(&path, &data, Some("refs")).unwrap()
         );
+    }
+
+    #[test]
+    fn sorted_prefix_scan_validates_only_its_range() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let view_of = |body: String| PackedRefsFileView::from_bytes(&path, body.into_bytes());
+
+        let bad_peel_on_branch = view_of(format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {oid} refs/heads/main\n\
+             ^not-hex\n\
+             {oid} refs/tags/v1\n"
+        ))
+        .unwrap();
+        assert!(matches!(
+            bad_peel_on_branch.map_for_prefix(&path, Some("refs/heads")),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+        let tags = bad_peel_on_branch
+            .map_for_prefix(&path, Some("refs/tags"))
+            .unwrap();
+        assert_eq!(tags.keys().collect::<Vec<_>>(), ["refs/tags/v1"]);
+        assert!(bad_peel_on_branch.map_for_prefix(&path, None).is_err());
+
+        let blank_among_tags = view_of(format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {oid} refs/heads/main\n\
+             {oid} refs/tags/v1\n\
+             \n\
+             {oid} refs/tags/v2\n"
+        ))
+        .unwrap();
+        assert_eq!(
+            blank_among_tags
+                .map_for_prefix(&path, Some("refs/heads"))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(blank_among_tags
+            .map_for_prefix(&path, Some("refs/tags"))
+            .is_err());
+
+        let no_match = blank_among_tags
+            .map_for_prefix(&path, Some("refs/notes"))
+            .unwrap();
+        assert!(no_match.is_empty());
+    }
+
+    #[test]
+    fn scan_of_file_without_ref_lines_still_validates_it() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let view = PackedRefsFileView::from_bytes(
+            &path,
+            b"# pack-refs with: peeled fully-peeled sorted\n\
+              ^1111111111111111111111111111111111111111\n"
+                .to_vec(),
+        )
+        .unwrap();
+        for prefix in [None, Some("refs/heads")] {
+            assert!(matches!(
+                view.map_for_prefix(&path, prefix),
+                Err(Error::PackedRefsUnexpectedLine { .. })
+            ));
+        }
+        let header_only = PackedRefsFileView::from_bytes(
+            &path,
+            b"# pack-refs with: peeled fully-peeled sorted\n".to_vec(),
+        )
+        .unwrap();
+        assert!(header_only.map_for_prefix(&path, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn view_rejects_short_last_record_but_not_a_short_comment() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        for body in [
+            format!("# pack-refs with: peeled sorted\n{oid} refs/heads/main\ngarbage\n"),
+            format!(
+                "# pack-refs with: peeled sorted\n{oid} refs/heads/main\n^{}\n",
+                &oid[1..]
+            ),
+        ] {
+            assert!(matches!(
+                PackedRefsFileView::from_bytes(&path, body.into_bytes()),
+                Err(Error::PackedRefsUnexpectedLine { .. })
+            ));
+        }
+        for body in [
+            "# pack-refs with: peeled\n".to_owned(),
+            format!("{oid} refs/heads/main\n#\n"),
+            format!("# pack-refs with: peeled sorted\n{oid} refs/heads/main\n^{oid}\n"),
+        ] {
+            assert!(PackedRefsFileView::from_bytes(&path, body.into_bytes()).is_ok());
+        }
+    }
+
+    #[test]
+    fn line_index_skips_comment_peel_and_blank_lines() {
+        let data = b"# header\nAAA\n^peel\n\nBBB\n#c\nCCC";
+        assert_eq!(packed_refs_data_line_starts(data), [9, 20, 27]);
+        assert!(packed_refs_data_line_starts(b"").is_empty());
+        assert_eq!(packed_refs_data_line_starts(b"\n\nX\n"), [2]);
     }
 
     #[test]

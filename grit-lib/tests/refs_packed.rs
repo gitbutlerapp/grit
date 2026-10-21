@@ -478,6 +478,73 @@ fn t1408_packed_refs_garbage_line_rejected_like_git() {
     assert_ref_listing_parity(wt, &git_dir, "refs/heads/");
 }
 
+/// Sorted `packed-refs` with two branches and two lightweight tags, written by `git pack-refs`.
+fn sorted_packed_refs_with_branches_and_tags(repo: &TestRepo) -> String {
+    let wt = wt_path(repo);
+    git_empty_commit_oid(wt);
+    git(wt, &["branch", "topic"]);
+    git(wt, &["tag", "t1"]);
+    git(wt, &["tag", "t2"]);
+    git(wt, &["pack-refs", "--all"]);
+    let content = fs::read_to_string(git_dir(repo).join("packed-refs")).unwrap();
+    assert!(content.lines().next().is_some_and(
+        |header| header.starts_with("# pack-refs with:") && header.contains(" sorted")
+    ));
+    content
+}
+
+/// Git binary-searches a sorted `packed-refs` and only parses the records a prefix scan visits,
+/// so a corrupt record among the tags breaks tag listing but not branch listing.
+#[test]
+fn sorted_packed_refs_corrupt_record_only_breaks_listings_that_cover_it() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    let content = sorted_packed_refs_with_branches_and_tags(&repo);
+    let corrupted = content.replacen(
+        "refs/tags/t1\n",
+        "refs/tags/t1\nthis is not a valid packed-refs line\n",
+        1,
+    );
+    assert_ne!(corrupted, content);
+    write_packed_refs(&git_dir, &corrupted);
+
+    let heads = list_refs(&git_dir, "refs/heads/").expect("branches stay listable");
+    assert_eq!(heads.len(), 2);
+    assert!(list_refs(&git_dir, "refs/tags/").is_err());
+    assert!(list_refs(&git_dir, "refs/").is_err());
+    assert!(matches!(
+        PackedRefs::load(&git_dir),
+        Err(Error::PackedRefsUnexpectedLine { .. })
+    ));
+    for prefix in ["refs/heads/", "refs/tags/", "refs/"] {
+        assert_ref_listing_parity(wt, &git_dir, prefix);
+    }
+}
+
+/// Git rejects the whole file when its last record is too short to hold an object id, even
+/// for prefix scans that never reach it.
+#[test]
+fn sorted_packed_refs_short_last_record_breaks_every_listing() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    let mut content = sorted_packed_refs_with_branches_and_tags(&repo);
+    content.push_str("this is not a valid packed-refs line\n");
+    write_packed_refs(&git_dir, &content);
+
+    for prefix in ["refs/heads/", "refs/tags/", "refs/"] {
+        assert!(
+            matches!(
+                list_refs(&git_dir, prefix),
+                Err(Error::PackedRefsUnexpectedLine { .. })
+            ),
+            "{prefix}"
+        );
+        assert_ref_listing_parity(wt, &git_dir, prefix);
+    }
+}
+
 #[test]
 fn t1408_packed_refs_crlf_rejected_like_git() {
     let repo = files_repo();

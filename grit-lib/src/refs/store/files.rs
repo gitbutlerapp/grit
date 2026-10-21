@@ -159,7 +159,6 @@ impl FilesRefStore {
         }
         let map = if let Some(ref file) = guard.file {
             let path = super::paths::packed_refs_path(&self.common_dir);
-            crate::refs::parse_packed_refs_to_map(&path, file.data())?;
             file.map_for_prefix(&path, None)?
                 .into_iter()
                 .collect::<BTreeMap<_, _>>()

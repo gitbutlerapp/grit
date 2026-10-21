@@ -67,6 +67,7 @@ crc32fast.workspace = true
 getrandom = "0.2"
 hashbrown.workspace = true
 memmap2.workspace = true
+memchr.workspace = true
 tzdb = "0.7.3"
 tz = { package = "tz-rs", version = "0.7.3" }
 

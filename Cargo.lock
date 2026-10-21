@@ -901,6 +901,7 @@ dependencies = [
  "icu_normalizer",
  "imara-diff",
  "libc",
+ "memchr",
  "memmap2",
  "merge3",
  "nix",
