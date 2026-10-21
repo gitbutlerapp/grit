@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Staged 1 change.\n",
+    "stdout": "Staged tracked.txt\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"staged\":1}\n",
+    "stdout": "{\"added\":[],\"modified\":[\"tracked.txt\"],\"removed\":[],\"dry_run\":false,\"count\":1,\"staged\":1}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Add\n\n- Staged **1** change\n",
+    "stdout": "## Add\n\n- Staged **1** change(s)\n  - `tracked.txt`\n",
     "stderr": ""
   }
 }

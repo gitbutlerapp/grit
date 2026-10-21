@@ -311,7 +311,7 @@ fn area_filter_selects_area() {
 }
 
 /// Matrix ids for step 7 (worktree + history areas in smoke).
-const MATRIX_SMOKE_IDS: [&str; 35] = [
+const MATRIX_SMOKE_IDS: [&str; 37] = [
     "status/clean@synth-100k",
     "status/clean@deep-tree",
     "status/clean@small",
