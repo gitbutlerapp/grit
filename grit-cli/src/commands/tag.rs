@@ -6,8 +6,7 @@ use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ref_name_messages::tag_short_name_error_message;
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
-use grit_lib::porcelain::tag::{create_tag, tag_ref_metadata, CreateTagRequest, TagKind};
-use grit_lib::refs;
+use grit_lib::porcelain::tag::{create_tag, delete_tag, list_tags, CreateTagRequest, TagKind};
 use grit_lib::refs::check_ref_format::validate_tag_short_name;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
@@ -139,32 +138,22 @@ pub fn run(
     let repo = context::discover()?;
     match name {
         None => list(&repo),
-        Some(name) if delete => delete_tag(&repo, &name),
+        Some(name) if delete => remove(&repo, &name),
         Some(name) => create(&repo, &name, message, object, now),
     }
 }
 
 fn list(repo: &Repository) -> Result<TagOutcome> {
-    let mut entries =
-        refs::list_refs(repo.git_dir(), "refs/tags/").context("could not list tags")?;
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let tags = entries
+    let tags = list_tags(repo)
+        .context("could not list tags")?
         .into_iter()
-        .map(|(refname, oid)| {
-            let (kind, peeled) = tag_ref_metadata(repo, &oid);
-            TagEntry {
-                name: refname
-                    .strip_prefix("refs/tags/")
-                    .unwrap_or(&refname)
-                    .to_owned(),
-                oid: oid.to_hex(),
-                kind: kind.into(),
-                peeled: peeled.map(|p| p.to_hex()),
-            }
+        .map(|tag| TagEntry {
+            name: tag.name,
+            oid: tag.oid.to_hex(),
+            kind: tag.kind.into(),
+            peeled: tag.peeled.map(|p| p.to_hex()),
         })
         .collect();
-
     Ok(TagOutcome::List { tags })
 }
 
@@ -225,13 +214,8 @@ fn create(
     })
 }
 
-fn delete_tag(repo: &Repository, name: &str) -> Result<TagOutcome> {
-    let tag_ref = format!("refs/tags/{name}");
-    if refs::resolve_ref(repo.git_dir(), &tag_ref).is_err() {
-        bail!("no tag named '{name}'");
-    }
-
-    refs::delete_ref(repo.git_dir(), &tag_ref).context("could not delete tag")?;
+fn remove(repo: &Repository, name: &str) -> Result<TagOutcome> {
+    delete_tag(repo, name)?;
     Ok(TagOutcome::Delete {
         name: name.to_owned(),
     })
