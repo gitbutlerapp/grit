@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use time::{OffsetDateTime, UtcOffset};
 
+use crate::change_id::{ChangeIdGenerator, OsChangeIdGenerator};
 use crate::command_runner::{system_command_runner, CommandRunner};
 use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics};
 use crate::git_date::tm::{local_tzoffset_with_tz, TzHhmm};
@@ -705,6 +706,8 @@ pub struct RepositoryOptions {
     pub environment: Environment,
     /// Subprocess runner for hooks, filters, and helpers.
     pub command_runner: Arc<dyn CommandRunner>,
+    /// Random bytes for new change ids (`grit.changeIds`).
+    pub change_id_generator: Arc<dyn ChangeIdGenerator>,
     /// Where non-fatal warnings and trace events are delivered.
     pub diagnostics: DiagnosticsHandle,
     /// When true, network operations may emit [`crate::diagnostics::Trace::Network`] events.
@@ -740,6 +743,7 @@ impl Default for RepositoryOptions {
         Self {
             environment: Environment::empty(),
             command_runner: system_command_runner(),
+            change_id_generator: Arc::new(OsChangeIdGenerator),
             diagnostics: Arc::new(NullDiagnostics),
             network_trace: false,
             test_assume_different_owner: false,
@@ -773,6 +777,13 @@ impl RepositoryOptions {
     #[must_use]
     pub fn with_command_runner(mut self, runner: Arc<dyn CommandRunner>) -> Self {
         self.command_runner = runner;
+        self
+    }
+
+    /// Override the generator used for random change ids on new commits.
+    #[must_use]
+    pub fn with_change_id_generator(mut self, generator: Arc<dyn ChangeIdGenerator>) -> Self {
+        self.change_id_generator = generator;
         self
     }
 

@@ -159,6 +159,7 @@ pub(crate) mod bloom;
 pub(crate) mod branch_tracking;
 pub mod bundle;
 pub(crate) mod bundle_remote;
+pub mod change_id;
 pub(crate) mod check_ref_format;
 pub(crate) mod clone;
 pub(crate) mod combined_diff_patch;
