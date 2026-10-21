@@ -495,8 +495,10 @@ impl FilesRefStore {
         }
         remove_empty_ref_directory(&path);
         let _ = fs::remove_file(&path);
-        prune_empty_loose_ref_parents(&route.storage_dir, &path);
+        // Drop the lock before pruning parents: a leftover lock in the ref directory
+        // would make `dir_tree_has_files` treat the parent as non-empty (issue #1317).
         let _ = fs::remove_file(lock);
+        prune_empty_loose_ref_parents(&route.storage_dir, &path);
         Ok(())
     }
 
