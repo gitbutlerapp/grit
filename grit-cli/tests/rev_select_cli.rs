@@ -299,6 +299,95 @@ fn limit_hidden_alias_still_works() -> TestResult {
 }
 
 #[test]
+fn revs_disconnected_left_right_count_json() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-revs-disc-lr-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("mkdir");
+    assert!(grit_run(&dir, &["init", "."]).status.success());
+    fs::write(dir.join("left.txt"), "left\n").expect("write");
+    assert!(grit_run(&dir, &["add", "left.txt"]).status.success());
+    assert!(grit_run(&dir, &["commit", "left-root"]).status.success());
+    let rename = Command::new("git")
+        .args(["-C", dir.to_str().expect("utf8"), "branch", "-M", "main"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .status()
+        .expect("git branch -M");
+    assert!(rename.success());
+    assert!(Command::new("git")
+        .args([
+            "-C",
+            dir.to_str().expect("utf8"),
+            "checkout",
+            "--orphan",
+            "side"
+        ])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .status()
+        .expect("orphan")
+        .success());
+    fs::write(dir.join("right.txt"), "right\n").expect("write");
+    assert!(grit_run(&dir, &["add", "right.txt"]).status.success());
+    assert!(grit_run(&dir, &["commit", "right-root"]).status.success());
+    assert!(grit_run(&dir, &["switch", "main"]).status.success());
+    for cherry in [false, true] {
+        let git_out = if cherry {
+            Command::new("git")
+                .args([
+                    "-C",
+                    dir.to_str().expect("utf8"),
+                    "rev-list",
+                    "--left-right",
+                    "--cherry-pick",
+                    "--count",
+                    "main...side",
+                ])
+                .env("GIT_CONFIG_GLOBAL", null_device())
+                .env("GIT_CONFIG_SYSTEM", null_device())
+                .output()
+                .expect("git count")
+        } else {
+            Command::new("git")
+                .args([
+                    "-C",
+                    dir.to_str().expect("utf8"),
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    "main...side",
+                ])
+                .env("GIT_CONFIG_GLOBAL", null_device())
+                .env("GIT_CONFIG_SYSTEM", null_device())
+                .output()
+                .expect("git count")
+        };
+        assert!(git_out.status.success());
+        let git_stdout = String::from_utf8_lossy(&git_out.stdout);
+        let parts: Vec<&str> = git_stdout.split_whitespace().collect();
+        let git_left: u64 = parts[0].parse().unwrap();
+        let git_right: u64 = parts[1].parse().unwrap();
+        let v = if cherry {
+            grit_json(
+                &dir,
+                &[
+                    "revs",
+                    "--count",
+                    "--left-right",
+                    "--cherry-pick",
+                    "main...side",
+                ],
+            )
+        } else {
+            grit_json(&dir, &["revs", "--count", "--left-right", "main...side"])
+        };
+        assert_eq!(v["left_right"]["left"], git_left);
+        assert_eq!(v["left_right"]["right"], git_right);
+    }
+    Ok(())
+}
+
+#[test]
 fn revs_json_omits_parents_without_flag() -> TestResult {
     let dir = std::env::temp_dir().join(format!("grit-revs-json-parents-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

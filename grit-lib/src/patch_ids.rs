@@ -18,14 +18,15 @@
 use similar::{ChangeTag, TextDiff};
 
 use crate::diff::{
-    diff_trees_with_renames, unified_diff_histogram_with_prefix_and_funcname, zero_oid, DiffEntry,
-    DiffStatus,
+    diff_trees, diff_trees_with_renames, unified_diff_histogram_with_prefix_and_funcname, zero_oid,
+    DiffEntry, DiffStatus,
 };
 use crate::error::Result;
 use crate::hash::ObjectHasher;
 use crate::merge_file;
 use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use std::collections::hash_map::Entry;
 
 const PATCH_ID_DIGEST_MAX: usize = 32;
 
@@ -452,7 +453,8 @@ pub fn compute_patch_id_for_paths(
 /// Reuses tree-to-tree diff results across cherry patch-id batches.
 #[derive(Default)]
 pub(crate) struct PatchIdTreeDiffCache {
-    diffs: std::collections::HashMap<(Option<ObjectId>, ObjectId), Vec<crate::diff::DiffEntry>>,
+    cherry_diffs: std::collections::HashMap<(Option<ObjectId>, ObjectId), Vec<DiffEntry>>,
+    full_diffs: std::collections::HashMap<(Option<ObjectId>, ObjectId), Vec<DiffEntry>>,
 }
 
 impl PatchIdTreeDiffCache {
@@ -461,19 +463,82 @@ impl PatchIdTreeDiffCache {
         odb: &Odb,
         parent_tree_oid: Option<ObjectId>,
         commit_tree: ObjectId,
-    ) -> Result<&[crate::diff::DiffEntry]> {
-        use std::collections::hash_map::Entry;
+        cherry: bool,
+    ) -> Result<&[DiffEntry]> {
+        let store = if cherry {
+            &mut self.cherry_diffs
+        } else {
+            &mut self.full_diffs
+        };
         let key = (parent_tree_oid, commit_tree);
-        if let Entry::Vacant(slot) = self.diffs.entry(key) {
-            let diffs =
-                diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit_tree), "", 50)?;
+        if let Entry::Vacant(slot) = store.entry(key) {
+            let diffs = if cherry {
+                diff_trees(odb, parent_tree_oid.as_ref(), Some(&commit_tree), "")?
+            } else {
+                diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit_tree), "", 50)?
+            };
             slot.insert(diffs);
         }
-        Ok(self
-            .diffs
+        Ok(store
             .get(&(parent_tree_oid, commit_tree))
             .map_or(&[][..], |v| v.as_slice()))
     }
+}
+
+/// Cheap fingerprint of a commit's tree diff for cherry pre-matching (index OIDs only).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct CherryDiffFingerprint(ObjectId);
+
+pub(crate) fn cherry_diff_fingerprint_from_entries(
+    algo: HashAlgo,
+    diffs: &[DiffEntry],
+) -> Option<CherryDiffFingerprint> {
+    if diffs.is_empty() {
+        return None;
+    }
+    let mut sorted: Vec<_> = diffs.iter().collect();
+    sorted.sort_by(|a, b| a.path().cmp(b.path()));
+    let mut hasher = ObjectHasher::new(algo);
+    for entry in sorted {
+        hasher.update(entry.path().as_bytes());
+        hasher.update(entry.old_oid.as_bytes());
+        hasher.update(entry.new_oid.as_bytes());
+    }
+    Some(CherryDiffFingerprint(hasher.finalize()))
+}
+
+pub(crate) fn cherry_diff_fingerprint_for_commit(
+    algo: HashAlgo,
+    odb: &Odb,
+    commit_oid: &ObjectId,
+    paths: &[String],
+    cache: &mut PatchIdTreeDiffCache,
+) -> Result<Option<CherryDiffFingerprint>> {
+    let obj = odb.read(commit_oid)?;
+    if obj.kind != ObjectKind::Commit {
+        return Ok(None);
+    }
+    let commit = parse_commit(&obj.data)?;
+    if commit.parents.len() > 1 {
+        return Ok(None);
+    }
+    let parent_tree_oid = if commit.parents.is_empty() {
+        None
+    } else {
+        let parent_obj = odb.read(&commit.parents[0])?;
+        let parent_commit = parse_commit(&parent_obj.data)?;
+        Some(parent_commit.tree)
+    };
+    if parent_tree_oid.as_ref() == Some(&commit.tree) {
+        return Ok(None);
+    }
+    let mut diffs = cache
+        .diffs_for_commit_trees(odb, parent_tree_oid, commit.tree, true)?
+        .to_vec();
+    if !paths.is_empty() {
+        diffs.retain(|entry| diff_entry_matches_paths(entry, paths));
+    }
+    Ok(cherry_diff_fingerprint_from_entries(algo, &diffs))
 }
 
 /// Stable patch-id for cherry matching, reusing tree diffs in `cache` when provided.
@@ -522,9 +587,10 @@ fn compute_patch_id_filtered(
     }
 
     // Match `git show` / `git diff-tree -M`: pair renames before hashing.
+    let cherry = tree_diff_cache.is_some();
     let mut diffs = if let Some(cache) = tree_diff_cache {
         cache
-            .diffs_for_commit_trees(odb, parent_tree_oid, commit.tree)?
+            .diffs_for_commit_trees(odb, parent_tree_oid, commit.tree, cherry)?
             .to_vec()
     } else {
         diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit.tree), "", 50)?

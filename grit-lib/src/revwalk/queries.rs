@@ -2,9 +2,9 @@
 use crate::error::{Error, Result};
 use crate::git_date::parse::{parse_date_basic_at, DateParseError};
 use crate::merge_base::{
-    commits_reachable_excluding_ancestors_of_cutoffs,
-    count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
-    merge_bases_first_vs_rest, ReachableCountFilter, ReachableWalkCommitterCutoffs,
+    commits_reachable_excluding_ancestors_of_cutoffs, count_symmetric_left_right_excluding,
+    is_ancestor as merge_base_is_ancestor, merge_bases_first_vs_rest, ReachableCountFilter,
+    ReachableWalkCommitterCutoffs,
 };
 use crate::objects::parse_commit;
 use crate::objects::ObjectId;
@@ -410,9 +410,30 @@ fn commit_count_from_result(result: RevListResult) -> Result<usize> {
 ///
 /// Applies [`RevWalkListOptions::limit`] once to the combined traversal, matching
 /// `git rev-list --left-right --count -n`.
-fn cherry_pick_left_right_counts_compatible(options: &RevWalkListOptions) -> bool {
-    options.cherry == CherryMode::Pick
-        && options.limit.is_none()
+fn reachable_count_filter_from_walk(options: &RevWalkListOptions) -> ReachableCountFilter {
+    let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
+    ReachableCountFilter {
+        min_parents,
+        max_parents,
+        first_parent_only: options.first_parent,
+        since: options.since,
+        until: options.until,
+    }
+}
+
+fn symmetric_left_right_exclusion_counts(
+    repo: &Repository,
+    left: ObjectId,
+    right: ObjectId,
+    filter: ReachableCountFilter,
+) -> Result<LeftRightCounts> {
+    let (left_count, right_count) =
+        count_symmetric_left_right_excluding(repo, left, right, filter)?;
+    Ok(LeftRightCounts::new(left_count, right_count))
+}
+
+fn left_right_count_fast_path_compatible(options: &RevWalkListOptions) -> bool {
+    options.limit.is_none()
         && options.paths.is_empty()
         && options.refs.is_empty()
         && options.skip == 0
@@ -422,6 +443,10 @@ fn cherry_pick_left_right_counts_compatible(options: &RevWalkListOptions) -> boo
         && options.merges == MergeFilter::Any
         && options.since.is_none()
         && options.until.is_none()
+}
+
+fn cherry_pick_left_right_counts_compatible(options: &RevWalkListOptions) -> bool {
+    options.cherry == CherryMode::Pick && left_right_count_fast_path_compatible(options)
 }
 
 fn filter_side_commits_by_parent_count(
@@ -667,36 +692,17 @@ impl<'repo> RevWalk<'repo> {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         };
 
+        let filter = reachable_count_filter_from_walk(options);
+
         if cherry_pick_left_right_counts_compatible(options) {
-            let merge_bases = merge_bases_first_vs_rest(repo, left, &[right])?;
-            if merge_bases.is_empty() {
-                return left_right_counts_from_combined_walk(
-                    repo, options, &parsed, &positive, all_refs,
-                );
+            if merge_bases_first_vs_rest(repo, left, &[right])?.is_empty() {
+                return symmetric_left_right_exclusion_counts(repo, left, right, filter);
             }
             return left_right_cherry_pick_counts(repo, left, right, options);
         }
 
-        if options.cherry == CherryMode::Off
-            && options.limit.is_none()
-            && options.paths.is_empty()
-            && options.refs.is_empty()
-            && options.skip == 0
-            && !options.reverse
-        {
-            let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
-            let filter = ReachableCountFilter {
-                min_parents,
-                max_parents,
-                first_parent_only: options.first_parent,
-                since: options.since,
-                until: options.until,
-            };
-            let left_count =
-                count_commits_reachable_excluding_ancestors_of(repo, &[left], &[right], filter)?;
-            let right_count =
-                count_commits_reachable_excluding_ancestors_of(repo, &[right], &[left], filter)?;
-            return Ok(LeftRightCounts::new(left_count, right_count));
+        if options.cherry == CherryMode::Off && left_right_count_fast_path_compatible(options) {
+            return symmetric_left_right_exclusion_counts(repo, left, right, filter);
         }
 
         left_right_counts_from_combined_walk(repo, options, &parsed, &positive, all_refs)

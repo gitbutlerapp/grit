@@ -5254,59 +5254,61 @@ pub fn cherry_equivalent_commits(
         return Ok(cherry_equivalent);
     }
     let left_first = left_commits.len() < right_commits.len();
+    let (small, large) = if left_first {
+        (left_commits, right_commits)
+    } else {
+        (right_commits, left_commits)
+    };
+    let algo = repo.odb().hash_algo();
     let mut patch_cache: HashMap<ObjectId, Option<ObjectId>> = HashMap::new();
     let mut tree_diff_cache = crate::patch_ids::PatchIdTreeDiffCache::default();
     let mut by_patch: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-    if left_first {
-        for oid in left_commits {
-            if let Some(pid) = compute_cherry_patch_id_cached(
-                repo,
-                oid,
-                paths,
-                &mut patch_cache,
-                &mut tree_diff_cache,
-            )? {
-                by_patch.entry(pid).or_default().push(*oid);
-            }
+    let mut small_fingerprints = std::collections::HashSet::new();
+    for oid in small {
+        if let Some(fp) = crate::patch_ids::cherry_diff_fingerprint_for_commit(
+            algo,
+            repo.odb(),
+            oid,
+            paths,
+            &mut tree_diff_cache,
+        )? {
+            small_fingerprints.insert(fp);
         }
-        for oid in right_commits {
-            if let Some(pid) = compute_cherry_patch_id_cached(
-                repo,
-                oid,
-                paths,
-                &mut patch_cache,
-                &mut tree_diff_cache,
-            )? {
-                if let Some(others) = by_patch.get(&pid) {
-                    cherry_equivalent.insert(*oid);
-                    cherry_equivalent.extend(others.iter().copied());
-                }
-            }
+        if let Some(pid) = compute_cherry_patch_id_cached(
+            repo,
+            oid,
+            paths,
+            &mut patch_cache,
+            &mut tree_diff_cache,
+        )? {
+            by_patch.entry(pid).or_default().push(*oid);
         }
-    } else {
-        for oid in right_commits {
-            if let Some(pid) = compute_cherry_patch_id_cached(
-                repo,
-                oid,
-                paths,
-                &mut patch_cache,
-                &mut tree_diff_cache,
-            )? {
-                by_patch.entry(pid).or_default().push(*oid);
+    }
+    for oid in large {
+        let probe = crate::patch_ids::cherry_diff_fingerprint_for_commit(
+            algo,
+            repo.odb(),
+            oid,
+            paths,
+            &mut tree_diff_cache,
+        )?;
+        if let Some(fp) = probe {
+            if !small_fingerprints.contains(&fp) {
+                continue;
             }
+        } else if !small_fingerprints.is_empty() {
+            continue;
         }
-        for oid in left_commits {
-            if let Some(pid) = compute_cherry_patch_id_cached(
-                repo,
-                oid,
-                paths,
-                &mut patch_cache,
-                &mut tree_diff_cache,
-            )? {
-                if let Some(others) = by_patch.get(&pid) {
-                    cherry_equivalent.insert(*oid);
-                    cherry_equivalent.extend(others.iter().copied());
-                }
+        if let Some(pid) = compute_cherry_patch_id_cached(
+            repo,
+            oid,
+            paths,
+            &mut patch_cache,
+            &mut tree_diff_cache,
+        )? {
+            if let Some(others) = by_patch.get(&pid) {
+                cherry_equivalent.insert(*oid);
+                cherry_equivalent.extend(others.iter().copied());
             }
         }
     }

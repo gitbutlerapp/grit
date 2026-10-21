@@ -889,12 +889,57 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         return Ok(0);
     }
     let mut cache = CommitGraphCache::new(repo);
+    count_commits_reachable_excluding_ancestors_of_with_cache(repo, tips, hide, filter, &mut cache)
+}
+
+/// Like [`count_commits_reachable_excluding_ancestors_of`], reusing an existing graph cache.
+/// Left/right symmetric reachability counts (`A...B`) using one commit-graph cache.
+pub fn count_symmetric_left_right_excluding(
+    repo: &Repository,
+    left: ObjectId,
+    right: ObjectId,
+    filter: ReachableCountFilter,
+) -> Result<(usize, usize)> {
+    let mut cache = CommitGraphCache::new(repo);
+    let left_count = count_commits_reachable_excluding_ancestors_of_with_cache(
+        repo,
+        &[left],
+        &[right],
+        filter,
+        &mut cache,
+    )?;
+    let right_count = count_commits_reachable_excluding_ancestors_of_with_cache(
+        repo,
+        &[right],
+        &[left],
+        filter,
+        &mut cache,
+    )?;
+    Ok((left_count, right_count))
+}
+
+fn count_commits_reachable_excluding_ancestors_of_with_cache(
+    repo: &Repository,
+    tips: &[ObjectId],
+    hide: &[ObjectId],
+    filter: ReachableCountFilter,
+    cache: &mut CommitGraphCache<'_>,
+) -> Result<usize> {
+    if tips.is_empty() {
+        return Ok(0);
+    }
 
     if tips.len() == 1 && hide.len() == 1 {
         let tip = tips[0];
         let hide_tip = hide[0];
-        if tip != hide_tip
-            && try_direct_first_parent_chain_merge_base(&mut cache, tip, hide_tip)?.is_some()
+        let histories_overlap = {
+            let tip_anc = cache.ancestor_closure(tip)?;
+            let hide_anc = cache.ancestor_closure(hide_tip)?;
+            tip_anc.intersection(&hide_anc).next().is_some()
+        };
+        if histories_overlap
+            && tip != hide_tip
+            && try_direct_first_parent_chain_merge_base(cache, tip, hide_tip)?.is_some()
         {
             return Ok(0);
         }
@@ -932,7 +977,7 @@ pub fn count_commits_reachable_excluding_ancestors_of(
 
     if tips.len() == 1 && hide.len() == 1 {
         if let Some(n) =
-            try_count_on_first_parent_chain_excluding_hide(&mut cache, tips[0], hide[0], filter)?
+            try_count_on_first_parent_chain_excluding_hide(cache, tips[0], hide[0], filter)?
         {
             return Ok(n);
         }
@@ -945,7 +990,7 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         if !walked.insert(oid) {
             continue;
         }
-        if commit_is_excluded_from_count(&mut cache, hide, oid)? {
+        if commit_is_excluded_from_count(cache, hide, oid)? {
             // Ancestors of `hide` cannot reach counted commits; do not walk past them.
             continue;
         }

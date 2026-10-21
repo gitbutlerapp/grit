@@ -736,8 +736,19 @@ fn disconnected_symmetric_left_right_count_matches_git() {
     let wt = hist.worktree();
     commit_file(wt, "left.txt", "left\n", "left-root");
     git(wt, &["branch", "-M", "main"]);
+    for i in 0..5 {
+        commit_file(wt, "left.txt", &format!("left-{i}\n"), &format!("main-{i}"));
+    }
     git(wt, &["checkout", "--orphan", "side"]);
     commit_file(wt, "right.txt", "right\n", "right-root");
+    for i in 0..3 {
+        commit_file(
+            wt,
+            "right.txt",
+            &format!("right-{i}\n"),
+            &format!("side-{i}"),
+        );
+    }
     git(wt, &["checkout", "main"]);
     let token = "main...side";
     let repo = open_grit(wt);
