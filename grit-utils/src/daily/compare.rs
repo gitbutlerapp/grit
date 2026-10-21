@@ -106,14 +106,9 @@ pub fn compare_daily_reports(
             outcome.skipped_pending += 1;
             continue;
         }
-        let git_delta = relative_ratio_drift(
-            git_median_ms(scenario),
-            git_median_ms(scenario_b),
-        );
-        let grit_delta = relative_ratio_drift(
-            scenario.grit.median_wall_ms,
-            scenario_b.grit.median_wall_ms,
-        );
+        let git_delta = relative_ratio_drift(git_median_ms(scenario), git_median_ms(scenario_b));
+        let grit_delta =
+            relative_ratio_drift(scenario.grit.median_wall_ms, scenario_b.grit.median_wall_ms);
         if git_delta > tolerance {
             outcome.skipped_git_median_drift += 1;
             continue;
@@ -235,7 +230,13 @@ mod tests {
         }
     }
 
-    fn sample_row(id: &str, git_ms: f64, grit_ms: f64, git_rss: u64, grit_rss: u64) -> DailyScenarioResult {
+    fn sample_row(
+        id: &str,
+        git_ms: f64,
+        grit_ms: f64,
+        git_rss: u64,
+        grit_rss: u64,
+    ) -> DailyScenarioResult {
         DailyScenarioResult {
             id: id.into(),
             area: Area::Worktree,
@@ -279,13 +280,7 @@ mod tests {
 
     #[test]
     fn flags_ratio_drift_over_tolerance() {
-        let mut row_b = sample_row(
-            "status/clean@synth-10k",
-            100.0,
-            108.0,
-            1_000_000,
-            900_000,
-        );
+        let mut row_b = sample_row("status/clean@synth-10k", 100.0, 108.0, 1_000_000, 900_000);
         row_b.ratio = 1.25;
         let a = sample_report(vec![sample_row(
             "status/clean@synth-10k",
@@ -305,13 +300,7 @@ mod tests {
 
     #[test]
     fn ignores_sub_20ms_time_drift() {
-        let mut row_b = sample_row(
-            "status/clean@small",
-            10.0,
-            10.0,
-            500_000,
-            500_000,
-        );
+        let mut row_b = sample_row("status/clean@small", 10.0, 10.0, 500_000, 500_000);
         row_b.ratio = 2.0;
         let a = sample_report(vec![sample_row(
             "status/clean@small",

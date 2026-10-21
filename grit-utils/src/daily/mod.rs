@@ -18,6 +18,10 @@ pub mod validate;
 
 pub use run::{run_daily, DailyRunOptions};
 
+pub use compare::{
+    compare_daily_files, compare_daily_reports, render_daily_compare_markdown, DailyCompareMetric,
+    DailyCompareMismatch, DailyCompareOutcome, TIME_RATIO_MIN_GIT_MS,
+};
 pub use coverage::all_registry_scenarios;
 pub use matrix_registry::MATRIX_SCENARIOS;
 pub use registry::{
@@ -26,9 +30,5 @@ pub use registry::{
 pub use revision_selection_matrix_registry::REVISION_SELECTION_MATRIX_SCENARIOS;
 pub use schema::{
     DailyBenchReport, DailyScenarioResult, DailyToolRun, DailyToolVersions, ScenarioId, SCHEMA_TAG,
-};
-pub use compare::{
-    compare_daily_files, compare_daily_reports, render_daily_compare_markdown, DailyCompareMetric,
-    DailyCompareMismatch, DailyCompareOutcome, TIME_RATIO_MIN_GIT_MS,
 };
 pub use validate::validate_daily_report;

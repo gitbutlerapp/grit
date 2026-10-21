@@ -21,16 +21,27 @@ fi
 
 mkdir -p "${BASELINE_DIR}"
 
+wall_run() {
+  local label=$1
+  shift
+  local start end
+  start=$(date +%s)
+  echo "${label} started $(date -Is)"
+  "$@"
+  end=$(date +%s)
+  echo "${label} wall_seconds=$((end - start))"
+}
+
 attempt=1
 while true; do
   echo "=== daily capture attempt ${attempt}/${MAX_COMPARE_ATTEMPTS} $(date -Is) ==="
   echo "Run 1 → ${RUN1}"
-  /usr/bin/time -f 'wall_seconds=%e' "$BENCH" daily --offline \
+  wall_run "daily run 1" "$BENCH" daily --offline \
     --baseline-grit "${BASELINE_GRIT}" \
     --output "${RUN1}" 2>&1 | tee "${BASELINE_DIR}/first-run.log"
 
   echo "Run 2 → ${RUN2}"
-  /usr/bin/time -f 'wall_seconds=%e' "$BENCH" daily --offline \
+  wall_run "daily run 2" "$BENCH" daily --offline \
     --baseline-grit "${BASELINE_GRIT}" \
     --output "${RUN2}" 2>&1 | tee "${BASELINE_DIR}/second-run.log"
 
@@ -40,6 +51,7 @@ while true; do
     2>&1 | tee "${BASELINE_DIR}/consecutive-compare.txt"
   compare_ec=${PIPESTATUS[0]}
   set -e
+  echo "compare_exit=${compare_ec}" >> "${BASELINE_DIR}/consecutive-compare.txt"
   if [[ "$compare_ec" -eq 0 ]]; then
     break
   fi

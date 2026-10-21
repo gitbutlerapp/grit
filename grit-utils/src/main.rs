@@ -1303,10 +1303,7 @@ fn main() -> Result<()> {
                     println!(
                         "{}",
                         grit_utils::daily::render_daily_compare_markdown(
-                            baseline,
-                            candidate,
-                            *tolerance,
-                            &outcome
+                            baseline, candidate, *tolerance, &outcome
                         )
                     );
                 }

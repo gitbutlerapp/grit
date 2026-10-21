@@ -15,7 +15,13 @@ fn tool_run(median_ms: f64, peak_rss: u64) -> DailyToolRun {
     }
 }
 
-fn sample_row(id: &str, git_ms: f64, grit_ms: f64, git_rss: u64, grit_rss: u64) -> DailyScenarioResult {
+fn sample_row(
+    id: &str,
+    git_ms: f64,
+    grit_ms: f64,
+    git_rss: u64,
+    grit_rss: u64,
+) -> DailyScenarioResult {
     DailyScenarioResult {
         id: id.into(),
         area: Area::Worktree,
@@ -59,13 +65,7 @@ fn sample_report(rows: Vec<DailyScenarioResult>) -> DailyBenchReport {
 
 #[test]
 fn flags_ratio_drift_over_tolerance() {
-    let mut row_b = sample_row(
-        "status/clean@synth-10k",
-        100.0,
-        108.0,
-        1_000_000,
-        900_000,
-    );
+    let mut row_b = sample_row("status/clean@synth-10k", 100.0, 108.0, 1_000_000, 900_000);
     row_b.ratio = 1.25;
     let a = sample_report(vec![sample_row(
         "status/clean@synth-10k",
@@ -85,13 +85,7 @@ fn flags_ratio_drift_over_tolerance() {
 
 #[test]
 fn ignores_sub_20ms_time_drift() {
-    let mut row_b = sample_row(
-        "status/clean@small",
-        10.0,
-        10.0,
-        500_000,
-        500_000,
-    );
+    let mut row_b = sample_row("status/clean@small", 10.0, 10.0, 500_000, 500_000);
     row_b.ratio = 2.0;
     let a = sample_report(vec![sample_row(
         "status/clean@small",
