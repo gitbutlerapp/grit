@@ -90,6 +90,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `log/all@git-git` | Full reachable history: grit log (paged) vs git log --oneline |
 | `log/author@git-git` | GAP: grit log has no --author; git log --author=<name> (pending until roadmap filter lands) |
 | `log/oneline-100@git-git` | Last 100 commits one line each vs git log --oneline |
+| `log/json-100@git-git` | Last 100 commits as JSON vs git log -100 with verbose `--format` |
 | `log/oneline-100@synth-100k` | Last 100 commits: grit log --limit 100 vs git log --oneline -100 |
 | `log/path@git-git` | History for one path: grit log -- <path> vs git log --oneline -- <path> |
 | `merge-base/branches@git-git` | Merge base of two branches: grit merge-base <a> <b> vs git merge-base <a> <b> |

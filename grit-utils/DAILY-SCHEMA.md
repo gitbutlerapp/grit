@@ -97,6 +97,7 @@ export type RepoShapeId =
 | `commit/small@synth-10k` | commit |
 | `diff/worktree@synth-10k` | diff |
 | `log/oneline-100@git-git` | log |
+| `log/json-100@git-git` | log |
 | `show/head@git-git` | show |
 | `blame/file@git-git` | blame |
 | `switch/branch@synth-10k` | switch |

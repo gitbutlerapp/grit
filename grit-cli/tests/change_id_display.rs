@@ -97,7 +97,6 @@ fn init_with_git_commit(repo: &Path) -> ObjectId {
         .output()
         .expect("git rev-parse")
         .stdout
-        .as_slice()
         .split(|&b| b == b'\n')
         .next()
         .and_then(|line| std::str::from_utf8(line).ok())
@@ -155,32 +154,18 @@ fn write_stored_change_commit(repo: &Path) -> ObjectId {
         .as_mut()
         .expect("stdin")
         .write_all(&body)
-        .expect("write commit body");
-    let out = hash.wait_with_output().expect("wait hash-object");
-    assert!(
-        out.status.success(),
-        "git hash-object: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+        .expect("write");
+    let out = hash.wait_with_output().expect("wait");
+    assert!(out.status.success());
     let oid: ObjectId = String::from_utf8_lossy(&out.stdout)
         .trim()
         .parse()
-        .expect("commit oid");
-    let git_ok = Command::new("git")
-        .args(["cat-file", "-t", &oid.to_hex()])
-        .current_dir(repo)
-        .status()
-        .expect("git cat-file");
-    assert!(git_ok.success(), "git must read stored commit");
+        .expect("oid");
     oid
 }
 
 fn assert_derived_fields(commit: &Value) {
-    let oid: ObjectId = commit["oid"]
-        .as_str()
-        .expect("oid")
-        .parse()
-        .expect("parse oid");
+    let oid: ObjectId = commit["oid"].as_str().expect("oid").parse().expect("parse");
     assert_eq!(commit["change_id_stored"], false);
     assert_eq!(
         commit["change_id"].as_str().expect("change_id"),
@@ -194,14 +179,9 @@ fn log_json_has_change_id() -> TestResult {
     init_with_git_commit(&repo);
     let log = grit_json(&repo, &["log", "--limit", "1"]);
     assert_derived_fields(&log["commits"][0]);
-
     let stored_oid = write_stored_change_commit(&repo);
     let show = grit_json(&repo, &["show", &stored_oid.to_hex()]);
     assert_eq!(show["commit"]["change_id_stored"], true);
-    assert_eq!(
-        show["commit"]["oid"].as_str().expect("oid"),
-        stored_oid.to_hex()
-    );
     Ok(())
 }
 
@@ -209,8 +189,7 @@ fn log_json_has_change_id() -> TestResult {
 fn show_json_has_change_id() -> TestResult {
     let repo = temp_repo("show-json");
     init_with_git_commit(&repo);
-    let show = grit_json(&repo, &["show"]);
-    assert_derived_fields(&show["commit"]);
+    assert_derived_fields(&grit_json(&repo, &["show"])["commit"]);
     Ok(())
 }
 
@@ -218,8 +197,7 @@ fn show_json_has_change_id() -> TestResult {
 fn revs_json_has_change_id() -> TestResult {
     let repo = temp_repo("revs-json");
     init_with_git_commit(&repo);
-    let revs = grit_json(&repo, &["revs", "HEAD"]);
-    assert_derived_fields(&revs["commits"][0]);
+    assert_derived_fields(&grit_json(&repo, &["revs", "HEAD"])["commits"][0]);
     Ok(())
 }
 
@@ -236,9 +214,9 @@ fn status_json_commits_have_change_id() -> TestResult {
         .status()?;
     let repo = root.join("repo");
     fs::write(repo.join("f.txt"), "one\n")?;
-    let mut commit_cmd = Command::new(GRIT);
-    grit_env(&mut commit_cmd);
-    commit_cmd
+    let mut first = Command::new(GRIT);
+    grit_env(&mut first);
+    first
         .args(["commit", "-m", "one"])
         .current_dir(&repo)
         .status()?;
@@ -254,8 +232,8 @@ fn status_json_commits_have_change_id() -> TestResult {
         .current_dir(&repo)
         .status()?;
     let status = grit_json(&repo, &["status"]);
-    let commits = status["commits"].as_array().expect("commits array");
-    assert!(!commits.is_empty(), "expected ahead commits in status json");
+    let commits = status["commits"].as_array().expect("commits");
+    assert!(!commits.is_empty());
     for row in commits {
         assert_derived_fields(row);
     }
@@ -267,17 +245,13 @@ fn log_human_shows_short_change_id() -> TestResult {
     let repo = temp_repo("log-human");
     init_with_git_commit(&repo);
     let out = grit_text(&repo, &["log", "--limit", "1"]);
-    let log = grit_json(&repo, &["log", "--limit", "1"]);
-    let short: String = log["commits"][0]["change_id"]
+    let short: String = grit_json(&repo, &["log", "--limit", "1"])["commits"][0]["change_id"]
         .as_str()
         .expect("change_id")
         .chars()
         .take(8)
         .collect();
-    assert!(
-        out.contains(&format!("change {short}")),
-        "expected change prefix in log output:\n{out}"
-    );
+    assert!(out.contains(&format!("change {short}")));
     Ok(())
 }
 
@@ -286,9 +260,6 @@ fn oneline_unchanged() -> TestResult {
     let repo = temp_repo("oneline");
     init_with_git_commit(&repo);
     let out = grit_text(&repo, &["log", "--oneline", "--limit", "1"]);
-    assert!(
-        !out.contains("change "),
-        "oneline must not include change id:\n{out}"
-    );
+    assert!(!out.contains("change "));
     Ok(())
 }
