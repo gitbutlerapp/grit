@@ -191,16 +191,19 @@ pub trait WritableObjectStore: ObjectStore {
 
 /// True when `oid` is stored as loose or in a non-promisor pack under `objects_dir`.
 pub(crate) fn local_object_materialized(objects_dir: &Path, oid: &ObjectId) -> bool {
-    if object_in_local_packs(objects_dir, oid) {
-        return true;
-    }
-    if oid.loose_path_in(objects_dir).is_file() {
+    if local_object_materialized_without_rescan(objects_dir, oid) {
         return true;
     }
     if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true) {
         return object_in_local_packs(objects_dir, oid);
     }
     false
+}
+
+/// Like [`local_object_materialized`], but trusts the cached pack listing instead of
+/// rescanning `pack/` when the object is not found.
+pub(crate) fn local_object_materialized_without_rescan(objects_dir: &Path, oid: &ObjectId) -> bool {
+    object_in_local_packs(objects_dir, oid) || oid.loose_path_in(objects_dir).is_file()
 }
 
 fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {

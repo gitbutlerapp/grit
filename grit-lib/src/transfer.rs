@@ -682,7 +682,7 @@ fn copy_objects_for_local_fetch(
     }
 
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
-    let send = collect_reachable_excluding_peer(
+    let send_set = collect_reachable_excluding_peer(
         remote_odb,
         wants,
         local_odb,
@@ -690,13 +690,14 @@ fn copy_objects_for_local_fetch(
         false,
         source_shallow,
     )?;
+    let send = &send_set.objects;
 
     if !pack_build.thin && try_pack_link {
         progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
-        if try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, &send, false)? {
+        if try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, send, false)? {
             progress.set(send.len() as u64);
             progress.finish();
-            let oids = linked_object_set(local_odb, &send);
+            let oids = linked_object_set(local_odb, send);
             let transfer = transfer_stats_from_pack_dir(&local_objects_pack_dir(local_git_dir))?;
             return Ok((oids, transfer));
         }
@@ -710,7 +711,7 @@ fn copy_objects_for_local_fetch(
         .collect();
     if still_missing.is_empty() {
         return Ok((
-            linked_object_set(local_odb, &send),
+            linked_object_set(local_odb, send),
             TransferStats::default(),
         ));
     }
@@ -729,7 +730,7 @@ fn copy_objects_for_local_fetch(
         progress.finish();
         if still_missing.is_empty() {
             return Ok((
-                linked_object_set(local_odb, &send),
+                linked_object_set(local_odb, send),
                 TransferStats::default(),
             ));
         }
@@ -740,8 +741,9 @@ fn copy_objects_for_local_fetch(
         ProgressPhase::CopyingObjects,
         Some(still_missing.len() as u64),
     );
-    let pack = build_pack_for_local_fetch(
+    let pack = build_pack_for_local_transfer(
         remote_odb,
+        &send_set,
         &still_missing,
         local_odb,
         haves,
@@ -755,7 +757,7 @@ fn copy_objects_for_local_fetch(
     progress.finish();
     refresh_local_odb_after_link(local_odb);
     let transfer = transfer_stats_from_ingested(&ingested)?;
-    let mut out = linked_object_set(local_odb, &send);
+    let mut out = linked_object_set(local_odb, send);
     out.extend(ingested.object_ids);
     Ok((out, transfer))
 }
@@ -781,7 +783,7 @@ fn copy_objects_for_local_push(
     let remote_objects = remote_git_dir.join("objects");
 
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
-    let send = collect_reachable_excluding_peer(
+    let send_set = collect_reachable_excluding_peer(
         local_odb,
         wants,
         remote_odb,
@@ -789,9 +791,10 @@ fn copy_objects_for_local_push(
         false,
         source_shallow,
     )?;
+    let send = &send_set.objects;
 
     if !opts.thin
-        && try_satisfy_via_object_link(&local_objects, &remote_objects, remote_odb, &send, false)?
+        && try_satisfy_via_object_link(&local_objects, &remote_objects, remote_odb, send, false)?
     {
         return Ok(());
     }
@@ -818,8 +821,9 @@ fn copy_objects_for_local_push(
     }
 
     let pack_opts = pack_build_options_for_send(local_odb, &still_missing, opts);
-    let pack = build_pack_for_local_fetch(
+    let pack = build_pack_for_local_transfer(
         local_odb,
+        &send_set,
         &still_missing,
         remote_odb,
         haves,
@@ -839,6 +843,53 @@ fn copy_objects_for_local_push(
     Ok(())
 }
 
+/// Build the pack that copies `missing` (a subset of `send_set`) into the peer.
+///
+/// With no `haves` and a non-thin pack, `missing` is already the exact set the
+/// peer lacks (the walk stopped at every object the peer stores), so it is
+/// packed as-is. Re-enumerating from `missing` instead would walk its whole
+/// closure and re-send objects just linked into the peer, such as every packed
+/// object reachable from a loose annotated tag. Otherwise defer to
+/// [`build_pack_for_local_fetch`], which negotiates against the peer's `haves`.
+#[allow(clippy::too_many_arguments)]
+fn build_pack_for_local_transfer(
+    source_odb: &Odb,
+    send_set: &PeerSendSet,
+    missing: &[ObjectId],
+    peer_odb: &Odb,
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    have_shallow: &HashSet<ObjectId>,
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
+    if haves.is_empty() && !opts.thin {
+        return crate::pack_objects::build_pack_from_send_list(
+            source_odb,
+            missing,
+            &HashSet::new(),
+            opts,
+            &send_set.blob_name_hashes,
+        );
+    }
+    build_pack_for_local_fetch(
+        source_odb,
+        missing,
+        peer_odb,
+        haves,
+        source_shallow,
+        have_shallow,
+        opts,
+    )
+}
+
+/// Objects a local transfer must send, from [`collect_reachable_excluding_peer`].
+struct PeerSendSet {
+    /// Objects missing from the peer, in walk order.
+    objects: Vec<ObjectId>,
+    /// Pack name hash of each blob's path, for delta-window ordering.
+    blob_name_hashes: HashMap<ObjectId, u32>,
+}
+
 /// Like [`collect_reachable_excluding`], but treats every object already stored in
 /// `peer_odb` as a boundary (plus explicit `peer_boundary` tips). Used for local
 /// file fetch/push so incremental transfers do not walk full history from `haves`.
@@ -849,36 +900,46 @@ fn collect_reachable_excluding_peer(
     peer_boundary: &HashSet<ObjectId>,
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
-) -> Result<Vec<ObjectId>> {
+) -> Result<PeerSendSet> {
+    use crate::pack_name_hash::pack_name_hash_extend;
+
     let mut visited: HashSet<ObjectId> = HashSet::new();
     let mut ordered: Vec<ObjectId> = Vec::new();
-    let mut queue: VecDeque<ObjectId> = VecDeque::new();
+    let mut blob_name_hashes: HashMap<ObjectId, u32> = HashMap::new();
+    // Each queued object carries the name hash of its directory prefix ("dir/").
+    let mut queue: VecDeque<(ObjectId, u32)> = VecDeque::new();
 
-    let at_boundary =
-        |oid: ObjectId| peer_boundary.contains(&oid) || peer_odb.exists_materialized_local(&oid);
+    // The peer is not written during the walk, so one pack-directory refresh is
+    // enough; a stale miss only means sending an object the peer already has.
+    peer_odb.reprepare_local_packs();
+    let at_boundary = |oid: ObjectId| {
+        peer_boundary.contains(&oid) || peer_odb.exists_materialized_local_without_rescan(&oid)
+    };
 
+    // `visited` also remembers boundary objects so each object is probed once.
+    // Blobs named by tree entries are recorded without being read: they have no
+    // outgoing links, and a missing one still fails when the pack is written.
     let enqueue = |oid: ObjectId,
-                   queue: &mut VecDeque<ObjectId>,
+                   prefix_hash: Option<u32>,
+                   queue: &mut VecDeque<(ObjectId, u32)>,
                    visited: &mut HashSet<ObjectId>,
                    ordered: &mut Vec<ObjectId>|
      -> bool {
-        if at_boundary(oid) {
+        if !visited.insert(oid) || at_boundary(oid) {
             return false;
         }
-        if visited.insert(oid) {
-            ordered.push(oid);
-            queue.push_back(oid);
-            true
-        } else {
-            false
+        ordered.push(oid);
+        if let Some(prefix_hash) = prefix_hash {
+            queue.push_back((oid, prefix_hash));
         }
+        true
     };
 
     for &root in roots {
-        enqueue(root, &mut queue, &mut visited, &mut ordered);
+        enqueue(root, Some(0), &mut queue, &mut visited, &mut ordered);
     }
 
-    while let Some(oid) = queue.pop_front() {
+    while let Some((oid, prefix_hash)) = queue.pop_front() {
         let obj = match source_odb.read(&oid) {
             Ok(o) => o,
             Err(_) if skip_missing => continue,
@@ -889,28 +950,49 @@ fn collect_reachable_excluding_peer(
                 let commit = parse_commit(&obj.data)?;
                 if !shallow_grafts.contains(&oid) {
                     for parent in commit.parents {
-                        enqueue(parent, &mut queue, &mut visited, &mut ordered);
+                        enqueue(parent, Some(0), &mut queue, &mut visited, &mut ordered);
                     }
                 }
-                enqueue(commit.tree, &mut queue, &mut visited, &mut ordered);
+                enqueue(commit.tree, Some(0), &mut queue, &mut visited, &mut ordered);
             }
             ObjectKind::Tree => {
                 for entry in parse_tree(&obj.data)? {
                     if entry.mode == 0o160000 {
                         continue;
                     }
-                    enqueue(entry.oid, &mut queue, &mut visited, &mut ordered);
+                    let path_hash = pack_name_hash_extend(prefix_hash, &entry.name);
+                    if entry.mode & 0o170000 == 0o040000 {
+                        let dir_hash = pack_name_hash_extend(path_hash, b"/");
+                        enqueue(
+                            entry.oid,
+                            Some(dir_hash),
+                            &mut queue,
+                            &mut visited,
+                            &mut ordered,
+                        );
+                    } else if enqueue(entry.oid, None, &mut queue, &mut visited, &mut ordered) {
+                        blob_name_hashes.insert(entry.oid, path_hash);
+                    }
                 }
             }
             ObjectKind::Tag => {
                 let tag = parse_tag(&obj.data)?;
-                enqueue(tag.object, &mut queue, &mut visited, &mut ordered);
+                enqueue(
+                    tag.object,
+                    Some(prefix_hash),
+                    &mut queue,
+                    &mut visited,
+                    &mut ordered,
+                );
             }
             ObjectKind::Blob => {}
         }
     }
 
-    Ok(ordered)
+    Ok(PeerSendSet {
+        objects: ordered,
+        blob_name_hashes,
+    })
 }
 
 /// Expand a thin pack by appending missing ref-delta bases from `odb`, matching

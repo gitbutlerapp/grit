@@ -1260,6 +1260,35 @@ impl Odb {
         })
     }
 
+    /// Bring this repository's cached pack listing up to date with `objects/pack/`.
+    ///
+    /// Call once before a batch of [`Self::exists_materialized_local_without_rescan`]
+    /// probes so packs written before the batch are visible.
+    pub(crate) fn reprepare_local_packs(&self) {
+        if self.custom_primary.is_some() {
+            return;
+        }
+        self.with_pack_store_for(&self.objects_dir, || {
+            let _ = crate::pack::reprepare_pack_directory_on_miss(&self.objects_dir);
+        });
+    }
+
+    /// Like [`Self::exists_materialized_local`], but a miss does not rescan
+    /// `objects/pack/`.
+    ///
+    /// For walks that probe many objects that are expected to be absent (local
+    /// clone/fetch/push boundary checks): each miss would otherwise list the pack
+    /// directory again. Packs that appear after [`Self::reprepare_local_packs`] are
+    /// not seen, so a miss can be stale; callers must treat it as "send anyway".
+    pub(crate) fn exists_materialized_local_without_rescan(&self, oid: &ObjectId) -> bool {
+        if self.custom_primary.is_some() {
+            return self.exists_materialized_local(oid);
+        }
+        self.with_pack_store_for(&self.objects_dir, || {
+            store::local_object_materialized_without_rescan(&self.objects_dir, oid)
+        })
+    }
+
     /// Check whether an object exists in the loose store or any pack file.
     #[must_use]
     pub fn exists(&self, oid: &ObjectId) -> bool {
