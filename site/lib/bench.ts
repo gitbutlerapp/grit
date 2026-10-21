@@ -112,6 +112,13 @@ function loadBundle(baselines: string[]): Bundle {
         if (isRevisionSelectionRefresh(prev.rel)) {
           return;
         }
+        if (isHashSuiteBaseline(rel) && isHashSuiteBaseline(prev.rel)) {
+          if (rel.endsWith("hash-after.json") && prev.rel.endsWith("hash-before.json")) {
+            scenarios[prev.index] = row;
+            seen.set(id, { index: prev.index, rel });
+          }
+          return;
+        }
         if (isHashSuiteBaseline(rel) && !isHashSuiteBaseline(prev.rel)) {
           return;
         }
