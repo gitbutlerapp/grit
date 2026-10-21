@@ -15,6 +15,8 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+use hashbrown::HashSet;
+
 use crate::crlf::path_gitattribute_value;
 use crate::crlf::AttrRule;
 pub use crate::error::{PathspecFromFileParseError, PathspecResolveError};
@@ -1111,16 +1113,7 @@ pub(crate) fn sorted_paths_match_pathspec<S: AsRef<str>>(
     sorted_paths: &[S],
     ctx: PathspecMatchContext,
 ) -> bool {
-    let plain = !ctx.precompose_paths
-        && !ctx.is_directory
-        && !ctx.is_git_submodule
-        && !spec.is_empty()
-        && spec != "."
-        && !spec.starts_with("./")
-        && !spec.starts_with(':')
-        && simple_length(spec) == spec.len()
-        && !(literal_global() || glob_global() || noglob_global() || icase_global());
-    if !plain {
+    if !is_plain_literal_pathspec(spec, ctx) {
         let specs = [spec.to_owned()];
         return sorted_paths
             .iter()
@@ -1140,6 +1133,85 @@ pub(crate) fn sorted_paths_match_pathspec<S: AsRef<str>>(
         return true;
     }
     has_path_with_prefix(&format!("{spec}/"))
+}
+
+/// Whether `spec` matches exactly the path `spec` and everything under directory `spec`
+/// (no magic, no wildcards, no `./`, and no context that changes trailing-`/` handling).
+fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {
+    !ctx.precompose_paths
+        && !ctx.is_directory
+        && !ctx.is_git_submodule
+        && !spec.is_empty()
+        && spec != "."
+        && !spec.starts_with("./")
+        && !spec.starts_with(':')
+        && simple_length(spec) == spec.len()
+        && !(literal_global() || glob_global() || noglob_global() || icase_global())
+}
+
+/// A pathspec list prepared once for matching many paths with the same context.
+///
+/// Gives the same answers as [`matches_pathspec_list_with_context`] with the list and context
+/// it was built from. When every element is a plain literal (see
+/// [`sorted_paths_match_pathspec`]), a path is answered with hash lookups of the path and its
+/// leading directories instead of comparing it against every element, which keeps matching a
+/// large index against many pathspecs linear in the index size.
+pub(crate) struct PathspecListMatcher<'a> {
+    specs: &'a [String],
+    ctx: PathspecMatchContext,
+    literals: Option<LiteralPathspecSet<'a>>,
+}
+
+/// Plain literal pathspecs split by how they match.
+struct LiteralPathspecSet<'a> {
+    /// Specs without a trailing `/`: they match the path itself.
+    exact: HashSet<&'a str>,
+    /// Directories whose contents match: every spec, with one trailing `/` removed.
+    dirs: HashSet<&'a str>,
+}
+
+impl<'a> PathspecListMatcher<'a> {
+    /// Prepare `specs` for repeated matching under `ctx`.
+    pub(crate) fn new(specs: &'a [String], ctx: PathspecMatchContext) -> Self {
+        let all_plain =
+            !specs.is_empty() && specs.iter().all(|s| is_plain_literal_pathspec(s, ctx));
+        let literals = all_plain.then(|| {
+            let mut set = LiteralPathspecSet {
+                exact: HashSet::with_capacity(specs.len()),
+                dirs: HashSet::with_capacity(specs.len()),
+            };
+            for spec in specs {
+                match spec.strip_suffix('/') {
+                    Some(dir) => {
+                        set.dirs.insert(dir);
+                    }
+                    None => {
+                        set.exact.insert(spec.as_str());
+                        set.dirs.insert(spec.as_str());
+                    }
+                }
+            }
+            set
+        });
+        Self {
+            specs,
+            ctx,
+            literals,
+        }
+    }
+
+    /// Whether `path` matches the pathspec list.
+    pub(crate) fn matches(&self, path: &str) -> bool {
+        let Some(set) = &self.literals else {
+            return matches_pathspec_list_with_context(path, self.specs, self.ctx);
+        };
+        if set.exact.contains(path) {
+            return true;
+        }
+        path.bytes()
+            .enumerate()
+            .any(|(i, b)| b == b'/' && set.dirs.contains(&path[..i]))
+    }
 }
 
 /// `matches_pathspec_list` for tree/index objects with mode and `.gitattributes` rules.
@@ -2157,6 +2229,81 @@ mod tree_entry_pathspec_tests {
             &empty,
             PathspecMatchContext::default()
         ));
+    }
+
+    #[test]
+    fn list_matcher_agrees_with_linear_matching() {
+        let paths = [
+            "a",
+            "a-b",
+            "a.txt",
+            "a/",
+            "a/b",
+            "a/b/c.txt",
+            "a/bc",
+            "a//x",
+            "a0",
+            "b/x[1].txt",
+            "dir/sub/file",
+            "dir-sub",
+            "f[o][o]",
+            "z",
+            "zz/a",
+            "é/x",
+            "",
+        ];
+        let lists: &[&[&str]] = &[
+            &[],
+            &["a"],
+            &["a/"],
+            &["a//"],
+            &["a/b", "dir/sub/", "z"],
+            &["a/b/", "a/bc", "dir", "zz"],
+            &["dir/su", "dir-sub", "f[o][o]"],
+            &["é", "a-"],
+            &["a", "*.txt"],
+            &["dir", ":!dir/sub"],
+            &[":!a"],
+            &["./a", "z"],
+            &[".", "a"],
+            &["", "a"],
+            &[":(icase)A/B", "z"],
+        ];
+        for ctx in [
+            PathspecMatchContext::default(),
+            PathspecMatchContext {
+                precompose_paths: true,
+                ..PathspecMatchContext::default()
+            },
+            PathspecMatchContext {
+                is_directory: true,
+                ..PathspecMatchContext::default()
+            },
+        ] {
+            for list in lists {
+                let specs: Vec<String> = list.iter().map(|s| (*s).to_owned()).collect();
+                let matcher = PathspecListMatcher::new(&specs, ctx);
+                for path in paths {
+                    assert_eq!(
+                        matcher.matches(path),
+                        matches_pathspec_list_with_context(path, &specs, ctx),
+                        "path {path:?} specs {specs:?} ctx {ctx:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn list_matcher_uses_literal_lookup_only_for_plain_lists() {
+        let ctx = PathspecMatchContext::default();
+        let plain = vec!["a/b".to_owned(), "dir/".to_owned()];
+        assert!(PathspecListMatcher::new(&plain, ctx).literals.is_some());
+        let glob = vec!["a/b".to_owned(), "*.txt".to_owned()];
+        assert!(PathspecListMatcher::new(&glob, ctx).literals.is_none());
+        let exclude = vec!["a/b".to_owned(), ":!a/b/c".to_owned()];
+        assert!(PathspecListMatcher::new(&exclude, ctx).literals.is_none());
+        assert!(PathspecListMatcher::new(&[], ctx).literals.is_none());
     }
 
     #[test]

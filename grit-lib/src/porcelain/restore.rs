@@ -14,7 +14,9 @@ use crate::error::{Error, Result};
 use crate::index::index_file_mtime;
 use crate::index::{entry_from_metadata, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK};
 use crate::objects::{parse_commit, ObjectId};
-use crate::pathspec::{pathspec_is_exclude, PathspecMatchContext};
+use crate::pathspec::{
+    pathspec_is_exclude, sorted_paths_match_pathspec, PathspecListMatcher, PathspecMatchContext,
+};
 use crate::porcelain::checkout::{
     remove_empty_parent_dirs, worktree_bytes_from_index_blob, write_to_worktree_cached,
     LeadingDirCache,
@@ -214,6 +216,7 @@ fn collect_matched_paths(
     select_all_tracked: bool,
     pathspec_ctx: PathspecMatchContext,
 ) -> BTreeSet<String> {
+    let matcher = PathspecListMatcher::new(pathspecs, pathspec_ctx);
     let mut paths = BTreeSet::new();
     let skip_index_union = select_all_tracked && !restore_staged && !worktree_from_tree;
     if !skip_index_union {
@@ -222,7 +225,7 @@ fn collect_matched_paths(
                 continue;
             }
             let path = String::from_utf8_lossy(&entry.path);
-            if crate::pathspec::matches_pathspec_list_with_context(&path, pathspecs, pathspec_ctx) {
+            if matcher.matches(&path) {
                 paths.insert(path.into_owned());
             }
         }
@@ -233,11 +236,7 @@ fn collect_matched_paths(
             RestoreSource::Tree(_) => source_entries.unwrap_or(&[]),
         };
         for entry in staged_source {
-            if crate::pathspec::matches_pathspec_list_with_context(
-                &entry.path,
-                pathspecs,
-                pathspec_ctx,
-            ) {
+            if matcher.matches(&entry.path) {
                 paths.insert(entry.path.clone());
             }
         }
@@ -245,11 +244,7 @@ fn collect_matched_paths(
     if worktree_from_tree {
         if let Some(src) = source_entries {
             for entry in src {
-                if crate::pathspec::matches_pathspec_list_with_context(
-                    &entry.path,
-                    pathspecs,
-                    pathspec_ctx,
-                ) {
+                if matcher.matches(&entry.path) {
                     paths.insert(entry.path.clone());
                 }
             }
@@ -270,6 +265,7 @@ fn validate_pathspecs(
     } else {
         &opts.pathspec_sources
     };
+    let matched_sorted: Vec<&str> = matched.iter().map(String::as_str).collect();
     for (label, resolved) in sources.iter().zip(opts.pathspecs.iter()) {
         if pathspec_is_exclude(label) {
             continue;
@@ -277,13 +273,7 @@ fn validate_pathspecs(
         let hits = if select_all_tracked && matches!(resolved.as_str(), "." | ":/.") {
             index.entries.iter().any(|e| e.stage() == 0)
         } else {
-            matched.iter().any(|p| {
-                crate::pathspec::matches_pathspec_list_with_context(
-                    p,
-                    std::slice::from_ref(resolved),
-                    pathspec_ctx,
-                )
-            })
+            sorted_paths_match_pathspec(resolved, &matched_sorted, pathspec_ctx)
         };
         if !hits {
             return Err(Error::PathspecNoMatch {
@@ -373,6 +363,7 @@ fn apply_worktree_restore(ctx: WorktreeRestoreContext<'_>) -> Result<()> {
         let attr_index = index_out.gitattributes_snapshot();
         let rules = WorktreeRules::from_parts(repo, &attr_index, Arc::clone(&config))?;
         let index_mtime = index_mtime_for_diff(index_out, None);
+        let matcher = PathspecListMatcher::new(pathspecs, repo.pathspec_match_context());
         let mut to_write: Vec<usize> = Vec::new();
         for (pos, entry) in index_out.entries.iter().enumerate() {
             if entry.stage() != 0 {
@@ -382,7 +373,7 @@ fn apply_worktree_restore(ctx: WorktreeRestoreContext<'_>) -> Result<()> {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if !repo.paths_match_pathspecs(path, pathspecs) {
+            if !matcher.matches(path) {
                 continue;
             }
             if entry.mode == MODE_GITLINK {

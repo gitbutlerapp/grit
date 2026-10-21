@@ -325,6 +325,74 @@ fn restore_directory_pathspec() {
     );
 }
 
+/// Many literal pathspecs (files, `dir`, `dir/`, prefix look-alikes) leave the same
+/// worktree and status as `git restore` with the same pathspecs.
+#[test]
+fn restore_many_literal_pathspecs_matches_git() {
+    let files = [
+        "a.txt",
+        "a-b.txt",
+        "ab/x.txt",
+        "d/one.txt",
+        "d/sub/two.txt",
+        "d-sibling/three.txt",
+        "e/f/g/deep.txt",
+        "e/f/gx.txt",
+        "keep.txt",
+    ];
+    let specs = ["a.txt", "d", "e/f/g/", "e/f/g/deep.txt"];
+    let mut worktrees = Vec::new();
+    for use_git in [false, true] {
+        let (dir, repo) = init_repo();
+        for f in files {
+            let p = dir.path().join(f);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, format!("{f} v1\n")).unwrap();
+        }
+        git_cmd(dir.path(), &["add", "."]);
+        git_cmd(dir.path(), &["commit", "-qm", "init"]);
+        for f in files {
+            fs::write(dir.path().join(f), format!("{f} dirty\n")).unwrap();
+        }
+        if use_git {
+            let mut args = vec!["restore", "--"];
+            args.extend(specs);
+            git_cmd(dir.path(), &args);
+        } else {
+            restore_paths(
+                &repo,
+                &restore_opts(&specs, false, false, RestoreSource::Index),
+            )
+            .expect("restore literal pathspecs");
+        }
+        let contents: Vec<String> = files
+            .iter()
+            .map(|f| fs::read_to_string(dir.path().join(f)).unwrap())
+            .collect();
+        let status = git_cmd(dir.path(), &["status", "--porcelain"]);
+        git_fsck(dir.path());
+        worktrees.push((contents, status));
+    }
+    assert_eq!(worktrees[0], worktrees[1]);
+    assert!(worktrees[0].1.contains(" M d-sibling/three.txt"));
+    assert!(worktrees[0].1.contains(" M e/f/gx.txt"));
+    assert!(!worktrees[0].1.contains("d/sub/two.txt"));
+
+    let (dir, repo) = init_repo();
+    fs::write(dir.path().join("a.txt"), "v1\n").unwrap();
+    git_cmd(dir.path(), &["add", "."]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    let err = restore_paths(
+        &repo,
+        &restore_opts(&["a.txt", "missing/"], false, false, RestoreSource::Index),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::PathspecNoMatch { ref spec } if spec == "missing/"
+    ));
+}
+
 #[test]
 fn restore_pathspec_no_match_errors() {
     let (dir, repo) = init_repo();
