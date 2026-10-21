@@ -110,8 +110,7 @@ pub struct CommitOutcome {
 ///
 /// Returns [`Error::Message`] when the cleaned body would be empty.
 pub fn normalize_commit_message(raw: &str) -> Result<String> {
-    let trimmed = raw.trim();
-    let processed = process(trimmed.as_bytes(), &Mode::Default);
+    let processed = process(raw.as_bytes(), &Mode::Default);
     let message = String::from_utf8(processed)
         .map_err(|_| Error::Message("invalid commit message".into()))?;
     if message.is_empty() {
@@ -140,6 +139,19 @@ fn run_commit_hook_recorded(
             hook_name: hook.as_str().to_owned(),
             status,
         }),
+    }
+}
+
+/// Like [`run_commit_hook_recorded`], but a non-zero exit from `post-commit` does not fail the commit (Git-compatible).
+fn run_post_commit_hook_recorded(
+    repo: &Repository,
+    commit_env: &CommitHookEnv<'_>,
+) -> std::result::Result<bool, HookError> {
+    match run_commit_hook(repo, HookName::PostCommit.as_str(), &[], None, commit_env)
+        .map_err(HookError::Internal)?
+    {
+        HookResult::Success | HookResult::Failed(_) => Ok(true),
+        HookResult::NotFound => Ok(false),
     }
 }
 
@@ -351,7 +363,9 @@ fn create_commit_with_index(
         message.push('\n');
     }
 
-    let (author, author_raw) = if let Some(a) = amend_author {
+    let (author, author_raw) = if req.amend && !req.author.is_empty() {
+        (req.author.clone(), Vec::new())
+    } else if let Some(a) = amend_author {
         (a, amend_author_raw)
     } else {
         (req.author.clone(), Vec::new())
@@ -470,7 +484,7 @@ fn create_commit_with_index(
         let _ = finish_merge_state(repo)?;
     }
 
-    if run_commit_hook_recorded(repo, HookName::PostCommit, &[], None, &commit_env)? {
+    if run_post_commit_hook_recorded(repo, &commit_env)? {
         hooks_run.push(HookName::PostCommit);
     }
 
@@ -914,8 +928,8 @@ mod tests {
 
     #[test]
     fn message_file_stripspace() {
-        let msg = normalize_commit_message("  subject\n\n  body line  \n\n").unwrap();
-        assert_eq!(msg, "subject\n\n  body line\n");
+        let msg = normalize_commit_message("  subject  \n\n  body line  \n\n").unwrap();
+        assert_eq!(msg, "  subject\n\n  body line\n");
     }
 
     #[test]
@@ -938,6 +952,48 @@ mod tests {
         req.hooks = HookPolicy::SkipVerify;
         let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
         assert!(outcome.hooks_run.is_empty());
+    }
+
+    #[test]
+    fn post_commit_hook_failure_does_not_fail_commit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        std::fs::write(
+            repo.git_dir().join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = true\n[hook \"hc\"]\n\tcommand = exit 9\n\tevent = post-commit\n",
+        )
+        .unwrap();
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let outcome = create_commit(&repo, &commit_req("after post"), &mut NullProgress).unwrap();
+        assert_eq!(
+            resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
+            outcome.oid
+        );
+        assert!(outcome.hooks_run.contains(&HookName::PostCommit));
+    }
+
+    #[test]
+    fn amend_with_explicit_author_overrides_tip_author() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut req = commit_req("first");
+        req.author = "Old Author <old@example.com> 1 +0000".to_owned();
+        req.committer = req.author.clone();
+        create_commit(&repo, &req, &mut NullProgress).unwrap();
+
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut amend = commit_req("second");
+        amend.amend = true;
+        amend.author = "New Author <new@example.com> 1 +0000".to_owned();
+        let outcome = create_commit(&repo, &amend, &mut NullProgress).unwrap();
+        assert_eq!(outcome.author.name, "New Author");
+        assert_eq!(outcome.author.email, "new@example.com");
     }
 
     #[test]

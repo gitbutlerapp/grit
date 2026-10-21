@@ -134,7 +134,7 @@ fn message_file_stdin_and_json_author() -> TestResult {
         .stdin
         .take()
         .expect("stdin")
-        .write_all(b"  subject from stdin  \n\n")?;
+        .write_all(b"  subject  \n\n  body line  \n\n")?;
     let out = child.wait_with_output()?;
     assert!(
         out.status.success(),
@@ -150,10 +150,7 @@ fn message_file_stdin_and_json_author() -> TestResult {
     assert_eq!(json["parents"].as_array().unwrap().len(), 0);
 
     let body = git(root, &["log", "-1", "--format=%B"]).stdout;
-    assert!(
-        body.starts_with("subject from stdin\n"),
-        "unexpected body: {body:?}"
-    );
+    assert_eq!(body, "  subject\n\n  body line\n\n");
 
     let idents = git(root, &["log", "-1", "--format=%an|%ae|%cn|%ce"]).stdout;
     assert_eq!(
@@ -179,6 +176,118 @@ fn message_sources_conflict() -> TestResult {
         "{}",
         out.dump()
     );
+    Ok(())
+}
+
+#[test]
+fn message_file_body_matches_git_stripspace() -> TestResult {
+    let scratch = Scratch::new("git-msg-bytes")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("a.txt"), "x\n")?;
+    let msg_path = root.join("msg.txt");
+    fs::write(&msg_path, "  subject  \n\n  body line  \n\n")?;
+
+    git(root, &["add", "a.txt"]);
+    git(root, &["commit", "-F", "msg.txt"]);
+    let git_body = git(root, &["log", "-1", "--format=%B"]).stdout;
+
+    let grit_root = scratch
+        .path()
+        .parent()
+        .unwrap()
+        .join(format!("grit-msg-bytes-{}", std::process::id()));
+    if grit_root.exists() {
+        fs::remove_dir_all(&grit_root)?;
+    }
+    fs::create_dir_all(&grit_root)?;
+    git(&grit_root, &["init", "-q", "-b", "main"]);
+    fs::write(grit_root.join("a.txt"), "x\n")?;
+    fs::write(
+        grit_root.join("msg.txt"),
+        "  subject  \n\n  body line  \n\n",
+    )?;
+    let out = gs(&grit_root, ["commit", "-F", "msg.txt"]);
+    assert!(out.success(), "{}", out.dump());
+    let grit_body = git(&grit_root, &["log", "-1", "--format=%B"]).stdout;
+    assert_eq!(grit_body, git_body);
+    let _ = fs::remove_dir_all(&grit_root);
+    Ok(())
+}
+
+#[test]
+fn amend_author_override() -> TestResult {
+    let scratch = Scratch::new("amend-author")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), "1\n")?;
+    gs(
+        root,
+        [
+            "commit",
+            "-m",
+            "first",
+            "--author",
+            "Old Author <old@example.com>",
+        ],
+    );
+    fs::write(root.join("a.txt"), "2\n")?;
+    let out = gs(
+        root,
+        [
+            "commit",
+            "--amend",
+            "-m",
+            "second",
+            "--author",
+            "New Author <new@example.com>",
+        ],
+    );
+    assert!(out.success(), "{}", out.dump());
+    let idents = git(root, &["log", "-1", "--format=%an|%ae"]).stdout;
+    assert_eq!(idents.trim(), "New Author|new@example.com");
+    assert!(git(root, &["fsck", "--strict"]).success());
+    Ok(())
+}
+
+#[test]
+fn author_with_newline_is_rejected() -> TestResult {
+    let scratch = Scratch::new("bad-author")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), "z\n")?;
+    let out = gs(
+        root,
+        [
+            "commit",
+            "-m",
+            "nope",
+            "--author",
+            "Bad\nInjected <x@y.example>",
+        ],
+    );
+    assert!(!out.success(), "{}", out.dump());
+    Ok(())
+}
+
+#[test]
+fn post_commit_hook_failure_still_succeeds() -> TestResult {
+    let scratch = Scratch::new("post-commit-fail")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    fs::write(
+        root.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n[hook \"hc\"]\n\tcommand = exit 9\n\tevent = post-commit\n",
+    )?;
+    fs::write(root.join("a.txt"), "p\n")?;
+    let out = gs(root, ["commit", "-m", "ok", "--json"]);
+    assert!(out.success(), "{}", out.dump());
+    let json: serde_json::Value = serde_json::from_str(&out.stdout)?;
+    assert!(json["hooks_run"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|v| v == "post-commit")));
     Ok(())
 }
 
