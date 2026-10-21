@@ -107,7 +107,8 @@ pub fn run(
     }
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
-    if (executable || non_executable) && resolved.is_entire_tree() {
+    let no_paths = resolved.is_entire_tree();
+    if (executable || non_executable) && no_paths {
         bail!("--executable and --non-executable require at least one path");
     }
     let outcome = stage_with_hint(
@@ -127,11 +128,7 @@ pub fn run(
             StageExecutableHint::None
         },
     )?;
-    Ok(AddOutcome::from_stage(
-        outcome,
-        dry_run,
-        resolved.is_entire_tree(),
-    ))
+    Ok(AddOutcome::from_stage(outcome, dry_run, no_paths))
 }
 
 fn stage_with_hint(

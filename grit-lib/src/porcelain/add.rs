@@ -104,18 +104,20 @@ fn index_path_to_string(path: &[u8]) -> String {
         .unwrap_or_else(|_| String::from_utf8_lossy(path).into_owned())
 }
 
+fn index_position_for_path(index: &Index, path: &str) -> usize {
+    index
+        .entries
+        .iter()
+        .position(|e| e.stage() == 0 && index_path_to_string(&e.path) == path)
+        .unwrap_or(usize::MAX)
+}
+
 fn sort_outcome_paths_in_index_order(outcome: &mut StageOutcome, index: &Index) {
-    let mut order: BTreeMap<String, usize> = BTreeMap::new();
-    for (i, entry) in index.entries.iter().enumerate() {
-        if entry.stage() == 0 {
-            order.entry(index_path_to_string(&entry.path)).or_insert(i);
-        }
-    }
     let sort_paths = |paths: &mut Vec<String>| {
         paths.sort_by(|a, b| {
-            let ia = order.get(a).copied().unwrap_or(usize::MAX);
-            let ib = order.get(b).copied().unwrap_or(usize::MAX);
-            ia.cmp(&ib).then_with(|| a.as_str().cmp(b))
+            index_position_for_path(index, a)
+                .cmp(&index_position_for_path(index, b))
+                .then_with(|| a.as_str().cmp(b))
         });
         paths.dedup();
     };
@@ -304,14 +306,24 @@ fn stage_inner_on_index(
             thread_policy: Some(repo.thread_policy()),
             ..DiffIndexToWorktreeOptions::default()
         };
-        let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
-            repo.odb(),
-            repo.git_dir(),
-            index,
-            work_tree,
-            diff_opts,
-        )?;
-        (unstaged, staging_stats)
+        if dry_run {
+            let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
+                repo.odb(),
+                index,
+                work_tree,
+                diff_opts,
+            )?;
+            (unstaged, std::collections::BTreeMap::new())
+        } else {
+            let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
+                repo.odb(),
+                repo.git_dir(),
+                index,
+                work_tree,
+                diff_opts,
+            )?;
+            (unstaged, staging_stats)
+        }
     };
 
     let rules = lock_rules(&rules_arc)?;
@@ -399,7 +411,10 @@ fn stage_inner_on_index(
     } else {
         let worktree_updates = collect_tracked_stage_plans(&unstaged, &matches);
         for (path, plan) in worktree_updates {
-            if has_unmerged && unmerged_only_paths.contains(path.as_bytes()) {
+            if has_unmerged
+                && unmerged_only_paths.contains(path.as_bytes())
+                && opts.mode != StageMode::Update
+            {
                 continue;
             }
             if plan.remove {
@@ -460,7 +475,7 @@ fn stage_inner_on_index(
         )?;
     }
 
-    if has_unmerged && !opts.pathspecs.is_empty() {
+    if has_unmerged && (!opts.pathspecs.is_empty() || opts.mode == StageMode::Update) {
         outcome
             .modified
             .extend(stage_unmerged_paths_matching_pathspecs(
@@ -1884,6 +1899,23 @@ mod tests {
         assert!(index.get(b"brand-new.txt", 0).is_none());
     }
 
+    fn count_loose_objects(root: &Path) -> usize {
+        let objects = root.join(".git/objects");
+        let mut count = 0usize;
+        for shard in fs::read_dir(&objects).unwrap() {
+            let shard = shard.unwrap();
+            if !shard.file_type().unwrap().is_dir() {
+                continue;
+            }
+            let name = shard.file_name();
+            if name == "info" || name == "pack" {
+                continue;
+            }
+            count += fs::read_dir(shard.path()).unwrap().count();
+        }
+        count
+    }
+
     #[test]
     fn stage_dry_run_writes_nothing() {
         let tmp = TempDir::new().unwrap();
@@ -1895,6 +1927,7 @@ mod tests {
         fs::write(root.join("new.txt"), b"n\n").unwrap();
         let index_before = repo.load_index().unwrap();
         let mtime_before = fs::metadata(repo.index_path()).unwrap().modified().ok();
+        let objects_before = count_loose_objects(root);
 
         let outcome = stage(
             &repo,
@@ -1912,7 +1945,11 @@ mod tests {
             let after = fs::metadata(repo.index_path()).unwrap().modified().ok();
             assert_eq!(Some(before), after);
         }
-        let objects_after = fs::read_dir(root.join(".git/objects")).unwrap().count();
+        assert_eq!(
+            count_loose_objects(root),
+            objects_before,
+            "dry-run must not write loose objects"
+        );
         stage(
             &repo,
             &StageOptions {
@@ -1922,8 +1959,44 @@ mod tests {
             &mut NullProgress,
         )
         .unwrap();
-        let objects_again = fs::read_dir(root.join(".git/objects")).unwrap().count();
-        assert_eq!(objects_after, objects_again);
+        assert_eq!(count_loose_objects(root), objects_before);
+    }
+
+    #[test]
+    fn add_update_resolves_unmerged_pathless() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let base = repo.odb().write(ObjectKind::Blob, b"base\n").unwrap();
+        let theirs = repo.odb().write(ObjectKind::Blob, b"base\nfeat\n").unwrap();
+
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+        index
+            .entries
+            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+        write_index(&repo, &mut index);
+        fs::write(root.join("f"), b"base\nfeat\n").unwrap();
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                mode: StageMode::Update,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.total(), 1, "pathless -u must stage resolved file");
+
+        let index = repo.load_index().unwrap();
+        assert!(
+            !index.has_unmerged_entries(),
+            "pathless -u must clear unmerged stages"
+        );
+        assert!(index.get(b"f", 0).is_some());
     }
 
     #[test]

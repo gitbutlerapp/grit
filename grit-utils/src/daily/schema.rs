@@ -260,15 +260,14 @@ mod tests {
 
     #[test]
     fn headline_ids_match_roadmap() {
-        let expected: [(&str, &str); 17] = [
+        let expected: [(&str, &str); 18] = [
             ("status/clean@synth-10k", "status-clean"),
             ("status/dirty@synth-10k", "status-dirty"),
             ("add/modified@synth-10k", "add"),
-            ("add/update@synth-100k", "add"),
-            ("add/dry-run@synth-10k", "add"),
             ("commit/small@synth-10k", "commit"),
             ("diff/worktree@synth-10k", "diff"),
             ("log/oneline-100@git-git", "log"),
+            ("log/json-100@git-git", "log"),
             ("show/head@git-git", "show"),
             ("blame/file@git-git", "blame"),
             ("switch/branch@synth-10k", "switch"),
@@ -281,7 +280,7 @@ mod tests {
             ("push/incremental@git-git", "push"),
             ("clone/local@synth-10k", "clone"),
         ];
-        assert_eq!(HEADLINE_SCENARIOS.len(), 17);
+        assert_eq!(HEADLINE_SCENARIOS.len(), 18);
         for (spec, (exp_id, exp_name)) in HEADLINE_SCENARIOS.iter().zip(expected.iter()) {
             assert_eq!(spec.id, *exp_id);
             assert_eq!(spec.name, Some(*exp_name));
