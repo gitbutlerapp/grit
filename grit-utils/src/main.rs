@@ -1281,6 +1281,46 @@ fn main() -> Result<()> {
                 eprintln!("daily report valid: {}", report.display());
                 return Ok(());
             }
+            Some(DailySubCmd::Compare {
+                baseline,
+                candidate,
+                tolerance,
+                markdown,
+            }) => {
+                let outcome =
+                    grit_utils::daily::compare_daily_files(baseline, candidate, *tolerance)?;
+                if *markdown {
+                    println!(
+                        "{}",
+                        grit_utils::daily::render_daily_compare_markdown(
+                            baseline, candidate, *tolerance, &outcome
+                        )
+                    );
+                }
+                if outcome.is_success() {
+                    eprintln!("All daily scenario ratios within tolerance {tolerance}");
+                    eprintln!(
+                        "Compared {} rows; skipped {} pending, {} sub-20ms time, {} missing in candidate",
+                        outcome.compared,
+                        outcome.skipped_pending,
+                        outcome.skipped_sub_20ms_time,
+                        outcome.missing_in_candidate
+                    );
+                    return Ok(());
+                }
+                eprintln!("Daily ratio drift exceeds tolerance {tolerance}:");
+                for m in &outcome.mismatches {
+                    let metric = match m.metric {
+                        grit_utils::daily::DailyCompareMetric::Time => "time",
+                        grit_utils::DailyCompareMetric::Memory => "memory",
+                    };
+                    eprintln!(
+                        "  {} [{metric}]: {:.4} vs {:.4} (delta {:.4})",
+                        m.scenario_id, m.ratio_a, m.ratio_b, m.delta
+                    );
+                }
+                std::process::exit(1);
+            }
             None => {
                 let git = resolve_binary("git", cli.git.as_deref())?;
                 let grit = resolve_binary("grit", cli.grit.as_deref())?;
