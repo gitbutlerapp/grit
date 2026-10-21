@@ -904,6 +904,7 @@ dependencies = [
  "rustix",
  "serde_json",
  "sha1",
+ "sha1dc",
  "sha2",
  "shell-words",
  "similar 3.2.0",
@@ -2291,6 +2292,12 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "sha1dc"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5b0ebf6537e3e8db8bb7d21ecb6d7399738c953c757945c6b95e46c4e95df7b"
 
 [[package]]
 name = "sha2"

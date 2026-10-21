@@ -1746,7 +1746,9 @@ pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Re
             "unsupported object hash width: {hash_bytes}"
         )));
     };
-    Ok(hash_object(algo, kind, data).as_bytes().to_vec())
+    Ok(crate::hash::try_hash_object(algo, kind, data)?
+        .as_bytes()
+        .to_vec())
 }
 
 /// Parse a pack index file (version 1 legacy or version 2), verifying the SHA-1

@@ -91,7 +91,7 @@
 ## 6. One hashing abstraction, accelerated SHA-1
 *Workstream: Performance*
 
-**Goal.** Make hashing fast and centralized. Plain SHA-1, never sha1dc.
+**Goal.** Make hashing fast and centralized. SHA-1 object ids use sha1dc (collision detection); file checksums use plain accelerated SHA-1.
 
 **Scope.**
 - Replace the 46 direct `Sha1::new`/`digest` call sites and ad-hoc SHA-256 uses with one `ObjectHasher` / `HashAlgo` API in grit-lib.

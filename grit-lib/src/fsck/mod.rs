@@ -692,6 +692,17 @@ fn verify_loose_objects(
                     path: path.clone(),
                 }))
             }
+            Err(Error::HashCollision { oid: colliding }) => Ok(LooseCheckOutcome::Issue(
+                FsckIssue::BadObject {
+                    oid: *oid,
+                    error: FsckError::new(
+                        "sha1Collision",
+                        format!(
+                            "SHA-1 collision detected while verifying loose object (digest {colliding})"
+                        ),
+                    ),
+                },
+            )),
             Err(_) => Ok(LooseCheckOutcome::Issue(FsckIssue::CorruptLoose {
                 oid: *oid,
                 path: path.clone(),
@@ -791,6 +802,15 @@ fn pack_object_read_issue(oid: ObjectId, pack: &Path, err: Error) -> FsckIssue {
         Error::ObjectNotFound(_) => FsckIssue::MissingObject {
             oid,
             referrer: MissingObjectReferrer::Pack,
+        },
+        Error::HashCollision { oid: colliding } => FsckIssue::BadObject {
+            oid,
+            error: FsckError::new(
+                "sha1Collision",
+                format!(
+                    "SHA-1 collision detected while verifying pack object (digest {colliding})"
+                ),
+            ),
         },
         Error::CorruptObject(_) | Error::Zlib(_) => FsckIssue::BadObject {
             oid,

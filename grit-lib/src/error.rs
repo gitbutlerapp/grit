@@ -411,6 +411,13 @@ pub enum Error {
     #[error("invalid object id '{0}'")]
     InvalidObjectId(String),
 
+    /// SHA-1 object hashing detected a chosen-prefix collision (sha1dc).
+    #[error("SHA-1 hash collision detected for object {oid}")]
+    HashCollision {
+        /// Plain SHA-1 digest for the colliding input (not safe to use as an object id).
+        oid: crate::objects::ObjectId,
+    },
+
     /// The requested object does not exist in the object store.
     #[error("object not found: {0}")]
     ObjectNotFound(String),

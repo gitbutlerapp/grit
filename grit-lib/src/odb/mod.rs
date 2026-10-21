@@ -1747,6 +1747,15 @@ impl Odb {
         hash_object_data_with(self.hash_algo(), kind, data)
     }
 
+    /// Like [`Self::hash`], but surfaces SHA-1 collision detection on ingestion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    pub fn try_hash(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        try_hash_object_data_with(self.hash_algo(), kind, data)
+    }
+
     /// Write an object to the loose store and return its [`ObjectId`].
     ///
     /// If the object already exists it is not overwritten (Git behaviour).
@@ -1881,7 +1890,7 @@ impl Odb {
         options: WriteOptions,
     ) -> Result<ObjectId> {
         let store_bytes = build_store_bytes(kind, data);
-        let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
+        let oid = try_hash_bytes_with(self.hash_algo(), &store_bytes)?;
 
         if let Some(primary) = &self.custom_primary {
             let already_exists = if options.trust_new_loose {
@@ -1949,7 +1958,7 @@ impl Odb {
             });
         }
         let store_bytes = build_store_bytes(kind, data);
-        let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
+        let oid = try_hash_bytes_with(self.hash_algo(), &store_bytes)?;
 
         if let Some(existing) = self.try_freshen_existing_local(&oid) {
             return Ok(existing);
@@ -1972,7 +1981,7 @@ impl Odb {
             });
         }
         let store_bytes = build_store_bytes(kind, data);
-        let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
+        let oid = try_hash_bytes_with(self.hash_algo(), &store_bytes)?;
         if let Ok(primary) = self.primary() {
             if let Ok(Some(existing)) = primary
                 .loose_store()
@@ -1997,7 +2006,7 @@ impl Odb {
     /// - [`Error::Io`] / [`Error::Zlib`] — storage errors.
     pub fn write_raw(&self, store_bytes: &[u8]) -> Result<ObjectId> {
         let obj = parse_object_bytes(store_bytes)?;
-        let oid = hash_bytes_with(self.hash_algo(), store_bytes);
+        let oid = try_hash_bytes_with(self.hash_algo(), store_bytes)?;
 
         if let Some(primary) = &self.custom_primary {
             if self.exists(&oid) {
@@ -2037,7 +2046,7 @@ impl Odb {
         }
         parse_object_bytes(store_bytes)?;
 
-        let oid = hash_bytes_with(self.hash_algo(), store_bytes);
+        let oid = try_hash_bytes_with(self.hash_algo(), store_bytes)?;
         if let Some(existing) = self.try_freshen_existing_local(&oid) {
             return Ok(existing);
         }
@@ -2083,9 +2092,12 @@ fn hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Objec
     hash::hash_object(algo, kind, data)
 }
 
-/// Compute the digest of pre-built store bytes with the given hash algorithm.
-fn hash_bytes_with(algo: HashAlgo, data: &[u8]) -> ObjectId {
-    algo.digest(data)
+fn try_hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+    hash::try_hash_object(algo, kind, data)
+}
+
+fn try_hash_bytes_with(algo: HashAlgo, data: &[u8]) -> Result<ObjectId> {
+    algo.try_digest(data)
 }
 
 /// Build canonical blob store bytes (`"blob <len>\\0<payload>"`).

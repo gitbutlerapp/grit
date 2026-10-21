@@ -5,7 +5,7 @@
 //! Single-threaded builds inflate and hash each whole object once in pack order.
 
 use crate::error::{Error, Result};
-use crate::hash::{hash_object, Parallelism};
+use crate::hash::{try_hash_object, Parallelism};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pack_zlib::{decompress_zlib_at_index, skip_zlib_at_with_scratch};
@@ -658,7 +658,7 @@ fn hash_whole_slot_with_data(
     ofs_base_refs: &HashMap<usize, u32>,
     oid_base_refs: &HashMap<ObjectId, u32>,
 ) -> Result<WholeHashed> {
-    let oid = hash_object(algo, work.kind, data);
+    let oid = try_hash_object(algo, work.kind, data)?;
     let retain_ofs = ofs_base_refs.get(&work.offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
     Ok(WholeHashed {
@@ -1030,7 +1030,7 @@ fn resolve_one_delta(
         return Err(Error::CorruptObject("delta base not available".to_owned()));
     };
     let result = apply_delta(base_data.as_ref(), &delta_data)?;
-    let oid = hash_object(algo, base_kind, &result);
+    let oid = try_hash_object(algo, base_kind, &result)?;
     let retain_ofs = ofs_out_refs.get(&delta.offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_out_refs.get(&oid).copied().unwrap_or(0) > 0;
     let retain = retain_ofs || retain_oid;

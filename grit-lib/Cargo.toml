@@ -37,6 +37,7 @@ unstable-bench-helpers = []
 [dependencies]
 thiserror.workspace = true
 sha1 = "0.11"
+sha1dc.workspace = true
 sha2 = "0.11"
 flate2.workspace = true
 time.workspace = true
