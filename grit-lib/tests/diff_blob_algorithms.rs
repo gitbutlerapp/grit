@@ -442,6 +442,38 @@ fn no_newline_at_eof_pairs_match_git_or_apply() {
 }
 
 #[test]
+fn append_after_eof_without_newline_matches_git() {
+    let old = b"a\nb";
+    let new = b"a\nb\nc";
+    for algo in [
+        LineDiffAlgo::Myers,
+        LineDiffAlgo::Minimal,
+        LineDiffAlgo::Patience,
+        LineDiffAlgo::Histogram,
+    ] {
+        let opts = default_opts(algo);
+        assert_patch_matches_git(old, new, "f.txt", &opts, &[], false);
+        let grit_p = grit_blob_patch(old, new, "f.txt", &opts);
+        let patch = wrap_apply_patch("f.txt", &grit_p);
+        assert!(
+            git_apply_check(old, &patch, "f.txt"),
+            "git apply --check failed for append-after-no-nl algo={algo:?}"
+        );
+        git_apply_and_compare(old, new, &patch, "f.txt");
+        let rh = patch_hunk_body(&grit_p);
+        assert!(
+            rh.contains("-b\n"),
+            "missing deletion of old last line: {rh:?}"
+        );
+        assert!(
+            rh.contains("+b\n"),
+            "missing re-added line with newline: {rh:?}"
+        );
+        assert!(rh.contains("+c\n"), "missing appended line: {rh:?}");
+    }
+}
+
+#[test]
 fn histogram_no_newline_eof_context_line_matches_git_and_applies() {
     let old = b"a\nb\nc";
     let new = b"a\nx\nc";

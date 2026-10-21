@@ -73,6 +73,22 @@ impl LineSide {
     }
 }
 
+/// Token for line-based diff alignment (Git compares full records including newline).
+///
+/// A line terminated with LF/CRLF must not match the same body at EOF without a newline.
+#[must_use]
+pub(crate) fn line_diff_token(line: &SourceLine) -> String {
+    match line.ending {
+        LineEnding::Missing => line.body.clone(),
+        LineEnding::Lf | LineEnding::CrLf => {
+            let mut s = String::with_capacity(line.body.len() + 1);
+            s.push_str(&line.body);
+            s.push('\n');
+            s
+        }
+    }
+}
+
 fn parse_line_segment(raw: &str, had_line_break: bool) -> SourceLine {
     if had_line_break {
         let ending = if raw.ends_with('\r') {
@@ -385,5 +401,15 @@ mod tests {
         assert!(body.contains("-one\n"));
         assert!(body.contains("+one\n"));
         assert!(body.contains("\\ No newline at end of file"));
+    }
+
+    #[test]
+    fn line_diff_token_distinguishes_eof_from_terminated() {
+        let no_nl = LineSide::from_text("a\nb");
+        let with_nl = LineSide::from_text("a\nb\n");
+        assert_ne!(
+            line_diff_token(no_nl.line(1)),
+            line_diff_token(with_nl.line(1))
+        );
     }
 }
