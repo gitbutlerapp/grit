@@ -139,10 +139,19 @@ impl RevSelectArgs {
         !self.author.is_empty() || !self.committer.is_empty() || !self.grep.is_empty()
     }
 
-    /// True when the caller named revisions or ref sets on the command line (not the command default).
+    /// True when the caller supplied revision, date, or ref-set selectors (not command defaults).
+    ///
+    /// Log continuation with `--cursor` must not repeat these; the cursor encodes the query.
     #[must_use]
-    pub fn has_explicit_revision_selection(&self) -> bool {
+    pub fn has_log_walk_selectors(&self) -> bool {
         !self.revs.is_empty()
+            || self.since.is_some()
+            || self.after.is_some()
+            || self.until.is_some()
+            || self
+                .before
+                .as_ref()
+                .is_some_and(|b| !b.starts_with(CURSOR_PREFIX))
             || self.all
             || self.branches.is_some()
             || self.tags.is_some()

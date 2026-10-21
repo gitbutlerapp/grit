@@ -197,7 +197,7 @@ fn log_cursor_pages_through_range() -> TestResult {
     let page1 = grit_json(&dir, &["log", "base..HEAD"]);
     assert_eq!(page1["commits"].as_array().expect("commits").len(), 10);
     let cursor = page1["next"].as_str().expect("next cursor for range walk");
-    let page2 = grit_json(&dir, &["log", "base..HEAD", &format!("--cursor={cursor}")]);
+    let page2 = grit_json(&dir, &["log", &format!("--cursor={cursor}")]);
     assert!(page2["next"].is_null());
     let paged: Vec<String> = page1["commits"]
         .as_array()
@@ -222,7 +222,85 @@ fn log_cursor_continues_range_with_cursor_only() -> TestResult {
     let page1 = grit_json(&dir, &["log", "base..HEAD"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     let page2 = grit_json(&dir, &["log", &format!("--cursor={cursor}")]);
-    assert!(!page2["commits"].as_array().expect("commits").is_empty());
+    let paged: Vec<String> = page1["commits"]
+        .as_array()
+        .expect("commits")
+        .iter()
+        .chain(page2["commits"].as_array().expect("commits").iter())
+        .map(|c| c["oid"].as_str().expect("oid").to_owned())
+        .collect();
+    assert_eq!(paged, git_oids(&dir, &["base..HEAD"]));
+    Ok(())
+}
+
+#[test]
+fn log_cursor_rejects_revision_selection() -> TestResult {
+    let dir = std::env::temp_dir().join(format!(
+        "grit-rev-select-cursor-reject-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    seed_linear_repo(&dir, 13);
+    git_branch(&dir, "base", "HEAD~12");
+    let page1 = grit_json(&dir, &["log", "base..HEAD"]);
+    let cursor = page1["next"].as_str().expect("next").to_owned();
+    let out = grit_run(&dir, &["log", &format!("--cursor={cursor}"), "base..HEAD"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cannot combine `--cursor`"),
+        "stderr: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn log_cursor_rejects_date_selectors() -> TestResult {
+    let dir = std::env::temp_dir().join(format!(
+        "grit-rev-select-cursor-dates-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    seed_linear_repo(&dir, 13);
+    git_branch(&dir, "base", "HEAD~12");
+    let page1 = grit_json(&dir, &["log", "base..HEAD"]);
+    let cursor = page1["next"].as_str().expect("next").to_owned();
+    for extra in [
+        "--since=9999999999",
+        "--before=9999999999",
+        "--until=1",
+        "--after=1",
+    ] {
+        let out = grit_run(&dir, &["log", &format!("--cursor={cursor}"), extra]);
+        assert!(!out.status.success(), "expected failure with {extra}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("cannot combine `--cursor`"),
+            "stderr for {extra}: {stderr}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn log_cursor_rejects_ref_set_selectors() -> TestResult {
+    let dir = std::env::temp_dir().join(format!(
+        "grit-rev-select-cursor-refs-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    seed_linear_repo(&dir, 12);
+    let page1 = grit_json(&dir, &["log"]);
+    let cursor = page1["next"].as_str().expect("next").to_owned();
+    for extra in ["--all", "--branches", "--tags"] {
+        let out = grit_run(&dir, &["log", &format!("--cursor={cursor}"), extra]);
+        assert!(!out.status.success(), "expected failure with {extra}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("cannot combine `--cursor`"),
+            "stderr for {extra}: {stderr}"
+        );
+    }
     Ok(())
 }
 
@@ -321,7 +399,7 @@ fn log_cursor_rejects_mismatched_revision_selection() -> TestResult {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("cursor was created for a different revision selection"),
+        stderr.contains("cannot combine `--cursor`"),
         "stderr: {stderr}"
     );
     Ok(())

@@ -273,6 +273,12 @@ pub fn run(
                 "`grit log` cannot combine `--cursor` with path filters; drop the cursor or the paths"
             );
         }
+        if rev.has_log_walk_selectors() {
+            bail!(
+                "`grit log` cannot combine `--cursor` with revision, date, or ref-set selectors; \
+                 pass only `--cursor` (and optionally `-n` / `--max-count` for page size)"
+            );
+        }
         if rev.reverse
             || rev.first_parent
             || rev.merges
@@ -286,19 +292,7 @@ pub fn run(
             );
         }
         let resume = LogWalkCursor::decode(token).context("invalid log continuation cursor")?;
-        let query = if rev.has_explicit_revision_selection() {
-            let token_refs = rev.rev_tokens(&["HEAD"]);
-            let expected =
-                LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.ok_or_else(|| {
-                    anyhow::anyhow!("cursor was created for a different revision selection")
-                })?;
-            if resume.query() != &expected {
-                bail!("cursor was created for a different revision selection");
-            }
-            expected
-        } else {
-            resume.query().clone()
-        };
+        let query = resume.query().clone();
         let page_size = rev.max_count.unwrap_or(PAGE);
         let page = LogWalkCursor::step(&repo, &query, Some(&resume), page_size)
             .context("could not list commits")?;
@@ -313,7 +307,7 @@ pub fn run(
             truncated,
             display,
             output_mode,
-            Some(continuation_args),
+            None,
         );
     }
 
