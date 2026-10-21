@@ -285,9 +285,12 @@ impl ObjectStore for PackedObjects {
     }
 
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let prefix = super::normalize_oid_prefix(prefix, self.hash_algo())?;
         self.with_pack(|objects_dir| {
             let indexes = read_local_pack_indexes_cached(objects_dir)?;
+            if indexes.is_empty() {
+                return Ok(());
+            }
+            let prefix = super::normalize_oid_prefix(prefix, self.hash_algo())?;
             let mut seen = HashSet::new();
             let mut count = 0usize;
             for idx in &indexes {
