@@ -204,9 +204,14 @@ harness = false
 name = "refs_reftable"
 harness = false
 
+[[bench]]
+name = "tree_sha256"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 

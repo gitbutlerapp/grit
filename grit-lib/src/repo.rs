@@ -883,6 +883,22 @@ impl Repository {
         crate::fsck::fsck(self, options, progress, cancel)
     }
 
+    /// SHA-256 content digest of a revision's tree ([tree-sha256] spec).
+    ///
+    /// [tree-sha256]: https://github.com/schacon/tree-sha256
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::Error::TreeSha256MissingSubmodules`] when submodule
+    /// checkouts or objects needed for hashing are absent.
+    pub fn tree_sha256(
+        &self,
+        oid: crate::objects::ObjectId,
+        options: &crate::tree_sha256::TreeSha256Options,
+    ) -> crate::error::Result<crate::tree_sha256::TreeSha256Report> {
+        crate::tree_sha256::tree_sha256(self, oid, options)
+    }
+
     /// Patch-ID for a single commit (merge commits and empty diffs return `None`).
     ///
     /// # Errors

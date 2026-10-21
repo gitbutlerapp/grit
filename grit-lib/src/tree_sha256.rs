@@ -1,0 +1,569 @@
+//! SHA-256 tree digest over repository file contents ([tree-sha256] spec).
+//!
+//! [tree-sha256]: https://github.com/schacon/tree-sha256
+
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+
+use crate::config::ConfigSet;
+use crate::diff::submodule_embedded_git_dir;
+use crate::environment::RepositoryOptions;
+use crate::error::{Error, Result};
+use crate::hash::try_par_hash_with;
+use crate::objects::{parse_commit, parse_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
+use crate::parallel::ParallelHashError;
+use crate::parallel::ParallelOp;
+use crate::repo::Repository;
+use crate::submodule_gitdir::{submodule_modules_git_dir, submodule_path_config_enabled};
+
+/// 32-byte tree-sha256 digest.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TreeSha256(pub [u8; 32]);
+
+impl TreeSha256 {
+    /// Digest bytes.
+    #[must_use]
+    pub const fn bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Lowercase hex encoding (64 characters).
+    #[must_use]
+    pub fn to_hex(&self) -> String {
+        let mut s = String::with_capacity(64);
+        for b in self.0 {
+            use std::fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+        }
+        s
+    }
+}
+
+impl fmt::Display for TreeSha256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_hex())
+    }
+}
+
+impl fmt::Debug for TreeSha256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("TreeSha256").field(&self.to_hex()).finish()
+    }
+}
+
+impl FromStr for TreeSha256 {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let s = s.trim();
+        if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(Error::Message("invalid tree-sha256 hex".into()));
+        }
+        let mut out = [0_u8; 32];
+        for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
+            let hi = hex_nibble(chunk[0])?;
+            let lo = hex_nibble(chunk[1])?;
+            out[i] = (hi << 4) | lo;
+        }
+        Ok(Self(out))
+    }
+}
+
+fn hex_nibble(b: u8) -> Result<u8> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        _ => Err(Error::Message("invalid tree-sha256 hex".into())),
+    }
+}
+
+/// Submodule exclusion and glob options for [`Repository::tree_sha256`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TreeSha256Options {
+    /// Glob patterns; `*` matches any byte including `/`, `?` one byte. Trailing `/` is trimmed.
+    pub exclude_globs: Vec<String>,
+    /// Submodule paths excluded exactly (full path from repository root).
+    pub exclude_exact: Vec<String>,
+}
+
+/// Outcome of a successful tree-sha256 computation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeSha256Report {
+    /// Final tree-sha256 digest.
+    pub digest: TreeSha256,
+    /// Regular file, executable, and symlink entries hashed.
+    pub files: usize,
+    /// Submodule entries whose contents were hashed recursively.
+    pub submodules: usize,
+    /// Excluded submodule paths and the gitlink commit recorded.
+    pub excluded: Vec<(String, ObjectId)>,
+    /// Submodule paths where a cycle was detected in the commit chain.
+    pub cycles: Vec<String>,
+}
+
+/// Why a submodule could not be hashed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MissingSubmoduleReason {
+    /// Submodule work tree or git directory is not present.
+    NotCheckedOut,
+    /// Gitlink commit is missing from the submodule object database.
+    MissingCommit,
+}
+
+/// One submodule that blocked hashing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingSubmodule {
+    /// Full path from the superproject root.
+    pub path: String,
+    /// What went wrong.
+    pub reason: MissingSubmoduleReason,
+}
+
+/// Compute tree-sha256 for `repo` at `oid` (peels annotated tags to commits).
+///
+/// # Errors
+///
+/// Returns [`Error::TreeSha256MissingSubmodules`] when any submodule required for
+/// hashing is missing; the error lists every missing path.
+pub fn tree_sha256(
+    repo: &Repository,
+    oid: ObjectId,
+    options: &TreeSha256Options,
+) -> Result<TreeSha256Report> {
+    tree_sha256_with_chain(repo, oid, options, &[])
+}
+
+fn tree_sha256_with_chain(
+    repo: &Repository,
+    oid: ObjectId,
+    options: &TreeSha256Options,
+    parent_chain: &[ObjectId],
+) -> Result<TreeSha256Report> {
+    let tree_oid = peel_to_tree(repo, oid)?;
+    let root_commit = peel_to_commit(repo, oid)?;
+    let mut commit_chain: Vec<ObjectId> = parent_chain.to_vec();
+    if let Some(c) = root_commit {
+        if !commit_chain.contains(&c) {
+            commit_chain.push(c);
+        }
+    }
+    let mut ctx = ComputeCtx {
+        repo,
+        options,
+        commit_chain,
+        records: Vec::new(),
+        missing: Vec::new(),
+        files: 0,
+        submodules: 0,
+        excluded: Vec::new(),
+        cycles: Vec::new(),
+        blob_jobs: Vec::new(),
+    };
+    ctx.walk_tree(tree_oid, "")?;
+    ctx.finish_blob_jobs()?;
+    if !ctx.missing.is_empty() {
+        return Err(Error::TreeSha256MissingSubmodules(ctx.missing));
+    }
+    ctx.records
+        .sort_by(|a, b| record_sort_key(a).cmp(record_sort_key(b)));
+    let mut concat = Vec::new();
+    for rec in &ctx.records {
+        concat.extend_from_slice(rec);
+    }
+    let digest_bytes = HashAlgo::Sha256.checksum_digest(&concat);
+    let digest_arr: [u8; 32] = digest_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| Error::Message("sha256 digest length".into()))?;
+    let digest = TreeSha256(digest_arr);
+    Ok(TreeSha256Report {
+        digest,
+        files: ctx.files,
+        submodules: ctx.submodules,
+        excluded: ctx.excluded,
+        cycles: ctx.cycles,
+    })
+}
+
+fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
+    let (peeled, kind) = repo.odb().peel_tags(oid)?;
+    match kind {
+        ObjectKind::Tree => Ok(peeled),
+        ObjectKind::Commit => {
+            let obj = repo.odb().read(&peeled)?;
+            Ok(parse_commit(&obj.data)?.tree)
+        }
+        other => Err(Error::Message(format!(
+            "tree-sha256: revision resolves to {other:?}, not a tree"
+        ))),
+    }
+}
+
+fn peel_to_commit(repo: &Repository, oid: ObjectId) -> Result<Option<ObjectId>> {
+    repo.odb().peel_to_commit(oid)
+}
+
+fn record_sort_key(record: &[u8]) -> &[u8] {
+    let Some(sp) = record.iter().position(|&b| b == b' ') else {
+        return record;
+    };
+    let start = sp + 1;
+    let end = record.iter().rposition(|&b| b == 0).unwrap_or(record.len());
+    &record[start..end]
+}
+
+struct BlobJob {
+    path: String,
+    oid: ObjectId,
+}
+
+struct ComputeCtx<'a> {
+    repo: &'a Repository,
+    options: &'a TreeSha256Options,
+    commit_chain: Vec<ObjectId>,
+    records: Vec<Vec<u8>>,
+    missing: Vec<MissingSubmodule>,
+    files: usize,
+    submodules: usize,
+    excluded: Vec<(String, ObjectId)>,
+    cycles: Vec<String>,
+    blob_jobs: Vec<BlobJob>,
+}
+
+impl ComputeCtx<'_> {
+    fn walk_tree(&mut self, tree_oid: ObjectId, prefix: &str) -> Result<()> {
+        let obj = self.repo.odb().read(&tree_oid)?;
+        if obj.kind != ObjectKind::Tree {
+            return Err(Error::CorruptObject(format!("expected tree {tree_oid}")));
+        }
+        let entries = parse_tree(&obj.data)?;
+        for TreeEntry { mode, name, oid } in entries {
+            let name_str = std::str::from_utf8(&name)
+                .map_err(|_| Error::CorruptObject("tree name not utf-8".into()))?;
+            if name_str.contains('/') || name_str.contains('\\') {
+                return Err(Error::CorruptObject("tree name contains slash".into()));
+            }
+            let mut path = String::with_capacity(prefix.len() + name_str.len());
+            path.push_str(prefix);
+            path.push_str(name_str);
+            match mode {
+                0o040000 => {
+                    let mut child_prefix = path;
+                    child_prefix.push('/');
+                    self.walk_tree(oid, &child_prefix)?;
+                }
+                0o100644 | 0o100755 | 0o120000 => {
+                    self.blob_jobs.push(BlobJob { path, oid });
+                }
+                0o160000 => self.handle_gitlink(&path, oid)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_gitlink(&mut self, path: &str, gitlink: ObjectId) -> Result<()> {
+        if self.is_excluded(path) {
+            self.push_excluded_record(path, gitlink);
+            self.excluded.push((path.to_owned(), gitlink));
+            return Ok(());
+        }
+        if gitlink_in_commit_chain(&self.commit_chain, gitlink) {
+            self.push_cycle_record(path, gitlink);
+            self.cycles.push(path.to_owned());
+            return Ok(());
+        }
+        if let Ok(obj) = self.repo.odb().read(&gitlink) {
+            if obj.kind == ObjectKind::Commit {
+                let tree = parse_commit(&obj.data)?.tree;
+                self.commit_chain.push(gitlink);
+                let mut prefix = path.to_owned();
+                if !prefix.ends_with('/') {
+                    prefix.push('/');
+                }
+                self.walk_tree(tree, &prefix)?;
+                self.commit_chain.pop();
+                return Ok(());
+            }
+        }
+        let Some(sub_repo) = self.open_submodule_repo(path)? else {
+            self.missing.push(MissingSubmodule {
+                path: path.to_owned(),
+                reason: MissingSubmoduleReason::NotCheckedOut,
+            });
+            return Ok(());
+        };
+        if sub_repo.odb().read(&gitlink).is_err() {
+            self.missing.push(MissingSubmodule {
+                path: path.to_owned(),
+                reason: MissingSubmoduleReason::MissingCommit,
+            });
+            return Ok(());
+        }
+        self.commit_chain.push(gitlink);
+        let sub_opts = TreeSha256Options {
+            exclude_globs: self.options.exclude_globs.clone(),
+            exclude_exact: self.options.exclude_exact.clone(),
+        };
+        match tree_sha256_with_chain(&sub_repo, gitlink, &sub_opts, &self.commit_chain) {
+            Ok(sub_report) => {
+                self.commit_chain.pop();
+                self.push_submodule_record(path, &sub_report.digest);
+                self.files += sub_report.files;
+                self.submodules += 1 + sub_report.submodules;
+                self.excluded.extend(sub_report.excluded);
+                self.cycles.extend(sub_report.cycles);
+            }
+            Err(Error::TreeSha256MissingSubmodules(mut miss)) => {
+                self.commit_chain.pop();
+                self.missing.append(&mut miss);
+            }
+            Err(e) => {
+                self.commit_chain.pop();
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    fn is_excluded(&self, path: &str) -> bool {
+        if self.options.exclude_exact.iter().any(|p| p == path) {
+            return true;
+        }
+        self.options
+            .exclude_globs
+            .iter()
+            .any(|g| path_matches_glob(path, g))
+    }
+
+    fn open_submodule_repo(&self, rel_path: &str) -> Result<Option<Repository>> {
+        let wt = match self.repo.work_tree() {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+        let sub_wt = wt.join(rel_path);
+        if !sub_wt.is_dir() {
+            return Ok(None);
+        }
+        if let Some(git_dir) = submodule_embedded_git_dir(&sub_wt) {
+            return Repository::open(&git_dir, &RepositoryOptions::empty().with_work_tree(sub_wt))
+                .map(Some);
+        }
+        let cfg = self.repo.config()?;
+        let name = submodule_name_for_path(&cfg, rel_path).unwrap_or_else(|| rel_path.to_owned());
+        let git_dir = resolve_submodule_git_dir(wt, self.repo.common_git_dir(), &cfg, &name)?;
+        if !git_dir.join("HEAD").exists() {
+            return Ok(None);
+        }
+        Repository::open(&git_dir, &RepositoryOptions::empty().with_work_tree(sub_wt)).map(Some)
+    }
+
+    fn finish_blob_jobs(&mut self) -> Result<()> {
+        if self.blob_jobs.is_empty() {
+            return Ok(());
+        }
+        let cfg = self.repo.config()?;
+        let threads = self
+            .repo
+            .thread_policy()
+            .resolve(ParallelOp::DiffContent, &cfg)
+            .parallelism()
+            .threads();
+        let total_bytes: usize = self.blob_jobs.iter().map(|j| j.oid.as_bytes().len()).sum();
+        let odb = self.repo.odb();
+        let hashed: Vec<String> = try_par_hash_with(
+            &self.blob_jobs,
+            threads,
+            total_bytes.max(1),
+            |job: &BlobJob| {
+                let obj = odb.read(&job.oid)?;
+                if !matches!(obj.kind, ObjectKind::Blob) {
+                    return Err(Error::CorruptObject(format!("expected blob {}", job.oid)));
+                }
+                Ok(hex_sha256_content(&obj.data))
+            },
+        )
+        .map_err(|e| match e {
+            ParallelHashError::Task(err) => err,
+        })?;
+        for (job, hex) in self.blob_jobs.iter().zip(hashed) {
+            self.records.push(file_record(&hex, &job.path));
+            self.files += 1;
+        }
+        Ok(())
+    }
+
+    fn push_submodule_record(&mut self, path: &str, digest: &TreeSha256) {
+        let mut rec = digest.to_hex().into_bytes();
+        rec.push(b' ');
+        rec.extend_from_slice(path.as_bytes());
+        if !path.ends_with('/') {
+            rec.push(b'/');
+        }
+        rec.push(0);
+        self.records.push(rec);
+    }
+
+    fn push_cycle_record(&mut self, path: &str, commit: ObjectId) {
+        let mut rec = b"cycle:".to_vec();
+        rec.extend_from_slice(commit.to_hex().as_bytes());
+        rec.push(b' ');
+        rec.extend_from_slice(path.as_bytes());
+        if !path.ends_with('/') {
+            rec.push(b'/');
+        }
+        rec.push(0);
+        self.records.push(rec);
+    }
+
+    fn push_excluded_record(&mut self, path: &str, commit: ObjectId) {
+        let mut rec = b"excluded:".to_vec();
+        rec.extend_from_slice(commit.to_hex().as_bytes());
+        rec.push(b' ');
+        rec.extend_from_slice(path.as_bytes());
+        if !path.ends_with('/') {
+            rec.push(b'/');
+        }
+        rec.push(0);
+        self.records.push(rec);
+    }
+}
+
+fn file_record(content_hex: &str, path: &str) -> Vec<u8> {
+    let mut rec = Vec::with_capacity(content_hex.len() + path.len() + 2);
+    rec.extend_from_slice(content_hex.as_bytes());
+    rec.push(b' ');
+    rec.extend_from_slice(path.as_bytes());
+    rec.push(0);
+    rec
+}
+
+fn hex_sha256_content(data: &[u8]) -> String {
+    let digest = HashAlgo::Sha256.checksum_digest(data);
+    let mut s = String::with_capacity(64);
+    for b in digest {
+        use std::fmt::Write as _;
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+fn resolve_submodule_git_dir(
+    work_tree: &Path,
+    super_git_dir: &Path,
+    cfg: &ConfigSet,
+    submodule_name: &str,
+) -> Result<PathBuf> {
+    if submodule_path_config_enabled(super_git_dir) {
+        let key = format!("submodule.{submodule_name}.gitdir");
+        let value = cfg.get(&key).ok_or_else(|| {
+            Error::Config(format!("missing {key} (submodulePathConfig enabled)").into())
+        })?;
+        Ok(resolve_gitdir_value(work_tree, &value))
+    } else {
+        Ok(submodule_modules_git_dir(super_git_dir, submodule_name))
+    }
+}
+
+fn resolve_gitdir_value(work_tree: &Path, gitdir_cfg: &str) -> PathBuf {
+    let p = Path::new(gitdir_cfg.trim());
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        work_tree.join(p)
+    }
+}
+
+fn submodule_name_for_path(cfg: &ConfigSet, path: &str) -> Option<String> {
+    for e in cfg.entries() {
+        let key = &e.key;
+        if let Some(rest) = key.strip_prefix("submodule.") {
+            if let Some(name) = rest.strip_suffix(".path") {
+                if e.value.as_deref() == Some(path) {
+                    return Some(name.to_owned());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Returns true when `gitlink` appears in `commit_chain` (cycle detection helper).
+#[must_use]
+pub fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> bool {
+    chain.contains(&gitlink)
+}
+
+/// Returns true when `path` matches `pattern` (Git tree-sha256 glob rules).
+#[must_use]
+pub fn path_matches_glob(path: &str, pattern: &str) -> bool {
+    let pattern = pattern.trim_end_matches('/');
+    glob_match(path.as_bytes(), pattern.as_bytes())
+}
+
+fn glob_match(path: &[u8], pat: &[u8]) -> bool {
+    glob_match_at(path, pat, 0, 0)
+}
+
+fn glob_match_at(path: &[u8], pat: &[u8], mut pi: usize, mut si: usize) -> bool {
+    loop {
+        if pi == pat.len() {
+            return si == path.len();
+        }
+        match pat[pi] {
+            b'*' => {
+                pi += 1;
+                if pi == pat.len() {
+                    return true;
+                }
+                while si <= path.len() {
+                    if glob_match_at(path, pat, pi, si) {
+                        return true;
+                    }
+                    si += 1;
+                }
+                return false;
+            }
+            b'?' => {
+                if si >= path.len() {
+                    return false;
+                }
+                pi += 1;
+                si += 1;
+            }
+            c => {
+                if si >= path.len() || path[si] != c {
+                    return false;
+                }
+                pi += 1;
+                si += 1;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod glob_tests {
+    use super::path_matches_glob;
+
+    #[test]
+    fn star_matches_slash() {
+        assert!(path_matches_glob("a/b/c", "a/*"));
+        assert!(path_matches_glob("nested/sub/file", "nested/*"));
+    }
+
+    #[test]
+    fn question_mark_one_byte() {
+        assert!(path_matches_glob("abc", "a?c"));
+        assert!(!path_matches_glob("ac", "a?c"));
+    }
+
+    #[test]
+    fn trailing_slash_on_pattern_trimmed() {
+        assert!(path_matches_glob("vendor", "vendor/"));
+    }
+}

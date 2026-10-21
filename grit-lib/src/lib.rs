@@ -316,6 +316,7 @@ mod tracked_path_tree;
 pub(crate) mod transfer;
 pub(crate) mod transport;
 pub(crate) mod transport_path;
+pub mod tree_sha256;
 pub(crate) mod unicode_normalization;
 pub(crate) mod unpack_objects;
 pub(crate) mod untracked_cache;

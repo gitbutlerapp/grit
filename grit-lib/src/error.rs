@@ -938,6 +938,10 @@ pub enum Error {
         /// Object-store operation that the backend does not implement.
         operation: &'static str,
     },
+
+    /// One or more submodules required for [`crate::tree_sha256::tree_sha256`] are missing.
+    #[error("tree-sha256: missing submodules")]
+    TreeSha256MissingSubmodules(Vec<crate::tree_sha256::MissingSubmodule>),
 }
 
 impl Error {
