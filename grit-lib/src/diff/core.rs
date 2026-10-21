@@ -119,6 +119,7 @@ pub(crate) fn histogram_unified_body_raw(
     context_lines: usize,
     inter_hunk_context: usize,
     indent_heuristic: bool,
+    function_context: bool,
     ws: super::WhitespaceMode,
 ) -> String {
     let before_side = LineSide::from_text(old_content);
@@ -140,7 +141,7 @@ pub(crate) fn histogram_unified_body_raw(
         UnifiedEmitOptions {
             context_lines,
             inter_hunk_context,
-            function_context: false,
+            function_context,
         },
         None,
     )
@@ -336,6 +337,7 @@ fn diff_ops_to_edit_spans(ops: &[similar::DiffOp]) -> Vec<EditSpan> {
 }
 
 /// Unified hunk body using Git's xdiff engine (no `---` / `+++`).
+#[allow(clippy::too_many_arguments)]
 fn git_xdiff_unified_body_raw(
     old_content: &str,
     new_content: &str,
@@ -343,6 +345,7 @@ fn git_xdiff_unified_body_raw(
     inter_hunk_context: usize,
     indent_heuristic: bool,
     need_min: bool,
+    function_context: bool,
     ws: super::WhitespaceMode,
 ) -> String {
     git_xdiff_unified_body_raw_with_ignorable(
@@ -352,6 +355,7 @@ fn git_xdiff_unified_body_raw(
         inter_hunk_context,
         indent_heuristic,
         need_min,
+        function_context,
         ws,
         None::<fn(&[&str], &[&str]) -> bool>,
     )
@@ -365,6 +369,7 @@ fn git_xdiff_unified_body_raw_with_ignorable<F>(
     inter_hunk_context: usize,
     indent_heuristic: bool,
     need_min: bool,
+    function_context: bool,
     ws: super::WhitespaceMode,
     is_ignorable_change: Option<F>,
 ) -> String
@@ -399,7 +404,7 @@ where
         UnifiedEmitOptions {
             context_lines,
             inter_hunk_context,
-            function_context: false,
+            function_context,
         },
         None,
     )
@@ -412,6 +417,7 @@ fn git_patience_unified_body_raw_with_ignorable<F>(
     context_lines: usize,
     inter_hunk_context: usize,
     indent_heuristic: bool,
+    function_context: bool,
     ws: super::WhitespaceMode,
     is_ignorable_change: Option<F>,
 ) -> String
@@ -477,7 +483,7 @@ where
         UnifiedEmitOptions {
             context_lines,
             inter_hunk_context,
-            function_context: false,
+            function_context,
         },
         None,
     )
@@ -500,6 +506,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
     use crate::diff::options::DiffAlgorithm;
 
     let ws = options.whitespace;
+    let fc = options.function_context;
     if ws.is_active() {
         let blank_only = blank_line_ignorable(ws);
         if ws.normalizes_line_compare() {
@@ -512,6 +519,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.inter_hunk_context,
                     options.indent_heuristic,
                     false,
+                    fc,
                     ws,
                     ignorable,
                 ),
@@ -522,6 +530,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.inter_hunk_context,
                     options.indent_heuristic,
                     true,
+                    fc,
                     ws,
                     ignorable,
                 ),
@@ -531,6 +540,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.context_lines,
                     options.inter_hunk_context,
                     options.indent_heuristic,
+                    fc,
                     ws,
                     ignorable,
                 ),
@@ -541,7 +551,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                             new_content,
                             options.context_lines,
                             options.inter_hunk_context,
-                            false,
+                            fc,
                             None,
                             options.indent_heuristic,
                             ws,
@@ -554,6 +564,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                             options.context_lines,
                             options.inter_hunk_context,
                             options.indent_heuristic,
+                            fc,
                             ws,
                         )
                     }
@@ -569,6 +580,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.inter_hunk_context,
                     options.indent_heuristic,
                     false,
+                    fc,
                     ws,
                     Some(blank_only),
                 ),
@@ -579,6 +591,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.inter_hunk_context,
                     options.indent_heuristic,
                     true,
+                    fc,
                     ws,
                     Some(blank_only),
                 ),
@@ -588,6 +601,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     options.context_lines,
                     options.inter_hunk_context,
                     options.indent_heuristic,
+                    fc,
                     ws,
                     Some(blank_only),
                 ),
@@ -596,7 +610,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
                     new_content,
                     options.context_lines,
                     options.inter_hunk_context,
-                    false,
+                    fc,
                     None,
                     options.indent_heuristic,
                     ws,
@@ -613,6 +627,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
             options.inter_hunk_context,
             options.indent_heuristic,
             false,
+            fc,
             ws,
         ),
         DiffAlgorithm::Minimal => git_xdiff_unified_body_raw(
@@ -622,6 +637,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
             options.inter_hunk_context,
             options.indent_heuristic,
             true,
+            fc,
             ws,
         ),
         DiffAlgorithm::Patience => git_patience_unified_body_raw(
@@ -630,6 +646,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
             options.context_lines,
             options.inter_hunk_context,
             options.indent_heuristic,
+            fc,
         ),
         DiffAlgorithm::Histogram => histogram_unified_body_raw(
             old_content,
@@ -637,6 +654,7 @@ pub(crate) fn unified_hunk_body_for_diff_options(
             options.context_lines,
             options.inter_hunk_context,
             options.indent_heuristic,
+            fc,
             ws,
         ),
     }
@@ -649,6 +667,7 @@ fn git_patience_unified_body_raw(
     context_lines: usize,
     inter_hunk_context: usize,
     indent_heuristic: bool,
+    function_context: bool,
 ) -> String {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
@@ -681,7 +700,7 @@ fn git_patience_unified_body_raw(
         UnifiedEmitOptions {
             context_lines,
             inter_hunk_context,
-            function_context: false,
+            function_context,
         },
         None,
     )
@@ -800,6 +819,7 @@ fn unified_diff_git_myers_with_prefix_and_funcname(
         inter_hunk_context,
         indent_heuristic,
         false,
+        false,
         super::WhitespaceMode::default(),
     );
 
@@ -880,6 +900,7 @@ fn unified_diff_git_minimal_with_prefix_and_funcname(
         inter_hunk_context,
         indent_heuristic,
         true,
+        false,
         super::WhitespaceMode::default(),
     );
 
@@ -959,6 +980,7 @@ fn unified_diff_git_patience_with_prefix_and_funcname(
         context_lines,
         inter_hunk_context,
         indent_heuristic,
+        false,
     );
 
     let mut output = String::new();
@@ -1032,6 +1054,7 @@ pub fn unified_diff_histogram_hunks_only(
         context_lines,
         inter_hunk_context,
         indent_heuristic,
+        false,
         super::WhitespaceMode::default(),
     )
 }
@@ -1088,6 +1111,7 @@ fn unified_diff_histogram_with_prefix_and_funcname_indent(
         context_lines,
         inter_hunk_context,
         indent_heuristic,
+        false,
         super::WhitespaceMode::default(),
     );
 
@@ -6627,6 +6651,14 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
         {
             // Sparse checkout: `git diff <rev>` does not report tree↔worktree drift for
             // skip-worktree paths (they are outside the sparse cone). Matches t7012 stash flow.
+            continue;
+        }
+        if index_entries
+            .get(path.as_bytes())
+            .is_some_and(|ie| ie.assume_unchanged())
+        {
+            // `assume-unchanged` entries are omitted from `git diff <rev>` even when the worktree
+            // differs (matches Git `CE_VALID` / diff-lib behavior).
             continue;
         }
 

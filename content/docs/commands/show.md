@@ -42,6 +42,7 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 | `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
 | `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
 | `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
+| `--patch-text` | Git apply-compatible patch text (same as [`grit diff`](diff.md)). |
 | `--find-renames` | Detect renames (Git `-M`; default threshold 50). |
 | `--no-renames` | Disable rename detection. |
 | `--diff-algorithm <algo>` | Line diff algorithm for the patch. |
@@ -186,11 +187,9 @@ Pass [`--markdown`](../global-options/) for headings, commit metadata, message b
 
 ## second
 
-```diff
-@@ -1,1 +1,2 @@
- line
-+added
-```
+     @@ -1,1 +1,2 @@
+     line
+    +added
 ```
 
 ## See also

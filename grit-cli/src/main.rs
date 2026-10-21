@@ -513,6 +513,12 @@ enum Command {
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
     Diff {
+        /// Compare two paths outside any repository (Git `--no-index`).
+        #[arg(
+            long = "no-index",
+            conflicts_with_all = ["staged", "unstaged", "against"]
+        )]
+        no_index: bool,
         /// Staged changes only (index vs HEAD).
         #[arg(short = 'S', long = "staged", visible_aliases = ["cached"])]
         staged: bool,
@@ -1156,6 +1162,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Diff {
+            no_index,
             staged,
             unstaged,
             against,
@@ -1165,8 +1172,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             paths,
             format,
         } => {
+            if format.patch_text && matches!(opts.mode, crate::output::OutputMode::Json) {
+                anyhow::bail!("--patch-text cannot be used with --json");
+            }
             let wants_exit_code = exit_code || quiet;
             match commands::diff::run(commands::diff::DiffRunOptions {
+                no_index,
                 staged,
                 unstaged,
                 against,
@@ -1182,7 +1193,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     if !quiet {
                         emit(&outcome, opts, ctx)?;
                     }
-                    if wants_exit_code {
+                    if wants_exit_code || no_index {
                         std::process::exit(commands::diff::exit_code(&outcome));
                     }
                     Ok(())
@@ -1213,6 +1224,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                         && commands::diff::diff_word_level_inline_for_output(),
                     diff_merges,
+                    now: ctx.now.unix_timestamp(),
                 })?,
                 opts,
                 ctx,
@@ -2197,7 +2209,21 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     }
 
     fn schema_top_level_field_names(schema: &serde_json::Value) -> HashSet<String> {
+        schema_top_level_field_names_inner(schema, schema)
+    }
+
+    fn schema_top_level_field_names_inner(
+        schema: &serde_json::Value,
+        root: &serde_json::Value,
+    ) -> HashSet<String> {
         let mut keys = HashSet::new();
+        if let Some(ref_name) = schema.get("$ref").and_then(|r| r.as_str()) {
+            if let Some(stripped) = ref_name.strip_prefix("#/definitions/") {
+                if let Some(def) = root.get("definitions").and_then(|d| d.get(stripped)) {
+                    return schema_top_level_field_names_inner(def, root);
+                }
+            }
+        }
         if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
             keys.extend(props.keys().cloned());
             return keys;
@@ -2205,22 +2231,13 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         for branch_key in ["anyOf", "oneOf"] {
             if let Some(items) = schema.get(branch_key).and_then(|v| v.as_array()) {
                 for item in items {
-                    keys.extend(schema_top_level_field_names(item));
+                    keys.extend(schema_top_level_field_names_inner(item, root));
                 }
                 return keys;
             }
         }
         if let Some(items) = schema.get("items") {
-            if let Some(ref_name) = items
-                .get("$ref")
-                .and_then(|r| r.as_str())
-                .and_then(|r| r.strip_prefix("#/definitions/"))
-            {
-                if let Some(def) = schema.get("definitions").and_then(|d| d.get(ref_name)) {
-                    return schema_top_level_field_names(def);
-                }
-            }
-            keys.extend(schema_top_level_field_names(items));
+            keys.extend(schema_top_level_field_names_inner(items, root));
         }
         keys
     }

@@ -8,6 +8,10 @@ use grit_lib::diff::{
     RenameDetection,
 };
 
+fn parse_find_renames_threshold(s: &str) -> Result<u8, String> {
+    parse_diff_rename_threshold_percent(s).ok_or_else(|| format!("invalid threshold `{s}`"))
+}
+
 /// Mutually exclusive diff output formats (default: patch for `grit diff`; none for `grit log`).
 #[derive(Debug, Default, Args, Clone, Copy)]
 pub struct DiffFormatArgs {
@@ -18,6 +22,19 @@ pub struct DiffFormatArgs {
         conflicts_with_all = ["stat", "numstat", "shortstat", "name_only", "name_status"]
     )]
     pub patch: bool,
+    /// Git apply-compatible patch text (`index` lines and `+`/`-` hunks), not delta-style output.
+    #[arg(
+        long = "patch-text",
+        conflicts_with_all = [
+            "patch",
+            "stat",
+            "numstat",
+            "shortstat",
+            "name_only",
+            "name_status"
+        ]
+    )]
+    pub patch_text: bool,
     /// Summary with change bars per file (like `git diff --stat`).
     #[arg(
         long = "stat",
@@ -80,7 +97,8 @@ pub struct DiffFormatArgs {
         value_name = "N",
         num_args = 0..=1,
         default_missing_value = "50",
-        require_equals = true
+        require_equals = true,
+        value_parser = parse_find_renames_threshold
     )]
     find_renames: Option<Option<u8>>,
     /// Do not detect renames.
@@ -99,6 +117,7 @@ impl DiffFormatArgs {
     #[must_use]
     pub fn any_format_flag(self) -> bool {
         self.patch
+            || self.patch_text
             || self.stat
             || self.numstat
             || self.shortstat
@@ -185,6 +204,10 @@ impl DiffFormatArgs {
             diff_options.filter = Some(spec);
         }
 
+        if self.function_context {
+            diff_options.function_context = true;
+        }
+
         let _ = config;
 
         Ok(())
@@ -197,20 +220,14 @@ impl DiffFormatArgs {
     }
 }
 
-/// Parse a rename threshold token (`30`, `30%`, …) for tests and argv expansion.
-#[must_use]
-pub fn parse_rename_threshold_token(token: &str) -> Option<u8> {
-    parse_diff_rename_threshold_percent(token)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use grit_lib::diff::parse_diff_rename_threshold_percent;
 
     #[test]
     fn parse_rename_threshold_accepts_git_forms() {
-        assert_eq!(parse_rename_threshold_token("30"), Some(30));
-        assert_eq!(parse_rename_threshold_token("30%"), Some(30));
-        assert_eq!(parse_rename_threshold_token("50"), Some(50));
+        assert_eq!(parse_diff_rename_threshold_percent("30"), Some(30));
+        assert_eq!(parse_diff_rename_threshold_percent("30%"), Some(30));
+        assert_eq!(parse_diff_rename_threshold_percent("50"), Some(50));
     }
 }

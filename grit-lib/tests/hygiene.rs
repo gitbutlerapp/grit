@@ -397,12 +397,50 @@ fn skip_ident(bytes: &[u8], mut i: usize) -> Option<usize> {
     Some(i)
 }
 
-fn skip_string(bytes: &[u8], mut i: usize) -> Option<usize> {
+/// Skip a Rust string/char literal starting at `i` (handles `b"…"`, `r"…"`, `r#"…"#`, etc.).
+fn skip_string(bytes: &[u8], i: usize) -> Option<usize> {
+    try_skip_rust_string(bytes, i).or(Some(i))
+}
+
+fn try_skip_rust_string(bytes: &[u8], mut i: usize) -> Option<usize> {
     if i >= bytes.len() {
-        return Some(i);
+        return None;
     }
-    let quote = bytes[i];
+    if bytes[i] == b'b' || bytes[i] == b'B' {
+        i += 1;
+    }
+    let mut raw = false;
+    if i < bytes.len() && (bytes[i] == b'r' || bytes[i] == b'R') {
+        raw = true;
+        i += 1;
+    }
+    let mut hash_count = 0usize;
+    while i < bytes.len() && bytes[i] == b'#' {
+        hash_count += 1;
+        i += 1;
+    }
+    let quote = *bytes.get(i)?;
+    if quote != b'"' && quote != b'\'' {
+        return None;
+    }
     i += 1;
+    if raw || hash_count > 0 {
+        while i < bytes.len() {
+            if bytes[i] == quote {
+                let mut h = 0usize;
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j] == b'#' {
+                    h += 1;
+                    j += 1;
+                }
+                if h == hash_count {
+                    return Some(j - 1);
+                }
+            }
+            i += 1;
+        }
+        return Some(bytes.len().saturating_sub(1));
+    }
     while i < bytes.len() {
         if bytes[i] == b'\\' {
             i += 2;
@@ -431,8 +469,10 @@ fn skip_balanced(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usiz
                     return Some(i);
                 }
             }
-            b'"' | b'\'' => {
-                i = skip_string(bytes, i)?;
+            b'b' | b'B' | b'r' | b'R' | b'"' | b'\'' => {
+                if let Some(end) = try_skip_rust_string(bytes, i) {
+                    i = end;
+                }
             }
             _ => {}
         }

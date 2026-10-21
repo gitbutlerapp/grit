@@ -3390,6 +3390,34 @@ impl PackLookupOptions {
     };
 }
 
+/// Pick one pack index for monotonic commit reads (single pack, or commit pack + blob promisor).
+fn select_single_local_pack_index(
+    indexes: &[Arc<PackIndex>],
+    commit_hint: Option<&crate::objects::ObjectId>,
+) -> Result<Option<Arc<PackIndex>>> {
+    if indexes.is_empty() {
+        return Ok(None);
+    }
+    if indexes.len() == 1 {
+        return Ok(Some(Arc::clone(&indexes[0])));
+    }
+    if let Some(oid) = commit_hint {
+        let mut found: Option<Arc<PackIndex>> = None;
+        for idx in indexes {
+            if idx.find_offset(oid)?.is_some() {
+                if found.is_some() {
+                    return Ok(None);
+                }
+                found = Some(Arc::clone(idx));
+            }
+        }
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
+}
+
 /// Sorted `cat-file --batch` reader for repos with exactly one local pack (hot-path benchmarks).
 ///
 /// Keeps a pack index cursor so probes in non-decreasing OID order avoid repeated binary search.
@@ -3400,6 +3428,7 @@ pub struct SingleLocalPackReader {
     cursor: usize,
     info_cache: HashMap<u64, ObjectInfo>,
     delta_scratch: ZlibInflateScratch,
+    commit_header_buf: Vec<u8>,
 }
 
 fn objects_dir_has_loose_objects(objects_dir: &Path) -> bool {
@@ -3429,24 +3458,32 @@ impl SingleLocalPackReader {
     ///
     /// Propagates pack directory read failures from index loading.
     pub fn open(objects_dir: &Path) -> Result<Option<Self>> {
-        Self::open_with_options(objects_dir, false)
+        Self::open_with_options(objects_dir, false, None)
     }
 
     /// Open when one local pack exists, optionally ignoring loose objects (commit parent walks).
     pub fn open_allow_loose(objects_dir: &Path) -> Result<Option<Self>> {
-        Self::open_with_options(objects_dir, true)
+        Self::open_with_options(objects_dir, true, None)
     }
 
-    fn open_with_options(objects_dir: &Path, allow_loose: bool) -> Result<Option<Self>> {
+    /// Like [`Self::open_allow_loose`], but when several packs exist (e.g. promisor blob
+    /// packs from partial clone), select the pack that contains `commit_hint`.
+    pub(crate) fn open_allow_loose_for_commits(
+        objects_dir: &Path,
+        commit_hint: &crate::objects::ObjectId,
+    ) -> Result<Option<Self>> {
+        Self::open_with_options(objects_dir, true, Some(commit_hint))
+    }
+
+    /// Open a reader bound to a specific on-disk pack index (bitmap / pack-order walks).
+    pub(crate) fn open_for_pack_index(
+        objects_dir: &Path,
+        idx: Arc<PackIndex>,
+    ) -> Result<Option<Self>> {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
             return Ok(None);
         }
         pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
-        let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
-        if indexes.len() != 1 || (!allow_loose && objects_dir_has_loose_objects(objects_dir)) {
-            return Ok(None);
-        }
-        let idx = Arc::clone(&indexes[0]);
         let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
         validate_pack_index_object_count(pack_bytes.as_ref(), idx.as_ref())?;
         pack_cache::mark_pack_object_count_validated(&idx.pack_path);
@@ -3459,7 +3496,124 @@ impl SingleLocalPackReader {
             cursor: 0,
             info_cache: HashMap::new(),
             delta_scratch: ZlibInflateScratch::default(),
+            commit_header_buf: Vec::with_capacity(COMMIT_HEADER_READ_PREFIX),
         }))
+    }
+
+    /// Whether `oid` is indexed in this reader's pack.
+    pub(crate) fn contains_oid(&self, oid: &crate::objects::ObjectId) -> Result<bool> {
+        Ok(self.idx.find_offset(oid)?.is_some())
+    }
+
+    fn open_with_options(
+        objects_dir: &Path,
+        allow_loose: bool,
+        commit_hint: Option<&crate::objects::ObjectId>,
+    ) -> Result<Option<Self>> {
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return Ok(None);
+        }
+        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
+        let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
+        let idx = match select_single_local_pack_index(&indexes, commit_hint)? {
+            Some(idx) => idx,
+            None => return Ok(None),
+        };
+        if !allow_loose && objects_dir_has_loose_objects(objects_dir) {
+            return Ok(None);
+        }
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        validate_pack_index_object_count(pack_bytes.as_ref(), idx.as_ref())?;
+        pack_cache::mark_pack_object_count_validated(&idx.pack_path);
+        pack_cache::remember_pack_hit(objects_dir, &idx);
+        let pack_id = pack_cache::pack_id_for(&idx.pack_path);
+        Ok(Some(Self {
+            idx,
+            pack_bytes,
+            pack_id,
+            cursor: 0,
+            info_cache: HashMap::new(),
+            delta_scratch: ZlibInflateScratch::default(),
+            commit_header_buf: Vec::with_capacity(COMMIT_HEADER_READ_PREFIX),
+        }))
+    }
+
+    /// Inflate the start of commit `oid` into an internal buffer (undeltified entries only).
+    ///
+    /// Returns `None` when the object is missing, not a commit, or stored as a delta.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack index and zlib errors.
+    pub fn read_commit_author_prefix(&mut self, oid: &ObjectId) -> Result<Option<&[u8]>> {
+        self.read_commit_author_prefix_at(oid, true)
+    }
+
+    /// Like [`Self::read_commit_author_prefix`], but pack index probes may be out of OID order.
+    pub(crate) fn read_commit_author_prefix_unordered(
+        &mut self,
+        oid: &ObjectId,
+    ) -> Result<Option<&[u8]>> {
+        self.read_commit_author_prefix_at(oid, false)
+    }
+
+    /// Inflate the start of the commit at pack index row `row` (pack-order / bitmap walks).
+    pub(crate) fn read_commit_author_prefix_at_pack_row(
+        &mut self,
+        row: usize,
+    ) -> Result<Option<&[u8]>> {
+        self.cursor = row;
+        let offset = self.idx.offset_at(row)?;
+        self.read_commit_author_prefix_at_pack_offset(offset)
+    }
+
+    fn read_commit_author_prefix_at(
+        &mut self,
+        oid: &ObjectId,
+        monotonic: bool,
+    ) -> Result<Option<&[u8]>> {
+        let offset = if monotonic {
+            self.idx.find_offset_monotonic(oid, &mut self.cursor)?
+        } else {
+            self.idx.find_offset(oid)?
+        };
+        let Some(offset) = offset else {
+            return Ok(None);
+        };
+        self.read_commit_author_prefix_at_pack_offset(offset)
+    }
+
+    fn read_commit_author_prefix_at_pack_offset(
+        &mut self,
+        offset: u64,
+    ) -> Result<Option<&[u8]>> {
+        let pack_bytes = self.pack_bytes.as_ref();
+        let mut pos = offset as usize;
+        if pos >= pack_bytes.len() {
+            return Ok(None);
+        }
+        let (packed_type, _) = match parse_pack_object_header(pack_bytes, &mut pos) {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+        if !matches!(packed_type, PackedType::Commit) {
+            return Ok(None);
+        }
+        self.commit_header_buf.clear();
+        self.delta_scratch.decompress_prefix_into(
+            &pack_bytes[pos..],
+            COMMIT_HEADER_READ_PREFIX,
+            &mut self.commit_header_buf,
+        )?;
+        if self.commit_header_buf.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(&self.commit_header_buf))
+    }
+
+    /// Drop any cached commit header prefix (required before delta / ODB fallbacks).
+    pub(crate) fn clear_commit_header_prefix(&mut self) {
+        self.commit_header_buf.clear();
     }
 
     fn read_info_at_pack_offset(&mut self, start_offset: u64) -> Result<ObjectInfo> {
@@ -3593,14 +3747,17 @@ impl SingleLocalPackReader {
         oid: &ObjectId,
         max_out: usize,
     ) -> Result<Option<Vec<u8>>> {
-        let Some(offset) = self.idx.find_offset(oid)? else {
-            return Ok(None);
-        };
-        Ok(read_whole_pack_entry_data_prefix_fast(
-            offset,
-            self.pack_bytes.as_ref(),
-            max_out,
-        ))
+        if max_out != COMMIT_HEADER_READ_PREFIX {
+            let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
+                return Ok(None);
+            };
+            return Ok(read_whole_pack_entry_data_prefix_fast(
+                offset,
+                self.pack_bytes.as_ref(),
+                max_out,
+            ));
+        }
+        Ok(self.read_commit_author_prefix(oid)?.map(|p| p.to_vec()))
     }
 
     /// Pack file offset for `oid` in this reader's index, if present.

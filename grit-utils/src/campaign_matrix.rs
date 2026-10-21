@@ -86,7 +86,7 @@ pub fn run_fixture_cli_matrix(
     hyperfine: &Path,
     git: &Path,
     grit: &Path,
-    _bench_exe: &Path,
+    bench_exe: &Path,
     cfg: &RunConfig,
     fixture: &CampaignFixture,
     smoke: bool,

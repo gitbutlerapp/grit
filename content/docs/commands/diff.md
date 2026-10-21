@@ -31,6 +31,7 @@ These flags are shared by [`grit diff`](diff.md), [`grit show`](show.md), and [`
 | Option | Description |
 | --- | --- |
 | `-p`, `--patch` | Full unified patch (default for `grit diff` and `grit show` when no other format is set). |
+| `--patch-text` | Git apply-compatible patch (`index` lines and `+`/`-` hunks). Cannot be combined with `--json`. |
 | `--stat` | Per-file change counts with `+`/`-` bars and a summary line. |
 | `--numstat` | `insertions<TAB>deletions<TAB>path` lines (`-<TAB>-` for binary). |
 | `--shortstat` | Summary line only (`N files changed, …`). |
@@ -52,6 +53,7 @@ These flags are shared by [`grit diff`](diff.md), [`grit show`](show.md), and [`
 
 | Option | Description |
 | --- | --- |
+| `--no-index` | Compare two filesystem paths outside any repository (Git `--no-index`). Requires exactly two path arguments; cannot be combined with `--staged`, `--unstaged`, or `--against`. Exit status is 1 when the paths differ (like Git), 0 when they match. |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
@@ -128,6 +130,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
+| `changed` | boolean | True when at least one file differs (used with `--exit-code` / `--quiet`). |
 | `files` | array | Changed files (see nested fields below). |
 | `totals` | object | Present for `--stat`, `--numstat`, and `--shortstat`: `files_changed`, `insertions`, `deletions`. |
 

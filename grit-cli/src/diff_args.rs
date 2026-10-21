@@ -161,10 +161,25 @@ fn rewrite_attached_find_renames(token: &str) -> Option<String> {
     if rest.is_empty() || rest.starts_with('=') {
         return None;
     }
-    let Some(pct) = parse_diff_rename_threshold_percent(rest) else {
+    if !attached_rename_threshold_token(rest) {
         return None;
-    };
-    Some(format!("-M={pct}"))
+    }
+    Some(format!("-M={rest}"))
+}
+
+fn attached_rename_threshold_token(rest: &str) -> bool {
+    let mut saw_digit = false;
+    for ch in rest.chars() {
+        if ch == '%' {
+            return saw_digit;
+        }
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+            continue;
+        }
+        return false;
+    }
+    saw_digit
 }
 
 #[cfg(test)]
@@ -189,6 +204,13 @@ mod tests {
             "HEAD".into(),
         ]);
         assert_eq!(pct[2], "-M=100%");
+        let bare = normalize_diff_argv(vec![
+            "grit".into(),
+            "diff".into(),
+            "-M5".into(),
+            "HEAD".into(),
+        ]);
+        assert_eq!(bare[2], "-M=5");
     }
 
     #[test]

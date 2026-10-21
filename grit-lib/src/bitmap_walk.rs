@@ -154,6 +154,26 @@ impl ReachableSet {
         .flat_map(|kind| self.iter_by_kind(kind))
     }
 
+    /// Reachable commit bitmap bit positions in ascending order (indexed namespace only).
+    pub(crate) fn reachable_commit_bitmap_positions(
+        &self,
+    ) -> std::result::Result<Vec<u32>, BitmapWalkError> {
+        let Ok(mut type_bits) = (|| {
+            let mut tb = Bitmap::new();
+            self.index
+                .type_bitmap(ObjectKind::Commit)
+                .expand_into_bitmap(&mut tb)?;
+            Ok::<_, BitmapError>(tb)
+        })() else {
+            return Ok(Vec::new());
+        };
+        type_bits.and_assign(&self.bits);
+        Ok(type_bits
+            .set_bits()
+            .map(|p| u32::try_from(p).unwrap_or(u32::MAX))
+            .collect())
+    }
+
     fn type_filtered_positions(&self, kind: ObjectKind) -> Vec<u32> {
         let Ok(mut type_bits) = (|| {
             let mut tb = Bitmap::new();

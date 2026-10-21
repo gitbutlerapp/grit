@@ -7,13 +7,17 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
-use crate::progress::{ProgressPhase, ProgressUnit};
+use crate::objects::HashAlgo;
+use crate::pack_stream_scan::PackStreamScanner;
+use crate::progress::{ProgressPhase, ProgressUnit, ReceivedObjects};
 
 /// Where demuxed pack bytes are stored.
 pub enum PackReceiveTarget<'a> {
@@ -43,25 +47,148 @@ pub fn append_pack_data(
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
 ) -> Result<u64> {
-    if *seen_pack {
-        let n = data.len() as u64;
-        target.append(data)?;
-        return Ok(n);
-    }
-    pending.extend_from_slice(data);
-    if let Some(pos) = find_pack_magic(pending) {
-        *seen_pack = true;
-        let chunk = &pending[pos..];
-        let n = chunk.len() as u64;
-        target.append(chunk)?;
-        pending.clear();
-        Ok(n)
+    append_pack_data_counted(data, target, pending, seen_pack, None)
+}
+
+/// [`append_pack_data`] that also hands every pack byte to `counter`.
+fn append_pack_data_counted(
+    data: &[u8],
+    target: &mut PackReceiveTarget<'_>,
+    pending: &mut Vec<u8>,
+    seen_pack: &mut bool,
+    counter: Option<&mut ObjectCounter>,
+) -> Result<u64> {
+    let chunk = if *seen_pack {
+        data
     } else {
-        if pending.len() > 3 {
-            let keep_from = pending.len() - 3;
-            pending.drain(..keep_from);
+        pending.extend_from_slice(data);
+        let Some(pos) = find_pack_magic(pending) else {
+            if pending.len() > 3 {
+                let keep_from = pending.len() - 3;
+                pending.drain(..keep_from);
+            }
+            return Ok(0);
+        };
+        *seen_pack = true;
+        &pending[pos..]
+    };
+    let n = chunk.len() as u64;
+    target.append(chunk)?;
+    if let Some(counter) = counter {
+        counter.push(chunk);
+    }
+    if !pending.is_empty() {
+        pending.clear();
+    }
+    Ok(n)
+}
+
+/// Pack bytes handed to the counting thread at a time.
+const COUNTER_BATCH: usize = 256 * 1024;
+/// Batches the counting thread may fall behind by before counting is
+/// abandoned, so a receive faster than inflate never waits or buffers
+/// without bound.
+const COUNTER_BACKLOG: usize = 64;
+
+/// Counts held by the background thread, read by the receiving thread.
+#[derive(Default)]
+struct CounterState {
+    header_seen: AtomicBool,
+    total: AtomicU64,
+    received: AtomicU64,
+    deltas: AtomicU64,
+    stop: AtomicBool,
+}
+
+/// Counts a pack's objects on a background thread while the receive loop
+/// writes its bytes (see [`crate::pack_stream_scan`]).
+struct ObjectCounter {
+    sender: Option<SyncSender<Vec<u8>>>,
+    batch: Vec<u8>,
+    state: Arc<CounterState>,
+    worker: Option<JoinHandle<()>>,
+    last_reported: Option<ReceivedObjects>,
+}
+
+impl ObjectCounter {
+    fn spawn(hash: HashAlgo) -> Option<Self> {
+        let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(COUNTER_BACKLOG);
+        let state = Arc::new(CounterState::default());
+        let shared = Arc::clone(&state);
+        let worker = thread::Builder::new()
+            .name("grit-pack-count".to_owned())
+            .spawn(move || {
+                let mut scanner = PackStreamScanner::new(hash);
+                for chunk in receiver {
+                    if shared.stop.load(Ordering::Relaxed) || scanner.feed(&chunk).is_err() {
+                        return;
+                    }
+                    if let Some(counts) = scanner.counts() {
+                        shared.total.store(counts.total, Ordering::Relaxed);
+                        shared.deltas.store(counts.deltas, Ordering::Relaxed);
+                        shared.received.store(counts.received, Ordering::Relaxed);
+                        shared.header_seen.store(true, Ordering::Release);
+                    }
+                    if scanner.is_complete() {
+                        return;
+                    }
+                }
+            })
+            .ok()?;
+        Some(Self {
+            sender: Some(sender),
+            batch: Vec::with_capacity(COUNTER_BATCH),
+            state,
+            worker: Some(worker),
+            last_reported: None,
+        })
+    }
+
+    fn push(&mut self, data: &[u8]) {
+        let Some(sender) = &self.sender else {
+            return;
+        };
+        self.batch.extend_from_slice(data);
+        if self.batch.len() < COUNTER_BATCH {
+            return;
         }
-        Ok(0)
+        let batch = std::mem::replace(&mut self.batch, Vec::with_capacity(COUNTER_BATCH));
+        match sender.try_send(batch) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                // Inflate cannot keep up with this transfer; stop counting
+                // rather than slow the receive down.
+                self.state.stop.store(true, Ordering::Relaxed);
+                self.sender = None;
+            }
+            Err(TrySendError::Disconnected(_)) => self.sender = None,
+        }
+    }
+
+    /// Hand `progress` the latest counts if they moved since the last report.
+    fn report(&mut self, progress: &mut dyn Progress) {
+        if !self.state.header_seen.load(Ordering::Acquire) {
+            return;
+        }
+        let counts = ReceivedObjects {
+            received: self.state.received.load(Ordering::Relaxed),
+            total: self.state.total.load(Ordering::Relaxed),
+            deltas: self.state.deltas.load(Ordering::Relaxed),
+        };
+        if self.last_reported != Some(counts) {
+            self.last_reported = Some(counts);
+            progress.received_objects(counts);
+        }
+    }
+}
+
+impl Drop for ObjectCounter {
+    fn drop(&mut self) {
+        self.state.stop.store(true, Ordering::Relaxed);
+        self.sender = None;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -247,6 +374,10 @@ fn read_sideband_pack_tail_buffered(
 ) -> Result<()> {
     let mut receiving = false;
     let mut progress_pending = 0u64;
+    // Only a pack that starts in this call can be counted from its header.
+    let mut counter = (!*seen_pack && progress.wants_received_objects())
+        .then(|| ObjectCounter::spawn(HashAlgo::Sha1))
+        .flatten();
     loop {
         while stream.available() < 4 {
             if !stream.refill(r)? {
@@ -304,11 +435,11 @@ fn read_sideband_pack_tail_buffered(
         match payload[0] {
             1 => {
                 let data = &payload[1..];
-                let nbytes = if *seen_pack {
+                let nbytes = if *seen_pack && counter.is_none() {
                     target.append(data)?;
                     data.len() as u64
                 } else {
-                    append_pack_data(data, target, pending, seen_pack)?
+                    append_pack_data_counted(data, target, pending, seen_pack, counter.as_mut())?
                 };
                 note_received_pack_bytes_coalesced(
                     progress,
@@ -316,6 +447,9 @@ fn read_sideband_pack_tail_buffered(
                     &mut progress_pending,
                     nbytes,
                 );
+                if let (Some(counter), true) = (&mut counter, receiving) {
+                    counter.report(progress);
+                }
             }
             2 => progress.message(&payload[1..]),
             3 => {
@@ -325,13 +459,22 @@ fn read_sideband_pack_tail_buffered(
                 )))
             }
             _ => {
-                let nbytes = append_pack_data(payload, target, pending, seen_pack)?;
+                let nbytes = append_pack_data_counted(
+                    payload,
+                    target,
+                    pending,
+                    seen_pack,
+                    counter.as_mut(),
+                )?;
                 note_received_pack_bytes_coalesced(
                     progress,
                     &mut receiving,
                     &mut progress_pending,
                     nbytes,
                 );
+                if let (Some(counter), true) = (&mut counter, receiving) {
+                    counter.report(progress);
+                }
             }
         }
     }
@@ -874,6 +1017,72 @@ mod tests {
             opt_scratch.is_empty(),
             "buffered demux should not use the staging Vec on band-1-only streams"
         );
+    }
+
+    /// Asks for object counts and records what it is told.
+    #[derive(Default)]
+    struct CountRecorder {
+        counts: Vec<ReceivedObjects>,
+    }
+
+    impl crate::progress::ProgressSink for CountRecorder {}
+
+    impl Progress for CountRecorder {
+        fn wants_received_objects(&self) -> bool {
+            true
+        }
+        fn received_objects(&mut self, counts: ReceivedObjects) {
+            self.counts.push(counts);
+        }
+    }
+
+    #[test]
+    fn counts_objects_while_receiving_when_asked() {
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        // Incompressible blobs, so the pack spans several counter batches.
+        let mut seed = 0x9e37_79b9_u32;
+        for _ in 0..12 {
+            let blob: Vec<u8> = (0..64 * 1024)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    seed as u8
+                })
+                .collect();
+            pb.add_full(PK::Blob, &blob);
+        }
+        let pack = pb.build().bytes;
+        let mut wire = Vec::new();
+        for piece in pack.chunks(65_000) {
+            wire.extend(sideband_pkt(1, piece));
+        }
+        wire.extend_from_slice(b"0000");
+
+        let mut out = Vec::new();
+        let mut target = PackReceiveTarget::Memory(&mut out);
+        let mut rec = CountRecorder::default();
+        read_sideband_pack_to(&mut Cursor::new(wire), &mut target, &mut rec).expect("receive");
+        assert_eq!(out, pack);
+        // The counting thread runs behind the receive, so how far it got by
+        // the last report varies; every report is consistent and ordered.
+        assert!(rec.counts.iter().all(|c| c.total == 12 && c.received <= 12));
+        assert!(rec
+            .counts
+            .windows(2)
+            .all(|w| w[0].received <= w[1].received));
+    }
+
+    #[test]
+    fn does_not_count_objects_unless_asked() {
+        let mut wire = sideband_pkt(1, b"PACK\0\0\0\x02\0\0\0\0");
+        wire.extend_from_slice(b"0000");
+        let mut out = Vec::new();
+        let mut target = PackReceiveTarget::Memory(&mut out);
+        let mut rec = ReceiveRecorder::default();
+        read_sideband_pack_to(&mut Cursor::new(wire), &mut target, &mut rec).expect("receive");
+        assert_eq!(out.len(), 12);
     }
 
     #[test]

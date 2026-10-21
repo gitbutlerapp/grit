@@ -167,10 +167,31 @@ fn show_unified_and_w_flags() {
     assert!(w.ok(), "{}", w.dump("-W"));
     let plain = grit(&repo, &["show", "HEAD"]);
     assert!(plain.ok(), "{}", plain.dump("plain"));
-    assert_ne!(
-        w.stdout, plain.stdout,
-        "-W should expand hunks to function context"
-    );
+
+    let git_w = Command::new("git")
+        .current_dir(repo)
+        .args(["show", "-W", "--format=", "HEAD"])
+        .output()
+        .expect("git show -W");
+    assert!(git_w.status.success());
+    let git_plain = Command::new("git")
+        .current_dir(repo)
+        .args(["show", "--format=", "HEAD"])
+        .output()
+        .expect("git show");
+    assert!(git_plain.status.success());
+    // Plain text without function boundaries: Git leaves `-W` output unchanged.
+    if git_w.stdout != git_plain.stdout {
+        assert_ne!(
+            w.stdout, plain.stdout,
+            "grit -W should differ from plain when git show -W does"
+        );
+    } else {
+        assert_eq!(
+            w.stdout, plain.stdout,
+            "grit -W should match plain when git show -W does"
+        );
+    }
 }
 
 #[test]

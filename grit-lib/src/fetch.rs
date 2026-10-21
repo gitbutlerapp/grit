@@ -45,6 +45,22 @@ pub trait Progress: ProgressSink {
     fn remote_sideband_progress(&self) -> bool {
         false
     }
+
+    /// When true, a pack being received is also counted in objects and
+    /// reported through [`Progress::received_objects`].
+    ///
+    /// Counting inflates every entry once more on a background thread (the
+    /// receive itself never waits on it), so leave this off unless the counts
+    /// are shown.
+    fn wants_received_objects(&self) -> bool {
+        false
+    }
+
+    /// Objects received so far in the pack being streamed in, reported during
+    /// the [`ReceivingObjects`](crate::progress::ProgressPhase::ReceivingObjects)
+    /// phase when [`Progress::wants_received_objects`] is true. Counts may lag
+    /// the bytes reported through [`ProgressSink::inc`] slightly.
+    fn received_objects(&mut self, _counts: crate::progress::ReceivedObjects) {}
 }
 
 /// A [`Progress`] / [`ProgressSink`] that discards everything.
@@ -1275,11 +1291,17 @@ pub fn fetch_remote(
     // keeps a tag whose target is already reachable from the fetched heads, so
     // wanting the tag itself would drag down its (otherwise unreachable) target
     // and incorrectly keep the tag. They are pruned by `retain_following_tags`.
+    let tags_present = if opts.tags == crate::transfer::TagMode::Following {
+        tags_already_local(local_git_dir, &remote_refs)
+    } else {
+        HashSet::new()
+    };
     let following_only = add_wire_tags(
         opts.tags,
         &remote_refs,
         &advertised_peel,
         &negatives,
+        &tags_present,
         &mut matched,
         &mut matched_oids,
         &mut seen_remote_ref,
@@ -1708,11 +1730,16 @@ pub(crate) fn finish_initial_remote_fetch_layout(
 /// into the pack (which would make it look reachable and survive the prune).
 /// Annotated tags whose peeled commit is already local are still wanted via
 /// [`following_tag_wants_with_local_peel`].
+///
+/// Under `Following`, tags named in `already_local` (see [`tags_already_local`])
+/// are skipped: the local repository already has them at the advertised value.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_wire_tags(
     mode: crate::transfer::TagMode,
     remote_refs: &[(String, ObjectId)],
     advertised_peel: &std::collections::HashMap<String, ObjectId>,
     negatives: &[RefspecItem],
+    already_local: &HashSet<String>,
     matched: &mut Vec<crate::transfer::MatchedRef>,
     matched_oids: &mut HashSet<ObjectId>,
     seen_remote_ref: &mut HashSet<String>,
@@ -1726,6 +1753,9 @@ pub(crate) fn add_wire_tags(
             continue;
         }
         if seen_remote_ref.contains(name) || ref_excluded(name, negatives) {
+            continue;
+        }
+        if mode == crate::transfer::TagMode::Following && already_local.contains(name) {
             continue;
         }
         seen_remote_ref.insert(name.clone());
@@ -1788,15 +1818,24 @@ pub(crate) fn retain_following_tags(
         .filter(|m| !m.is_tag)
         .map(|m| m.oid)
         .collect();
-    let commit_reach = reachable_commits(local_odb, &roots, shallow_boundaries);
+    let peeled_by_tag: std::collections::HashMap<ObjectId, ObjectId> = matched
+        .iter()
+        .filter(|m| m.is_tag)
+        .map(|m| {
+            let peeled = m
+                .advertised_peel
+                .unwrap_or_else(|| local_odb.peel_tags(m.oid).map_or(m.oid, |(oid, _)| oid));
+            (m.oid, peeled)
+        })
+        .collect();
+    let targets: HashSet<ObjectId> = peeled_by_tag.values().copied().collect();
+    let commit_reach = reachable_commits(local_odb, &roots, &targets, shallow_boundaries);
     let pack_reach = pack_delivered_reachable(local_odb, &roots, pack_oids)?;
     matched.retain(|m| {
         if !m.is_tag {
             return true;
         }
-        let peeled = m
-            .advertised_peel
-            .unwrap_or_else(|| local_odb.peel_tags(m.oid).map_or(m.oid, |(oid, _)| oid));
+        let peeled = peeled_by_tag.get(&m.oid).copied().unwrap_or(m.oid);
         let reachable = commit_reach.contains(&peeled) || pack_reach.contains(&peeled);
         if !reachable {
             return false;
@@ -1862,17 +1901,65 @@ fn pack_delivered_reachable(
     Ok(seen)
 }
 
+/// Names of the remote `refs/tags/*` entries in `remote_refs` that the local
+/// repository already stores under the same name at the same object id.
+///
+/// Tag-following never needs to consider these: Git's auto-follow skips tags
+/// that already exist locally, and there is nothing to fetch or write for them.
+/// Excluding them up front keeps the reachability walk off the whole history
+/// when the client already has every advertised tag (the common incremental
+/// fetch).
+///
+/// # Parameters
+///
+/// * `local_git_dir` — the fetching repository's git directory.
+/// * `remote_refs` — advertised `(name, oid)` pairs (peeled `^{}` entries excluded).
+///
+/// Unreadable local refs count as absent, so they still go through the regular
+/// tag-following path.
+pub(crate) fn tags_already_local(
+    local_git_dir: &Path,
+    remote_refs: &[(String, ObjectId)],
+) -> HashSet<String> {
+    let mut remote_tags = remote_refs
+        .iter()
+        .filter(|(name, _)| name.starts_with("refs/tags/"))
+        .peekable();
+    if remote_tags.peek().is_none() {
+        return HashSet::new();
+    }
+    let Ok(resolver) = crate::refs::CachedRefResolver::open(local_git_dir) else {
+        return HashSet::new();
+    };
+    remote_tags
+        .filter(|(name, oid)| resolver.resolve(name).ok().flatten() == Some(*oid))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 /// Commit-level reachability from `roots`: the set of commit OIDs reachable by
 /// following commit parents (peeling annotated tags to their target). Unlike
 /// [`reachable_closure`] it never descends into trees or blobs, so it stays cheap
 /// across thousands of heads. Sufficient for tag-following retention, whose only
 /// question is whether a tag's target commit is reachable from the fetched heads.
+///
+/// The walk stops as soon as every oid in `targets` has been reached, so the
+/// returned set is only guaranteed complete for membership tests of `targets`
+/// (and is the full closure whenever some target is unreachable). An empty
+/// `targets` set returns immediately with an empty result.
 pub(crate) fn reachable_commits(
     odb: &crate::odb::Odb,
     roots: &[ObjectId],
+    targets: &HashSet<ObjectId>,
     shallow_boundaries: &HashSet<ObjectId>,
 ) -> HashSet<ObjectId> {
     use crate::objects::{parse_commit, parse_tag, ObjectKind};
+
+    let mut seen: HashSet<ObjectId> = HashSet::new();
+    let mut remaining: HashSet<ObjectId> = targets.clone();
+    if remaining.is_empty() {
+        return seen;
+    }
 
     // Read commit parents from the commit-graph file when present — an mmap-style
     // lookup that avoids decompressing/parsing every commit object (the dominant
@@ -1880,21 +1967,25 @@ pub(crate) fn reachable_commits(
     // octopus merges fall back to the object read below.
     let graph = crate::commit_graph_file::CommitGraphChain::load(odb.objects_dir());
 
-    let mut seen: HashSet<ObjectId> = HashSet::new();
     let mut stack: Vec<ObjectId> = roots.to_vec();
     while let Some(oid) = stack.pop() {
+        if remaining.is_empty() {
+            break;
+        }
         if seen.contains(&oid) {
             continue;
         }
         if shallow_boundaries.contains(&oid) {
             if odb.exists(&oid) {
                 seen.insert(oid);
+                remaining.remove(&oid);
             }
             continue;
         }
         if let Some(graph) = graph.as_ref() {
             if let Some((parents, _time)) = graph.graph_commit(&oid) {
                 seen.insert(oid);
+                remaining.remove(&oid);
                 stack.extend(parents);
                 continue;
             }
@@ -1903,6 +1994,7 @@ pub(crate) fn reachable_commits(
             continue;
         };
         seen.insert(oid);
+        remaining.remove(&oid);
         match obj.kind {
             ObjectKind::Commit => {
                 if let Ok(c) = parse_commit(&obj.data) {
@@ -2013,6 +2105,7 @@ mod fetch_advertised_ref_tests {
             &remote_refs,
             &advertised_peel,
             &negatives,
+            &HashSet::new(),
             &mut matched,
             &mut matched_oids,
             &mut seen,
@@ -2055,5 +2148,138 @@ mod fetch_advertised_ref_tests {
         }];
         let wants = following_tag_wants_with_local_peel(&matched, &following_only, &odb);
         assert!(wants.contains(&tag_obj));
+    }
+
+    /// Writes a linear chain of `n` commits (oldest first) into `odb`.
+    fn write_commit_chain(odb: &crate::odb::Odb, n: usize) -> Vec<ObjectId> {
+        let mut chain: Vec<ObjectId> = Vec::new();
+        for i in 0..n {
+            let parent = chain
+                .last()
+                .map(|p| format!("parent {}\n", p.to_hex()))
+                .unwrap_or_default();
+            let body = format!(
+                "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n{parent}\
+                 author T <t@example.com> {i} +0000\ncommitter T <t@example.com> {i} +0000\n\nc{i}\n"
+            );
+            let oid = odb
+                .write_loose_materialize(crate::objects::ObjectKind::Commit, body.as_bytes())
+                .expect("write commit");
+            chain.push(oid);
+        }
+        chain
+    }
+
+    #[test]
+    fn reachable_commits_stops_once_every_target_is_found() {
+        use std::collections::HashSet;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        std::fs::create_dir_all(&objects).expect("objects");
+        let odb = crate::odb::Odb::new(&objects);
+        let chain = write_commit_chain(&odb, 5);
+        let tip = chain[4];
+        let none = HashSet::new();
+
+        let near = HashSet::from([chain[3]]);
+        let seen = reachable_commits(&odb, &[tip], &near, &none);
+        assert!(seen.contains(&chain[3]), "reachable target is reported");
+        assert!(
+            !seen.contains(&chain[0]),
+            "walk must stop before the root once every target is found"
+        );
+
+        let unreachable =
+            HashSet::from([
+                ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap(),
+            ]);
+        let seen = reachable_commits(&odb, &[tip], &unreachable, &none);
+        assert_eq!(
+            seen,
+            chain.iter().copied().collect::<HashSet<_>>(),
+            "an unreachable target forces the full closure"
+        );
+
+        assert!(
+            reachable_commits(&odb, &[tip], &HashSet::new(), &none).is_empty(),
+            "no targets means no walk"
+        );
+    }
+
+    #[test]
+    fn tags_already_local_matches_name_and_oid_across_loose_and_packed() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
+        std::fs::create_dir_all(git_dir.join("refs/tags")).expect("refs/tags");
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+
+        let a = ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let b = ObjectId::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        let c = ObjectId::from_hex("cccccccccccccccccccccccccccccccccccccccc").unwrap();
+        std::fs::write(git_dir.join("refs/tags/loose"), format!("{}\n", a.to_hex()))
+            .expect("loose tag");
+        std::fs::write(
+            git_dir.join("packed-refs"),
+            format!(
+                "# pack-refs with: peeled fully-peeled sorted \n{} refs/tags/moved\n{} refs/tags/packed\n",
+                a.to_hex(),
+                b.to_hex()
+            ),
+        )
+        .expect("packed-refs");
+
+        let remote_refs = vec![
+            ("refs/heads/main".to_owned(), a),
+            ("refs/tags/loose".to_owned(), a),
+            ("refs/tags/packed".to_owned(), b),
+            ("refs/tags/moved".to_owned(), c),
+            ("refs/tags/new".to_owned(), c),
+        ];
+        let present = tags_already_local(&git_dir, &remote_refs);
+        assert_eq!(
+            present,
+            HashSet::from(["refs/tags/loose".to_owned(), "refs/tags/packed".to_owned()]),
+            "only tags stored locally at the advertised oid count as present"
+        );
+        assert!(tags_already_local(&git_dir, &remote_refs[..1]).is_empty());
+    }
+
+    #[test]
+    fn add_wire_tags_following_skips_tags_already_local() {
+        use crate::transfer::TagMode;
+        use std::collections::HashMap;
+
+        let tip = ObjectId::from_hex("2222222222222222222222222222222222222222").unwrap();
+        let old_tag = ObjectId::from_hex("3333333333333333333333333333333333333333").unwrap();
+        let new_tag = ObjectId::from_hex("4444444444444444444444444444444444444444").unwrap();
+        let remote_refs = vec![
+            ("refs/heads/main".to_owned(), tip),
+            ("refs/tags/old".to_owned(), old_tag),
+            ("refs/tags/new".to_owned(), new_tag),
+        ];
+        let already_local = HashSet::from(["refs/tags/old".to_owned()]);
+
+        for (mode, expect) in [
+            (TagMode::Following, vec!["refs/tags/new"]),
+            (TagMode::All, vec!["refs/tags/old", "refs/tags/new"]),
+        ] {
+            let mut matched = Vec::new();
+            let mut matched_oids = HashSet::new();
+            let mut seen = HashSet::new();
+            add_wire_tags(
+                mode,
+                &remote_refs,
+                &HashMap::new(),
+                &[],
+                &already_local,
+                &mut matched,
+                &mut matched_oids,
+                &mut seen,
+            );
+            let names: Vec<&str> = matched.iter().map(|m| m.remote_ref.as_str()).collect();
+            assert_eq!(names, expect, "{mode:?}");
+        }
     }
 }

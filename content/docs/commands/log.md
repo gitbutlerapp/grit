@@ -63,6 +63,7 @@ With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape
 | `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
 | `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
 | `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
+| `--patch-text` | Git apply-compatible patch text for per-commit diffs (same as [`grit diff`](diff.md)). |
 | `--find-renames` | Detect renames in per-commit diffs (Git `-M`; default threshold 50). |
 | `--no-renames` | Disable rename detection. |
 | `--diff-algorithm <algo>` | Line diff algorithm for patches. |

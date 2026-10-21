@@ -77,6 +77,8 @@ pub struct RevWalkListOptions {
     pub paths: Vec<String>,
     /// Author/committer/grep filter (same semantics as `git rev-list` / `git log`).
     pub commit_filter: Option<Arc<CommitFilter>>,
+    /// Pickaxe filter (`-S` / `-G`).
+    pub pickaxe: Option<Arc<crate::diff::Pickaxe>>,
 }
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
@@ -188,7 +190,7 @@ fn merge_filter_to_parent_bounds(merges: MergeFilter) -> (Option<usize>, Option<
     }
 }
 
-fn rev_list_options_from_walk(
+pub(crate) fn rev_list_options_from_walk(
     repo: &Repository,
     walk: &RevWalkListOptions,
     parsed: &RevWalkParsedSpecs,
@@ -215,6 +217,7 @@ fn rev_list_options_from_walk(
         symmetric_left: parsed.symmetric_left,
         symmetric_right: parsed.symmetric_right,
         commit_filter: walk.commit_filter.clone(),
+        pickaxe: walk.pickaxe.clone(),
         ..RevListOptions::default()
     })
 }
@@ -278,7 +281,7 @@ pub fn rev_list_commits_for_author_group(
     Ok(result.commits)
 }
 
-fn positive_specs_for_walk(
+pub(crate) fn positive_specs_for_walk(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
@@ -334,6 +337,7 @@ impl<'repo> RevWalk<'repo> {
                 .commit_filter
                 .as_ref()
                 .is_none_or(|f| !f.is_active())
+            && options.pickaxe.is_none()
         {
             let tip = crate::rev_parse::resolve_revision_for_range_end(repo, &positive[0])?;
             let tip = crate::rev_parse::peel_to_commit_for_merge_base(repo, tip)?;
@@ -384,6 +388,7 @@ impl<'repo> RevWalk<'repo> {
                 .commit_filter
                 .as_ref()
                 .is_none_or(|f| !f.is_active())
+            && options.pickaxe.is_none()
         {
             let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
             let filter = ReachableCountFilter {

@@ -1013,7 +1013,7 @@ mod tests {
         let main = tmp.path().join("main");
         fs::create_dir_all(&main).unwrap();
         let git = |args: &[&str]| {
-            let out = Command::new("git")
+            let out = Command::new("git") // hygiene: git fixture in integration test
                 .env("GIT_AUTHOR_NAME", "Test")
                 .env("GIT_AUTHOR_EMAIL", "test@example.com")
                 .env("GIT_COMMITTER_NAME", "Test")
@@ -1182,17 +1182,19 @@ mod tests {
         let main = tmp.path().join("main");
         fs::create_dir_all(&main).unwrap();
         let git = |args: &[&str]| {
-            assert!(Command::new("git")
-                .env("GIT_AUTHOR_NAME", "Test")
-                .env("GIT_AUTHOR_EMAIL", "test@example.com")
-                .env("GIT_COMMITTER_NAME", "Test")
-                .env("GIT_COMMITTER_EMAIL", "test@example.com")
-                .current_dir(&main)
-                .args(args)
-                .output()
-                .unwrap()
-                .status
-                .success());
+            assert!(
+                Command::new("git") // hygiene: git fixture in integration test
+                    .env("GIT_AUTHOR_NAME", "Test")
+                    .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                    .env("GIT_COMMITTER_NAME", "Test")
+                    .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                    .current_dir(&main)
+                    .args(args)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
         };
         git(&["init", "-q", "-b", "main"]);
         fs::write(main.join("t"), b"1\n").unwrap();
@@ -1237,17 +1239,19 @@ mod tests {
         let main = tmp.path().join("main");
         fs::create_dir_all(&main).unwrap();
         let git = |args: &[&str]| {
-            assert!(Command::new("git")
-                .env("GIT_AUTHOR_NAME", "Test")
-                .env("GIT_AUTHOR_EMAIL", "test@example.com")
-                .env("GIT_COMMITTER_NAME", "Test")
-                .env("GIT_COMMITTER_EMAIL", "test@example.com")
-                .current_dir(&main)
-                .args(args)
-                .output()
-                .unwrap()
-                .status
-                .success());
+            assert!(
+                Command::new("git") // hygiene: git fixture in integration test
+                    .env("GIT_AUTHOR_NAME", "Test")
+                    .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                    .env("GIT_COMMITTER_NAME", "Test")
+                    .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                    .current_dir(&main)
+                    .args(args)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
         };
         git(&["init", "-q", "-b", "main"]);
         fs::write(main.join("t"), b"1\n").unwrap();
@@ -1294,13 +1298,15 @@ mod tests {
         let main = tmp.path().join("main");
         fs::create_dir_all(&main).unwrap();
         let git = |args: &[&str]| {
-            assert!(Command::new("git")
-                .current_dir(&main)
-                .args(args)
-                .output()
-                .unwrap()
-                .status
-                .success());
+            assert!(
+                Command::new("git") // hygiene: git fixture in integration test
+                    .current_dir(&main)
+                    .args(args)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
         };
         git(&["init", "-q", "-b", "main"]);
         fs::write(main.join("t"), b"1\n").unwrap();
@@ -1348,17 +1354,19 @@ mod tests {
         let main = tmp.path().join("main");
         fs::create_dir_all(&main).unwrap();
         let git = |args: &[&str]| {
-            assert!(Command::new("git")
-                .env("GIT_AUTHOR_NAME", "Test")
-                .env("GIT_AUTHOR_EMAIL", "test@example.com")
-                .env("GIT_COMMITTER_NAME", "Test")
-                .env("GIT_COMMITTER_EMAIL", "test@example.com")
-                .current_dir(&main)
-                .args(args)
-                .output()
-                .unwrap()
-                .status
-                .success());
+            assert!(
+                Command::new("git") // hygiene: git fixture in integration test
+                    .env("GIT_AUTHOR_NAME", "Test")
+                    .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                    .env("GIT_COMMITTER_NAME", "Test")
+                    .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                    .current_dir(&main)
+                    .args(args)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
         };
         git(&["init", "-q", "-b", "main"]);
         fs::write(main.join("t"), b"1\n").unwrap();

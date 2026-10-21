@@ -111,6 +111,8 @@ pub struct DiffOptions {
     pub whitespace: WhitespaceMode,
     /// When false, skip intra-line word emphasis (line-level hunks only).
     pub word_level_inline: bool,
+    /// Expand hunks to enclosing function boundaries (Git `-W` / `--function-context`).
+    pub function_context: bool,
     /// When set, incremented on each blob ODB read during tree content loading (tests only).
     #[doc(hidden)]
     pub blob_read_counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
@@ -127,6 +129,7 @@ impl Default for DiffOptions {
             filter: None,
             whitespace: WhitespaceMode::default(),
             word_level_inline: true,
+            function_context: false,
             blob_read_counter: None,
         }
     }
@@ -142,6 +145,7 @@ impl PartialEq for DiffOptions {
             && self.filter == other.filter
             && self.whitespace == other.whitespace
             && self.word_level_inline == other.word_level_inline
+            && self.function_context == other.function_context
     }
 }
 
@@ -190,7 +194,7 @@ impl DiffOptions {
 
     /// Similarity percent for rename detection, or `None` when [`RenameDetection::Off`].
     #[must_use]
-    pub fn rename_similarity_threshold(self) -> Option<u32> {
+    pub fn rename_similarity_threshold(&self) -> Option<u32> {
         match self.renames {
             RenameDetection::Off => None,
             RenameDetection::Similarity(p) => Some(u32::from(p)),
@@ -199,7 +203,7 @@ impl DiffOptions {
 
     /// u32 threshold for [`super::apply_rename_detection_to_diff_entries`] and related APIs.
     #[must_use]
-    pub fn rename_threshold_u32(self) -> u32 {
+    pub fn rename_threshold_u32(&self) -> u32 {
         self.rename_similarity_threshold()
             .unwrap_or(RENAME_DETECTION_DISABLED)
     }
@@ -354,6 +358,11 @@ mod tests {
                 "renames={off}"
             );
         }
+    }
+
+    #[test]
+    fn function_context_defaults_off() {
+        assert!(!DiffOptions::default().function_context);
     }
 
     #[test]

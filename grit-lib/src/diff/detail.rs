@@ -1,17 +1,23 @@
 //! Per-file diff detail levels (patch, stat, name-only) and aggregate totals.
 
+use super::has_changes::text_sides_differ;
 use super::options::DiffOptions;
 use super::structured::StructuredFileDiff;
-use super::{count_changes_with_algorithm, DiffEntry, DiffStatus};
+use super::{count_changes_with_algorithm, DiffEntry, DiffStatus, WhitespaceMode};
 
 /// Count insertions and deletions between two text sides using [`DiffOptions`]'s algorithm.
 ///
 /// Does not allocate hunk structures (used for `--stat` / `--numstat`).
 #[must_use]
 pub fn line_change_counts(old_content: &str, new_content: &str, options: &DiffOptions) -> LineStat {
+    if !text_sides_differ(old_content, new_content, options) {
+        return LineStat::default();
+    }
+    let (old_content, new_content) =
+        sides_for_line_stat(old_content, new_content, options.whitespace);
     let (insertions, deletions) = count_changes_with_algorithm(
-        old_content,
-        new_content,
+        &old_content,
+        &new_content,
         options.algorithm.similar_algorithm(),
         options.algorithm.uses_git_histogram(),
     );
@@ -19,6 +25,31 @@ pub fn line_change_counts(old_content: &str, new_content: &str, options: &DiffOp
         insertions,
         deletions,
     }
+}
+
+/// Line-oriented normalization for `--stat` / `--numstat` when whitespace rules apply.
+///
+/// Keeps one `\n` per logical line so line diffs match Git (avoids merging the last old line
+/// with the first new line when trailing newlines differ).
+fn sides_for_line_stat(old: &str, new: &str, ws: WhitespaceMode) -> (String, String) {
+    if !ws.is_active() {
+        return (old.to_owned(), new.to_owned());
+    }
+    let normalize_side = |text: &str| -> String {
+        let mut lines: Vec<String> = text
+            .lines()
+            .map(|line| ws.normalize_line_for_compare(line).into_owned())
+            .collect();
+        if ws.ignore_blank_lines {
+            lines.retain(|l| !l.trim().is_empty());
+        }
+        if lines.is_empty() {
+            String::new()
+        } else {
+            lines.join("\n") + "\n"
+        }
+    };
+    (normalize_side(old), normalize_side(new))
 }
 
 /// How much content to compute for each changed file.
