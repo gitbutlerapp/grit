@@ -1,519 +1,402 @@
-//! Histogram-based line alignment for diff: index repeated lines on the old side, pick stable
-//! anchors in the new side, subdivide unmatched bands, and delegate ambiguous bands to Myers.
+//! Git histogram line diff with whitespace-aware record comparison (`xdl_recmatch` semantics).
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use crate::diff::WhitespaceMode;
 
-const BUCKET_CHAIN_LIMIT: u32 = 64;
-const MAX_REGION_SPLITS: u64 = 4096;
+const MAX_CHAIN_LENGTH: u32 = 64;
 
-/// Accounting for histogram work (tests and diagnostics); not wall-clock time.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct HistogramWork {
-    /// Hash-bucket chain steps while indexing or matching.
-    pub chain_steps: u64,
-    /// Region subdivisions (including the initial whole file).
-    pub regions: u64,
-    /// New-side line scans in the anchor search.
-    pub anchor_scans: u64,
+#[derive(Default, Clone, Copy)]
+struct Region {
+    begin1: usize,
+    end1: usize,
+    begin2: usize,
+    end2: usize,
 }
 
-impl HistogramWork {
-    fn step_chain(&mut self) {
-        self.chain_steps += 1;
+struct Record {
+    ptr: usize,
+    cnt: u32,
+    next: Option<usize>,
+}
+
+struct HistIndex<'a> {
+    old_lines: &'a [&'a str],
+    new_lines: &'a [&'a str],
+    ws: WhitespaceMode,
+    table_bits: u32,
+    records: Vec<Option<usize>>,
+    record_pool: Vec<Record>,
+    line_map: Vec<Option<usize>>,
+    next_ptrs: Vec<usize>,
+    ptr_shift: usize,
+    max_chain_length: u32,
+    cnt: u32,
+    has_common: bool,
+}
+
+impl<'a> HistIndex<'a> {
+    fn new(old_lines: &'a [&'a str], count1: usize, ws: WhitespaceMode) -> Self {
+        let table_bits = hash_bits(count1);
+        let records_size = 1usize << table_bits;
+        Self {
+            old_lines,
+            new_lines: &[],
+            ws,
+            table_bits,
+            records: vec![None; records_size],
+            record_pool: Vec::new(),
+            line_map: vec![None; count1],
+            next_ptrs: vec![0; count1],
+            ptr_shift: 0,
+            max_chain_length: MAX_CHAIN_LENGTH,
+            cnt: MAX_CHAIN_LENGTH + 1,
+            has_common: false,
+        }
     }
-    fn step_region(&mut self) {
-        self.regions += 1;
+
+    fn table_hash(&self, side2_line: usize) -> usize {
+        let line = self.new_lines[side2_line];
+        let h = hash_long(&self.ws.normalize_line_for_compare(line));
+        (h as usize) & ((1 << self.table_bits) - 1)
     }
-    fn step_anchor_scan(&mut self) {
-        self.anchor_scans += 1;
+
+    fn table_hash_side1(&self, line: usize) -> usize {
+        let h = hash_long(&self.ws.normalize_line_for_compare(self.old_lines[line]));
+        (h as usize) & ((1 << self.table_bits) - 1)
     }
-}
 
-/// Inclusive line index span on both sides (0-based indices into the full line slices).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct MatchedBand {
-    old_lo: usize,
-    old_hi: usize,
-    new_lo: usize,
-    new_hi: usize,
-}
+    fn cmp(&self, side1_line: usize, side2_line: usize) -> bool {
+        self.ws
+            .normalize_line_for_compare(self.old_lines[side1_line])
+            == self
+                .ws
+                .normalize_line_for_compare(self.new_lines[side2_line])
+    }
 
-/// Per-bucket singly linked list node describing one line's text class inside an old window.
-#[derive(Clone, Copy)]
-struct ClassNode {
-    /// Latest old line index (absolute) represented by this node.
-    head_line: usize,
-    /// Number of times this text has been seen while indexing (duplicate run weight).
-    weight: u32,
-    next_in_bucket: Option<usize>,
-}
+    fn cmp_side1(&self, a: usize, b: usize) -> bool {
+        self.ws.normalize_line_for_compare(self.old_lines[a])
+            == self.ws.normalize_line_for_compare(self.old_lines[b])
+    }
 
-/// Index of old-window lines for histogram matching.
-struct OldWindowIndex {
-    table_mask: usize,
-    heads: Vec<Option<usize>>,
-    nodes: Vec<ClassNode>,
-    /// For absolute old line index: previous line with identical text when scanning backward.
-    prior_same: Vec<Option<usize>>,
-    /// For absolute old line index: node in `nodes` that owns the line.
-    owner: Vec<Option<usize>>,
-}
-
-impl OldWindowIndex {
-    fn try_build(
-        old: &[&str],
-        old_start: usize,
-        old_len: usize,
-        work: &mut HistogramWork,
-    ) -> Result<Self, ()> {
-        let table_bits = (old_len.max(1).ilog2() as usize + 1).clamp(1, 20);
-        let table_size = 1usize << table_bits;
-        let mask = table_size - 1;
-        let old_end = old_start + old_len;
-        let mut prior_same = vec![None; old.len()];
-        let mut owner = vec![None; old.len()];
-        let mut heads: Vec<Option<usize>> = vec![None; table_size];
-        let mut nodes: Vec<ClassNode> = Vec::new();
-
-        for line in (old_start..old_end).rev() {
-            let bucket = hash_line(old[line]) as usize & mask;
-            let mut chain = 0u32;
-            let mut cursor = heads[bucket];
-            let mut merged = false;
-            while let Some(ni) = cursor {
-                work.step_chain();
-                let head = nodes[ni].head_line;
-                if old[head] == old[line] {
-                    prior_same[line] = Some(head);
-                    nodes[ni].head_line = line;
-                    nodes[ni].weight = nodes[ni].weight.saturating_add(1);
-                    owner[line] = Some(ni);
-                    merged = true;
+    fn scan_a(&mut self, line1: usize, count1: usize) -> bool {
+        let end1 = line1 + count1;
+        for ptr in (line1..end1).rev() {
+            let tbl_idx = self.table_hash_side1(ptr);
+            let mut chain_len = 0u32;
+            let mut rec_idx = self.records[tbl_idx];
+            let mut matched = false;
+            while let Some(idx) = rec_idx {
+                let rec = &self.record_pool[idx];
+                if self.cmp_side1(rec.ptr, ptr) {
+                    self.next_ptrs[ptr - self.ptr_shift] = rec.ptr;
+                    self.record_pool[idx].ptr = ptr;
+                    self.record_pool[idx].cnt =
+                        self.record_pool[idx].cnt.saturating_add(1);
+                    self.line_map[ptr - self.ptr_shift] = Some(idx);
+                    matched = true;
                     break;
                 }
-                chain += 1;
-                cursor = nodes[ni].next_in_bucket;
+                chain_len += 1;
+                rec_idx = self.record_pool[idx].next;
             }
-            if chain >= BUCKET_CHAIN_LIMIT {
-                return Err(());
-            }
-            if merged {
+            if matched {
                 continue;
             }
-            let ni = nodes.len();
-            nodes.push(ClassNode {
-                head_line: line,
-                weight: 1,
-                next_in_bucket: heads[bucket],
-            });
-            heads[bucket] = Some(ni);
-            owner[line] = Some(ni);
+            if chain_len == self.max_chain_length {
+                return true;
+            }
+            let new_rec = Record {
+                ptr,
+                cnt: 1,
+                next: self.records[tbl_idx],
+            };
+            let new_idx = self.record_pool.len();
+            self.record_pool.push(new_rec);
+            self.records[tbl_idx] = Some(new_idx);
+            self.line_map[ptr - self.ptr_shift] = Some(new_idx);
         }
-        Ok(Self {
-            table_mask: mask,
-            heads,
-            nodes,
-            prior_same,
-            owner,
-        })
+        false
     }
 
-    fn lines_equal(&self, old: &[&str], o: usize, new: &[&str], n: usize) -> bool {
-        old[o] == new[n]
-    }
-}
-
-fn hash_line(text: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    text.hash(&mut h);
-    h.finish()
-}
-
-struct AnchorSearch<'a> {
-    old: &'a [&'a str],
-    new: &'a [&'a str],
-    old_start: usize,
-    old_end: usize,
-    new_start: usize,
-    new_end: usize,
-    index: &'a OldWindowIndex,
-    work: &'a mut HistogramWork,
-    best: Option<MatchedBand>,
-    ambiguity_floor: u32,
-    saw_match: bool,
-}
-
-impl AnchorSearch<'_> {
-    fn run(&mut self) -> Result<(bool, Option<MatchedBand>), ()> {
-        self.ambiguity_floor = BUCKET_CHAIN_LIMIT + 1;
-        self.best = None;
-        self.saw_match = false;
-        for new_line in self.new_start..self.new_end {
-            self.work.step_anchor_scan();
-            self.consider_new_line(new_line);
-        }
-        let myers = self.saw_match && BUCKET_CHAIN_LIMIT < self.ambiguity_floor;
-        Ok((myers, self.best))
-    }
-
-    fn consider_new_line(&mut self, new_line: usize) {
-        let bucket = hash_line(self.new[new_line]) as usize & self.index.table_mask;
-        let mut node_idx = self.index.heads[bucket];
-        let mut next_new_hint = new_line + 1;
-        while let Some(ni) = node_idx {
-            self.work.step_chain();
-            let node = &self.index.nodes[ni];
-            if node.weight > self.ambiguity_floor {
-                if !self.saw_match
-                    && self
-                        .index
-                        .lines_equal(self.old, node.head_line, self.new, new_line)
-                {
-                    self.saw_match = true;
+    fn try_lcs(
+        &mut self,
+        lcs: &mut Region,
+        b_ptr: usize,
+        line1: usize,
+        count1: usize,
+        line2: usize,
+        count2: usize,
+    ) -> usize {
+        let end2 = line2 + count2;
+        let mut b_next = b_ptr + 1;
+        let tbl_idx = self.table_hash(b_ptr);
+        let mut rec_idx = self.records[tbl_idx];
+        while let Some(idx) = rec_idx {
+            let rec = &self.record_pool[idx];
+            if rec.cnt > self.cnt {
+                if !self.has_common {
+                    self.has_common = self.cmp(rec.ptr, b_ptr);
                 }
-                node_idx = node.next_in_bucket;
+                rec_idx = self.record_pool[idx].next;
                 continue;
             }
-            let old_line = node.head_line;
-            if !self
-                .index
-                .lines_equal(self.old, old_line, self.new, new_line)
-            {
-                node_idx = node.next_in_bucket;
+            let mut as_ = rec.ptr;
+            if !self.cmp(as_, b_ptr) {
+                rec_idx = self.record_pool[idx].next;
                 continue;
             }
-            self.saw_match = true;
-            let mut anchor_old = old_line;
+            self.has_common = true;
             loop {
-                let mut weight = node.weight;
-                let (mut o_lo, mut n_lo) = (anchor_old, new_line);
-                let (mut o_hi, mut n_hi) = (anchor_old, new_line);
-                while self.old_start < o_lo
-                    && self.new_start < n_lo
-                    && self
-                        .index
-                        .lines_equal(self.old, o_lo - 1, self.new, n_lo - 1)
-                {
-                    o_lo -= 1;
-                    n_lo -= 1;
-                    if weight > 1 {
-                        weight = weight.min(self.weight_at(o_lo));
+                let mut np = self.next_ptrs[as_ - self.ptr_shift];
+                let mut bs = b_ptr;
+                let mut ae = as_;
+                let mut be = bs;
+                let mut rc = rec.cnt;
+                let end1 = line1 + count1;
+
+                while line1 < as_ && line2 < bs && self.cmp(as_ - 1, bs - 1) {
+                    as_ -= 1;
+                    bs -= 1;
+                    if rc > 1 {
+                        rc = rc.min(cnt_index(self, as_));
                     }
                 }
-                while o_hi + 1 < self.old_end
-                    && n_hi + 1 < self.new_end
-                    && self
-                        .index
-                        .lines_equal(self.old, o_hi + 1, self.new, n_hi + 1)
-                {
-                    o_hi += 1;
-                    n_hi += 1;
-                    if weight > 1 {
-                        weight = weight.min(self.weight_at(o_hi));
+                while ae + 1 < end1 && be + 1 < end2 && self.cmp(ae + 1, be + 1) {
+                    ae += 1;
+                    be += 1;
+                    if rc > 1 {
+                        rc = rc.min(cnt_index(self, ae));
                     }
                 }
-                if next_new_hint <= n_hi {
-                    next_new_hint = n_hi + 1;
+
+                if b_next <= be {
+                    b_next = be + 1;
                 }
-                let span = o_hi.saturating_sub(o_lo);
-                let best_span = self
-                    .best
-                    .map(|b| b.old_hi.saturating_sub(b.old_lo))
-                    .unwrap_or(0);
-                if best_span < span || weight < self.ambiguity_floor {
-                    self.best = Some(MatchedBand {
-                        old_lo: o_lo,
-                        old_hi: o_hi,
-                        new_lo: n_lo,
-                        new_hi: n_hi,
-                    });
-                    self.ambiguity_floor = weight;
+                if lcs.end1.saturating_sub(lcs.begin1) < ae.saturating_sub(as_) || rc < self.cnt {
+                    lcs.begin1 = as_;
+                    lcs.begin2 = bs;
+                    lcs.end1 = ae;
+                    lcs.end2 = be;
+                    self.cnt = rc;
                 }
-                let mut next_anchor = self.index.prior_same.get(anchor_old).copied().flatten();
-                while let Some(p) = next_anchor {
-                    if p > o_hi {
+
+                if np == 0 {
+                    break;
+                }
+                while np <= ae {
+                    np = self.next_ptrs[np - self.ptr_shift];
+                    if np == 0 {
                         break;
                     }
-                    next_anchor = self.index.prior_same.get(p).copied().flatten();
                 }
-                let Some(next_anchor) = next_anchor else {
-                    break;
-                };
-                if next_anchor < self.old_start {
+                if np == 0 {
                     break;
                 }
-                anchor_old = next_anchor;
+                as_ = np;
             }
-            node_idx = node.next_in_bucket;
+            rec_idx = self.record_pool[idx].next;
         }
-        let _ = next_new_hint;
-    }
-
-    fn weight_at(&self, old_line: usize) -> u32 {
-        self.index
-            .owner
-            .get(old_line)
-            .copied()
-            .flatten()
-            .map(|ni| self.index.nodes[ni].weight)
-            .unwrap_or(1)
+        b_next
     }
 }
 
-fn mark_myers<F>(
-    changed1: &mut [bool],
-    changed2: &mut [bool],
-    fallback: &mut F,
-    old_start: usize,
-    old_len: usize,
-    new_start: usize,
-    new_len: usize,
-) where
-    F: FnMut(&mut [bool], &mut [bool], usize, usize, usize, usize),
-{
-    fallback(
-        changed1,
-        changed2,
-        old_start,
-        old_start + old_len,
-        new_start,
-        new_start + new_len,
-    );
+fn cnt_index(index: &HistIndex<'_>, line: usize) -> u32 {
+    index
+        .line_map
+        .get(line.saturating_sub(index.ptr_shift))
+        .and_then(|o| *o)
+        .map(|idx| index.record_pool[idx].cnt)
+        .unwrap_or(1)
 }
 
-fn mark_all_changed(
+fn hash_bits(count: usize) -> u32 {
+    let mut bits = 0u32;
+    let mut n = count.max(1);
+    while n > 1 {
+        bits += 1;
+        n >>= 1;
+    }
+    bits.max(1)
+}
+
+fn hash_long(key: &str) -> u32 {
+    crc32fast::hash(key.as_bytes())
+}
+
+fn find_lcs(
+    index: &mut HistIndex<'_>,
+    lcs: &mut Region,
+    line1: usize,
+    count1: usize,
+    line2: usize,
+    count2: usize,
+) -> i32 {
+    index.ptr_shift = line1;
+    index.line_map.fill(None);
+    index.next_ptrs.fill(0);
+    if index.scan_a(line1, count1) {
+        return -1;
+    }
+    index.cnt = index.max_chain_length + 1;
+    let end2 = line2 + count2;
+    let mut b_ptr = line2;
+    while b_ptr < end2 {
+        b_ptr = index.try_lcs(lcs, b_ptr, line1, count1, line2, count2);
+    }
+    if index.has_common && index.max_chain_length < index.cnt {
+        1
+    } else {
+        0
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fall_back_classic(
+    old_lines: &[&str],
+    new_lines: &[&str],
     changed1: &mut [bool],
     changed2: &mut [bool],
-    old_start: usize,
-    old_len: usize,
-    new_start: usize,
-    new_len: usize,
+    line1: usize,
+    count1: usize,
+    line2: usize,
+    count2: usize,
+    ws: WhitespaceMode,
 ) {
-    if old_len > 0 {
-        changed1[old_start..old_start + old_len].fill(true);
+    let o_slice = &old_lines[line1..line1 + count1];
+    let n_slice = &new_lines[line2..line2 + count2];
+    let (sub1, sub2) = super::xdiff_changed_flags_for_line_slices(o_slice, n_slice, ws, false);
+    for (i, flag) in sub1.iter().enumerate() {
+        if *flag {
+            changed1[line1 + i] = true;
+        }
     }
-    if new_len > 0 {
-        changed2[new_start..new_start + new_len].fill(true);
+    for (j, flag) in sub2.iter().enumerate() {
+        if *flag {
+            changed2[line2 + j] = true;
+        }
     }
 }
 
-#[derive(Clone, Copy)]
-struct TextRange {
-    old_start: usize,
-    old_len: usize,
-    new_start: usize,
-    new_len: usize,
-}
-
-fn align_region<F>(
-    old: &[&str],
-    new: &[&str],
+#[allow(clippy::too_many_arguments)]
+fn histogram_diff(
+    old_lines: &[&str],
+    new_lines: &[&str],
     changed1: &mut [bool],
     changed2: &mut [bool],
-    fallback: &mut F,
-    range: TextRange,
-    work: &mut HistogramWork,
-) where
-    F: FnMut(&mut [bool], &mut [bool], usize, usize, usize, usize),
-{
-    let TextRange {
-        old_start,
-        old_len,
-        new_start,
-        new_len,
-    } = range;
-    work.step_region();
-    if work.regions > MAX_REGION_SPLITS {
-        mark_myers(
-            changed1, changed2, fallback, old_start, old_len, new_start, new_len,
-        );
-        return;
-    }
-    if old_len == 0 && new_len == 0 {
-        return;
-    }
-    if old_len == 0 {
-        mark_all_changed(changed1, changed2, old_start, 0, new_start, new_len);
-        return;
-    }
-    if new_len == 0 {
-        mark_all_changed(changed1, changed2, old_start, old_len, new_start, 0);
-        return;
-    }
-
-    let index = match OldWindowIndex::try_build(old, old_start, old_len, work) {
-        Ok(idx) => idx,
-        Err(()) => {
-            mark_myers(
-                changed1, changed2, fallback, old_start, old_len, new_start, new_len,
-            );
-            return;
+    mut line1: usize,
+    mut count1: usize,
+    mut line2: usize,
+    mut count2: usize,
+    ws: WhitespaceMode,
+) -> i32 {
+    loop {
+        if count1 == 0 && count2 == 0 {
+            return 0;
         }
-    };
-
-    let old_end = old_start + old_len;
-    let new_end = new_start + new_len;
-    let mut search = AnchorSearch {
-        old,
-        new,
-        old_start,
-        old_end,
-        new_start,
-        new_end,
-        index: &index,
-        work,
-        best: None,
-        ambiguity_floor: 0,
-        saw_match: false,
-    };
-    let (myers, band) = match search.run() {
-        Ok(v) => v,
-        Err(()) => {
-            mark_myers(
-                changed1, changed2, fallback, old_start, old_len, new_start, new_len,
-            );
-            return;
+        if count1 == 0 {
+            for flag in changed2.iter_mut().skip(line2).take(count2) {
+                *flag = true;
+            }
+            return 0;
         }
-    };
+        if count2 == 0 {
+            for flag in changed1.iter_mut().skip(line1).take(count1) {
+                *flag = true;
+            }
+            return 0;
+        }
 
-    if myers {
-        mark_myers(
-            changed1, changed2, fallback, old_start, old_len, new_start, new_len,
-        );
-        return;
-    }
-
-    let Some(band) = band else {
-        mark_all_changed(changed1, changed2, old_start, old_len, new_start, new_len);
-        return;
-    };
-
-    if band.new_lo > new_start || band.old_lo > old_start {
-        align_region(
-            old,
-            new,
+        let mut lcs = Region::default();
+        let mut index = HistIndex::new(old_lines, count1, ws);
+        index.new_lines = new_lines;
+        let lcs_found = find_lcs(&mut index, &mut lcs, line1, count1, line2, count2);
+        if lcs_found < 0 {
+            return -1;
+        }
+        if lcs_found == 1 {
+            fall_back_classic(
+                old_lines, new_lines, changed1, changed2, line1, count1, line2, count2, ws,
+            );
+            return 0;
+        }
+        if lcs.begin1 == line1 && lcs.begin2 == line2 {
+            for flag in changed1.iter_mut().skip(line1).take(count1) {
+                *flag = true;
+            }
+            for flag in changed2.iter_mut().skip(line2).take(count2) {
+                *flag = true;
+            }
+            return 0;
+        }
+        let before_result = histogram_diff(
+            old_lines,
+            new_lines,
             changed1,
             changed2,
-            fallback,
-            TextRange {
-                old_start,
-                old_len: band.old_lo.saturating_sub(old_start),
-                new_start,
-                new_len: band.new_lo.saturating_sub(new_start),
-            },
-            work,
+            line1,
+            lcs.begin1 - line1,
+            line2,
+            lcs.begin2 - line2,
+            ws,
         );
-    }
-    let tail_old_start = band.old_hi + 1;
-    let tail_old_len = old_end.saturating_sub(tail_old_start);
-    let tail_new_start = band.new_hi + 1;
-    let tail_new_len = new_end.saturating_sub(tail_new_start);
-    if tail_old_len > 0 || tail_new_len > 0 {
-        align_region(
-            old,
-            new,
-            changed1,
-            changed2,
-            fallback,
-            TextRange {
-                old_start: tail_old_start,
-                old_len: tail_old_len,
-                new_start: tail_new_start,
-                new_len: tail_new_len,
-            },
-            work,
-        );
+        if before_result != 0 {
+            return before_result;
+        }
+        let end1 = line1 + count1 - 1;
+        let end2 = line2 + count2 - 1;
+        count1 = end1 - lcs.end1;
+        line1 = lcs.end1 + 1;
+        count2 = end2 - lcs.end2;
+        line2 = lcs.end2 + 1;
     }
 }
 
-/// Mark changed lines using histogram alignment with Myers fallback on ambiguous regions.
-pub fn histogram_changed_flags<F>(
-    old: &[&str],
-    new: &[&str],
-    mut myers_fallback: F,
-) -> (Vec<bool>, Vec<bool>)
-where
-    F: FnMut(&mut [bool], &mut [bool], usize, usize, usize, usize),
-{
-    histogram_changed_flags_with_work(old, new, &mut myers_fallback, &mut HistogramWork::default())
-}
-
-/// Like [`histogram_changed_flags`], but fills `work` with deterministic operation counts.
-pub fn histogram_changed_flags_with_work<F>(
-    old: &[&str],
-    new: &[&str],
-    myers_fallback: &mut F,
-    work: &mut HistogramWork,
-) -> (Vec<bool>, Vec<bool>)
-where
-    F: FnMut(&mut [bool], &mut [bool], usize, usize, usize, usize),
-{
-    let mut changed1 = vec![false; old.len()];
-    let mut changed2 = vec![false; new.len()];
-    if old.is_empty() && new.is_empty() {
+/// Per-line changed flags using Git's histogram algorithm with whitespace-aware line matching.
+pub(crate) fn histogram_changed_flags(
+    old_lines: &[&str],
+    new_lines: &[&str],
+    ws: WhitespaceMode,
+) -> (Vec<bool>, Vec<bool>) {
+    let mut changed1 = vec![false; old_lines.len()];
+    let mut changed2 = vec![false; new_lines.len()];
+    if old_lines.len() > u32::MAX as usize || new_lines.len() > u32::MAX as usize {
+        fall_back_classic(
+            old_lines,
+            new_lines,
+            &mut changed1,
+            &mut changed2,
+            0,
+            old_lines.len(),
+            0,
+            new_lines.len(),
+            ws,
+        );
         return (changed1, changed2);
     }
-    align_region(
-        old,
-        new,
+    if histogram_diff(
+        old_lines,
+        new_lines,
         &mut changed1,
         &mut changed2,
-        myers_fallback,
-        TextRange {
-            old_start: 0,
-            old_len: old.len(),
-            new_start: 0,
-            new_len: new.len(),
-        },
-        work,
-    );
-    (changed1, changed2)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Frobnitz-sized inputs must stay within a modest histogram budget (no runaway chains).
-    const FROBNITZ_MAX_CHAIN_STEPS: u64 = 8_000_000;
-    const FROBNITZ_MAX_REGIONS: u64 = 50_000;
-    const FROBNITZ_MAX_ANCHOR_SCANS: u64 = 2_000_000;
-
-    #[test]
-    fn frobnitz_histogram_work_bounded() {
-        let old = include_str!("../../tests/support/data/diff_frobnitz_old.c");
-        let new = include_str!("../../tests/support/data/diff_frobnitz_new.c");
-        let ol: Vec<&str> = old.lines().collect();
-        let nl: Vec<&str> = new.lines().collect();
-        let mut work = HistogramWork::default();
-        let _ = histogram_changed_flags_with_work(
-            &ol,
-            &nl,
-            &mut |c1, c2, o0, o1, n0, n1| {
-                for i in o0..o1 {
-                    c1[i] = true;
-                }
-                for j in n0..n1 {
-                    c2[j] = true;
-                }
-            },
-            &mut work,
-        );
-        assert!(
-            work.chain_steps < FROBNITZ_MAX_CHAIN_STEPS,
-            "chain_steps={}",
-            work.chain_steps
-        );
-        assert!(
-            work.regions < FROBNITZ_MAX_REGIONS,
-            "regions={}",
-            work.regions
-        );
-        assert!(
-            work.anchor_scans < FROBNITZ_MAX_ANCHOR_SCANS,
-            "anchor_scans={}",
-            work.anchor_scans
+        0,
+        old_lines.len(),
+        0,
+        new_lines.len(),
+        ws,
+    ) < 0
+    {
+        changed1.fill(false);
+        changed2.fill(false);
+        fall_back_classic(
+            old_lines,
+            new_lines,
+            &mut changed1,
+            &mut changed2,
+            0,
+            old_lines.len(),
+            0,
+            new_lines.len(),
+            ws,
         );
     }
+    (changed1, changed2)
 }
