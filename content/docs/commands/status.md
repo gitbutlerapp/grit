@@ -29,9 +29,7 @@ Paths are shown relative to the directory you run `grit` from. Valid UTF-8 file 
 
 ### The target branch
 
-The target is the branch your work is compared against in the header line. When the current branch has upstream tracking configured (`branch.<name>.remote` and `branch.<name>.merge`, including after `grit switch origin/<topic>` creates a local branch), `grit` compares against that upstream first.
-
-Otherwise it uses the first of these that exists:
+The target is the branch your work is compared against in the header line (`target`, `ahead`, and `behind` in JSON). It uses the first of these that exists:
 
 1. the branch named in the `target.branch` config setting
 2. `origin/master`
@@ -45,11 +43,14 @@ To compare against something else, set it for the repository:
 $ grit config target.branch origin/develop
 ```
 
+When the current branch has a configured upstream (`branch.<name>.remote` and `branch.<name>.merge`) that differs from the target, human output adds a second line (`↑n ↓m origin/topic`) and JSON includes an `upstream` object with the same counts relative to that tracking ref. When upstream and target resolve to the same ref, `upstream` is `null`.
+
 ## Options
 
 | Flag | Description |
 | ---- | ----------- |
 | `--untracked <MODE>` | How untracked paths are listed: `normal` (default) shows untracked files and collapses wholly untracked directories to a single directory entry; `all` lists every untracked file; `no` omits untracked paths. When the flag is omitted, `status.showUntrackedFiles` from config is used (Git-compatible; defaults to `normal`). |
+| `--no-ahead-behind` | Skip ahead/behind rev-list walks; JSON sets `ahead`, `behind`, and upstream counts to `null`. Also skipped when `status.aheadBehind=false` in config. |
 
 See also the [global options](../global-options/).
 
@@ -161,8 +162,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `detached` | boolean | Whether HEAD is detached. |
 | `head` | string or null | Full id of the current commit, or `null` before the first commit. |
 | `target` | string or null | Target branch, or `null` when none was found. |
-| `ahead` | number | Commits on the branch that the target does not have. |
-| `behind` | number | Commits on the target that the branch does not have. |
+| `ahead` | number or null | Commits on the branch that the target does not have; `null` when ahead/behind counts were skipped. |
+| `behind` | number or null | Commits on the target that the branch does not have; `null` when counts were skipped. |
+| `upstream` | object or null | When upstream tracking differs from `target`: `{ "ref", "ahead", "behind" }` (counts may be `null` when skipped). Omitted or `null` when there is no separate upstream. |
 | `commits` | array | Newest of those commits, up to ten, each using the shared [`CommitJson`](../README.md#commit-json-object-commitjson) shape (including `change_id` and `change_id_stored`). |
 | `staged` | array | Staged changes with `path` and `status`. |
 | `unstaged` | array | Unstaged changes with `path` and `status`. |

@@ -768,24 +768,6 @@ fn read_single_oid_file(path: &Path) -> Result<Option<ObjectId>> {
     }
 }
 
-/// Check upstream (tracking) information for the current branch.
-///
-/// Returns `(ahead, behind)` counts relative to the tracking branch.
-/// This requires commit walking and is deferred for now.
-///
-/// # Parameters
-///
-/// - `_git_dir` — path to the `.git` directory.
-/// - `_branch` — the local branch name.
-///
-/// # Returns
-///
-/// `None` if no upstream is configured.
-pub fn upstream_tracking(_git_dir: &Path, _branch: &str) -> Result<Option<(usize, usize)>> {
-    // TODO: Implement ahead/behind counting once config + rev-list integration is ready.
-    Ok(None)
-}
-
 #[cfg(test)]
 mod merge_sentinel_tests {
     #![allow(clippy::unwrap_used)]

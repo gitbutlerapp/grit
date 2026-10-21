@@ -374,7 +374,8 @@ fn status_json_uses_upstream_after_switch_from_remote_tracking() -> TestResult {
 
     let v = gs_json(&clone, &["status"]);
     assert_eq!(v["branch"], "topic");
-    assert_eq!(v["target"], "origin/topic");
+    assert_eq!(v["target"], "origin/main");
+    assert_eq!(v["upstream"]["ref"], "origin/topic");
     assert_eq!(v["ahead"], 0);
     assert_eq!(v["behind"], 0);
     assert_eq!(v["clean"], Value::Bool(true));

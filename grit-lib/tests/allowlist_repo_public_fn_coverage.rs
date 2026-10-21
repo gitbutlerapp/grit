@@ -70,7 +70,7 @@ use grit_lib::repo::caches::RepoCaches;
 use grit_lib::repo::ensure_core_bare;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::{StashApplyOptions, StashPushOptions};
-use grit_lib::state::{read_merge_msg, resolve_head, split_commit_in_progress, upstream_tracking};
+use grit_lib::state::{read_merge_msg, resolve_head, split_commit_in_progress};
 use grit_lib::RefStorageFormat;
 use tempfile::tempdir;
 
@@ -299,7 +299,6 @@ fn refs_state_repo_caches_and_notes() {
     let head = resolve_head(git_dir.as_path()).expect("head");
     let _ = split_commit_in_progress(git_dir.as_path(), &head);
     let _ = read_merge_msg(git_dir.as_path());
-    let _ = upstream_tracking(git_dir.as_path(), "main");
 
     let rt_dir = tempdir().expect("rt");
     let rt_repo = Repository::init(

@@ -8,7 +8,9 @@ use grit_lib::porcelain::status::{
     status, untracked_mode_from_config, StatusOptions, UntrackedMode,
 };
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::branch_tracking::{comparison_base, Standing, TipComparison};
+use grit_lib::refs::branch_tracking::{
+    status_ahead_behind_enabled, BranchStanding, Standing, StandingOptions, TrackedComparison,
+};
 use grit_lib::repo::Repository;
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
 use schemars::JsonSchema;
@@ -31,6 +33,8 @@ const SHORTLOG_LIMIT: usize = 10;
 enum HeaderKind {
     /// On a branch with a base: even with, ahead of, behind or diverged from it.
     Compared(Standing),
+    /// Target resolves but ahead/behind counts were not computed.
+    ComparedNoCounts,
     NoTarget,
     Unborn,
     Detached,
@@ -49,10 +53,14 @@ pub struct StatusOutcome {
     pub head: Option<String>,
     /// Target branch name, or `null` when none applies / was found.
     pub target: Option<String>,
-    /// Number of commits ahead of `target` (full count).
-    pub ahead: usize,
-    /// Number of commits on `target` not in the current branch (full count).
-    pub behind: usize,
+    /// Number of commits ahead of `target` (full count), or `null` when counts were skipped.
+    pub ahead: Option<usize>,
+    /// Number of commits on `target` not in the current branch (full count), or `null` when skipped.
+    pub behind: Option<usize>,
+    /// Upstream tracking comparison when it differs from `target`, or `null`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub upstream: Option<StatusUpstreamJson>,
     /// Newest ahead-of-target commits (newest first), up to the status shortlog limit.
     pub commits: Vec<CommitJson>,
     pub staged: Vec<ChangeJson>,
@@ -86,6 +94,20 @@ pub struct StatusOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     path_display: Option<PathDisplayOptions>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    show_counts: bool,
+}
+
+/// Upstream ahead/behind in `--json` / `--markdown` output.
+#[derive(Serialize, JsonSchema)]
+pub struct StatusUpstreamJson {
+    /// Short upstream ref name (`origin/topic`).
+    pub r#ref: String,
+    /// Commits on this branch not on the upstream, or `null` when counts were skipped.
+    pub ahead: Option<usize>,
+    /// Commits on the upstream not on this branch, or `null` when counts were skipped.
+    pub behind: Option<usize>,
 }
 
 impl HumanRender for StatusOutcome {
@@ -113,26 +135,42 @@ impl StatusOutcome {
         let now = ctx.now.unix_timestamp();
         match self.header {
             HeaderKind::Compared(Standing::Ahead) => {
-                outln!(w, "On {branch}  ·  {} ahead of {target}", self.ahead);
+                outln!(
+                    w,
+                    "On {branch}  ·  {} ahead of {target}",
+                    self.ahead.unwrap_or(0)
+                );
                 outln!(w);
                 self.render_ahead_shortlog(w, now)?;
             }
             HeaderKind::Compared(Standing::Behind) => {
-                outln!(w, "On {branch}  ·  {} behind {target}", self.behind);
+                outln!(
+                    w,
+                    "On {branch}  ·  {} behind {target}",
+                    self.behind.unwrap_or(0)
+                );
                 outln!(w);
             }
             HeaderKind::Compared(Standing::Diverged) => {
                 outln!(
                     w,
                     "On {branch}  ·  {} ahead, {} behind {target}",
-                    self.ahead,
-                    self.behind
+                    self.ahead.unwrap_or(0),
+                    self.behind.unwrap_or(0)
                 );
                 outln!(w);
                 self.render_ahead_shortlog(w, now)?;
             }
             HeaderKind::Compared(Standing::Even) => {
                 outln!(w, "On {branch}  ·  even with {target}");
+                outln!(w);
+            }
+            HeaderKind::ComparedNoCounts if target.is_empty() => {
+                outln!(w, "On {branch}");
+                outln!(w);
+            }
+            HeaderKind::ComparedNoCounts => {
+                outln!(w, "On {branch}  ·  {target}");
                 outln!(w);
             }
             HeaderKind::NoTarget => {
@@ -159,6 +197,19 @@ impl StatusOutcome {
             HeaderKind::OtherInProgress => {
                 outln!(w, "On {branch}  ·  operation in progress");
                 outln!(w);
+            }
+        }
+        if self.show_counts {
+            if let Some(up) = &self.upstream {
+                if up.ahead.is_some() || up.behind.is_some() {
+                    outln!(
+                        w,
+                        "  ↑{} ↓{} {}",
+                        up.ahead.unwrap_or(0),
+                        up.behind.unwrap_or(0),
+                        up.r#ref
+                    );
+                }
             }
         }
         Ok(())
@@ -195,7 +246,7 @@ impl StatusOutcome {
         if !self.staged_entries.is_empty() {
             hints.push("grit commit \"message\" to commit".to_owned());
         }
-        if self.ahead == 0 && self.behind > 0 {
+        if self.ahead == Some(0) && self.behind.is_some_and(|b| b > 0) {
             let target = self.target.as_deref().unwrap_or("target");
             hints.push(format!("grit pull to update from {target}"));
         }
@@ -212,8 +263,12 @@ impl StatusOutcome {
         {
             outln!(w, "{row}");
         }
-        if self.ahead > SHORTLOG_LIMIT {
-            outln!(w, "  … and {} more", self.ahead - SHORTLOG_LIMIT);
+        if self.ahead.unwrap_or(0) > SHORTLOG_LIMIT {
+            outln!(
+                w,
+                "  … and {} more",
+                self.ahead.unwrap_or(0) - SHORTLOG_LIMIT
+            );
         }
         outln!(w);
         Ok(())
@@ -235,7 +290,7 @@ impl StatusOutcome {
         if !self.staged_entries.is_empty() {
             hints.push("grit commit `\"message\"` to commit".to_owned());
         }
-        if self.ahead == 0 && self.behind > 0 {
+        if self.ahead == Some(0) && self.behind.is_some_and(|b| b > 0) {
             let target = self.target.as_deref().unwrap_or("target");
             hints.push(format!("grit pull to update from `{target}`"));
         }
@@ -253,7 +308,7 @@ impl StatusOutcome {
                 outln!(
                     w,
                     "On **`{branch}`** · **{}** ahead of `{target}`",
-                    self.ahead
+                    self.ahead.unwrap_or(0)
                 );
                 self.render_markdown_ahead_shortlog(w, ctx)?;
             }
@@ -261,7 +316,7 @@ impl StatusOutcome {
                 outln!(
                     w,
                     "On **`{branch}`** · **{}** behind `{target}`",
-                    self.behind
+                    self.behind.unwrap_or(0)
                 );
                 outln!(w);
             }
@@ -269,13 +324,21 @@ impl StatusOutcome {
                 outln!(
                     w,
                     "On **`{branch}`** · **{}** ahead, **{}** behind `{target}`",
-                    self.ahead,
-                    self.behind
+                    self.ahead.unwrap_or(0),
+                    self.behind.unwrap_or(0)
                 );
                 self.render_markdown_ahead_shortlog(w, ctx)?;
             }
             HeaderKind::Compared(Standing::Even) => {
                 outln!(w, "On **`{branch}`** · even with `{target}`");
+                outln!(w);
+            }
+            HeaderKind::ComparedNoCounts if target.is_empty() => {
+                outln!(w, "On **`{branch}`**");
+                outln!(w);
+            }
+            HeaderKind::ComparedNoCounts => {
+                outln!(w, "On **`{branch}`** · `{target}`");
                 outln!(w);
             }
             HeaderKind::NoTarget => {
@@ -315,9 +378,13 @@ impl StatusOutcome {
                 &self.commit_rows[..self.commit_rows.len().min(SHORTLOG_LIMIT)],
                 ctx,
             )?;
-            if self.ahead > SHORTLOG_LIMIT {
+            if self.ahead.unwrap_or(0) > SHORTLOG_LIMIT {
                 outln!(w);
-                outln!(w, "… and {} more commit(s).", self.ahead - SHORTLOG_LIMIT);
+                outln!(
+                    w,
+                    "… and {} more commit(s).",
+                    self.ahead.unwrap_or(0) - SHORTLOG_LIMIT
+                );
             }
         }
         outln!(w);
@@ -380,15 +447,14 @@ impl UntrackedListing {
     }
 }
 
-pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
+pub fn run(untracked: Option<UntrackedListing>, no_ahead_behind: bool) -> Result<StatusOutcome> {
     let repo = context::discover()?;
+    let config = repo.config().context("could not load config")?;
     let untracked_mode = match untracked {
         Some(mode) => mode.into_lib(),
-        None => {
-            let config = repo.config().context("could not load config")?;
-            untracked_mode_from_config(&config)?
-        }
+        None => untracked_mode_from_config(&config)?,
     };
+    let show_counts = !no_ahead_behind && status_ahead_behind_enabled(&config);
     let status_opts = StatusOptions {
         untracked: untracked_mode,
         ..StatusOptions::default()
@@ -400,7 +466,15 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
     let merging = model.state.merge_in_progress;
     let conflicts = model.conflicts.clone();
 
-    let summary = summarize_head(&repo, &model.head, in_progress_header(merging, &operations))?;
+    let summary = summarize_head(
+        &repo,
+        &model.head,
+        in_progress_header(merging, &operations),
+        StandingOptions {
+            newest_ahead_limit: SHORTLOG_LIMIT,
+            counts: show_counts,
+        },
+    )?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let ahead_oids: Vec<_> = summary.ahead_commits.iter().map(|c| c.oid).collect();
     let commits = if ahead_oids.is_empty() {
@@ -426,6 +500,7 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
         target: summary.target,
         ahead: summary.ahead,
         behind: summary.behind,
+        upstream: summary.upstream,
         commits,
         staged,
         unstaged,
@@ -439,6 +514,7 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
         staged_entries: model.staged,
         unstaged_entries: model.unstaged,
         path_display,
+        show_counts,
     })
 }
 
@@ -446,8 +522,9 @@ pub fn run(untracked: Option<UntrackedListing>) -> Result<StatusOutcome> {
 struct HeadSummary {
     branch: Option<String>,
     target: Option<String>,
-    ahead: usize,
-    behind: usize,
+    ahead: Option<usize>,
+    behind: Option<usize>,
+    upstream: Option<StatusUpstreamJson>,
     ahead_commits: Vec<CommitSummary>,
     header: HeaderKind,
 }
@@ -457,8 +534,9 @@ impl HeadSummary {
         Self {
             branch,
             target: None,
-            ahead: 0,
-            behind: 0,
+            ahead: None,
+            behind: None,
+            upstream: None,
             ahead_commits: Vec::new(),
             header,
         }
@@ -493,36 +571,63 @@ fn summarize_head(
     repo: &Repository,
     head: &HeadState,
     in_progress: Option<HeaderKind>,
+    standing_opts: StandingOptions,
 ) -> Result<HeadSummary> {
-    let (short_name, head_oid) = match head {
-        HeadState::Branch {
-            short_name,
-            oid: Some(oid),
-            ..
-        } => (short_name, *oid),
-        HeadState::Branch { short_name, .. } => {
-            return Ok(HeadSummary::new(
-                Some(short_name.clone()),
-                HeaderKind::Unborn,
-            ));
-        }
-        HeadState::Detached { .. } => return Ok(HeadSummary::new(None, HeaderKind::Detached)),
-        HeadState::Invalid => return Ok(HeadSummary::new(None, HeaderKind::Invalid)),
-    };
+    if let HeadState::Branch { short_name, oid: None, .. } = head {
+        return Ok(HeadSummary::new(
+            Some(short_name.clone()),
+            HeaderKind::Unborn,
+        ));
+    }
+    if matches!(head, HeadState::Detached { .. }) {
+        return Ok(HeadSummary::new(None, HeaderKind::Detached));
+    }
+    if matches!(head, HeadState::Invalid) {
+        return Ok(HeadSummary::new(None, HeaderKind::Invalid));
+    }
+
+    let standing = BranchStanding::compute(repo, head, standing_opts)
+        .context("could not resolve branch standing")?;
     let mut summary = HeadSummary::new(
-        Some(short_name.clone()),
+        standing.branch.clone(),
         in_progress.unwrap_or(HeaderKind::NoTarget),
     );
-    let Some(base) =
-        comparison_base(repo, short_name).context("could not resolve the target branch")?
-    else {
+    let head_oid = head.oid().copied();
+    let Some(tracked) = standing.target else {
         return Ok(summary);
     };
-    let comparison = TipComparison::compute(repo, head_oid, base.oid, SHORTLOG_LIMIT)?;
-    summary.header = in_progress.unwrap_or(HeaderKind::Compared(comparison.standing()));
-    summary.target = Some(base.name);
-    summary.ahead = comparison.ahead;
-    summary.behind = comparison.behind;
-    summary.ahead_commits = context::commit_summaries(repo, &comparison.newest_ahead)?;
+    summary.target = Some(tracked.name.clone());
+    summary.ahead = tracked.ahead;
+    summary.behind = tracked.behind;
+    summary.ahead_commits = context::commit_summaries(repo, &tracked.newest_ahead)?;
+    summary.upstream = standing.upstream.map(tracked_to_upstream_json);
+    summary.header =
+        in_progress.unwrap_or_else(|| header_for_tracked(head_oid, &tracked, standing_opts));
     Ok(summary)
+}
+
+fn tracked_to_upstream_json(tracked: TrackedComparison) -> StatusUpstreamJson {
+    StatusUpstreamJson {
+        r#ref: tracked.name,
+        ahead: tracked.ahead,
+        behind: tracked.behind,
+    }
+}
+
+fn header_for_tracked(
+    head_oid: Option<ObjectId>,
+    tracked: &TrackedComparison,
+    opts: StandingOptions,
+) -> HeaderKind {
+    if !opts.counts {
+        return if head_oid == Some(tracked.oid) {
+            HeaderKind::Compared(Standing::Even)
+        } else {
+            HeaderKind::ComparedNoCounts
+        };
+    }
+    HeaderKind::Compared(Standing::from_counts(
+        tracked.ahead.unwrap_or(0),
+        tracked.behind.unwrap_or(0),
+    ))
 }

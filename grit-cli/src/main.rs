@@ -562,6 +562,9 @@ enum Command {
         /// When omitted, uses `status.showUntrackedFiles` from config.
         #[arg(long = "untracked", value_name = "MODE")]
         untracked: Option<commands::status::UntrackedListing>,
+        /// Skip ahead/behind rev-list walks (also when `status.aheadBehind=false`).
+        #[arg(long = "no-ahead-behind")]
+        no_ahead_behind: bool,
     },
     /// List the commits on this branch that aren't on the target branch yet.
     #[command(alias = "sl")]
@@ -1057,7 +1060,10 @@ fn reject_non_human_plumbing(cli: &Cli, opts: &OutputOptions) -> Result<()> {
 }
 
 fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
-    match cli.command.unwrap_or(Command::Status { untracked: None }) {
+    match cli.command.unwrap_or(Command::Status {
+        untracked: None,
+        no_ahead_behind: false,
+    }) {
         Command::Init {
             path,
             bare,
@@ -1229,7 +1235,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 ctx,
             )
         }
-        Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
+        Command::Status {
+            untracked,
+            no_ahead_behind,
+        } => emit(
+            &commands::status::run(untracked, no_ahead_behind)?,
+            opts,
+            ctx,
+        ),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add {
             paths,

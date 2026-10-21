@@ -146,16 +146,55 @@
   "description": "Result of `grit status`.",
   "properties": {
     "ahead": {
-      "description": "Number of commits ahead of `target` (full count).",
+      "description": "Number of commits ahead of `target` (full count), or null when counts were skipped.",
       "format": "uint",
       "minimum": 0.0,
-      "type": "integer"
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "behind": {
-      "description": "Number of commits on `target` not in the current branch (full count).",
+      "description": "Number of commits on `target` not in the current branch (full count), or null when counts were skipped.",
       "format": "uint",
       "minimum": 0.0,
-      "type": "integer"
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "upstream": {
+      "description": "Upstream tracking comparison when it differs from `target`.",
+      "properties": {
+        "ahead": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "behind": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ahead",
+        "behind",
+        "ref"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "branch": {
       "description": "Current branch (short name), or `null` when detached / invalid.",
