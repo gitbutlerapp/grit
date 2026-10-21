@@ -308,6 +308,7 @@ pub(crate) mod stripspace;
 pub(crate) mod submodule_gitdir;
 pub(crate) mod terminal;
 pub(crate) mod textconv_cache;
+pub(crate) mod trace;
 mod tracked_path_tree;
 pub(crate) mod transfer;
 pub(crate) mod transport;

@@ -879,6 +879,7 @@ pub(crate) mod pack_cache {
                 return Ok(hit);
             }
         }
+        crate::trace::trace_span!("grit.pack.index.open");
         let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
         store.with_catalog(|g| {
             g.by_idx.insert(
@@ -3583,10 +3584,7 @@ impl SingleLocalPackReader {
         self.read_commit_author_prefix_at_pack_offset(offset)
     }
 
-    fn read_commit_author_prefix_at_pack_offset(
-        &mut self,
-        offset: u64,
-    ) -> Result<Option<&[u8]>> {
+    fn read_commit_author_prefix_at_pack_offset(&mut self, offset: u64) -> Result<Option<&[u8]>> {
         let pack_bytes = self.pack_bytes.as_ref();
         let mut pos = offset as usize;
         if pos >= pack_bytes.len() {

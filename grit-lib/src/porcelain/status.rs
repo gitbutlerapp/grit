@@ -1515,6 +1515,7 @@ pub fn status(
     opts: &StatusOptions,
     _progress: &mut dyn ProgressSink,
 ) -> Result<StatusModel> {
+    crate::trace::trace_span!("grit.status.scan");
     let work_tree = repo.work_tree().ok_or_else(|| {
         crate::error::Error::Message("this operation must be run in a work tree".into())
     })?;

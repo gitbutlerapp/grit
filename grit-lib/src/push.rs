@@ -103,6 +103,7 @@ pub fn push_remote(
     opts: &PushOptions,
     progress: &mut dyn Progress,
 ) -> Result<PushOutcome> {
+    crate::trace::trace_span!("grit.push");
     use crate::net_trace::net_trace;
     net_trace!(
         opts.network_trace,

@@ -14,6 +14,7 @@ mod diagnostics;
 mod diff_args;
 mod diff_format;
 mod diff_render;
+mod grit_trace;
 mod json_error;
 mod json_filter;
 #[cfg(test)]
@@ -911,6 +912,7 @@ struct ServeArgs {
 
 fn main() {
     stdio::configure();
+    grit_trace::maybe_init_from_env();
     let parse_argv = diff_args::normalize_diff_argv(std::env::args().collect());
     let cli = match Cli::try_parse_from(parse_argv) {
         Ok(cli) => cli,

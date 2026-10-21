@@ -181,6 +181,7 @@ pub fn build_pack_index_records_with_progress(
     verify_trailer: bool,
     progress: Option<&mut dyn ProgressSink>,
 ) -> Result<Vec<PackIndexRecord>> {
+    crate::trace::trace_span!("grit.pack.delta.resolve");
     let algo = odb.hash_algo();
     let threads = parallelism.threads();
     let header = read_pack_header(pack)?;

@@ -222,6 +222,7 @@ fn negotiate_pack(
     local_shallow: &[ObjectId],
     progress: &mut dyn Progress,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
+    crate::trace::trace_span!("grit.fetch.negotiate");
     let local_repo = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
     let want_set: HashSet<ObjectId> = wants.iter().copied().collect();
 

@@ -23,7 +23,8 @@ anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
-grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq"] }
+grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "tracing"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 time.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -35,7 +36,7 @@ terminal_size.workspace = true
 libc.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls"] }
+grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls", "tracing"] }
 
 [dev-dependencies]
 grit-lib = { path = "../grit-lib" }

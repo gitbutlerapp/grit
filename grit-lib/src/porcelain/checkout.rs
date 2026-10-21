@@ -1400,6 +1400,7 @@ fn checkout_tree_changes_with_progress(
     let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len() / 8);
     let mut deleted_abs_paths: Vec<PathBuf> = Vec::with_capacity(changes.len() / 8);
     let mut dir_cache = LeadingDirCache::new();
+    crate::trace::trace_span!("grit.checkout.plan");
     let mut plan: Vec<CheckoutPlanSlot> = Vec::with_capacity(changes.len());
     let mut write_jobs: Vec<CheckoutWriteJob> = Vec::new();
     let mut rules: Option<WorktreeRules> = None;
@@ -1645,6 +1646,7 @@ fn checkout_tree_changes_with_progress(
         let conv = conv.as_ref().ok_or_else(|| {
             Error::PathError("internal error: missing conversion config for write jobs".into())
         })?;
+        crate::trace::trace_span!("grit.checkout.write");
         execute_write_jobs(
             repo,
             rules,

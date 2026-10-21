@@ -244,6 +244,7 @@ pub fn read_sideband_pack_to(
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
 ) -> Result<()> {
+    crate::trace::trace_span!("grit.pack.receive");
     let mut pending = Vec::new();
     let mut payload = Vec::with_capacity(65520);
     read_sideband_pack_tail(r, target, progress, &mut pending, &mut false, &mut payload)?;

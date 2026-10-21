@@ -33,8 +33,11 @@ http-ureq = ["dep:ureq", "dep:base64", "ureq?/rustls"]
 http-ureq-native-tls = ["http-ureq", "ureq?/native-tls"]
 # Internal helpers for Criterion benches (EWAH); omitted from the public API snapshot.
 unstable-bench-helpers = []
+# Forward `trace_span!` to the `tracing` crate (zero cost when disabled).
+tracing = ["dep:tracing"]
 
 [dependencies]
+tracing = { version = "0.1", optional = true }
 thiserror.workspace = true
 sha1 = "0.11"
 sha2 = "0.11"
@@ -190,6 +193,7 @@ harness = false
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
 serde_json.workspace = true
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
 [[test]]
 name = "clone_layout"

@@ -33,6 +33,11 @@ slug = "global-options"
 label = "Global options"
 
 [[section.page]]
+file = "debugging.md"
+slug = "debugging"
+label = "Debugging and tracing"
+
+[[section.page]]
 file = "scripting.md"
 slug = "scripting"
 label = "Scripting"
