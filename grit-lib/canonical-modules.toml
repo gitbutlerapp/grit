@@ -13,6 +13,7 @@ bundle = "bundle"
 bundle_remote = "bundle::bundle_remote"
 change_id = "change_id"
 check_ref_format = "refs::check_ref_format"
+change_id = "change_id"
 clone = "remote::clone"
 combined_diff_patch = "diff::combined_diff_patch"
 combined_tree_diff = "diff::combined_tree_diff"
@@ -47,6 +48,7 @@ hash = "objects::hash"
 hide_refs = "refs::hide_refs"
 history = "revwalk::history"
 hooks = "command_runner::hooks"
+ident = "config::ident"
 ident_resolve = "config::ident_resolve"
 ignore = "worktree::ignore"
 index = "index"
@@ -139,6 +141,7 @@ modules = [
   "apply",
   "blame",
   "bundle",
+  "change_id",
   "command_runner",
   "commit",
   "config",
@@ -146,6 +149,7 @@ modules = [
   "diff",
   "error",
   "history",
+  "ident",
   "index",
   "maintenance",
   "notes",
