@@ -29,6 +29,7 @@ fn rewrite_opts() -> RewriteOptions {
         empty: EmptyPolicy::Drop,
         committer: "Absorb <a@grit.test> 1 +0000".into(),
         preserve_committer: false,
+        sign: true,
     }
 }
 

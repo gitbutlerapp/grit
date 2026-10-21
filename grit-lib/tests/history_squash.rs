@@ -36,6 +36,7 @@ fn squash_opts(scope: RefScope) -> SquashOptions {
             empty: EmptyPolicy::Drop,
             committer: committer(1),
             preserve_committer: false,
+            sign: true,
         },
     }
 }

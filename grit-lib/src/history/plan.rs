@@ -17,6 +17,7 @@ use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
+use crate::porcelain::commit::prepare_commit_bytes;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::resolve_head;
@@ -90,6 +91,10 @@ fn change_id_err(err: ChangeIdError) -> HistoryError {
 /// is enabled and the source commit has no stored change id, the rewritten commit stores the
 /// Jujutsu-derived id for the original commit oid. New commits inserted by the plan (for example
 /// split parents) receive fresh ids from [`ChangeIdPolicy::id_for_new_commit`](crate::change_id::ChangeIdPolicy::id_for_new_commit).
+///
+/// When [`RewriteOptions::sign`] is `true`, replacement commits honor `commit.gpgsign` via
+/// [`prepare_commit_bytes`](crate::porcelain::commit::prepare_commit_bytes). When `sign` is
+/// `false`, commits are written unsigned and external signers are not invoked.
 ///
 /// # Errors
 ///
@@ -210,6 +215,7 @@ pub fn plan_rewrite(
                 };
                 Some(write_new_commit(
                     repo,
+                    opts,
                     &change_ids,
                     insert.tree,
                     &parents,
@@ -258,6 +264,7 @@ pub fn plan_rewrite(
                 let message = rest_message.as_deref().unwrap_or(&old.message);
                 let oid = write_rewritten_commit(
                     repo,
+                    opts,
                     &change_ids,
                     &old,
                     old_oid,
@@ -322,6 +329,7 @@ pub fn plan_rewrite(
                 let oid = if let Some(explicit_tree) = *tree {
                     write_rewritten_commit(
                         repo,
+                        opts,
                         &change_ids,
                         &old,
                         old_oid,
@@ -824,6 +832,7 @@ fn replay_merge_descendant(
             EmptyPolicy::Drop => Ok(new_first_parent),
             EmptyPolicy::Keep => write_rewritten_commit(
                 repo,
+                opts,
                 change_ids,
                 old,
                 old_oid,
@@ -838,6 +847,7 @@ fn replay_merge_descendant(
 
     write_rewritten_commit(
         repo,
+        opts,
         change_ids,
         old,
         old_oid,
@@ -956,6 +966,7 @@ fn replay_edited_commit(
             EmptyPolicy::Drop => Ok(new_parent),
             EmptyPolicy::Keep => write_rewritten_commit(
                 repo,
+                opts,
                 change_ids,
                 old,
                 old_oid,
@@ -970,6 +981,7 @@ fn replay_edited_commit(
 
     write_rewritten_commit(
         repo,
+        opts,
         change_ids,
         old,
         old_oid,
@@ -1064,6 +1076,7 @@ fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryE
 #[allow(clippy::too_many_arguments)]
 fn write_new_commit(
     repo: &Repository,
+    opts: &RewriteOptions,
     change_ids: &ChangeIdWriteContext,
     tree: ObjectId,
     parents: &[ObjectId],
@@ -1091,7 +1104,7 @@ fn write_new_commit(
     {
         set_change_id(&mut data, &id);
     }
-    write_commit_data(repo, &data)
+    write_commit_data(repo, opts, &data)
 }
 
 /// Write a replacement commit, preserving encoding and raw author/message bytes from `template`
@@ -1099,6 +1112,7 @@ fn write_new_commit(
 #[allow(clippy::too_many_arguments)]
 fn write_rewritten_commit(
     repo: &Repository,
+    opts: &RewriteOptions,
     change_ids: &ChangeIdWriteContext,
     template: &CommitData,
     old_oid: ObjectId,
@@ -1158,14 +1172,29 @@ fn write_rewritten_commit(
         raw_message,
         extra_headers,
     };
-    write_commit_data(repo, &data)
+    write_commit_data(repo, opts, &data)
 }
 
-fn write_commit_data(repo: &Repository, data: &CommitData) -> Result<ObjectId, HistoryError> {
-    let bytes = serialize_commit(data);
+fn write_commit_data(
+    repo: &Repository,
+    opts: &RewriteOptions,
+    data: &CommitData,
+) -> Result<ObjectId, HistoryError> {
+    let bytes = if opts.sign {
+        let config = repo.config().map_err(library_err)?;
+        prepare_commit_bytes(repo, config.as_ref(), data, None).map_err(signing_err)?
+    } else {
+        serialize_commit(data)
+    };
     repo.odb()
         .write(ObjectKind::Commit, &bytes)
         .map_err(library_err)
+}
+
+fn signing_err(err: Error) -> HistoryError {
+    HistoryError::Signing {
+        message: err.to_string(),
+    }
 }
 
 fn plan_ref_updates(
@@ -1251,6 +1280,7 @@ pub fn plan_fold_range_at_head(
     }
     let new_oid = write_rewritten_commit(
         repo,
+        opts,
         &change_ids,
         &oldest_commit,
         oldest,
@@ -1331,9 +1361,27 @@ mod merge_call_tests {
         let id = ident(1);
         let tree_a = blob_tree(&repo, "f.txt", b"a\n").expect("tree");
         let change_ids = ChangeIdWriteContext::from_repo(&repo).expect("change ids");
-        let a = write_new_commit(&repo, &change_ids, tree_a, &[], &id, &id, "a\n", &[]).expect("a");
-        let b =
-            write_new_commit(&repo, &change_ids, tree_a, &[a], &id, &id, "b\n", &[]).expect("b");
+        let opts = RewriteOptions {
+            scope: RefScope::Branches,
+            empty: EmptyPolicy::Drop,
+            committer: ident(0),
+            preserve_committer: false,
+            sign: false,
+        };
+        let a = write_new_commit(&repo, &opts, &change_ids, tree_a, &[], &id, &id, "a\n", &[])
+            .expect("a");
+        let b = write_new_commit(
+            &repo,
+            &opts,
+            &change_ids,
+            tree_a,
+            &[a],
+            &id,
+            &id,
+            "b\n",
+            &[],
+        )
+        .expect("b");
         write_ref(repo.git_dir(), "refs/heads/main", &b).expect("ref");
         let open =
             Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
@@ -1356,6 +1404,7 @@ mod merge_call_tests {
                 empty: EmptyPolicy::Drop,
                 committer: ident(2),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");

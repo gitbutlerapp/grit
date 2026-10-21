@@ -124,6 +124,13 @@ pub enum HistoryError {
         worktree: String,
     },
 
+    /// Commit signing failed while writing a replacement commit object.
+    #[error("commit signing failed: {message}")]
+    Signing {
+        /// Underlying signing or config failure summary.
+        message: String,
+    },
+
     /// Applying the plan would overwrite staged or unstaged worktree changes on affected paths.
     #[error("local changes would be overwritten")]
     LocalChangesWouldBeOverwritten {

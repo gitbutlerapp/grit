@@ -37,6 +37,7 @@
 //!     empty: EmptyPolicy::Drop,
 //!     committer: "Rewriter <r@example.com> 1 +0000".into(),
 //!     preserve_committer: false,
+//!     sign: true,
 //! };
 //! let _plan = plan_rewrite(repo, &edits, &opts)?;
 //! # Ok(())

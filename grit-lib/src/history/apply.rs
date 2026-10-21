@@ -1652,6 +1652,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 1 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");
@@ -1792,6 +1793,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 1 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");
@@ -2043,6 +2045,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 2 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");
@@ -2307,6 +2310,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 1 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");
@@ -2443,6 +2447,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 1 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");
@@ -2563,6 +2568,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 1 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");
@@ -2796,6 +2802,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 1 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");
@@ -2932,6 +2939,7 @@ mod inject_and_apply_tests {
                 empty: EmptyPolicy::Drop,
                 committer: "T <t@t> 1 +0000".into(),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan");

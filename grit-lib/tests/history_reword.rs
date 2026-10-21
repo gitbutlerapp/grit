@@ -49,6 +49,7 @@ fn reword_changes_only_message_and_replays_descendants() {
             empty: EmptyPolicy::Drop,
             committer: committer(1),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("reword");
@@ -94,6 +95,7 @@ fn reword_rejects_empty_message() {
             empty: EmptyPolicy::Drop,
             committer: committer(1),
             preserve_committer: false,
+            sign: true,
         },
     )
     .unwrap_err();
@@ -142,6 +144,7 @@ fn reword_in_bare_repository() {
             empty: EmptyPolicy::Drop,
             committer: committer(2),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("reword bare");
@@ -207,6 +210,7 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
             empty: EmptyPolicy::Drop,
             committer: committer(10),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("reword root");

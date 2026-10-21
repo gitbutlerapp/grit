@@ -36,6 +36,7 @@ fn rebase_opts(scope: RefScope, empty: EmptyPolicy, skip: bool) -> RebaseOntoOpt
             empty,
             committer: PINNED_COMMITTER.into(),
             preserve_committer: false,
+            sign: true,
         },
         skip_applied: skip,
     }

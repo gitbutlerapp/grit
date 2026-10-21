@@ -49,6 +49,7 @@ fn split_plan(
             empty: EmptyPolicy::Drop,
             committer: committer_line.to_string(),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("split plan")
@@ -149,6 +150,7 @@ fn split_rejects_all_or_nothing_selection() {
             empty: EmptyPolicy::Drop,
             committer: committer(3),
             preserve_committer: false,
+            sign: true,
         },
     )
     .unwrap_err();
@@ -165,6 +167,7 @@ fn split_rejects_all_or_nothing_selection() {
             empty: EmptyPolicy::Drop,
             committer: committer(4),
             preserve_committer: false,
+            sign: true,
         },
     )
     .unwrap_err();
@@ -192,6 +195,7 @@ fn split_rejects_merge_commit() {
             empty: EmptyPolicy::Drop,
             committer: committer(5),
             preserve_committer: false,
+            sign: true,
         },
     )
     .unwrap_err();
@@ -287,6 +291,7 @@ fn split_in_bare_repository() {
             empty: EmptyPolicy::Drop,
             committer: committer(2),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("bare split");

@@ -15934,6 +15934,8 @@ pub grit_lib::revwalk::history::HistoryError::RefApply
 pub grit_lib::revwalk::history::HistoryError::RefApply::message: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::RefCasMismatch
 pub grit_lib::revwalk::history::HistoryError::RefCasMismatch::name: alloc::string::String
+pub grit_lib::revwalk::history::HistoryError::Signing
+pub grit_lib::revwalk::history::HistoryError::Signing::message: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::RootCommit
 pub grit_lib::revwalk::history::HistoryError::RootCommit::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::SplitSelectsEverything
@@ -16259,6 +16261,7 @@ pub grit_lib::revwalk::history::RewriteOptions::committer: alloc::string::String
 pub grit_lib::revwalk::history::RewriteOptions::empty: grit_lib::revwalk::history::EmptyPolicy
 pub grit_lib::revwalk::history::RewriteOptions::preserve_committer: bool
 pub grit_lib::revwalk::history::RewriteOptions::scope: grit_lib::revwalk::history::RefScope
+pub grit_lib::revwalk::history::RewriteOptions::sign: bool
 impl core::clone::Clone for grit_lib::revwalk::history::RewriteOptions
 pub fn grit_lib::revwalk::history::RewriteOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::RewriteOptions

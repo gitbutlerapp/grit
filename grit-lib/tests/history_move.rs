@@ -145,6 +145,7 @@ fn move_commit_before_and_after() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
 
     let plan = move_commit(&grit, c, Placement::Before(b), &opts).expect("move c before b");
@@ -186,6 +187,7 @@ fn move_commit_to_top_and_bottom_of_segment() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
 
     let plan = move_commit(&grit, b, Placement::After(tip), &opts).expect("move b to top");
@@ -214,6 +216,7 @@ fn move_noop_errors() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
     let err = move_commit(&grit, b, Placement::Before(c), &opts).unwrap_err();
     assert!(matches!(err, HistoryError::NoOp { .. }));
@@ -241,6 +244,7 @@ fn move_with_ancient_merge_on_first_parent_chain() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
     let plan = move_commit(&grit, oids["c"], Placement::Before(oids["b"]), &opts)
         .expect("move c before b with ancient merge below");
@@ -273,6 +277,7 @@ fn move_with_forked_topic_branch_succeeds() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
     let plan = move_commit(&grit, oids["c"], Placement::Before(oids["b"]), &opts)
         .expect("move c before b with forked topic branch");
@@ -315,6 +320,7 @@ fn move_across_merge_rejected() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
     let err = move_commit(&grit, oids["b"], Placement::After(oids["merge"]), &opts).unwrap_err();
     assert!(
@@ -343,6 +349,7 @@ fn move_conflict_changes_nothing() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
     let err = move_commit(&grit, c, Placement::Before(b), &opts).unwrap_err();
     assert!(matches!(err, HistoryError::Conflict { .. }));
@@ -372,6 +379,7 @@ fn move_maps_branch_in_segment() {
         empty: EmptyPolicy::Drop,
         committer: committer(1),
         preserve_committer: false,
+        sign: true,
     };
     let plan = move_commit(&grit, c, Placement::Before(b), &opts).expect("move");
     apply_plan(wt, &plan);
@@ -408,6 +416,7 @@ fn history_move_matches_git_rebase_reorder() {
         empty: EmptyPolicy::Drop,
         committer: PINNED_COMMITTER.into(),
         preserve_committer: false,
+        sign: true,
     };
     let plan = move_commit(&grit, c, Placement::Before(b), &opts).expect("grit move");
     apply_plan(wt, &plan);

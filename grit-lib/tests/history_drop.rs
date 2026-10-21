@@ -37,6 +37,7 @@ fn opts(seq: i64) -> RewriteOptions {
         empty: EmptyPolicy::Drop,
         committer: committer(seq),
         preserve_committer: false,
+        sign: true,
     }
 }
 
@@ -306,6 +307,7 @@ fn history_drop_matches_git_rebase_drop() {
             empty: EmptyPolicy::Drop,
             committer: replay_committer,
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -377,6 +379,7 @@ fn history_drop_matches_git_history_when_available() {
             empty: EmptyPolicy::Drop,
             committer: committer(8),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");

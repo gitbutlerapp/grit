@@ -116,6 +116,7 @@ fn plan_reword(
             empty: EmptyPolicy::Drop,
             committer: committer(1),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan")
@@ -151,6 +152,7 @@ fn plan_reword_with_tree(
             empty: EmptyPolicy::Drop,
             committer: committer(1),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan")
@@ -245,6 +247,7 @@ fn apply_rewrite_refuses_when_head_moved_since_plan() {
                 empty: EmptyPolicy::Drop,
                 committer: committer(1),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan")
@@ -372,6 +375,7 @@ fn apply_rewrite_bare_repository() {
             empty: EmptyPolicy::Drop,
             committer: committer(2),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");

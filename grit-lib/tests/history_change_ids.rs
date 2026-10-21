@@ -155,6 +155,7 @@ fn rewrite_opts(seq: i64) -> RewriteOptions {
         empty: EmptyPolicy::Drop,
         committer: format!("Rewriter <r@grit.test> {seq} +0000"),
         preserve_committer: false,
+        sign: true,
     }
 }
 

@@ -184,6 +184,7 @@ fn plan_rewrite_rewords_and_replays_linear_descendants() {
             empty: EmptyPolicy::Drop,
             committer: committer(2),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -254,6 +255,7 @@ fn plan_rewrite_preserves_encoding_when_message_unchanged() {
             empty: EmptyPolicy::Drop,
             committer: committer(9),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -309,6 +311,7 @@ fn plan_rewrite_implicit_tree_replay_preserves_ancestor_tree_change() {
             empty: EmptyPolicy::Drop,
             committer: committer(20),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -352,6 +355,7 @@ fn plan_rewrite_insert_before_root_succeeds() {
             empty: EmptyPolicy::Drop,
             committer: committer(21),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("insert before root");
@@ -392,6 +396,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
             empty: EmptyPolicy::Drop,
             committer: committer(23),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect_err("insert before merge");
@@ -435,6 +440,7 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
             empty: EmptyPolicy::Drop,
             committer: ident,
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect_err("blob tip is not a commit");
@@ -506,6 +512,7 @@ fn plan_rewrite_strips_gpgsig_and_gpgsig_sha256() {
                 empty: EmptyPolicy::Drop,
                 committer: committer(22),
                 preserve_committer: false,
+                sign: true,
             },
         )
         .expect("plan signed rewrite");
@@ -558,6 +565,7 @@ fn plan_rewrite_keeps_all_merge_parents_on_implicit_tree_reword() {
             empty: EmptyPolicy::Drop,
             committer: committer(23),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("merge reword");
@@ -596,6 +604,7 @@ fn plan_rewrite_skips_merge_when_parent_tree_unchanged() {
             empty: EmptyPolicy::Drop,
             committer: committer(3),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -629,6 +638,7 @@ fn plan_rewrite_updates_all_descendant_branches() {
             empty: EmptyPolicy::Drop,
             committer: committer(4),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -669,6 +679,7 @@ fn plan_rewrite_head_scope_updates_only_head() {
             empty: EmptyPolicy::Drop,
             committer: committer(5),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -705,6 +716,7 @@ fn plan_rewrite_replays_merge_descendants() {
             empty: EmptyPolicy::Drop,
             committer: committer(6),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("merge replay");
@@ -775,6 +787,7 @@ fn plan_rewrite_reports_conflict_with_paths() {
             empty: EmptyPolicy::Abort,
             committer: ident,
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect_err("conflict");
@@ -822,6 +835,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
             empty: EmptyPolicy::Drop,
             committer: committer(8),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("drop");
@@ -856,6 +870,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
             empty: EmptyPolicy::Abort,
             committer: committer(9),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect_err("abort");
@@ -872,6 +887,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
             empty: EmptyPolicy::Keep,
             committer: committer(10),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("keep");
@@ -916,6 +932,7 @@ fn plan_rewrite_rejects_branch_checked_out_in_other_worktree() {
             empty: EmptyPolicy::Drop,
             committer: committer(11),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect_err("worktree");
@@ -951,6 +968,7 @@ fn plan_rewrite_detached_head() {
             empty: EmptyPolicy::Drop,
             committer: committer(12),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -984,6 +1002,7 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
             empty: EmptyPolicy::Drop,
             committer: committer(13),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -1019,6 +1038,7 @@ fn plan_rewrite_surfaces_missing_object_as_library_error() {
             empty: EmptyPolicy::Drop,
             committer: committer(30),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect_err("missing commit object");
@@ -1066,6 +1086,7 @@ fn plan_rewrite_parent_only_replay_matches_git_commit_tree() {
             empty: EmptyPolicy::Drop,
             committer: committer_line.clone(),
             preserve_committer: false,
+            sign: true,
         },
     )
     .expect("plan");
@@ -1147,6 +1168,7 @@ fn history_public_api_coverage_smoke() {
         empty: EmptyPolicy::Abort,
         committer: committer(0),
         preserve_committer: false,
+        sign: true,
     };
     let _nc = NewCommit {
         tree: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),

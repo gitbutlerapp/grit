@@ -238,6 +238,7 @@ impl Rewrite {
                 empty: EmptyPolicy::Drop,
                 committer,
                 preserve_committer: false,
+                sign: !shared.dry_run,
             },
         })
     }
@@ -608,6 +609,9 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         }
         HistoryError::Planning { message } => {
             anyhow::anyhow!("history rewrite planning failed: {message}")
+        }
+        HistoryError::Signing { message } => {
+            anyhow::anyhow!("commit signing failed: {message}")
         }
         HistoryError::InsertBeforeOnMerge { commit } => {
             let short = &commit.to_hex()[..7];

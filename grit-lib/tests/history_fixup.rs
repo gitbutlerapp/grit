@@ -41,6 +41,7 @@ fn fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
             empty,
             committer: committer(1),
             preserve_committer: false,
+            sign: true,
         },
     }
 }
@@ -54,6 +55,7 @@ fn harness_fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
             empty,
             committer: harness_committer_line(),
             preserve_committer: false,
+            sign: true,
         },
     }
 }

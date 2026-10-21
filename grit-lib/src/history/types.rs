@@ -96,6 +96,10 @@ pub struct RewriteOptions {
     pub committer: String,
     /// When `true`, replayed commits keep the source committer line instead of [`Self::committer`].
     pub preserve_committer: bool,
+    /// When `true`, honor [`commit.gpgsign`](crate::config::ConfigSet) and sign replacement commits
+    /// (same path as [`crate::porcelain::commit::prepare_commit_bytes`]). When `false`, commits are
+    /// written unsigned and external signers are not invoked (for example history `--dry-run`).
+    pub sign: bool,
 }
 
 /// One original commit and its replacement (if any).
