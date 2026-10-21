@@ -1470,6 +1470,18 @@ impl Odb {
             .flatten()
     }
 
+    /// Whether an object is already stored for [`Self::write_with_options`] deduplication.
+    ///
+    /// Like [`Self::exists`], but the well-known empty tree counts as present only when
+    /// materialized on disk (see [`Self::write_local`]).
+    fn object_exists_for_write_skip(&self, oid: &ObjectId) -> bool {
+        if oid.is_well_known_empty_tree() {
+            self.exists_materialized_local(oid)
+        } else {
+            self.exists(oid)
+        }
+    }
+
     /// Read a loose object file at `path`, verifying the uncompressed payload hashes to `expected_oid`.
     ///
     /// Git stores loose objects under paths derived from the OID; if the file contents hash to a
@@ -2018,8 +2030,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let already_exists =
-            !(options.trust_new_loose || options.assume_loose_only_existence) && self.exists(oid);
+        let already_exists = !(options.trust_new_loose || options.assume_loose_only_existence)
+            && self.object_exists_for_write_skip(oid);
 
         if self.overlay_active() && !already_exists {
             if let Ok(raw) = decompress_zlib_loose_bytes(zlib_store) {
@@ -2056,7 +2068,7 @@ impl Odb {
             } else if options.assume_loose_only_existence {
                 primary.contains(&oid)?
             } else {
-                self.exists(&oid)
+                self.object_exists_for_write_skip(&oid)
             };
             if self.overlay_active()
                 && !already_exists
@@ -2077,8 +2089,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let already_exists =
-            !(options.trust_new_loose || options.assume_loose_only_existence) && self.exists(&oid);
+        let already_exists = !(options.trust_new_loose || options.assume_loose_only_existence)
+            && self.object_exists_for_write_skip(&oid);
 
         // When the in-memory overlay is active, keep the object in memory only (unless it is
         // already present on disk, in which case nothing new needs to be written anyway).
@@ -2908,6 +2920,21 @@ mod tests {
         let canon = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
         assert!(odb.exists_local(&canon));
         assert!(!odb.exists_materialized_local(&canon));
+    }
+
+    #[test]
+    fn write_materializes_well_known_empty_tree() {
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let odb = Odb::new(&objects);
+        let canon = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
+        assert!(!odb.exists_materialized_local(&canon));
+        let oid = odb
+            .write(crate::objects::ObjectKind::Tree, &[])
+            .expect("write empty tree");
+        assert_eq!(oid, canon);
+        assert!(odb.exists_materialized_local(&canon));
     }
 
     #[test]
