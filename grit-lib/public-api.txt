@@ -9850,6 +9850,8 @@ pub grit_lib::porcelain::add::StageOptions::mode: grit_lib::porcelain::add::Stag
 pub grit_lib::porcelain::add::StageOptions::pathspec_sources: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOptions::dry_run: bool
+pub grit_lib::porcelain::add::StageOptions::intent_to_add: bool
+pub grit_lib::porcelain::add::StageOptions::force_ignored: bool
 impl core::clone::Clone for grit_lib::porcelain::add::StageOptions
 pub fn grit_lib::porcelain::add::StageOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::add::StageOptions
@@ -9867,6 +9869,7 @@ pub struct grit_lib::porcelain::add::StageOutcome
 pub grit_lib::porcelain::add::StageOutcome::added: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOutcome::modified: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOutcome::removed: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::add::StageOutcome::intent_to_add: alloc::vec::Vec<alloc::string::String>
 impl grit_lib::porcelain::add::StageOutcome
 pub fn grit_lib::porcelain::add::StageOutcome::total(&self) -> usize
 impl core::clone::Clone for grit_lib::porcelain::add::StageOutcome

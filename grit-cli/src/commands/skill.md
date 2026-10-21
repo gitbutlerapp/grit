@@ -61,9 +61,11 @@ $ grit commit -m "Explain what changed and why"
 | Stage everything (modified, deleted, untracked) | `grit add` |
 | Stage only tracked edits and deletions | `grit add -u` (or `grit add --update`) |
 | Preview without writing the index | `grit add --dry-run` (combine with `-u` or paths) |
+| Record intent to add (empty index slot, no blob yet) | `grit add -N -- path` (requires paths; does not alter tracked entries) |
+| Stage an ignored path | `grit add -f -- ignored.log` |
 | Stage specific paths | `grit add -- path/to/file` |
 
-`grit add --json` returns `{added, modified, removed, dry_run, count, staged}` with repository-relative paths. Use `--dry-run` before bulk staging to bound agent work; path lists are sorted and stable.
+`grit add --json` returns `{added, modified, removed, intent_to_add, dry_run, count, staged}` with repository-relative paths. Use `--dry-run` before bulk staging to bound agent work; path lists are sorted and stable.
 
 `grit commit` fails with "nothing to commit" on a clean tree unless you pass `--allow-empty`. It also refuses a detached HEAD.
 

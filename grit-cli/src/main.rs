@@ -577,6 +577,12 @@ enum Command {
         /// Report paths that would be staged without writing the index or object database.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Record intent to add (empty index entries) instead of staging file content.
+        #[arg(short = 'N', long = "intent-to-add")]
+        intent_to_add: bool,
+        /// Stage paths that would otherwise be rejected as ignored.
+        #[arg(short = 'f', long = "force")]
+        force: bool,
         /// Mark staged regular files as executable (`100755`) in the index.
         #[arg(long = "executable", conflicts_with = "non_executable")]
         executable: bool,
@@ -1241,10 +1247,20 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             pathspecs,
             update,
             dry_run,
+            intent_to_add,
+            force,
             executable,
             non_executable,
         } => emit(
-            &commands::add::run(&pathspecs, update, dry_run, executable, non_executable)?,
+            &commands::add::run(
+                &pathspecs,
+                update,
+                dry_run,
+                intent_to_add,
+                force,
+                executable,
+                non_executable,
+            )?,
             opts,
             ctx,
         ),

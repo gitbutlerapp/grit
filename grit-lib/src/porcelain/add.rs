@@ -10,8 +10,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::diff::{
-    is_unregistered_embedded_git_repo, materialize_worktree_blob, mode_from_metadata,
-    read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
+    empty_blob_oid, is_unregistered_embedded_git_repo, materialize_worktree_blob,
+    mode_from_metadata, read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
 use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
@@ -73,6 +73,10 @@ pub struct StageOptions {
     pub staging_thresholds: Option<IndexStagingThresholds>,
     /// When true, classify paths that would be staged without writing blobs, the index, or UNTR.
     pub dry_run: bool,
+    /// Record intent-to-add entries (empty blob, extended flag) instead of hashing file content.
+    pub intent_to_add: bool,
+    /// Stage explicitly named ignored paths instead of returning [`Error::PathspecIgnored`].
+    pub force_ignored: bool,
 }
 
 /// Paths returned by [`stage`] (repository-relative, `/` separators).
@@ -84,6 +88,8 @@ pub struct StageOutcome {
     pub modified: Vec<String>,
     /// Tracked paths removed from the index because they are absent from the work tree.
     pub removed: Vec<String>,
+    /// Paths recorded with the intent-to-add bit (`git add -N`).
+    pub intent_to_add: Vec<String>,
 }
 
 impl StageOutcome {
@@ -94,6 +100,7 @@ impl StageOutcome {
             .len()
             .saturating_add(self.modified.len())
             .saturating_add(self.removed.len())
+            .saturating_add(self.intent_to_add.len())
     }
 }
 
@@ -123,6 +130,7 @@ fn sort_outcome_paths_in_index_order(outcome: &mut StageOutcome, index: &Index) 
     sort_paths(&mut outcome.added);
     sort_paths(&mut outcome.modified);
     sort_paths(&mut outcome.removed);
+    sort_paths(&mut outcome.intent_to_add);
 }
 
 fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
@@ -130,6 +138,7 @@ fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
         &mut outcome.added,
         &mut outcome.modified,
         &mut outcome.removed,
+        &mut outcome.intent_to_add,
     ] {
         paths.sort();
         paths.dedup();
@@ -187,7 +196,11 @@ pub fn stage(
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
 ) -> Result<StageOutcome> {
-    if opts.pathspecs.is_empty() && opts.mode == StageMode::All && !opts.dry_run {
+    if opts.pathspecs.is_empty()
+        && opts.mode == StageMode::All
+        && !opts.dry_run
+        && !opts.intent_to_add
+    {
         return stage_with_tracked_scan(repo, opts, progress);
     }
     stage_via_worktree_diff(repo, opts, progress)
@@ -312,7 +325,7 @@ fn stage_inner_on_index(
     let rules = lock_rules(&rules_arc)?;
     let bulk_empty_index_add =
         opts.mode == StageMode::All && index.entries.is_empty() && opts.pathspecs.is_empty();
-    let untracked = if opts.mode == StageMode::All {
+    let mut untracked = if opts.mode == StageMode::All {
         if bulk_empty_index_add {
             let scan = UntrackedScan {
                 ignored_mode: IgnoredMode::No,
@@ -363,12 +376,43 @@ fn stage_inner_on_index(
         Vec::new()
     };
 
+    if opts.force_ignored && !opts.pathspecs.is_empty() {
+        untracked.extend(collect_force_ignored_untracked(
+            repo, index, work_tree, opts, &rules,
+        )?);
+        untracked.sort_unstable();
+        untracked.dedup();
+    }
+
     if !opts.pathspecs.is_empty() {
         validate_pathspecs(repo, index, work_tree, &unstaged, &untracked, opts, &rules)?;
     }
 
     let matches =
         |path: &str| opts.pathspecs.is_empty() || repo.paths_match_pathspecs(path, &opts.pathspecs);
+
+    if opts.intent_to_add {
+        let mut outcome = stage_intent_to_add_paths(
+            repo,
+            work_tree,
+            &untracked,
+            &unstaged,
+            &matches,
+            index,
+            &rules,
+            dry_run,
+        )?;
+        if dry_run {
+            sort_outcome_paths_lexicographic(&mut outcome);
+        } else if outcome.total() > 0 {
+            sort_outcome_paths_in_index_order(&mut outcome, index);
+            index.ensure_canonical_order();
+            if persist_index {
+                repo.write_index(index)?;
+            }
+        }
+        return Ok(outcome);
+    }
 
     let mut outcome = StageOutcome::default();
     let has_unmerged = index.has_unmerged_entries();
@@ -521,9 +565,7 @@ fn stage_unmerged_paths_matching_pathspecs(
         let meta = match fs::symlink_metadata(&abs) {
             Ok(m) => m,
             Err(e) if worktree_path_is_missing(&e) => {
-                if dry_run {
-                    removed.push(rel.to_owned());
-                } else if index.remove(raw_path) {
+                if dry_run || index.remove(raw_path) {
                     removed.push(rel.to_owned());
                 }
                 continue;
@@ -1060,6 +1102,9 @@ fn validate_pathspecs(
                 "pathspec '{label}' did not match any files"
             )));
         }
+        if opts.force_ignored {
+            continue;
+        }
         if let Some(display) =
             ignored_display_for_explicit_add(repo, index, rules, work_tree, label, resolved)?
         {
@@ -1132,6 +1177,155 @@ fn first_ignored_parent_directory(
         }
     }
     Ok(None)
+}
+
+fn collect_force_ignored_untracked(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    opts: &StageOptions,
+    rules: &WorktreeRules,
+) -> Result<Vec<String>> {
+    let sources = pathspec_sources(opts);
+    let mut out = Vec::new();
+    let precompose = repo.pathspec_precompose_enabled();
+    let mut ignore = rules.ignore_mut();
+    for (label, resolved) in sources.iter().zip(opts.pathspecs.iter()) {
+        if pathspec_is_exclude(label) {
+            continue;
+        }
+        if has_glob_chars(resolved) || resolved.starts_with(":(") || resolved.starts_with(':') {
+            continue;
+        }
+        let staged = resolve_worktree_path_for_staging(work_tree, resolved, precompose);
+        if !staged.abs.exists() {
+            continue;
+        }
+        let rel = staged.index_relpath;
+        let meta = fs::symlink_metadata(&staged.abs).map_err(Error::Io)?;
+        let is_dir = meta.is_dir() && !meta.file_type().is_symlink();
+        let (ignored, _) = ignore.check_path(repo, Some(index), &rel, is_dir)?;
+        if !ignored {
+            continue;
+        }
+        if is_dir {
+            walk_worktree_files_under(work_tree, &rel, &mut out)?;
+        } else {
+            out.push(rel);
+        }
+    }
+    Ok(out)
+}
+
+fn walk_worktree_files_under(work_tree: &Path, rel_dir: &str, out: &mut Vec<String>) -> Result<()> {
+    let abs_dir = work_tree.join(rel_dir);
+    let mut stack = vec![abs_dir];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).map_err(Error::Io)? {
+            let entry = entry.map_err(Error::Io)?;
+            let path = entry.path();
+            let meta = entry.metadata().map_err(Error::Io)?;
+            if meta.is_dir() {
+                if path.file_name().is_some_and(|n| n == ".git") {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+            if !meta.is_file() && !meta.file_type().is_symlink() {
+                continue;
+            }
+            let rel = pathdiff_worktree(work_tree, &path)?;
+            out.push(rel);
+        }
+    }
+    Ok(())
+}
+
+fn pathdiff_worktree(work_tree: &Path, abs: &Path) -> Result<String> {
+    let rel = abs
+        .strip_prefix(work_tree)
+        .map_err(|_| Error::Message("path escaped the work tree during force-add walk".into()))?;
+    Ok(rel.to_string_lossy().replace('\\', "/"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stage_intent_to_add_paths(
+    repo: &Repository,
+    work_tree: &Path,
+    untracked: &[String],
+    unstaged: &[DiffEntry],
+    matches: &impl Fn(&str) -> bool,
+    index: &mut Index,
+    rules: &WorktreeRules,
+    dry_run: bool,
+) -> Result<StageOutcome> {
+    let mut candidates: BTreeSet<String> = BTreeSet::new();
+    for path in untracked {
+        if matches(path) {
+            candidates.insert(path.clone());
+        }
+    }
+    for entry in unstaged {
+        let path = entry.path().to_owned();
+        if !matches(&path) {
+            continue;
+        }
+        if index.get(path.as_bytes(), 0).is_some() {
+            continue;
+        }
+        if entry.status == DiffStatus::Deleted {
+            continue;
+        }
+        candidates.insert(path);
+    }
+
+    let mut outcome = StageOutcome::default();
+    let empty = empty_blob_oid();
+    if !dry_run {
+        repo.odb()
+            .write(crate::objects::ObjectKind::Blob, b"")
+            .map_err(|e| Error::Message(format!("could not store empty blob: {e}")))?;
+    }
+    let precompose = rules
+        .config()
+        .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+
+    let mut file_paths: BTreeSet<String> = BTreeSet::new();
+    for rel in candidates {
+        let resolved = resolve_worktree_path_for_staging(work_tree, &rel, precompose);
+        let meta = fs::symlink_metadata(&resolved.abs).map_err(Error::Io)?;
+        if meta.is_dir() && !meta.file_type().is_symlink() {
+            let mut under = Vec::new();
+            walk_worktree_files_under(work_tree, &resolved.index_relpath, &mut under)?;
+            file_paths.extend(under);
+        } else if meta.is_file() || meta.file_type().is_symlink() {
+            file_paths.insert(resolved.index_relpath);
+        }
+    }
+
+    for rel in file_paths {
+        if index.get(rel.as_bytes(), 0).is_some() {
+            continue;
+        }
+        let resolved = resolve_worktree_path_for_staging(work_tree, &rel, precompose);
+        let meta = fs::symlink_metadata(&resolved.abs).map_err(Error::Io)?;
+        if dry_run {
+            outcome.intent_to_add.push(rel);
+            continue;
+        }
+        let mode = mode_from_metadata(&meta);
+        let mut entry = entry_from_metadata(&meta, resolved.index_relpath.as_bytes(), empty, mode);
+        entry.oid = empty;
+        entry.size = 0;
+        entry.set_intent_to_add(true);
+        index.stage_file(entry);
+        mark_fsmonitor_staged(index, &resolved.index_relpath);
+        outcome.intent_to_add.push(resolved.index_relpath);
+    }
+    Ok(outcome)
 }
 
 fn pathspec_sources(opts: &StageOptions) -> Vec<String> {
@@ -2260,5 +2454,136 @@ mod tests {
         assert!(outcome.added.contains(&"n.txt".to_owned()));
         let index = repo.load_index().unwrap();
         assert!(index.get(b"n.txt", 0).is_none());
+    }
+
+    #[test]
+    fn force_stages_named_ignored_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        fs::write(root.join("a.log"), b"x\n").unwrap();
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["a.log".to_owned()],
+                pathspec_sources: vec!["a.log".to_owned()],
+                force_ignored: true,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.added, vec!["a.log".to_owned()]);
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"a.log", 0).is_some());
+    }
+
+    #[test]
+    fn intent_to_add_entry_round_trips_with_git() {
+        use std::process::Command;
+
+        if !Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            return;
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("f.txt"), b"hello\n").unwrap();
+
+        stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["f.txt".to_owned()],
+                pathspec_sources: vec!["f.txt".to_owned()],
+                intent_to_add: true,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        let index = repo.load_index().unwrap();
+        let ie = index.get(b"f.txt", 0).expect("ita row");
+        assert!(ie.intent_to_add());
+        assert_eq!(ie.oid, empty_blob_oid());
+
+        let fsck = Command::new("git")
+            .args(["fsck", "--strict"])
+            .current_dir(root)
+            .output()
+            .expect("git fsck");
+        assert!(fsck.status.success(), "{}", String::from_utf8_lossy(&fsck.stderr));
+
+        let diff_stat = Command::new("git")
+            .args(["diff", "--stat"])
+            .current_dir(root)
+            .output()
+            .expect("git diff --stat");
+        assert!(diff_stat.status.success());
+        assert!(String::from_utf8_lossy(&diff_stat.stdout).contains("f.txt"));
+
+        let commit = Command::new("git")
+            .args(["commit", "-a", "-m", "ita"])
+            .current_dir(root)
+            .output()
+            .expect("git commit -a");
+        assert!(
+            commit.status.success(),
+            "{}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+
+        fs::write(root.join("g.txt"), b"other\n").unwrap();
+        stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["g.txt".to_owned()],
+                pathspec_sources: vec!["g.txt".to_owned()],
+                intent_to_add: true,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        let grit_porcelain = Command::new("git")
+            .args(["status", "--porcelain=v2"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+
+        let tmp2 = TempDir::new().unwrap();
+        let root2 = tmp2.path();
+        grit_test_support::git(root2, &["init", "-q"]);
+        grit_test_support::git(root2, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root2, &["config", "user.name", "Test"]);
+        fs::write(root2.join("g.txt"), b"other\n").unwrap();
+        grit_test_support::git(root2, &["add", "-N", "g.txt"]);
+        let git_porcelain = Command::new("git")
+            .args(["status", "--porcelain=v2"])
+            .current_dir(root2)
+            .output()
+            .unwrap();
+
+        fn porcelain_ita_lines(out: &[u8]) -> Vec<String> {
+            String::from_utf8_lossy(out)
+                .lines()
+                .filter(|l| l.contains(" g.txt") || l.ends_with("g.txt"))
+                .map(str::to_owned)
+                .collect()
+        }
+        assert_eq!(
+            porcelain_ita_lines(&grit_porcelain.stdout),
+            porcelain_ita_lines(&git_porcelain.stdout),
+            "porcelain v2 for -N must match git"
+        );
     }
 }

@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit add [-u | --update] [--dry-run] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
+grit add [-u | --update] [--dry-run] [-N | --intent-to-add] [-f | --force] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
 ```
 
 ## Description
@@ -28,6 +28,8 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 | `<path>...` | Files or directories to stage. Omit to stage every change. |
 | `-u`, `--update` | Stage tracked changes only (modified and deleted paths). Untracked files are left alone. With no paths, applies to the whole tree. |
 | `--dry-run` | List paths that would be staged without updating the index or writing objects. |
+| `-N`, `--intent-to-add` | Record intent to add (empty blob, index v3 flag) for new paths only; requires at least one path. Does not change already-tracked entries. |
+| `-f`, `--force` | Stage explicitly named paths even when `.gitignore` would reject them. Directory pathspecs still skip ignored files inside unless those files are named. |
 | `--pathspec-from-file` | Read additional pathspecs from a file, or `-` for stdin (same rules as Git). |
 | `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
 | `--executable` | Stage listed regular files with mode `100755` in the index (requires at least one path). |
@@ -67,6 +69,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `added` | string[] | New paths staged (untracked → index). |
 | `modified` | string[] | Tracked paths updated in the index. |
 | `removed` | string[] | Tracked paths removed from the index (deleted in the worktree). |
+| `intent_to_add` | string[] | Paths recorded with intent-to-add (`-N` / `--intent-to-add`). |
 | `dry_run` | boolean | True when `--dry-run` was passed. |
 | `count` | number | Total paths in `added`, `modified`, and `removed`. |
 | `staged` | number | Same as `count` (kept for older scripts). |
