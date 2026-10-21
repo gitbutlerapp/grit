@@ -1256,7 +1256,12 @@ pub fn fetch_local_with_progress(
 
     // 3. Determine wants (matched oids not present locally) and haves (current
     //    local tracking-ref tips) and copy the minimal object set.
-    let wants: Vec<ObjectId> = matched_oids
+    let commit_matched_oids: Vec<ObjectId> = matched
+        .iter()
+        .filter(|m| !m.is_tag)
+        .map(|m| m.oid)
+        .collect();
+    let mut wants: Vec<ObjectId> = matched_oids
         .iter()
         .copied()
         .filter(|oid| !local_odb.exists(oid))
@@ -1296,10 +1301,43 @@ pub fn fetch_local_with_progress(
             deepen_not: Vec::new(),
             deepen_relative: false,
         };
-        let resp = crate::serve::compute_shallow_response(&remote_repo, &wants, &req)?;
+        let commit_wants: Vec<ObjectId> = commit_matched_oids
+            .iter()
+            .copied()
+            .filter(|oid| !local_odb.exists(oid))
+            .collect();
+        let resp = crate::serve::compute_shallow_response(&remote_repo, &commit_wants, &req)?;
         shallow_new = resp.shallow;
         shallow_unshallow = resp.unshallow;
         copy_source_shallow = resp.pack_shallow_grafts;
+        if opts.tags == TagMode::Following {
+            if let Some(depth) = opts.depth.filter(|d| *d > 0) {
+                let mut effective_shallow = tag_shallow.clone();
+                effective_shallow.extend(shallow_new.iter().copied());
+                for oid in &shallow_unshallow {
+                    effective_shallow.remove(oid);
+                }
+                let fetch_commits = crate::fetch::shallow_fetched_commit_oids(
+                    &remote_odb,
+                    &commit_matched_oids,
+                    depth,
+                    &effective_shallow,
+                );
+                for m in &matched {
+                    if !m.is_tag || local_odb.exists(&m.oid) || wants.contains(&m.oid) {
+                        continue;
+                    }
+                    let peel = remote_odb
+                        .peel_tags(m.oid)
+                        .ok()
+                        .map(|(p, _)| p)
+                        .unwrap_or(m.oid);
+                    if fetch_commits.contains(&peel) {
+                        wants.push(m.oid);
+                    }
+                }
+            }
+        }
     }
     if !wants.is_empty() && !opts.dry_run {
         let remote_cfg = config_for_git_dir(remote_git_dir);
@@ -1331,7 +1369,17 @@ pub fn fetch_local_with_progress(
     }
 
     if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &local_shallow)?;
+        let mut effective_shallow = local_shallow.clone();
+        effective_shallow.extend(shallow_new.iter().copied());
+        for oid in &shallow_unshallow {
+            effective_shallow.remove(oid);
+        }
+        crate::fetch::retain_following_tags(
+            &local_odb,
+            &mut matched,
+            &pack_oids,
+            &effective_shallow,
+        )?;
     }
 
     // 4. Classify and apply ref updates. Ancestry checks use the local repo,

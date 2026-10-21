@@ -97,3 +97,76 @@ fn clone_depth_one_records_shallow_boundary_and_limits_history() {
 
     git_fsck_clean(&dest);
 }
+
+fn build_linear_bare_with_parent_tag(bare: &Path) -> ObjectId {
+    let wt = bare.with_extension("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    git(&wt, &["init", "-q", "-b", "main", "."]);
+    for i in 1..=3 {
+        std::fs::write(wt.join("f"), format!("{i}\n")).unwrap();
+        git(&wt, &["add", "f"]);
+        git(&wt, &["commit", "-q", "-m", &format!("c{i}")]);
+    }
+    let parent = rev_parse(&wt, "HEAD~1");
+    git(
+        &wt,
+        &[
+            "tag",
+            "-a",
+            "parent-tag",
+            "-m",
+            "on parent",
+            &parent.to_hex(),
+        ],
+    );
+    git(&wt, &["clone", "-q", "--bare", ".", bare.to_str().unwrap()]);
+    parent
+}
+
+#[test]
+fn clone_depth_two_keeps_annotated_tag_on_fetched_parent() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("remote.git");
+    let parent = build_linear_bare_with_parent_tag(&bare);
+
+    let dest = tmp.path().join("grit-shallow-d2");
+    let outcome = clone_repo(
+        CloneOptions {
+            depth: Some(2),
+            ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
+        },
+        &mut NoProgress,
+        None,
+    )
+    .expect("depth-2 shallow clone");
+
+    let tag_oid = resolve_ref(&dest.join(".git"), "refs/tags/parent-tag")
+        .expect("refs/tags/parent-tag must exist like git clone --depth=2");
+    assert!(
+        outcome
+            .repo
+            .odb()
+            .peel_tags(tag_oid)
+            .is_ok_and(|(peeled, _)| peeled == parent),
+        "tag must peel to parent commit {}",
+        parent.to_hex()
+    );
+
+    let git_dest = tmp.path().join("git-shallow-d2");
+    let url = format!("file://{}", bare.to_string_lossy());
+    let status = Command::new("git")
+        .args([
+            "clone",
+            "-q",
+            "--depth",
+            "2",
+            &url,
+            git_dest.to_str().unwrap(),
+        ])
+        .status()
+        .expect("git clone");
+    assert!(status.success(), "git clone --depth=2 failed");
+    let git_tag = resolve_ref(&git_dest.join(".git"), "refs/tags/parent-tag")
+        .expect("git must keep parent-tag");
+    assert_eq!(tag_oid, git_tag, "grit and git must agree on tag oid");
+}

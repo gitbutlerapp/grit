@@ -1306,13 +1306,31 @@ pub fn fetch_remote(
         &mut matched_oids,
         &mut seen_remote_ref,
     );
-    let following_tag_wants =
-        following_tag_wants_with_local_peel(&matched, &following_only, &local_odb);
-
     // The client's current shallow grafts (drives the wire `shallow <oid>` lines
     // and the "this is a shallow request" decisions in the negotiators).
     let local_shallow = crate::shallow::load_shallow_oids(local_git_dir)?;
     let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
+
+    let mut following_tag_wants =
+        following_tag_wants_with_local_peel(&matched, &following_only, &local_odb);
+    if shallow_request {
+        if let Some(depth) = opts.depth.filter(|d| *d > 0) {
+            let roots: Vec<ObjectId> = matched
+                .iter()
+                .filter(|m| !m.is_tag)
+                .map(|m| m.oid)
+                .collect();
+            let local_shallow_set: HashSet<ObjectId> = local_shallow.iter().copied().collect();
+            let fetch_commits =
+                shallow_fetched_commit_oids(&local_odb, &roots, depth, &local_shallow_set);
+            following_tag_wants.extend(following_tag_wants_peel_among_fetched_commits(
+                &matched,
+                &following_only,
+                &local_odb,
+                &fetch_commits,
+            ));
+        }
+    }
 
     // 4. Wants. Normally the matched oids that are absent locally. For a
     // deepen/`--unshallow` request the wanted tips may already be present (a prior
@@ -1777,6 +1795,77 @@ pub(crate) fn add_wire_tags(
     following_only
 }
 
+/// Commit OIDs reachable within an absolute shallow `depth` from each root on
+/// `odb` (first-parent chain), stopping at `shallow_boundaries`. Roots absent
+/// from `odb` are included alone so pre-pack wants still cover the tips.
+pub(crate) fn shallow_fetched_commit_oids(
+    odb: &crate::odb::Odb,
+    roots: &[ObjectId],
+    depth: u32,
+    shallow_boundaries: &HashSet<ObjectId>,
+) -> HashSet<ObjectId> {
+    use crate::objects::{parse_commit, ObjectKind};
+
+    if depth == 0 {
+        return HashSet::new();
+    }
+    let depth = usize::try_from(depth).unwrap_or(usize::MAX);
+    let mut out = HashSet::new();
+    for &root in roots {
+        let mut cur = root;
+        for _ in 0..depth {
+            if shallow_boundaries.contains(&cur) {
+                if odb.exists(&cur) {
+                    out.insert(cur);
+                }
+                break;
+            }
+            out.insert(cur);
+            if !odb.exists(&cur) {
+                break;
+            }
+            let Ok(obj) = odb.read(&cur) else {
+                break;
+            };
+            if obj.kind != ObjectKind::Commit {
+                break;
+            }
+            let Ok(c) = parse_commit(&obj.data) else {
+                break;
+            };
+            let Some(&parent) = c.parents.first() else {
+                break;
+            };
+            cur = parent;
+        }
+    }
+    out
+}
+
+/// Under `TagMode::Following`, tag OIDs in `following_only` whose peeled
+/// commit is in `fetch_commit_oids` (the depth-limited commit closure), and
+/// whose tag object is not yet local.
+pub(crate) fn following_tag_wants_peel_among_fetched_commits(
+    matched: &[crate::transfer::MatchedRef],
+    following_only: &HashSet<ObjectId>,
+    local_odb: &crate::odb::Odb,
+    fetch_commit_oids: &HashSet<ObjectId>,
+) -> HashSet<ObjectId> {
+    let mut wants = HashSet::new();
+    for m in matched {
+        if !m.is_tag || !following_only.contains(&m.oid) {
+            continue;
+        }
+        let Some(peel) = m.advertised_peel else {
+            continue;
+        };
+        if fetch_commit_oids.contains(&peel) && !local_odb.exists(&m.oid) {
+            wants.insert(m.oid);
+        }
+    }
+    wants
+}
+
 /// Under `TagMode::Following`, tag OIDs in `following_only` that should still
 /// be `want`ed: annotated tags pointing at a commit already present locally.
 pub(crate) fn following_tag_wants_with_local_peel(
@@ -2120,6 +2209,55 @@ mod fetch_advertised_ref_tests {
             "tag-only oid stays following-only (no upfront want)"
         );
         assert_eq!(matched.iter().filter(|m| m.is_tag).count(), 2);
+    }
+
+    #[test]
+    fn following_tag_wants_peel_among_fetched_commits_includes_parent_at_depth_two() {
+        use std::collections::HashSet;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        std::fs::create_dir_all(&objects).expect("objects");
+        let odb = crate::odb::Odb::new(objects.as_path());
+        let chain = write_commit_chain(&odb, 3);
+        let tip = *chain.last().expect("tip");
+        let parent = chain[1];
+
+        let tag_oid = ObjectId::from_hex("cccccccccccccccccccccccccccccccccccccccc").unwrap();
+
+        let following_only = HashSet::from([tag_oid]);
+        let matched = vec![crate::transfer::MatchedRef {
+            remote_ref: "refs/tags/parent-tag".to_owned(),
+            local_ref: Some("refs/tags/parent-tag".to_owned()),
+            oid: tag_oid,
+            force: false,
+            is_tag: true,
+            advertised_peel: Some(parent),
+        }];
+        let tips_only = HashSet::from([tip]);
+        let wants_tips = following_tag_wants_peel_among_fetched_commits(
+            &matched,
+            &following_only,
+            &odb,
+            &tips_only,
+        );
+        assert!(
+            wants_tips.is_empty(),
+            "peel on parent must not match branch tip only"
+        );
+
+        let fetch_commits = shallow_fetched_commit_oids(&odb, &[tip], 2, &HashSet::new());
+        assert!(
+            fetch_commits.contains(&parent),
+            "depth-2 must include parent"
+        );
+        let wants = following_tag_wants_peel_among_fetched_commits(
+            &matched,
+            &following_only,
+            &odb,
+            &fetch_commits,
+        );
+        assert!(wants.contains(&tag_oid));
     }
 
     #[test]
