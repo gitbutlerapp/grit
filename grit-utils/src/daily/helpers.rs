@@ -451,6 +451,20 @@ pub fn log_oneline_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+pub fn log_json_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["log", "--limit", "100", "--json"]),
+        sh_devnull(
+            &ctx.git,
+            &[
+                "log",
+                "-100",
+                "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x00",
+            ],
+        ),
+    )
+}
+
 pub fn log_all_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let cap = if ctx.smoke { "500" } else { "5000" };
     (

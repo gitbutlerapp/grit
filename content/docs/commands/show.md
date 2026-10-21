@@ -49,6 +49,7 @@ Show the latest commit with patch (default):
 $ grit show
 branch feature
 commit cf18394a62c3f845bd9c44927a5a55e014b2a99d
+change yrwyvtvk
 Author: Ada Lovelace <ada@example.com>
 Date:   2026-10-07 10:00:00 +0000
 
@@ -102,7 +103,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `kind` | string | For a commit, branch, tag, or annotated tag: `commit`, `branch`, `tag`, or `annotated_tag`. For `rev:path`: `blob` or `tree`. |
 | `ref_name` | string | Branch or tag name when you named a ref; omitted for a raw commit id. |
 | `tag` | object | For an annotated tag: `name`, `tagger`, and `message`. |
-| `commit` | object | Commit id, parents, author, committer, subject, and full message. |
+| `commit` | object | Shared [`CommitJson`](../README.md#commit-json-object-commitjson) row: `oid`, parents, author, committer, subject, message, ref decorations, `change_id`, and `change_id_stored`. |
 | `files` | array | Per-file diff rows (same shape as [`grit diff`](diff.md) `--json`), including optional `combined_status` (`MM`, `DD`, …) on combined merge name-status output. |
 | `totals` | object | Aggregate line counts when a stat-style format is selected; omitted for patch-only output unless the library computed totals. |
 | `stat` | object | Summary diffstat with `files`, `files_changed`, `insertions`, and `deletions` (always present on commit shows). |

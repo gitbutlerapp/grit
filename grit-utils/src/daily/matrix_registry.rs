@@ -169,6 +169,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Last 100 commits: grit log --limit 100 vs git log --oneline -100",
     },
     ScenarioSpec {
+        id: "log/json-100@git-git",
+        area: Area::Revwalk,
+        headline: true,
+        name: None,
+        description: "Last 100 commits JSON: grit log --limit 100 --json vs git log -100 with verbose --format",
+    },
+    ScenarioSpec {
         id: "log/all@git-git",
         area: Area::Revwalk,
         headline: false,

@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "  b5ea30d  Test  [TIME_AGO]  second\n  72934de  Test  [TIME_AGO]  first\n",
+    "stdout": "  b5ea30d  change krrtwksq  Test  [TIME_AGO]  second\n  72934de  change lrnmklyr  Test  [TIME_AGO]  first\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"commits\":[{\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"parents\":[\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"second\",\"message\":\"second\",\"refs\":[{\"name\":\"HEAD\",\"kind\":\"head\"},{\"name\":\"main\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\"},{\"oid\":\"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\"parents\":[],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"first\",\"message\":\"first\",\"refs\":[{\"name\":\"feature\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\"}],\"next\":null,\"truncated\":false}\n",
+    "stdout": "{\"commits\":[{\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"parents\":[\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"second\",\"message\":\"second\",\"refs\":[{\"name\":\"HEAD\",\"kind\":\"head\"},{\"name\":\"main\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\",\"change_id\":\"krrtwksqnwvkpkwuzwkwymqzwxywulrx\",\"change_id_stored\":false},{\"oid\":\"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\"parents\":[],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"first\",\"message\":\"first\",\"refs\":[{\"name\":\"feature\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\",\"change_id\":\"lrnmklyrzvttxkspwtokzxnslkuwslxo\",\"change_id_stored\":false}],\"next\":null,\"truncated\":false}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "- `b5ea30d` second (Test, [TIME_AGO])\n- `72934de` first (Test, [TIME_AGO])\n",
+    "stdout": "- `b5ea30d` change krrtwksq second (Test, [TIME_AGO])\n- `72934de` change lrnmklyr first (Test, [TIME_AGO])\n",
     "stderr": ""
   }
 }

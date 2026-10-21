@@ -22,7 +22,7 @@ grit log [<REV>…] [-n <N>] [--cursor <token>]
 
 ## Description
 
-Lists commits reachable from the selected revisions (default `HEAD`), newest first, ten at a time (unless you pass `-n` / `--max-count`). Each line shows the short commit id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`.
+Lists commits reachable from the selected revisions (default `HEAD`), newest first, ten at a time (unless you pass `-n` / `--max-count`). Each line shows the short commit id, a `change` prefix with the first eight characters of the commit's stable change id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`. `--oneline` omits the change id column.
 
 Revision selection matches [`grit revs`](../revs/): plain tips, `A..B`, `A...B`, `^tip`, and the same ref-set flags (`--all`, `--branches`, and so on). Path operands after `--` limit to commits that touch those paths (same cwd rules as [`grit diff`](../diff/)). Path filters use the same author/date output as the default log, not the bare oid list from `grit revs`. Without `-n`, every matching commit is listed when paths are set (not capped at ten).
 
@@ -151,7 +151,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry uses the shared [`CommitJson`](../README.md#commit-json-object-commitjson) shape (`oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, optional `relative_date`). Omitted when `--group-by` is set. |
+| `commits` | array | Up to ten commits by default, or up to `-n` when set, newest first. Each entry uses the shared [`CommitJson`](../README.md#commit-json-object-commitjson) shape (`oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, `change_id`, `change_id_stored`, optional `relative_date`). Omitted when `--group-by` is set. |
 | `commits[].files` | array | With any diff detail flag: same [`FileDiff`](/schemas/diff/v1.json) objects as [`grit diff`](../diff/) (including `stat` sub-objects for `--stat` / `--numstat`). |
 | `commits[].totals` | object | With stat-style flags: `files_changed`, `insertions`, `deletions`. |
 | `commits[].stat` | object | Only with `--stat`: duplicate summary in the legacy [`grit show`](../show/) `stat` shape (`files`, `files_changed`, …). |
@@ -172,7 +172,9 @@ Example:
         "email": "ada@example.com",
         "date": "2026-10-07T14:54:02Z"
       },
-      "relative_date": "2 days ago"
+      "relative_date": "2 days ago",
+      "change_id": "yrwyvtvkoqlyvuptwonynqqzrnmkpnwn",
+      "change_id_stored": false
     },
     {
       "oid": "919c45f33de5e5c0bd05f8ffb089f697f4644976",
@@ -182,7 +184,9 @@ Example:
         "email": "ada@example.com",
         "date": "2026-10-05T09:12:00Z"
       },
-      "relative_date": "4 days ago"
+      "relative_date": "4 days ago",
+      "change_id": "tszotmtkusqkntptnnlymtvortyorplz",
+      "change_id_stored": false
     }
   ],
   "next": null,

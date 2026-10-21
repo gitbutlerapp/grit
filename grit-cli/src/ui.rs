@@ -146,6 +146,15 @@ fn paint(color: bool, code: &str, text: &str) -> String {
 /// Longest author shown before truncation.
 const AUTHOR_MAX: usize = 15;
 
+const CHANGE_ID_DISPLAY_LEN: usize = 8;
+
+/// Short change-id label for human log/show (`change` + eight reverse-hex digits).
+#[must_use]
+pub fn change_display_segment(change_id: &str) -> String {
+    let short: String = change_id.chars().take(CHANGE_ID_DISPLAY_LEN).collect();
+    format!("change {short}")
+}
+
 /// Format commit-list rows (status / shortlog / log) as
 /// `<dim sha>  <author>  <dim relative-date>  <subject>`, with the author and
 /// date columns aligned. Colors are applied only on a TTY. The author is capped
@@ -155,25 +164,27 @@ pub fn commit_rows(commits: &[CommitSummary], now: i64) -> Vec<String> {
     let color = use_color();
     let term_width = terminal_size::terminal_size().map(|(w, _)| w.0 as usize);
 
-    let cells: Vec<(String, String, String, &str)> = commits
+    let cells: Vec<(String, String, String, String, &str)> = commits
         .iter()
         .map(|c| {
             let full = c.oid.to_hex();
             let sha = full.get(..7).unwrap_or(&full).to_owned();
+            let change = change_display_segment(&c.change_id);
             let author = truncate(&c.author, AUTHOR_MAX);
             let date = context::relative_date_from(c.timestamp, now);
-            (sha, author, date, c.subject.as_str())
+            (sha, change, author, date, c.subject.as_str())
         })
         .collect();
 
-    let author_w = cells.iter().map(|c| c.1.chars().count()).max().unwrap_or(0);
-    let date_w = cells.iter().map(|c| c.2.chars().count()).max().unwrap_or(0);
-    // Columns before the subject: "  " + sha(7) + "  " + author + "  " + date + "  ".
-    let prefix_w = 2 + 7 + 2 + author_w + 2 + date_w + 2;
+    let change_w = cells.iter().map(|c| c.1.chars().count()).max().unwrap_or(0);
+    let author_w = cells.iter().map(|c| c.2.chars().count()).max().unwrap_or(0);
+    let date_w = cells.iter().map(|c| c.3.chars().count()).max().unwrap_or(0);
+    // Columns before the subject: "  " + sha(7) + "  " + change + "  " + author + "  " + date + "  ".
+    let prefix_w = 2 + 7 + 2 + change_w + 2 + author_w + 2 + date_w + 2;
 
     cells
         .iter()
-        .map(|(sha, author, date, subject)| {
+        .map(|(sha, change, author, date, subject)| {
             // Truncate the subject to the terminal width so the row doesn't wrap.
             // When not on a terminal (piped), leave it intact.
             let subject = match term_width {
@@ -181,8 +192,9 @@ pub fn commit_rows(commits: &[CommitSummary], now: i64) -> Vec<String> {
                 _ => (*subject).to_owned(),
             };
             format!(
-                "  {}  {}  {}  {subject}",
+                "  {}  {}  {}  {}  {subject}",
                 paint(color, FG_DIM, sha),
+                paint(color, FG_DIM, &format!("{change:<change_w$}")),
                 paint(color, FG_AUTHOR, &format!("{author:<author_w$}")),
                 paint(color, FG_DIM, &format!("{date:<date_w$}")),
             )

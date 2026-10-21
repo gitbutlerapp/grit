@@ -120,6 +120,13 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 17] = [
         description: "Last 100 commits one line each vs git log --oneline",
     },
     ScenarioSpec {
+        id: "log/json-100@git-git",
+        area: Area::Revwalk,
+        headline: true,
+        name: Some("log"),
+        description: "Last 100 commits as JSON vs git log with a verbose --format",
+    },
+    ScenarioSpec {
         id: "show/head@git-git",
         area: Area::Revwalk,
         headline: true,

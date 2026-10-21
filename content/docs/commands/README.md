@@ -67,6 +67,8 @@ List and show commands share one commit object in `--json` output. The v1 schema
 | `message` | string | Full message body with trailing whitespace trimmed. |
 | `refs` | array | Ref decorations on this commit: each `{ "name", "kind" }` where `kind` is `branch`, `remote_branch`, `tag`, `stash`, `head`, `grafted`, or `other`. |
 | `relative_date` | string or omitted | Human-relative author date (e.g. `3 days ago`) when the command supplies a clock. |
+| `change_id` | string | Stable change id (reverse-hex). Stored in a `change-id` commit header when grit wrote the commit; otherwise derived deterministically from `oid`. |
+| `change_id_stored` | boolean | `true` when `change_id` came from a `change-id` header in the commit object. |
 
 List outcomes (`log`, `revs`, `shortlog`) also expose:
 

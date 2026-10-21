@@ -275,6 +275,10 @@ pub struct CommitJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub relative_date: Option<String>,
+    /// Stable change id (reverse-hex; stored header or derived from commit id).
+    pub change_id: String,
+    /// `true` when `change_id` came from a `change-id` commit header.
+    pub change_id_stored: bool,
 }
 
 impl CommitJson {
@@ -289,6 +293,8 @@ impl CommitJson {
             message: commit.subject.clone(),
             refs: Vec::new(),
             relative_date: Some(crate::context::relative_date_from(commit.timestamp, now)),
+            change_id: commit.change_id.clone(),
+            change_id_stored: commit.change_id_stored,
         }
     }
 }

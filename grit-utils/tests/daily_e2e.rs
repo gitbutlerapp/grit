@@ -67,6 +67,7 @@ const ALL_HEADLINE_IDS: [&str; 17] = [
     "commit/small@synth-10k",
     "diff/worktree@synth-10k",
     "log/oneline-100@git-git",
+    "log/json-100@git-git",
     "show/head@git-git",
     "blame/file@git-git",
     "switch/branch@synth-10k",
@@ -352,6 +353,7 @@ const MATRIX_GAP_IDS: [&str; 0] = [];
 
 const GIT_GIT_HEADLINE_IDS: [&str; 3] = [
     "log/oneline-100@git-git",
+    "log/json-100@git-git",
     "show/head@git-git",
     "blame/file@git-git",
 ];

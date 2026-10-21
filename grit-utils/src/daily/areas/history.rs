@@ -2,10 +2,10 @@
 
 use super::super::helpers::{
     blame_file_bench, cat_blob_bench, ctx, finish_git_git_matrix_ctx, headline_spec, log_all_bench,
-    log_oneline_bench, log_path_bench, merge_base_bench, patch_id_head_bench, prepare_none,
-    reflog_list_bench, resolve_head_bench, revs_count_bench, scenario_spec, setup_big_blobs,
-    setup_git_git_history, setup_git_git_worktree, setup_registry_worktree, setup_shape_worktree,
-    setup_synth100k, shortlog_ahead_bench, show_head_bench, synth10k_kind,
+    log_json_bench, log_oneline_bench, log_path_bench, merge_base_bench, patch_id_head_bench,
+    prepare_none, reflog_list_bench, resolve_head_bench, revs_count_bench, scenario_spec,
+    setup_big_blobs, setup_git_git_history, setup_git_git_worktree, setup_registry_worktree,
+    setup_shape_worktree, setup_synth100k, shortlog_ahead_bench, show_head_bench, synth10k_kind,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;
@@ -48,6 +48,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: prepare_none,
             build_git: |c| log_oneline_bench(c).1,
             build_grit: |c| log_oneline_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("log/json-100@git-git"),
+            pending: false,
+            setup: setup_git_git,
+            prepare: prepare_none,
+            build_git: |c| log_json_bench(c).1,
+            build_grit: |c| log_json_bench(c).0,
             correctness: None,
         },
         DailyHeadlinePlan {

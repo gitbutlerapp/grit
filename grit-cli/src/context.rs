@@ -1,6 +1,7 @@
 //! Shared repository helpers used across `grit` commands.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::change_id::resolved_change_id;
 use grit_lib::config::environment::Environment;
 use grit_lib::config::ident_resolve::{
     resolve_email_with, resolve_identity_with, resolve_loose_committer_identity_with,
@@ -55,6 +56,10 @@ pub struct CommitSummary {
     pub author_ident: String,
     /// Author date as a Unix timestamp (for relative-date rendering).
     pub timestamp: i64,
+    /// Full reverse-hex change id for display and JSON bridging.
+    pub change_id: String,
+    /// `true` when the change id was stored in a `change-id` header.
+    pub change_id_stored: bool,
 }
 
 /// Discover the repository containing the current directory.
@@ -75,7 +80,9 @@ pub fn discover_with_warnings(
 pub fn commit_summaries(repo: &Repository, oids: &[ObjectId]) -> Result<Vec<CommitSummary>> {
     oids.iter()
         .map(|oid| {
-            let commit = read_commit(repo, oid)?;
+            let obj = repo.odb().read(oid)?;
+            let commit = parse_commit(&obj.data)?;
+            let resolved = resolved_change_id(oid, &commit);
             let (author, timestamp) = author_and_time(&commit.author);
             Ok(CommitSummary {
                 oid: *oid,
@@ -83,6 +90,8 @@ pub fn commit_summaries(repo: &Repository, oids: &[ObjectId]) -> Result<Vec<Comm
                 author,
                 author_ident: commit.author,
                 timestamp,
+                change_id: resolved.id.as_str().to_owned(),
+                change_id_stored: resolved.stored,
             })
         })
         .collect()

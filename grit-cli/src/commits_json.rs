@@ -27,7 +27,9 @@ impl CommitJsonLoader {
     pub fn load_summaries_only(repo: &Repository, oids: &[ObjectId]) -> Result<Vec<CommitSummary>> {
         let mut summaries = Vec::with_capacity(oids.len());
         for oid in oids {
-            let data = context::read_commit(repo, oid)?;
+            let obj = repo.odb().read(oid)?;
+            let data = grit_lib::objects::parse_commit(&obj.data)?;
+            let resolved = grit_lib::change_id::resolved_change_id(oid, &data);
             let (author, timestamp) = context::author_and_time(&data.author);
             summaries.push(CommitSummary {
                 oid: *oid,
@@ -35,6 +37,8 @@ impl CommitJsonLoader {
                 author,
                 author_ident: data.author,
                 timestamp,
+                change_id: resolved.id.as_str().to_owned(),
+                change_id_stored: resolved.stored,
             });
         }
         Ok(summaries)
@@ -63,6 +67,8 @@ impl CommitJsonLoader {
                 author,
                 author_ident: row.author.clone(),
                 timestamp,
+                change_id: row.change_id.as_str().to_owned(),
+                change_id_stored: row.change_id_stored,
             });
             json.push(CommitJson::from_loaded(row, now));
         }
@@ -116,6 +122,8 @@ impl CommitJson {
                 })
                 .collect(),
             relative_date: Some(crate::context::relative_date_from(author_ts, now)),
+            change_id: commit.change_id.as_str().to_owned(),
+            change_id_stored: commit.change_id_stored,
         }
     }
 }

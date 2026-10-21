@@ -24,11 +24,11 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::commands::diff::{CommitDiffOptions, DiffOutcome, DiffTotalsJson, FileDiff};
-use crate::context::{self, subject_line};
+use crate::context;
 use crate::diff_format::DiffFormatArgs;
 pub use crate::diff_render::DiffStat;
 use crate::diff_render::{self, diffstat_from_files};
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 
 /// Inputs for `grit show`.
 pub struct ShowRunOptions {
@@ -218,7 +218,7 @@ pub struct ShowOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub tag: Option<TagInfo>,
-    pub commit: CommitInfo,
+    pub commit: CommitJson,
     /// Per-file diff rows (same shape as `grit diff --json`).
     pub files: Vec<FileDiff>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -229,16 +229,6 @@ pub struct ShowOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     diff: DiffOutcome,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct CommitInfo {
-    pub oid: String,
-    pub parents: Vec<String>,
-    pub author: Person,
-    pub committer: Person,
-    pub subject: String,
-    pub message: String,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -287,20 +277,9 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
     let resolved = grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, spec)
         .with_context(|| format!("could not resolve '{spec}'"))?;
     let commit_oid = peel_to_commit(&repo, resolved)?;
-    let data = context::read_commit(&repo, &commit_oid)?;
-
-    let commit = CommitInfo {
-        oid: commit_oid.to_hex(),
-        parents: data
-            .parents
-            .iter()
-            .map(grit_lib::objects::ObjectId::to_hex)
-            .collect(),
-        author: Person::from_identity_line(&data.author),
-        committer: Person::from_identity_line(&data.committer),
-        subject: subject_line(&data.message),
-        message: data.message.trim_end().to_owned(),
-    };
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
+    let loader = crate::commits_json::CommitJsonLoader::new(&repo)?;
+    let commit = loader.load_one(&repo, &commit_oid, now)?;
 
     let diff_opts = CommitDiffOptions {
         paths: opts.paths.clone(),
@@ -609,6 +588,11 @@ impl MarkdownRender for ShowOutcome {
         outln!(w, "# Commit `{short}`");
         outln!(w);
         outln!(w, "**Oid:** `{}`", self.commit.oid);
+        outln!(
+            w,
+            "**Change:** `{}`",
+            crate::ui::change_display_segment(&self.commit.change_id)
+        );
         if self.commit.parents.len() > 1 {
             let parents: Vec<String> = self
                 .commit
@@ -668,6 +652,15 @@ impl HumanRender for ShowOutcome {
             w,
             "{}",
             paint(color, "33", &format!("commit {}", self.commit.oid))
+        );
+        outln!(
+            w,
+            "{}",
+            paint(
+                color,
+                "33",
+                &crate::ui::change_display_segment(&self.commit.change_id)
+            )
         );
         if self.commit.parents.len() > 1 {
             let abbrev: Vec<String> = self

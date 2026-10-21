@@ -18,6 +18,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::change_id::{resolved_change_id, ChangeId};
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
 use crate::objects::{parse_commit, ObjectId};
@@ -85,6 +86,10 @@ pub struct LoadedCommit {
     pub message: String,
     /// Ref decorations pointing at this commit.
     pub refs: Vec<CommitRefDecoration>,
+    /// Stable change id (stored header or derived from commit id).
+    pub change_id: ChangeId,
+    /// `true` when the id came from a `change-id` commit header.
+    pub change_id_stored: bool,
 }
 
 /// The `--decorate-refs` / `--decorate-refs-exclude` / `log.excludeDecoration`
@@ -210,6 +215,7 @@ pub fn load_commits_with_decorations(
     for oid in oids {
         let obj = odb.read(oid)?;
         let data = parse_commit(&obj.data)?;
+        let resolved = resolved_change_id(oid, &data);
         let hex = oid.to_hex();
         let refs = decorations
             .get(&hex)
@@ -230,6 +236,8 @@ pub fn load_commits_with_decorations(
             committer: data.committer,
             message: data.message,
             refs,
+            change_id: resolved.id,
+            change_id_stored: resolved.stored,
         });
     }
     Ok(out)

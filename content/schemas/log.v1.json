@@ -21,6 +21,14 @@
         "author": {
           "$ref": "#/definitions/Person"
         },
+        "change_id": {
+          "description": "Stable change id (reverse-hex; stored header or derived from commit id).",
+          "type": "string"
+        },
+        "change_id_stored": {
+          "description": "`true` when `change_id` came from a `change-id` commit header.",
+          "type": "boolean"
+        },
         "committer": {
           "$ref": "#/definitions/Person"
         },
@@ -57,6 +65,8 @@
       },
       "required": [
         "author",
+        "change_id",
+        "change_id_stored",
         "committer",
         "message",
         "oid",
@@ -462,6 +472,14 @@
         "author": {
           "$ref": "#/definitions/Person"
         },
+        "change_id": {
+          "description": "Stable change id (reverse-hex; stored header or derived from commit id).",
+          "type": "string"
+        },
+        "change_id_stored": {
+          "description": "`true` when `change_id` came from a `change-id` commit header.",
+          "type": "boolean"
+        },
         "committer": {
           "$ref": "#/definitions/Person"
         },
@@ -529,6 +547,8 @@
       },
       "required": [
         "author",
+        "change_id",
+        "change_id_stored",
         "committer",
         "message",
         "oid",
