@@ -14,7 +14,15 @@ export interface DailyBenchReport {
   generated_at: string; // RFC3339 UTC
   machine: MachineInfo;
   tools: DailyToolVersions;
+  /** Present when capture used non-default fixture policy (for example low-memory smoke specials). */
+  capture?: DailyCaptureInfo;
   scenarios: DailyScenarioResult[];
+}
+
+export interface DailyCaptureInfo {
+  fixture_policy: string;
+  /** Wall seconds per functional area when merged from per-scenario `--only` captures. */
+  area_wall_seconds?: Record<string, number>;
 }
 
 export interface MachineInfo {
