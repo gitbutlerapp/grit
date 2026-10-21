@@ -50,6 +50,14 @@ impl TerminationKind {
 pub struct CappedRunOutcome {
     pub termination: TerminationKind,
     pub peak_rss_bytes: u64,
+    /// Parent-observed wall time from spawn through exit or cap (includes RSS poll sleeps).
+    pub wall_ms: f64,
+}
+
+const RSS_POLL_INTERVAL: Duration = Duration::from_millis(1);
+
+fn wall_ms_since(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
 }
 
 /// Run `program` with `args` directly (no shell) under optional timeout and peak-RSS enforcement.
@@ -91,7 +99,6 @@ pub fn run_capped_argv_command_with(
     let pid = child.id();
     let start = Instant::now();
     let mut peak_rss_bytes = 0u64;
-    let poll = Duration::from_millis(50);
 
     loop {
         if let Some(limit) = timeout {
@@ -102,6 +109,7 @@ pub fn run_capped_argv_command_with(
                 return Ok(CappedRunOutcome {
                     termination: TerminationKind::Timeout,
                     peak_rss_bytes,
+                    wall_ms: wall_ms_since(start),
                 });
             }
         }
@@ -119,6 +127,7 @@ pub fn run_capped_argv_command_with(
                         cap_bytes: cap,
                     },
                     peak_rss_bytes,
+                    wall_ms: wall_ms_since(start),
                 });
             }
         }
@@ -126,6 +135,7 @@ pub fn run_capped_argv_command_with(
         match child.try_wait().context("poll capped argv command")? {
             Some(status) => {
                 peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
+                let wall_ms = wall_ms_since(start);
                 let termination = if status.success() {
                     TerminationKind::Success
                 } else {
@@ -136,9 +146,10 @@ pub fn run_capped_argv_command_with(
                 return Ok(CappedRunOutcome {
                     termination,
                     peak_rss_bytes,
+                    wall_ms,
                 });
             }
-            None => thread::sleep(poll),
+            None => thread::sleep(RSS_POLL_INTERVAL),
         }
     }
 }
@@ -175,6 +186,7 @@ pub fn run_capped_argv_command_with(
     Ok(CappedRunOutcome {
         termination,
         peak_rss_bytes: 0,
+        wall_ms: 0.0,
     })
 }
 
@@ -205,7 +217,6 @@ pub fn run_capped_shell_command(
     let pid = child.id();
     let start = Instant::now();
     let mut peak_rss_bytes = 0u64;
-    let poll = Duration::from_millis(50);
 
     loop {
         if let Some(limit) = timeout {
@@ -216,6 +227,7 @@ pub fn run_capped_shell_command(
                 return Ok(CappedRunOutcome {
                     termination: TerminationKind::Timeout,
                     peak_rss_bytes,
+                    wall_ms: wall_ms_since(start),
                 });
             }
         }
@@ -233,6 +245,7 @@ pub fn run_capped_shell_command(
                         cap_bytes: cap,
                     },
                     peak_rss_bytes,
+                    wall_ms: wall_ms_since(start),
                 });
             }
         }
@@ -240,6 +253,7 @@ pub fn run_capped_shell_command(
         match child.try_wait().context("poll capped command")? {
             Some(status) => {
                 peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
+                let wall_ms = wall_ms_since(start);
                 let termination = if status.success() {
                     TerminationKind::Success
                 } else {
@@ -250,9 +264,10 @@ pub fn run_capped_shell_command(
                 return Ok(CappedRunOutcome {
                     termination,
                     peak_rss_bytes,
+                    wall_ms,
                 });
             }
-            None => thread::sleep(poll),
+            None => thread::sleep(RSS_POLL_INTERVAL),
         }
     }
 }
@@ -285,6 +300,7 @@ pub fn run_capped_shell_command(
     Ok(CappedRunOutcome {
         termination,
         peak_rss_bytes: 0,
+        wall_ms: 0.0,
     })
 }
 
@@ -428,5 +444,25 @@ mod tests {
             outcome.peak_rss_bytes
         );
         assert!(outcome.peak_rss_bytes >= cap);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wall_clock_timeout_uses_real_elapsed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outcome = run_capped_argv_command(
+            Path::new("/bin/sleep"),
+            &["2"],
+            dir.path(),
+            Some(Duration::from_secs(1)),
+            None,
+        )
+        .expect("monitored run");
+        assert_eq!(outcome.termination, TerminationKind::Timeout);
+        assert!(
+            outcome.wall_ms >= 900.0 && outcome.wall_ms < 1800.0,
+            "expected ~1s wall at timeout, got {} ms",
+            outcome.wall_ms
+        );
     }
 }

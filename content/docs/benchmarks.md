@@ -178,6 +178,80 @@ cargo bench -p grit-lib --bench hash
 ./scripts/bench-hash.sh
 ```
 
+## Performance plan close-out (2026-10-21)
+
+After the memory and libification wave (fair single-process `grit log --limit`, mapped pack index / commit-graph / MIDX, packed-refs seek, repository path cache, LTO release profile, merge tree cache, pick/revert/merge pass reduction, status/diff scan memory, add without full index copies), the factory re-ran the **cooking dashboard** matrix on **`grit 0.5.15`** (`756aa953`) vs system **`git 2.43.0`**. Committed baselines: **`suite-after-LH.json`**, **`hot-paths-after.json`**, **`commit-after-LH.json`**, and **`dashboard/current.json`**. **`grit-bench compare`** against the pre-plan dashboard snapshot at **`grit 0.5.14`** shows **no overlapping 10k scenario regressed more than 5%** on Grit median wall time.
+
+### Synthetic L/H dashboard (before → after)
+
+| Scenario | Git ms (before→after) | Grit ms (before→after) | Ratio before→after |
+| --- | ---: | ---: | ---: |
+| `status-dirty-10000` | 11.8→10.3 | 13.8→8.7 | 1.17×→**0.84×** |
+| `status-clean-10000` | 8.1→8.0 | 11.4→7.6 | 1.40×→**0.95×** |
+| `add-10000` | 20.1→23.1 | 33.8→30.2 | 1.68×→**1.31×** |
+| `commit-10000` | 199.7→176.4 | 113.9→73.1 | 0.57×→**0.41×** |
+| `switch-10000` | 23.6→21.9 | 30.2→27.1 | 1.28×→**1.24×** |
+| `pick-10000` | 123.3→113.5 | 671.5→199.7 | 5.45×→**1.76×** |
+| `merge-10000` | 105.1→18.5 | 732.8→28.5 | 6.97×→**1.54×** |
+| `diff-10000` | 5.7→5.3 | 12.4→10.3 | 2.19×→**1.92×** |
+| `log-10000` | 3.3→3.2 | 55.9→4.4 | 17.0×→**1.39×** |
+
+### Synthetic 10k — wall time and peak RSS (before → after)
+
+Each row is **Git → Grit** on median wall time (ms) and **peak RSS** from hyperfine + `grit-bench measure-rss` (same capture as **`dashboard/current.json`**). On this VM, Grit peak RSS exceeds **1.5×** Git on **`status-*`**, **`pick-*`**, and **`log-10000`**; **`add`**, **`commit`**, **`switch`**, **`merge`**, and **`diff`** stay below **1.5×** on RSS while several remain above **1.5×** on wall time.
+
+| Scenario | Git ms | Grit ms | Git RSS | Grit RSS | Ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `status-dirty-10000` | 11.8→10.3 | 13.8→8.7 | 9.8 MiB | 15.6 MiB | 0.84× |
+| `status-clean-10000` | 8.1→8.0 | 11.4→7.6 | 9.2 MiB | 15.5 MiB | 0.95× |
+| `add-10000` | 20.1→23.1 | 33.8→30.2 | 16.4 MiB | 19.8 MiB | 1.31× |
+| `commit-10000` | 199.7→176.4 | 113.9→73.1 | 17.1 MiB | 21.0 MiB | 0.41× |
+| `switch-10000` | 23.6→21.9 | 30.2→27.1 | 14.6 MiB | 19.8 MiB | 1.24× |
+| `pick-10000` | 123.3→113.5 | 671.5→199.7 | 16.1 MiB | 25.3 MiB | 1.76× |
+| `merge-10000` | 105.1→18.5 | 732.8→28.5 | 15.3 MiB | 19.8 MiB | 1.54× |
+| `diff-10000` | 5.7→5.3 | 12.4→10.3 | 15.6 MiB | 17.1 MiB | 1.92× |
+| `log-10000` | 3.3→3.2 | 55.9→4.4 | 7.0 MiB | 14.7 MiB | 1.39× |
+
+At **100k** files the same suites land in **`dashboard/current.json`** (22 scenarios). Highlights vs the previous **`suite-after-LH.json`** / **`hot-paths-after.json`** captures: dirty/clean **status** at 100k is near parity (**~0.98–1.26×**); **`switch-100000`** and **`merge-100000`** drop to **~0.7–1.0×**; **`switch-wide-100000`** falls from **~13×** to **~1.03×**. Remaining headline gaps above **1.0×** Git time on this refresh:
+
+| Scenario | Grit ÷ Git | Profile / why |
+| --- | ---: | --- |
+| `revert-100000` | **9.96×** | Merge-engine revert still replays large tree diffs; pick/revert pass sharing helped 10k more than 100k topic commits. |
+| `pick-100000` | **9.20×** | Same merge/checkout path as revert on ~2000-path topics. |
+| `pick-series-100000` | **5.87×** | By design **20×** separate `grit pick` processes vs one `git cherry-pick` range (process + repo open overhead). |
+| `pick-series-10000` | **4.31×** | Same multi-process model at L tier. |
+| `diff-100000` | **2.87×** | Parallel worktree diff still allocates per-entry results on wide modified sets (~2000 paths); RSS not yet the limiter. |
+| `diff-10000` | **1.96×** | Same diff pipeline at L. |
+| `add-100000` | **1.86×** | Staging ~20% of 100k paths still walks the full index; incremental index updates reduced copies but not scan volume. |
+| `pick-10000` / `revert-10000` | **1.73× / 1.88×** | Residual merge + index write cost on 2000-path topics. |
+| `merge-10000` | **1.51×** | Small-repo merge still above Git on median; 100k merge is parity. |
+| `add-10000` | **1.49×** | Index update path at L. |
+| `log-10000` / `log-100000` | **~1.37×** | Single `grit log --limit 100` vs `git log -100 --oneline`; remaining gap is revwalk + formatting, not paging. |
+| `status-clean-100000` | **1.26×** | Clean 100k worktree: untracked/ignore setup vs Git preload. |
+
+Factory follow-ups (queued as **Speed:** tasks): `diff-100000`, `add-100000`, `pick-series-100000`, `pick-100000`, `revert-100000`, `pick-series-10000`, `add-10000`, `diff-10000`, `pick-10000`, `revert-10000`, `merge-10000`, `log-100000`.
+
+### git.git headlines (hyperfine wall time + peak RSS)
+
+**`grit-utils/baselines/dashboard/git-dot-git-headlines.json`** uses the standard grit-bench schema (hyperfine medians + **`peak_rss_bytes`** per side). Headline wall times are **not** taken from the daily RSS poll loop (which quantized sub-50 ms commands to ~50 ms); they use the same hyperfine + **`measure-rss`** path as other scenario suites.
+
+| Scenario | Git ms | Grit ms | Git RSS | Grit RSS | Ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `log/oneline-100@git-git` | 3.44 | 5.36 | 14.0 MiB | 24.4 MiB | 1.56× |
+| `show/head@git-git` | 2.02 | 3.77 | 7.4 MiB | 14.8 MiB | 1.87× |
+| `resolve/head-n@git-git` | 1.25 | 3.21 | 7.4 MiB | 12.5 MiB | 2.57× |
+| `branch/list@many-refs` | 1.41 | 8.61 | 7.2 MiB | 15.8 MiB | 6.10× |
+
+**`dashboard/git-dot-git-worktree-status.json`** captures clean/dirty **status** (and related worktree rows) on the pinned **git.git** clone; every git/grit side includes **`peak_rss_bytes`** (e.g. clean status **~27 MiB** on both tools on this VM).
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench fixtures prepare --only git-git,git-git-wt,many-refs
+./target/release/grit-bench status --sizes 10000,100000 --format json --output /tmp/status.json
+./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output grit-utils/baselines/hot-paths-after.json
+./target/release/grit-bench headlines --offline --format json --output grit-utils/baselines/dashboard/git-dot-git-headlines.json
+```
+
 ## grit-bench vs Git
 
 ### Methodology
@@ -185,7 +259,7 @@ cargo bench -p grit-lib --bench hash
 - **Build profile:** Command-level numbers use a **`dist`** **`grit`** (**`cargo build --profile dist -p grit-cli`**, or **`make build`**): **`lto = "fat"`**, **`codegen-units = 1`**, **`opt-level = 3`**, **`strip = true`**, **`panic = "unwind"`** (required because **`grit-lib`**'s parallel pool uses **`catch_unwind`** / **`resume_unwind`**). Workspace **`[profile.release]`** stays fast for **`cargo test --release`** (no fat LTO on test binaries). Rebuild **`grit-cli`** before re-running **`grit-bench`**; pass **`--grit target/dist/grit`** or rely on the harness preferring **`target/dist/grit`** over **`target/release/grit`**.
 - **Trivial status RSS:** In an empty repo, peak RSS for **`grit status`** is measured with **`grit-bench measure-rss`** (fresh helper process, **`GRIT_BENCH_MEASURE_CMD='…/target/dist/grit status'`**) and/or **`VmHWM`** from **`/proc/<pid>/status`** over many cold starts (100+). Report median and max in bytes or KiB. **Target remains ≤ 8 MiB (8 388 608 bytes)**; the **`dist`** profile reaches **~9.4–9.8 MiB** on the factory VM (link tuning only). **Follow-up:** factory plan step under **[#2348](https://github.com/gitbutlerapp/grit/issues/2348)** — binary diet (feature-gate or lazy-load HTTP/jaq, reduce static init/relocations, allocator/startup mapping review) without slowing dashboard scenarios.
 - **Fixtures** use synthetic repos at large file counts and deep history, built deterministically in a scratch directory.
-- **Drivers** are CLI invocations of `grit` and `git` with equivalent semantics (not argv-for-argv compatibility). Dashboard scenarios `log-{size}` time a single `grit log --limit 100` against `git log -100 --oneline` on the synthetic history fixture; the production **campaign** matrix still has a separate **`log`** row that deliberately shells through paged `grit log --before=` cursors (census agent may rename that id when refreshing baselines).
+- **Drivers** are CLI invocations of `grit` and `git` with equivalent semantics (not argv-for-argv compatibility). Dashboard scenarios `log-{size}` time a single **`grit log --limit 100`** against **`git log -100 --oneline`** on the synthetic history fixture. The production **campaign** matrix still has a separate **`log`** row that uses paged **`grit log --before=`** cursors on **git.git** (not the dashboard id).
 - **Ratios** are **Grit median ÷ Git median** (stored in each scenario’s `ratio` field; hyperfine also records mean and spread). Values below `1.00×` mean Grit is faster; values above `2.00×` are highlighted as regressions worth investigating.
 - **Spread** shows Grit’s standard deviation across timed runs (hyperfine `--min-runs` / warmup settings from the baseline capture).
 

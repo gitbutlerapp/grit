@@ -20,14 +20,14 @@ use crate::hot_path_fixture::{
     prepare_switch_wide, setup_pick_merge_fixture, setup_pick_series_fixture, setup_switch_fixture,
     touch_paths_for_size, HotPathMeta, HotPathRepoSpec,
 };
-use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::real_repo_fixture::run_git;
+use crate::resource::bench_with_peak_rss;
 use crate::schema::{
     BenchFailure, BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION,
 };
 use crate::shell::{shell_command, shell_quote};
-use crate::stats::{failed_timing_stats, median_ratio, timing_from_hyperfine};
+use crate::stats::{failed_timing_stats, median_ratio};
 
 /// Driver selection for a scenario (CLI today; library hooks reserved).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,20 +115,21 @@ fn bench_tool(
     command_name: &str,
 ) -> Result<crate::schema::TimingStats> {
     let env_prefix = cfg.isolated_config.then(isolated_env_prefix);
-    let entry = run_hyperfine(
+    let command = shell_command(program, args);
+    let (mut stats, peak_rss) = bench_with_peak_rss(
         hyperfine,
-        &HyperfineRun {
-            command: shell_command(program, args),
-            working_directory: cwd.to_path_buf(),
-            prepare: prepare.map(str::to_string),
-            warmup: cfg.warmup,
-            min_runs: cfg.min_runs,
-            exact_runs: cfg.exact_runs,
-            command_name: Some(command_name.into()),
-            env_prefix,
-        },
+        &cfg.prepare_bin,
+        &command,
+        cwd,
+        cfg.warmup,
+        cfg.min_runs,
+        cfg.exact_runs,
+        command_name,
+        env_prefix.as_deref(),
+        prepare,
     )?;
-    Ok(timing_from_hyperfine(&entry))
+    stats.peak_rss_bytes = Some(peak_rss);
+    Ok(stats)
 }
 
 fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind, repo: &Path) -> String {

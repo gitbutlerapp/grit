@@ -45,6 +45,14 @@ function isCampaignBaseline(rel: string): boolean {
   return rel.endsWith("campaign-before.json") || rel.endsWith("campaign-after.json");
 }
 
+function isDashboardBaseline(rel: string): boolean {
+  return rel.startsWith("grit-utils/baselines/dashboard/");
+}
+
+function isDashboardPrimary(rel: string): boolean {
+  return rel.endsWith("dashboard/current.json");
+}
+
 function loadBundle(baselines: string[]): Bundle {
   const scenarios: Scenario[] = [];
   const seen = new Map<string, { index: number; rel: string }>();
@@ -57,7 +65,13 @@ function loadBundle(baselines: string[]): Bundle {
     for (const key of ["timestamp", "machine", "tools", "scenarios"]) {
       if (!(key in report)) fail(`${rel} missing ${key}`);
     }
-    if (!primary || rel.endsWith("campaign-after.json")) primary = report;
+    if (
+      !primary ||
+      rel.endsWith("campaign-after.json") ||
+      rel.endsWith("dashboard/current.json")
+    ) {
+      primary = report;
+    }
     (report.scenarios as Record<string, any>[]).forEach((raw, i) => {
       const label = `${rel} scenario[${i}] (${raw.id ?? "?"})`;
       for (const key of ["id", "group", "fixture", "grit"]) if (!(key in raw)) fail(`${label} missing ${key}`);
@@ -79,6 +93,15 @@ function loadBundle(baselines: string[]): Bundle {
         const prev = seen.get(id)!;
         if (isCampaignBaseline(rel) && isCampaignBaseline(prev.rel)) {
           scenarios[prev.index] = row;
+          return;
+        }
+        if (isDashboardBaseline(rel) && isDashboardBaseline(prev.rel)) {
+          scenarios[prev.index] = row;
+          return;
+        }
+        if (isDashboardPrimary(rel)) {
+          scenarios[prev.index] = row;
+          seen.set(id, { index: prev.index, rel });
           return;
         }
         fail(`duplicate scenario id ${id}`);

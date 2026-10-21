@@ -35,6 +35,9 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
 | `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (bare `-U` means 3). |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
+| `-p`, `--patch` | Unified patch output (default when no other format flag is set). |
+| `--exit-code` | Exit with status **1** when there are changes (for scripts); **0** when clean. |
+| `--quiet` | Print nothing; implies `--exit-code`. |
 | `--staged`, `-S` | Staged changes only (index vs `HEAD`). Cannot be combined with `--unstaged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--unstaged` | Unstaged changes only (worktree vs index). Cannot be combined with `--staged`, commit arguments, or `--against`. Optional path limits after `--` are allowed. |
 | `--against <ref>` | Compare the worktree to `<ref>`’s tree instead of `HEAD`. No commit arguments. Optional path limits after `--` are allowed. |
@@ -111,6 +114,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
+| `changed` | boolean | Whether any selected change exists (matches `--exit-code` / `--quiet`). |
 | `files` | array | Changed files (see nested fields below). |
 | `totals` | object | Present for `--stat`, `--numstat`, and `--shortstat`: `files_changed`, `insertions`, `deletions`. |
 

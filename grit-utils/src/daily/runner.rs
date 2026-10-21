@@ -361,12 +361,10 @@ pub fn run_measure_direct_cli(cwd: &Path, argv: &[String]) -> Result<()> {
     let program = Path::new(&argv[0]);
     let args: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
     let limits = measure_limits_from_env()?;
-    let start = Instant::now();
     let outcome = run_direct_once_with_limits(cwd, program, &args, &limits)?;
-    let wall_ms = start.elapsed().as_secs_f64() * 1000.0;
     match outcome.termination {
         TerminationKind::Success => {
-            println!("{} {wall_ms}", outcome.peak_rss_bytes);
+            println!("{} {}", outcome.peak_rss_bytes, outcome.wall_ms);
             Ok(())
         }
         TerminationKind::Timeout => std::process::exit(EXIT_TIMEOUT),
@@ -378,6 +376,7 @@ pub fn run_measure_direct_cli(cwd: &Path, argv: &[String]) -> Result<()> {
 struct DirectOutcome {
     termination: TerminationKind,
     peak_rss_bytes: u64,
+    wall_ms: f64,
 }
 
 fn run_direct_once(cwd: &Path, cmd: &BenchArgv, limits: &RunLimits) -> Result<DirectOutcome> {
@@ -402,6 +401,7 @@ fn run_direct_once_with_limits(
     Ok(DirectOutcome {
         termination: outcome.termination,
         peak_rss_bytes: outcome.peak_rss_bytes,
+        wall_ms: outcome.wall_ms,
     })
 }
 

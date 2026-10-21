@@ -38,6 +38,7 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 | `--name-status` | Status letter and path(s) per line. |
 | `-U`, `--unified <n>` | Lines of context around each change in patch mode (bare `-U` means 3). |
 | `-W`, `--function-context` | Expand hunks to enclosing function boundaries (patch mode). |
+| `-p`, `--patch` | Unified patch output (default when no other format flag is set). |
 | `-- <path>…` | Limit the diff to these paths (pathspecs). |
 
 ## Examples
@@ -178,11 +179,7 @@ Pass [`--markdown`](../global-options/) for headings, commit metadata, message b
 
 ## second
 
-```diff
-@@ -1,1 +1,2 @@
- line
-+added
-```
+(diff fenced code block per changed file follows)
 ```
 
 ## See also

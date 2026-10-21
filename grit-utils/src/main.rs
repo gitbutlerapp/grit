@@ -174,6 +174,11 @@ enum Cmd {
     },
     /// `grit resolve` / `grit cat` vs `git rev-parse` / `git cat-file -p`
     ResolveCat,
+    /// git.git / many-refs daily headline rows (hyperfine wall time + peak RSS)
+    Headlines {
+        #[arg(long)]
+        offline: bool,
+    },
     /// Switch / pick / merge hot-path scenarios (L/H sizes by default)
     HotPaths {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000, 100_000])]
@@ -1592,6 +1597,13 @@ fn main() -> Result<()> {
             let cfg = run_config(&cli, true);
             grit_utils::resolve_cat_suite::run_resolve_cat_suite(
                 &hyperfine, &git, &grit, &cfg, timestamp,
+            )?
+        }
+        Cmd::Headlines { offline } => {
+            eprintln!("Running git.git headline benchmarks...");
+            let cfg = run_config(&cli, true);
+            grit_utils::headlines_suite::run_headlines_suite(
+                &hyperfine, &git, &grit, &cfg, *offline, timestamp,
             )?
         }
         Cmd::Odb => {

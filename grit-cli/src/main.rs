@@ -2205,6 +2205,16 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         for branch_key in ["anyOf", "oneOf"] {
             if let Some(items) = schema.get(branch_key).and_then(|v| v.as_array()) {
                 for item in items {
+                    if let Some(ref_name) = item
+                        .get("$ref")
+                        .and_then(|r| r.as_str())
+                        .and_then(|r| r.strip_prefix("#/definitions/"))
+                    {
+                        if let Some(def) = schema.get("definitions").and_then(|d| d.get(ref_name)) {
+                            keys.extend(schema_top_level_field_names(def));
+                            continue;
+                        }
+                    }
                     keys.extend(schema_top_level_field_names(item));
                 }
                 return keys;

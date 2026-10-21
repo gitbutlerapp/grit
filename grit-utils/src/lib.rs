@@ -16,6 +16,7 @@ pub mod daily;
 pub mod fixture;
 pub mod fixture_registry;
 pub mod fsck_suite;
+pub mod headlines_suite;
 pub mod history_compat;
 pub mod history_fixture;
 pub mod history_rewrite_compat;
