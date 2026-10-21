@@ -7,7 +7,10 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::error::Error;
 use crate::ewah_bitmap::Bitmap;
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{
+    empty_oid_set, oid_hash_set, parse_commit, parse_tag, parse_tree, ObjectId,
+    ObjectKind, OidHashSet,
+};
 use crate::pack::read_object_info_from_packs;
 use crate::pack_bitmap::{BitmapError, BitmapIndex};
 use crate::repo::Repository;
@@ -49,7 +52,7 @@ pub struct ReachableSet {
     index: std::sync::Arc<BitmapIndex>,
     bits: Bitmap,
     extended: Vec<(ObjectId, ObjectKind)>,
-    extended_set: HashSet<ObjectId>,
+    extended_set: OidHashSet,
 }
 
 impl ReachableSet {
@@ -112,7 +115,7 @@ impl ReachableSet {
     /// All reachable object ids (indexed namespace and extended) as a set.
     #[must_use]
     pub fn object_ids(&self) -> HashSet<ObjectId> {
-        let mut out = HashSet::new();
+        let mut out = oid_hash_set();
         for pos in self.bits.set_bits() {
             if let Ok(oid) = self.index.oid_at(u32::try_from(pos).unwrap_or(u32::MAX)) {
                 out.insert(oid);
@@ -121,7 +124,7 @@ impl ReachableSet {
         for (oid, _) in &self.extended {
             out.insert(*oid);
         }
-        out
+        out.into_iter().collect()
     }
 
     /// Bitmap positions the client still needs (indexed reachability minus haves).
@@ -362,7 +365,7 @@ fn find_objects_union(
             index: std::sync::Arc::clone(index),
             bits: Bitmap::new(),
             extended: Vec::new(),
-            extended_set: HashSet::new(),
+            extended_set: oid_hash_set(),
         });
     }
     find_objects(repo, index, tips, missing, ignore_stored_commit_bitmaps)
@@ -388,7 +391,7 @@ fn find_objects_peeled(
 ) -> std::result::Result<ReachableSet, BitmapWalkError> {
     let mut bits = Bitmap::new();
     let mut extended = Vec::new();
-    let mut extended_set = HashSet::new();
+    let mut extended_set = oid_hash_set();
     let mut pending_commits = VecDeque::new();
 
     for commit in peeled.commits {
@@ -431,7 +434,7 @@ fn find_objects_peeled(
         )?;
     }
 
-    let mut seen_commits = HashSet::new();
+    let mut seen_commits = oid_hash_set();
     while let Some(commit) = pending_commits.pop_front() {
         if !seen_commits.insert(commit) {
             continue;
@@ -500,7 +503,7 @@ fn try_or_commit_bitmap(
 fn already_marked(
     index: &BitmapIndex,
     bits: &Bitmap,
-    extended: &HashSet<ObjectId>,
+    extended: &OidHashSet,
     oid: &ObjectId,
 ) -> bool {
     if extended.contains(oid) {
@@ -515,7 +518,7 @@ fn mark_index_or_extended(
     index: &BitmapIndex,
     bits: &mut Bitmap,
     extended: &mut Vec<(ObjectId, ObjectKind)>,
-    extended_set: &mut HashSet<ObjectId>,
+    extended_set: &mut OidHashSet,
     oid: ObjectId,
     kind: ObjectKind,
 ) {
@@ -532,7 +535,7 @@ fn mark_object(
     index: &BitmapIndex,
     bits: &mut Bitmap,
     extended: &mut Vec<(ObjectId, ObjectKind)>,
-    extended_set: &mut HashSet<ObjectId>,
+    extended_set: &mut OidHashSet,
     oid: ObjectId,
     kind: ObjectKind,
     missing: MissingAction,
@@ -556,7 +559,7 @@ fn walk_tree(
     index: &BitmapIndex,
     bits: &mut Bitmap,
     extended: &mut Vec<(ObjectId, ObjectKind)>,
-    extended_set: &mut HashSet<ObjectId>,
+    extended_set: &mut OidHashSet,
     tree: ObjectId,
     missing: MissingAction,
 ) -> std::result::Result<(), BitmapWalkError> {
@@ -699,15 +702,10 @@ fn blob_under_limit(repo: &Repository, oid: &ObjectId, limit: u64) -> bool {
 }
 
 fn clear_type(index: &BitmapIndex, bits: &mut Bitmap, kind: ObjectKind) {
-    clear_type_except(index, bits, kind, &HashSet::new());
+    clear_type_except(index, bits, kind, empty_oid_set());
 }
 
-fn clear_type_except(
-    index: &BitmapIndex,
-    bits: &mut Bitmap,
-    kind: ObjectKind,
-    keep: &HashSet<ObjectId>,
-) {
+fn clear_type_except(index: &BitmapIndex, bits: &mut Bitmap, kind: ObjectKind, keep: &OidHashSet) {
     if let Ok(type_bits) = expand_type(index, kind) {
         for pos in type_bits.set_bits().collect::<Vec<_>>() {
             let pos_u32 = u32::try_from(pos).unwrap_or(u32::MAX);
@@ -722,8 +720,8 @@ fn clear_type_except(
 }
 
 struct ExplicitFilterRoots {
-    trees: HashSet<ObjectId>,
-    blobs: HashSet<ObjectId>,
+    trees: OidHashSet,
+    blobs: OidHashSet,
 }
 
 fn explicit_filter_roots(
@@ -732,8 +730,8 @@ fn explicit_filter_roots(
     tips: &[ObjectId],
 ) -> std::result::Result<ExplicitFilterRoots, BitmapWalkError> {
     let peeled = peel_tips(repo, tips, MissingAction::Error)?;
-    let mut trees = HashSet::new();
-    let mut blobs = HashSet::new();
+    let mut trees = oid_hash_set();
+    let mut blobs = oid_hash_set();
     for oid in peeled.extra_objects {
         match repo
             .odb()
@@ -808,7 +806,7 @@ fn tip_blob_oids(
     repo: &Repository,
     index: &BitmapIndex,
     tips: &[ObjectId],
-) -> std::result::Result<HashSet<ObjectId>, BitmapWalkError> {
+) -> std::result::Result<OidHashSet, BitmapWalkError> {
     Ok(explicit_filter_roots(repo, index, tips)?.blobs)
 }
 
@@ -816,7 +814,7 @@ fn filter_blob_limit(
     repo: &Repository,
     index: &BitmapIndex,
     bits: &mut Bitmap,
-    tip_blobs: &HashSet<ObjectId>,
+    tip_blobs: &OidHashSet,
     limit: u64,
 ) -> std::result::Result<(), BitmapWalkError> {
     let mut blob_type = expand_type(index, ObjectKind::Blob)?;

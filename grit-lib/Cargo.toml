@@ -89,6 +89,10 @@ name = "hash"
 harness = false
 
 [[bench]]
+name = "oid_hashmap"
+harness = false
+
+[[bench]]
 name = "history"
 harness = false
 

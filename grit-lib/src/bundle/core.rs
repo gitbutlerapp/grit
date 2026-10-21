@@ -5,7 +5,7 @@
 //! verifies prerequisite connectivity against a local repository, and ingests the pack
 //! without updating refs (callers apply [`BundleHeader::refs`] themselves).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, Seek, Write};
 use std::path::{Path, PathBuf};

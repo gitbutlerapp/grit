@@ -9,7 +9,7 @@
 //! (delta bytes + deflate per planned entry) and a serial emission stage (headers,
 //! OFS vs REF selection, trailer).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,7 +23,7 @@ use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::delta_islands::DeltaIslands;
 use crate::error::{Error, Result};
 use crate::objects::{
-    HashAlgo, Object, ObjectId, ObjectKind, oid_hash_map, OidHashMap, OidHashSet,
+    oid_hash_map, HashAlgo, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet,
 };
 use crate::odb::Odb;
 use crate::pack_objects::{
@@ -834,7 +834,7 @@ fn zlib_compress(data: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::objects::{Object, ObjectId, ObjectKind, oid_hash_map, oid_hash_set};
+    use crate::objects::{oid_hash_map, oid_hash_set, Object, ObjectId, ObjectKind};
     use std::num::NonZeroUsize;
 
     #[test]

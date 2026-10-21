@@ -32,7 +32,7 @@ use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics, Warning};
 use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
-use crate::objects::{ObjectId, oid_hash_map, oid_hash_set, empty_oid_set, OidHashMap, OidHashSet};
+use crate::objects::{oid_hash_map, ObjectId, OidHashMap};
 use crate::pack_bitmap::BitmapIndexCache;
 use crate::precompose_config::{
     effective_core_precomposeunicode_with_config, filesystem_nfd_nfc_aliases,
@@ -61,7 +61,7 @@ pub struct RepoCaches {
     local_config_source_path: Mutex<Option<PathBuf>>,
     attr_stack: Mutex<HashMap<(PathBuf, PathBuf), AttrStackCacheEntry>>,
     attr_bare: Mutex<HashMap<PathBuf, AttrStackCacheEntry>>,
-    attr_tree: Mutex<OidHashMap< Arc<ParsedGitAttributes>>>,
+    attr_tree: Mutex<OidHashMap<Arc<ParsedGitAttributes>>>,
     pathspec_precompose: OnceLock<bool>,
     ref_storage_format: Mutex<HashMap<PathBuf, RefStorageFormat>>,
     pub(crate) ref_stores: Mutex<HashMap<PathBuf, Arc<dyn crate::refs::store::RefStore>>>,

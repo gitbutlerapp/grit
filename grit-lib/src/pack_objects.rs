@@ -16,8 +16,8 @@ use crate::error::{Error, Result};
 use crate::hash::HashingWriter;
 use crate::objects::{
     empty_object_id_hash_set, oid_hash_map, oid_hash_map_from, oid_hash_set, oid_hash_set_from,
-    OidHashMap, OidHashSet, parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId,
-    ObjectKind,
+    parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind, OidHashMap,
+    OidHashSet,
 };
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -566,13 +566,13 @@ fn write_planned_entries(
     mut reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
 ) -> Result<crate::pack_reuse::ReuseWriteStats> {
     let algo = odb.hash_algo();
-    let payloads: OidHashMap< &[u8]> = plan
+    let payloads: OidHashMap<&[u8]> = plan
         .entries
         .iter()
         .map(|e| (e.oid, e.data.as_slice()))
         .collect();
-    let mut oid_to_offset: OidHashMap< u64> = oid_hash_map();
-    let mut delta_index_by_base: OidHashMap< DeltaIndex> = oid_hash_map();
+    let mut oid_to_offset: OidHashMap<u64> = oid_hash_map();
+    let mut delta_index_by_base: OidHashMap<DeltaIndex> = oid_hash_map();
     let mut body_written = 0u64;
 
     for entry in &plan.entries {
@@ -691,7 +691,7 @@ pub fn build_pack_from_send_list(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &OidHashMap< u32>,
+    blob_name_hashes: &OidHashMap<u32>,
 ) -> Result<Vec<u8>> {
     build_pack_from_send_list_with_parallel_threads(
         odb,
@@ -779,7 +779,7 @@ pub fn build_pack_from_send_list_with_write_threads(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &OidHashMap< u32>,
+    blob_name_hashes: &OidHashMap<u32>,
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
     build_pack_from_send_list_with_parallel_threads(
@@ -799,7 +799,7 @@ pub fn build_pack_from_send_list_with_parallel_threads(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &OidHashMap< u32>,
+    blob_name_hashes: &OidHashMap<u32>,
     search_threads: Option<usize>,
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
@@ -1047,13 +1047,13 @@ pub(crate) fn plan_deltas(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &OidHashMap< u32>,
+    blob_name_hashes: &OidHashMap<u32>,
     search_threads: Option<usize>,
 ) -> Result<DeltaPlan> {
     // Reuse-only repacks (`window == 0`) stream from disk at serialize time; avoid
     // materializing every payload during planning.
     let lazy_payloads = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
-    let mut objects: OidHashMap< Object> = oid_hash_map();
+    let mut objects: OidHashMap<Object> = oid_hash_map();
     if !lazy_payloads {
         for &oid in send {
             objects.insert(oid, odb.read(&oid)?);
@@ -1068,7 +1068,7 @@ pub(crate) fn plan_deltas(
     let islands = load_islands_for_pack(odb, &in_pack, opts);
 
     // target oid -> base oid (the object `target` deltas against).
-    let mut delta_to_base: OidHashMap< ObjectId> = oid_hash_map();
+    let mut delta_to_base: OidHashMap<ObjectId> = oid_hash_map();
     // Deltas whose instruction stream is reused verbatim from an existing pack.
     let mut reused_zlib: HashMap<
         ObjectId,

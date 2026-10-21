@@ -1,11 +1,13 @@
 //! Serialize Git commit-graph v1 files with GDA2 + optional Bloom chunks (`commit-graph.c` compatible).
 
-use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use crate::bloom::{BloomBuildOutcome, BloomFilterSettings};
 use crate::commit_graph_file::CommitGraphChain;
-use crate::objects::{CommitData, HashAlgo, ObjectId, ObjectKind, OidHashMap, OidHashSet, empty_oid_set, oid_hash_map, oid_hash_set, parse_commit, serialize_commit};
+use crate::objects::{
+    oid_hash_set, parse_commit,
+    HashAlgo, ObjectId, ObjectKind, OidHashMap, OidHashSet,
+};
 use crate::odb::Odb;
 
 const SIGNATURE: &[u8; 4] = b"CGPH";
@@ -75,8 +77,8 @@ pub fn load_commit_graph_commit_info(
 
 fn compute_topo_generations(
     sorted_oids: &[ObjectId],
-    infos: &OidHashMap< CommitGraphCommitInfo>,
-    oid_to_idx: &OidHashMap< u32>,
+    infos: &OidHashMap<CommitGraphCommitInfo>,
+    oid_to_idx: &OidHashMap<u32>,
 ) -> Vec<u32> {
     let n = sorted_oids.len();
     let mut gen = vec![0u32; n];
@@ -137,8 +139,8 @@ fn compute_topo_generations(
 
 fn compute_corrected_generations(
     sorted_oids: &[ObjectId],
-    infos: &OidHashMap< CommitGraphCommitInfo>,
-    oid_to_idx: &OidHashMap< u32>,
+    infos: &OidHashMap<CommitGraphCommitInfo>,
+    oid_to_idx: &OidHashMap<u32>,
     topo_gen: &[u32],
 ) -> Vec<u64> {
     let n = sorted_oids.len();
@@ -209,7 +211,7 @@ fn compute_corrected_generations(
 
 fn resolve_parent_edge(
     parent: ObjectId,
-    oid_to_idx: &OidHashMap< u32>,
+    oid_to_idx: &OidHashMap<u32>,
     base_count: u32,
     chain: Option<&CommitGraphChain>,
 ) -> u32 {
@@ -242,22 +244,22 @@ pub struct BloomWriteStats {
 /// Build raw commit-graph bytes (without touching the filesystem).
 pub fn build_commit_graph_bytes(
     sorted_oids: &[ObjectId],
-    infos: &OidHashMap< CommitGraphCommitInfo>,
+    infos: &OidHashMap<CommitGraphCommitInfo>,
     odb: &Odb,
     changed_paths: bool,
     bloom_settings: &BloomFilterSettings,
     base_chain: Option<&CommitGraphChain>,
     base_graph_hashes: &[&[u8]],
     max_new_filters: Option<u32>,
-    existing_filters: &OidHashMap< Vec<u8>>,
-    upgraded_filters: &OidHashMap< Vec<u8>>,
+    existing_filters: &OidHashMap<Vec<u8>>,
+    upgraded_filters: &OidHashMap<Vec<u8>>,
     write_generation_data: bool,
 ) -> crate::error::Result<(Vec<u8>, BloomWriteStats)> {
     let base_count: u32 = base_chain.map(CommitGraphChain::total_commits).unwrap_or(0);
     let algo = odb.hash_algo();
     let hash_len = algo.len();
 
-    let oid_to_idx: OidHashMap< u32> = sorted_oids
+    let oid_to_idx: OidHashMap<u32> = sorted_oids
         .iter()
         .enumerate()
         .map(|(i, o)| (*o, i as u32))
@@ -850,8 +852,7 @@ mod tests {
     use crate::bloom::BloomFilterSettings;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
     use crate::objects::{
-        empty_oid_byte_filter_map, oid_hash_map, serialize_commit, CommitData, ObjectId,
-        ObjectKind,
+        empty_oid_byte_filter_map, oid_hash_map, serialize_commit, CommitData, ObjectId, ObjectKind,
     };
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::write_tree_from_index;

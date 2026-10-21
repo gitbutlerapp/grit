@@ -6,7 +6,9 @@
 
 use crate::error::{Error, Result};
 use crate::hash::{hash_object, Parallelism};
-use crate::objects::{HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{
+    oid_hash_map, HashAlgo, ObjectId, ObjectKind, OidHashMap,
+};
 use crate::odb::Odb;
 use crate::pack_zlib::{decompress_zlib_at_index, skip_zlib_at_with_scratch};
 use crate::parallel::run_ordered_pool;
@@ -127,9 +129,9 @@ struct PendingIndexDelta {
 struct IndexBuildState<'a> {
     odb: &'a Odb,
     ofs_base_refs: &'a mut HashMap<usize, u32>,
-    oid_base_refs: &'a mut HashMap<ObjectId, u32>,
+    oid_base_refs: &'a mut OidHashMap<u32>,
     ofs_bases: &'a mut HashMap<usize, IndexBase>,
-    oid_bases: &'a mut HashMap<ObjectId, IndexBase>,
+    oid_bases: &'a mut OidHashMap<IndexBase>,
     records: &'a mut Vec<PackIndexRecord>,
 }
 
@@ -187,11 +189,11 @@ pub fn build_pack_index_records_with_progress(
     let object_total = u64::try_from(header.nr_objects).unwrap_or(u64::MAX);
     let mut reporter = progress.map(|sink| PackIndexReporter::begin_indexing(sink, object_total));
     let mut ofs_base_refs: HashMap<usize, u32> = HashMap::new();
-    let mut oid_base_refs: HashMap<ObjectId, u32> = HashMap::new();
+    let mut oid_base_refs: OidHashMap<u32> = oid_hash_map();
     let mut pending: Vec<PendingIndexDelta> = Vec::new();
     let mut records: Vec<PackIndexRecord> = Vec::with_capacity(header.nr_objects);
     let mut ofs_bases: HashMap<usize, IndexBase> = HashMap::new();
-    let mut oid_bases: HashMap<ObjectId, IndexBase> = HashMap::new();
+    let mut oid_bases: OidHashMap<IndexBase> = oid_hash_map();
 
     let mut state = IndexBuildState {
         odb,
@@ -631,7 +633,7 @@ fn hash_one_whole_slot(
     work: &WholeSlot,
     algo: HashAlgo,
     ofs_base_refs: &HashMap<usize, u32>,
-    oid_base_refs: &HashMap<ObjectId, u32>,
+    oid_base_refs: &OidHashMap<u32>,
 ) -> Result<WholeHashed> {
     let data = decompress_zlib_at_index(pack, work.zlib_offset, work.uncompressed_size)?;
     hash_whole_slot_with_data(pack, work, &data, algo, ofs_base_refs, oid_base_refs)
@@ -642,7 +644,7 @@ fn hash_one_whole_slot_with_scratch(
     work: &WholeSlot,
     algo: HashAlgo,
     ofs_base_refs: &HashMap<usize, u32>,
-    oid_base_refs: &HashMap<ObjectId, u32>,
+    oid_base_refs: &OidHashMap<u32>,
     scratch: &mut ZlibInflateScratch,
 ) -> Result<WholeHashed> {
     let mut pos = work.zlib_offset;
@@ -656,7 +658,7 @@ fn hash_whole_slot_with_data(
     data: &[u8],
     algo: HashAlgo,
     ofs_base_refs: &HashMap<usize, u32>,
-    oid_base_refs: &HashMap<ObjectId, u32>,
+    oid_base_refs: &OidHashMap<u32>,
 ) -> Result<WholeHashed> {
     let oid = hash_object(algo, work.kind, data);
     let retain_ofs = ofs_base_refs.get(&work.offset).copied().unwrap_or(0) > 0;
@@ -766,9 +768,9 @@ fn retain_pack_base_for_whole(
     zlib_offset: usize,
     uncompressed_size: usize,
     ofs_base_refs: &HashMap<usize, u32>,
-    oid_base_refs: &HashMap<ObjectId, u32>,
+    oid_base_refs: &OidHashMap<u32>,
     ofs_bases: &mut HashMap<usize, IndexBase>,
-    oid_bases: &mut HashMap<ObjectId, IndexBase>,
+    oid_bases: &mut OidHashMap<IndexBase>,
 ) {
     let payload = BasePayload::InPack {
         zlib_offset,
@@ -799,9 +801,9 @@ fn retain_owned_base_for_delta(
     kind: ObjectKind,
     data: Vec<u8>,
     ofs_base_refs: &HashMap<usize, u32>,
-    oid_base_refs: &HashMap<ObjectId, u32>,
+    oid_base_refs: &OidHashMap<u32>,
     ofs_bases: &mut HashMap<usize, IndexBase>,
-    oid_bases: &mut HashMap<ObjectId, IndexBase>,
+    oid_bases: &mut OidHashMap<IndexBase>,
 ) {
     let payload = BasePayload::Owned(data);
     let retain_ofs = ofs_base_refs.get(&offset).copied().unwrap_or(0) > 0;
@@ -839,7 +841,7 @@ fn materialize_bases_for_ready_deltas(
     pack: &[u8],
     ready: &[PendingIndexDelta],
     ofs_bases: &mut HashMap<usize, IndexBase>,
-    oid_bases: &mut HashMap<ObjectId, IndexBase>,
+    oid_bases: &mut OidHashMap<IndexBase>,
 ) -> Result<()> {
     use std::collections::HashSet;
     let mut seen_ofs = HashSet::new();
@@ -983,7 +985,7 @@ fn resolve_pending_deltas_parallel(
 fn delta_base_ready(
     delta: &PendingIndexDelta,
     ofs_bases: &HashMap<usize, IndexBase>,
-    oid_bases: &HashMap<ObjectId, IndexBase>,
+    oid_bases: &OidHashMap<IndexBase>,
     odb: &Odb,
 ) -> bool {
     if let Some(base_off) = delta.base_offset {
@@ -1003,11 +1005,11 @@ fn resolve_one_delta(
     pack: &[u8],
     delta: &PendingIndexDelta,
     ofs_bases: &HashMap<usize, IndexBase>,
-    oid_bases: &HashMap<ObjectId, IndexBase>,
+    oid_bases: &OidHashMap<IndexBase>,
     odb: &Odb,
     algo: HashAlgo,
     ofs_out_refs: &HashMap<usize, u32>,
-    oid_out_refs: &HashMap<ObjectId, u32>,
+    oid_out_refs: &OidHashMap<u32>,
 ) -> Result<DeltaHashed> {
     let delta_data = decompress_zlib_at_index(pack, delta.zlib_offset, delta.uncompressed_size)?;
     let base: Option<(ObjectKind, Cow<'_, [u8]>)> = if let Some(base_off) = delta.base_offset {

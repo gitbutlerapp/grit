@@ -14,7 +14,7 @@
 //! # }
 //! ```
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};

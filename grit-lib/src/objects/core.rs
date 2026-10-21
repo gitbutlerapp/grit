@@ -154,7 +154,7 @@ const WELL_KNOWN_EMPTY_TREE_LEGACY: [u8; 20] = [
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ObjectId {
     bytes: [u8; MAX_OID_LEN],
     len: u8,
@@ -356,6 +356,12 @@ impl ObjectId {
     #[must_use]
     pub const fn is_loose_suffix_len(len: usize) -> bool {
         len == HashAlgo::Sha1.hex_len() - 2 || len == HashAlgo::Sha256.hex_len() - 2
+    }
+}
+
+impl std::hash::Hash for ObjectId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write(self.as_bytes());
     }
 }
 

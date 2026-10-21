@@ -19,7 +19,6 @@ pub use loose::LooseStore;
 pub use midx::{MidxObjects, MidxObjectsStatus};
 pub use packs::{PackFilter, PackedObjects};
 
-use std::collections::HashMap;
 use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock};
@@ -28,7 +27,10 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::hash;
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use crate::objects::{
+    oid_hash_map, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind,
+    OidHashMap,
+};
 use crate::odb::WriteOptions;
 use crate::pack;
 
@@ -224,7 +226,7 @@ fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
 #[derive(Debug)]
 pub struct MemoryStore {
     algo: HashAlgo,
-    objects: RwLock<HashMap<ObjectId, MemoryObjectEntry>>,
+    objects: RwLock<OidHashMap<MemoryObjectEntry>>,
 }
 
 impl MemoryStore {
@@ -233,7 +235,7 @@ impl MemoryStore {
     pub fn new(algo: HashAlgo) -> Self {
         Self {
             algo,
-            objects: RwLock::new(HashMap::new()),
+            objects: RwLock::new(oid_hash_map()),
         }
     }
 

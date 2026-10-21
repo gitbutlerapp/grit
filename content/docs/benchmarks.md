@@ -31,6 +31,10 @@ Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects 
 
 Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
 
+## grit-lib: OID hash maps
+
+Criterion bench **`oid_hashmap`** (`cargo bench -p grit-lib --bench oid_hashmap`) compares `std` `HashMap`/`HashSet` keyed by [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html) (SipHash over the full digest) against [`OidHashMap`](https://docs.rs/grit-lib/latest/grit_lib/objects/type.OidHashMap.html) / [`OidHashSet`](https://docs.rs/grit-lib/latest/grit_lib/objects/type.OidHashSet.html) ([`OidBuildHasher`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.OidBuildHasher.html): first eight digest bytes, mixed with a per-map random odd multiplier). At **1 M** insert/lookup/contains operations, the OID hasher is typically **≥2×** faster than SipHash on the factory VM. Hot paths (rev-list commit cache, pack index build, fsck connectivity, ODB session caches, and related maps) use these types internally; public APIs still expose standard `HashSet`/`HashMap` at boundaries.
+
 ## grit-lib: ODB backend (pluggable object store)
 
 Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). Built-in layouts route hot reads through [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) on the primary store and [`CompositeStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) for alternates so behaviour matches the pre-refactor oracle tests while keeping a pluggable [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) boundary.

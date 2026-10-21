@@ -12,9 +12,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::bitmap_walk::{
-    bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet,
-};
+use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet};
 use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphChain};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
@@ -25,7 +23,10 @@ use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{
+    oid_hash_map, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind,
+    OidHashMap, OidHashSet,
+};
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
@@ -6997,12 +6998,12 @@ pub(crate) struct CommitGraph<'r> {
     repo: &'r Repository,
     first_parent_only: bool,
     graph_chain: Option<CommitGraphChain>,
-    parents: HashMap<ObjectId, Vec<ObjectId>>,
-    commit_trees: HashMap<ObjectId, ObjectId>,
-    committer_time: HashMap<ObjectId, i64>,
-    author_time: HashMap<ObjectId, i64>,
-    shallow_boundaries: HashSet<ObjectId>,
-    graft_parents: HashMap<ObjectId, Vec<ObjectId>>,
+    parents: OidHashMap<Vec<ObjectId>>,
+    commit_trees: OidHashMap<ObjectId>,
+    committer_time: OidHashMap<i64>,
+    author_time: OidHashMap<i64>,
+    shallow_boundaries: OidHashSet,
+    graft_parents: OidHashMap<Vec<ObjectId>>,
 }
 
 impl<'r> CommitGraph<'r> {
@@ -7015,8 +7016,13 @@ impl<'r> CommitGraph<'r> {
         first_parent_only: bool,
         use_commit_graph: bool,
     ) -> Self {
-        let shallow_boundaries = load_shallow_boundaries(repo.git_dir());
-        let graft_parents = crate::rev_parse::load_graft_parents(repo.git_dir());
+        let shallow_boundaries: OidHashSet = load_shallow_boundaries(repo.git_dir())
+            .into_iter()
+            .collect();
+        let graft_parents: OidHashMap<Vec<ObjectId>> =
+            crate::rev_parse::load_graft_parents(repo.git_dir())
+                .into_iter()
+                .collect();
         let graph_chain = if use_commit_graph {
             repo.caches()
                 .commit_graph_chain(&repo.git_dir().join("objects"))
@@ -7028,10 +7034,10 @@ impl<'r> CommitGraph<'r> {
             repo,
             first_parent_only,
             graph_chain,
-            parents: HashMap::new(),
-            commit_trees: HashMap::new(),
-            committer_time: HashMap::new(),
-            author_time: HashMap::new(),
+            parents: oid_hash_map(),
+            commit_trees: oid_hash_map(),
+            committer_time: oid_hash_map(),
+            author_time: oid_hash_map(),
             shallow_boundaries,
             graft_parents,
         }

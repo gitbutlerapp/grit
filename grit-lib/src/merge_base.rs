@@ -5,13 +5,13 @@
 //! and `--is-ancestor`.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
 
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
 use crate::objects::{
-    ObjectId, ObjectKind, OidHashMap, OidHashSet, empty_oid_set, oid_hash_map, oid_hash_set,
-    oid_hash_set_from, parse_commit,
+    oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet,
 };
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
@@ -510,7 +510,7 @@ pub struct ReachableWalkState {
     done: OidHashSet,
     queued: OidHashSet,
     /// Selected children not yet emitted, per parent (Git `limit_list` gating).
-    unfinished_children: OidHashMap< usize>,
+    unfinished_children: OidHashMap<usize>,
     /// Tips seeded on the heap up front (may emit before all children are shown).
     seeded: OidHashSet,
     seq: u64,
@@ -897,12 +897,9 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     {
         if let Some(graph) = &cache.graph {
             let shallow: HashSet<ObjectId> = cache.shallow_boundaries.iter().copied().collect();
-            if let Some(n) = graph.count_reachable_commits(
-                tips,
-                hide,
-                filter.first_parent_only,
-                &shallow,
-            ) {
+            if let Some(n) =
+                graph.count_reachable_commits(tips, hide, filter.first_parent_only, &shallow)
+            {
                 return Ok(n);
             }
         }
@@ -1192,7 +1189,7 @@ pub fn branch_base_for_tip(
     }
 
     let tip_chain = first_parent_chain(repo, tip)?;
-    let tip_positions: OidHashMap< usize> = tip_chain
+    let tip_positions: OidHashMap<usize> = tip_chain
         .iter()
         .copied()
         .enumerate()
@@ -1433,7 +1430,7 @@ fn enqueue_commit_for_intersect_walk(
     cache: &mut CommitGraphCache<'_>,
     pending: &mut BinaryHeap<RankedCommit>,
     tally: &mut OpenQueueTally,
-    labels: &mut OidHashMap< u8>,
+    labels: &mut OidHashMap<u8>,
     oid: ObjectId,
     extra: u8,
 ) -> Result<()> {
@@ -1461,7 +1458,7 @@ fn enqueue_commit_for_intersect_walk(
 fn dequeue_commit_for_intersect_walk(
     pending: &mut BinaryHeap<RankedCommit>,
     tally: &mut OpenQueueTally,
-    labels: &mut OidHashMap< u8>,
+    labels: &mut OidHashMap<u8>,
     allow_rank_stop: bool,
 ) -> Option<ObjectId> {
     let node = pending.pop()?;
@@ -1497,7 +1494,7 @@ fn walk_intersecting_histories(
     collect_every_base: bool,
 ) -> Result<Vec<ObjectId>> {
     let mut pending = BinaryHeap::new();
-    let mut labels: OidHashMap< u8> = oid_hash_map();
+    let mut labels: OidHashMap<u8> = oid_hash_map();
     let mut tally = OpenQueueTally {
         open_on_a: 0,
         open_on_b: 0,
@@ -1599,7 +1596,7 @@ fn reduce_to_best(
 
 struct CommitGraphCache<'r> {
     repo: &'r Repository,
-    closures: OidHashMap< OidHashSet>,
+    closures: OidHashMap<OidHashSet>,
     promisor_stop: OidHashSet,
     shallow_boundaries: OidHashSet,
     /// Commit-graph file, when present: supplies parents + committer time without

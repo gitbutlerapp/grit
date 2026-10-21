@@ -3,7 +3,9 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::error::Result;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{
+    oid_hash_set, parse_commit, ObjectId, ObjectKind,
+};
 use crate::refs;
 use crate::repo::Repository;
 
@@ -28,7 +30,7 @@ fn commit_closure_from_all_refs(repo: &Repository) -> Result<HashSet<ObjectId>> 
         }
     }
 
-    let mut seen = HashSet::new();
+    let mut seen = oid_hash_set();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
 
     for oid in seeds {
@@ -55,7 +57,7 @@ fn commit_closure_from_all_refs(repo: &Repository) -> Result<HashSet<ObjectId>> 
         }
     }
 
-    Ok(seen)
+    Ok(seen.into_iter().collect())
 }
 
 /// Returns whether every bundle prerequisite commit is already reachable from existing refs.

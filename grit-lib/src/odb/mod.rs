@@ -54,7 +54,10 @@ use crate::diagnostics::NullDiagnostics;
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::validate_midx_referenced_packs_with_diagnostics;
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet, empty_oid_set, oid_hash_map, oid_hash_set};
+use crate::objects::{
+    oid_hash_map, oid_hash_set, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind,
+    OidHashMap, OidHashSet,
+};
 use crate::pack;
 use crate::pack_store::PackStore;
 use filetime::{set_file_mtime, FileTime};
@@ -228,7 +231,7 @@ pub struct Odb {
     /// Avoid re-reading the same loose object repeatedly during one repository session.
     session_loose_reads: Arc<std::sync::Mutex<OidHashMap<Object>>>,
     /// Parsed tree entries reused for the lifetime of this [`Odb`] handle (Git object cache).
-    session_tree_entries: Arc<Mutex<OidHashMap< Arc<Vec<crate::objects::TreeEntry>>>>>,
+    session_tree_entries: Arc<Mutex<OidHashMap<Arc<Vec<crate::objects::TreeEntry>>>>>,
 }
 
 const _: () = {
