@@ -2,9 +2,9 @@
 
 use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Context, Result};
-use grit_lib::pathspec::ResolvedPathspecs;
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions, RemoveOutcome};
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::ResolvedPathspecs;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;

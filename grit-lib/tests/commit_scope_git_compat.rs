@@ -4,10 +4,10 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::pathspec::ResolvedPathspecs;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::ResolvedPathspecs;
 
 fn ident() -> String {
     "Scope Compat <scope@example.com> 1700000000 +0000".to_owned()

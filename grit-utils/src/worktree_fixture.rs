@@ -314,7 +314,7 @@ pub fn shell_grit_commit_paths(program: &Path) -> String {
     format!(
         r#"set -eu
 if [ -s {paths_q} ]; then
-  tr '\n' '\0' < {paths_q} | xargs -0 {prog_q} commit -q -m bench --
+  tr '\n' '\0' < {paths_q} | xargs -0 {prog_q} commit -m bench --
 fi"#
     )
 }

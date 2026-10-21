@@ -6,11 +6,11 @@
 use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
 use grit_lib::error::Error as LibError;
-use grit_lib::pathspec::ResolvedPathspecs;
 use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions};
 use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::ResolvedPathspecs;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;

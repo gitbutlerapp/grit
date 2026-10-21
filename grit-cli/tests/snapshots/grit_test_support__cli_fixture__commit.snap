@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"oid\":\"0678d0320dac162a518bfd0ee738896acdcc0f6b\",\"branch\":\"main\",\"subject\":\"third\",\"changes\":3,\"amended\":false}\n",
+    "stdout": "{\"oid\":\"0678d0320dac162a518bfd0ee738896acdcc0f6b\",\"branch\":\"main\",\"subject\":\"third\",\"changes\":3,\"amended\":false,\"scope\":\"auto_stage\"}\n",
     "stderr": ""
   },
   "markdown": {

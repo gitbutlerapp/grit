@@ -310,3 +310,11 @@ followup = "ROADMAP item 29"
 documented = "Full fsck on 400k-file synthetic worktree remains above 1.1×"
 followup = "ROADMAP item 30"
 
+[scenario."commit/staged@synth-100k"]
+documented = "grit commit --staged on synth-100k is ~1.78× git commit (132.7 ms vs 74.5 ms); index read/write and tree build for staged-only scope"
+followup = "ROADMAP item 23"
+
+[scenario."commit/paths@synth-10k"]
+documented = "grit commit with pathspec on synth-10k is ~21.4× git (493.7 ms vs 23.0 ms); partial commit builds temp index from HEAD tree and re-stages matching paths"
+followup = "ROADMAP item 23"
+

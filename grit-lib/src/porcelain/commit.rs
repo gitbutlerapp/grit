@@ -28,7 +28,8 @@ use crate::write_tree::{
     cache_tree_extension_valid, is_empty_tree_oid, write_tree_update_index, WriteTreeFlags,
 };
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process;
 use std::sync::{Arc, Mutex};
 
 /// Inputs for [`create_commit`].
@@ -140,6 +141,9 @@ fn commit_paths_scope(
     };
 
     let mut real_index = repo.load_index()?;
+    if real_index.has_unmerged_entries() {
+        return Err(Error::IndexUnmerged);
+    }
     let mut commit_index = match parent_tree.as_ref() {
         Some(tree) => index_from_tree_with_worktree_stats(repo, tree)?,
         None => Index::new(),
@@ -264,6 +268,15 @@ pub fn commit_worktree(
     create_commit_with_index(repo, &mut index, &req, progress, None)
 }
 
+/// Removes a partial-commit hook index file on drop (Git `next-index-<pid>`).
+struct TempHookIndexFile(PathBuf);
+
+impl Drop for TempHookIndexFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 fn create_commit_with_index(
     repo: &Repository,
     index: &mut Index,
@@ -335,10 +348,24 @@ fn create_commit_with_index(
         }
     }
 
-    repo.write_index(index)?;
+    let partial_commit = persist_index.is_some();
+    let _temp_hook_index_guard = if partial_commit {
+        let path = repo.git_dir().join(format!("next-index-{}", process::id()));
+        repo.write_index_at(&path, index)?;
+        Some(TempHookIndexFile(path))
+    } else {
+        repo.write_index(index)?;
+        None
+    };
+
+    let temp_hook_index_path = _temp_hook_index_guard.as_ref().map(|g| g.0.clone());
+
+    let hook_index_path: PathBuf = temp_hook_index_path
+        .clone()
+        .unwrap_or_else(|| index_path.clone());
 
     let commit_env = CommitHookEnv {
-        index_file: Some(index_path.as_path()),
+        index_file: Some(hook_index_path.as_path()),
         git_editor: Some(":"),
         git_prefix: None,
         extra_env: &[],
@@ -456,45 +483,24 @@ fn create_commit_with_index(
         }
     });
 
-    match persist_index {
-        Some(persist) => {
-            if !req.assume_worktree_synced {
-                if let Some(work_tree) = repo.work_tree() {
-                    let rules = WorktreeRules::from_repository(repo, persist).ok();
-                    let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
-                    let _ = refresh_index_stat_content_verified_with_rules(
-                        repo.odb(),
-                        repo.git_dir(),
-                        persist,
-                        work_tree,
-                        None,
-                        Some(config.as_ref()),
-                        None,
-                        rules_arc.as_ref(),
-                    )?;
-                }
+    if !partial_commit {
+        if !req.assume_worktree_synced {
+            if let Some(work_tree) = repo.work_tree() {
+                let rules = WorktreeRules::from_repository(repo, index).ok();
+                let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
+                let _ = refresh_index_stat_content_verified_with_rules(
+                    repo.odb(),
+                    repo.git_dir(),
+                    index,
+                    work_tree,
+                    None,
+                    Some(config.as_ref()),
+                    None,
+                    rules_arc.as_ref(),
+                )?;
             }
-            repo.write_index(persist)?;
         }
-        None => {
-            if !req.assume_worktree_synced {
-                if let Some(work_tree) = repo.work_tree() {
-                    let rules = WorktreeRules::from_repository(repo, index).ok();
-                    let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
-                    let _ = refresh_index_stat_content_verified_with_rules(
-                        repo.odb(),
-                        repo.git_dir(),
-                        index,
-                        work_tree,
-                        None,
-                        Some(config.as_ref()),
-                        None,
-                        rules_arc.as_ref(),
-                    )?;
-                }
-            }
-            repo.write_index(index)?;
-        }
+        repo.write_index(index)?;
     }
 
     let changes = if parent_tree.as_ref() == Some(&tree) {
@@ -533,7 +539,33 @@ fn create_commit_with_index(
         let _ = finish_merge_state(repo)?;
     }
 
-    let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &commit_env);
+    if let Some(persist) = persist_index {
+        if !req.assume_worktree_synced {
+            if let Some(work_tree) = repo.work_tree() {
+                let rules = WorktreeRules::from_repository(repo, persist).ok();
+                let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
+                let _ = refresh_index_stat_content_verified_with_rules(
+                    repo.odb(),
+                    repo.git_dir(),
+                    persist,
+                    work_tree,
+                    None,
+                    Some(config.as_ref()),
+                    None,
+                    rules_arc.as_ref(),
+                )?;
+            }
+        }
+        repo.write_index(persist)?;
+    }
+
+    let post_commit_env = CommitHookEnv {
+        index_file: Some(index_path.as_path()),
+        git_editor: Some(":"),
+        git_prefix: None,
+        extra_env: &[],
+    };
+    let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &post_commit_env);
 
     Ok(CommitOutcome {
         oid,

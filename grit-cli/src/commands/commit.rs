@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
+use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{
     commit_with_scope, default_commit_scope, CommitRequest, CommitScope,
 };
@@ -87,7 +88,12 @@ pub fn run(
     let message = match message {
         Some(m) if !m.trim().is_empty() => Some(m),
         None if amend => None,
-        _ => bail!("provide a commit message, e.g. grit commit \"what changed\""),
+        _ => {
+            if matches!(scope, CommitScope::AutoStage) {
+                stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
+            }
+            bail!("provide a commit message, e.g. grit commit \"what changed\"");
+        }
     };
     let message_text = message.as_deref().unwrap_or("");
 

@@ -55,10 +55,10 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
         String::from_utf8_lossy(&git_out.stderr)
     );
 
-    use grit_lib::pathspec::{PathspecInput, ResolvedPathspecs};
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::{InitOptions, Repository};
+    use grit_lib::worktree::pathspec::{PathspecInput, ResolvedPathspecs};
 
     let dir2 = tempfile::tempdir().expect("tempdir2");
     let repo = Repository::init(dir2.path(), &InitOptions::default()).expect("init");
@@ -114,8 +114,8 @@ fn empty_pathspec_record_matches_git_rejection() {
     );
 
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::pathspec::{PathspecInput, PathspecResolveError, ResolvedPathspecs};
     use grit_lib::repo::Repository;
+    use grit_lib::worktree::pathspec::{PathspecInput, PathspecResolveError, ResolvedPathspecs};
 
     let git_dir = dir.path().join(".git");
     let repo = Repository::open(

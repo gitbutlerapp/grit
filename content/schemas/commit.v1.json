@@ -1,6 +1,17 @@
 {
   "$id": "https://grit-scm.com/schemas/commit/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "CommitScopeJson": {
+      "description": "JSON scope label for [`CommitOutcome::scope`].",
+      "enum": [
+        "auto_stage",
+        "staged",
+        "paths"
+      ],
+      "type": "string"
+    }
+  },
   "description": "Result of `grit commit`.",
   "properties": {
     "amended": {
@@ -17,12 +28,10 @@
     "oid": {
       "type": "string"
     },
-    "subject": {
-      "type": "string"
-    },
     "scope": {
-      "description": "How the index was prepared: auto_stage (default), staged, or paths.",
-      "enum": ["auto_stage", "staged", "paths"],
+      "$ref": "#/definitions/CommitScopeJson"
+    },
+    "subject": {
       "type": "string"
     }
   },

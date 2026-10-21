@@ -2,8 +2,8 @@
 
 use anyhow::{bail, Context, Result};
 use clap::Args;
-use grit_lib::pathspec::{PathspecInput, PathspecResolveError, ResolvedPathspecs};
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{PathspecInput, PathspecResolveError, ResolvedPathspecs};
 use std::io::Read;
 /// Path arguments plus Git-compatible `--pathspec-from-file` / `--pathspec-file-nul`.
 #[derive(Debug, Clone, Default, Args)]
