@@ -93,6 +93,11 @@ pub fn create_repo(git: &Path, file_count: usize) -> Result<PathBuf> {
 
 /// Append `commit_count` empty commits on top of an existing repo (for log benchmarks).
 pub fn extend_with_empty_commits(dir: &Path, git: &Path, commit_count: usize) -> Result<()> {
+    static EMPTY_COMMIT_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _guard = EMPTY_COMMIT_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     for i in 0..commit_count {
         run_git(
             git,
