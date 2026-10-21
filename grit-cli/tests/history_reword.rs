@@ -229,6 +229,7 @@ fn history_reword_matches_git_history_when_available() -> TestResult {
     let (_a1, b1, c1) = init_linear_repo(grit_dir.path())?;
     let (_a2, b2, _c2) = init_linear_repo(git_dir.path())?;
     assert_eq!(b1, b2);
+    git(grit_dir.path(), &["config", "grit.changeIds", "false"])?;
     let msg = "parity reword\n";
     let msg_file = grit_dir.path().join("msg.txt");
     fs::write(&msg_file, msg)?;
