@@ -1,4 +1,4 @@
-//! Path-limited status, untracked `-u` forms, and rename JSON vs Git porcelain v2.
+//! Path-limited status, untracked modes, and rename JSON vs Git porcelain v2.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -172,13 +172,13 @@ fn status_staged_git_mv_json_reports_old_path() -> TestResult {
 }
 
 #[test]
-fn status_uno_omits_untracked() -> TestResult {
+fn status_untracked_no_omits_untracked() -> TestResult {
     let base = tempfile::tempdir()?;
     let repo = base.path();
     fs::write(repo.join("lonely.txt"), b"x\n")?;
     init_repo(repo)?;
 
-    let v = grit_json(repo, &["status", "-uno"]);
+    let v = grit_json(repo, &["status", "--untracked=no"]);
     assert_eq!(v["untracked"].as_array().unwrap().len(), 0);
     Ok(())
 }
@@ -201,25 +201,6 @@ fn status_modified_json_omits_old_path() -> TestResult {
         .expect("modified entry");
     assert_eq!(modified["path"], "old.txt");
     assert!(modified.get("old_path").is_none());
-    Ok(())
-}
-
-#[test]
-fn status_u_flag_does_not_consume_pathspec() -> TestResult {
-    let base = tempfile::tempdir()?;
-    let repo = base.path();
-    fs::write(repo.join("keep.txt"), b"a\n")?;
-    fs::write(repo.join("other.txt"), b"b\n")?;
-    init_repo(repo)?;
-
-    let v = grit_json(repo, &["status", "-u", "keep.txt"]);
-    let untracked: BTreeSet<_> = v["untracked"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|x| x.as_str().unwrap().to_owned())
-        .collect();
-    assert!(!untracked.contains("other.txt"));
     Ok(())
 }
 
@@ -250,20 +231,5 @@ fn status_path_named_uno_after_double_dash_matches_git() -> TestResult {
         line.contains("-uno") && line.contains('M'),
         "git must report modified -uno: {line}"
     );
-    Ok(())
-}
-
-#[test]
-fn status_u_flag_lists_all_untracked_like_long_form() -> TestResult {
-    let base = tempfile::tempdir()?;
-    let repo = base.path();
-    fs::create_dir_all(repo.join("docs"))?;
-    fs::write(repo.join("docs/a.txt"), b"a\n")?;
-    fs::write(repo.join("docs/b.txt"), b"b\n")?;
-    init_repo(repo)?;
-
-    let u = grit_json(repo, &["status", "-u"]);
-    let all = grit_json(repo, &["status", "--untracked", "all"]);
-    assert_eq!(u["untracked"], all["untracked"]);
     Ok(())
 }

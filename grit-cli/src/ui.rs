@@ -337,3 +337,25 @@ pub fn print_untracked(
     outln!(w);
     Ok(())
 }
+
+/// Print ignored paths (does nothing when empty).
+pub fn print_ignored(
+    w: &mut dyn Write,
+    paths: &[String],
+    path_opts: Option<&PathDisplayOptions>,
+) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let color = use_color();
+    outln!(w, "{}", paint(color, "1", "Ignored"));
+    for path in paths {
+        let shown = path_opts
+            .map(|opts| opts.format_path_for_human(path))
+            .unwrap_or_else(|| path.clone());
+        let marker = format!("!  {l:<width$}", l = "ignored", width = LABEL_WIDTH);
+        outln!(w, "  {}  {shown}", paint(color, "90", &marker));
+    }
+    outln!(w);
+    Ok(())
+}

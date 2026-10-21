@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::status::{
-    status, status_options_from_config, Conflict, UntrackedMode,
+    short_status_lines, status, status_options_from_config, Conflict, IgnoredMode, UntrackedMode,
 };
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::branch_tracking::{
@@ -28,161 +28,6 @@ use clap::Args;
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
 const SHORTLOG_LIMIT: usize = 10;
-
-/// Expand Git-style `-u`, `-uno`, `-unormal`, and `-uall` only for status invocations.
-pub fn normalize_status_argv(argv: &mut [String]) {
-    let Some(range) = status_untracked_rewrite_range(argv) else {
-        return;
-    };
-    for arg in argv[range].iter_mut() {
-        let Some(rest) = arg.strip_prefix("-u") else {
-            continue;
-        };
-        if rest.is_empty() {
-            *arg = "--untracked=all".to_owned();
-        } else if matches!(rest, "no" | "normal" | "all") {
-            *arg = format!("--untracked={rest}");
-        }
-    }
-}
-
-fn status_untracked_rewrite_range(argv: &[String]) -> Option<std::ops::Range<usize>> {
-    let mut i = 1;
-    while i < argv.len() {
-        let arg = argv[i].as_str();
-        if arg == "--" {
-            return None;
-        }
-        if let Some(n) = skip_global_flag(argv, i) {
-            i += n;
-            continue;
-        }
-        break;
-    }
-    if i >= argv.len() {
-        return Some(1..1);
-    }
-    let start = match argv[i].as_str() {
-        "status" | "st" => i + 1,
-        cmd if is_grit_subcommand(cmd) => return None,
-        _ => i,
-    };
-    let end = argv[start..]
-        .iter()
-        .position(|token| token == "--")
-        .map_or(argv.len(), |pos| start + pos);
-    Some(start..end)
-}
-
-fn skip_global_flag(argv: &[String], i: usize) -> Option<usize> {
-    match argv[i].as_str() {
-        "--json" | "--markdown" | "-v" | "-V" | "--version" => Some(1),
-        "--filter" | "--threads" => argv.get(i + 1).map(|_| 2).or(Some(1)),
-        s if s.starts_with("--filter=") || s.starts_with("--threads=") => Some(1),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod argv_tests {
-    use super::normalize_status_argv;
-
-    #[test]
-    fn normalize_skips_non_status_commands() {
-        let mut argv = vec![
-            "grit".into(),
-            "add".into(),
-            "-uno".into(),
-            "file.txt".into(),
-        ];
-        normalize_status_argv(&mut argv);
-        assert_eq!(argv[2], "-uno");
-    }
-
-    #[test]
-    fn normalize_expands_status_u_and_uno() {
-        let mut argv = vec![
-            "grit".into(),
-            "status".into(),
-            "-u".into(),
-            "keep.txt".into(),
-        ];
-        normalize_status_argv(&mut argv);
-        assert_eq!(argv[2], "--untracked=all");
-        assert_eq!(argv[3], "keep.txt");
-        let mut argv2 = vec!["grit".into(), "st".into(), "-uno".into()];
-        normalize_status_argv(&mut argv2);
-        assert_eq!(argv2[2], "--untracked=no");
-    }
-
-    #[test]
-    fn normalize_does_not_rewrite_pathspecs_after_double_dash() {
-        for path in ["-uno", "-unormal", "-uall", "-u"] {
-            let mut argv = vec!["grit".into(), "status".into(), "--".into(), path.into()];
-            normalize_status_argv(&mut argv);
-            assert_eq!(argv[3], path, "path token after -- must be preserved");
-        }
-        let mut argv = vec![
-            "grit".into(),
-            "status".into(),
-            "-uno".into(),
-            "--".into(),
-            "keep.txt".into(),
-        ];
-        normalize_status_argv(&mut argv);
-        assert_eq!(argv[2], "--untracked=no");
-        assert_eq!(argv[4], "keep.txt");
-    }
-}
-
-fn is_grit_subcommand(name: &str) -> bool {
-    matches!(
-        name,
-        "init"
-            | "clone"
-            | "remote"
-            | "fetch"
-            | "pull"
-            | "push"
-            | "log"
-            | "show"
-            | "diff"
-            | "status"
-            | "st"
-            | "shortlog"
-            | "add"
-            | "rm"
-            | "mv"
-            | "clean"
-            | "restore"
-            | "reset"
-            | "commit"
-            | "branch"
-            | "tag"
-            | "switch"
-            | "merge"
-            | "pick"
-            | "revert"
-            | "history"
-            | "stash"
-            | "config"
-            | "fsck"
-            | "gc"
-            | "bundle"
-            | "notes"
-            | "cat"
-            | "rev-parse"
-            | "revs"
-            | "worktree"
-            | "auth"
-            | "skill"
-            | "completions"
-            | "manager"
-            | "upload-pack"
-            | "receive-pack"
-            | "help"
-    )
-}
 
 /// One unmerged path in `--json` output.
 #[derive(Serialize, JsonSchema)]
@@ -242,6 +87,12 @@ pub struct StatusOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(default)]
     pub operation: Option<OperationJson>,
+    /// Ignored paths (only when `--ignored` is passed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub ignored: Option<Vec<String>>,
+    /// Number of entries on the stash reflog.
+    pub stash_count: usize,
 
     // Human-only state, not part of the JSON schema.
     #[serde(skip)]
@@ -267,13 +118,16 @@ pub struct StatusOutcome {
     standing: BranchStanding,
     #[serde(skip)]
     #[schemars(skip)]
-    conflict_entries: Vec<Conflict>,
-    #[serde(skip)]
-    #[schemars(skip)]
     next_steps: Vec<NextStep>,
     #[serde(skip)]
     #[schemars(skip)]
     alternative_steps: Vec<NextStep>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    short_format: bool,
+    #[serde(skip)]
+    #[schemars(skip)]
+    short_lines: Vec<String>,
 }
 
 fn conflict_json(c: &Conflict) -> ConflictJson {
@@ -312,23 +166,56 @@ pub struct StatusUpstreamJson {
 
 impl HumanRender for StatusOutcome {
     fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        if self.short_format {
+            self.render_short_human(w)?;
+            return Ok(());
+        }
         self.render_header(w, ctx)?;
         self.render_changes(w)?;
         self.render_hints(w)?;
+        self.render_stash_footer(w)?;
         Ok(())
     }
 }
 
 impl MarkdownRender for StatusOutcome {
     fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        if self.short_format {
+            self.render_short_human(w)?;
+            return Ok(());
+        }
         self.render_markdown_header(w, ctx)?;
         self.render_markdown_changes(w)?;
         self.render_markdown_hints(w)?;
+        self.render_stash_footer(w)?;
         Ok(())
     }
 }
 
 impl StatusOutcome {
+    fn render_short_human(&self, w: &mut dyn Write) -> Result<()> {
+        for line in &self.short_lines {
+            outln!(w, "{line}");
+        }
+        self.render_stash_footer(w)
+    }
+
+    fn render_stash_footer(&self, w: &mut dyn Write) -> Result<()> {
+        if self.stash_count > 0 {
+            let noun = if self.stash_count == 1 {
+                "entry"
+            } else {
+                "entries"
+            };
+            outln!(w, "{} stash {noun}", self.stash_count);
+        }
+        Ok(())
+    }
+
+    fn ignored_paths(&self) -> &[String] {
+        self.ignored.as_deref().unwrap_or(&[])
+    }
+
     /// Trunk or upstream ref name used in the status header line.
     fn header_comparison_name(&self) -> &str {
         StatusHeader::primary_comparison_name(&self.standing).unwrap_or("")
@@ -462,14 +349,17 @@ impl StatusOutcome {
     }
 
     fn render_changes(&self, w: &mut dyn Write) -> Result<()> {
+        let display = self.path_display.as_ref();
+        let ignored = self.ignored_paths();
         if self.clean {
             outln!(w, "Nothing to commit — working tree clean.");
+            ui::print_ignored(w, ignored, display)?;
             return Ok(());
         }
-        let display = self.path_display.as_ref();
         ui::print_change_group(w, "Staged", &self.staged_entries, display)?;
         ui::print_change_group(w, "Changed (not staged)", &self.unstaged_entries, display)?;
         ui::print_untracked(w, &self.untracked, display)?;
+        ui::print_ignored(w, ignored, display)?;
         Ok(())
     }
 
@@ -675,14 +565,17 @@ impl StatusOutcome {
     }
 
     fn render_markdown_changes(&self, w: &mut dyn Write) -> Result<()> {
+        let display = self.path_display.as_ref();
+        let ignored = self.ignored_paths();
         if self.clean {
             outln!(w, "Nothing to commit — working tree clean.");
+            markdown::print_ignored(w, ignored, display)?;
             return Ok(());
         }
-        let display = self.path_display.as_ref();
         markdown::print_change_section(w, "Staged", &self.staged_entries, display)?;
         markdown::print_change_section(w, "Changed (not staged)", &self.unstaged_entries, display)?;
         markdown::print_untracked(w, &self.untracked, display)?;
+        markdown::print_ignored(w, ignored, display)?;
         Ok(())
     }
 }
@@ -730,35 +623,23 @@ impl UntrackedListing {
     }
 }
 
-fn kind_label(kind: grit_lib::porcelain::status::ConflictKind) -> &'static str {
-    match kind {
-        grit_lib::porcelain::status::ConflictKind::BothModified => "both modified",
-        grit_lib::porcelain::status::ConflictKind::BothAdded => "both added",
-        grit_lib::porcelain::status::ConflictKind::BothDeleted => "both deleted",
-        grit_lib::porcelain::status::ConflictKind::AddedByUs => "added by us",
-        grit_lib::porcelain::status::ConflictKind::AddedByThem => "added by them",
-        grit_lib::porcelain::status::ConflictKind::DeletedByUs => "deleted by us",
-        grit_lib::porcelain::status::ConflictKind::DeletedByThem => "deleted by them",
-    }
-}
-
 /// CLI arguments for `grit status` (also the default when no subcommand is given).
 #[derive(Debug, Clone, Default, Args)]
 pub struct StatusCliArgs {
     /// How untracked paths are listed: `normal` (default) collapses wholly untracked
     /// directories; `all` lists every file; `no` omits untracked paths. When omitted,
-    /// uses `status.showUntrackedFiles` from config. Git-style `-u`, `-uno`, `-unormal`,
-    /// and `-uall` are accepted.
-    #[arg(
-        long = "untracked",
-        value_name = "MODE",
-        num_args = 0..=1,
-        default_missing_value = "all"
-    )]
+    /// uses `status.showUntrackedFiles` from config.
+    #[arg(long = "untracked", value_name = "MODE")]
     pub untracked: Option<UntrackedListing>,
     /// Skip ahead/behind rev-list walks (also when `status.aheadBehind=false`).
     #[arg(long = "no-ahead-behind")]
     pub no_ahead_behind: bool,
+    /// List ignored paths (traditional mode; same set as `git status --ignored`).
+    #[arg(long)]
+    pub ignored: bool,
+    /// One line per path: two-letter index/worktree code plus path (`??` / `!!` for untracked / ignored).
+    #[arg(long)]
+    pub short: bool,
     #[command(flatten)]
     pub pathspecs: PathspecArgs,
 }
@@ -774,14 +655,17 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         let resolved = args.pathspecs.resolve(&repo)?;
         status_opts.pathspecs = resolved.specs;
     }
+    if args.ignored {
+        status_opts.ignored = IgnoredMode::Traditional;
+    }
+    status_opts.count_stash = true;
     let show_counts = !args.no_ahead_behind && status_ahead_behind_enabled(&config);
     let model =
         status(&repo, &status_opts, &mut NullProgress).context("could not compute status")?;
 
     let operations = detect_in_progress(repo.git_dir());
     let merging = model.state.merge_in_progress;
-    let conflict_entries = model.conflict_details.clone();
-    let conflicts: Vec<ConflictJson> = conflict_entries.iter().map(conflict_json).collect();
+    let conflicts: Vec<ConflictJson> = model.conflict_details.iter().map(conflict_json).collect();
     let operation = model.operation.as_ref().map(operation_json);
     let (next_steps, alternative_steps) = model
         .operation
@@ -818,10 +702,16 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     let clean = model.staged.is_empty()
         && model.unstaged.is_empty()
         && model.untracked.is_empty()
-        && conflict_entries.is_empty()
+        && conflicts.is_empty()
         && !merging;
 
     let path_display = PathDisplayOptions::from_repo(&repo).ok();
+    let short_lines = if args.short {
+        format_short_lines(&model, path_display.as_ref())
+    } else {
+        Vec::new()
+    };
+    let ignored_json = args.ignored.then(|| model.ignored.clone());
 
     let standing_for_outcome = standing.clone();
     Ok(StatusOutcome {
@@ -841,6 +731,8 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         in_progress: operations.into_iter().map(in_progress_label).collect(),
         conflicts,
         operation,
+        ignored: ignored_json,
+        stash_count: model.stash_count,
         header,
         commit_rows,
         staged_entries: model.staged,
@@ -848,10 +740,27 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         path_display,
         show_counts,
         standing: standing_for_outcome,
-        conflict_entries,
         next_steps,
         alternative_steps,
+        short_format: args.short,
+        short_lines,
     })
+}
+
+fn format_short_lines(
+    model: &grit_lib::porcelain::status::StatusModel,
+    display: Option<&PathDisplayOptions>,
+) -> Vec<String> {
+    short_status_lines(model)
+        .into_iter()
+        .map(|line| {
+            line.render_with(|path| {
+                display
+                    .map(|d| d.format_path_for_human(path))
+                    .unwrap_or_else(|| path.to_owned())
+            })
+        })
+        .collect()
 }
 
 fn in_progress_label(op: InProgressOperation) -> String {

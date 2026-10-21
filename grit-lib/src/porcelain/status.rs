@@ -97,6 +97,8 @@ pub struct StatusOptions {
     /// Hook protocol v1 query boundary for fsmonitor refresh (deterministic tests).
     #[doc(hidden)]
     pub fsmonitor_query_boundary: Option<crate::fsmonitor::FsmonitorQueryBoundary>,
+    /// When `true`, count entries on `refs/stash` (reads the stash reflog).
+    pub count_stash: bool,
 }
 
 /// Map `status.showUntrackedFiles` to [`UntrackedMode`].
@@ -145,6 +147,7 @@ impl Default for StatusOptions {
             ahead_behind: true,
             stat_parallel_threads: None,
             fsmonitor_query_boundary: None,
+            count_stash: false,
         }
     }
 }
@@ -1820,32 +1823,40 @@ pub fn status(
     let conflicts: Vec<String> = conflict_details.iter().map(|c| c.path.clone()).collect();
     normalize_status_conflicts(&mut staged, &mut unstaged, &conflicts);
 
-    let (untracked, ignored) = if opts.untracked == UntrackedMode::No {
-        (Vec::new(), Vec::new())
-    } else {
-        let rules_guard = worktree_rules.lock().map_err(|e| {
-            crate::error::Error::Message(format!("worktree rules lock poisoned: {e}"))
-        })?;
-        let (untracked, ignored, collect_meta) = collect_untracked_and_ignored_with_rules(
-            repo,
-            &mut index,
-            work_tree,
-            opts.ignored,
-            opts.untracked == UntrackedMode::All,
-            &opts.pathspecs,
-            &rules_guard,
-        )?;
-        persist_index |= collect_meta.untracked_cache_refreshed;
-        (untracked, ignored)
-    };
+    let (untracked, ignored) =
+        if opts.untracked == UntrackedMode::No && opts.ignored == IgnoredMode::No {
+            (Vec::new(), Vec::new())
+        } else {
+            let rules_guard = worktree_rules.lock().map_err(|e| {
+                crate::error::Error::Message(format!("worktree rules lock poisoned: {e}"))
+            })?;
+            let (mut untracked, ignored, collect_meta) = collect_untracked_and_ignored_with_rules(
+                repo,
+                &mut index,
+                work_tree,
+                opts.ignored,
+                opts.untracked == UntrackedMode::All,
+                &opts.pathspecs,
+                &rules_guard,
+            )?;
+            persist_index |= collect_meta.untracked_cache_refreshed;
+            if opts.untracked == UntrackedMode::No {
+                untracked.clear();
+            }
+            (untracked, ignored)
+        };
 
     if persist_index && repo.try_write_index_at(&index_path, &mut index)? {
         index.source_mtime = crate::index::index_file_mtime(&index_path);
     }
 
-    let stash_count = crate::reflog::read_reflog(repo.git_dir(), "refs/stash")
-        .map(|e| e.len())
-        .unwrap_or(0);
+    let stash_count = if opts.count_stash {
+        crate::reflog::read_reflog(repo.git_dir(), "refs/stash")
+            .map(|e| e.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
 
     let operation = status_operation(&state, !conflicts.is_empty());
 
@@ -2053,6 +2064,212 @@ pub fn format_porcelain_v2(
 
     out.sort();
     out
+}
+
+/// Path half of a [`StatusShortLine`] (single path or rename/copy endpoints).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusShortPath {
+    /// One repository-relative path.
+    Single(String),
+    /// Rename or copy with distinct old and new paths.
+    Rename {
+        /// Previous path.
+        old: String,
+        /// Current path.
+        new: String,
+    },
+}
+
+impl StatusShortPath {
+    /// Render this path with a formatter applied to each repository-relative component.
+    #[must_use]
+    pub fn render_with<F>(&self, mut format_path: F) -> String
+    where
+        F: FnMut(&str) -> String,
+    {
+        match self {
+            Self::Single(path) => format_path(path),
+            Self::Rename { old, new } => {
+                format!("{} -> {}", format_path(old), format_path(new))
+            }
+        }
+    }
+}
+
+/// One line of compact status output before terminal path quoting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusShortLine {
+    /// Ordinary tracked change (`XY path`).
+    Tracked {
+        /// Index (staged) status letter, or `.`.
+        staged: char,
+        /// Worktree (unstaged) status letter, or `.`.
+        unstaged: char,
+        /// Path or rename endpoints.
+        path: StatusShortPath,
+    },
+    /// Untracked path (`?? path`).
+    Untracked(String),
+    /// Ignored path (`!! path`).
+    Ignored(String),
+    /// Unmerged path (`XY path` with conflict letters).
+    Unmerged {
+        /// Index column letter.
+        staged: char,
+        /// Worktree column letter.
+        unstaged: char,
+        /// Conflict path.
+        path: String,
+    },
+}
+
+impl StatusShortLine {
+    /// Render this line, applying `format_path` to each repository-relative path segment.
+    #[must_use]
+    pub fn render_with<F>(&self, format_path: F) -> String
+    where
+        F: FnMut(&str) -> String,
+    {
+        match self {
+            Self::Tracked {
+                staged,
+                unstaged,
+                path,
+            } => format!("{staged}{unstaged} {}", path.render_with(format_path)),
+            Self::Untracked(path) => {
+                let mut format_path = format_path;
+                format!("?? {}", format_path(path))
+            }
+            Self::Ignored(path) => {
+                let mut format_path = format_path;
+                format!("!! {}", format_path(path))
+            }
+            Self::Unmerged {
+                staged,
+                unstaged,
+                path,
+            } => {
+                let mut format_path = format_path;
+                format!("{staged}{unstaged} {}", format_path(path))
+            }
+        }
+    }
+}
+
+/// Collect compact status lines from `model` with structured paths (for `--short` rendering).
+#[must_use]
+pub fn short_status_lines(model: &StatusModel) -> Vec<StatusShortLine> {
+    use std::collections::BTreeMap;
+
+    let mut staged_by_path: BTreeMap<String, &DiffEntry> = BTreeMap::new();
+    for e in &model.staged {
+        staged_by_path.insert(e.path().to_owned(), e);
+    }
+    let mut unstaged_by_path: BTreeMap<String, &DiffEntry> = BTreeMap::new();
+    for e in &model.unstaged {
+        unstaged_by_path.insert(e.path().to_owned(), e);
+    }
+
+    let conflict_set: BTreeMap<&str, ()> = model
+        .conflicts
+        .iter()
+        .map(String::as_str)
+        .map(|p| (p, ()))
+        .collect();
+
+    let mut paths: BTreeMap<String, ()> = BTreeMap::new();
+    for p in staged_by_path.keys().chain(unstaged_by_path.keys()) {
+        paths.insert(p.clone(), ());
+    }
+
+    let mut out = Vec::new();
+
+    for path in paths.keys() {
+        if conflict_set.contains_key(path.as_str()) {
+            continue;
+        }
+        let staged = staged_by_path.get(path.as_str());
+        let unstaged = unstaged_by_path.get(path.as_str());
+        let x = staged.map(|e| e.status.letter()).unwrap_or('.');
+        let y = unstaged.map(|e| e.status.letter()).unwrap_or('.');
+        if x == '.' && y == '.' {
+            continue;
+        }
+        out.push(StatusShortLine::Tracked {
+            staged: x,
+            unstaged: y,
+            path: short_status_path(staged.copied(), unstaged.copied(), path),
+        });
+    }
+
+    for path in &model.untracked {
+        out.push(StatusShortLine::Untracked(path.clone()));
+    }
+
+    for path in &model.ignored {
+        out.push(StatusShortLine::Ignored(path.clone()));
+    }
+
+    for path in &model.conflicts {
+        let stages: Vec<_> = model
+            .index
+            .entries()
+            .iter()
+            .filter(|e| String::from_utf8_lossy(&e.path) == *path && e.stage() != 0)
+            .collect();
+        if stages.is_empty() {
+            continue;
+        }
+        let stagemask = unmerged_stagemask(&stages);
+        let xy = porcelain_v2_unmerged_xy(stagemask);
+        out.push(StatusShortLine::Unmerged {
+            staged: xy.0,
+            unstaged: xy.1,
+            path: path.clone(),
+        });
+    }
+
+    out.sort_by_key(short_status_line_sort_key);
+    out
+}
+
+fn short_status_line_sort_key(line: &StatusShortLine) -> String {
+    line.render_with(|p| p.to_owned())
+}
+
+/// Render [`StatusModel`] as compact two-column status lines (repository-relative paths).
+///
+/// Prefer [`short_status_lines`] when paths need cwd-relative display or quoting.
+#[must_use]
+pub fn format_short(model: &StatusModel) -> Vec<String> {
+    short_status_lines(model)
+        .into_iter()
+        .map(|line| line.render_with(|p| p.to_owned()))
+        .collect()
+}
+
+fn short_status_path(
+    staged: Option<&DiffEntry>,
+    unstaged: Option<&DiffEntry>,
+    fallback: &str,
+) -> StatusShortPath {
+    use crate::diff::DiffStatus;
+    let entry = staged.or(unstaged);
+    let Some(entry) = entry else {
+        return StatusShortPath::Single(fallback.to_owned());
+    };
+    if matches!(entry.status, DiffStatus::Renamed | DiffStatus::Copied) {
+        if let Some(old) = entry.old_path.as_deref() {
+            let new = entry.new_path.as_deref().unwrap_or(fallback);
+            if old != new {
+                return StatusShortPath::Rename {
+                    old: old.to_owned(),
+                    new: new.to_owned(),
+                };
+            }
+        }
+    }
+    StatusShortPath::Single(entry.path().to_owned())
 }
 
 fn unmerged_stagemask(stages: &[&crate::index::IndexEntry]) -> u8 {
@@ -2428,6 +2645,37 @@ mod status_op_tests {
     }
 
     #[test]
+    fn status_untracked_no_still_collects_ignored_when_requested() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        fs::write(root.join("noise.log"), b"x\n").unwrap();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let opts = StatusOptions {
+            untracked: UntrackedMode::No,
+            ignored: IgnoredMode::Traditional,
+            ..StatusOptions::default()
+        };
+        let model = status(&repo, &opts, &mut NullProgress).unwrap();
+        assert!(
+            model.untracked.is_empty(),
+            "untracked=No must omit untracked, got {:?}",
+            model.untracked
+        );
+        assert!(
+            model.ignored.iter().any(|p| p == "noise.log"),
+            "ignored must still be collected with untracked=No, got {:?}",
+            model.ignored
+        );
+    }
+
+    #[test]
     fn status_untracked_mode_no_skips_walk() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -2781,6 +3029,47 @@ mod status_op_tests {
     }
 
     #[test]
+    fn short_status_lines_keep_rename_endpoints_when_filename_contains_arrow() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        grit_test_support::git(root, &["init", "-q", "-b", "main", "."]);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("a -> b.txt"), b"x\n").unwrap();
+        grit_test_support::git(root, &["add", "a -> b.txt"]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+        grit_test_support::git(root, &["mv", "a -> b.txt", "c -> d.txt"]);
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let opts = StatusOptions {
+            renames: Some(RenameDetection {
+                threshold: 50,
+                copies: false,
+            }),
+            ..StatusOptions::default()
+        };
+        let model = status(&repo, &opts, &mut NullProgress).unwrap();
+        let rename_line = short_status_lines(&model)
+            .into_iter()
+            .find_map(|line| match line {
+                StatusShortLine::Tracked { path, .. } => Some(path),
+                _ => None,
+            })
+            .expect("staged rename line");
+        assert_eq!(
+            rename_line,
+            StatusShortPath::Rename {
+                old: "a -> b.txt".into(),
+                new: "c -> d.txt".into(),
+            }
+        );
+    }
+
+    #[test]
     fn status_rename_staged_reports_old_path() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -3049,6 +3338,62 @@ mod status_op_tests {
             entries_read <= 32,
             "after system git status, grit must reuse UNTR without a full rescan \
              (read {entries_read} directory entries)"
+        );
+    }
+
+    #[test]
+    fn ignored_listing_matches_git() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        grit_test_support::git(root, &["init", "-q", "-b", "main", "."]);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        fs::write(
+            root.join(".gitignore"),
+            "*.log\nbuild/\n!/keep.log\nignored-dir/\n",
+        )
+        .unwrap();
+        fs::write(root.join("tracked.txt"), b"ok\n").unwrap();
+        fs::write(root.join("noise.log"), b"log\n").unwrap();
+        fs::create_dir_all(root.join("build/out")).unwrap();
+        fs::write(root.join("build/out/x.txt"), b"x\n").unwrap();
+        fs::create_dir_all(root.join("ignored-dir/deep")).unwrap();
+        fs::write(root.join("ignored-dir/deep/y.log"), b"y\n").unwrap();
+        fs::write(root.join("keep.log"), b"keep\n").unwrap();
+        grit_test_support::git(root, &["add", "tracked.txt"]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let opts = StatusOptions {
+            ignored: IgnoredMode::Traditional,
+            ..StatusOptions::default()
+        };
+        let model = status(&repo, &opts, &mut NullProgress).unwrap();
+        let grit_ignored: std::collections::BTreeSet<String> = model.ignored.into_iter().collect();
+
+        let git_out = std::process::Command::new("git")
+            .args(["status", "--ignored", "--porcelain"])
+            .current_dir(root)
+            .output()
+            .expect("git status");
+        assert!(
+            git_out.status.success(),
+            "git status failed:\n{}",
+            String::from_utf8_lossy(&git_out.stderr)
+        );
+        let git_ignored: std::collections::BTreeSet<String> =
+            String::from_utf8_lossy(&git_out.stdout)
+                .lines()
+                .filter_map(|line| line.strip_prefix("!! ").map(str::to_owned))
+                .collect();
+
+        assert_eq!(
+            grit_ignored, git_ignored,
+            "ignored paths must match git status --ignored --porcelain (!! lines)"
         );
     }
 }

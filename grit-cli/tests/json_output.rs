@@ -2289,6 +2289,7 @@ fn schema_top_level_keys_are_stable() -> TestResult {
             "head",
             "merging",
             "staged",
+            "stash_count",
             "target",
             "unstaged",
             "untracked",
