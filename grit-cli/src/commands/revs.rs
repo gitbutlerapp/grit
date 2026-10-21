@@ -2,9 +2,7 @@
 
 use anyhow::{bail, Result};
 use grit_lib::objects::{read_commit_subject_line, ObjectId};
-use grit_lib::revwalk::{
-    refresh_parent_rewrite_entries, CherryMode, LeftRightCounts, RevWalkCommit, RevWalkSide,
-};
+use grit_lib::revwalk::{CherryMode, LeftRightCounts, RevWalkCommit, RevWalkSide};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -226,9 +224,6 @@ pub fn run(
     let oids: Vec<ObjectId> = entries.iter().map(|e| e.oid).collect();
     let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
     entries.truncate(oids.len());
-    if walk_flags.parents {
-        refresh_parent_rewrite_entries(&repo, &mut entries, &opts)?;
-    }
 
     let now = context::wall_clock_now(env).unix_timestamp();
     let commits = if output == OutputMode::Human {
@@ -309,6 +304,8 @@ fn apply_walk_metadata(
     for (json, row) in commits.iter_mut().zip(entries.iter()) {
         if walk_flags.parents {
             json.parents = row.parents.iter().map(ObjectId::to_hex).collect();
+        } else {
+            json.parents.clear();
         }
         if walk_flags.left_right {
             if let Some(side) = row.side {

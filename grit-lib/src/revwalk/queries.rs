@@ -479,7 +479,7 @@ fn left_right_cherry_pick_counts(
     let merge_base = merge_bases_first_vs_rest(repo, left, &[right])?
         .into_iter()
         .next()
-        .ok_or_else(|| Error::Message("symmetric range has no merge base".into()))?;
+        .ok_or_else(|| Error::Message("symmetric range has no merge base".into()))?; // caller checks non-empty
     let mut left_only = match try_side_commits_first_parent_to_merge_base(repo, left, merge_base)? {
         Some(list) => list,
         None => commits_reachable_excluding_ancestors_of_cutoffs(
@@ -505,6 +505,9 @@ fn left_right_cherry_pick_counts(
     right_only = filter_side_commits_by_parent_count(repo, right_only, min_parents, max_parents)?;
     let paths = repo.resolve_rev_walk_pathspecs(&options.paths)?;
     let cherry_equivalent = cherry_equivalent_commits(repo, &left_only, &right_only, &paths)?;
+    if cherry_equivalent.is_empty() {
+        return Ok(LeftRightCounts::new(left_only.len(), right_only.len()));
+    }
     let left = left_only
         .iter()
         .filter(|oid| !cherry_equivalent.contains(oid))
@@ -586,10 +589,23 @@ impl<'repo> RevWalk<'repo> {
         options: &RevWalkListOptions,
     ) -> Result<Vec<RevWalkCommit>> {
         let repo = self.repository();
-        let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
-        let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
+        let defer_limit = options.include_parents && options.limit.is_some();
+        let mut walk_for_list = options.clone();
+        if defer_limit {
+            walk_for_list.limit = None;
+        }
+        let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, &walk_for_list)?;
+        let opts = rev_list_options_from_walk(repo, &walk_for_list, &parsed, all_refs, false)?;
         let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
-        rev_walk_commits_from_result(repo, &result, options, &opts)
+        let mut entries = rev_walk_commits_from_result(repo, &result, &walk_for_list, &opts)?;
+        if defer_limit {
+            if let Some(n) = options.limit {
+                // Parent links were rewritten against the full path-simplified output set.
+                // Git keeps those links after `-n`; do not re-run rewrite on the truncated slice.
+                entries.truncate(n);
+            }
+        }
+        Ok(entries)
     }
 
     /// Count reachable commits without collecting them, using the commit-graph when loaded.
@@ -652,6 +668,12 @@ impl<'repo> RevWalk<'repo> {
         };
 
         if cherry_pick_left_right_counts_compatible(options) {
+            let merge_bases = merge_bases_first_vs_rest(repo, left, &[right])?;
+            if merge_bases.is_empty() {
+                return left_right_counts_from_combined_walk(
+                    repo, options, &parsed, &positive, all_refs,
+                );
+            }
             return left_right_cherry_pick_counts(repo, left, right, options);
         }
 

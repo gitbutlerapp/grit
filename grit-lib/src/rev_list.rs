@@ -26,7 +26,6 @@ use crate::merge_base::{
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
-use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
 use crate::reflog::{list_reflog_refs, read_reflog};
 use crate::refs;
@@ -5255,15 +5254,29 @@ pub fn cherry_equivalent_commits(
         return Ok(cherry_equivalent);
     }
     let left_first = left_commits.len() < right_commits.len();
+    let mut patch_cache: HashMap<ObjectId, Option<ObjectId>> = HashMap::new();
+    let mut tree_diff_cache = crate::patch_ids::PatchIdTreeDiffCache::default();
     let mut by_patch: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     if left_first {
         for oid in left_commits {
-            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+            if let Some(pid) = compute_cherry_patch_id_cached(
+                repo,
+                oid,
+                paths,
+                &mut patch_cache,
+                &mut tree_diff_cache,
+            )? {
                 by_patch.entry(pid).or_default().push(*oid);
             }
         }
         for oid in right_commits {
-            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+            if let Some(pid) = compute_cherry_patch_id_cached(
+                repo,
+                oid,
+                paths,
+                &mut patch_cache,
+                &mut tree_diff_cache,
+            )? {
                 if let Some(others) = by_patch.get(&pid) {
                     cherry_equivalent.insert(*oid);
                     cherry_equivalent.extend(others.iter().copied());
@@ -5272,12 +5285,24 @@ pub fn cherry_equivalent_commits(
         }
     } else {
         for oid in right_commits {
-            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+            if let Some(pid) = compute_cherry_patch_id_cached(
+                repo,
+                oid,
+                paths,
+                &mut patch_cache,
+                &mut tree_diff_cache,
+            )? {
                 by_patch.entry(pid).or_default().push(*oid);
             }
         }
         for oid in left_commits {
-            if let Ok(Some(pid)) = compute_cherry_patch_id(repo, oid, paths) {
+            if let Some(pid) = compute_cherry_patch_id_cached(
+                repo,
+                oid,
+                paths,
+                &mut patch_cache,
+                &mut tree_diff_cache,
+            )? {
                 if let Some(others) = by_patch.get(&pid) {
                     cherry_equivalent.insert(*oid);
                     cherry_equivalent.extend(others.iter().copied());
@@ -5288,23 +5313,35 @@ pub fn cherry_equivalent_commits(
     Ok(cherry_equivalent)
 }
 
+fn compute_cherry_patch_id_cached(
+    repo: &Repository,
+    oid: &ObjectId,
+    paths: &[String],
+    cache: &mut HashMap<ObjectId, Option<ObjectId>>,
+    tree_diff_cache: &mut crate::patch_ids::PatchIdTreeDiffCache,
+) -> Result<Option<ObjectId>> {
+    if let Some(cached) = cache.get(oid) {
+        return Ok(*cached);
+    }
+    let computed = compute_cherry_patch_id(repo, oid, paths, tree_diff_cache)?;
+    cache.insert(*oid, computed);
+    Ok(computed)
+}
+
 fn compute_cherry_patch_id(
     repo: &Repository,
     oid: &ObjectId,
     paths: &[String],
+    tree_diff_cache: &mut crate::patch_ids::PatchIdTreeDiffCache,
 ) -> Result<Option<ObjectId>> {
     let algo = repo.odb().hash_algo();
-    if paths.is_empty() {
-        compute_patch_id(algo, repo.odb(), oid, crate::patch_ids::PatchIdMode::Stable)
-    } else {
-        compute_patch_id_for_paths(
-            algo,
-            repo.odb(),
-            oid,
-            paths,
-            crate::patch_ids::PatchIdMode::Stable,
-        )
-    }
+    crate::patch_ids::compute_patch_id_stable_for_cherry(
+        algo,
+        repo.odb(),
+        oid,
+        paths,
+        Some(tree_diff_cache),
+    )
 }
 
 fn path_differs_for_specs(

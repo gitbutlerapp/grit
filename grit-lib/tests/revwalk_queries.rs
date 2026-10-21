@@ -731,6 +731,64 @@ fn cherry_symmetric_fixture(wt: &Path) -> (String, String) {
 }
 
 #[test]
+fn disconnected_symmetric_left_right_count_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    commit_file(wt, "left.txt", "left\n", "left-root");
+    git(wt, &["branch", "-M", "main"]);
+    git(wt, &["checkout", "--orphan", "side"]);
+    commit_file(wt, "right.txt", "right\n", "right-root");
+    git(wt, &["checkout", "main"]);
+    let token = "main...side";
+    let repo = open_grit(wt);
+    let git_counts = git_rev_list_left_right_count(wt, &[token]);
+    let grit_counts = repo
+        .rev_walk()
+        .left_right_counts(&[token], &RevWalkListOptions::default())
+        .expect("disconnected symmetric counts");
+    assert_eq!(grit_counts, git_counts);
+
+    let git_cherry = git_rev_list_left_right_count(wt, &["--cherry-pick", token]);
+    let grit_cherry = repo
+        .rev_walk()
+        .left_right_counts(
+            &[token],
+            &RevWalkListOptions {
+                cherry: CherryMode::Pick,
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("disconnected cherry-pick counts");
+    assert_eq!(grit_cherry, git_cherry);
+}
+
+#[test]
+fn parents_limit_with_paths_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    setup_path_simplify_history(wt);
+    let repo = open_grit(wt);
+    let git_lines = git_rev_list_lines(
+        wt,
+        &["-n", "2", "--parents", "rw6012-l", "--", "content.txt"],
+    );
+    let grit_rows = grit_rev_walk_entries(
+        &repo,
+        &["rw6012-l"],
+        &RevWalkListOptions {
+            include_parents: true,
+            limit: Some(2),
+            paths: vec!["content.txt".into()],
+            ..RevWalkListOptions::default()
+        },
+    );
+    assert_eq!(grit_rows.len(), git_lines.len());
+    for (row, git_line) in grit_rows.iter().zip(&git_lines) {
+        assert_eq!(format_rev_walk_row(row), git_line.trim());
+    }
+}
+
+#[test]
 fn parents_rewritten_with_paths_match_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

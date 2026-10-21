@@ -299,6 +299,63 @@ fn limit_hidden_alias_still_works() -> TestResult {
 }
 
 #[test]
+fn revs_json_omits_parents_without_flag() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-revs-json-parents-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_linear_repo(&dir, 3);
+    let v = grit_json(&dir, &["revs", "HEAD", "-n", "2"]);
+    for row in v["commits"].as_array().expect("commits") {
+        assert!(
+            row["parents"].as_array().expect("parents").is_empty(),
+            "parents without --parents: {row:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn revs_parents_limit_with_path_matches_git() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-revs-n-parents-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_linear_repo(&dir, 1);
+    fs::write(dir.join("track.txt"), "a\n").expect("write");
+    assert!(grit_run(&dir, &["add", "track.txt"]).status.success());
+    assert!(grit_run(&dir, &["commit", "touch"]).status.success());
+    fs::write(dir.join("other.txt"), "b\n").expect("write");
+    assert!(grit_run(&dir, &["add", "other.txt"]).status.success());
+    assert!(grit_run(&dir, &["commit", "noise"]).status.success());
+    let git_out = Command::new("git")
+        .args([
+            "-C",
+            dir.to_str().expect("utf8"),
+            "rev-list",
+            "-n",
+            "1",
+            "--parents",
+            "HEAD",
+            "--",
+            "track.txt",
+        ])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git");
+    assert!(git_out.status.success());
+    let git_line = String::from_utf8_lossy(&git_out.stdout).trim().to_owned();
+    let git_tokens: Vec<_> = git_line.split_whitespace().collect();
+    let out = grit_run(
+        &dir,
+        &["revs", "-n", "1", "--parents", "HEAD", "--", "track.txt"],
+    );
+    assert!(out.status.success());
+    let grit_line = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    let grit_oid_part = grit_line.split("  ").next().expect("oid part");
+    let grit_tokens: Vec<_> = grit_oid_part.split_whitespace().collect();
+    assert_eq!(grit_tokens, git_tokens);
+    Ok(())
+}
+
+#[test]
 fn revs_plain_human_omits_parents() -> TestResult {
     let dir = std::env::temp_dir().join(format!("grit-revs-plain-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

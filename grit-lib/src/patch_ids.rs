@@ -421,7 +421,7 @@ pub fn compute_patch_id(
     commit_oid: &ObjectId,
     mode: PatchIdMode,
 ) -> Result<Option<ObjectId>> {
-    compute_patch_id_filtered(algo, odb, commit_oid, &[], mode)
+    compute_patch_id_filtered(algo, odb, commit_oid, &[], mode, None)
 }
 
 /// Compute the patch-ID for a single commit, limited to matching pathspecs.
@@ -446,7 +446,45 @@ pub fn compute_patch_id_for_paths(
     paths: &[String],
     mode: PatchIdMode,
 ) -> Result<Option<ObjectId>> {
-    compute_patch_id_filtered(algo, odb, commit_oid, paths, mode)
+    compute_patch_id_filtered(algo, odb, commit_oid, paths, mode, None)
+}
+
+/// Reuses tree-to-tree diff results across cherry patch-id batches.
+#[derive(Default)]
+pub(crate) struct PatchIdTreeDiffCache {
+    diffs: std::collections::HashMap<(Option<ObjectId>, ObjectId), Vec<crate::diff::DiffEntry>>,
+}
+
+impl PatchIdTreeDiffCache {
+    fn diffs_for_commit_trees(
+        &mut self,
+        odb: &Odb,
+        parent_tree_oid: Option<ObjectId>,
+        commit_tree: ObjectId,
+    ) -> Result<&[crate::diff::DiffEntry]> {
+        use std::collections::hash_map::Entry;
+        let key = (parent_tree_oid, commit_tree);
+        if let Entry::Vacant(slot) = self.diffs.entry(key) {
+            let diffs =
+                diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit_tree), "", 50)?;
+            slot.insert(diffs);
+        }
+        Ok(self
+            .diffs
+            .get(&(parent_tree_oid, commit_tree))
+            .map_or(&[][..], |v| v.as_slice()))
+    }
+}
+
+/// Stable patch-id for cherry matching, reusing tree diffs in `cache` when provided.
+pub(crate) fn compute_patch_id_stable_for_cherry(
+    algo: HashAlgo,
+    odb: &Odb,
+    commit_oid: &ObjectId,
+    paths: &[String],
+    cache: Option<&mut PatchIdTreeDiffCache>,
+) -> Result<Option<ObjectId>> {
+    compute_patch_id_filtered(algo, odb, commit_oid, paths, PatchIdMode::Stable, cache)
 }
 
 fn compute_patch_id_filtered(
@@ -455,6 +493,7 @@ fn compute_patch_id_filtered(
     commit_oid: &ObjectId,
     paths: &[String],
     mode: PatchIdMode,
+    tree_diff_cache: Option<&mut PatchIdTreeDiffCache>,
 ) -> Result<Option<ObjectId>> {
     let per_file_flush = mode != PatchIdMode::Unstable;
     let digest_len = algo.len();
@@ -483,8 +522,13 @@ fn compute_patch_id_filtered(
     }
 
     // Match `git show` / `git diff-tree -M`: pair renames before hashing.
-    let mut diffs =
-        diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit.tree), "", 50)?;
+    let mut diffs = if let Some(cache) = tree_diff_cache {
+        cache
+            .diffs_for_commit_trees(odb, parent_tree_oid, commit.tree)?
+            .to_vec()
+    } else {
+        diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit.tree), "", 50)?
+    };
     if !paths.is_empty() {
         diffs.retain(|entry| diff_entry_matches_paths(entry, paths));
     }

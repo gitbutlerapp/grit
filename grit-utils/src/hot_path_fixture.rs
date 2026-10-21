@@ -428,6 +428,7 @@ pub fn setup_pick_merge_fixture_in(
         wide_branch_b: None,
     };
     assert_pick_merge_sibling_topology(git, dir, &meta)?;
+    let _ = run_git(git, dir, &["commit-graph", "write"]);
     fs::write(meta_path(dir), serde_json::to_string_pretty(&meta)?)?;
     Ok((dir.to_path_buf(), meta))
 }
