@@ -23,6 +23,8 @@ export interface DailyCaptureInfo {
   fixture_policy: string;
   /** Wall seconds per functional area when merged from per-scenario `--only` captures. */
   area_wall_seconds?: Record<string, number>;
+  /** Wall seconds for the full merged capture run. */
+  total_wall_seconds?: number;
 }
 
 export interface MachineInfo {
