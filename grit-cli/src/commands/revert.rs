@@ -52,7 +52,6 @@ pub fn run(commit: &str) -> Result<RevertOutcome> {
         env,
         &config,
         IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
         context::wall_clock_now(env),
     )?;
     let outcome = replay_commit(

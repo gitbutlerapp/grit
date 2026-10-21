@@ -193,14 +193,8 @@ fn create(
     let config = repo.config().context("could not load config")?;
     let tagger = if message.is_some() {
         Some(
-            context::identity(
-                &env,
-                &config,
-                IdentRole::Committer,
-                "GIT_COMMITTER_DATE",
-                now,
-            )
-            .context("could not resolve tagger identity")?,
+            context::identity(&env, &config, IdentRole::Committer, now)
+                .context("could not resolve tagger identity")?,
         )
     } else {
         None

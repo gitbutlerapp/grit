@@ -3,8 +3,8 @@
 use anyhow::{bail, Context, Result};
 use grit_lib::config::environment::Environment;
 use grit_lib::config::ident_resolve::{
-    resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
-    IdentityError,
+    resolve_email_with, resolve_identity_with, resolve_loose_committer_identity_with,
+    resolve_name_with, IdentRole, IdentityError,
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
@@ -220,18 +220,9 @@ pub fn identity(
     env: &Environment,
     config: &ConfigSet,
     role: IdentRole,
-    date_var: &str,
     now: OffsetDateTime,
 ) -> Result<String> {
-    let name = resolve_name_with(env, config, role).map_err(identity_error)?;
-    let email = resolve_email_with(env, config, role).map_err(identity_error)?;
-    let date = env.var(date_var);
-    Ok(grit_lib::commit::assemble_identity(
-        &name,
-        &email,
-        date.as_deref(),
-        now,
-    ))
+    resolve_identity_with(env, config, role, now).map_err(identity_error)
 }
 
 /// Reflog identity for the committer (`Name <email>`), failing when unset like [`identity`].
@@ -244,8 +235,7 @@ pub fn committer_reflog_identity(env: &Environment, config: &ConfigSet) -> Resul
 /// A best-effort committer identity for reflog entries: never fails, even when
 /// no identity is configured.
 pub fn reflog_identity(env: &Environment, config: &ConfigSet, now: OffsetDateTime) -> String {
-    let (name, email) = resolve_loose_committer_parts_with(env, config);
-    grit_lib::commit::assemble_identity(&name, &email, None, now)
+    resolve_loose_committer_identity_with(env, config, now)
 }
 
 fn identity_error(err: IdentityError) -> anyhow::Error {

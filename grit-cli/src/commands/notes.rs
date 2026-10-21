@@ -296,20 +296,8 @@ fn notes_write_options(
 ) -> Result<NotesWriteOptions> {
     let env = repo.environment();
     let config = repo.config().context("could not load config")?;
-    let committer = context::identity(
-        env,
-        config.as_ref(),
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        now,
-    )?;
-    let author = context::identity(
-        env,
-        config.as_ref(),
-        IdentRole::Author,
-        "GIT_AUTHOR_DATE",
-        now,
-    )?;
+    let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
+    let author = context::identity(env, config.as_ref(), IdentRole::Author, now)?;
     let message = format!("Notes {verb} by 'grit notes {verb}'");
     Ok(NotesWriteOptions {
         message,

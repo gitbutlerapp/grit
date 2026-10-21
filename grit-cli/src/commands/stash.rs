@@ -232,13 +232,7 @@ pub fn run_push(message: Option<String>, include_untracked: bool) -> Result<Stas
     let env = context::environment();
     let config = repo.config().context("could not load config")?;
     let now = context::wall_clock_now(&env);
-    let identity = context::identity(
-        &env,
-        &config,
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-        now,
-    )?;
+    let identity = context::identity(&env, &config, IdentRole::Committer, now)?;
     let options = StashCreateOptions {
         message,
         include_untracked,

@@ -228,7 +228,6 @@ impl Rewrite {
             env,
             &config,
             IdentRole::Committer,
-            "GIT_COMMITTER_DATE",
             context::wall_clock_now(env),
         )?;
         Ok(Self {
