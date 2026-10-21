@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, CommitRef, ObjectId, ObjectKind};
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
@@ -1707,8 +1707,8 @@ impl<'r> CommitGraphCache<'r> {
                     "object {commit_oid} is not a commit"
                 )));
             }
-            let commit = parse_commit(&object.data)?;
-            let time = crate::ident::committer_timestamp_for_until_filter(&commit.committer);
+            let commit = CommitRef::parse(&object.data)?;
+            let time = commit.committer_timestamp();
             self.with_linkage(|link| {
                 link.times.insert(oid, time);
                 link.parents.insert(oid, Vec::new());
@@ -1739,14 +1739,18 @@ impl<'r> CommitGraphCache<'r> {
             other => other,
         })?;
         self.ensure_single_pack_reader();
-        let linkage = if let Some(reader) = self.single_pack.as_mut() {
+        let (time, parsed_parents) = if let Some(reader) = self.single_pack.as_mut() {
             let object = reader.read_object(&commit_oid)?;
             if object.kind != ObjectKind::Commit {
                 return Err(Error::CorruptObject(format!(
                     "object {commit_oid} is not a commit"
                 )));
             }
-            crate::objects::parse_commit_linkage(&object.data)?
+            let linkage = CommitRef::parse(&object.data)?;
+            (
+                linkage.committer_timestamp(),
+                linkage.parents().to_vec(),
+            )
         } else {
             let object = self.repo.odb().read(&commit_oid)?;
             if object.kind != ObjectKind::Commit {
@@ -1754,14 +1758,16 @@ impl<'r> CommitGraphCache<'r> {
                     "object {commit_oid} is not a commit"
                 )));
             }
-            crate::objects::parse_commit_linkage(&object.data)?
+            let linkage = CommitRef::parse(&object.data)?;
+            (
+                linkage.committer_timestamp(),
+                linkage.parents().to_vec(),
+            )
         };
-        let time = crate::ident::committer_timestamp_for_until_filter(&linkage.committer);
         let parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&commit_oid) {
             Vec::new()
         } else {
-            linkage
-                .parents
+            parsed_parents
                 .iter()
                 .copied()
                 .filter(|p| !self.promisor_stop.contains(p))

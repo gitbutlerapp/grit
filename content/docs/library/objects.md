@@ -9,6 +9,8 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 [`Objects::write`](rustdoc:grit_lib::objects::handle::Objects) (or [`Odb::write`](rustdoc:grit_lib::objects::odb::Odb)) takes a kind and payload bytes, stores a loose object under `objects/`, and returns the id. Tree and commit bodies must already be in Git’s text format; use [`parse_tree`](rustdoc:grit_lib::objects::parse_tree) and [`parse_commit`](rustdoc:grit_lib::objects::parse_commit) when reading them back.
 
+For hot paths that only need headers (tree, parents, identities) or a borrowed message body, prefer [`CommitRef::parse`](rustdoc:grit_lib::objects::CommitRef::parse). It borrows from the object bytes and decodes author, committer, and message on demand via [`CommitRef::author`](rustdoc:grit_lib::objects::CommitRef::author), [`CommitRef::committer`](rustdoc:grit_lib::objects::CommitRef::committer), and [`CommitRef::message`](rustdoc:grit_lib::objects::CommitRef::message). [`parse_commit`](rustdoc:grit_lib::objects::parse_commit) is `CommitRef::parse(data)?.to_owned()` for callers that need an owning [`CommitData`](rustdoc:grit_lib::objects::CommitData).
+
 [`Odb::hash`](rustdoc:grit_lib::objects::odb::Odb) (or [`HashAlgo::hash_object`](rustdoc:grit_lib::objects::HashAlgo)) computes an id without writing—useful for dry runs and tests. The algorithm follows the repository’s configured object format (SHA-1 or SHA-256).
 
 ## Reading

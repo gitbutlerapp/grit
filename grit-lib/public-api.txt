@@ -8392,6 +8392,7 @@ impl grit_lib::objects::pack::SingleLocalPackReader
 pub fn grit_lib::objects::pack::SingleLocalPackReader::open(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::open_allow_loose(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::pack_offset(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<u64>>
+pub fn grit_lib::objects::pack::SingleLocalPackReader::read_commit_author_prefix(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<&[u8]>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_info(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_object(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::try_read_commit_header_prefix(&mut self, &grit_lib::objects::ObjectId, usize) -> grit_lib::error::Result<core::option::Option<alloc::vec::Vec<u8>>>
@@ -9117,8 +9118,12 @@ pub grit_lib::objects::CommitData::raw_message: core::option::Option<alloc::vec:
 pub grit_lib::objects::CommitData::tree: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::objects::CommitData
 pub fn grit_lib::objects::CommitData::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::CommitData
+impl core::cmp::PartialEq for grit_lib::objects::CommitData
+pub fn grit_lib::objects::CommitData::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::objects::CommitData
 pub fn grit_lib::objects::CommitData::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::CommitData
 impl core::marker::Freeze for grit_lib::objects::CommitData
 impl core::marker::Send for grit_lib::objects::CommitData
 impl core::marker::Sync for grit_lib::objects::CommitData
@@ -9126,6 +9131,40 @@ impl core::marker::Unpin for grit_lib::objects::CommitData
 impl core::marker::UnsafeUnpin for grit_lib::objects::CommitData
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::CommitData
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::CommitData
+pub struct grit_lib::objects::CommitRef<'a>
+impl<'a> grit_lib::objects::CommitRef<'a>
+pub fn grit_lib::objects::CommitRef<'a>::author(&self) -> alloc::string::String
+pub fn grit_lib::objects::CommitRef<'a>::author_raw(&self) -> &[u8]
+pub fn grit_lib::objects::CommitRef<'a>::author_unix_seconds_for_ordering(&self) -> i64
+pub fn grit_lib::objects::CommitRef<'a>::committer(&self) -> alloc::string::String
+pub fn grit_lib::objects::CommitRef<'a>::committer_raw(&self) -> &[u8]
+pub fn grit_lib::objects::CommitRef<'a>::committer_timestamp(&self) -> i64
+pub fn grit_lib::objects::CommitRef<'a>::committer_unix_seconds_for_ordering(&self) -> i64
+pub fn grit_lib::objects::CommitRef<'a>::encoding_raw(&self) -> core::option::Option<&[u8]>
+pub fn grit_lib::objects::CommitRef<'a>::extra_headers(&self) -> &[u8]
+pub fn grit_lib::objects::CommitRef<'a>::message(&self) -> alloc::borrow::Cow<'_, str>
+pub fn grit_lib::objects::CommitRef<'a>::message_bytes(&self) -> &[u8]
+pub fn grit_lib::objects::CommitRef<'a>::parents(&self) -> &[grit_lib::objects::ObjectId]
+pub fn grit_lib::objects::CommitRef<'a>::parents_iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = &grit_lib::objects::ObjectId> + '_
+pub fn grit_lib::objects::CommitRef<'a>::parse(&'a [u8]) -> grit_lib::error::Result<Self>
+pub fn grit_lib::objects::CommitRef<'a>::to_bytes(&self) -> alloc::vec::Vec<u8>
+pub fn grit_lib::objects::CommitRef<'a>::to_owned(&self) -> grit_lib::objects::CommitData
+pub fn grit_lib::objects::CommitRef<'a>::tree(&self) -> grit_lib::objects::ObjectId
+impl<'a> core::clone::Clone for grit_lib::objects::CommitRef<'a>
+pub fn grit_lib::objects::CommitRef<'a>::clone(&self) -> Self
+impl<'a> core::cmp::Eq for grit_lib::objects::CommitRef<'a>
+impl<'a> core::cmp::PartialEq for grit_lib::objects::CommitRef<'a>
+pub fn grit_lib::objects::CommitRef<'a>::eq(&self, &Self) -> bool
+impl<'a> core::fmt::Debug for grit_lib::objects::CommitRef<'a>
+pub fn grit_lib::objects::CommitRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::StructuralPartialEq for grit_lib::objects::CommitRef<'a>
+impl<'a> core::marker::Freeze for grit_lib::objects::CommitRef<'a>
+impl<'a> core::marker::Send for grit_lib::objects::CommitRef<'a>
+impl<'a> core::marker::Sync for grit_lib::objects::CommitRef<'a>
+impl<'a> core::marker::Unpin for grit_lib::objects::CommitRef<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::CommitRef<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::CommitRef<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::CommitRef<'a>
 pub struct grit_lib::objects::HashVersionError(pub u8)
 impl core::clone::Clone for grit_lib::objects::HashVersionError
 pub fn grit_lib::objects::HashVersionError::clone(&self) -> Self

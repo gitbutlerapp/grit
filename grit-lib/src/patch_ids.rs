@@ -24,7 +24,7 @@ use crate::diff::{
 use crate::error::Result;
 use crate::hash::ObjectHasher;
 use crate::merge_file;
-use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{CommitRef, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 
 const PATCH_ID_DIGEST_MAX: usize = 32;
@@ -462,25 +462,25 @@ fn compute_patch_id_filtered(
     if obj.kind != ObjectKind::Commit {
         return Ok(None);
     }
-    let commit = parse_commit(&obj.data)?;
+    let commit = CommitRef::parse(&obj.data)?;
 
     // Merge commits (>1 parent) have no defined patch-id.
-    if commit.parents.len() > 1 {
+    if commit.parents().len() > 1 {
         return Ok(None);
     }
 
     // Resolve the parent tree (None = empty tree for root commits).
-    let parent_tree_oid = if commit.parents.is_empty() {
+    let parent_tree_oid = if commit.parents().is_empty() {
         None
     } else {
-        let parent_obj = odb.read(&commit.parents[0])?;
-        let parent_commit = parse_commit(&parent_obj.data)?;
-        Some(parent_commit.tree)
+        let parent_obj = odb.read(&commit.parents()[0])?;
+        let parent_commit = CommitRef::parse(&parent_obj.data)?;
+        Some(parent_commit.tree())
     };
 
     // Match `git show` / `git diff-tree -M`: pair renames before hashing.
     let mut diffs =
-        diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit.tree), "", 50)?;
+        diff_trees_with_renames(odb, parent_tree_oid.as_ref(), Some(&commit.tree()), "", 50)?;
     if !paths.is_empty() {
         diffs.retain(|entry| diff_entry_matches_paths(entry, paths));
     }

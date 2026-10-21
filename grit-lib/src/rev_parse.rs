@@ -751,7 +751,9 @@ impl<'repo> NavParentCache<'repo> {
                 "invalid ref: {commit_oid} is not a commit"
             )));
         }
-        Ok(crate::objects::parse_commit_linkage(&obj.data)?.parents)
+        Ok(crate::objects::CommitRef::parse(&obj.data)?
+            .parents()
+            .to_vec())
     }
 }
 

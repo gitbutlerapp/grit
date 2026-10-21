@@ -12,20 +12,18 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::bitmap_walk::{
-    bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet,
-};
+use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet};
 use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphChain};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
-use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
+use crate::ident::parse_signature_times;
 use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tag, parse_tree, CommitRef, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
@@ -7088,9 +7086,15 @@ impl<'r> CommitGraph<'r> {
     }
 
     fn fill_author_time_from_object(&mut self, oid: ObjectId) {
-        if let Ok(commit) = load_commit(self.repo, oid) {
+        let Ok(object) = self.repo.odb().read(&oid) else {
+            return;
+        };
+        if object.kind != ObjectKind::Commit {
+            return;
+        }
+        if let Ok(commit) = CommitRef::parse(&object.data) {
             self.author_time
-                .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
+                .insert(oid, commit.author_unix_seconds_for_ordering());
         }
     }
 
@@ -7125,12 +7129,18 @@ impl<'r> CommitGraph<'r> {
                 return Ok(());
             }
         }
-        let commit = load_commit(self.repo, oid)?;
+        let object = self.repo.odb().read(&oid)?;
+        if object.kind != ObjectKind::Commit {
+            return Err(rev_list_unexpected_kind(oid, "commit"));
+        }
+        #[cfg(test)]
+        self.repo.odb().hot_path_metrics().record_commit_parse();
+        let commit = CommitRef::parse(&object.data)?;
         // Shallow boundaries: treat commit as having no parents
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
         } else {
-            commit.parents
+            commit.parents().to_vec()
         };
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();
@@ -7139,10 +7149,10 @@ impl<'r> CommitGraph<'r> {
             parents.truncate(1);
         }
         self.committer_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
+            .insert(oid, commit.committer_unix_seconds_for_ordering());
         self.author_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
-        self.commit_trees.insert(oid, commit.tree);
+            .insert(oid, commit.author_unix_seconds_for_ordering());
+        self.commit_trees.insert(oid, commit.tree());
         self.parents.insert(oid, parents);
         Ok(())
     }
@@ -7526,8 +7536,8 @@ fn commit_parent_ids(repo: &Repository, oid: ObjectId) -> Vec<ObjectId> {
     if obj.kind != ObjectKind::Commit {
         return Vec::new();
     }
-    parse_commit(&obj.data)
-        .map(|c| c.parents)
+    CommitRef::parse(&obj.data)
+        .map(|c| c.parents().to_vec())
         .unwrap_or_default()
 }
 

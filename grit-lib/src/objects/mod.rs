@@ -16,9 +16,11 @@
 //! # }
 //! ```
 
+mod commit_ref;
 mod core;
 pub mod handle;
 
+pub use commit_ref::CommitRef;
 pub use core::*;
 pub use handle::Objects;
 

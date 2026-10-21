@@ -17,7 +17,7 @@ use grit_lib::objects::hash::{hash_object, hash_objects_parallel};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
 use grit_lib::objects::unpack_objects::apply_delta;
-use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::objects::{parse_commit, CommitRef, HashAlgo, ObjectKind};
 
 fn bench_sha1_throughput(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
@@ -260,6 +260,52 @@ fn bench_exists_local_10k_oids_packed(c: &mut Criterion) {
     });
 }
 
+fn bench_commit_parse(c: &mut Criterion) {
+    static BODIES: OnceLock<Vec<Vec<u8>>> = OnceLock::new();
+    let bodies = BODIES.get_or_init(|| {
+        use fixture::OdbBackendFixtures;
+        let fx = OdbBackendFixtures::global();
+        let mut bodies = Vec::new();
+        let mut cur = Some(fx.pack_100k.history_tip);
+        while let Some(oid) = cur {
+            let Ok(obj) = fx.pack_100k.odb.read(&oid) else {
+                break;
+            };
+            if obj.kind != ObjectKind::Commit {
+                break;
+            }
+            bodies.push(obj.data.clone());
+            cur = CommitRef::parse(&obj.data)
+                .ok()
+                .and_then(|c| c.parents().first().copied());
+        }
+        assert!(
+            bodies.len() >= 1000,
+            "expected a long commit chain in pack_100k, got {}",
+            bodies.len()
+        );
+        bodies
+    });
+
+    let mut group = c.benchmark_group("commit_parse");
+    group.throughput(Throughput::Elements(bodies.len() as u64));
+    group.bench_function("parse_commit_owned", |b| {
+        b.iter(|| {
+            for raw in bodies.iter() {
+                black_box(parse_commit(black_box(raw)).expect("parse"));
+            }
+        });
+    });
+    group.bench_function("commit_ref_borrowed", |b| {
+        b.iter(|| {
+            for raw in bodies.iter() {
+                black_box(CommitRef::parse(black_box(raw)).expect("parse"));
+            }
+        });
+    });
+    group.finish();
+}
+
 fn bench_delta_apply(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
     let mut group = c.benchmark_group("delta_apply");
@@ -286,6 +332,7 @@ criterion_group!(
     bench_packed_read,
     bench_idx_lookup,
     bench_exists_local_10k_oids_packed,
-    bench_delta_apply
+    bench_delta_apply,
+    bench_commit_parse
 );
 criterion_main!(objects);

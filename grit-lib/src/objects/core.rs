@@ -21,7 +21,6 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::commit_encoding;
 use crate::error::{Error, Result};
 
 /// A Git hash algorithm.
@@ -805,7 +804,7 @@ fn find_tree_entry_by_name_in_spans(
 }
 
 /// Parsed representation of a commit object.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitData {
     /// The tree this commit points to.
     pub tree: ObjectId,
@@ -835,19 +834,6 @@ pub struct CommitData {
     /// [`serialize_commit`] always emits `tree`, `parent`, `author`, `committer`, and `encoding`
     /// from the structured fields, then appends these bytes before the blank line and message.
     pub extra_headers: Vec<u8>,
-}
-
-/// Commit headers needed for graph walks without parsing the message body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CommitLinkage {
-    /// Root tree OID.
-    pub tree: ObjectId,
-    /// Parent commit OIDs.
-    pub parents: Vec<ObjectId>,
-    /// Decoded author identity line.
-    pub author: String,
-    /// Decoded committer identity line.
-    pub committer: String,
 }
 
 /// Parse commit headers (tree, parents, author, committer) and skip the message body.
@@ -887,115 +873,7 @@ pub fn read_commit_subject_line(data: &[u8]) -> Result<String> {
     ))
 }
 
-pub(crate) fn parse_commit_linkage(data: &[u8]) -> Result<CommitLinkage> {
-    #[derive(Clone, Copy)]
-    enum Continuation {
-        Author,
-        Committer,
-        Multiline,
-        Ignore,
-    }
-
-    let mut pos = 0usize;
-    let mut tree = None;
-    let mut parents = Vec::new();
-    let mut author_raw: Option<Vec<u8>> = None;
-    let mut committer_raw: Option<Vec<u8>> = None;
-    let mut encoding: Option<String> = None;
-    let mut cont = Continuation::Ignore;
-
-    while pos < data.len() {
-        let line_start = pos;
-        let mut line_end = pos;
-        while line_end < data.len() && data[line_end] != b'\n' {
-            line_end += 1;
-        }
-        let line = &data[line_start..line_end];
-        let after_nl = line_end.saturating_add(1);
-        if line.is_empty() {
-            let author_bytes = author_raw
-                .ok_or_else(|| Error::CorruptObject("commit missing author header".to_owned()))?;
-            let committer_bytes = committer_raw.ok_or_else(|| {
-                Error::CorruptObject("commit missing committer header".to_owned())
-            })?;
-            let author = commit_encoding::decode_bytes(encoding.as_deref(), &author_bytes);
-            let committer = commit_encoding::decode_bytes(encoding.as_deref(), &committer_bytes);
-            return Ok(CommitLinkage {
-                tree: tree
-                    .ok_or_else(|| Error::CorruptObject("commit missing tree header".to_owned()))?,
-                parents,
-                author,
-                committer,
-            });
-        }
-
-        if line.first() == Some(&b' ') {
-            let rest = line.get(1..).unwrap_or_default();
-            match cont {
-                Continuation::Author => {
-                    let a = author_raw.as_mut().ok_or_else(|| {
-                        Error::CorruptObject("orphan header continuation".to_owned())
-                    })?;
-                    a.extend_from_slice(rest);
-                }
-                Continuation::Committer => {
-                    let c = committer_raw.as_mut().ok_or_else(|| {
-                        Error::CorruptObject("orphan header continuation".to_owned())
-                    })?;
-                    c.extend_from_slice(rest);
-                }
-                Continuation::Multiline | Continuation::Ignore => {}
-            }
-            pos = after_nl;
-            continue;
-        }
-
-        let key_end = line
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| Error::CorruptObject("malformed commit header line".to_owned()))?;
-        let key = &line[..key_end];
-        let rest = line.get(key_end + 1..).unwrap_or_default();
-
-        match key {
-            b"tree" => {
-                tree = Some(parse_oid_field(rest)?);
-                cont = Continuation::Ignore;
-            }
-            b"parent" => {
-                parents.push(parse_oid_field(rest)?);
-                cont = Continuation::Ignore;
-            }
-            b"author" => {
-                author_raw = Some(rest.to_vec());
-                cont = Continuation::Author;
-            }
-            b"committer" => {
-                committer_raw = Some(rest.to_vec());
-                cont = Continuation::Committer;
-            }
-            b"encoding" => {
-                encoding = Some(
-                    std::str::from_utf8(rest)
-                        .map_err(|_| Error::CorruptObject("encoding is not UTF-8".to_owned()))?
-                        .to_owned(),
-                );
-                cont = Continuation::Ignore;
-            }
-            b"gpgsig" | b"mergetag" => {
-                cont = Continuation::Multiline;
-            }
-            _ => cont = Continuation::Ignore,
-        }
-        pos = after_nl;
-    }
-
-    Err(Error::CorruptObject(
-        "commit missing blank line before message".to_owned(),
-    ))
-}
-
-fn parse_oid_field(value: &[u8]) -> Result<ObjectId> {
+pub(crate) fn parse_oid_field(value: &[u8]) -> Result<ObjectId> {
     let s = std::str::from_utf8(value)
         .map_err(|_| Error::CorruptObject("commit header object id is not UTF-8".to_owned()))?;
     s.trim()
@@ -1007,43 +885,8 @@ fn parse_oid_field(value: &[u8]) -> Result<ObjectId> {
 ///
 /// Used on hot paths such as blame history walks that do not need author/committer data.
 pub(crate) fn parse_commit_tree_and_parents(data: &[u8]) -> Result<(ObjectId, Vec<ObjectId>)> {
-    let mut pos = 0usize;
-    let mut tree = None;
-    let mut parents = Vec::new();
-
-    while pos < data.len() {
-        let line_start = pos;
-        let mut line_end = pos;
-        while line_end < data.len() && data[line_end] != b'\n' {
-            line_end += 1;
-        }
-        let line = &data[line_start..line_end];
-        let after_nl = line_end.saturating_add(1);
-        if line.is_empty() {
-            break;
-        }
-        if line.first() == Some(&b' ') {
-            pos = after_nl;
-            continue;
-        }
-        let key_end = line
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| Error::CorruptObject("malformed commit header line".to_owned()))?;
-        let key = &line[..key_end];
-        let rest = line.get(key_end + 1..).unwrap_or_default();
-        match key {
-            b"tree" => tree = Some(parse_oid_field(rest)?),
-            b"parent" => parents.push(parse_oid_field(rest)?),
-            _ => {}
-        }
-        pos = after_nl;
-    }
-
-    Ok((
-        tree.ok_or_else(|| Error::CorruptObject("commit missing tree header".to_owned()))?,
-        parents,
-    ))
+    let commit = super::CommitRef::parse(data)?;
+    Ok((commit.tree(), commit.parents().to_vec()))
 }
 
 /// Parse the raw data of a commit object.
@@ -1052,147 +895,7 @@ pub(crate) fn parse_commit_tree_and_parents(data: &[u8]) -> Result<(ObjectId, Ve
 ///
 /// Returns [`Error::CorruptObject`] if required headers are missing.
 pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
-    // Header lines are mostly ASCII; author/committer payloads may match the `encoding` header.
-    // Continuation lines (leading SP) append to the previous header for author/committer, or are
-    // skipped for multiline headers Git allows (`gpgsig`, `mergetag`, …).
-    #[derive(Clone, Copy)]
-    enum Continuation {
-        Author,
-        Committer,
-        Multiline,
-        Ignore,
-    }
-
-    let mut pos = 0usize;
-    let mut tree = None;
-    let mut parents = Vec::new();
-    let mut author_raw: Option<Vec<u8>> = None;
-    let mut committer_raw: Option<Vec<u8>> = None;
-    let mut encoding: Option<String> = None;
-    let mut extra_headers = Vec::new();
-    let mut cont = Continuation::Ignore;
-
-    while pos < data.len() {
-        let line_start = pos;
-        let mut line_end = pos;
-        while line_end < data.len() && data[line_end] != b'\n' {
-            line_end += 1;
-        }
-        let line = &data[line_start..line_end];
-        let after_nl = (line_end + 1).min(data.len());
-        if line.is_empty() {
-            let body = data.get(after_nl..).unwrap_or_default();
-            let message = commit_encoding::decode_bytes(encoding.as_deref(), body);
-            // Preserve the exact message tail: Git allows commits whose log ends without a
-            // final newline (`commit-tree` from a file). `serialize_commit` appends `\n` when
-            // only `message` is set, so keep raw bytes when the body is not LF-terminated.
-            let has_non_utf8_encoding = encoding.as_deref().is_some_and(|label| {
-                !label.eq_ignore_ascii_case("utf-8") && !label.eq_ignore_ascii_case("utf8")
-            });
-            let raw_message = if body.is_empty() {
-                None
-            } else if has_non_utf8_encoding
-                || std::str::from_utf8(body).is_err()
-                || !body.ends_with(b"\n")
-            {
-                Some(body.to_vec())
-            } else {
-                None
-            };
-            let author_bytes = author_raw
-                .ok_or_else(|| Error::CorruptObject("commit missing author header".to_owned()))?;
-            let committer_bytes = committer_raw.ok_or_else(|| {
-                Error::CorruptObject("commit missing committer header".to_owned())
-            })?;
-            let author = commit_encoding::decode_bytes(encoding.as_deref(), &author_bytes);
-            let committer = commit_encoding::decode_bytes(encoding.as_deref(), &committer_bytes);
-            return Ok(CommitData {
-                tree: tree
-                    .ok_or_else(|| Error::CorruptObject("commit missing tree header".to_owned()))?,
-                parents,
-                author,
-                committer,
-                author_raw: author_bytes,
-                committer_raw: committer_bytes,
-                encoding,
-                message,
-                raw_message,
-                extra_headers,
-            });
-        }
-
-        if line.first() == Some(&b' ') {
-            let rest = line.get(1..).unwrap_or_default();
-            match cont {
-                Continuation::Author => {
-                    let a = author_raw.as_mut().ok_or_else(|| {
-                        Error::CorruptObject("orphan header continuation".to_owned())
-                    })?;
-                    a.extend_from_slice(rest);
-                }
-                Continuation::Committer => {
-                    let c = committer_raw.as_mut().ok_or_else(|| {
-                        Error::CorruptObject("orphan header continuation".to_owned())
-                    })?;
-                    c.extend_from_slice(rest);
-                }
-                Continuation::Multiline => {
-                    extra_headers.extend_from_slice(&data[line_start..after_nl]);
-                }
-                Continuation::Ignore => {}
-            }
-            pos = after_nl;
-            continue;
-        }
-
-        let key_end = line
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| Error::CorruptObject("malformed commit header line".to_owned()))?;
-        let key = &line[..key_end];
-        let rest = line.get(key_end + 1..).unwrap_or_default();
-
-        match key {
-            b"tree" => {
-                let line_str = std::str::from_utf8(rest).map_err(|_| {
-                    Error::CorruptObject("commit tree line is not valid UTF-8".to_owned())
-                })?;
-                tree = Some(line_str.trim().parse::<ObjectId>()?);
-                cont = Continuation::Ignore;
-            }
-            b"parent" => {
-                let line_str = std::str::from_utf8(rest).map_err(|_| {
-                    Error::CorruptObject("commit parent line is not valid UTF-8".to_owned())
-                })?;
-                parents.push(line_str.trim().parse::<ObjectId>()?);
-                cont = Continuation::Ignore;
-            }
-            b"author" => {
-                author_raw = Some(rest.to_vec());
-                cont = Continuation::Author;
-            }
-            b"committer" => {
-                committer_raw = Some(rest.to_vec());
-                cont = Continuation::Committer;
-            }
-            b"encoding" => {
-                let line_str = std::str::from_utf8(rest).map_err(|_| {
-                    Error::CorruptObject("commit encoding line is not valid UTF-8".to_owned())
-                })?;
-                encoding = Some(line_str.to_owned());
-                cont = Continuation::Ignore;
-            }
-            _ => {
-                cont = Continuation::Multiline;
-                extra_headers.extend_from_slice(&data[line_start..after_nl]);
-            }
-        }
-        pos = after_nl;
-    }
-
-    Err(Error::CorruptObject(
-        "commit missing blank line before message".to_owned(),
-    ))
+    Ok(super::CommitRef::parse(data)?.to_owned())
 }
 
 /// Value after `prefix` on the first header line that starts with `prefix`, scanning until a blank
@@ -1368,7 +1071,7 @@ mod commit_parse_tests {
     use super::*;
 
     #[test]
-    fn parse_commit_linkage_matches_commit_headers() {
+    fn commit_ref_matches_parse_commit_headers() {
         let raw = concat!(
             "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
             "parent 1111111111111111111111111111111111111111\n",
@@ -1378,11 +1081,11 @@ mod commit_parse_tests {
             "ignored body\n",
         );
         let full = parse_commit(raw.as_bytes()).expect("parse");
-        let link = parse_commit_linkage(raw.as_bytes()).expect("linkage");
-        assert_eq!(link.tree, full.tree);
-        assert_eq!(link.parents, full.parents);
-        assert_eq!(link.author, full.author);
-        assert_eq!(link.committer, full.committer);
+        let link = crate::objects::CommitRef::parse(raw.as_bytes()).expect("CommitRef");
+        assert_eq!(link.tree(), full.tree);
+        assert_eq!(link.parents(), full.parents.as_slice());
+        assert_eq!(link.author(), full.author);
+        assert_eq!(link.committer(), full.committer);
     }
 
     #[test]
