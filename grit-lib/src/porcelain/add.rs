@@ -4,6 +4,7 @@
 //! [`StageMode::All`] is selected). It does **not** compute the index-vs-HEAD diff
 //! that full [`super::status::status`] requires.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
@@ -18,15 +19,17 @@ use crate::ignore::IgnoreMatcher;
 use crate::index::{
     entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
 };
-use crate::objects::{parse_commit, parse_tree, ObjectId};
+use crate::objects::ObjectId;
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
-use crate::pathspec::{has_glob_chars, pathspec_is_exclude};
+use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
     apply_executable_hint_to_index, staged_mode_with_hint, StageExecutableHint,
 };
-use crate::porcelain::pathspec_match::pathspec_matches_known_in_repository;
+use crate::porcelain::pathspec_match::{
+    pathspec_matches_known_in_repository, sorted_head_tree_paths,
+};
 use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
 };
@@ -36,7 +39,6 @@ use crate::porcelain::status::{
 };
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
-use crate::state::resolve_head;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_batch::{prepare_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
@@ -918,12 +920,20 @@ fn validate_pathspecs(
     if positive.is_empty() {
         return Ok(());
     }
-    let known = known_paths(repo, index, unstaged, untracked)?;
+    let ctx = repo.pathspec_match_context();
+    let known = sorted_stageable_paths(index, unstaged, untracked);
+    // Walking HEAD's tree is only needed for a pathspec that matches nothing else.
+    let mut head_paths: Option<Vec<String>> = None;
     let mut ignored_paths = Vec::new();
     for (label, resolved) in positive {
-        let spec = [(*resolved).to_owned()];
-        let stageable = known.iter().any(|p| repo.paths_match_pathspecs(p, &spec));
-        if stageable {
+        if sorted_paths_match_pathspec(resolved, &known, ctx) {
+            continue;
+        }
+        if head_paths.is_none() {
+            head_paths = Some(sorted_head_tree_paths(repo)?);
+        }
+        let head = head_paths.as_deref().unwrap_or_default();
+        if sorted_paths_match_pathspec(resolved, head, ctx) {
             continue;
         }
         if !pathspec_matches_known_in_repository(repo, resolved)? {
@@ -1013,61 +1023,25 @@ fn pathspec_sources(opts: &StageOptions) -> Vec<String> {
     }
 }
 
-fn known_paths(
-    repo: &Repository,
-    index: &Index,
-    unstaged: &[DiffEntry],
-    untracked: &[String],
-) -> Result<Vec<String>> {
-    let mut set = HashSet::<String>::new();
-    for entry in &index.entries {
-        set.insert(String::from_utf8_lossy(&entry.path).into_owned());
-    }
-    for entry in unstaged {
-        set.insert(entry.path().to_owned());
-    }
-    for path in untracked {
-        set.insert(path.clone());
-    }
-    for path in head_tree_paths(repo)? {
-        set.insert(path);
-    }
-    Ok(set.into_iter().collect())
-}
-
-fn head_tree_paths(repo: &Repository) -> Result<Vec<String>> {
-    let head = resolve_head(repo.git_dir())?;
-    let Some(head_oid) = head.oid() else {
-        return Ok(Vec::new());
-    };
-    let obj = repo.odb().read(head_oid)?;
-    let commit = parse_commit(&obj.data)?;
-    let mut paths = HashSet::new();
-    collect_tree_paths(repo, commit.tree, "", &mut paths)?;
-    Ok(paths.into_iter().collect())
-}
-
-fn collect_tree_paths(
-    repo: &Repository,
-    tree_oid: ObjectId,
-    prefix: &str,
-    out: &mut HashSet<String>,
-) -> Result<()> {
-    let obj = repo.odb().read(&tree_oid)?;
-    for entry in parse_tree(&obj.data)? {
-        let name = String::from_utf8_lossy(&entry.name);
-        let path = if prefix.is_empty() {
-            name.into_owned()
-        } else {
-            format!("{prefix}/{name}")
-        };
-        if entry.mode == MODE_TREE {
-            collect_tree_paths(repo, entry.oid, &path, out)?;
-        } else {
-            out.insert(path);
-        }
-    }
-    Ok(())
+/// Index (all stages), unstaged and untracked paths in byte order, borrowed where possible.
+fn sorted_stageable_paths<'a>(
+    index: &'a Index,
+    unstaged: &'a [DiffEntry],
+    untracked: &'a [String],
+) -> Vec<Cow<'a, str>> {
+    let mut paths: Vec<Cow<'a, str>> =
+        Vec::with_capacity(index.entries.len() + unstaged.len() + untracked.len());
+    paths.extend(
+        index
+            .entries
+            .iter()
+            .map(|e| String::from_utf8_lossy(&e.path)),
+    );
+    paths.extend(unstaged.iter().map(|e| Cow::Borrowed(e.path())));
+    paths.extend(untracked.iter().map(|p| Cow::Borrowed(p.as_str())));
+    paths.sort_unstable();
+    paths.dedup();
+    paths
 }
 
 fn stage_gitlink_at(
@@ -1263,6 +1237,61 @@ mod tests {
         let b_blob = repo.odb().read(&b_oid).unwrap();
         assert_eq!(a_blob.data, b"a2\n");
         assert_eq!(b_blob.data, b"b\n");
+    }
+
+    #[test]
+    fn stage_validates_many_pathspecs_against_index_and_untracked() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        for rel in [
+            "dir/a.txt",
+            "dir/b.txt",
+            "dir-x.txt",
+            "dirx/c.txt",
+            "top.txt",
+        ] {
+            stage_file_in_index(&repo, &mut index, rel, b"1\n");
+        }
+        write_index(&repo, &mut index);
+        for rel in ["dir/a.txt", "dir/b.txt", "dirx/c.txt", "top.txt"] {
+            fs::write(root.join(rel), b"2\n").unwrap();
+        }
+        fs::write(root.join("new.txt"), b"n\n").unwrap();
+
+        let specs = ["dir/", "dirx", "top.txt", "new.txt"].map(str::to_owned);
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: specs.to_vec(),
+                pathspec_sources: specs.to_vec(),
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.modified, 4);
+        assert_eq!(outcome.added, 1);
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"new.txt", 0).is_some());
+
+        for missing in ["di", "dir/a", "top.txt/", "nope"] {
+            let err = stage(
+                &repo,
+                &StageOptions {
+                    pathspecs: vec!["top.txt".to_owned(), missing.to_owned()],
+                    pathspec_sources: vec!["top.txt".to_owned(), missing.to_owned()],
+                    ..StageOptions::default()
+                },
+                &mut NullProgress,
+            )
+            .unwrap_err();
+            assert!(
+                matches!(&err, Error::Message(msg) if msg.contains(&format!("'{missing}'"))),
+                "{missing}: {err:?}"
+            );
+        }
     }
 
     #[test]

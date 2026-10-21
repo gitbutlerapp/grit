@@ -167,20 +167,11 @@ impl AttrRequirement {
     }
 }
 
-fn parse_maybe_bool(v: &str) -> Option<bool> {
-    let s = v.trim().to_ascii_lowercase();
-    match s.as_str() {
-        "true" | "yes" | "on" | "1" => Some(true),
-        "false" | "no" | "off" | "0" => Some(false),
-        _ => None,
-    }
-}
-
-fn git_env_bool(key: &str, default: bool) -> bool {
-    match crate::environment::Environment::empty().var(key) {
-        Some(v) => parse_maybe_bool(&v).unwrap_or(default),
-        None => default,
-    }
+/// The library never reads the process environment, so Git's `GIT_*_PATHSPECS` globals are
+/// always unset here and every global flag takes its default. This runs on every pathspec
+/// comparison, so it must stay allocation-free.
+fn git_env_bool(_key: &str, default: bool) -> bool {
+    default
 }
 
 fn literal_global() -> bool {
@@ -922,16 +913,18 @@ pub fn matches_pathspec_list_with_context(
     if specs.is_empty() {
         return true;
     }
-    let has_exclude = specs.iter().any(|s| pathspec_is_exclude(s));
-    let positive_specs: Vec<&String> = specs.iter().filter(|s| !pathspec_is_exclude(s)).collect();
-    let positive = if positive_specs.is_empty() {
-        true
-    } else {
-        positive_specs
-            .iter()
-            .any(|s| matches_pathspec_element_with_context(s, path, ctx))
-    };
-    if !positive {
+    let mut has_exclude = false;
+    let mut has_positive = false;
+    let mut positive = false;
+    for spec in specs {
+        if pathspec_is_exclude(spec) {
+            has_exclude = true;
+        } else {
+            has_positive = true;
+            positive = positive || matches_pathspec_element_with_context(spec, path, ctx);
+        }
+    }
+    if has_positive && !positive {
         return false;
     }
     if !has_exclude {
@@ -941,6 +934,50 @@ pub fn matches_pathspec_list_with_context(
         pathspec_is_exclude(s) && pathspec_exclude_element_matches_with_context(s, path, ctx)
     });
     !excluded
+}
+
+/// Whether any of `sorted_paths` matches the single pathspec `spec`.
+///
+/// Same result as testing every path with [`matches_pathspec_list_with_context`] and `[spec]`,
+/// but a plain literal pathspec (no magic, no wildcards, no `./`) is answered with a binary
+/// search instead of a scan, so checking many pathspecs against a large index stays cheap.
+///
+/// `sorted_paths` must be sorted in byte order (the [`str`] ordering) for the result to be
+/// correct; duplicates are allowed.
+pub(crate) fn sorted_paths_match_pathspec<S: AsRef<str>>(
+    spec: &str,
+    sorted_paths: &[S],
+    ctx: PathspecMatchContext,
+) -> bool {
+    let plain = !ctx.precompose_paths
+        && !ctx.is_directory
+        && !ctx.is_git_submodule
+        && !spec.is_empty()
+        && spec != "."
+        && !spec.starts_with("./")
+        && !spec.starts_with(':')
+        && simple_length(spec) == spec.len()
+        && !(literal_global() || glob_global() || noglob_global() || icase_global());
+    if !plain {
+        let specs = [spec.to_owned()];
+        return sorted_paths
+            .iter()
+            .any(|p| matches_pathspec_list_with_context(p.as_ref(), &specs, ctx));
+    }
+    let has_path_with_prefix = |prefix: &str| {
+        let at = sorted_paths.partition_point(|p| p.as_ref() < prefix);
+        sorted_paths
+            .get(at)
+            .is_some_and(|p| p.as_ref().starts_with(prefix))
+    };
+    if spec.ends_with('/') {
+        return has_path_with_prefix(spec);
+    }
+    let at = sorted_paths.partition_point(|p| p.as_ref() < spec);
+    if sorted_paths.get(at).is_some_and(|p| p.as_ref() == spec) {
+        return true;
+    }
+    has_path_with_prefix(&format!("{spec}/"))
 }
 
 /// `matches_pathspec_list` for tree/index objects with mode and `.gitattributes` rules.
@@ -1051,15 +1088,11 @@ fn pathspec_matches_tail(pattern: &str, path: &str, magic: PathspecMagic) -> boo
             if ps_str_eq(prefix, path, magic.icase) {
                 return true;
             }
-            let prefix_slash = format!("{prefix}/");
-            if path_starts_with(path, &prefix_slash, magic.icase) {
+            if path_is_under_dir(path, prefix, magic.icase) {
                 return true;
             }
-        } else {
-            let prefix_slash = format!("{pattern}/");
-            if path_starts_with(path, &prefix_slash, magic.icase) {
-                return true;
-            }
+        } else if path_is_under_dir(path, pattern, magic.icase) {
+            return true;
         }
     }
 
@@ -1095,8 +1128,7 @@ fn pathspec_matches_tail(pattern: &str, path: &str, magic: PathspecMagic) -> boo
         return wildmatch(pat_rest.as_bytes(), path_rest.as_bytes(), wm_flags);
     }
 
-    ps_str_eq(pattern, path, magic.icase)
-        || path_starts_with(path, &format!("{pattern}/"), magic.icase)
+    ps_str_eq(pattern, path, magic.icase) || path_is_under_dir(path, pattern, magic.icase)
 }
 
 fn ps_str_eq(a: &str, b: &str, icase: bool) -> bool {
@@ -1116,17 +1148,22 @@ fn path_starts_with(path: &str, prefix: &str, icase: bool) -> bool {
     }
 }
 
+/// Whether `path` starts with `dir` followed by `/` (the path lies inside directory `dir`).
+fn path_is_under_dir(path: &str, dir: &str, icase: bool) -> bool {
+    path.as_bytes().get(dir.len()) == Some(&b'/') && path_starts_with(path, dir, icase)
+}
+
 fn literal_prefix_match(pattern: &str, path: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix('/') {
-        return path == prefix || path.starts_with(&format!("{prefix}/"));
+        return path == prefix || path_is_under_dir(path, prefix, false);
     }
-    path == pattern || path.starts_with(&format!("{pattern}/"))
+    path == pattern || path_is_under_dir(path, pattern, false)
 }
 
 /// Literal pathspec match for `ls-tree` when the pattern has no `*`/`?` (brackets stay literal).
 fn ls_tree_literal_match(pattern: &str, path: &str, ctx: PathspecMatchContext) -> bool {
     if let Some(prefix) = pattern.strip_suffix('/') {
-        if path.starts_with(&format!("{prefix}/")) {
+        if path_is_under_dir(path, prefix, false) {
             return true;
         }
         if path == prefix {
@@ -1134,7 +1171,7 @@ fn ls_tree_literal_match(pattern: &str, path: &str, ctx: PathspecMatchContext) -
         }
         return false;
     }
-    path == pattern || path.starts_with(&format!("{pattern}/"))
+    path == pattern || path_is_under_dir(path, pattern, false)
 }
 
 /// Optional path metadata for literal pathspecs with a trailing `/` (tree-walk / diff-tree).
@@ -1206,7 +1243,7 @@ pub fn matches_pathspec_with_context(spec: &str, path: &str, ctx: PathspecMatchC
 
     if magic.literal {
         if let Some(prefix) = pattern.strip_suffix('/') {
-            if path_for_match.starts_with(&format!("{prefix}/")) {
+            if path_is_under_dir(path_for_match, prefix, false) {
                 return true;
             }
             if path_for_match == prefix {
@@ -1214,13 +1251,13 @@ pub fn matches_pathspec_with_context(spec: &str, path: &str, ctx: PathspecMatchC
             }
             return false;
         }
-        return path_for_match == pattern || path_for_match.starts_with(&format!("{pattern}/"));
+        return path_for_match == pattern || path_is_under_dir(path_for_match, pattern, false);
     }
 
     // No wildcards and trailing `/`: directory-only semantics (Git `matches_pathspec`).
     if let Some(prefix) = pattern.strip_suffix('/') {
         if simple_length(pattern) == pattern.len() {
-            if path_for_match.starts_with(&format!("{prefix}/")) {
+            if path_is_under_dir(path_for_match, prefix, false) {
                 return true;
             }
             if path_for_match == prefix {
@@ -1866,6 +1903,98 @@ mod tree_entry_pathspec_tests {
         ));
         assert!(matches_pathspec("file0", "file0"));
         assert!(!matches_pathspec("path", "path1/file1"));
+    }
+
+    #[test]
+    fn dir_prefix_needs_slash_boundary() {
+        assert!(matches_pathspec("a/b", "a/b/c"));
+        assert!(!matches_pathspec("a/b", "a/bc"));
+        assert!(!matches_pathspec("a/b", "a"));
+        assert!(matches_pathspec(":(literal)dir", "dir/x"));
+        assert!(!matches_pathspec(":(literal)dir", "dirx"));
+        assert!(matches_pathspec(":(icase)DIR", "dir/x"));
+        assert!(!matches_pathspec(":(icase)DIR", "dirx"));
+        assert!(matches_pathspec("dir/", "dir/x"));
+        assert!(!matches_pathspec("dir/", "dir"));
+    }
+
+    #[test]
+    fn sorted_lookup_agrees_with_linear_scan() {
+        let mut paths: Vec<&str> = vec![
+            "a",
+            "a-b",
+            "a.txt",
+            "a/b",
+            "a/b/c.txt",
+            "a/bc",
+            "a0",
+            "b/x[1].txt",
+            "dir/sub/file",
+            "dir-sub",
+            "f[o][o]",
+            "z",
+        ];
+        paths.sort_unstable();
+        let specs = [
+            "a",
+            "a/",
+            "a/b",
+            "a/b/",
+            "a/bc",
+            "a-",
+            "a-b",
+            "a.txt",
+            "b",
+            "b/",
+            "dir",
+            "dir/sub",
+            "dir/sub/",
+            "dir/su",
+            "dir-sub",
+            "f[o][o]",
+            "*.txt",
+            "a/*",
+            ":(glob)**/*.txt",
+            ":(literal)f[o][o]",
+            ":(icase)A/B",
+            ":!a",
+            ".",
+            "./a/b",
+            "",
+            "z",
+            "zz",
+            "/",
+            "a//",
+        ];
+        for ctx in [
+            PathspecMatchContext::default(),
+            PathspecMatchContext {
+                precompose_paths: true,
+                ..PathspecMatchContext::default()
+            },
+            PathspecMatchContext {
+                is_directory: true,
+                ..PathspecMatchContext::default()
+            },
+        ] {
+            for spec in specs {
+                let list = [spec.to_owned()];
+                let linear = paths
+                    .iter()
+                    .any(|p| matches_pathspec_list_with_context(p, &list, ctx));
+                assert_eq!(
+                    sorted_paths_match_pathspec(spec, &paths, ctx),
+                    linear,
+                    "spec {spec:?} ctx {ctx:?}"
+                );
+            }
+        }
+        let empty: [&str; 0] = [];
+        assert!(!sorted_paths_match_pathspec(
+            "a",
+            &empty,
+            PathspecMatchContext::default()
+        ));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use crate::error::{Error, Result};
 use crate::index::MODE_TREE;
 use crate::objects::{parse_commit, parse_tree, ObjectId};
-use crate::pathspec::{has_glob_chars, pathspec_is_exclude};
+use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
 use crate::repo::Repository;
 use crate::state::resolve_head;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -40,8 +40,7 @@ fn pathspec_matches_known_in_paths(
     resolved: &str,
     known: &[String],
 ) -> Result<bool> {
-    let spec = [resolved.to_owned()];
-    if known.iter().any(|p| repo.paths_match_pathspecs(p, &spec)) {
+    if sorted_paths_match_pathspec(resolved, known, repo.pathspec_match_context()) {
         return Ok(true);
     }
     if has_glob_chars(resolved) || resolved.starts_with(":(") {
@@ -74,29 +73,35 @@ fn known_paths(repo: &Repository) -> Result<Vec<String>> {
             set.insert(String::from_utf8_lossy(&entry.path).into_owned());
         }
     }
-    for path in head_tree_paths(repo)? {
-        set.insert(path);
-    }
-    Ok(set.into_iter().collect())
+    set.extend(sorted_head_tree_paths(repo)?);
+    let mut known: Vec<String> = set.into_iter().collect();
+    known.sort_unstable();
+    Ok(known)
 }
 
-fn head_tree_paths(repo: &Repository) -> Result<Vec<String>> {
+/// Every non-tree path in `HEAD`'s tree, sorted in byte order (empty on an unborn branch).
+///
+/// # Errors
+///
+/// Propagates failures resolving `HEAD` or reading its commit and trees.
+pub(crate) fn sorted_head_tree_paths(repo: &Repository) -> Result<Vec<String>> {
     let head = resolve_head(repo.git_dir())?;
     let Some(head_oid) = head.oid() else {
         return Ok(Vec::new());
     };
     let obj = repo.odb().read(head_oid)?;
     let commit = parse_commit(&obj.data)?;
-    let mut paths = HashSet::new();
+    let mut paths = Vec::new();
     collect_tree_paths(repo, commit.tree, "", &mut paths)?;
-    Ok(paths.into_iter().collect())
+    paths.sort_unstable();
+    Ok(paths)
 }
 
 fn collect_tree_paths(
     repo: &Repository,
     tree_oid: ObjectId,
     prefix: &str,
-    out: &mut HashSet<String>,
+    out: &mut Vec<String>,
 ) -> Result<()> {
     let obj = repo.odb().read(&tree_oid)?;
     for entry in parse_tree(&obj.data)? {
@@ -109,7 +114,7 @@ fn collect_tree_paths(
         if entry.mode == MODE_TREE {
             collect_tree_paths(repo, entry.oid, &path, out)?;
         } else {
-            out.insert(path);
+            out.push(path);
         }
     }
     Ok(())
