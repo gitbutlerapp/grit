@@ -48,8 +48,16 @@ run_daily_merged() {
   echo "${label} started $(date -Is) (sequential --only ${#DAILY_IDS[@]} scenarios)"
   for id in "${DAILY_IDS[@]}"; do
     echo "  scenario=${id} …"
-    "$BENCH" daily --offline --only "$id" --baseline-grit "${BASELINE_GRIT}" \
-      --output "${tmpdir}/${id//\//@-}.json"
+    local attempt=1
+    while ! "$BENCH" daily --offline --only "$id" --baseline-grit "${BASELINE_GRIT}" \
+      --output "${tmpdir}/${id//\//@-}.json"; do
+      attempt=$((attempt + 1))
+      if [[ "$attempt" -gt 3 ]]; then
+        echo "scenario ${id} failed after 3 attempts" >&2
+        return 1
+      fi
+      echo "  retry ${id} (attempt ${attempt}/3)…" >&2
+    done
   done
   merge_daily_parts "$out" "${tmpdir}"/*.json
   rm -rf "${tmpdir}"
