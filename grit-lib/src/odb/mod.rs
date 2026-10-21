@@ -394,9 +394,8 @@ impl Odb {
                 obj.kind.as_str()
             )));
         }
-        let parsed = crate::objects::TreeRefIter::with_oid_len(&obj.data, self.hash_algo().len())
-            .map(|entry| entry.map(|e| e.to_owned()))
-            .collect::<crate::error::Result<Vec<_>>>()?;
+        let parsed =
+            crate::objects::parse_tree_with_oid_len(&obj.data, self.hash_algo().len())?;
         let arc = Arc::new(parsed);
         if let Ok(mut guard) = self.session_tree_entries.lock() {
             if guard.len() > 4096 {

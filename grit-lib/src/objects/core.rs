@@ -609,43 +609,49 @@ impl<'a> TreeRefIter<'a> {
     }
 
     fn next_entry(&mut self) -> Result<Option<TreeEntryRef<'a>>> {
-        if self.pos >= self.data.len() {
-            return Ok(None);
-        }
-        let start = self.pos;
-        let sp = self.data[self.pos..]
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
-        let mode_bytes = &self.data[self.pos..self.pos + sp];
-        let mode = std::str::from_utf8(mode_bytes)
-            .ok()
-            .and_then(|s| u32::from_str_radix(s, 8).ok())
-            .ok_or_else(|| {
-                Error::CorruptObject(format!(
-                    "invalid tree mode: {}",
-                    String::from_utf8_lossy(mode_bytes)
-                ))
-            })?;
-        self.pos += sp + 1;
-
-        let nul = self.data[self.pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
-        let name = &self.data[self.pos..self.pos + nul];
-        self.pos += nul + 1;
-
-        if self.pos + self.oid_len > self.data.len() {
-            return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
-        }
-        let oid = ObjectId::from_bytes(&self.data[self.pos..self.pos + self.oid_len])?;
-        self.pos += self.oid_len;
-
-        debug_assert!(self.pos >= start);
-        let _ = start;
-        Ok(Some(TreeEntryRef { mode, name, oid }))
+        parse_tree_entry_at(self.data, &mut self.pos, self.oid_len)
     }
+}
+
+/// Parse one tree entry and advance `pos`. Returns `Ok(None)` when `pos` is at end of `data`.
+fn parse_tree_entry_at<'a>(
+    data: &'a [u8],
+    pos: &mut usize,
+    oid_len: usize,
+) -> Result<Option<TreeEntryRef<'a>>> {
+    if *pos >= data.len() {
+        return Ok(None);
+    }
+    let sp = data[*pos..]
+        .iter()
+        .position(|&b| b == b' ')
+        .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
+    let mode_bytes = &data[*pos..*pos + sp];
+    let mode = std::str::from_utf8(mode_bytes)
+        .ok()
+        .and_then(|s| u32::from_str_radix(s, 8).ok())
+        .ok_or_else(|| {
+            Error::CorruptObject(format!(
+                "invalid tree mode: {}",
+                String::from_utf8_lossy(mode_bytes)
+            ))
+        })?;
+    *pos += sp + 1;
+
+    let nul = data[*pos..]
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
+    let name = &data[*pos..*pos + nul];
+    *pos += nul + 1;
+
+    if *pos + oid_len > data.len() {
+        return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
+    }
+    let oid = ObjectId::from_bytes(&data[*pos..*pos + oid_len])?;
+    *pos += oid_len;
+
+    Ok(Some(TreeEntryRef { mode, name, oid }))
 }
 
 impl<'a> Iterator for TreeRefIter<'a> {
@@ -669,16 +675,22 @@ impl<'a> Iterator for TreeRefIter<'a> {
 
 /// Walk `data` once to verify it parses as a tree with the given OID width (no entry allocation).
 fn try_parse_tree_oid_len(data: &[u8], oid_len: usize) -> Result<()> {
-    for entry in TreeRefIter::with_oid_len(data, oid_len) {
-        entry?;
-    }
+    let mut pos = 0usize;
+    while parse_tree_entry_at(data, &mut pos, oid_len)?.is_some() {}
     Ok(())
 }
 
 fn collect_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntry>> {
-    TreeRefIter::with_oid_len(data, oid_len)
-        .map(|entry| entry.map(|e| e.to_owned()))
-        .collect()
+    let mut pos = 0usize;
+    let mut entries = Vec::with_capacity(data.len() / 32);
+    while let Some(entry) = parse_tree_entry_at(data, &mut pos, oid_len)? {
+        entries.push(TreeEntry {
+            mode: entry.mode,
+            name: entry.name.to_vec(),
+            oid: entry.oid,
+        });
+    }
+    Ok(entries)
 }
 
 /// Parse the raw data of a tree object into its entries.
