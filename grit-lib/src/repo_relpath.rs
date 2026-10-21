@@ -31,8 +31,6 @@ pub fn file_name(path: &[u8]) -> &[u8] {
     }
 }
 
-/// Join `parent` and `name` with a single `/` when `parent` is non-empty.
-#[must_use]
 /// Join a stored prefix path with a tree or index name segment (raw bytes).
 #[must_use]
 pub fn format_path_stored(prefix: &str, name: &[u8]) -> String {
@@ -40,6 +38,7 @@ pub fn format_path_stored(prefix: &str, name: &[u8]) -> String {
     storage_string(&join_rel(&prefix_bytes, name))
 }
 
+#[must_use]
 pub fn join_rel(parent: &[u8], name: &[u8]) -> Vec<u8> {
     if parent.is_empty() {
         return name.to_vec();
@@ -55,8 +54,8 @@ pub fn join_rel(parent: &[u8], name: &[u8]) -> Vec<u8> {
 #[must_use]
 pub fn storage_string(path: &[u8]) -> String {
     match std::str::from_utf8(path) {
-        Ok(s) => s.to_owned(),
-        Err(_) => {
+        Ok(s) if !s.starts_with(STORAGE_PREFIX) => s.to_owned(),
+        _ => {
             let mut out = String::with_capacity(STORAGE_PREFIX.len() + path.len() * 2);
             out.push_str(STORAGE_PREFIX);
             for b in path {
@@ -81,10 +80,10 @@ pub fn storage_bytes(stored: &str) -> Cow<'_, [u8]> {
         while i + 1 < bytes.len() {
             let hi = hex_nibble(bytes[i]);
             let lo = hex_nibble(bytes[i + 1]);
-            if hi.is_none() || lo.is_none() {
-                return Cow::Borrowed(stored.as_bytes());
+            match (hi, lo) {
+                (Some(h), Some(l)) => out.push((h << 4) | l),
+                _ => return Cow::Borrowed(stored.as_bytes()),
             }
-            out.push((hi.unwrap() << 4) | lo.unwrap());
             i += 2;
         }
         Cow::Owned(out)
@@ -171,5 +170,14 @@ mod tests {
         assert_eq!(parent_dir(b"a/b/c"), b"a/b");
         assert_eq!(file_name(b"a/b/c"), b"c");
         assert_eq!(join_rel(b"a", b"b"), b"a/b");
+    }
+
+    #[test]
+    fn storage_escapes_utf8_that_looks_like_hex_encoding() {
+        let literal = b"grit+pathhex:6162";
+        let stored = storage_string(literal);
+        assert_ne!(stored, "grit+pathhex:6162");
+        assert!(stored.starts_with(STORAGE_PREFIX));
+        assert_eq!(storage_bytes(&stored)[..], literal[..]);
     }
 }

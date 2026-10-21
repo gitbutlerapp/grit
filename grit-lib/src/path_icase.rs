@@ -63,12 +63,6 @@ impl Stage0TrackedPaths {
         }
     }
 
-    /// Whether a repository-relative path is already tracked at stage 0.
-    #[must_use]
-    pub fn contains(&self, path: &str) -> bool {
-        self.contains_bytes(path.as_bytes())
-    }
-
     /// Whether a repository-relative path is already tracked at stage 0 (raw index bytes).
     #[must_use]
     pub fn contains_bytes(&self, path: &[u8]) -> bool {
@@ -196,9 +190,9 @@ mod tests {
         let mut index = Index::new();
         index.push_entry_unsorted(dummy_entry("f02398b.txt"));
         let tracked = Stage0TrackedPaths::from_index_for_untracked_scan(&index, true);
-        assert!(tracked.contains("f02398b.txt"));
+        assert!(tracked.contains_bytes(b"f02398b.txt"));
         assert!(
-            !tracked.contains("f0688b8.txt"),
+            !tracked.contains_bytes(b"f0688b8.txt"),
             "hash collision must not treat distinct paths as tracked"
         );
     }

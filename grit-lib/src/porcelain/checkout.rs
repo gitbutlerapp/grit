@@ -171,7 +171,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
                 continue;
             }
             if let Some(path) = &change.new_path {
-                written_by_tree_diff.insert(path.as_bytes().to_vec());
+                written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
             }
         }
     }
@@ -2116,7 +2116,7 @@ fn materialize_gitlink_worktree(
     dir_cache: &mut LeadingDirCache,
 ) -> Result<()> {
     dir_cache.ensure_parents(work_tree, rel_path)?;
-    let file_path = work_tree.join(rel_path);
+    let file_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
     if let Ok(meta) = fs::symlink_metadata(&file_path) {
         if meta.file_type().is_symlink() || meta.is_file() {
             fs::remove_file(&file_path)?;
@@ -2271,18 +2271,21 @@ impl LeadingDirCache {
     }
 
     fn ensure_parents(&mut self, work_tree: &Path, rel_path: &str) -> Result<()> {
-        use std::path::Component;
-        let path = Path::new(rel_path);
-        let Some(parent_rel) = path.parent() else {
-            return Ok(());
-        };
-        if parent_rel.as_os_str().is_empty() {
+        let rel_bytes = crate::repo_relpath::storage_bytes(rel_path);
+        let parent = crate::repo_relpath::parent_dir(&rel_bytes);
+        if parent.is_empty() {
             return Ok(());
         }
-        let mut cur = work_tree.to_path_buf();
-        for comp in parent_rel.components() {
-            if let Component::Normal(name) = comp {
-                cur.push(name);
+        #[cfg(unix)]
+        {
+            use std::ffi::OsStr;
+            use std::os::unix::ffi::OsStrExt;
+            let mut cur = work_tree.to_path_buf();
+            for comp in parent.split(|&b| b == b'/') {
+                if comp.is_empty() {
+                    continue;
+                }
+                cur.push(OsStr::from_bytes(comp));
                 if self.ready.contains(&cur) {
                     continue;
                 }
@@ -2295,6 +2298,31 @@ impl LeadingDirCache {
                     // Exists as a directory already.
                 }
                 self.ready.insert(cur.clone());
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            use std::path::Component;
+            let parent_str = std::str::from_utf8(&parent)
+                .map_err(|_| Error::Message("non-UTF-8 parent path during checkout".into()))?;
+            let path = Path::new(parent_str);
+            let mut cur = work_tree.to_path_buf();
+            for comp in path.components() {
+                if let Component::Normal(name) = comp {
+                    cur.push(name);
+                    if self.ready.contains(&cur) {
+                        continue;
+                    }
+                    if let Ok(meta) = leading_dir_metadata(&cur) {
+                        if meta.file_type().is_symlink() || !meta.is_dir() {
+                            fs::remove_file(&cur)?;
+                        }
+                    }
+                    if fs::create_dir(&cur).is_err() {
+                        // Exists as a directory already.
+                    }
+                    self.ready.insert(cur.clone());
+                }
             }
         }
         Ok(())
@@ -2407,7 +2435,7 @@ pub fn apply_index_file_mode(abs_path: &Path, mode: u32) -> Result<()> {
 pub fn prepare_parent_dirs_for_checkout(work_tree: &Path, rel_path: &str) -> Result<()> {
     let mut cache = LeadingDirCache::new();
     cache.ensure_parents(work_tree, rel_path)?;
-    let abs_path = work_tree.join(rel_path);
+    let abs_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
     if let Some(parent) = abs_path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
             Error::PathError(format!("creating parent directories for '{rel_path}': {e}"))

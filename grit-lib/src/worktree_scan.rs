@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+type DirAbsFn = dyn Fn(&[u8]) -> PathBuf + Send + Sync;
+
 /// Minimum blob entries sharing a parent before `read_dir` amortizes separate stats.
 /// Deep trees often have one tracked file per leaf directory; one `read_dir` plus
 /// `DirEntry::metadata` per parent beats a full-path `symlink_metadata` per indexed file on
@@ -318,22 +320,23 @@ pub(crate) fn plan_blob_entries_by_dir_for_paths(
         indices: Vec::new(),
     };
     for path in paths {
-        let path_bytes = path.as_bytes();
-        let Some(ie) = index.get(path_bytes, 0) else {
+        let path_bytes = crate::repo_relpath::storage_bytes(path);
+        let Some(ie) = index.get(path_bytes.as_ref(), 0) else {
             continue;
         };
         if !index_blob_scan_eligible(ie, index, false) {
             continue;
         }
+        let path_bytes_ref = path_bytes.as_ref();
         let Ok(entry_index) = index.entries.binary_search_by(|e| {
             e.path
                 .as_slice()
-                .cmp(path_bytes)
+                .cmp(path_bytes_ref)
                 .then_with(|| e.stage().cmp(&0))
         }) else {
             continue;
         };
-        let dir = crate::repo_relpath::parent_dir(path_bytes);
+        let dir = crate::repo_relpath::parent_dir(path_bytes_ref);
         plan.push_entry(dir, entry_index);
     }
     plan.finish()
@@ -850,8 +853,8 @@ fn preload_blob_lookups_parallel(
     plan: &BlobScanPlan,
     threads: usize,
     symlink_missing: &HashSet<Vec<u8>>,
-    dir_abs: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync>,
-    file_abs: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync>,
+    dir_abs: Arc<DirAbsFn>,
+    file_abs: Arc<DirAbsFn>,
     sparse: BlobScanSparseMode,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>> {
     let blob_count = plan.len();
@@ -1014,8 +1017,8 @@ pub(crate) fn collect_blob_lookup_batches(
 
     let blob_count = plan.len();
     let threads = stat_scan_thread_count(thread_policy, config, scan_options, blob_count);
-    let dir_abs_arc: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync> = Arc::new(dir_abs);
-    let file_abs_arc: Arc<dyn Fn(&[u8]) -> PathBuf + Send + Sync> = Arc::new(file_abs);
+    let dir_abs_arc: Arc<DirAbsFn> = Arc::new(dir_abs);
+    let file_abs_arc: Arc<DirAbsFn> = Arc::new(file_abs);
     let batches = if threads > 1 {
         // Always partition parallel preload by directory groups so multi-file parents use
         // one read_dir per directory (Git preload-index style). A flat per-file stat loop
@@ -1375,8 +1378,7 @@ mod tests {
             }
         };
         let wt_file = wt.clone();
-        let file_abs =
-            move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel);
+        let file_abs = move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel);
         let policy = crate::parallel::ThreadPolicy::default();
         let config = crate::config::ConfigSet::new();
         let mut seen = 0;
@@ -1443,8 +1445,7 @@ mod tests {
             }
         };
         let wt_file = wt.clone();
-        let file_abs =
-            move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel);
+        let file_abs = move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_file, rel);
         let policy = crate::parallel::ThreadPolicy::default();
         let config = crate::config::ConfigSet::new();
         let mut seen = 0;

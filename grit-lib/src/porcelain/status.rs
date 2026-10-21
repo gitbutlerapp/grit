@@ -1441,14 +1441,6 @@ fn has_tracked_under(index: &Index, gitlinks: &HashSet<String>, rel_dir: &str) -
     })
 }
 
-fn relative_path(parent: &str, name: &str) -> String {
-    if parent.is_empty() {
-        name.to_string()
-    } else {
-        format!("{parent}/{name}")
-    }
-}
-
 /// Whether `dir` is the work tree of a nested submodule of the superproject at
 /// `super_git_dir` (its `.git` resolves under `super_git_dir/modules`).
 pub fn dir_is_nested_submodule_worktree(super_git_dir: &Path, dir: &Path) -> bool {

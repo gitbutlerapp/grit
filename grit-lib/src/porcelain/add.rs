@@ -776,7 +776,7 @@ fn stage_untracked_paths_parallel(
         if !matches(path) {
             continue;
         }
-        if indexed_any_stage.contains(path.as_bytes()) {
+        if indexed_any_stage.contains(crate::repo_relpath::storage_bytes(path).as_ref()) {
             continue;
         }
         let resolved = if precompose_unicode {

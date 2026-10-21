@@ -369,17 +369,15 @@ fn apply_worktree_restore(ctx: WorktreeRestoreContext<'_>) -> Result<()> {
             if entry.stage() != 0 {
                 continue;
             }
-            let path = match std::str::from_utf8(&entry.path) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            if !matcher.matches(path) {
+            let path = crate::repo_relpath::storage_string(&entry.path);
+            if !matcher.matches(&path) {
                 continue;
             }
             if entry.mode == MODE_GITLINK {
                 continue;
             }
-            if worktree_index_entry_up_to_date(repo, work_tree, entry, path, index_mtime, &rules)? {
+            if worktree_index_entry_up_to_date(repo, work_tree, entry, &path, index_mtime, &rules)?
+            {
                 continue;
             }
             to_write.push(pos);
@@ -388,9 +386,7 @@ fn apply_worktree_restore(ctx: WorktreeRestoreContext<'_>) -> Result<()> {
             outcome.restored.reserve(to_write.len());
         }
         for pos in to_write {
-            let path = std::str::from_utf8(&index_out.entries[pos].path)
-                .map_err(|_| Error::Message("non-UTF-8 path in index".into()))?
-                .to_string();
+            let path = crate::repo_relpath::storage_string(&index_out.entries[pos].path);
             let oid = index_out.entries[pos].oid;
             let mode = index_out.entries[pos].mode;
             restore_worktree_blob_from_index(
@@ -483,7 +479,7 @@ fn worktree_index_entry_up_to_date(
     if entry.mode != crate::index::MODE_REGULAR && entry.mode != MODE_EXECUTABLE {
         return Ok(false);
     }
-    let abs_path = work_tree.join(path);
+    let abs_path = crate::repo_relpath::worktree_abs(work_tree, path);
     let meta = match fs::symlink_metadata(&abs_path) {
         Ok(m) => m,
         Err(_) => return Ok(false),
@@ -540,9 +536,10 @@ fn restore_worktree_blob_from_index(
         )));
     };
     write_to_worktree_cached(work_tree, path, &bytes, mode, dir_cache)?;
-    let abs = work_tree.join(path);
+    let abs = crate::repo_relpath::worktree_abs(work_tree, path);
     let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-    index_out.add_or_replace(entry_from_metadata(&meta, path.as_bytes(), oid, mode));
+    let index_path = crate::repo_relpath::storage_bytes(path);
+    index_out.add_or_replace(entry_from_metadata(&meta, index_path.as_ref(), oid, mode));
     *index_dirty = true;
     outcome.restored.push(path.to_string());
     Ok(())
