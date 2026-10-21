@@ -9,11 +9,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::diff::{
-    entry_is_racy, hash_worktree_blob, index_entry_worktree_abs, materialize_worktree_blob,
-    read_submodule_head_oid, symlink_target_bytes, SymlinkDirCache,
+    entry_is_racy, hash_worktree_blob, index_entry_worktree_abs, read_submodule_head_oid,
+    symlink_target_bytes, SymlinkDirCache,
 };
 use crate::error::{Error, Result};
-use crate::hash::Parallelism;
+use crate::hash::{hash_object, Parallelism};
 use crate::index::index_file_mtime;
 use crate::index::{
     entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_GITLINK,
@@ -188,7 +188,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     // serial on campaign-scale indexes so bulk add stays under the factory RSS ceiling.
     let parallel_restage = entry_count_at_start >= thresholds.parallel_tracked_restage
         && entry_count_at_start < PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES;
-    if bulk_untr_defer && !dry_run {
+    if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = true;
     }
 
@@ -202,7 +202,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         rules,
         dry_run,
     );
-    if bulk_untr_defer && !dry_run {
+    if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = false;
     }
     result
@@ -232,14 +232,6 @@ pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &Stag
         if let Some(root) = uc.root.as_mut() {
             root.valid = false;
         }
-    }
-}
-
-fn tracked_index_remove(index: &mut Index, raw_path: &[u8], dry_run: bool) -> bool {
-    if dry_run {
-        index.get(raw_path, 0).is_some()
-    } else {
-        index.remove(raw_path)
     }
 }
 
@@ -280,7 +272,7 @@ fn stage_tracked_modifications_in_index_body(
 
     let mut symlink_parent_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut summary = StageTrackedSummary {
-        untracked_invalidation_deferred: bulk_untr_defer && !dry_run,
+        untracked_invalidation_deferred: bulk_untr_defer,
         ..StageTrackedSummary::default()
     };
     let ignorecase = repo
@@ -463,7 +455,7 @@ fn stage_tracked_modifications_in_index_body(
         Ok(())
     })?;
     for raw_path in pending_removals {
-        if tracked_index_remove(index, &raw_path, dry_run) {
+        if index.remove(&raw_path) {
             summary.removed.push(raw_path);
         }
     }
@@ -527,20 +519,14 @@ fn refresh_unmerged_tracked_path(
         .unwrap_or(0o100644);
     match symlink_metadata_for_staging(abs_path)? {
         Some(_) => {
-            if !dry_run {
-                index.remove(raw_path);
-            }
+            index.remove(raw_path);
             if idx_mode == 0o160000 {
                 if let Some(oid) = read_submodule_head_oid(abs_path) {
-                    if !dry_run {
-                        stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
-                    }
+                    stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
                     summary.modified.push(raw_path.to_vec());
                 }
             } else {
-                if !dry_run {
-                    stage_blob_from_worktree(repo, index, abs_path, raw_path, None, rules)?;
-                }
+                stage_blob_from_worktree(repo, index, abs_path, raw_path, None, rules, dry_run)?;
                 summary.modified.push(raw_path.to_vec());
             }
         }
@@ -598,7 +584,7 @@ fn stage_tracked_path_individual(
 ) -> Result<()> {
     let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
     if path_has_symlink_parent_cached(work_tree, &abs_path, symlink_parent_cache) {
-        if tracked_index_remove(index, raw_path, dry_run) {
+        if index.remove(raw_path) {
             summary.removed.push(raw_path.to_vec());
         }
         return Ok(());
@@ -622,7 +608,7 @@ fn stage_tracked_path_individual(
         }
         None if idx_e.skip_worktree() => {}
         None => {
-            if tracked_index_remove(index, raw_path, dry_run) {
+            if index.remove(raw_path) {
                 summary.removed.push(raw_path.to_vec());
             }
         }
@@ -677,13 +663,10 @@ fn refresh_present_tracked_path(
                 {
                     return Ok(false);
                 }
-                if dry_run {
-                    return Ok(true);
-                }
                 stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
                 return Ok(true);
             }
-        } else if tracked_index_remove(index, raw_path, dry_run) {
+        } else if index.remove(raw_path) {
             return Ok(true);
         } else {
             return Ok(false);
@@ -698,9 +681,6 @@ fn refresh_present_tracked_path(
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
         if wt_mode == idx_mode || !trust_filemode {
             return Ok(false);
-        }
-        if dry_run {
-            return Ok(true);
         }
         let entry = entry_from_stat(abs_path, raw_path, idx_oid, wt_mode)?;
         index.stage_file(entry);
@@ -741,16 +721,13 @@ fn refresh_present_tracked_path(
         }
         Err(_) => {
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
-            let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta)?;
+            let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta, !dry_run)?;
             if !idx_intent_to_add && idx_oid == oid && (wt_mode == idx_mode || !trust_filemode) {
                 return Ok(false);
             }
             oid
         }
     };
-    if dry_run {
-        return Ok(true);
-    }
     let mode_for_index = if trust_filemode { wt_mode } else { idx_mode };
     let entry = entry_from_stat(abs_path, raw_path, oid, mode_for_index)?;
     index.stage_file(entry);
@@ -841,11 +818,9 @@ fn restage_deferred_jobs(
             abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
         let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
         modified.push(raw_path.to_vec());
-        if !dry_run {
-            replacements.push(entry);
-        }
+        replacements.push(entry);
     }
-    if !dry_run && !replacements.is_empty() {
+    if !replacements.is_empty() {
         index.replace_stage0_entries_batch(replacements);
     }
     Ok(modified)
@@ -857,7 +832,7 @@ fn refresh_gitlink(
     raw_path: &[u8],
     abs_path: &Path,
     idx_e: &IndexEntry,
-    dry_run: bool,
+    _dry_run: bool,
 ) -> Result<bool> {
     if let Some(oid) = read_submodule_head_oid(abs_path) {
         if index
@@ -867,9 +842,6 @@ fn refresh_gitlink(
             .is_some_and(|e| e.oid == oid && e.mode == 0o160000)
         {
             return Ok(false);
-        }
-        if dry_run {
-            return Ok(true);
         }
         stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
         return Ok(true);
@@ -897,9 +869,10 @@ fn stage_blob_from_worktree(
     raw_path: &[u8],
     mode_override: Option<u32>,
     rules: &mut WorktreeRules,
+    dry_run: bool,
 ) -> Result<()> {
     let meta = fs::symlink_metadata(abs_path)?;
-    let oid = read_worktree_blob_oid(repo, abs_path, &meta, raw_path, rules)?;
+    let oid = read_worktree_blob_oid(repo, abs_path, &meta, raw_path, rules, !dry_run)?;
     #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;
     let mode = mode_override.unwrap_or_else(|| {
@@ -923,17 +896,18 @@ fn read_worktree_blob_oid(
     meta: &fs::Metadata,
     raw_path: &[u8],
     rules: &mut WorktreeRules,
+    materialize: bool,
 ) -> Result<ObjectId> {
     if meta.file_type().is_symlink() {
         let target = fs::read_link(abs_path)?;
         let data = symlink_target_bytes(&target);
-        return repo.odb().write(ObjectKind::Blob, &data);
+        return hash_or_store_blob(repo, &data, materialize);
     }
     if let Ok(rel_path) = std::str::from_utf8(raw_path) {
         let file_attrs = rules.file_attrs(rel_path, false);
         #[cfg(test)]
         repo.odb().hot_path_metrics().record_blob_content_read();
-        return materialize_worktree_blob(
+        return hash_worktree_blob(
             repo.odb(),
             abs_path,
             meta,
@@ -942,15 +916,25 @@ fn read_worktree_blob_oid(
             rel_path,
             None,
             Some(rules.filter_process()),
+            materialize,
         );
     }
-    read_worktree_blob_oid_raw(repo, abs_path, meta)
+    read_worktree_blob_oid_raw(repo, abs_path, meta, materialize)
+}
+
+fn hash_or_store_blob(repo: &Repository, data: &[u8], materialize: bool) -> Result<ObjectId> {
+    if materialize {
+        repo.odb().write(ObjectKind::Blob, data)
+    } else {
+        Ok(hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data))
+    }
 }
 
 fn read_worktree_blob_oid_raw(
     repo: &Repository,
     abs_path: &Path,
     meta: &fs::Metadata,
+    materialize: bool,
 ) -> Result<ObjectId> {
     let data = if meta.file_type().is_symlink() {
         let target = fs::read_link(abs_path)?;
@@ -960,7 +944,7 @@ fn read_worktree_blob_oid_raw(
         repo.odb().hot_path_metrics().record_blob_content_read();
         fs::read(abs_path)?
     };
-    repo.odb().write(ObjectKind::Blob, &data)
+    hash_or_store_blob(repo, &data, materialize)
 }
 
 fn rel_path_has_symlink_parent(work_tree: &Path, rel_path: &str) -> bool {

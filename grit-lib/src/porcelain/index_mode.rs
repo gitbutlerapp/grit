@@ -110,7 +110,7 @@ pub(crate) fn apply_executable_hint_to_index(
     index: &mut Index,
     hint: StageExecutableHint,
     matches: &impl Fn(&str) -> bool,
-    dry_run: bool,
+    _dry_run: bool,
 ) -> Result<Vec<String>> {
     if hint == StageExecutableHint::None {
         return Ok(Vec::new());
@@ -147,10 +147,6 @@ pub(crate) fn apply_executable_hint_to_index(
             continue;
         }
         if entry.mode == target {
-            continue;
-        }
-        if dry_run {
-            updated.push(rel.to_owned());
             continue;
         }
         if let Some(entry) = index.get_mut(&path, 0) {

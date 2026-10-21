@@ -115,3 +115,39 @@ fn add_dry_run_json_lists_paths_without_index_write() {
     let ls = git_out(repo, &["ls-files"]);
     assert!(!ls.contains("n.txt"));
 }
+
+#[test]
+fn add_dry_run_json_matches_following_real_add_ignorecase_rename() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let repo = dir.path();
+    assert!(run_grit(repo, &["init"]).status.success());
+    git_out(repo, &["config", "user.email", "t@example.com"]);
+    git_out(repo, &["config", "user.name", "Test"]);
+    git_out(repo, &["config", "core.ignorecase", "true"]);
+    fs::write(repo.join("foo"), b"line\n").unwrap();
+    git_out(repo, &["add", "foo"]);
+    git_out(repo, &["commit", "-qm", "seed"]);
+    fs::rename(repo.join("foo"), repo.join("FOO")).expect("case rename");
+
+    let index_mtime_before = fs::metadata(repo.join(".git/index"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let dry = json(repo, &["add", "--dry-run", "--json"]);
+    assert_eq!(dry["dry_run"], true);
+    assert_eq!(
+        fs::metadata(repo.join(".git/index"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        index_mtime_before,
+        "dry-run must not touch on-disk index"
+    );
+
+    let real = json(repo, &["add", "--json"]);
+    assert_eq!(real["dry_run"], false);
+    assert_eq!(dry["added"], real["added"]);
+    assert_eq!(dry["modified"], real["modified"]);
+    assert_eq!(dry["removed"], real["removed"]);
+    assert_eq!(dry["count"], real["count"]);
+}
