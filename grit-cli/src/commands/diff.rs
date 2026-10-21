@@ -300,6 +300,16 @@ pub struct Segment {
     pub emphasis: bool,
 }
 
+/// Process exit code for `--exit-code` / `--quiet`: 0 when no file changes, 1 otherwise.
+#[must_use]
+pub fn exit_code(outcome: &DiffOutcome) -> i32 {
+    if outcome.files.is_empty() {
+        0
+    } else {
+        1
+    }
+}
+
 /// Inputs for `grit diff` (flags and revision arguments).
 pub struct DiffRunOptions {
     pub staged: bool,
