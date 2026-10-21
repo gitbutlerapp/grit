@@ -158,6 +158,12 @@ pub fn finish_git_git_matrix_ctx(headline: &mut DailyHeadlineContext, git: &Path
         .unwrap_or("README.md");
     let blob_spec = format!("HEAD:{path}");
     headline.cat_blob = Some(git_rev_parse(git, &headline.repo, &blob_spec)?);
+    let depth = if headline.smoke { 500 } else { 5000 };
+    let deep_spec = format!("HEAD~{depth}");
+    let deep_hex = git_rev_parse(git, &headline.repo, &deep_spec)?;
+    let deep_oid: grit_lib::objects::ObjectId = deep_hex.parse().context("deep oid")?;
+    let derived = grit_lib::change_id::ChangeId::derived_from_commit_id(&deep_oid);
+    headline.change_id_bench_prefix = Some(derived.short(12).to_string());
     run_git(
         git,
         &headline.repo,
@@ -501,6 +507,16 @@ pub fn resolve_head_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     (
         sh_devnull(&ctx.grit, &["resolve", "HEAD"]),
         sh_devnull(&ctx.git, &["rev-parse", "HEAD"]),
+    )
+}
+
+pub fn resolve_change_id_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let Some(prefix) = ctx.change_id_bench_prefix.as_deref() else {
+        return noop_bench();
+    };
+    (
+        sh_devnull(&ctx.grit, &["resolve", prefix]),
+        sh_devnull(&ctx.git, &["log", "--all", "--format=%H"]),
     )
 }
 

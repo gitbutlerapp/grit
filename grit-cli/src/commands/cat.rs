@@ -230,6 +230,17 @@ fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
             }
             anyhow::anyhow!(msg)
         }
+        ResolveError::AmbiguousChangeId { candidates, .. } => {
+            let mut msg = format!("ambiguous change id '{spec}'");
+            for hint in candidates {
+                let short_id = hint.change_id.chars().take(8).collect::<String>();
+                msg.push_str(&format!(
+                    "\n  {} {} {}",
+                    hint.oid_hex, short_id, hint.subject
+                ));
+            }
+            anyhow::anyhow!(msg)
+        }
         ResolveError::PathNotInTree { path, revision } => {
             anyhow::anyhow!("path '{path}' does not exist in '{revision}'")
         }

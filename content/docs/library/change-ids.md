@@ -40,6 +40,17 @@ Embedders inject randomness with [`ChangeIdGenerator`](rustdoc:grit_lib::change_
 
 [`prepare_commit_bytes`](rustdoc:grit_lib::porcelain::commit::prepare_commit_bytes) and [`write_commit_object`](rustdoc:grit_lib::porcelain::commit::write_commit_object) do **not** add change ids — stash, notes, and other auxiliary commits stay header-free unless the caller sets one.
 
+## Revisions
+
+After refs and abbreviated object ids, grit resolves **change ids** as revision tokens:
+
+- **Alphabet:** reverse-hex ids use `k`–`z` (4–32 characters). A token in that range is treated as a change-id prefix, not a Git object id.
+- **Lookup:** [`find_commits_by_change_id_prefix`](rustdoc:grit_lib::change_id::find_commits_by_change_id_prefix) walks commits reachable from all refs and `HEAD` (not reflogs), compares [`resolved_change_id`](rustdoc:grit_lib::change_id::resolved_change_id) on each commit, and returns a unique match or [`RevParseError::AmbiguousChangeId`](rustdoc:grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousChangeId).
+- **Composition:** change ids compose with the usual suffixes — `\<cid\>~1`, `\<cid\>^`, `\<cid\>..main`, peel suffixes, and path suffixes — because they plug into the same base-name resolution as branches and short oids.
+- **Precedence:** a branch or tag named like a change-id token wins (for example `refs/heads/zzzz` before the change-id `zzzz…`).
+
+Use `grit resolve`, `grit show`, `grit log`, and other commands that take revisions; no separate flag is required.
+
 ## Git compatibility
 
 The header is an ordinary commit header line. System `git` preserves it on read/write; `git fsck --strict` accepts commits that carry `change-id`.

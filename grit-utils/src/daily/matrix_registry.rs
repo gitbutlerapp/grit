@@ -232,6 +232,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD",
     },
     ScenarioSpec {
+        id: "resolve/change-id@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Resolve change id prefix: grit resolve <cid> vs git log --all --format=%H",
+    },
+    ScenarioSpec {
         id: "cat/blob@git-git",
         area: Area::Revwalk,
         headline: false,

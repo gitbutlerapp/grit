@@ -13,7 +13,7 @@ grit resolve [--short] <SPEC>...
 
 ## Description
 
-Resolves one or more revision specs to the object id Git would produce from `git rev-parse`, plus the object type and uncompressed size. Type and size follow `git cat-file` semantics, including `refs/replace` when replace refs are enabled (honor `GIT_NO_REPLACE_OBJECTS` to read the stored object instead). Supported forms match the library rev-parse surface: branches and tags, `HEAD~n`, peel suffixes such as `^{tree}`, path suffixes such as `main:path/file`, reflog selectors like `@{1}`, and abbreviated object ids.
+Resolves one or more revision specs to an object id, plus the object type and uncompressed size. Type and size follow `git cat-file` semantics, including `refs/replace` when replace refs are enabled (honor `GIT_NO_REPLACE_OBJECTS` to read the stored object instead). Supported forms match the library rev-parse surface: branches and tags, `HEAD~n`, peel suffixes such as `^{tree}`, path suffixes such as `main:path/file`, reflog selectors like `@{1}`, abbreviated object ids, and **change ids** (reverse-hex tokens in `k`–`z`, 4–32 characters — stored header or derived id). See [Change ids — Revisions](../library/change-ids.md#revisions).
 
 Each spec prints on its own line as `OID TYPE` (full hex by default). With `--short`, oids are abbreviated using the same uniqueness rules as elsewhere in grit.
 

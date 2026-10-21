@@ -42,7 +42,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` |
 
-Revisions can be full or short ids, branch or tag names, or expressions like `HEAD~2`.
+Revisions can be full or short object ids, branch or tag names, change ids (reverse-hex `k`–`z`, 4–32 chars — unique prefix or full id), or expressions like `HEAD~2` and `\<cid\>~1`.
 
 Commit rows in `--json` from `log`, `show`, `revs`, and `status` share `change_id` (reverse-hex) and `change_id_stored`. Human `log` and `show` prefix each commit with `change <8 chars>`; `--oneline` does not.
 

@@ -97,6 +97,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `patch-id/commit@git-git` | Stable patch-id for HEAD: grit patch-id HEAD vs git patch-id --stable HEAD |
 | `reflog/list@synth-10k` | Reflog for HEAD: grit reflog vs git reflog |
 | `resolve/head-n@git-git` | Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD |
+| `resolve/change-id@git-git` | Resolve change-id prefix: grit resolve \<cid\> vs git log --all --format=%H |
 | `revs/count@git-git` | Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD |
 | `shortlog/ahead@git-git` | Ahead-of-target commits: grit shortlog vs git log <target>..HEAD --oneline |
 | `show/head@big-blobs` | Show HEAD on big-blobs: grit show vs git show |

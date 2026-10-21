@@ -56,6 +56,8 @@ pub struct DailyHeadlineContext {
     pub shortlog_git_range: Option<String>,
     /// Blob object id for `cat/blob@git-git` (from `git rev-parse HEAD:<path>`).
     pub cat_blob: Option<String>,
+    /// Change-id prefix for `resolve/change-id@git-git` (derived from `HEAD~N`).
+    pub change_id_bench_prefix: Option<String>,
     /// History rewrite fixture metadata for `history/reword@synth-10k`.
     pub history_meta: Option<crate::history_rewrite_fixture::HistoryRewriteMeta>,
     /// Path to a bundle file for bundle scenarios.
@@ -84,6 +86,7 @@ impl DailyHeadlineContext {
             merge_base_b: None,
             shortlog_git_range: None,
             cat_blob: None,
+            change_id_bench_prefix: None,
             history_meta: None,
             bundle_path: None,
             linked_worktree: None,
