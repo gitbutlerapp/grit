@@ -761,6 +761,16 @@ enum DailySubCmd {
         /// Daily census JSON report path
         report: PathBuf,
     },
+    /// Compare two daily reports; exit non-zero when ratios drift beyond tolerance
+    Compare {
+        baseline: PathBuf,
+        candidate: PathBuf,
+        #[arg(long, default_value = "0.10")]
+        tolerance: f64,
+        /// Print a markdown drift table on stdout
+        #[arg(long)]
+        markdown: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1280,6 +1290,51 @@ fn main() -> Result<()> {
                 grit_utils::validate_daily_report(report)?;
                 eprintln!("daily report valid: {}", report.display());
                 return Ok(());
+            }
+            Some(DailySubCmd::Compare {
+                baseline,
+                candidate,
+                tolerance,
+                markdown,
+            }) => {
+                let outcome =
+                    grit_utils::daily::compare_daily_files(baseline, candidate, *tolerance)?;
+                if *markdown {
+                    println!(
+                        "{}",
+                        grit_utils::daily::render_daily_compare_markdown(
+                            baseline,
+                            candidate,
+                            *tolerance,
+                            &outcome
+                        )
+                    );
+                }
+                if outcome.is_success() {
+                    eprintln!("All daily scenario ratios within tolerance {tolerance}");
+                    eprintln!(
+                        "Compared {} rows; skipped {} pending, {} sub-20ms time, {} git median drift, {} grit median drift; {} missing in candidate",
+                        outcome.compared,
+                        outcome.skipped_pending,
+                        outcome.skipped_sub_20ms_time,
+                        outcome.skipped_git_median_drift,
+                        outcome.skipped_grit_median_drift,
+                        outcome.missing_in_candidate
+                    );
+                    return Ok(());
+                }
+                eprintln!("Daily ratio drift exceeds tolerance {tolerance}:");
+                for m in &outcome.mismatches {
+                    let metric = match m.metric {
+                        grit_utils::daily::DailyCompareMetric::Time => "time",
+                        grit_utils::daily::DailyCompareMetric::Memory => "memory",
+                    };
+                    eprintln!(
+                        "  {} [{metric}]: {:.4} vs {:.4} (delta {:.4})",
+                        m.scenario_id, m.ratio_a, m.ratio_b, m.delta
+                    );
+                }
+                std::process::exit(1);
             }
             None => {
                 let git = resolve_binary("git", cli.git.as_deref())?;

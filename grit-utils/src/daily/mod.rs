@@ -1,6 +1,7 @@
 //! Daily performance census report schema, scenario registry, and direct-spawn runner.
 
 pub mod areas;
+pub mod compare;
 pub mod coverage;
 pub mod helpers;
 pub mod matrix_helpers;
@@ -25,5 +26,9 @@ pub use registry::{
 pub use revision_selection_matrix_registry::REVISION_SELECTION_MATRIX_SCENARIOS;
 pub use schema::{
     DailyBenchReport, DailyScenarioResult, DailyToolRun, DailyToolVersions, ScenarioId, SCHEMA_TAG,
+};
+pub use compare::{
+    compare_daily_files, compare_daily_reports, render_daily_compare_markdown, DailyCompareMetric,
+    DailyCompareMismatch, DailyCompareOutcome, TIME_RATIO_MIN_GIT_MS,
 };
 pub use validate::validate_daily_report;
