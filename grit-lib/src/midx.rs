@@ -1669,7 +1669,7 @@ fn build_midx_bytes_filtered(
     } else {
         HashAlgo::Sha1
     };
-    out.extend_from_slice(algo.digest(&out).as_bytes());
+    out.extend_from_slice(&algo.checksum_digest(&out));
 
     Ok((out, bitmap_rid_order))
 }

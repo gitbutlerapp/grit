@@ -22,7 +22,7 @@ use crate::diff::{
     DiffStatus,
 };
 use crate::error::Result;
-use crate::hash::ObjectHasher;
+use crate::hash::ChecksumHasher;
 use crate::merge_file;
 use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -72,7 +72,7 @@ pub fn compute_patch_ids_from_text(
     let mut results: Vec<(ObjectId, ObjectId)> = Vec::new();
 
     // Current accumulated state for the patch being processed.
-    let mut ctx = ObjectHasher::new(algo);
+    let mut ctx = ChecksumHasher::new(algo);
     let mut result = [0u8; PATCH_ID_DIGEST_MAX];
     let mut patchlen: usize = 0;
     // before/after: -1 = parsing file header, 0 = awaiting @@ hunk, >0 = in hunk
@@ -120,7 +120,7 @@ pub fn compute_patch_ids_from_text(
                 }
                 // Reset for the new patch.
                 result = [0u8; PATCH_ID_DIGEST_MAX];
-                ctx = ObjectHasher::new(algo);
+                ctx = ChecksumHasher::new(algo);
                 patchlen = 0;
                 before = -1;
                 after = -1;
@@ -198,7 +198,7 @@ pub fn compute_patch_ids_from_text(
                     }
                 }
                 result = [0u8; PATCH_ID_DIGEST_MAX];
-                ctx = ObjectHasher::new(algo);
+                ctx = ChecksumHasher::new(algo);
                 patchlen = 0;
                 before = -1;
                 after = -1;
@@ -279,11 +279,11 @@ pub fn compute_patch_ids_from_text(
 fn text_flush_one_hunk(
     result: &mut [u8],
     digest_len: usize,
-    ctx: &mut ObjectHasher,
+    ctx: &mut ChecksumHasher,
     algo: HashAlgo,
 ) {
     let mut hash_buf = [0u8; PATCH_ID_DIGEST_MAX];
-    let old = std::mem::replace(ctx, ObjectHasher::new(algo));
+    let old = std::mem::replace(ctx, ChecksumHasher::new(algo));
     let _ = old.finalize_into(&mut hash_buf);
     let mut carry: u16 = 0;
     for i in 0..digest_len {
@@ -296,7 +296,7 @@ fn text_flush_one_hunk(
 /// Hash `raw` bytes into `ctx`, skipping ASCII whitespace.
 ///
 /// Returns the number of non-whitespace bytes fed to the hasher.
-fn hash_without_whitespace(ctx: &mut ObjectHasher, raw: &[u8]) -> usize {
+fn hash_without_whitespace(ctx: &mut ChecksumHasher, raw: &[u8]) -> usize {
     let mut count = 0;
     for &b in raw {
         if !b.is_ascii_whitespace() {
@@ -513,11 +513,11 @@ fn compute_patch_id_filtered(
     }
 
     let mut result = [0u8; PATCH_ID_DIGEST_MAX];
-    let mut rolling_ctx = ObjectHasher::new(algo);
+    let mut rolling_ctx = ChecksumHasher::new(algo);
 
     for entry in &diffs {
         if per_file_flush {
-            let mut ctx = ObjectHasher::new(algo);
+            let mut ctx = ChecksumHasher::new(algo);
             patch_id_hash_diff_entry(odb, entry, &mut ctx)?;
             text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
         } else {
@@ -611,11 +611,11 @@ fn patch_id_index_oid(oid: &ObjectId) -> String {
     oid.to_hex().chars().take(7).collect()
 }
 
-fn patch_id_add_string(ctx: &mut ObjectHasher, s: &[u8]) {
+fn patch_id_add_string(ctx: &mut ChecksumHasher, s: &[u8]) {
     ctx.update(s);
 }
 
-fn patch_id_add_mode(ctx: &mut ObjectHasher, mode: u32) {
+fn patch_id_add_mode(ctx: &mut ChecksumHasher, mode: u32) {
     let text = format!("{mode:06o}");
     ctx.update(text.as_bytes());
 }
@@ -729,7 +729,7 @@ fn patch_id_append_git_show_entry(odb: &Odb, entry: &DiffEntry, out: &mut Vec<u8
 }
 
 /// Hash one tree diff entry into `ctx` (rename or regular file).
-fn patch_id_hash_diff_entry(odb: &Odb, entry: &DiffEntry, ctx: &mut ObjectHasher) -> Result<()> {
+fn patch_id_hash_diff_entry(odb: &Odb, entry: &DiffEntry, ctx: &mut ChecksumHasher) -> Result<()> {
     if entry.status == DiffStatus::Renamed {
         patch_id_hash_rename_entry_into_ctx(odb, entry, ctx)
     } else {
@@ -741,7 +741,7 @@ fn patch_id_hash_diff_entry(odb: &Odb, entry: &DiffEntry, ctx: &mut ObjectHasher
 fn patch_id_hash_file_entry_into_ctx(
     odb: &Odb,
     entry: &DiffEntry,
-    ctx: &mut ObjectHasher,
+    ctx: &mut ChecksumHasher,
 ) -> Result<()> {
     // Git's patch-id header (`diff --git a/<x> b/<y>`) uses the present path on both sides for
     // pure additions/deletions (e.g. `diff --git a/file b/file` for a new file), so fall back to
@@ -824,7 +824,7 @@ fn patch_id_hash_file_entry_into_ctx(
 fn patch_id_hash_rename_entry_into_ctx(
     odb: &Odb,
     entry: &DiffEntry,
-    ctx: &mut ObjectHasher,
+    ctx: &mut ChecksumHasher,
 ) -> Result<()> {
     let old_path = entry.old_path.as_deref().unwrap_or("");
     let new_path = entry.new_path.as_deref().unwrap_or("");
@@ -878,7 +878,7 @@ fn patch_id_hash_rename_entry_into_ctx(
     Ok(())
 }
 
-fn patch_id_hash_text_hunks(ctx: &mut ObjectHasher, old_str: &str, new_str: &str) {
+fn patch_id_hash_text_hunks(ctx: &mut ChecksumHasher, old_str: &str, new_str: &str) {
     let diff = TextDiff::from_lines(old_str, new_str);
     for change in diff.iter_all_changes() {
         let prefix = match change.tag() {

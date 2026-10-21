@@ -15,7 +15,7 @@ use std::io::{self, Read};
 
 use crate::error::{Error, Result};
 use crate::gitmodules;
-use crate::hash::ObjectHasher;
+use crate::hash::ChecksumHasher;
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -754,11 +754,11 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
 
     let consumed = rd.pos;
     {
-        let mut hasher = ObjectHasher::new(algo);
+        let mut hasher = ChecksumHasher::new(algo);
         hasher.update(&rd.data[..consumed]);
         let digest = hasher.finalize();
         let trailing = rd.read_exact(algo.len())?;
-        if digest.as_bytes() != trailing {
+        if digest.as_slice() != trailing {
             return Err(Error::CorruptObject(
                 "pack trailing checksum mismatch".to_owned(),
             ));
@@ -964,7 +964,7 @@ fn io_to_corrupt_eof(e: io::Error, stream_pos: usize, context: &str) -> Error {
 /// object header or zlib stream starts at the correct offset.
 struct StreamingPackReader<'a> {
     inner: &'a mut dyn Read,
-    pack_hasher: ObjectHasher,
+    pack_hasher: ChecksumHasher,
     stream_pos: usize,
     max_input_bytes: Option<u64>,
     /// Compressed (or other) bytes already read from `inner` and hashed but not yet consumed by
@@ -976,7 +976,7 @@ impl<'a> StreamingPackReader<'a> {
     fn new(inner: &'a mut dyn Read, max_input_bytes: Option<u64>, algo: HashAlgo) -> Self {
         Self {
             inner,
-            pack_hasher: ObjectHasher::new(algo),
+            pack_hasher: ChecksumHasher::new(algo),
             stream_pos: 0,
             max_input_bytes,
             pending: Vec::new(),
@@ -1221,7 +1221,7 @@ impl<'a> StreamingPackReader<'a> {
 
     /// Hash over all pack bytes read so far (objects only; trailer not yet read).
     fn finalize_hasher(&self) -> Vec<u8> {
-        self.pack_hasher.clone().finalize().as_bytes().to_vec()
+        self.pack_hasher.clone().finalize()
     }
 
     /// Trailing pack checksum (hash-width bytes); not included in [`Self::finalize_hasher`].
@@ -1462,7 +1462,7 @@ mod tests {
         for entry in &entries {
             pack.extend_from_slice(entry);
         }
-        pack.extend_from_slice(HashAlgo::Sha1.digest(&pack).as_bytes());
+        pack.extend_from_slice(&HashAlgo::Sha1.checksum_digest(&pack));
         pack
     }
 

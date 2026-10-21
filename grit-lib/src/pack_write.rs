@@ -170,8 +170,8 @@ pub fn write_pack_index_v2(
     }
     buf.extend_from_slice(&pack_bytes[pack_bytes.len() - hash_bytes..]);
     let idx_hash = match hash_bytes {
-        20 => HashAlgo::Sha1.digest(&buf).as_bytes().to_vec(),
-        32 => HashAlgo::Sha256.digest(&buf).as_bytes().to_vec(),
+        20 => HashAlgo::Sha1.checksum_digest(&buf),
+        32 => HashAlgo::Sha256.checksum_digest(&buf),
         _ => {
             return Err(Error::CorruptObject(format!(
                 "unsupported hash width {hash_bytes} for pack index"

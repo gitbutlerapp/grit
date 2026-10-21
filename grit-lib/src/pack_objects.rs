@@ -967,7 +967,7 @@ fn write_whole_pack_object(
 /// Append the trailing pack checksum: the hash of everything written so far, at
 /// the repository's hash width (SHA-1 → 20 bytes, SHA-256 → 32 bytes).
 pub(crate) fn append_pack_trailer(buf: &mut Vec<u8>, algo: HashAlgo) {
-    buf.extend_from_slice(algo.digest(&*buf).as_bytes());
+    buf.extend_from_slice(&algo.checksum_digest(&*buf));
 }
 
 /// Append whole objects from `odb` to an in-progress pack (header + body, no trailer).

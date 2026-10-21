@@ -333,7 +333,8 @@ fn resolve_shared_index_file(git_dir: &Path, index_path: &Path, base_oid: &Objec
 }
 
 pub(crate) fn hash_index_body(body: &[u8], algo: HashAlgo) -> ObjectId {
-    algo.digest(body)
+    ObjectId::from_bytes(&algo.checksum_digest(body))
+        .unwrap_or_else(|_| unreachable!("checksum digest length matches object id"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

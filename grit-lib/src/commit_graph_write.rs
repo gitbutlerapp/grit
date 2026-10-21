@@ -42,7 +42,7 @@ pub struct CommitGraphCommitInfo {
 
 /// Hash a commit-graph/multi-pack-index file body with the repository algorithm.
 fn hash_file_body(body: &[u8], algo: HashAlgo) -> Vec<u8> {
-    algo.digest(body).as_bytes().to_vec()
+    algo.checksum_digest(body)
 }
 
 fn parse_commit_time(committer: &str) -> u64 {

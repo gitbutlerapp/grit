@@ -220,7 +220,7 @@ fn hash_extension_headers(
         let ext_sz = u32::from_be_bytes(body[pos + 4..pos + 8].try_into().ok()?) as usize;
         pos = pos.checked_add(8)?.checked_add(ext_sz)?;
     }
-    Some(hash_algo.digest(&data).as_bytes().to_vec())
+    Some(hash_algo.checksum_digest(&data))
 }
 
 pub(crate) fn read_ieot_extension(body: &[u8], mut offset: usize, end: usize) -> Option<IeotTable> {

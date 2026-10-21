@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ConfigSet;
 use crate::error::Result;
-use crate::hash::ObjectHasher;
+use crate::hash::ChecksumHasher;
 use crate::index::{entry_from_metadata, Index, IndexEntry, MODE_REGULAR};
 use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
@@ -214,7 +214,7 @@ fn handle_conflict(
     lines: &[String],
     i: &mut usize,
     marker_size: usize,
-    ctx: Option<&mut ObjectHasher>,
+    ctx: Option<&mut ChecksumHasher>,
 ) -> std::result::Result<String, ()> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Hunk {
@@ -314,7 +314,7 @@ fn handle_path(
     let lines: Vec<String> = content.lines().map(String::from).collect();
     let mut i = 0usize;
     let mut ctx = if hash_out.is_some() {
-        Some(ObjectHasher::new(algo))
+        Some(ChecksumHasher::new(algo))
     } else {
         None
     };

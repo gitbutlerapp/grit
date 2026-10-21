@@ -748,9 +748,9 @@ fn verify_pack_trailer(pack: &[u8], consumed: usize, algo: HashAlgo) -> Result<(
             "pack object stream ends at {consumed} but pack trailer starts at {body_end}"
         )));
     }
-    let expected = algo.digest(&pack[..consumed]);
+    let expected = algo.checksum_digest(&pack[..consumed]);
     let trailing = &pack[consumed..body_end + hb];
-    if expected.as_bytes() != trailing {
+    if expected.as_slice() != trailing {
         return Err(Error::CorruptObject(
             "pack trailing checksum mismatch".to_owned(),
         ));

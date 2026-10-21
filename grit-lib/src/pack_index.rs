@@ -907,7 +907,7 @@ mod tests {
             body.extend_from_slice(&(off as u32).to_be_bytes());
             body.extend_from_slice(&oid);
         }
-        body.extend_from_slice(crate::objects::HashAlgo::Sha1.digest(&body).as_bytes());
+        body.extend_from_slice(&crate::objects::HashAlgo::Sha1.checksum_digest(&body));
         body
     }
 

@@ -1,11 +1,18 @@
-//! Incremental hashing for Git object ids and file trailers.
+//! Incremental hashing for Git object ids and file checksums.
 //!
 //! Parallel batch helpers: [`hash_objects_parallel`], [`par_hash_with`], and [`Parallelism`].
 //!
 //! This module is the single owner of the `sha1` and `sha2` crates in
-//! `grit-lib`. Callers hash canonical Git object bytes (`"<kind> <len>\\0<payload>"`)
-//! via [`HashAlgo::hash_object`] / [`ObjectHasher::for_object`], raw payloads via
-//! [`HashAlgo::digest`], and checksummed file bodies via [`HashingWriter`] /
+//! `grit-lib`.
+//!
+//! **Object ids** name Git objects. Use [`ObjectHasher`] / [`HashAlgo::hash_object`]
+//! for canonical store bytes (`"<kind> <len>\\0<payload>"`) and [`HashAlgo::digest`]
+//! when hashing raw bytes that should become an [`ObjectId`] (for example verifying
+//! loose object headers).
+//!
+//! **Checksums** detect corruption in pack, index, MIDX, commit-graph, and related
+//! file trailers. They use the same digest algorithms but are not object identities.
+//! Use [`ChecksumHasher`] / [`HashAlgo::checksum_digest`], [`HashingWriter`], and
 //! [`verify_trailer`]. Push certificate nonces use [`hmac_sha1`].
 
 use std::io::{self, Write};
@@ -95,6 +102,82 @@ const HMAC_BLOCK_SIZE: usize = 64;
 /// Longest kind name is `"commit"` (6 bytes) plus space, up to 20 decimal digits
 /// for the payload length, plus the trailing NUL.
 const OBJECT_HEADER_BUF_LEN: usize = 6 + 1 + 20 + 1;
+
+/// Incremental hasher for Git file checksums (pack/index/MIDX/commit-graph trailers).
+///
+/// Checksums use the same SHA-1 or SHA-256 digests as object ids but name file
+/// integrity, not [`ObjectId`] values. Prefer this type anywhere a trailer or
+/// non-object content hash is computed or verified.
+#[derive(Debug, Clone)]
+pub enum ChecksumHasher {
+    /// SHA-1 (20-byte digests).
+    Sha1(Sha1),
+    /// SHA-256 (32-byte digests).
+    Sha256(Sha256),
+}
+
+impl ChecksumHasher {
+    /// Create a fresh checksum hasher for `algo`.
+    #[must_use]
+    pub fn new(algo: HashAlgo) -> Self {
+        algo.checksum_hasher()
+    }
+
+    /// The hash algorithm this hasher produces.
+    #[must_use]
+    pub fn algo(self: &ChecksumHasher) -> HashAlgo {
+        match self {
+            Self::Sha1(_) => HashAlgo::Sha1,
+            Self::Sha256(_) => HashAlgo::Sha256,
+        }
+    }
+
+    /// Feed more bytes into the digest.
+    pub fn update(&mut self, data: &[u8]) {
+        match self {
+            Self::Sha1(h) => h.update(data),
+            Self::Sha256(h) => h.update(data),
+        }
+    }
+
+    /// Finish hashing and return the raw digest bytes.
+    #[must_use]
+    pub fn finalize(self) -> Vec<u8> {
+        match self {
+            Self::Sha1(h) => h.finalize().to_vec(),
+            Self::Sha256(h) => h.finalize().to_vec(),
+        }
+    }
+
+    /// Write the raw digest into `out` and return the number of bytes written.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `out` is shorter than the digest length for this algorithm.
+    #[must_use]
+    pub fn finalize_into(self, out: &mut [u8]) -> usize {
+        let digest = self.finalize();
+        let len = digest.len();
+        assert!(
+            out.len() >= len,
+            "checksum digest buffer too short: need {len} bytes, have {}",
+            out.len()
+        );
+        out[..len].copy_from_slice(&digest);
+        len
+    }
+}
+
+impl Write for ChecksumHasher {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Incremental hasher for Git's supported object-id algorithms.
 #[derive(Debug, Clone)]
@@ -200,6 +283,23 @@ impl Write for ObjectHasher {
 }
 
 impl HashAlgo {
+    /// Return a fresh incremental checksum hasher for this algorithm.
+    #[must_use]
+    pub fn checksum_hasher(self) -> ChecksumHasher {
+        match self {
+            Self::Sha1 => ChecksumHasher::Sha1(Sha1::new()),
+            Self::Sha256 => ChecksumHasher::Sha256(Sha256::new()),
+        }
+    }
+
+    /// Hash a byte slice with no Git object header and return a file checksum.
+    #[must_use]
+    pub fn checksum_digest(self, data: &[u8]) -> Vec<u8> {
+        let mut hasher = self.checksum_hasher();
+        hasher.update(data);
+        hasher.finalize()
+    }
+
     /// Return a fresh incremental hasher for this algorithm.
     #[must_use]
     pub fn hasher(self) -> ObjectHasher {
@@ -242,7 +342,7 @@ pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
 /// and obtain the digest as an [`ObjectId`].
 pub struct HashingWriter<W: Write> {
     inner: W,
-    hasher: ObjectHasher,
+    hasher: ChecksumHasher,
 }
 
 impl<W: Write> HashingWriter<W> {
@@ -251,7 +351,7 @@ impl<W: Write> HashingWriter<W> {
     pub fn new(algo: HashAlgo, inner: W) -> Self {
         Self {
             inner,
-            hasher: algo.hasher(),
+            hasher: algo.checksum_hasher(),
         }
     }
 
@@ -272,8 +372,10 @@ impl<W: Write> HashingWriter<W> {
     ///
     /// Propagates I/O errors from writing the trailer to `inner`.
     pub fn finish(mut self) -> io::Result<(W, ObjectId)> {
-        let digest = self.hasher.finalize();
-        self.inner.write_all(digest.as_bytes())?;
+        let digest_bytes = self.hasher.finalize();
+        self.inner.write_all(&digest_bytes)?;
+        let digest = ObjectId::from_bytes(&digest_bytes)
+            .unwrap_or_else(|_| unreachable!("checksum digest length matches object id for algo"));
         Ok((self.inner, digest))
     }
 }
@@ -330,12 +432,12 @@ pub fn verify_trailer(algo: HashAlgo, bytes: &[u8]) -> std::result::Result<(), T
     }
     let split = bytes.len() - trailer_len;
     let (body, trailer) = bytes.split_at(split);
-    let expected = algo.digest(body);
-    if expected.as_bytes() == trailer {
+    let expected = algo.checksum_digest(body);
+    if expected.as_slice() == trailer {
         Ok(())
     } else {
         Err(TrailerMismatch {
-            expected: expected.as_bytes().to_vec(),
+            expected,
             found: trailer.to_vec(),
         })
     }
@@ -422,6 +524,62 @@ mod tests {
     fn assert_digest(algo: HashAlgo, data: &[u8], expected_hex: &str) {
         let got = algo.digest(data);
         assert_eq!(got, hex_oid(algo, expected_hex), "digest mismatch");
+    }
+
+    fn assert_checksum_digest(algo: HashAlgo, data: &[u8], expected_hex: &str) {
+        let got = algo.checksum_digest(data);
+        assert_eq!(hex::encode(&got), expected_hex, "checksum digest mismatch");
+    }
+
+    #[test]
+    fn checksum_hasher_nist_vectors_sha1_sha256() {
+        assert_checksum_digest(
+            HashAlgo::Sha1,
+            b"",
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+        );
+        assert_checksum_digest(
+            HashAlgo::Sha1,
+            b"abc",
+            "a9993e364706816aba3e25717850c26c9cd0d89d",
+        );
+        assert_checksum_digest(
+            HashAlgo::Sha256,
+            b"",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        );
+        assert_checksum_digest(
+            HashAlgo::Sha256,
+            b"abc",
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        );
+    }
+
+    #[test]
+    fn checksum_hasher_matches_object_hasher_digest() {
+        let data: Vec<u8> = (0..512).map(|i| (i % 251) as u8).collect();
+        for algo in [HashAlgo::Sha1, HashAlgo::Sha256] {
+            let mut checksum = algo.checksum_hasher();
+            checksum.update(&data);
+            let checksum_bytes = checksum.finalize();
+            assert_eq!(checksum_bytes, algo.digest(&data).as_bytes());
+        }
+    }
+
+    #[test]
+    fn hashing_writer_uses_checksum_hasher() {
+        let body = b"streaming checksum body";
+        let mut buf = Vec::new();
+        {
+            let mut w = HashingWriter::new(HashAlgo::Sha256, Cursor::new(&mut buf));
+            w.write_all(body).unwrap();
+            let (_, digest) = w.finish().unwrap();
+            assert_eq!(
+                digest.as_bytes(),
+                HashAlgo::Sha256.checksum_digest(body).as_slice()
+            );
+        }
+        verify_trailer(HashAlgo::Sha256, &buf).expect("trailer valid");
     }
 
     #[test]
@@ -583,8 +741,14 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(w.get_ref().buf, b"ab");
         let (_, digest) = w.finish().expect("finish");
-        assert_eq!(digest, HashAlgo::Sha1.digest(b"ab"));
-        assert_ne!(digest, HashAlgo::Sha1.digest(b"abcdef"));
+        assert_eq!(
+            digest.as_bytes(),
+            HashAlgo::Sha1.checksum_digest(b"ab").as_slice()
+        );
+        assert_ne!(
+            digest.as_bytes(),
+            HashAlgo::Sha1.checksum_digest(b"abcdef").as_slice()
+        );
     }
 
     #[test]
@@ -599,7 +763,10 @@ mod tests {
         w.get_mut().fail = false;
         w.write_all(b"ab").expect("write");
         let (_, digest) = w.finish().expect("finish");
-        assert_eq!(digest, HashAlgo::Sha1.digest(b"ab"));
+        assert_eq!(
+            digest.as_bytes(),
+            HashAlgo::Sha1.checksum_digest(b"ab").as_slice()
+        );
     }
 
     #[test]
@@ -610,7 +777,10 @@ mod tests {
             let mut w = HashingWriter::new(HashAlgo::Sha1, Cursor::new(&mut buf));
             w.write_all(body).unwrap();
             let (_, digest) = w.finish().unwrap();
-            assert_eq!(digest, HashAlgo::Sha1.digest(body));
+            assert_eq!(
+                digest.as_bytes(),
+                HashAlgo::Sha1.checksum_digest(body).as_slice()
+            );
             assert_eq!(&buf[body.len()..], digest.as_bytes());
         }
         verify_trailer(HashAlgo::Sha1, &buf).expect("trailer valid");

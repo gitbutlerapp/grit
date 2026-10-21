@@ -6702,6 +6702,29 @@ impl core::marker::Unpin for grit_lib::objects::hash::Backend
 impl core::marker::UnsafeUnpin for grit_lib::objects::hash::Backend
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::hash::Backend
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::hash::Backend
+pub enum grit_lib::objects::hash::ChecksumHasher
+pub grit_lib::objects::hash::ChecksumHasher::Sha1(sha1::Sha1)
+pub grit_lib::objects::hash::ChecksumHasher::Sha256(sha2::Sha256)
+impl grit_lib::objects::hash::ChecksumHasher
+pub fn grit_lib::objects::hash::ChecksumHasher::algo(&grit_lib::objects::hash::ChecksumHasher) -> grit_lib::objects::HashAlgo
+pub fn grit_lib::objects::hash::ChecksumHasher::finalize(self) -> alloc::vec::Vec<u8>
+pub fn grit_lib::objects::hash::ChecksumHasher::finalize_into(self, &mut [u8]) -> usize
+pub fn grit_lib::objects::hash::ChecksumHasher::new(grit_lib::objects::HashAlgo) -> Self
+pub fn grit_lib::objects::hash::ChecksumHasher::update(&mut self, &[u8])
+impl core::clone::Clone for grit_lib::objects::hash::ChecksumHasher
+pub fn grit_lib::objects::hash::ChecksumHasher::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::objects::hash::ChecksumHasher
+pub fn grit_lib::objects::hash::ChecksumHasher::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::io::write::Write for grit_lib::objects::hash::ChecksumHasher
+pub fn grit_lib::objects::hash::ChecksumHasher::flush(&mut self) -> core::io::error::Result<()>
+pub fn grit_lib::objects::hash::ChecksumHasher::write(&mut self, &[u8]) -> core::io::error::Result<usize>
+impl core::marker::Freeze for grit_lib::objects::hash::ChecksumHasher
+impl core::marker::Send for grit_lib::objects::hash::ChecksumHasher
+impl core::marker::Sync for grit_lib::objects::hash::ChecksumHasher
+impl core::marker::Unpin for grit_lib::objects::hash::ChecksumHasher
+impl core::marker::UnsafeUnpin for grit_lib::objects::hash::ChecksumHasher
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::hash::ChecksumHasher
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::hash::ChecksumHasher
 pub enum grit_lib::objects::hash::ObjectHasher
 pub grit_lib::objects::hash::ObjectHasher::Sha1(sha1::Sha1)
 pub grit_lib::objects::hash::ObjectHasher::Sha256(sha2::Sha256)
@@ -8279,6 +8302,7 @@ impl grit_lib::objects::pack::SingleLocalPackReader
 pub fn grit_lib::objects::pack::SingleLocalPackReader::open(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::open_allow_loose(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::pack_offset(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<u64>>
+pub fn grit_lib::objects::pack::SingleLocalPackReader::read_commit_author_prefix(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<&[u8]>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_info(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_object(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::try_read_commit_header_prefix(&mut self, &grit_lib::objects::ObjectId, usize) -> grit_lib::error::Result<core::option::Option<alloc::vec::Vec<u8>>>
@@ -8851,6 +8875,8 @@ pub enum grit_lib::objects::HashAlgo
 pub grit_lib::objects::HashAlgo::Sha1
 pub grit_lib::objects::HashAlgo::Sha256
 impl grit_lib::objects::HashAlgo
+pub fn grit_lib::objects::HashAlgo::checksum_digest(self, &[u8]) -> alloc::vec::Vec<u8>
+pub fn grit_lib::objects::HashAlgo::checksum_hasher(self) -> grit_lib::objects::hash::ChecksumHasher
 pub fn grit_lib::objects::HashAlgo::digest(self, &[u8]) -> grit_lib::objects::ObjectId
 pub fn grit_lib::objects::HashAlgo::hash_object(self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::objects::ObjectId
 pub fn grit_lib::objects::HashAlgo::hasher(self) -> grit_lib::objects::hash::ObjectHasher

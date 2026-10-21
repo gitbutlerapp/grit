@@ -2950,7 +2950,7 @@ mod tests {
             }
             let pack_bytes = fs::read(pack_path)?;
             buf.extend_from_slice(&pack_bytes[pack_bytes.len() - 20..]);
-            buf.extend_from_slice(HashAlgo::Sha1.digest(&buf).as_bytes());
+            buf.extend_from_slice(&HashAlgo::Sha1.checksum_digest(&buf));
             fs::write(idx_path, buf)?;
             Ok(())
         }
@@ -2972,7 +2972,7 @@ mod tests {
         append_pack_object(&mut pack, 3, b"alpha");
         let off_b = pack.len() as u64;
         append_pack_object(&mut pack, 3, b"beta");
-        pack.extend_from_slice(HashAlgo::Sha1.digest(&pack).as_bytes());
+        pack.extend_from_slice(&HashAlgo::Sha1.checksum_digest(&pack));
 
         let pack_dir = objects_dir.join("pack");
         fs::create_dir_all(&pack_dir).unwrap();
@@ -3025,7 +3025,7 @@ mod tests {
         let compressed = enc.finish().unwrap();
         pack.push(0x30 | 0x03); // blob len 11
         pack.extend_from_slice(&compressed);
-        pack.extend_from_slice(HashAlgo::Sha1.digest(&pack).as_bytes());
+        pack.extend_from_slice(&HashAlgo::Sha1.checksum_digest(&pack));
 
         let pack_dir = objects_dir.join("pack");
         fs::create_dir_all(&pack_dir).unwrap();
@@ -3053,7 +3053,7 @@ mod tests {
         buf.extend_from_slice(&0u32.to_be_bytes());
         buf.extend_from_slice(&(off as u32).to_be_bytes());
         buf.extend_from_slice(&pack[pack.len() - 20..]);
-        buf.extend_from_slice(HashAlgo::Sha1.digest(&buf).as_bytes());
+        buf.extend_from_slice(&HashAlgo::Sha1.checksum_digest(&buf));
         fs::write(&idx_path, buf).unwrap();
         odb.invalidate_packs();
 

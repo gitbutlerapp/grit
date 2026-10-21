@@ -39,7 +39,7 @@ const fn ridx_hash_id(hash_len: usize) -> u32 {
 /// Used for pack `.rev` files and MIDX `.rev` sidecars (RIDX format).
 pub fn append_hashfile_checksum(out: &mut Vec<u8>, hash_len: usize) {
     let algo = HashAlgo::from_len(hash_len).unwrap_or(HashAlgo::Sha1);
-    out.extend_from_slice(algo.digest(&*out).as_bytes());
+    out.extend_from_slice(&algo.checksum_digest(&*out));
 }
 
 /// True if `data` is a valid hashfile of trailing width `hash_len`: the last

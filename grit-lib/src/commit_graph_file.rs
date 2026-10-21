@@ -1860,9 +1860,9 @@ mod tests {
     fn reseal_graph(bytes: &mut Vec<u8>, algo: crate::objects::HashAlgo) {
         let hash_len = algo.len();
         let body_len = bytes.len().saturating_sub(hash_len);
-        let digest = algo.digest(&bytes[..body_len]);
+        let digest = algo.checksum_digest(&bytes[..body_len]);
         bytes.truncate(body_len);
-        bytes.extend_from_slice(digest.as_bytes());
+        bytes.extend_from_slice(&digest);
     }
 
     #[test]

@@ -1728,7 +1728,7 @@ fn write_v2_pack_index_body(
             "unsupported index hash width {hash_bytes}"
         )));
     };
-    buf.extend_from_slice(algo.digest(&buf).as_bytes());
+    buf.extend_from_slice(&algo.checksum_digest(&buf));
     fs::write(idx_path, buf).map_err(Error::Io)?;
     Ok(())
 }
@@ -3583,10 +3583,7 @@ impl SingleLocalPackReader {
         self.read_commit_author_prefix_at_pack_offset(offset)
     }
 
-    fn read_commit_author_prefix_at_pack_offset(
-        &mut self,
-        offset: u64,
-    ) -> Result<Option<&[u8]>> {
+    fn read_commit_author_prefix_at_pack_offset(&mut self, offset: u64) -> Result<Option<&[u8]>> {
         let pack_bytes = self.pack_bytes.as_ref();
         let mut pos = offset as usize;
         if pos >= pack_bytes.len() {
@@ -4708,7 +4705,7 @@ mod tests {
     }
 
     fn append_sha1_pack_trailer(buf: &mut Vec<u8>) {
-        buf.extend_from_slice(HashAlgo::Sha1.digest(&*buf).as_bytes());
+        buf.extend_from_slice(HashAlgo::Sha1.checksum_digest(&*buf).as_slice());
     }
 
     fn append_ref_delta(buf: &mut Vec<u8>, base_oid: &ObjectId, delta: &[u8]) {
@@ -5006,7 +5003,7 @@ mod tests {
         pack.extend_from_slice(&2u32.to_be_bytes());
         pack.extend_from_slice(&1u32.to_be_bytes());
         let off = append_whole_blob(&mut pack, data);
-        pack.extend_from_slice(HashAlgo::Sha256.digest(&pack).as_bytes());
+        pack.extend_from_slice(HashAlgo::Sha256.checksum_digest(&pack).as_slice());
 
         let dir = tempfile::tempdir().expect("tempdir");
         let pack_path = dir.path().join("sha256-corrupt.pack");
@@ -5882,7 +5879,7 @@ mod cached_lookup_tests {
             body.extend_from_slice(&(entry.offset().expect("off") as u32).to_be_bytes());
             body.extend_from_slice(entry.oid());
         }
-        body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
+        body.extend_from_slice(HashAlgo::Sha1.checksum_digest(&body).as_slice());
         rewrite_test_file(&idx_path, &body);
         clear_pack_cache();
         idx_path
@@ -5906,7 +5903,7 @@ mod cached_lookup_tests {
             body.extend_from_slice(&(off as u32).to_be_bytes());
             body.extend_from_slice(&oid);
         }
-        body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
+        body.extend_from_slice(HashAlgo::Sha1.checksum_digest(&body).as_slice());
         parse_pack_index_bytes(Path::new("synthetic.idx"), body, false).expect("v1 idx")
     }
 

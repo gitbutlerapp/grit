@@ -769,8 +769,8 @@ mod tests {
         let body = &valid[..valid.len().checked_sub(hb).expect("pack trailer")];
         let mut body_with_junk = body.to_vec();
         body_with_junk.extend_from_slice(junk);
-        let trailer = algo.digest(&body_with_junk);
-        body_with_junk.extend_from_slice(trailer.as_bytes());
+        let trailer = algo.checksum_digest(&body_with_junk);
+        body_with_junk.extend_from_slice(&trailer);
         body_with_junk
     }
 

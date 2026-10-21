@@ -11,6 +11,8 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 [`Odb::hash`](rustdoc:grit_lib::objects::odb::Odb) (or [`HashAlgo::hash_object`](rustdoc:grit_lib::objects::HashAlgo)) computes an id without writing—useful for dry runs and tests. The algorithm follows the repository’s configured object format (SHA-1 or SHA-256).
 
+Object ids and file checksums share the same digest algorithms but serve different roles. [`ObjectHasher`](rustdoc:grit_lib::objects::hash::ObjectHasher) and [`HashAlgo::digest`](rustdoc:grit_lib::objects::HashAlgo) name Git objects (canonical `"<kind> <len>\\0<payload>"` bytes or raw payloads that become an [`ObjectId`](rustdoc:grit_lib::objects::ObjectId)). [`ChecksumHasher`](rustdoc:grit_lib::objects::hash::ChecksumHasher), [`HashAlgo::checksum_digest`](rustdoc:grit_lib::objects::HashAlgo), [`HashingWriter`](rustdoc:grit_lib::objects::hash::HashingWriter), and [`verify_trailer`](rustdoc:grit_lib::objects::hash::verify_trailer) cover pack, index, MIDX, and commit-graph trailers—integrity checks, not object identities.
+
 ## Reading
 
 [`Odb::read`](rustdoc:grit_lib::objects::odb::Odb) returns an [`Object`](rustdoc:grit_lib::objects::Object) with `kind` and uncompressed `data`. Packed and loose objects share the same API.
