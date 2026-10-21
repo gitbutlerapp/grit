@@ -34,6 +34,9 @@ pub enum NoIndexError {
         /// Filesystem path that could not be accessed.
         path: String,
     },
+    /// SHA-1 collision detection rejected blob content while hashing a path.
+    #[error("sha-1 hash collision while hashing no-index diff input")]
+    HashCollision,
 }
 
 impl From<NoIndexError> for crate::error::Error {
@@ -221,11 +224,14 @@ fn hash_side_at_path(path: &str, mode: &str) -> Result<ObjectId, NoIndexError> {
             path: path.to_owned(),
         }
     })?;
-    Ok(hash_blob(&data))
+    hash_blob(&data)
 }
 
-fn hash_blob(data: &[u8]) -> ObjectId {
-    hash_object(HashAlgo::Sha1, ObjectKind::Blob, data)
+fn hash_blob(data: &[u8]) -> Result<ObjectId, NoIndexError> {
+    hash_object(HashAlgo::Sha1, ObjectKind::Blob, data).map_err(|e| match e {
+        crate::error::Error::HashCollision { .. } => NoIndexError::HashCollision,
+        other => panic!("unexpected error hashing no-index blob: {other}"),
+    })
 }
 
 fn read_side_bytes(path: &Path, mode: u32) -> Result<Vec<u8>, NoIndexError> {
@@ -263,21 +269,21 @@ fn oids_for_pair(
         (Some(l), Some(r)) if mode_left != 0 && mode_right != 0 => {
             let old_bytes = read_side_bytes(l, mode_left)?;
             let new_bytes = read_side_bytes(r, mode_right)?;
-            let old_oid = hash_blob(&old_bytes);
+            let old_oid = hash_blob(&old_bytes)?;
             let new_oid = if old_bytes == new_bytes {
                 old_oid
             } else {
-                hash_blob(&new_bytes)
+                hash_blob(&new_bytes)?
             };
             Ok((old_oid, new_oid))
         }
         (Some(l), _) if mode_left != 0 => {
             let old_bytes = read_side_bytes(l, mode_left)?;
-            Ok((hash_blob(&old_bytes), zero_oid()))
+            Ok((hash_blob(&old_bytes)?, zero_oid()))
         }
         (_, Some(r)) if mode_right != 0 => {
             let new_bytes = read_side_bytes(r, mode_right)?;
-            Ok((zero_oid(), hash_blob(&new_bytes)))
+            Ok((zero_oid(), hash_blob(&new_bytes)?))
         }
         _ => Ok((zero_oid(), zero_oid())),
     }

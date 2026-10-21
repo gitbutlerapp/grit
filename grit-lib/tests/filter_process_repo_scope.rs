@@ -106,7 +106,10 @@ fn filter_process_reused_and_disable_persists_on_repository() {
     );
 
     let upper = b"WORLD\n";
-    let upper_oid = repo.odb().hash(grit_lib::objects::ObjectKind::Blob, upper);
+    let upper_oid = repo
+        .odb()
+        .hash(grit_lib::objects::ObjectKind::Blob, upper)
+        .expect("hash upper");
     assert_eq!(
         oid_b, upper_oid,
         "filter clean should uppercase worktree bytes"
@@ -131,7 +134,8 @@ fn filter_process_reused_and_disable_persists_on_repository() {
     .expect("hash b after disable");
     let raw_oid = repo
         .odb()
-        .hash(grit_lib::objects::ObjectKind::Blob, b"world\n");
+        .hash(grit_lib::objects::ObjectKind::Blob, b"world\n")
+        .expect("hash raw");
     assert_eq!(
         oid_b_after, raw_oid,
         "disabled filter should leave worktree bytes unmodified for hashing"

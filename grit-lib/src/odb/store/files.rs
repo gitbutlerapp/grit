@@ -424,7 +424,7 @@ impl ObjectStore for FilesSource {
 
 impl WritableObjectStore for FilesSource {
     fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId> {
-        let oid = hash::try_hash_object(self.hash_algo(), kind, data)?;
+        let oid = hash::hash_object(self.hash_algo(), kind, data)?;
         if let Some(existing) = self.try_finish_duplicate_write(&oid, options)? {
             return Ok(existing);
         }

@@ -1293,7 +1293,7 @@ pub fn apply_stash(
                             ignore_cr_at_eol: false,
                         };
                         let output = merge(&input)?;
-                        let marker_oid = repo.odb().hash(ObjectKind::Blob, &output.content);
+                        let marker_oid = repo.odb().hash(ObjectKind::Blob, &output.content)?;
                         let worktree_bytes = smudge_bytes_for_worktree_path(
                             repo,
                             &worktree_rules,

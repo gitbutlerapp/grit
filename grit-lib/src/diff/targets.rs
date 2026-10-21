@@ -587,26 +587,30 @@ fn tree_structured_from_worktree_changes(
     par_opts.min_items = 0;
     let est_bytes = changes.len().saturating_mul(8192);
     let hash_algo = repo.odb().hash_algo();
-    Ok(par_map(&changes, par_opts, est_bytes, |fc| {
+    let structured = crate::parallel::try_par_map(&changes, par_opts, est_bytes, |fc| {
         build_tree_structured(fc, hash_algo, opts.clone())
     })
-    .into_iter()
-    .filter(|t| include_tree_structured_in_diff(t, &opts))
-    .collect())
+    .map_err(|e| match e {
+        crate::parallel::ParallelHashError::Task(err) => err,
+    })?;
+    Ok(structured
+        .into_iter()
+        .filter(|t| include_tree_structured_in_diff(t, &opts))
+        .collect())
 }
 
 fn build_tree_structured(
     fc: &FileChange,
     hash_algo: crate::objects::HashAlgo,
     diff_options: DiffOptions,
-) -> TreeDiffStructured {
+) -> Result<TreeDiffStructured> {
     let structured = structured_for_file_change(fc, diff_options);
-    TreeDiffStructured {
-        entry: diff_entry_from_file_change(fc, hash_algo),
+    Ok(TreeDiffStructured {
+        entry: diff_entry_from_file_change(fc, hash_algo)?,
         structured,
         binary: fc.binary,
         patch_bytes: Some((fc.old_bytes.clone(), fc.new_bytes.clone())),
-    }
+    })
 }
 
 fn oid_for_patch_index_line(
@@ -614,17 +618,20 @@ fn oid_for_patch_index_line(
     mode: &str,
     oid: ObjectId,
     bytes: &SideBytes,
-) -> ObjectId {
+) -> Result<ObjectId> {
     if mode == "000000" {
-        return crate::diff::zero_oid();
+        return Ok(crate::diff::zero_oid());
     }
     if !oid.is_zero() {
-        return oid;
+        return Ok(oid);
     }
     crate::hash::hash_object(hash_algo, ObjectKind::Blob, &bytes.data)
 }
 
-fn diff_entry_from_file_change(fc: &FileChange, hash_algo: crate::objects::HashAlgo) -> DiffEntry {
+fn diff_entry_from_file_change(
+    fc: &FileChange,
+    hash_algo: crate::objects::HashAlgo,
+) -> Result<DiffEntry> {
     let (old_path, new_path) = match fc.status {
         DiffStatus::Added => (None, Some(fc.path.clone())),
         DiffStatus::Deleted => (Some(fc.path.clone()), None),
@@ -633,16 +640,16 @@ fn diff_entry_from_file_change(fc: &FileChange, hash_algo: crate::objects::HashA
             Some(fc.path.clone()),
         ),
     };
-    DiffEntry {
+    Ok(DiffEntry {
         status: fc.status,
         old_path,
         new_path,
         old_mode: fc.old_mode.clone(),
         new_mode: fc.new_mode.clone(),
-        old_oid: oid_for_patch_index_line(hash_algo, &fc.old_mode, fc.old_oid, &fc.old_bytes),
-        new_oid: oid_for_patch_index_line(hash_algo, &fc.new_mode, fc.new_oid, &fc.new_bytes),
+        old_oid: oid_for_patch_index_line(hash_algo, &fc.old_mode, fc.old_oid, &fc.old_bytes)?,
+        new_oid: oid_for_patch_index_line(hash_algo, &fc.new_mode, fc.new_oid, &fc.new_bytes)?,
         score: None,
-    }
+    })
 }
 
 fn file_diffs_from_worktree_changes(

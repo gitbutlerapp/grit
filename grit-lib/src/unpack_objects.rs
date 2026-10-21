@@ -543,7 +543,7 @@ fn pack_is_thin_with_ofs_deltas(
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
                 let obj_data = rd.decompress(size)?;
-                let oid = crate::hash::try_hash_object(algo, kind, &obj_data)?;
+                let oid = crate::hash::hash_object(algo, kind, &obj_data)?;
                 by_offset.insert(obj_offset, (kind, obj_data.clone()));
                 by_oid.insert(oid, (kind, obj_data));
             }
@@ -592,7 +592,7 @@ fn pack_is_thin_with_ofs_deltas(
             };
             if let Some((base_kind, base_data)) = base {
                 let result = apply_delta(&base_data, &delta.delta_data)?;
-                let oid = crate::hash::try_hash_object(algo, base_kind, &result)?;
+                let oid = crate::hash::hash_object(algo, base_kind, &result)?;
                 by_offset.insert(delta.offset, (base_kind, result.clone()));
                 by_oid.insert(oid, (base_kind, result));
             } else {
@@ -716,7 +716,7 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
                 let data = rd.decompress(size)?;
-                let oid = odb.hash(kind, &data);
+                let oid = odb.hash(kind, &data)?;
                 by_offset.insert(obj_offset, (kind, data.clone()));
                 by_oid.insert(oid, (kind, data));
             }
@@ -784,7 +784,7 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
 
             if let Some((base_kind, base_data)) = base {
                 let result = apply_delta(&base_data, &delta.delta_data)?;
-                let oid = odb.hash(base_kind, &result);
+                let oid = odb.hash(base_kind, &result)?;
                 by_offset.insert(delta.offset, (base_kind, result.clone()));
                 by_oid.insert(oid, (base_kind, result));
             } else {
@@ -811,7 +811,7 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
 /// [`ObjectId`] without touching the filesystem.
 fn write_or_hash(kind: ObjectKind, data: &[u8], odb: &Odb, dry_run: bool) -> Result<ObjectId> {
     if dry_run {
-        odb.try_hash(kind, data)
+        odb.hash(kind, data)
     } else {
         // Always materialize into this ODB: objects reachable only via alternates must still be
         // written locally (matches git unpack-objects; t5519-push-alternates).
@@ -1557,8 +1557,12 @@ mod tests {
         assert_eq!(count, 2);
 
         // Verify both blobs can be read back.
-        let oid1 = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"hello\n");
-        let oid2 = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"world\n");
+        let oid1 = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"hello\n")
+            .expect("hash");
+        let oid2 = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"world\n")
+            .expect("hash");
         let obj1 = odb.read(&oid1).unwrap();
         let obj2 = odb.read(&oid2).unwrap();
         assert_eq!(obj1.data, b"hello\n");
@@ -1579,7 +1583,9 @@ mod tests {
             unpack_objects(&mut pack.as_slice(), &odb, &opts).unwrap(),
             1
         );
-        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, b"");
+        let oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, b"")
+            .expect("hash");
         assert!(odb.exists(&oid));
         let loose = objects_dir
             .join(oid.loose_prefix())
@@ -1605,7 +1611,9 @@ mod tests {
             name: b"sub".to_vec(),
             oid: submodule_oid,
         }]);
-        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, &tree_data);
+        let tree_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, &tree_data)
+            .expect("hash");
 
         // Strict connectivity must NOT flag the gitlink target as missing,
         // matching upstream git (git/fsck.c skips S_ISGITLINK entries).
@@ -1620,7 +1628,9 @@ mod tests {
             name: b"file".to_vec(),
             oid: ObjectId::from_hex(&"ab".repeat(20)).unwrap(),
         }]);
-        let bad_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, &bad_tree);
+        let bad_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, &bad_tree)
+            .expect("hash");
         let mut bad_pack = HashMap::new();
         bad_pack.insert(bad_oid, (ObjectKind::Tree, bad_tree));
         assert!(matches!(
@@ -1655,7 +1665,9 @@ mod tests {
         use tempfile::TempDir;
         let pack = make_pack(&[(ObjectKind::Blob, b"chunked-stream")]);
         let opts = UnpackOptions::default();
-        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"chunked-stream");
+        let oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"chunked-stream")
+            .expect("hash");
 
         let tmp = TempDir::new().unwrap();
         let objects_dir = tmp.path().join("objects");
@@ -1703,7 +1715,9 @@ mod tests {
         assert_eq!(count, 1);
 
         // Nothing should be written.
-        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"test content");
+        let oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"test content")
+            .expect("hash");
         assert!(!odb.exists(&oid));
     }
 
@@ -1774,8 +1788,12 @@ mod tests {
         use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
 
         let delta = crate::delta_encode::encode_lcp_delta(base, target).expect("delta");
-        let base_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, base);
-        let target_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, target);
+        let base_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, base)
+            .expect("hash");
+        let target_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, target)
+            .expect("hash");
         let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
         pb.add_full(PK::Blob, base);
         pb.add_ref_delta(base_oid.as_bytes(), &delta, delta.len());
@@ -1789,7 +1807,9 @@ mod tests {
         let base = b"base payload";
         let target = b"base payload-extended";
         let delta = crate::delta_encode::encode_lcp_delta(base, target).unwrap();
-        let base_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, base);
+        let base_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, base)
+            .expect("hash");
 
         let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
         let base_idx = pb.add_full(PK::Blob, base);
@@ -1803,7 +1823,9 @@ mod tests {
             unpack_objects(&mut ofs_pack.as_slice(), &odb, &opts).unwrap(),
             2
         );
-        let target_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, target);
+        let target_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, target)
+            .expect("hash");
         assert_eq!(odb.read(&target_oid).unwrap().data, target);
 
         let (ref_pack, _, ref_target_oid) = pack_with_ref_delta(base, target);
@@ -1849,7 +1871,9 @@ mod tests {
         use crate::objects::{serialize_commit, serialize_tag, CommitData, TagData};
 
         let tree_data = b"";
-        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, tree_data);
+        let tree_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, tree_data)
+            .expect("hash");
         let commit = CommitData {
             tree: tree_oid,
             parents: vec![],
@@ -1863,7 +1887,9 @@ mod tests {
             extra_headers: Vec::new(),
         };
         let commit_data = serialize_commit(&commit);
-        let commit_oid = HashAlgo::Sha1.hash_object(ObjectKind::Commit, &commit_data);
+        let commit_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Commit, &commit_data)
+            .expect("hash");
         let tag = TagData {
             object: commit_oid,
             object_type: "commit".into(),
@@ -1895,7 +1921,9 @@ mod tests {
     fn test_unpack_objects_strict_shallow_skips_missing_parent() {
         use crate::objects::{serialize_commit, CommitData};
 
-        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, b"");
+        let tree_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, b"")
+            .expect("hash");
         let missing_parent = ObjectId::from_hex(&"cc".repeat(20)).unwrap();
         let commit = CommitData {
             tree: tree_oid,
@@ -1910,7 +1938,9 @@ mod tests {
             extra_headers: Vec::new(),
         };
         let commit_data = serialize_commit(&commit);
-        let commit_oid = HashAlgo::Sha1.hash_object(ObjectKind::Commit, &commit_data);
+        let commit_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Commit, &commit_data)
+            .expect("hash");
         let pack = make_pack(&[(ObjectKind::Tree, b""), (ObjectKind::Commit, &commit_data)]);
 
         let tmp = tempfile::tempdir().unwrap();
@@ -2011,20 +2041,26 @@ mod tests {
             unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).unwrap(),
             1
         );
-        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"");
+        let oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"")
+            .expect("hash");
         assert!(odb.exists(&oid));
     }
 
     #[test]
     fn test_strict_verify_rejects_missing_tree_reference() {
-        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, b"");
+        let tree_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, b"")
+            .expect("hash");
         let missing = ObjectId::from_hex(&"ee".repeat(20)).unwrap();
         let bad_tree = crate::objects::serialize_tree(&[crate::objects::TreeEntry {
             mode: crate::index::MODE_REGULAR,
             name: b"f".to_vec(),
             oid: missing,
         }]);
-        let bad_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, &bad_tree);
+        let bad_oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Tree, &bad_tree)
+            .expect("hash");
         let mut pack = HashMap::new();
         pack.insert(tree_oid, (ObjectKind::Tree, b"".to_vec()));
         pack.insert(bad_oid, (ObjectKind::Tree, bad_tree));
@@ -2041,7 +2077,9 @@ mod tests {
             unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).unwrap(),
             1
         );
-        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, &big);
+        let oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, &big)
+            .expect("hash");
         assert_eq!(odb.read(&oid).unwrap().data, big);
     }
 }

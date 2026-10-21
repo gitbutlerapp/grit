@@ -376,7 +376,7 @@ fn git_config_count_env(
     env
 }
 
-/// Merge `extra` config pairs after [`standard_test_git_config_pairs`], replacing keys on conflict.
+/// Merge `extra` config pairs after the standard test git config entries, replacing keys on conflict.
 pub fn merge_git_config_env<'a>(cmd: &'a mut Command, extra: &[(&str, &str)]) -> &'a mut Command {
     let mut pairs: Vec<(String, String)> = standard_test_git_config_pairs()
         .into_iter()

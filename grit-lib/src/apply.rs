@@ -1329,8 +1329,8 @@ pub fn write_git_binary_patch(
 ) -> Result<String> {
     use crate::objects::{HashAlgo, ObjectKind};
 
-    let old_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, old);
-    let new_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, new);
+    let old_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, old)?;
+    let new_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, new)?;
     let mut out = String::with_capacity(old.len() + new.len() + 128);
     out.push_str(&format!(
         "index {}..{} 100644\n",
@@ -1703,6 +1703,22 @@ mod tests {
             .expect("git apply");
         assert!(apply.status.success(), "git apply failed");
         assert_eq!(fs::read(&b).expect("read"), new);
+    }
+
+    fn shattered_prefix_fixture() -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/data/shattered-1-prefix.bin"),
+        )
+        .expect("fixture")
+    }
+
+    #[test]
+    fn apply_rejects_shattered_result_blob() {
+        use crate::error::Error;
+        let shattered = shattered_prefix_fixture();
+        let err = write_git_binary_patch(b"ok", &shattered, "a/f", "b/f").expect_err("collision");
+        assert!(matches!(err, Error::HashCollision { .. }));
     }
 
     #[test]

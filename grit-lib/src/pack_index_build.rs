@@ -5,7 +5,7 @@
 //! Single-threaded builds inflate and hash each whole object once in pack order.
 
 use crate::error::{Error, Result};
-use crate::hash::{try_hash_object, Parallelism};
+use crate::hash::{hash_object, Parallelism};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pack_zlib::{decompress_zlib_at_index, skip_zlib_at_with_scratch};
@@ -659,7 +659,7 @@ fn hash_whole_slot_with_data(
     ofs_base_refs: &HashMap<usize, u32>,
     oid_base_refs: &HashMap<ObjectId, u32>,
 ) -> Result<WholeHashed> {
-    let oid = try_hash_object(algo, work.kind, data)?;
+    let oid = hash_object(algo, work.kind, data)?;
     let retain_ofs = ofs_base_refs.get(&work.offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
     Ok(WholeHashed {
@@ -1031,7 +1031,7 @@ fn resolve_one_delta(
         return Err(Error::CorruptObject("delta base not available".to_owned()));
     };
     let result = apply_delta(base_data.as_ref(), &delta_data)?;
-    let oid = try_hash_object(algo, base_kind, &result)?;
+    let oid = hash_object(algo, base_kind, &result)?;
     let retain_ofs = ofs_out_refs.get(&delta.offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_out_refs.get(&oid).copied().unwrap_or(0) > 0;
     let retain = retain_ofs || retain_oid;
@@ -1236,7 +1236,7 @@ mod line_coverage_tests {
             contents.push(next);
         }
         for base in [&contents[2], &contents[4]] {
-            let oid = odb.hash(ObjectKind::Blob, base);
+            let oid = odb.hash(ObjectKind::Blob, base).expect("hash");
             let target = extend(base, "ref-child\n");
             let delta = crate::delta_encode::encode_lcp_delta(base, &target).expect("ref delta");
             pb.add_ref_delta(oid.as_bytes(), &delta, delta.len());
@@ -1252,7 +1252,7 @@ mod line_coverage_tests {
                 "threads={threads}"
             );
         }
-        let tip = odb.hash(ObjectKind::Blob, &contents[4]);
+        let tip = odb.hash(ObjectKind::Blob, &contents[4]).expect("hash");
         assert!(serial.iter().any(|(oid, _, _)| *oid == tip));
     }
 
@@ -1276,7 +1276,7 @@ mod line_coverage_tests {
         let serial = sorted_records(&pack, &odb, 1);
         assert_eq!(serial.len(), 6);
         assert_eq!(sorted_records(&pack, &odb, 2), serial);
-        let large_oid = odb.hash(ObjectKind::Blob, &large);
+        let large_oid = odb.hash(ObjectKind::Blob, &large).expect("hash");
         assert!(serial.iter().any(|(oid, _, _)| *oid == large_oid));
     }
 

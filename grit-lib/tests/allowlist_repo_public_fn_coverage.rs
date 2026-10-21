@@ -397,7 +397,7 @@ fn mailmap_gitmodules_submodule_and_write_tree() {
         "objects/00/00000000000000000000000000000000000000",
     )]);
 
-    let _ = hash_blob_sha1_hex(b"data");
+    let _ = hash_blob_sha1_hex(b"data").expect("hash");
     let mut cfg_file = ConfigFile::from_path(&git_dir.join("config"), ConfigScope::Local)
         .expect("cfg path")
         .expect("cfg file");

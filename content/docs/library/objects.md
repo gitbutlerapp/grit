@@ -13,6 +13,27 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 Object ids and file checksums share the same digest algorithms but serve different roles. [`ObjectHasher`](rustdoc:grit_lib::objects::hash::ObjectHasher) and [`HashAlgo::digest`](rustdoc:grit_lib::objects::HashAlgo) name Git objects (canonical `"<kind> <len>\\0<payload>"` bytes or raw payloads that become an [`ObjectId`](rustdoc:grit_lib::objects::ObjectId)). [`ChecksumHasher`](rustdoc:grit_lib::objects::hash::ChecksumHasher), [`HashAlgo::checksum_digest`](rustdoc:grit_lib::objects::HashAlgo), [`HashingWriter`](rustdoc:grit_lib::objects::hash::HashingWriter), and [`verify_trailer`](rustdoc:grit_lib::objects::hash::verify_trailer) cover pack, index, MIDX, and commit-graph trailers—integrity checks, not object identities.
 
+## Collision detection
+
+SHA-1 object ids are computed with collision detection (sha1dc). [`hash_object`](rustdoc:grit_lib::objects::hash::hash_object), [`HashAlgo::hash_object`](rustdoc:grit_lib::objects::HashAlgo::hash_object), [`HashAlgo::digest`](rustdoc:grit_lib::objects::HashAlgo::digest), [`ObjectHasher::finalize`](rustdoc:grit_lib::objects::hash::ObjectHasher::finalize), and [`Odb::hash`](rustdoc:grit_lib::objects::odb::Odb::hash) return [`Result`](rustdoc:grit_lib::error::Result) and surface [`Error::HashCollision`](rustdoc:grit_lib::error::Error::HashCollision) when a chosen-prefix collision is detected. Ingestion paths (`Odb::write`, pack indexing, worktree staging) propagate the same error instead of storing a colliding object.
+
+```rust
+use grit_lib::error::Error;
+use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::objects::hash::hash_object;
+
+let payload = b"hello\n";
+match hash_object(HashAlgo::Sha1, ObjectKind::Blob, payload) {
+    Ok(oid) => println!("blob id {oid}"),
+    Err(Error::HashCollision { oid }) => {
+        eprintln!("refusing colliding digest {}", oid.to_hex());
+    }
+    Err(e) => return Err(e.into()),
+}
+```
+
+Patch ids, rerere ids, and pack/index trailers use [`ChecksumHasher`](rustdoc:grit_lib::objects::hash::ChecksumHasher)—same digests, not object identities, and no collision guard on those paths.
+
 ## Reading
 
 [`Odb::read`](rustdoc:grit_lib::objects::odb::Odb) returns an [`Object`](rustdoc:grit_lib::objects::Object) with `kind` and uncompressed `data`. Packed and loose objects share the same API.

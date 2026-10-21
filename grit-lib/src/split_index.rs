@@ -986,7 +986,9 @@ mod tests {
             uid: 1,
             gid: 1,
             size: 3,
-            oid: HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"abc"),
+            oid: HashAlgo::Sha1
+                .hash_object(ObjectKind::Blob, b"abc")
+                .expect("hash"),
             flags: path.len().min(0xFFF) as u16,
             flags_extended: None,
             path: path.as_bytes().to_vec(),
@@ -999,7 +1001,9 @@ mod tests {
         let cfg = ConfigSet::new();
         let mut idx = Index::empty(2);
         idx.split_link = Some(SplitIndexLink {
-            base_oid: HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"base"),
+            base_oid: HashAlgo::Sha1
+                .hash_object(ObjectKind::Blob, b"base")
+                .expect("hash"),
             delete_bitmap: None,
             replace_bitmap: None,
         });
@@ -1021,7 +1025,9 @@ mod tests {
 
     #[test]
     fn parse_link_extension_round_trip_and_corrupt() {
-        let base = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"base");
+        let base = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"base")
+            .expect("hash");
         let mut del = EwahBitmap::new();
         del.set_bit_extend(1);
         let mut rep = EwahBitmap::new();
@@ -1160,7 +1166,9 @@ mod tests {
         fs::create_dir_all(&git_dir).expect("mkdir");
         let mut idx = Index::empty(2);
         idx.split_link = Some(SplitIndexLink {
-            base_oid: HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"missing"),
+            base_oid: HashAlgo::Sha1
+                .hash_object(ObjectKind::Blob, b"missing")
+                .expect("hash"),
             delete_bitmap: None,
             replace_bitmap: None,
         });
@@ -1200,7 +1208,9 @@ mod tests {
         let mut del = EwahBitmap::new();
         del.set_bit_extend(0);
         let link = SplitIndexLink {
-            base_oid: HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"shared"),
+            base_oid: HashAlgo::Sha1
+                .hash_object(ObjectKind::Blob, b"shared")
+                .expect("hash"),
             delete_bitmap: Some(del),
             replace_bitmap: None,
         };
@@ -1222,12 +1232,16 @@ mod tests {
         let mut rep = EwahBitmap::new();
         rep.set_bit_extend(2);
         let link = SplitIndexLink {
-            base_oid: HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"shared"),
+            base_oid: HashAlgo::Sha1
+                .hash_object(ObjectKind::Blob, b"shared")
+                .expect("hash"),
             delete_bitmap: Some(del),
             replace_bitmap: Some(rep),
         };
         let mut rep_entry = sample_entry("", 99);
-        rep_entry.oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"newc");
+        rep_entry.oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"newc")
+            .expect("hash");
         let mut index = Index::empty(2);
         index.add_or_replace(rep_entry);
         merge_split_into_index(&mut index, link, base_entries).expect("merge");

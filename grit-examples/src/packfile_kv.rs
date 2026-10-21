@@ -168,7 +168,7 @@ impl ObjectStore for PackfileKvStore {
         };
         let raw = self.read_zlib_record(offset)?;
         let obj = parse_store_bytes(&raw)?;
-        let computed = hash::hash_object(self.algo, obj.kind, &obj.data);
+        let computed = hash::hash_object(self.algo, obj.kind, &obj.data)?;
         if computed != *oid {
             return Err(Error::CorruptObject(format!(
                 "packfile kv hash mismatch for {}",
@@ -248,7 +248,7 @@ impl ObjectStore for PackfileKvStore {
 
 impl WritableObjectStore for PackfileKvStore {
     fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
-        let oid = hash::hash_object(self.algo, kind, data);
+        let oid = hash::hash_object(self.algo, kind, data)?;
         {
             let guard = self
                 .index
@@ -353,7 +353,7 @@ fn rebuild_index(file: &mut File, algo: HashAlgo) -> Result<HashMap<ObjectId, u6
             Ok(obj) => obj,
             Err(_) => break,
         };
-        let oid = hash::hash_object(algo, obj.kind, &obj.data);
+        let oid = hash::hash_object(algo, obj.kind, &obj.data)?;
         index.entry(oid).or_insert(offset);
         valid_end = file.stream_position().map_err(Error::Io)?;
     }

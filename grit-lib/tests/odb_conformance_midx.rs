@@ -37,7 +37,7 @@ const CHUNK_OIDFANOUT: u32 = 0x4f49_4446;
 fn recompute_midx_sha1_trailer(data: &mut [u8]) {
     let hash_len = 20;
     let payload_len = data.len().saturating_sub(hash_len);
-    let digest = HashAlgo::Sha1.digest(&data[..payload_len]);
+    let digest = HashAlgo::Sha1.digest(&data[..payload_len]).expect("digest");
     data[payload_len..].copy_from_slice(digest.as_bytes());
 }
 
@@ -156,11 +156,11 @@ fn install_specs_only_pack(objects: &Path, specs: &[(ObjectKind, Vec<u8>)], algo
     pack.extend_from_slice(&(specs.len() as u32).to_be_bytes());
     let mut entries = Vec::new();
     for (kind, data) in specs {
-        let oid = hash::hash_object(algo, *kind, data);
+        let oid = hash::hash_object(algo, *kind, data).expect("hash");
         let off = append_whole_object(&mut pack, *kind, data);
         entries.push((oid, off, 0u32));
     }
-    let digest = algo.digest(&pack);
+    let digest = algo.digest(&pack).expect("digest");
     pack.extend_from_slice(digest.as_bytes());
 
     let pack_dir = objects.join("pack");

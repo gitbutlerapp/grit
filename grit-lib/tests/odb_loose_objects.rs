@@ -179,12 +179,12 @@ fn t1050_odb_hash_matches_git_hash_object() {
         let odb = Odb::new(&repo.objects_dir());
         for data in blob_payloads() {
             let git_oid = git_hash_object_w(&repo, "blob", &data);
-            let grit_oid = odb.hash(ObjectKind::Blob, &data).to_hex();
+            let grit_oid = odb.hash(ObjectKind::Blob, &data).expect("hash").to_hex();
             assert_eq!(grit_oid, git_oid, "blob len {}", data.len());
         }
         let tree = Vec::new();
         assert_eq!(
-            odb.hash(ObjectKind::Tree, &tree).to_hex(),
+            odb.hash(ObjectKind::Tree, &tree).expect("hash").to_hex(),
             git_hash_object_w(&repo, "tree", &tree)
         );
         let tree_oid = git_hash_object_w(&repo, "tree", &tree);
@@ -194,6 +194,7 @@ fn t1050_odb_hash_matches_git_hash_object() {
         let commit_oid = git_hash_object_w(&repo, "commit", commit_body.as_bytes());
         assert_eq!(
             odb.hash(ObjectKind::Commit, commit_body.as_bytes())
+                .expect("hash")
                 .to_hex(),
             commit_oid
         );
@@ -202,7 +203,9 @@ fn t1050_odb_hash_matches_git_hash_object() {
         );
         let tag_oid = git_hash_object_w(&repo, "tag", tag_body.as_bytes());
         assert_eq!(
-            odb.hash(ObjectKind::Tag, tag_body.as_bytes()).to_hex(),
+            odb.hash(ObjectKind::Tag, tag_body.as_bytes())
+                .expect("hash")
+                .to_hex(),
             tag_oid
         );
     }
@@ -270,7 +273,7 @@ fn t1060_loose_header_size_mismatch_returns_corrupt_object() {
     let repo = init_repo(HashAlgo::Sha1);
     let odb = Odb::new(&repo.objects_dir());
     let body = b"size-mismatch";
-    let oid = odb.hash(ObjectKind::Blob, body);
+    let oid = odb.hash(ObjectKind::Blob, body).expect("hash");
     let path = odb.object_path(&oid);
     let mut raw = format!("blob 999999\0").into_bytes();
     raw.extend_from_slice(body);
@@ -291,7 +294,7 @@ fn t1060_loose_header_type_mismatch_returns_loose_hash_mismatch() {
     let repo = init_repo(HashAlgo::Sha1);
     let odb = Odb::new(&repo.objects_dir());
     let body = b"type-mismatch";
-    let oid = odb.hash(ObjectKind::Blob, body);
+    let oid = odb.hash(ObjectKind::Blob, body).expect("hash");
     let path = odb.object_path(&oid);
     let mut raw = format!("tree {}\0", body.len()).into_bytes();
     raw.extend_from_slice(body);
@@ -312,8 +315,8 @@ fn t1060_read_loose_verify_oid_wrong_path_returns_loose_hash_mismatch() {
     let repo = init_repo(HashAlgo::Sha1);
     let odb = Odb::new(&repo.objects_dir());
     let body = b"payload-for-mismatch";
-    let real_oid = odb.hash(ObjectKind::Blob, body);
-    let decoy_oid = odb.hash(ObjectKind::Blob, b"decoy-name");
+    let real_oid = odb.hash(ObjectKind::Blob, body).expect("hash");
+    let decoy_oid = odb.hash(ObjectKind::Blob, b"decoy-name").expect("hash");
     let real_path = odb.object_path(&real_oid);
     write_loose_object(&repo.objects_dir(), FixtureAlgo::Sha1, "blob", body).expect("write loose");
     let decoy_path = odb.object_path(&decoy_oid);
@@ -328,7 +331,7 @@ fn t1060_read_loose_verify_oid_wrong_path_returns_loose_hash_mismatch() {
 fn t1060_missing_loose_object_returns_object_not_found() {
     let repo = init_repo(HashAlgo::Sha1);
     let odb = Odb::new(&repo.objects_dir());
-    let missing = odb.hash(ObjectKind::Blob, b"never-written");
+    let missing = odb.hash(ObjectKind::Blob, b"never-written").expect("hash");
     let err = odb.read(&missing).unwrap_err();
     assert!(matches!(err, Error::ObjectNotFound(_)), "{err:?}");
 }
@@ -459,7 +462,7 @@ fn t1060_object_header_too_long_returns_typed_error() {
     let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
     enc.write_all(raw.as_bytes()).unwrap();
     let zlib = enc.finish().unwrap();
-    let oid = odb.hash(ObjectKind::Blob, b"");
+    let oid = odb.hash(ObjectKind::Blob, b"").expect("hash");
     let path = odb.object_path(&oid);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, zlib).unwrap();
@@ -521,7 +524,7 @@ fn write_loose_zlib_prehashed_round_trip() {
     let zlib = odb
         .zlib_compress_loose_store(&store_bytes)
         .expect("compress");
-    let oid = odb.hash(ObjectKind::Blob, payload);
+    let oid = odb.hash(ObjectKind::Blob, payload).expect("hash");
     odb.write_loose_zlib_prehashed(&oid, &zlib, WriteOptions::default())
         .expect("prehashed write");
     let again = odb
@@ -593,7 +596,7 @@ fn write_local_materializes_loose_when_object_only_in_cruft_pack() {
 fn t1006_zlib_preset_dictionary_returns_needs_dictionary() {
     let repo = init_repo(HashAlgo::Sha1);
     let odb = Odb::new(&repo.objects_dir());
-    let oid = odb.hash(ObjectKind::Blob, b"dict");
+    let oid = odb.hash(ObjectKind::Blob, b"dict").expect("hash");
     let path = odb.object_path(&oid);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, zlib_with_preset_dictionary()).unwrap();

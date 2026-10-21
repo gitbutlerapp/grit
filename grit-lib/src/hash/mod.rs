@@ -6,10 +6,10 @@
 //! `grit-lib`.
 //!
 //! **Object ids** name Git objects. SHA-1 ids are computed with [`sha1dc`] (collision
-//! detection, standard digest mode). Use [`ObjectHasher::try_finalize`] on ingestion
-//! paths. [`ObjectHasher`] / [`HashAlgo::hash_object`] remain for callers not yet on
-//! the checked API. Canonical store bytes are `"<kind> <len>\\0<payload>"`; use
-//! [`HashAlgo::digest`] when hashing raw bytes that should become an [`ObjectId`]
+//! detection, standard digest mode). [`ObjectHasher::finalize`], [`hash_object`], and
+//! [`HashAlgo::digest`] return [`Result`] and surface [`Error::HashCollision`] on
+//! chosen-prefix collisions. Canonical store bytes are `"<kind> <len>\\0<payload>"`;
+//! use [`HashAlgo::digest`] when hashing raw bytes that should become an [`ObjectId`]
 //! (for example verifying loose object headers).
 //!
 //! **Checksums** detect corruption in pack, index, MIDX, commit-graph, and related
@@ -30,8 +30,8 @@ mod parallel;
 
 pub use parallel::{
     hash_objects_parallel, index_parallelism_from_config, par_hash_with, parallel_hash_worthwhile,
-    try_hash_objects_parallel, try_par_hash_with, try_par_hash_with_force, ParallelHashError,
-    Parallelism, PAR_HASH_MIN_ITEMS, PAR_HASH_MIN_TOTAL_BYTES,
+    try_par_hash_with, try_par_hash_with_force, ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS,
+    PAR_HASH_MIN_TOTAL_BYTES,
 };
 
 /// Which implementation the `sha1` / `sha2` dependency selects for `algo` on this CPU.
@@ -233,23 +233,10 @@ impl ObjectHasher {
 
     /// Finish hashing and return the object id.
     ///
-    /// On SHA-1 collision detection the plain digest is still returned (ingestion should
-    /// use [`Self::try_finalize`] instead).
-    #[must_use]
-    pub fn finalize(self) -> ObjectId {
-        match self {
-            Self::Sha1(h) => sha1_object_id_infallible(h),
-            Self::Sha256(h) => ObjectId::from_bytes(h.finalize().as_slice())
-                .unwrap_or_else(|_| unreachable!("SHA-256 digest is 32 bytes")),
-        }
-    }
-
-    /// Finish hashing and return the object id, or [`Error::HashCollision`] for SHA-1.
-    ///
     /// # Errors
     ///
     /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
-    pub fn try_finalize(self) -> Result<ObjectId> {
+    pub fn finalize(self) -> Result<ObjectId> {
         match self {
             Self::Sha1(h) => match h.finalize() {
                 Ok(digest) => Ok(object_id_from_sha1_digest(&digest)),
@@ -339,37 +326,23 @@ impl HashAlgo {
     }
 
     /// Hash a byte slice with no Git object header.
-    #[must_use]
-    pub fn digest(self, data: &[u8]) -> ObjectId {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    pub fn digest(self, data: &[u8]) -> Result<ObjectId> {
         let mut hasher = self.hasher();
         hasher.update(data);
         hasher.finalize()
     }
 
-    /// Like [`Self::digest`], but surfaces SHA-1 collision detection.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
-    pub fn try_digest(self, data: &[u8]) -> Result<ObjectId> {
-        let mut hasher = self.hasher();
-        hasher.update(data);
-        hasher.try_finalize()
-    }
-
     /// Hash canonical Git store bytes for `kind` and `data`.
-    #[must_use]
-    pub fn hash_object(self, kind: ObjectKind, data: &[u8]) -> ObjectId {
-        hash_object(self, kind, data)
-    }
-
-    /// Like [`Self::hash_object`], but surfaces SHA-1 collision detection.
     ///
     /// # Errors
     ///
     /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
-    pub fn try_hash_object(self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
-        try_hash_object(self, kind, data)
+    pub fn hash_object(self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        hash_object(self, kind, data)
     }
 }
 
@@ -377,24 +350,15 @@ impl HashAlgo {
 ///
 /// Equivalent to [`HashAlgo::hash_object`] but accepts the algorithm as the
 /// first argument.
-#[must_use]
-pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
-    let len = u64::try_from(data.len()).unwrap_or(u64::MAX); // clamp on platforms where usize exceeds u64::MAX
-    let mut hasher = ObjectHasher::for_object(algo, kind, len);
-    hasher.update(data);
-    hasher.finalize()
-}
-
-/// Like [`hash_object`], but surfaces SHA-1 collision detection.
 ///
 /// # Errors
 ///
 /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
-pub fn try_hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
     let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
     let mut hasher = ObjectHasher::for_object(algo, kind, len);
     hasher.update(data);
-    let oid = hasher.try_finalize()?;
+    let oid = hasher.finalize()?;
     if algo == HashAlgo::Sha1 {
         detect_standalone_sha1_collision(data)?;
     }
@@ -414,13 +378,6 @@ fn detect_standalone_sha1_collision(payload: &[u8]) -> Result<()> {
 fn object_id_from_sha1_digest(digest: &sha1dc::Digest) -> ObjectId {
     ObjectId::from_bytes(digest.as_ref())
         .unwrap_or_else(|_| unreachable!("SHA-1 digest is 20 bytes"))
-}
-
-fn sha1_object_id_infallible(hasher: Sha1dcHasher) -> ObjectId {
-    match hasher.finalize() {
-        Ok(digest) => object_id_from_sha1_digest(&digest),
-        Err(collision) => object_id_from_sha1_digest(&collision.digest()),
-    }
 }
 
 fn collision_to_error(collision: sha1dc::Collision) -> Error {
@@ -615,7 +572,7 @@ mod tests {
     }
 
     fn assert_digest(algo: HashAlgo, data: &[u8], expected_hex: &str) {
-        let got = algo.digest(data);
+        let got = algo.digest(data).expect("digest");
         assert_eq!(got, hex_oid(algo, expected_hex), "digest mismatch");
     }
 
@@ -655,7 +612,10 @@ mod tests {
             let mut checksum = algo.checksum_hasher();
             checksum.update(&data);
             let checksum_bytes = checksum.finalize();
-            assert_eq!(checksum_bytes, algo.digest(&data).as_bytes());
+            assert_eq!(
+                checksum_bytes,
+                algo.digest(&data).expect("digest").as_bytes()
+            );
         }
     }
 
@@ -729,7 +689,7 @@ mod tests {
     fn incremental_matches_oneshot_random_splits() {
         let data: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
         for algo in [HashAlgo::Sha1, HashAlgo::Sha256] {
-            let oneshot = algo.digest(&data);
+            let oneshot = algo.digest(&data).expect("digest");
             let mut state = 0xdead_beef_u64;
             let mut pos = 0usize;
             let mut hasher = algo.hasher();
@@ -746,7 +706,7 @@ mod tests {
                 hasher.update(&data[pos..pos + chunk]);
                 pos += chunk;
             }
-            assert_eq!(hasher.finalize(), oneshot);
+            assert_eq!(hasher.finalize().expect("finalize"), oneshot);
         }
     }
 
@@ -790,8 +750,8 @@ mod tests {
                     ObjectHasher::for_object(HashAlgo::Sha1, kind, payload.len() as u64);
                 hasher.update(payload);
                 assert_eq!(
-                    hash_object(HashAlgo::Sha1, kind, payload),
-                    hasher.finalize()
+                    hash_object(HashAlgo::Sha1, kind, payload).expect("hash"),
+                    hasher.finalize().expect("finalize")
                 );
             }
         }
@@ -936,7 +896,7 @@ mod tests {
         let n = hasher.finalize_into(&mut out).unwrap();
         assert_eq!(n, 32);
         assert_eq!(
-            HashAlgo::Sha256.digest(b"via write trait"),
+            HashAlgo::Sha256.digest(b"via write trait").expect("digest"),
             ObjectId::from_bytes(&out).unwrap()
         );
     }
@@ -983,48 +943,36 @@ mod tests {
             let mut hasher = ObjectHasher::new(HashAlgo::Sha1);
             hasher.update(&data);
             assert_eq!(
-                hasher.finalize().as_bytes(),
+                hasher.finalize().expect("finalize").as_bytes(),
                 expected.as_slice(),
                 "len {len}"
-            );
-            let mut hasher = ObjectHasher::new(HashAlgo::Sha1);
-            hasher.update(&data);
-            assert_eq!(
-                hasher
-                    .try_finalize()
-                    .expect("no collision on random data")
-                    .as_bytes(),
-                expected.as_slice(),
-                "try_finalize len {len}"
             );
         }
     }
 
     #[test]
-    fn try_finalize_detects_shattered_prefix() {
+    fn finalize_detects_shattered_prefix() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
         for name in ["shattered-1-prefix.bin", "shattered-2-prefix.bin"] {
             let bytes = std::fs::read(dir.join(name)).expect("fixture");
             let mut hasher = ObjectHasher::new(HashAlgo::Sha1);
             hasher.update(&bytes);
-            let err = hasher
-                .try_finalize()
-                .expect_err("SHAttered block must collide");
+            let err = hasher.finalize().expect_err("SHAttered block must collide");
             assert!(matches!(err, Error::HashCollision { .. }));
             assert!(matches!(
-                try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &bytes),
+                hash_object(HashAlgo::Sha1, ObjectKind::Blob, &bytes),
                 Err(Error::HashCollision { .. })
             ));
         }
     }
 
     #[test]
-    fn sha256_try_finalize_never_collides() {
+    fn sha256_finalize_never_collides() {
         let data: Vec<u8> = (0..1024).map(|i| (i % 251) as u8).collect();
         let mut hasher = ObjectHasher::new(HashAlgo::Sha256);
         hasher.update(&data);
         hasher
-            .try_finalize()
+            .finalize()
             .expect("SHA-256 has no collision detection");
     }
 

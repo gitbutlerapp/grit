@@ -12,7 +12,7 @@ use crate::parallel::{
 pub use crate::parallel::index_parallelism_from_config;
 pub use crate::parallel::{ParallelHashError, Parallelism};
 
-use super::{hash_object, try_hash_object};
+use super::hash_object;
 use crate::error::Error;
 
 /// Minimum item count before parallel helpers use more than one thread.
@@ -45,27 +45,19 @@ fn hash_parallel_options(threads: NonZeroUsize) -> ParallelOptions {
 }
 
 /// Hash Git objects in parallel, preserving input order.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`ParallelHashError::Task`] with [`Error::HashCollision`] when sha1dc
+/// detects a chosen-prefix collision in any item.
 pub fn hash_objects_parallel(
-    algo: HashAlgo,
-    items: &[(ObjectKind, &[u8])],
-    threads: NonZeroUsize,
-) -> Vec<ObjectId> {
-    let total_bytes: usize = items.iter().map(|(_, data)| data.len()).sum();
-    par_hash_with(items, threads, total_bytes, |(kind, data)| {
-        hash_object(algo, *kind, data)
-    })
-}
-
-/// Fallible variant of [`hash_objects_parallel`] (SHA-1 collision detection).
-pub fn try_hash_objects_parallel(
     algo: HashAlgo,
     items: &[(ObjectKind, &[u8])],
     threads: NonZeroUsize,
 ) -> Result<Vec<ObjectId>, ParallelHashError<Error>> {
     let total_bytes: usize = items.iter().map(|(_, data)| data.len()).sum();
     try_par_hash_with(items, threads, total_bytes, |(kind, data)| {
-        try_hash_object(algo, *kind, data)
+        hash_object(algo, *kind, data)
     })
 }
 
@@ -134,7 +126,7 @@ mod tests {
     fn serial_ids(algo: HashAlgo, items: &[(ObjectKind, &[u8])]) -> Vec<ObjectId> {
         items
             .iter()
-            .map(|(kind, data)| hash_object(algo, *kind, data))
+            .map(|(kind, data)| hash_object(algo, *kind, data).expect("serial hash"))
             .collect()
     }
 
@@ -161,7 +153,8 @@ mod tests {
                 .collect();
             let expect = serial_ids(HashAlgo::Sha1, &items);
             for &t in &thread_counts {
-                let got = hash_objects_parallel(HashAlgo::Sha1, &items, threads(t));
+                let got =
+                    hash_objects_parallel(HashAlgo::Sha1, &items, threads(t)).expect("parallel");
                 assert_eq!(got, expect, "n={n} threads={t}");
             }
         }
@@ -175,7 +168,7 @@ mod tests {
             .map(|b| (ObjectKind::Blob, b.as_slice()))
             .collect();
         let expect = serial_ids(HashAlgo::Sha256, &items);
-        let got = hash_objects_parallel(HashAlgo::Sha256, &items, threads(4));
+        let got = hash_objects_parallel(HashAlgo::Sha256, &items, threads(4)).expect("parallel");
         assert_eq!(got, expect);
     }
 

@@ -4170,11 +4170,11 @@ fn parallel_process_blob_worktree_jobs(
             let worktree_oid = if materialize_dirty_blobs {
                 odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
             } else {
-                odb.hash(ObjectKind::Blob, &data)
+                odb.hash(ObjectKind::Blob, &data)?
             };
             let mut eff_oid = worktree_oid;
             if eff_oid != job.entry.oid {
-                let raw_oid = odb.hash(ObjectKind::Blob, &data);
+                let raw_oid = odb.hash(ObjectKind::Blob, &data)?;
                 if raw_oid == job.entry.oid {
                     eff_oid = job.entry.oid;
                 }
@@ -4368,11 +4368,11 @@ fn push_index_blob_worktree_diff(
     let worktree_oid = if materialize_dirty_blobs {
         odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
     } else {
-        odb.hash(ObjectKind::Blob, &data)
+        odb.hash(ObjectKind::Blob, &data)?
     };
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
-        let raw_oid = odb.hash(ObjectKind::Blob, &data);
+        let raw_oid = odb.hash(ObjectKind::Blob, &data)?;
         if raw_oid == ie.oid {
             eff_oid = ie.oid;
         }
@@ -5462,9 +5462,10 @@ pub fn worktree_differs_from_index_entry(
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(&file_path) {
-            let raw_oid = odb.hash(ObjectKind::Blob, &raw);
-            if raw_oid == ie.oid {
-                eff_oid = ie.oid;
+            if let Ok(raw_oid) = odb.hash(ObjectKind::Blob, &raw) {
+                if raw_oid == ie.oid {
+                    eff_oid = ie.oid;
+                }
             }
         }
     }
@@ -5630,9 +5631,10 @@ fn worktree_effective_oid_matches_index(
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(abs_path) {
-            let raw_oid = odb.hash(ObjectKind::Blob, &raw);
-            if raw_oid == ie.oid {
-                eff_oid = ie.oid;
+            if let Ok(raw_oid) = odb.hash(ObjectKind::Blob, &raw) {
+                if raw_oid == ie.oid {
+                    eff_oid = ie.oid;
+                }
             }
         }
     }
@@ -6361,7 +6363,7 @@ fn worktree_file_oid(
     if materialize {
         odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)
     } else {
-        Ok(odb.hash(ObjectKind::Blob, &data))
+        odb.hash(ObjectKind::Blob, &data)
     }
 }
 
@@ -6387,7 +6389,7 @@ pub fn hash_worktree_file(
         index_entry,
         filter_process,
     )?;
-    Ok(odb.hash(ObjectKind::Blob, &data))
+    odb.hash(ObjectKind::Blob, &data)
 }
 
 /// Read, normalize (CRLF/attributes), and store a worktree blob once.
@@ -6942,7 +6944,7 @@ fn modified_as_copy_from_sources(
     let new_oid_eff = if e.new_oid != zero_oid() {
         e.new_oid
     } else {
-        odb.hash(ObjectKind::Blob, &new_data)
+        odb.hash(ObjectKind::Blob, &new_data).ok()?
     };
 
     let mut best: Option<(usize, u32)> = None;
@@ -7296,6 +7298,10 @@ pub fn detect_renames_with_policy(
 ///
 /// `source_tree_entries` should be a list of (path, mode, oid) from the source tree;
 /// used when `find_copies_harder` is true to consider unmodified files as copy sources.
+/// # Errors
+///
+/// Returns [`Error::HashCollision`] when hashing worktree blob content for copy detection
+/// would produce a known-bad SHA-1 object id.
 pub fn detect_copies(
     odb: &Odb,
     work_root: Option<&Path>,
@@ -7303,7 +7309,7 @@ pub fn detect_copies(
     threshold: u32,
     find_copies_harder: bool,
     source_tree_entries: &[(String, String, ObjectId)],
-) -> Vec<DiffEntry> {
+) -> Result<Vec<DiffEntry>> {
     let config = ConfigSet::new();
     let policy = ThreadPolicy::default();
     detect_copies_with_policy(
@@ -7319,7 +7325,10 @@ pub fn detect_copies(
 }
 
 /// Like [`detect_copies`], but honors parallel thread policy and rename limits.
-#[must_use]
+///
+/// # Errors
+///
+/// Same as [`detect_copies`].
 #[expect(clippy::too_many_arguments)]
 pub fn detect_copies_with_policy(
     odb: &Odb,
@@ -7330,7 +7339,7 @@ pub fn detect_copies_with_policy(
     source_tree_entries: &[(String, String, ObjectId)],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
-) -> Vec<DiffEntry> {
+) -> Result<Vec<DiffEntry>> {
     use std::collections::{HashMap, HashSet};
 
     // Separate entries by status.
@@ -7384,7 +7393,7 @@ pub fn detect_copies_with_policy(
         result.extend(deleted);
         result.extend(added);
         result.sort_by(|a, b| a.path().cmp(b.path()));
-        return result;
+        return Ok(result);
     }
 
     let par_opts = diff_rename_parallel_options(config, thread_policy);
@@ -7475,13 +7484,13 @@ pub fn detect_copies_with_policy(
         add: &DiffEntry,
         added_contents: &[Option<Vec<u8>>],
         ai: usize,
-    ) -> ObjectId {
+    ) -> Result<ObjectId> {
         if add.new_oid != zero_oid() {
-            add.new_oid
+            Ok(add.new_oid)
         } else if let Some(ref data) = added_contents[ai] {
             odb.hash(ObjectKind::Blob, data)
         } else {
-            zero_oid()
+            Ok(zero_oid())
         }
     }
 
@@ -7502,7 +7511,7 @@ pub fn detect_copies_with_policy(
                 if add.new_path.as_deref() == Some(src_path.as_str()) {
                     continue;
                 }
-                let add_oid = added_entry_oid(odb, add, &added_contents, ai);
+                let add_oid = added_entry_oid(odb, add, &added_contents, ai)?;
                 if *src_oid == add_oid && add_oid != zero_oid() {
                     exact_scores.push((100, si, ai));
                 }
@@ -7633,7 +7642,7 @@ pub fn detect_copies_with_policy(
     }
 
     final_result.sort_by(|a, b| a.path().cmp(b.path()));
-    final_result
+    Ok(final_result)
 }
 
 /// Options for Git-style rename, copy, and break-rewrite post-processing on tree diffs.
@@ -7826,7 +7835,7 @@ fn materialize_break_worktree_new_oids(
             continue;
         }
         let bytes = read_new_side_bytes(odb, e, work_root, worktree, config)?;
-        e.new_oid = odb.hash(ObjectKind::Blob, &bytes);
+        e.new_oid = odb.hash(ObjectKind::Blob, &bytes)?;
     }
     Ok(())
 }
@@ -7904,7 +7913,7 @@ pub fn postprocess_diff_entries(
 
     if opts.copy_threshold.is_some() || opts.find_copies_harder {
         let threshold = opts.copy_threshold.unwrap_or(opts.rename_threshold.min(99));
-        Ok(detect_copies_with_policy(
+        detect_copies_with_policy(
             odb,
             work_root,
             entries,
@@ -7913,7 +7922,7 @@ pub fn postprocess_diff_entries(
             &source_tree_entries,
             config,
             thread_policy,
-        ))
+        )
     } else if opts.rename_threshold < 100 {
         Ok(detect_renames_with_policy(
             odb,
@@ -7996,7 +8005,7 @@ pub fn status_apply_rename_copy_detection(
             .collect(),
         None => Vec::new(),
     };
-    Ok(detect_copies_with_policy(
+    detect_copies_with_policy(
         odb,
         None,
         unstaged_raw,
@@ -8005,7 +8014,7 @@ pub fn status_apply_rename_copy_detection(
         &source_tree_entries,
         config,
         thread_policy,
-    ))
+    )
 }
 
 /// Format a rename pair using Git's compact path format.
@@ -11626,7 +11635,7 @@ mod racy_index_mtime_diff_tests {
         let git_dir = wt.join(".git");
         fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
         let odb = Odb::new(&git_dir.join("objects"));
-        let oid_a = odb.hash(ObjectKind::Blob, content_a);
+        let oid_a = odb.hash(ObjectKind::Blob, content_a).expect("hash");
         let entry = entry_from_metadata(&meta, b"f.txt", oid_a, MODE_REGULAR);
 
         let mut index = Index::new();
@@ -11664,7 +11673,7 @@ mod racy_index_mtime_diff_tests {
         let git_dir = wt.join(".git");
         fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
         let odb = Odb::new(&git_dir.join("objects"));
-        let oid = odb.hash(ObjectKind::Blob, target.as_bytes());
+        let oid = odb.hash(ObjectKind::Blob, target.as_bytes()).expect("hash");
         let entry = entry_from_metadata(&meta, b"link", oid, MODE_SYMLINK);
 
         let mut index = Index::new();
@@ -11689,7 +11698,7 @@ mod racy_index_mtime_diff_tests {
         fs::write(wt.join("f.txt"), bytes).expect("write");
         pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
         let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
-        let oid = odb.hash(ObjectKind::Blob, bytes);
+        let oid = odb.hash(ObjectKind::Blob, bytes).expect("hash");
         let entry = entry_from_metadata(&meta, b"f.txt", oid, MODE_REGULAR);
 
         let mut index = Index::new();
@@ -11770,7 +11779,7 @@ mod smudge_racily_clean_tests {
         fs::write(&path, bytes).expect("write file");
         pin_mtime_and_sample(&path, mtime.0, mtime.1);
         let meta = fs::symlink_metadata(&path).expect("stat file");
-        let oid = odb.hash(ObjectKind::Blob, bytes);
+        let oid = odb.hash(ObjectKind::Blob, bytes).expect("hash");
         entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR)
     }
 
@@ -11835,7 +11844,7 @@ mod smudge_racily_clean_tests {
         let (git_dir, odb) = minimal_repo(wt, "[core]\n");
         let rel = "unset-stat.txt";
         let bytes = b"same bytes\n";
-        let oid = odb.hash(ObjectKind::Blob, bytes);
+        let oid = odb.hash(ObjectKind::Blob, bytes).expect("hash");
         fs::write(wt.join(rel), bytes).expect("write");
         let mut index = Index::new();
         let mut entry = staged_entry_for_file(&odb, wt, rel, bytes, (100, 0));
@@ -12205,7 +12214,7 @@ mod smudge_racily_clean_tests {
         assert_eq!(odb.hash_algo(), HashAlgo::Sha256);
 
         let bytes = b"sha256 width!!";
-        let oid = odb.hash(ObjectKind::Blob, bytes);
+        let oid = odb.hash(ObjectKind::Blob, bytes).expect("hash");
         let mut index = Index::new();
         let entry = staged_entry_with_oid(wt, "f.txt", bytes, oid, index_mtime);
         index.entries.push(entry.clone());
@@ -12232,7 +12241,7 @@ mod smudge_racily_clean_tests {
         let (git_dir, odb) = minimal_repo(wt, "[core]\n\tautocrlf = true\n");
         let git_form = b"line one\nline two\n";
         let worktree_form = b"line one\r\nline two\r\n";
-        let oid = odb.hash(ObjectKind::Blob, git_form);
+        let oid = odb.hash(ObjectKind::Blob, git_form).expect("hash");
 
         let mut index = Index::new();
         let entry = staged_entry_with_oid(wt, "f.txt", worktree_form, oid, index_mtime);
@@ -12635,7 +12644,7 @@ mod line_coverage_tests {
             &source_flat,
             &config,
             &policy,
-        );
+        )?;
         let opts = DiffPostprocessOptions {
             break_score: Some(50),
             rename_threshold: 50,

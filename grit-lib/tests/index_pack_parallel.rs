@@ -336,7 +336,7 @@ fn idx_rev_identical_threads_1_2_4_8_deep_delta_chain() {
     let ref_base = b"ref-base-for-delta\n";
     let _ref_base_idx = pb.add_full(PK::Blob, ref_base);
     let scratch_odb = Odb::new(tempfile::tempdir().expect("odb").path());
-    let ref_oid = scratch_odb.hash(ObjectKind::Blob, ref_base);
+    let ref_oid = scratch_odb.hash(ObjectKind::Blob, ref_base).expect("hash");
     let mut ref_target = ref_base.to_vec();
     ref_target.extend_from_slice(b"++");
     let ref_delta = encode_lcp_delta(ref_base, &ref_target).expect("ref delta");

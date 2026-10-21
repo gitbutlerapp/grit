@@ -3,7 +3,9 @@ use grit_lib::objects::{HashAlgo, Object, ObjectKind};
 
 fn main() {
     let object = Object::new(ObjectKind::Blob, b"hello from grit\n".to_vec());
-    let oid = HashAlgo::Sha1.hash_object(object.kind, &object.data);
+    let oid = HashAlgo::Sha1
+        .hash_object(object.kind, &object.data)
+        .expect("hash");
 
     println!("{} {} bytes", oid, object.data.len());
 }

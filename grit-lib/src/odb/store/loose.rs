@@ -151,7 +151,7 @@ impl LooseStore {
         let file = fs::File::open(path).map_err(Error::Io)?;
         let raw = read_zlib_loose_payload(file)?;
         let obj = parse_object_bytes_with_oid(&raw, expected_oid)?;
-        let computed = hash::try_hash_object(expected_oid.algo(), obj.kind, &obj.data)?;
+        let computed = hash::hash_object(expected_oid.algo(), obj.kind, &obj.data)?;
         if computed != *expected_oid {
             return Err(Error::LooseHashMismatch {
                 path: path.display().to_string(),
@@ -263,8 +263,7 @@ impl ObjectStore for LooseStore {
 impl WritableObjectStore for LooseStore {
     fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId> {
         let store_bytes = build_store_bytes(kind, data);
-        let oid = hash::try_hash_object(self.hash_algo, kind, data)?;
-        debug_assert_eq!(oid, hash::hash_object(self.hash_algo, kind, data));
+        let oid = hash::hash_object(self.hash_algo, kind, data)?;
         if let Some(existing) = self.try_finish_if_loose_present(&oid, options)? {
             return Ok(existing);
         }
@@ -456,7 +455,7 @@ pub(crate) fn parse_object_header_prefix(raw: &[u8]) -> Result<(ObjectKind, u64)
 
     if sp > 32 {
         return Err(Error::ObjectHeaderTooLong {
-            oid: hash_algo_digest_hex(HashAlgo::Sha1, raw),
+            oid: hash_algo_digest_hex(HashAlgo::Sha1, raw).unwrap_or_else(|_| "?".to_owned()),
         });
     }
 
@@ -484,9 +483,9 @@ fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<O
         .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
 
     if sp > 32 {
-        let oid_str = oid_hint
-            .map(|o| o.to_hex())
-            .unwrap_or_else(|| hash_algo_digest_hex(HashAlgo::Sha1, raw));
+        let oid_str = oid_hint.map(|o| o.to_hex()).unwrap_or_else(|| {
+            hash_algo_digest_hex(HashAlgo::Sha1, raw).unwrap_or_else(|_| "?".to_owned())
+        });
         return Err(Error::ObjectHeaderTooLong { oid: oid_str });
     }
 
@@ -508,8 +507,8 @@ fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<O
     Ok(Object::new(kind, data))
 }
 
-fn hash_algo_digest_hex(algo: HashAlgo, data: &[u8]) -> String {
-    algo.digest(data).to_hex()
+fn hash_algo_digest_hex(algo: HashAlgo, data: &[u8]) -> Result<String> {
+    Ok(algo.digest(data)?.to_hex())
 }
 
 fn publish_zlib_loose_object(

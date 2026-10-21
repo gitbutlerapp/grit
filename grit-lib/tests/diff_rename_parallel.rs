@@ -355,7 +355,8 @@ fn copy_mixed_exact_inexact_respects_rename_limit_like_git() {
         &source_tree,
         &config,
         &parallel_policy(),
-    );
+    )
+    .expect("detect copies");
 
     let git_lines = git_rename_and_copy_lines(root, &parent, &commit);
     let grit_lines = rename_and_copy_lines(&detected);
@@ -414,7 +415,8 @@ fn parallel_copy_many_to_one_matches_serial() {
         &source_tree,
         &config,
         &serial_policy(),
-    );
+    )
+    .expect("detect copies");
     let parallel = detect_copies_with_policy(
         repo.odb(),
         None,
@@ -424,7 +426,8 @@ fn parallel_copy_many_to_one_matches_serial() {
         &source_tree,
         &config,
         &parallel_policy(),
-    );
+    )
+    .expect("detect copies");
     assert_eq!(
         serial, parallel,
         "parallel copy detection must match serial"

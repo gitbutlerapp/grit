@@ -118,7 +118,8 @@ fn blame_diff_dotfile_ident_and_hash_helpers() {
         50,
         false,
         &[(String::new(), String::new(), empty_tree)],
-    );
+    )
+    .expect("detect copies");
 
     assert!(is_ntfs_dot_gitignore(".gitignore"));
 

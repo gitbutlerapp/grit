@@ -76,7 +76,7 @@ pub fn read_all_four_object_kinds<S: ObjectStore>(seed: &impl Fn(&[(ObjectKind, 
     let specs = standard_object_specs(algo);
     let store = seed(&specs);
     for (kind, data) in &specs {
-        let oid = hash::hash_object(algo, *kind, data);
+        let oid = hash::hash_object(algo, *kind, data).expect("hash");
         let obj = store
             .read(&oid)
             .expect("read_all_four_object_kinds: read")
@@ -97,7 +97,7 @@ pub fn read_empty_blob_and_empty_tree<S: ObjectStore>(
     ];
     let store = seed(&specs);
     for (kind, data) in &specs {
-        let oid = hash::hash_object(algo, *kind, data);
+        let oid = hash::hash_object(algo, *kind, data).expect("hash");
         let obj = store
             .read(&oid)
             .expect("read_empty_blob_and_empty_tree: read")
@@ -113,7 +113,7 @@ pub fn read_binary_data_with_nuls<S: ObjectStore>(seed: &impl Fn(&[(ObjectKind, 
     let specs = vec![(ObjectKind::Blob, payload.clone())];
     let store = seed(&specs);
     let algo = store.hash_algo();
-    let oid = hash::hash_object(algo, ObjectKind::Blob, &payload);
+    let oid = hash::hash_object(algo, ObjectKind::Blob, &payload).expect("hash");
     let obj = store
         .read(&oid)
         .expect("read_binary_data_with_nuls: read")
@@ -129,7 +129,7 @@ pub fn read_large_blob_stream_matches_read<S: ObjectStore>(
     let specs = vec![(ObjectKind::Blob, payload.clone())];
     let store = seed(&specs);
     let algo = store.hash_algo();
-    let oid = hash::hash_object(algo, ObjectKind::Blob, &payload);
+    let oid = hash::hash_object(algo, ObjectKind::Blob, &payload).expect("hash");
     let whole = store
         .read(&oid)
         .expect("read_large_blob_stream_matches_read: read")
@@ -155,7 +155,7 @@ pub fn read_info_matches_read<S: ObjectStore>(seed: &impl Fn(&[(ObjectKind, Vec<
     let specs = standard_object_specs(algo);
     let store = seed(&specs);
     for (kind, data) in &specs {
-        let oid = hash::hash_object(algo, *kind, data);
+        let oid = hash::hash_object(algo, *kind, data).expect("hash");
         let obj = store
             .read(&oid)
             .expect("read_info_matches_read: read")
@@ -181,7 +181,7 @@ pub fn read_contains_agreement_on_misses<S: ObjectStore>(
     let algo = store.hash_algo();
     let misses = [
         ObjectId::zero(),
-        hash::hash_object(algo, ObjectKind::Blob, b"never-written"),
+        hash::hash_object(algo, ObjectKind::Blob, b"never-written").expect("hash"),
     ];
     for oid in misses {
         assert!(
@@ -216,7 +216,7 @@ pub fn read_for_each_object_yields_each_id_once<S: ObjectStore>(
     let store = seed(&specs);
     let expected: HashSet<ObjectId> = specs
         .iter()
-        .map(|(kind, data)| hash::hash_object(algo, *kind, data))
+        .map(|(kind, data)| hash::hash_object(algo, *kind, data).expect("hash"))
         .collect();
     let mut seen = HashSet::new();
     store
@@ -246,8 +246,8 @@ pub fn read_lookup_prefix_unique_ambiguous_and_exact<S: ObjectStore>(
     ];
     let store = seed(&specs);
     let algo = store.hash_algo();
-    let a = hash::hash_object(algo, ObjectKind::Blob, a_data);
-    let b = hash::hash_object(algo, ObjectKind::Blob, b_data);
+    let a = hash::hash_object(algo, ObjectKind::Blob, a_data).expect("hash");
+    let b = hash::hash_object(algo, ObjectKind::Blob, b_data).expect("hash");
     let hex_a = a.to_hex();
     let four_char = &hex_a[..4];
     let mut unique = Vec::new();
@@ -287,7 +287,7 @@ pub fn read_concurrent_reads_from_eight_threads<S: ObjectStore + 'static>(
     let oids: Arc<Vec<ObjectId>> = Arc::new(
         specs
             .iter()
-            .map(|(kind, data)| hash::hash_object(algo, *kind, data))
+            .map(|(kind, data)| hash::hash_object(algo, *kind, data).expect("hash"))
             .collect(),
     );
     let mut handles = Vec::with_capacity(8);
@@ -316,7 +316,7 @@ pub fn read_sha256_variants<S: ObjectStore>(seed: &impl Fn(&[(ObjectKind, Vec<u8
     if store.hash_algo() != HashAlgo::Sha256 {
         return;
     }
-    let oid = hash::hash_object(HashAlgo::Sha256, ObjectKind::Blob, b"sha256-probe");
+    let oid = hash::hash_object(HashAlgo::Sha256, ObjectKind::Blob, b"sha256-probe").expect("hash");
     assert_eq!(oid.to_hex().len(), HashAlgo::Sha256.hex_len());
     let mut out = Vec::new();
     store
@@ -332,7 +332,7 @@ pub fn write_returns_git_hashed_id<S: WritableObjectStore>(make: &impl Fn() -> S
     let oid = store
         .write(ObjectKind::Blob, data, WriteOptions::default())
         .expect("write_returns_git_hashed_id: write");
-    let expected = hash::hash_object(store.hash_algo(), ObjectKind::Blob, data);
+    let expected = hash::hash_object(store.hash_algo(), ObjectKind::Blob, data).expect("hash");
     assert_eq!(oid, expected, "write_returns_git_hashed_id: oid");
 }
 
@@ -415,11 +415,11 @@ pub fn write_sha256_variants<S: WritableObjectStore>(make: &impl Fn() -> S) {
 
 fn standard_object_specs(algo: HashAlgo) -> Vec<(ObjectKind, Vec<u8>)> {
     let blob = b"blob-body".to_vec();
-    let blob_oid = hash::hash_object(algo, ObjectKind::Blob, &blob);
-    let empty_tree = hash::hash_object(algo, ObjectKind::Tree, b"");
+    let blob_oid = hash::hash_object(algo, ObjectKind::Blob, &blob).expect("hash");
+    let empty_tree = hash::hash_object(algo, ObjectKind::Tree, b"").expect("hash");
     let tree = tree_with_blob_entry(&blob_oid);
     let commit = minimal_commit_body(algo, &empty_tree);
-    let commit_oid = hash::hash_object(algo, ObjectKind::Commit, &commit);
+    let commit_oid = hash::hash_object(algo, ObjectKind::Commit, &commit).expect("hash");
     let tag = minimal_tag_body(algo, &commit_oid);
     vec![
         (ObjectKind::Blob, blob),

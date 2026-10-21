@@ -548,7 +548,7 @@ fn build_ofs_chain_pack(depth: usize) -> Option<(tempfile::TempDir, PathBuf, Obj
         content = next;
     }
     let built = builder.build();
-    let tip = odb.hash(ObjectKind::Blob, &content);
+    let tip = odb.hash(ObjectKind::Blob, &content).expect("hash");
     let outcome = write_pack_and_index(
         &objects,
         "chain",

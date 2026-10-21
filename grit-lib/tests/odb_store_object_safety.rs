@@ -38,7 +38,7 @@ impl ObjectStore for ExternalStore {
 
 impl WritableObjectStore for ExternalStore {
     fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
-        Ok(grit_lib::objects::hash::hash_object(self.algo, kind, data))
+        grit_lib::objects::hash::hash_object(self.algo, kind, data)
     }
 
     fn freshen(&self, _oid: &ObjectId) -> Result<bool> {

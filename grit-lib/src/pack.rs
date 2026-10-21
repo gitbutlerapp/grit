@@ -1747,7 +1747,7 @@ pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Re
             "unsupported object hash width: {hash_bytes}"
         )));
     };
-    Ok(crate::hash::try_hash_object(algo, kind, data)?
+    Ok(crate::hash::hash_object(algo, kind, data)?
         .as_bytes()
         .to_vec())
 }
@@ -3359,7 +3359,7 @@ fn verify_packed_object_hash(kind: ObjectKind, data: &[u8], expected_oid: &[u8])
             expected_oid.len()
         ))
     })?;
-    let actual = hash_object(algo, kind, data);
+    let actual = hash_object(algo, kind, data)?;
     if actual.as_bytes() != expected_oid {
         return Err(Error::CorruptObject(format!(
             "packed object {} hashes to {}",
@@ -4375,7 +4375,11 @@ pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Op
             None if read_object_from_pack(idx, oid)
                 .map(|obj| {
                     HashAlgo::from_len(idx.hash_bytes())
-                        .map(|algo| hash_object(algo, obj.kind, &obj.data) != *oid)
+                        .map(|algo| {
+                            hash_object(algo, obj.kind, &obj.data)
+                                .map(|h| h != *oid)
+                                .unwrap_or(true)
+                        })
                         .unwrap_or(true)
                 })
                 .unwrap_or(true) =>
@@ -4766,7 +4770,7 @@ mod tests {
 
     fn single_blob_pack(data: &[u8]) -> (Vec<u8>, ObjectId, u64) {
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
-        let oid = odb.hash(ObjectKind::Blob, data);
+        let oid = odb.hash(ObjectKind::Blob, data).expect("hash");
         let mut pack = Vec::new();
         pack.extend_from_slice(b"PACK");
         pack.extend_from_slice(&2u32.to_be_bytes());
@@ -4855,7 +4859,7 @@ mod tests {
         use std::io::{Seek, SeekFrom, Write};
 
         let odb = Odb::new(repo_root);
-        let oid = odb.hash(ObjectKind::Blob, data);
+        let oid = odb.hash(ObjectKind::Blob, data).expect("hash");
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -4999,8 +5003,9 @@ mod tests {
         use std::fs;
 
         let data = b"sha256 packed blob for hash verify\n";
-        let oid = hash_object(HashAlgo::Sha256, ObjectKind::Blob, data);
-        let wrong_oid = hash_object(HashAlgo::Sha256, ObjectKind::Blob, b"different payload\n");
+        let oid = hash_object(HashAlgo::Sha256, ObjectKind::Blob, data).expect("hash");
+        let wrong_oid =
+            hash_object(HashAlgo::Sha256, ObjectKind::Blob, b"different payload\n").expect("hash");
         let mut pack = Vec::new();
         pack.extend_from_slice(b"PACK");
         pack.extend_from_slice(&2u32.to_be_bytes());
@@ -5067,7 +5072,10 @@ mod tests {
             let expected = odb.read(&oid).expect("loose/alt copy for oid");
             assert_eq!(from_pack.kind, expected.kind);
             assert_eq!(from_pack.data, expected.data);
-            assert_eq!(odb.hash(from_pack.kind, &from_pack.data), oid);
+            assert_eq!(
+                odb.hash(from_pack.kind, &from_pack.data).expect("hash"),
+                oid
+            );
         }
     }
 
@@ -5077,8 +5085,8 @@ mod tests {
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
         let content_a = b"aaa".as_slice();
         let content_b = b"bbb".as_slice();
-        let oid_a = odb.hash(ObjectKind::Blob, content_a);
-        let oid_b = odb.hash(ObjectKind::Blob, content_b);
+        let oid_a = odb.hash(ObjectKind::Blob, content_a).expect("hash");
+        let oid_b = odb.hash(ObjectKind::Blob, content_b).expect("hash");
         let delta_a = encode_lcp_delta(content_b, content_a).expect("delta a");
         let delta_b = encode_lcp_delta(content_a, content_b).expect("delta b");
 
@@ -5116,8 +5124,8 @@ mod tests {
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
         let base = b"cross-pack-base-payload".as_slice();
         let tip = b"cross-pack-base-payload!".as_slice();
-        let oid_base = odb.hash(ObjectKind::Blob, base);
-        let oid_tip = odb.hash(ObjectKind::Blob, tip);
+        let oid_base = odb.hash(ObjectKind::Blob, base).expect("hash");
+        let oid_tip = odb.hash(ObjectKind::Blob, tip).expect("hash");
         let delta = encode_lcp_delta(base, tip).expect("delta");
 
         let mut pack_base = Vec::new();
@@ -5146,21 +5154,25 @@ mod tests {
         assert_eq!(from_delta_pack.kind, ObjectKind::Blob);
         assert_eq!(from_delta_pack.data, tip);
         assert_eq!(
-            odb.hash(from_delta_pack.kind, &from_delta_pack.data),
+            odb.hash(from_delta_pack.kind, &from_delta_pack.data)
+                .expect("hash"),
             oid_tip
         );
 
         let from_packs = read_object_from_packs(&objects, &oid_tip).expect("packs dir read");
         assert_eq!(from_packs.kind, ObjectKind::Blob);
         assert_eq!(from_packs.data, tip);
-        assert_eq!(odb.hash(from_packs.kind, &from_packs.data), oid_tip);
+        assert_eq!(
+            odb.hash(from_packs.kind, &from_packs.data).expect("hash"),
+            oid_tip
+        );
     }
 
     #[test]
     fn read_object_from_pack_bytes_uses_in_memory_index_without_on_disk_idx() {
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
         let content = b"in-memory-index-blob";
-        let oid = odb.hash(ObjectKind::Blob, content);
+        let oid = odb.hash(ObjectKind::Blob, content).expect("hash");
 
         let mut pack = Vec::new();
         pack.extend_from_slice(b"PACK");
@@ -5198,13 +5210,16 @@ mod tests {
         pack.extend_from_slice(&2u32.to_be_bytes());
         pack.extend_from_slice(&(depth as u32 + 1).to_be_bytes());
         let mut base_off = append_whole_blob(&mut pack, &content);
-        let mut entries = vec![(odb.hash(ObjectKind::Blob, &content), base_off)];
+        let mut entries = vec![(
+            odb.hash(ObjectKind::Blob, &content).expect("hash"),
+            base_off,
+        )];
         for _ in 0..depth {
             let mut next = content.clone();
             next.push(b'!');
             let delta = encode_lcp_delta(&content, &next).ok()?;
             let off = append_ofs_delta(&mut pack, base_off, &delta);
-            let oid = odb.hash(ObjectKind::Blob, &next);
+            let oid = odb.hash(ObjectKind::Blob, &next).expect("hash");
             entries.push((oid, off));
             content = next;
             base_off = off;
@@ -5229,7 +5244,7 @@ mod tests {
             return;
         };
         let got = read_object_from_pack(&idx, &tip).expect("4096-deep chain");
-        let expect = odb.hash(ObjectKind::Blob, &got.data);
+        let expect = odb.hash(ObjectKind::Blob, &got.data).expect("hash");
         assert_eq!(expect, tip);
     }
 
@@ -5399,8 +5414,8 @@ mod tests {
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
         let content_a = b"aaa".as_slice();
         let content_b = b"bbb".as_slice();
-        let oid_a = odb.hash(ObjectKind::Blob, content_a);
-        let oid_b = odb.hash(ObjectKind::Blob, content_b);
+        let oid_a = odb.hash(ObjectKind::Blob, content_a).expect("hash");
+        let oid_b = odb.hash(ObjectKind::Blob, content_b).expect("hash");
         let delta_a = encode_lcp_delta(content_b, content_a).expect("delta a");
         let delta_b = encode_lcp_delta(content_a, content_b).expect("delta b");
 
@@ -5445,9 +5460,9 @@ mod tests {
         let odb = Odb::new(&objects);
         let base = b"common prefix base";
         let target = b"common prefix target";
-        let oid_base = odb.hash(ObjectKind::Blob, base);
+        let oid_base = odb.hash(ObjectKind::Blob, base).expect("hash");
         let delta = encode_lcp_delta(base, target).expect("delta");
-        let oid_target = odb.hash(ObjectKind::Blob, target);
+        let oid_target = odb.hash(ObjectKind::Blob, target).expect("hash");
 
         let mut pack_base = Vec::new();
         pack_base.extend_from_slice(b"PACK");
@@ -5472,7 +5487,7 @@ mod tests {
             .expect("Odb::read cross-pack ref-delta");
         assert_eq!(got.kind, ObjectKind::Blob);
         assert_eq!(got.data.as_slice(), target);
-        assert_eq!(odb.hash(got.kind, &got.data), oid_target);
+        assert_eq!(odb.hash(got.kind, &got.data).expect("hash"), oid_target);
     }
 
     #[test]
@@ -5486,7 +5501,7 @@ mod tests {
         let tip = b"good-base-bytes!";
         let oid_base = odb.write_local(ObjectKind::Blob, base).expect("loose base");
         let delta = encode_lcp_delta(base, tip).expect("delta");
-        let oid_tip = odb.hash(ObjectKind::Blob, tip);
+        let oid_tip = odb.hash(ObjectKind::Blob, tip).expect("hash");
 
         let mut pack = Vec::new();
         pack.extend_from_slice(b"PACK");
@@ -5693,7 +5708,7 @@ mod tests {
 
         let data = b"large-offset-blob";
         let odb = Odb::new(tmp.path());
-        let oid = odb.hash(ObjectKind::Blob, data);
+        let oid = odb.hash(ObjectKind::Blob, data).expect("hash");
 
         let pack_path = objects.join("pack/large-off.pack");
         let mut file = OpenOptions::new()

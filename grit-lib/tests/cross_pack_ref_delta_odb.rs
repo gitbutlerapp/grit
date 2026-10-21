@@ -44,7 +44,7 @@ fn append_ref_delta(buf: &mut Vec<u8>, base_oid: &ObjectId, delta: &[u8]) {
 }
 
 fn append_sha1_pack_trailer(buf: &mut Vec<u8>) {
-    let digest = HashAlgo::Sha1.digest(buf);
+    let digest = HashAlgo::Sha1.digest(buf).expect("digest");
     buf.extend_from_slice(digest.as_bytes());
 }
 
@@ -78,7 +78,7 @@ fn write_v2_idx(idx_path: &Path, pack_path: &Path, entries: &[(ObjectId, u64)]) 
     }
     let pack_bytes = std::fs::read(pack_path).expect("read pack");
     buf.extend_from_slice(&pack_bytes[pack_bytes.len() - 20..]);
-    let digest = HashAlgo::Sha1.digest(&buf);
+    let digest = HashAlgo::Sha1.digest(&buf).expect("digest");
     buf.extend_from_slice(digest.as_bytes());
     std::fs::write(idx_path, buf).expect("write idx");
 }
@@ -101,9 +101,9 @@ fn odb_read_cross_pack_ref_delta_applies_delta_frames() {
     let odb = Odb::new(&objects);
     let base = b"common prefix base";
     let target = b"common prefix target";
-    let oid_base = odb.hash(ObjectKind::Blob, base);
+    let oid_base = odb.hash(ObjectKind::Blob, base).expect("hash");
     let delta = encode_lcp_delta(base, target).unwrap();
-    let oid_target = odb.hash(ObjectKind::Blob, target);
+    let oid_target = odb.hash(ObjectKind::Blob, target).expect("hash");
 
     let mut pack_base = Vec::new();
     pack_base.extend_from_slice(b"PACK");
@@ -127,5 +127,5 @@ fn odb_read_cross_pack_ref_delta_applies_delta_frames() {
     let got = odb.read(&oid_target).unwrap();
     assert_eq!(got.kind, ObjectKind::Blob);
     assert_eq!(got.data.as_slice(), target);
-    assert_eq!(odb.hash(got.kind, &got.data), oid_target);
+    assert_eq!(odb.hash(got.kind, &got.data).expect("hash"), oid_target);
 }

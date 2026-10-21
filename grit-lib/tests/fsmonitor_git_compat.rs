@@ -116,7 +116,9 @@ fn init_repo_with_fsmn(tmp: &Path) -> PathBuf {
 }
 
 fn make_replacement_entry(path: &[u8], content: &[u8]) -> IndexEntry {
-    let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, content);
+    let oid = HashAlgo::Sha1
+        .hash_object(ObjectKind::Blob, content)
+        .expect("hash");
     IndexEntry {
         ctime_sec: 1,
         ctime_nsec: 0,

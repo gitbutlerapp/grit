@@ -636,6 +636,7 @@ pub fn grit_lib::bundle::read_header(&mut dyn alloc::io::buf_read::BufRead) -> c
 pub fn grit_lib::bundle::write_bundle(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub mod grit_lib::change_id
 pub enum grit_lib::change_id::ChangeIdError
+pub grit_lib::change_id::ChangeIdError::HashCollision
 pub grit_lib::change_id::ChangeIdError::InvalidCharacter
 pub grit_lib::change_id::ChangeIdError::RandomFailed(getrandom::error::Error)
 pub grit_lib::change_id::ChangeIdError::WrongLength
@@ -1651,7 +1652,7 @@ pub fn grit_lib::config::gitmodules::gitdir::compute_default_submodule_gitdir(&s
 pub fn grit_lib::config::gitmodules::gitdir::connect_submodule_work_tree_and_git_dir(&std::path::Path, &std::path::Path, &grit_lib::config::ConfigFile, &str, &std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::gitmodules::gitdir::die_path_inside_submodule_when_disabled(&std::path::Path, &std::path::Path, &str, core::option::Option<&grit_lib::index::Index>) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::gitmodules::gitdir::ensure_submodule_gitdir_config(&std::path::Path, &std::path::Path, &mut grit_lib::config::ConfigFile, &str) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::config::gitmodules::gitdir::hash_blob_sha1_hex(&[u8]) -> alloc::string::String
+pub fn grit_lib::config::gitmodules::gitdir::hash_blob_sha1_hex(&[u8]) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::config::gitmodules::gitdir::init_submodule_head_from_gitlink(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::gitmodules::gitdir::is_git_directory(&std::path::Path) -> bool
 pub fn grit_lib::config::gitmodules::gitdir::migrate_gitdir_configs(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>
@@ -3482,6 +3483,7 @@ impl core::marker::UnsafeUnpin for grit_lib::diff::LogPatchCommitHeader
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::LogPatchCommitHeader
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::LogPatchCommitHeader
 #[non_exhaustive] pub enum grit_lib::diff::NoIndexError
+pub grit_lib::diff::NoIndexError::HashCollision
 pub grit_lib::diff::NoIndexError::PathNotAccessible
 pub grit_lib::diff::NoIndexError::PathNotAccessible::path: alloc::string::String
 impl core::clone::Clone for grit_lib::diff::NoIndexError
@@ -4196,8 +4198,8 @@ pub fn grit_lib::diff::count_changes(&str, &str) -> (usize, usize)
 pub fn grit_lib::diff::count_changes_git_histogram(&str, &str) -> (usize, usize)
 pub fn grit_lib::diff::count_changes_with_algorithm(&str, &str, similar::types::Algorithm, bool) -> (usize, usize)
 pub fn grit_lib::diff::count_git_lines(&[u8]) -> usize
-pub fn grit_lib::diff::detect_copies(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, alloc::string::String, grit_lib::objects::ObjectId)]) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
-pub fn grit_lib::diff::detect_copies_with_policy(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, alloc::string::String, grit_lib::objects::ObjectId)], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
+pub fn grit_lib::diff::detect_copies(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, alloc::string::String, grit_lib::objects::ObjectId)]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::detect_copies_with_policy(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, alloc::string::String, grit_lib::objects::ObjectId)], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::detect_renames(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
 pub fn grit_lib::diff::detect_renames_with_policy(&grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> alloc::vec::Vec<grit_lib::diff::DiffEntry>
 pub fn grit_lib::diff::diff_commits(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -6890,7 +6892,7 @@ pub mod grit_lib::objects::handle
 pub struct grit_lib::objects::handle::Objects<'repo>
 impl<'repo> grit_lib::objects::handle::Objects<'repo>
 pub fn grit_lib::objects::handle::Objects<'repo>::contains(&self, &grit_lib::objects::ObjectId) -> bool
-pub fn grit_lib::objects::handle::Objects<'repo>::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::handle::Objects<'repo>::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::objects::handle::Objects<'repo>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::handle::Objects<'repo>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
@@ -6963,11 +6965,10 @@ pub grit_lib::objects::hash::ObjectHasher::Sha1(sha1dc::Hasher)
 pub grit_lib::objects::hash::ObjectHasher::Sha256(sha2::Sha256)
 impl grit_lib::objects::hash::ObjectHasher
 pub fn grit_lib::objects::hash::ObjectHasher::algo(&grit_lib::objects::hash::ObjectHasher) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::hash::ObjectHasher::finalize(self) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::hash::ObjectHasher::finalize(self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::hash::ObjectHasher::finalize_into(self, &mut [u8]) -> grit_lib::error::Result<usize>
 pub fn grit_lib::objects::hash::ObjectHasher::for_object(grit_lib::objects::HashAlgo, grit_lib::objects::ObjectKind, u64) -> Self
 pub fn grit_lib::objects::hash::ObjectHasher::new(grit_lib::objects::HashAlgo) -> Self
-pub fn grit_lib::objects::hash::ObjectHasher::try_finalize(self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::hash::ObjectHasher::update(&mut self, &[u8])
 impl core::clone::Clone for grit_lib::objects::hash::ObjectHasher
 pub fn grit_lib::objects::hash::ObjectHasher::clone(&self) -> Self
@@ -7064,14 +7065,12 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::hash::TrailerMi
 pub const grit_lib::objects::hash::PAR_HASH_MIN_ITEMS: usize
 pub const grit_lib::objects::hash::PAR_HASH_MIN_TOTAL_BYTES: usize
 pub fn grit_lib::objects::hash::backend(grit_lib::objects::HashAlgo) -> grit_lib::objects::hash::Backend
-pub fn grit_lib::objects::hash::hash_object(grit_lib::objects::HashAlgo, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::objects::ObjectId
-pub fn grit_lib::objects::hash::hash_objects_parallel(grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectKind, &[u8])], core::num::nonzero::NonZeroUsize) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::hash::hash_object(grit_lib::objects::HashAlgo, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::hash::hash_objects_parallel(grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectKind, &[u8])], core::num::nonzero::NonZeroUsize) -> core::result::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>, grit_lib::parallel::ParallelHashError<grit_lib::error::Error>>
 pub fn grit_lib::objects::hash::hmac_sha1(&[u8], &[u8]) -> [u8; 20]
 pub fn grit_lib::objects::hash::index_parallelism_from_config(&grit_lib::config::ConfigSet) -> grit_lib::parallel::Parallelism
 pub fn grit_lib::objects::hash::par_hash_with<T, R, F>(&[T], core::num::nonzero::NonZeroUsize, usize, F) -> alloc::vec::Vec<R> where T: core::marker::Sync, R: core::marker::Send, F: core::ops::function::Fn(&T) -> R + core::marker::Sync
 pub fn grit_lib::objects::hash::parallel_hash_worthwhile(usize, usize, usize) -> bool
-pub fn grit_lib::objects::hash::try_hash_object(grit_lib::objects::HashAlgo, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::hash::try_hash_objects_parallel(grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectKind, &[u8])], core::num::nonzero::NonZeroUsize) -> core::result::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>, grit_lib::parallel::ParallelHashError<grit_lib::error::Error>>
 pub fn grit_lib::objects::hash::try_par_hash_with<T, R, E, F>(&[T], core::num::nonzero::NonZeroUsize, usize, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, F: core::ops::function::Fn(&T) -> core::result::Result<R, E> + core::marker::Sync
 pub fn grit_lib::objects::hash::try_par_hash_with_force<T, R, E, F>(&[T], core::num::nonzero::NonZeroUsize, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, F: core::ops::function::Fn(&T) -> core::result::Result<R, E> + core::marker::Sync
 pub fn grit_lib::objects::hash::verify_trailer(grit_lib::objects::HashAlgo, &[u8]) -> core::result::Result<(), grit_lib::objects::hash::TrailerMismatch>
@@ -8171,7 +8170,7 @@ pub fn grit_lib::objects::odb::Odb::exists_local(&self, &grit_lib::objects::Obje
 pub fn grit_lib::objects::odb::Odb::exists_materialized_local(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::odb::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::freshen_object(&self, &grit_lib::objects::ObjectId) -> bool
-pub fn grit_lib::objects::odb::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::odb::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::hash_algo(&self) -> grit_lib::objects::HashAlgo
 pub fn grit_lib::objects::odb::Odb::invalidate_alternates_cache(&self)
 pub fn grit_lib::objects::odb::Odb::invalidate_packs(&self)
@@ -8190,7 +8189,6 @@ pub fn grit_lib::objects::odb::Odb::read_loose_verify_oid(&std::path::Path, &gri
 pub fn grit_lib::objects::odb::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::register_submodule_object_directories_from_index(&self, &std::path::Path, &grit_lib::index::Index)
 pub fn grit_lib::objects::odb::Odb::sources(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::CompositeStore>>
-pub fn grit_lib::objects::odb::Odb::try_hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::with_config_git_dir(self, std::path::PathBuf) -> Self
 pub fn grit_lib::objects::odb::Odb::with_env_alternate_dirs(self, alloc::vec::Vec<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::with_pack_read_context<R>(&self, impl core::ops::function::FnOnce() -> R) -> R
@@ -9109,6 +9107,7 @@ pub fn grit_lib::objects::unpack_objects::pack_is_thin(&[u8], grit_lib::objects:
 pub fn grit_lib::objects::unpack_objects::strict_verify_packed_references(core::option::Option<&grit_lib::objects::odb::Odb>, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, (grit_lib::objects::ObjectKind, alloc::vec::Vec<u8>)>) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::unpack_objects::unpack_objects(&mut dyn alloc::io::read::Read, &grit_lib::objects::odb::Odb, &grit_lib::objects::unpack_objects::UnpackOptions) -> grit_lib::error::Result<usize>
 pub enum grit_lib::objects::ChangeIdError
+pub grit_lib::objects::ChangeIdError::HashCollision
 pub grit_lib::objects::ChangeIdError::InvalidCharacter
 pub grit_lib::objects::ChangeIdError::RandomFailed(getrandom::error::Error)
 pub grit_lib::objects::ChangeIdError::WrongLength
@@ -9134,11 +9133,9 @@ pub grit_lib::objects::HashAlgo::Sha256
 impl grit_lib::objects::HashAlgo
 pub fn grit_lib::objects::HashAlgo::checksum_digest(self, &[u8]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::HashAlgo::checksum_hasher(self) -> grit_lib::objects::hash::ChecksumHasher
-pub fn grit_lib::objects::HashAlgo::digest(self, &[u8]) -> grit_lib::objects::ObjectId
-pub fn grit_lib::objects::HashAlgo::hash_object(self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::HashAlgo::digest(self, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::HashAlgo::hash_object(self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::HashAlgo::hasher(self) -> grit_lib::objects::hash::ObjectHasher
-pub fn grit_lib::objects::HashAlgo::try_digest(self, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::HashAlgo::try_hash_object(self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 impl grit_lib::objects::HashAlgo
 pub const fn grit_lib::objects::HashAlgo::from_len(usize) -> core::option::Option<Self>
 pub fn grit_lib::objects::HashAlgo::from_name(&str) -> core::option::Option<Self>
@@ -9380,7 +9377,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ObjectInfo
 pub struct grit_lib::objects::Objects<'repo>
 impl<'repo> grit_lib::objects::handle::Objects<'repo>
 pub fn grit_lib::objects::handle::Objects<'repo>::contains(&self, &grit_lib::objects::ObjectId) -> bool
-pub fn grit_lib::objects::handle::Objects<'repo>::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::handle::Objects<'repo>::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::objects::handle::Objects<'repo>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::handle::Objects<'repo>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
@@ -11718,7 +11715,7 @@ pub fn grit_lib::objects::odb::Odb::exists_local(&self, &grit_lib::objects::Obje
 pub fn grit_lib::objects::odb::Odb::exists_materialized_local(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::odb::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::freshen_object(&self, &grit_lib::objects::ObjectId) -> bool
-pub fn grit_lib::objects::odb::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::odb::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::hash_algo(&self) -> grit_lib::objects::HashAlgo
 pub fn grit_lib::objects::odb::Odb::invalidate_alternates_cache(&self)
 pub fn grit_lib::objects::odb::Odb::invalidate_packs(&self)
@@ -11737,7 +11734,6 @@ pub fn grit_lib::objects::odb::Odb::read_loose_verify_oid(&std::path::Path, &gri
 pub fn grit_lib::objects::odb::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::register_submodule_object_directories_from_index(&self, &std::path::Path, &grit_lib::index::Index)
 pub fn grit_lib::objects::odb::Odb::sources(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::CompositeStore>>
-pub fn grit_lib::objects::odb::Odb::try_hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::with_config_git_dir(self, std::path::PathBuf) -> Self
 pub fn grit_lib::objects::odb::Odb::with_env_alternate_dirs(self, alloc::vec::Vec<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::with_pack_read_context<R>(&self, impl core::ops::function::FnOnce() -> R) -> R

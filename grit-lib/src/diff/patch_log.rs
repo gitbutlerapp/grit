@@ -1036,7 +1036,7 @@ mod tests {
 
     #[test]
     fn copied_diff_emits_copy_headers() -> Result<()> {
-        let blob_oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"x");
+        let blob_oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"x").expect("hash");
         let entry = DiffEntry {
             status: DiffStatus::Copied,
             old_path: Some("src/a.txt".into()),

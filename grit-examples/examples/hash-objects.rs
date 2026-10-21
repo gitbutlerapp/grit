@@ -2,6 +2,8 @@
 use grit_lib::objects::{HashAlgo, ObjectKind};
 
 fn main() {
-    let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"content to hash\n");
+    let oid = HashAlgo::Sha1
+        .hash_object(ObjectKind::Blob, b"content to hash\n")
+        .expect("hash");
     println!("{oid}");
 }

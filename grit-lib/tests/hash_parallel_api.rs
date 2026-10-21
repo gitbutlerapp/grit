@@ -17,13 +17,14 @@ fn hash_objects_parallel_public_api_matches_serial() {
     let items = [(ObjectKind::Blob, data.as_slice()); 64];
     let serial: Vec<_> = items
         .iter()
-        .map(|(k, d)| hash_object(HashAlgo::Sha1, *k, d))
+        .map(|(k, d)| hash_object(HashAlgo::Sha1, *k, d).expect("hash"))
         .collect();
     let parallel = hash_objects_parallel(
         HashAlgo::Sha1,
         &items,
         NonZeroUsize::new(4).expect("threads"),
-    );
+    )
+    .expect("parallel hash");
     assert_eq!(parallel, serial);
 }
 

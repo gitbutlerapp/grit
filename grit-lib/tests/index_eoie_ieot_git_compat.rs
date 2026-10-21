@@ -156,7 +156,8 @@ fn grit_write_git_accepts(version: u32) {
     for i in 0..ENTRY_COUNT {
         let path = format!("d{:04}/f{i:05}.txt", i / 100);
         let data = format!("body {i}\n");
-        let oid = hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data.as_bytes());
+        let oid =
+            hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data.as_bytes()).expect("hash");
         repo.odb()
             .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
             .expect("write blob");
@@ -219,7 +220,8 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
     for i in 0..8 {
         let path = format!("d{:04}/f{i:05}.txt", i / 100);
         let data = format!("body {i}\n");
-        let oid = hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data.as_bytes());
+        let oid =
+            hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data.as_bytes()).expect("hash");
         repo.odb()
             .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
             .expect("write blob");
@@ -285,7 +287,8 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
         repo.odb()
             .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
             .expect("blob");
-        let oid = hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data.as_bytes());
+        let oid =
+            hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data.as_bytes()).expect("hash");
         let mut entry = grit_lib::index::IndexEntry {
             ctime_sec: 1_700_000_000,
             ctime_nsec: 0,
@@ -353,7 +356,7 @@ fn invalid_eoie_falls_back_to_serial_parse() {
             // Corrupt EOIE extension-header hash (not the file trailer); read_eoie must reject it.
             let hash_in_eoie = eoie_start + 8 + 4;
             bytes[hash_in_eoie] = bytes[hash_in_eoie].wrapping_add(1);
-            let trailer = algo.digest(&bytes[..body_len]);
+            let trailer = algo.digest(&bytes[..body_len]).expect("digest");
             bytes[body_len..].copy_from_slice(trailer.as_bytes());
         }
     }

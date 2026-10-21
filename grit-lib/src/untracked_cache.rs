@@ -623,13 +623,13 @@ fn file_stat_and_blob_oid(path: &Path, algo: HashAlgo) -> Result<(StatDataDisk, 
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).map_err(Error::Io)?;
             let oid = if buf.is_empty() {
-                algo.hash_object(ObjectKind::Blob, &buf)
+                algo.hash_object(ObjectKind::Blob, &buf)?
             } else {
                 // Match Git's exclude-file oid normalization used by the untracked cache:
                 // parsed non-empty ignore files carry a trailing newline sentinel.
                 let mut normalized = buf;
                 normalized.push(b'\n');
-                algo.hash_object(ObjectKind::Blob, &normalized)
+                algo.hash_object(ObjectKind::Blob, &normalized)?
             };
             Ok((st, oid))
         }

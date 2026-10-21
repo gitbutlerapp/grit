@@ -942,7 +942,7 @@ fn git_hash_object(kind: &str, content: &[u8], algo: grit_lib::objects::HashAlgo
         "tag" => ObjectKind::Tag,
         other => panic!("unknown object kind {other}"),
     };
-    hash_object(algo, kind, content)
+    hash_object(algo, kind, content).expect("hash")
 }
 
 /// Apply a Git delta instruction stream (copy/insert ops) to `base`.

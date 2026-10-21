@@ -49,7 +49,9 @@ fn two_blobs_sharing_seven_hex_prefix() -> (
         HashMap::new();
     for n in 0_u64..2_000_000 {
         let data = n.to_string().into_bytes();
-        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, &data);
+        let oid = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, &data)
+            .expect("hash");
         let prefix = oid.to_hex()[..7].to_string();
         if let Some((other, _)) = first_by_prefix.get(&prefix) {
             if *other != oid {

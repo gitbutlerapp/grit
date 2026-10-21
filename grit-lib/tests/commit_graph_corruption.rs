@@ -127,7 +127,7 @@ fn reseal_commit_graph(bytes: &mut Vec<u8>) {
     let hash_len = if bytes[5] == 2 { 32 } else { 20 };
     let algo = HashAlgo::try_from(bytes[5]).expect("hash algo");
     let body_len = bytes.len().saturating_sub(hash_len);
-    let digest = algo.digest(&bytes[..body_len]);
+    let digest = algo.digest(&bytes[..body_len]).expect("digest");
     bytes.truncate(body_len);
     bytes.extend_from_slice(digest.as_bytes());
 }

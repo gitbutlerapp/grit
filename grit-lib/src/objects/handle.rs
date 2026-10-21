@@ -80,9 +80,12 @@ impl<'repo> Objects<'repo> {
     }
 
     /// Hash `data` as a Git object of `kind` without writing to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
     #[inline]
-    #[must_use]
-    pub fn hash(&self, kind: ObjectKind, data: &[u8]) -> ObjectId {
+    pub fn hash(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         self.repo.odb().hash(kind, data)
     }
 

@@ -1021,8 +1021,9 @@ fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
         if (1..=4).contains(&type_code) {
             if let Ok(data) = zlib_decompress_fixed(&pack[payload_start..], size) {
                 if let Ok(kind) = pack_type_code_to_kind(type_code) {
-                    let oid = hash::hash_object(algo, kind, &data);
-                    out.insert(oid);
+                    if let Ok(oid) = hash::hash_object(algo, kind, &data) {
+                        out.insert(oid);
+                    }
                 }
             }
         }

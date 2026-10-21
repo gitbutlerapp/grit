@@ -472,7 +472,9 @@ mod tests {
             uid: 1,
             gid: 1,
             size: 1,
-            oid: HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"x"),
+            oid: HashAlgo::Sha1
+                .hash_object(ObjectKind::Blob, b"x")
+                .expect("hash"),
             flags: path.len().min(0xFFF) as u16,
             flags_extended: None,
             path: path.as_bytes().to_vec(),

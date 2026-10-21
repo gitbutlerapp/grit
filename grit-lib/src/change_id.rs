@@ -38,6 +38,9 @@ pub enum ChangeIdError {
     /// OS randomness failed.
     #[error("failed to read random bytes for change id: {0}")]
     RandomFailed(getrandom::Error),
+    /// SHA-1 collision detection rejected commit bytes while deriving a content hash.
+    #[error("sha-1 hash collision while deriving change id")]
+    HashCollision,
 }
 
 /// Injectable source of random change-id bytes.
@@ -221,7 +224,12 @@ impl ChangeIdPolicy {
                 let mut stripped = data.clone();
                 strip_change_id_headers(&mut stripped.extra_headers);
                 let bytes = serialize_commit(&stripped);
-                let digest = algo.digest(&bytes);
+                let digest = algo.digest(&bytes).map_err(|e| match e {
+                    crate::error::Error::HashCollision { .. } => ChangeIdError::HashCollision,
+                    other => {
+                        panic!("unexpected error deriving content-hash change id: {other}")
+                    }
+                })?;
                 let raw = digest.as_bytes();
                 let mut chunk = [0u8; 16];
                 chunk.copy_from_slice(&raw[4..20]);

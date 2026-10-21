@@ -119,8 +119,8 @@ pub fn install_git_large_offset_pack(repo: &RepoFixture) -> Option<ObjectId> {
     let odb = Odb::new(&objects);
     let small = b"lo";
     let large_data = b"large-loff-midx-fixture";
-    let oid_small = odb.hash(ObjectKind::Blob, small);
-    let oid_large = odb.hash(ObjectKind::Blob, large_data);
+    let oid_small = odb.hash(ObjectKind::Blob, small).expect("hash");
+    let oid_large = odb.hash(ObjectKind::Blob, large_data).expect("hash");
     let pack_path = objects.join("pack/large-loff.pack");
     let idx_path = pack_path.with_extension("idx");
     let large_offset: u64 = 1 << 32;
@@ -157,7 +157,7 @@ pub fn install_git_large_offset_pack(repo: &RepoFixture) -> Option<ObjectId> {
         hasher.update(&buf[..n]);
         left -= n as u64;
     }
-    let trailer = hasher.finalize();
+    let trailer = hasher.finalize().expect("hash");
     file.seek(SeekFrom::Start(body_end)).ok()?;
     file.write_all(trailer.as_bytes()).ok()?;
     file.flush().ok()?;

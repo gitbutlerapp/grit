@@ -378,7 +378,7 @@ fn build_git_delta_pack(sha256: bool) -> PackFixture {
     );
     let body = &pack[..pack.len() - hb];
     assert_eq!(
-        algo.digest(body).as_bytes(),
+        algo.digest(body).expect("digest").as_bytes(),
         &pack[pack.len() - hb..],
         "git pack-objects pack trailer must match repository hash algorithm"
     );
@@ -1158,7 +1158,7 @@ fn make_single_tree_pack(tree_body: &[u8], algo: HashAlgo) -> Vec<u8> {
     pack.extend_from_slice(&1u32.to_be_bytes());
     pack.extend_from_slice(&header);
     pack.extend_from_slice(&compressed);
-    let trailer = algo.digest(&pack);
+    let trailer = algo.digest(&pack).expect("digest");
     pack.extend_from_slice(trailer.as_bytes());
     pack
 }
@@ -1189,7 +1189,9 @@ fn unpack_strict_rejects_missing_tree_reference() {
     );
 
     let mut map = HashMap::new();
-    let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, &tree);
+    let tree_oid = HashAlgo::Sha1
+        .hash_object(ObjectKind::Tree, &tree)
+        .expect("hash");
     map.insert(tree_oid, (ObjectKind::Tree, tree));
     assert!(strict_verify_packed_references(None, &map).is_err());
 }

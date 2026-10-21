@@ -183,7 +183,7 @@ fn write_v2_idx(idx_path: &Path, pack_path: &Path, entries: &[(ObjectId, u64)], 
         HashAlgo::Sha1 => grit_lib::objects::HashAlgo::Sha1,
         HashAlgo::Sha256 => grit_lib::objects::HashAlgo::Sha256,
     };
-    let digest = lib_algo.digest(&buf);
+    let digest = lib_algo.digest(&buf).expect("digest");
     buf.extend_from_slice(digest.as_bytes());
     std::fs::write(idx_path, buf).expect("write idx");
 }

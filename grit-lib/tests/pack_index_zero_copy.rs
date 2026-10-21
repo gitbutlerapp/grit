@@ -123,7 +123,9 @@ fn v1_idx_matches_git_show_index() {
         body.extend_from_slice(&(entry.offset().expect("off") as u32).to_be_bytes());
         body.extend_from_slice(entry.oid());
     }
-    let digest = grit_lib::objects::HashAlgo::Sha1.digest(&body);
+    let digest = grit_lib::objects::HashAlgo::Sha1
+        .digest(&body)
+        .expect("digest");
     body.extend_from_slice(digest.as_bytes());
     let v1_path = v2_path.with_file_name("test-v1.idx");
     std::fs::write(&v1_path, &body).expect("write v1");

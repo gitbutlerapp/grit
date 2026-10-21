@@ -631,7 +631,7 @@ mod tests {
             .count();
         assert_eq!(loose_count, 0, "install must not create loose objects");
 
-        let oid = odb.hash(ObjectKind::Blob, blob);
+        let oid = odb.hash(ObjectKind::Blob, blob).expect("hash");
         let obj = odb.read(&oid).expect("read from pack");
         assert_eq!(obj.data.as_slice(), blob);
     }

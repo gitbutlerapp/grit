@@ -359,7 +359,7 @@ fn bloom_filter_slice_warns_on_bad_offsets_in_memory() {
     let algo = repo.odb().hash_algo();
     let hash_len = algo.len();
     let body_len = bytes.len() - hash_len;
-    let digest = algo.digest(&bytes[..body_len]);
+    let digest = algo.digest(&bytes[..body_len]).expect("digest");
     bytes.truncate(body_len);
     bytes.extend_from_slice(digest.as_bytes());
     std::fs::write(repo.odb().objects_dir().join("info/commit-graph"), &bytes).expect("write");
@@ -444,7 +444,7 @@ fn two_parent_graph_commit_matches_object() {
 }
 
 fn graph_content_hash(bytes: &[u8], algo: HashAlgo) -> String {
-    algo.digest(bytes).to_string()
+    algo.digest(bytes).expect("digest").to_string()
 }
 
 fn two_commit_repo() -> (tempfile::TempDir, Repository, Vec<ObjectId>) {
@@ -481,7 +481,7 @@ fn two_commit_repo() -> (tempfile::TempDir, Repository, Vec<ObjectId>) {
 fn reseal_commit_graph(bytes: &mut Vec<u8>, algo: HashAlgo) {
     let hash_len = algo.len();
     let body_len = bytes.len() - hash_len;
-    let digest = algo.digest(&bytes[..body_len]);
+    let digest = algo.digest(&bytes[..body_len]).expect("digest");
     bytes.truncate(body_len);
     bytes.extend_from_slice(digest.as_bytes());
 }

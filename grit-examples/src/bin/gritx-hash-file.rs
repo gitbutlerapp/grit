@@ -41,7 +41,7 @@ fn run() -> Result<()> {
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)
         .with_context(|| format!("could not read {}", cli.file.display()))?;
-    let oid = hash::hash_object(cli.algo, ObjectKind::Blob, &buf);
+    let oid = hash::hash_object(cli.algo, ObjectKind::Blob, &buf)?;
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{oid}")?;
     Ok(())

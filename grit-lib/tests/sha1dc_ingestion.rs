@@ -8,7 +8,7 @@ use grit_lib::error::Error;
 use grit_lib::maintenance::repository_fsck::{
     fsck, issue_msg_id, FsckIssue, FsckOptions, FsckReport,
 };
-use grit_lib::objects::hash::{hash_object, try_hash_objects_parallel, ParallelHashError};
+use grit_lib::objects::hash::{hash_object, hash_objects_parallel, ParallelHashError};
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::verify_pack_and_collect;
@@ -68,8 +68,8 @@ fn odb_write_rejects_shattered_blob() {
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     let odb = Odb::new(&repo.objects_dir());
     let data = shattered_prefix(1);
-    assert_hash_collision(HashAlgo::Sha1.try_digest(&data));
-    assert_hash_collision(odb.try_hash(ObjectKind::Blob, &data));
+    assert_hash_collision(HashAlgo::Sha1.digest(&data));
+    assert_hash_collision(odb.hash(ObjectKind::Blob, &data));
     let err = odb
         .write(ObjectKind::Blob, &data)
         .expect_err("write must reject when object id hashing detects collision");
@@ -105,14 +105,15 @@ fn fsck_reports_shattered_object() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let data = shattered_prefix(1);
-    let oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
-    grit_test_support::write_loose_object(
+    assert_hash_collision(hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data));
+    let hex = grit_test_support::write_loose_object(
         repo.odb().objects_dir(),
         FixtureAlgo::Sha1,
         "blob",
         &data,
     )
     .expect("write loose bytes at colliding oid path");
+    let oid = grit_lib::objects::ObjectId::from_hex(&hex).expect("written oid hex");
 
     let report = fsck(
         &repo,
@@ -140,7 +141,7 @@ fn parallel_hash_surfaces_collision() {
     let data = shattered_prefix(1);
     let items = [(ObjectKind::Blob, data.as_slice())];
     let threads = NonZeroUsize::new(2).expect("threads");
-    let err = try_hash_objects_parallel(HashAlgo::Sha1, &items, threads).expect_err("parallel");
+    let err = hash_objects_parallel(HashAlgo::Sha1, &items, threads).expect_err("parallel");
     match err {
         ParallelHashError::Task(Error::HashCollision { .. }) => {}
         other => panic!("unexpected error: {other:?}"),
@@ -150,7 +151,7 @@ fn parallel_hash_surfaces_collision() {
 #[test]
 fn grit_stricter_than_git_on_shattered_prefix_blob() {
     let data = shattered_prefix(1);
-    assert_hash_collision(HashAlgo::Sha1.try_hash_object(ObjectKind::Blob, &data));
+    assert_hash_collision(HashAlgo::Sha1.hash_object(ObjectKind::Blob, &data));
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     let mut child = Command::new("git")
         .current_dir(repo.path())

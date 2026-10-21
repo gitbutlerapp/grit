@@ -682,7 +682,10 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
     pin_mtime(&hot_path, entry_mtime.0, entry_mtime.1);
 
     let meta = std::fs::symlink_metadata(&hot_path).expect("meta");
-    let stale_oid = grit_repo.odb().hash(ObjectKind::Blob, CONTENT_A.as_bytes());
+    let stale_oid = grit_repo
+        .odb()
+        .hash(ObjectKind::Blob, CONTENT_A.as_bytes())
+        .expect("hash");
     let mut racy_index = Index::new();
     racy_index.add_or_replace(entry_from_metadata(
         &meta,

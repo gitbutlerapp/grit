@@ -418,8 +418,8 @@ fn repo_git_path_append(git_dir: &Path, tail: &str) -> PathBuf {
 }
 
 /// Returns the 40-character hex SHA-1 of a blob object for `data` (same as `git hash-object`).
-pub fn hash_blob_sha1_hex(data: &[u8]) -> String {
-    hash::hash_object(crate::objects::HashAlgo::Sha1, ObjectKind::Blob, data).to_hex()
+pub fn hash_blob_sha1_hex(data: &[u8]) -> Result<String> {
+    Ok(hash::hash_object(crate::objects::HashAlgo::Sha1, ObjectKind::Blob, data)?.to_hex())
 }
 
 /// Computes `submodule.<name>.gitdir` as a path relative to the work tree when not already set.
@@ -481,7 +481,7 @@ pub fn compute_default_submodule_gitdir(
         }
     }
 
-    let hex = hash_blob_sha1_hex(submodule_name.as_bytes());
+    let hex = hash_blob_sha1_hex(submodule_name.as_bytes())?;
     let rel_h = format!("modules/{hex}");
     if let Some(v) = try_set(&rel_h) {
         return Ok(v);

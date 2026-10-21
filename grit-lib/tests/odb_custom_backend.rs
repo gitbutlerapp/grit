@@ -173,7 +173,8 @@ fn memory_primary_write_raw_ignores_seeded_loose_on_disk() {
         grit_lib::objects::HashAlgo::Sha1,
         ObjectKind::Blob,
         payload,
-    );
+    )
+    .expect("hash");
     let loose = objects.join(oid.loose_prefix()).join(oid.loose_suffix());
     fs::create_dir_all(loose.parent().unwrap()).expect("shard");
     fs::write(&loose, b"placeholder").expect("seed loose");
@@ -227,7 +228,8 @@ fn files_primary_gc_prunes_unreachable_loose() {
         grit_lib::objects::HashAlgo::Sha1,
         ObjectKind::Blob,
         orphan_payload,
-    );
+    )
+    .expect("hash");
     let orphan_path = repo.odb().object_path(&orphan_oid);
     fs::create_dir_all(orphan_path.parent().unwrap()).expect("shard");
     fs::write(&orphan_path, b"x").expect("orphan loose");

@@ -73,7 +73,7 @@ fn append_ref_delta(buf: &mut Vec<u8>, base_oid: &ObjectId, delta: &[u8]) {
 }
 
 fn append_sha1_pack_trailer(buf: &mut Vec<u8>) {
-    buf.extend_from_slice(HashAlgo::Sha1.digest(buf).as_bytes());
+    buf.extend_from_slice(HashAlgo::Sha1.digest(buf).expect("digest").as_bytes());
 }
 
 fn write_v2_idx(idx_path: &Path, pack_path: &Path, entries: &[(ObjectId, u64)]) {
@@ -106,7 +106,7 @@ fn write_v2_idx(idx_path: &Path, pack_path: &Path, entries: &[(ObjectId, u64)]) 
     }
     let pack_bytes = std::fs::read(pack_path).expect("read pack");
     buf.extend_from_slice(&pack_bytes[pack_bytes.len() - 20..]);
-    let digest = HashAlgo::Sha1.digest(&buf);
+    let digest = HashAlgo::Sha1.digest(&buf).expect("digest");
     buf.extend_from_slice(digest.as_bytes());
     std::fs::write(idx_path, buf).expect("write idx");
 }
@@ -203,9 +203,13 @@ fn build_fixture() -> (
 
     let base = b"common prefix base for read_info packs";
     let ref_target = b"common prefix target for ref delta";
-    let base_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, base);
+    let base_oid = HashAlgo::Sha1
+        .hash_object(ObjectKind::Blob, base)
+        .expect("hash");
     let ref_delta = encode_lcp_delta(base, ref_target).expect("ref delta");
-    let ref_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, ref_target);
+    let ref_oid = HashAlgo::Sha1
+        .hash_object(ObjectKind::Blob, ref_target)
+        .expect("hash");
 
     let mut pack_base = Vec::new();
     pack_base.extend_from_slice(b"PACK");
@@ -234,7 +238,9 @@ fn build_fixture() -> (
     let mut ofs_target = base.to_vec();
     ofs_target.extend_from_slice(b"\nofs suffix\n");
     let ofs_delta = encode_lcp_delta(base, &ofs_target).expect("ofs delta");
-    let ofs_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, &ofs_target);
+    let ofs_oid = HashAlgo::Sha1
+        .hash_object(ObjectKind::Blob, &ofs_target)
+        .expect("hash");
     let mut pack_ofs = Vec::new();
     pack_ofs.extend_from_slice(b"PACK");
     pack_ofs.extend_from_slice(&2u32.to_be_bytes());

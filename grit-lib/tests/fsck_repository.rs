@@ -724,8 +724,8 @@ fn hash_mismatch() {
     one_commit(&repo);
     let odb = repo.odb();
     let body = b"payload-for-mismatch";
-    let real_oid = odb.hash(ObjectKind::Blob, body);
-    let decoy_oid = odb.hash(ObjectKind::Blob, b"decoy");
+    let real_oid = odb.hash(ObjectKind::Blob, body).expect("hash");
+    let decoy_oid = odb.hash(ObjectKind::Blob, b"decoy").expect("hash");
     let real_path = odb.object_path(&real_oid);
     write_loose_object(
         &dir.path().join(".git/objects"),

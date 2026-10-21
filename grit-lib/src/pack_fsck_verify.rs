@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::hash::try_hash_object;
+use crate::hash::hash_object;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pack::{
@@ -112,7 +112,7 @@ fn verify_oid_hash(
     data: &[u8],
     expected: &ObjectId,
 ) -> Result<()> {
-    let actual = try_hash_object(algo, kind, data)?;
+    let actual = hash_object(algo, kind, data)?;
     if actual != *expected {
         return Err(Error::CorruptObject(format!(
             "packed object {} hashes to {}",

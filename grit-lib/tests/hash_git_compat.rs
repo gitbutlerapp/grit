@@ -77,7 +77,7 @@ fn sample_tag_payload(dir: &Path) -> Vec<u8> {
 fn assert_kind_matches_git(dir: &Path, algo: HashAlgo, kind: ObjectKind, payload: &[u8]) {
     let git_kind = kind.as_str();
     let git_oid = git_hash_object(dir, git_kind, payload);
-    let grit_oid = algo.hash_object(kind, payload).to_hex();
+    let grit_oid = algo.hash_object(kind, payload).expect("hash").to_hex();
     assert_eq!(
         grit_oid,
         git_oid,

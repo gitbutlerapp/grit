@@ -99,7 +99,7 @@ impl SqliteOdbStore {
             let oid = parse_oid_blob(&oid_bytes, self.algo)?;
             let raw = decompress_zlib(&zlib)?;
             let obj = parse_store_bytes(&raw)?;
-            let computed = hash::hash_object(self.algo, obj.kind, &obj.data);
+            let computed = hash::hash_object(self.algo, obj.kind, &obj.data)?;
             if computed != oid {
                 return Err(Error::CorruptObject(format!(
                     "sqlite odb hash mismatch for {}",
@@ -161,7 +161,7 @@ impl ObjectStore for SqliteOdbStore {
         };
         let raw = decompress_zlib(&zlib)?;
         let obj = parse_store_bytes(&raw)?;
-        let computed = hash::hash_object(self.algo, obj.kind, &obj.data);
+        let computed = hash::hash_object(self.algo, obj.kind, &obj.data)?;
         if computed != *oid {
             return Err(Error::CorruptObject(format!(
                 "sqlite odb hash mismatch for {}",
@@ -266,7 +266,7 @@ impl ObjectStore for SqliteOdbStore {
 
 impl WritableObjectStore for SqliteOdbStore {
     fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
-        let oid = hash::hash_object(self.algo, kind, data);
+        let oid = hash::hash_object(self.algo, kind, data)?;
         if self.contains(&oid)? {
             return Ok(oid);
         }

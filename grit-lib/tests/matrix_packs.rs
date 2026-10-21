@@ -354,7 +354,7 @@ fn git_hash_object(kind: &str, content: &[u8], algo: HashAlgo) -> ObjectId {
         "tag" => ObjectKind::Tag,
         other => panic!("unknown object kind {other}"),
     };
-    hash_object(algo, kind, content)
+    hash_object(algo, kind, content).expect("hash")
 }
 
 /// Resolve every delta edge in `pack` to `(target_oid, base_oid)` by fully

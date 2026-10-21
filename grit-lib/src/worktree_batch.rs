@@ -8,7 +8,7 @@ use crate::diff::{mode_from_metadata, worktree_blob_bytes};
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
 use crate::hash::{
-    try_hash_object, try_par_hash_with, try_par_hash_with_force, ParallelHashError, Parallelism,
+    hash_object, try_par_hash_with, try_par_hash_with_force, ParallelHashError, Parallelism,
 };
 use crate::index::IndexEntry;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
@@ -85,7 +85,7 @@ pub(crate) fn prepare_worktree_blobs_parallel(
             filter_process,
         )?;
         let store_bytes = odb::blob_store_bytes(&data);
-        let oid = try_hash_object(ctx.algo, ObjectKind::Blob, &data)?;
+        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data)?;
         let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
         let mode = mode_from_metadata(&meta);
         Ok(PreparedWorktreeBlob {
@@ -141,7 +141,7 @@ pub(crate) fn prepare_and_store_worktree_blobs_parallel(
             filter_process,
         )?;
         let store_bytes = odb::blob_store_bytes(&data);
-        let oid = try_hash_object(ctx.algo, ObjectKind::Blob, &data)?;
+        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data)?;
         let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
         odb.write_loose_zlib_prehashed(&oid, &zlib_store, write_opts)
             .map_err(|e| match e {
@@ -170,4 +170,49 @@ pub(crate) fn prepare_and_store_worktree_blobs_parallel(
         ParallelHashError::Task(err) => err,
     })?;
     Ok(prepared)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ConfigSet;
+    use crate::crlf::FileAttrs;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn shattered_prefix() -> Vec<u8> {
+        fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/shattered-1-prefix.bin"),
+        )
+        .expect("fixture")
+    }
+
+    #[test]
+    fn worktree_add_rejects_shattered_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("shattered.bin");
+        fs::write(&file, shattered_prefix()).expect("write");
+        let meta = fs::symlink_metadata(&file).expect("stat");
+        let odb = Odb::new(&dir.path().join("objects"));
+        fs::create_dir_all(odb.objects_dir()).expect("objects");
+        let conv = ConversionConfig::from_config(&ConfigSet::new());
+        let input = WorktreeBlobReadInput {
+            abs: file,
+            index_relpath: "shattered.bin".to_owned(),
+            index_entry: None,
+            file_attrs: FileAttrs::default(),
+            cached_meta: Some(meta),
+        };
+        match prepare_worktree_blobs_parallel(
+            &odb,
+            &[input],
+            &conv,
+            Parallelism::resolve(Some(1)),
+            None,
+        ) {
+            Err(Error::HashCollision { .. }) => {}
+            Ok(_) => panic!("expected HashCollision"),
+            Err(other) => panic!("expected HashCollision, got {other}"),
+        }
+    }
 }

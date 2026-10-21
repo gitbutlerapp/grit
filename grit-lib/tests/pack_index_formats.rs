@@ -234,7 +234,7 @@ fn sha1_trailer_for_file(file: &mut std::fs::File) -> ObjectId {
         hasher.update(&buf[..n]);
         left -= n as u64;
     }
-    ObjectId::from_bytes(hasher.finalize().as_bytes()).expect("trailer oid")
+    ObjectId::from_bytes(hasher.finalize().expect("hash").as_bytes()).expect("trailer oid")
 }
 
 /// On-disk pack longer than the mmap owned-buffer threshold without huge compressed payloads.
@@ -245,7 +245,7 @@ fn write_sparse_blob_pack(
     object_offset: u64,
 ) -> ObjectId {
     let odb = Odb::new(repo_root);
-    let oid = odb.hash(ObjectKind::Blob, data);
+    let oid = odb.hash(ObjectKind::Blob, data).expect("hash");
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -326,7 +326,7 @@ fn fanout_all_objects_share_first_byte() {
         body.extend_from_slice(&(*off as u32).to_be_bytes());
         body.extend_from_slice(oid);
     }
-    body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
+    body.extend_from_slice(HashAlgo::Sha1.digest(&body).expect("digest").as_bytes());
     let idx = parse_pack_index_bytes(Path::new("one-bucket.idx"), body, false).expect("v1 idx");
     assert_eq!(idx.fanout[0xab], 32);
     assert_eq!(idx.fanout[0xac], 32);
@@ -348,7 +348,7 @@ fn fanout_first_and_last_bucket_hits() {
         body.extend_from_slice(&(*off as u32).to_be_bytes());
         body.extend_from_slice(oid);
     }
-    body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
+    body.extend_from_slice(HashAlgo::Sha1.digest(&body).expect("digest").as_bytes());
     let idx = parse_pack_index_bytes(Path::new("fanout-edges.idx"), body, false).expect("v1 idx");
     let oid_lo = ObjectId::from_bytes(&rows[0].0).expect("oid 0x00");
     let oid_hi = ObjectId::from_bytes(&rows[1].0).expect("oid 0xff");
@@ -394,7 +394,7 @@ fn assert_corrupt_contains(result: Result<(), Error>, needle: &str) {
 fn recompute_idx_trailer(raw: &mut [u8], hash_bytes: usize) {
     let algo = HashAlgo::from_len(hash_bytes).expect("hash width");
     let body_len = raw.len().saturating_sub(hash_bytes);
-    let digest = algo.digest(&raw[..body_len]);
+    let digest = algo.digest(&raw[..body_len]).expect("digest");
     raw[body_len..].copy_from_slice(digest.as_bytes());
 }
 
@@ -517,8 +517,8 @@ fn pack_index_object_count_mismatch_errors() {
     );
 
     let odb = Odb::new(repo.path());
-    let oid_a = odb.hash(ObjectKind::Blob, b"a");
-    let oid_b = odb.hash(ObjectKind::Blob, b"b");
+    let oid_a = odb.hash(ObjectKind::Blob, b"a").expect("hash");
+    let oid_b = odb.hash(ObjectKind::Blob, b"b").expect("hash");
     let off_a = bogus_count.entry_offsets[0] as u64;
     let off_b = bogus_count.entry_offsets[1] as u64;
     let idx_path = install_grit_v2_index(
@@ -544,8 +544,8 @@ fn pack_index_object_count_mismatch_errors() {
     let inflated = builder3.build();
     assert_eq!(inflated.entry_offsets.len(), 2);
     let odb3 = Odb::new(repo.path());
-    let oid_a3 = odb3.hash(ObjectKind::Blob, b"a");
-    let oid_b3 = odb3.hash(ObjectKind::Blob, b"b");
+    let oid_a3 = odb3.hash(ObjectKind::Blob, b"a").expect("hash");
+    let oid_b3 = odb3.hash(ObjectKind::Blob, b"b").expect("hash");
     let off_a3 = inflated.entry_offsets[0] as u64;
     let off_b3 = inflated.entry_offsets[1] as u64;
     let crc_a = pack_entry_crc(&inflated.bytes, off_a3, 20);
@@ -597,7 +597,7 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     }
     body.extend_from_slice(&bogus.to_be_bytes());
     body.extend_from_slice(&oid_bytes);
-    body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
+    body.extend_from_slice(HashAlgo::Sha1.digest(&body).expect("digest").as_bytes());
     let corrupt_v1 = scratch.path().join("corrupt-v1.idx");
     std::fs::write(&corrupt_v1, &body).expect("write synthetic v1");
     let idx = read_pack_index_no_verify(&corrupt_v1).expect("parse corrupt v1");
@@ -741,7 +741,7 @@ fn install_duplicate_pack_index(
     assert_eq!(second, 1);
     let hash_bytes = fixture.oid_len();
     let odb = Odb::new(&repo.objects_dir());
-    let oid = odb.hash(ObjectKind::Blob, payload);
+    let oid = odb.hash(ObjectKind::Blob, payload).expect("hash");
     let off0 = built.entry_offsets[0] as u64;
     let off1 = built.entry_offsets[1] as u64;
     let idx_path = install_grit_v2_index(
@@ -833,7 +833,9 @@ fn warmed_pack_cache_revalidates_after_same_path_replacement() {
     builder.add_full(FixtureKind::Blob, b"after-repack-content");
     let built_b = builder.build();
     let odb = Odb::new(repo.path());
-    let oid_b = odb.hash(ObjectKind::Blob, b"after-repack-content");
+    let oid_b = odb
+        .hash(ObjectKind::Blob, b"after-repack-content")
+        .expect("hash");
     let off_b = built_b.entry_offsets[0] as u64;
     std::fs::write(&pack_path, &built_b.bytes).expect("replace pack bytes");
     let rows = [(oid_b, off_b, pack_entry_crc(&built_b.bytes, off_b, 20))];

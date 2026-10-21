@@ -139,16 +139,16 @@ pub(crate) fn install_indexed_pack(objects_dir: &Path, stem: &str, pack_bytes: &
 fn typical_tree_bytes() -> Vec<u8> {
     let blob_body = b"typical blob payload for zlib bench\n";
     let odb = Odb::new(tempfile::tempdir().expect("temp").path());
-    let blob_oid = odb.hash(ObjectKind::Blob, blob_body);
+    let blob_oid = odb.hash(ObjectKind::Blob, blob_body).expect("hash");
     let mut tree = Vec::new();
     tree.extend_from_slice(b"100644 README.md\0");
     tree.extend_from_slice(blob_oid.as_bytes());
     tree.extend_from_slice(b"040000 src\0");
-    let sub_blob = odb.hash(ObjectKind::Blob, b"mod rs\n");
+    let sub_blob = odb.hash(ObjectKind::Blob, b"mod rs\n").expect("hash");
     let mut sub = Vec::new();
     sub.extend_from_slice(b"100644 lib.rs\0");
     sub.extend_from_slice(sub_blob.as_bytes());
-    let sub_tree = odb.hash(ObjectKind::Tree, &sub);
+    let sub_tree = odb.hash(ObjectKind::Tree, &sub).expect("hash");
     tree.extend_from_slice(sub_tree.as_bytes());
     tree
 }
@@ -494,7 +494,7 @@ impl ObjectBenchFixtures {
         let delta_zlib = deflate_store_bytes(&delta_store);
 
         let tree_small_body = {
-            let leaf = odb.hash(ObjectKind::Blob, b"x");
+            let leaf = odb.hash(ObjectKind::Blob, b"x").expect("hash");
             let mut t = Vec::with_capacity(200);
             for i in 0..8 {
                 t.extend_from_slice(format!("100644 f{i}.txt\0").as_bytes());

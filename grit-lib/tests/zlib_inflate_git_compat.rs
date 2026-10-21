@@ -93,7 +93,7 @@ fn grit_loose_and_pack_round_trip_git_fsck_and_cat_file() {
 
     let blob_body = b"round-trip payload for zlib inflate step\n".repeat(128);
     let tree_entries = {
-        let blob_oid = odb.hash(ObjectKind::Blob, &blob_body);
+        let blob_oid = odb.hash(ObjectKind::Blob, &blob_body).expect("hash");
         let mut tree = Vec::new();
         tree.extend_from_slice(b"100644 file.txt\0");
         tree.extend_from_slice(blob_oid.as_bytes());
