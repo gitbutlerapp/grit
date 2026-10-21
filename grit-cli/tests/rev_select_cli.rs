@@ -263,6 +263,29 @@ fn limit_hidden_alias_still_works() -> TestResult {
 }
 
 #[test]
+fn revs_cherry_mark_json() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-revs-cherry-mark-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_diverged_repo(&dir);
+    let git_lines = git_rev_list_oids(&dir, &["--left-right", "--cherry-mark", "main...side"]);
+    let v = grit_json(
+        &dir,
+        &["revs", "--left-right", "--cherry-mark", "main...side"],
+    );
+    let commits = v["commits"].as_array().expect("commits");
+    assert_eq!(commits.len(), git_lines.len());
+    for (row, git_line) in commits.iter().zip(git_lines.iter()) {
+        let stripped = git_line.trim_start_matches(['<', '>', '=', ' '].as_ref());
+        let git_oid = stripped.split_whitespace().next().expect("oid token");
+        assert_eq!(row["oid"].as_str().expect("oid"), git_oid);
+        if git_line.starts_with('=') {
+            assert_eq!(row["equivalent"].as_bool(), Some(true));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn revs_n_zero_left_right_json_shape() -> TestResult {
     let dir = std::env::temp_dir().join(format!("grit-rev-select-lr-zero-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

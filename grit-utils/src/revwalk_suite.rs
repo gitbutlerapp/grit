@@ -173,6 +173,37 @@ pub fn run_revwalk_suite(
 
     let spec = HotPathRepoSpec::for_size(if smoke { 80 } else { 10_000 });
     let (pick_repo, meta) = setup_pick_merge_fixture(git, spec, 4)?;
+    let cherry_range = format!("{}...{}", meta.main_branch, meta.topic_branch);
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: "revs-cherry-pick".into(),
+            group: "revs".into(),
+            fixture: format!("synthetic-{}", spec.file_count),
+            description: "revs --left-right --cherry-pick on pick/merge fixture".into(),
+            grit_argv: vec![
+                "revs".into(),
+                "--left-right".into(),
+                "--cherry-pick".into(),
+                cherry_range.clone(),
+            ],
+            git_argv: vec![
+                "rev-list".into(),
+                "--left-right".into(),
+                "--cherry-pick".into(),
+                cherry_range,
+            ],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &pick_repo,
+    )?);
+
     scenarios.push(run_scenario(
         hyperfine,
         git,

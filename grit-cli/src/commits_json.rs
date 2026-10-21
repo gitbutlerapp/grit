@@ -98,6 +98,8 @@ impl CommitJson {
                 })
                 .collect(),
             relative_date: Some(crate::context::relative_date_from(author_ts, now)),
+            side: None,
+            equivalent: None,
         }
     }
 }

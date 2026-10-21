@@ -8,12 +8,16 @@ use crate::merge_base::{
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
-use crate::rev_list::{rev_list, split_revision_token, RevListOptions, RevListResult};
+use crate::rev_list::{
+    commit_output_parents, rev_list, split_revision_token, OutputMode, RevListOptions,
+    RevListResult,
+};
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_revision_for_range_end,
     split_triple_dot_range,
 };
+use std::collections::HashSet;
 
 use super::RevWalk;
 
@@ -40,6 +44,40 @@ pub enum RefSelection {
     Tags(Option<String>),
     /// All remote-tracking tips, or those matching an optional `refs/remotes/` glob pattern.
     Remotes(Option<String>),
+}
+
+/// Cherry-pick equivalence handling for symmetric ranges (`A...B`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CherryMode {
+    /// No patch-id filtering or marking.
+    #[default]
+    Off,
+    /// Omit commits on one side that match a commit on the other (`--cherry-pick`).
+    Pick,
+    /// Keep all commits but mark patch-id matches (`--cherry-mark`).
+    Mark,
+}
+
+/// Left or right side of a symmetric range when `--left-right` is active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevWalkSide {
+    /// Reachable from the left tip only.
+    Left,
+    /// Reachable from the right tip only.
+    Right,
+}
+
+/// One commit row from a [`RevWalk`] query with optional parent rewrite and range metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevWalkCommit {
+    /// Commit object id.
+    pub oid: ObjectId,
+    /// Rewritten parent links when [`RevWalkListOptions::include_parents`] is set.
+    pub parents: Vec<ObjectId>,
+    /// Symmetric-range side when [`RevWalkListOptions::left_right`] is set.
+    pub side: Option<RevWalkSide>,
+    /// True when `--cherry-mark` matched this commit by patch-id.
+    pub equivalent: bool,
 }
 
 /// Left/right commit counts for a symmetric range (`A...B`), matching `git rev-list --left-right --count`.
@@ -72,6 +110,12 @@ pub struct RevWalkListOptions {
     pub first_parent: bool,
     /// Limit history to commits that touch these paths (same rules as `rev-list --`).
     pub paths: Vec<String>,
+    /// Include rewritten parent oids for each commit (`rev-list --parents`).
+    pub include_parents: bool,
+    /// Patch-id cherry handling on symmetric ranges.
+    pub cherry: CherryMode,
+    /// Classify commits as left/right on `A...B` (`rev-list --left-right`).
+    pub left_right: bool,
 }
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
@@ -192,6 +236,9 @@ fn rev_list_options_from_walk(
 ) -> Result<RevListOptions> {
     let paths = repo.resolve_rev_walk_pathspecs(&walk.paths)?;
     let (min_parents, max_parents) = merge_filter_to_parent_bounds(walk.merges);
+    let cherry_pick = walk.cherry == CherryMode::Pick;
+    let cherry_mark = walk.cherry == CherryMode::Mark;
+    let needs_side_map = walk.left_right || cherry_pick || cherry_mark;
     Ok(RevListOptions {
         first_parent: walk.first_parent,
         max_count: walk.limit,
@@ -209,8 +256,55 @@ fn rev_list_options_from_walk(
         paths_resolved_from_argv: !walk.paths.is_empty(),
         symmetric_left: parsed.symmetric_left,
         symmetric_right: parsed.symmetric_right,
+        output_mode: if walk.include_parents {
+            OutputMode::Parents
+        } else {
+            OutputMode::OidOnly
+        },
+        parent_rewrite: walk.include_parents,
+        left_right: needs_side_map,
+        left_right_explicit: walk.left_right,
+        cherry_pick,
+        cherry_mark,
         ..RevListOptions::default()
     })
+}
+
+fn rev_walk_commits_from_result(
+    repo: &Repository,
+    result: &RevListResult,
+    list_options: &RevWalkListOptions,
+    rev_list_options: &RevListOptions,
+) -> Result<Vec<RevWalkCommit>> {
+    let output_set: HashSet<ObjectId> = result.commits.iter().copied().collect();
+    let mut out = Vec::with_capacity(result.commits.len());
+    for &oid in &result.commits {
+        let parents = if list_options.include_parents {
+            commit_output_parents(repo, oid, &output_set, rev_list_options)?
+        } else {
+            Vec::new()
+        };
+        let side = if list_options.left_right {
+            result.left_right_map.get(&oid).copied().map(|left| {
+                if left {
+                    RevWalkSide::Left
+                } else {
+                    RevWalkSide::Right
+                }
+            })
+        } else {
+            None
+        };
+        let equivalent =
+            list_options.cherry == CherryMode::Mark && result.cherry_equivalent.contains(&oid);
+        out.push(RevWalkCommit {
+            oid,
+            parents,
+            side,
+            equivalent,
+        });
+    }
+    Ok(out)
 }
 
 /// Parse a user date string into a Unix committer cutoff (Git `--since` / `--until`).
@@ -306,11 +400,28 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// Propagates rev-parse and rev-list errors.
     pub fn commits(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<Vec<ObjectId>> {
+        Ok(self
+            .commit_entries(tokens, options)?
+            .into_iter()
+            .map(|row| row.oid)
+            .collect())
+    }
+
+    /// List commits with optional rewritten parents, left/right sides, and cherry-mark flags.
+    ///
+    /// # Errors
+    ///
+    /// Propagates rev-parse and rev-list errors.
+    pub fn commit_entries(
+        &self,
+        tokens: &[&str],
+        options: &RevWalkListOptions,
+    ) -> Result<Vec<RevWalkCommit>> {
         let repo = self.repository();
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
         let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
-        Ok(result.commits)
+        rev_walk_commits_from_result(repo, &result, options, &opts)
     }
 
     /// Count reachable commits without collecting them, using the commit-graph when loaded.

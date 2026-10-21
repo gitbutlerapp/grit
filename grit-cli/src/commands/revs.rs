@@ -1,7 +1,8 @@
 //! `grit revs` — list or count commits matching revision ranges.
 
 use anyhow::{bail, Result};
-use grit_lib::revwalk::LeftRightCounts;
+use grit_lib::objects::ObjectId;
+use grit_lib::revwalk::{CherryMode, LeftRightCounts, RevWalkCommit, RevWalkSide};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -25,6 +26,15 @@ impl From<LeftRightCounts> for RevsLeftRightCount {
             right: c.right,
         }
     }
+}
+
+/// Walk modifiers specific to `grit revs` (not shared with `log`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RevsWalkFlags {
+    pub parents: bool,
+    pub cherry_pick: bool,
+    pub cherry_mark: bool,
+    pub left_right: bool,
 }
 
 /// Result of `grit revs`.
@@ -54,7 +64,7 @@ impl HumanRender for RevsOutcome {
             return Ok(());
         }
         for row in &self.commits {
-            outln!(w, "{}  {}", row.oid, row.subject);
+            outln!(w, "{}", format_revs_line(row, true));
         }
         Ok(())
     }
@@ -86,13 +96,13 @@ impl MarkdownRender for RevsOutcome {
             return Ok(());
         }
         for row in &self.commits {
-            outln!(w, "- `{}` {}", row.oid, row.subject);
+            outln!(w, "- {}", format_revs_line(row, false));
         }
         Ok(())
     }
 }
 
-pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutcome> {
+pub fn run(rev: RevSelectArgs, count: bool, walk_flags: RevsWalkFlags) -> Result<RevsOutcome> {
     if rev.revs.is_empty()
         && !rev.all
         && rev.branches.is_none()
@@ -101,17 +111,30 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
     {
         bail!("at least one revision range is required");
     }
-    if left_right && !count {
-        bail!("`--left-right` requires `--count`");
+    if walk_flags.cherry_pick && walk_flags.cherry_mark {
+        bail!("`--cherry-pick` and `--cherry-mark` cannot be used together");
     }
     let repo = context::discover()?;
     let env = repo.environment();
     let mut deprecated = None;
     let mut warn = false;
-    let opts = rev.to_rev_walk_options(env, &[], &mut deprecated, &mut warn)?;
+    let mut opts = rev.to_rev_walk_options(env, &[], &mut deprecated, &mut warn)?;
     if deprecated.is_some() {
         bail!("`grit revs` does not support log continuation cursors");
     }
+    opts.include_parents = walk_flags.parents;
+    opts.left_right = walk_flags.left_right;
+    opts.cherry = if walk_flags.cherry_pick {
+        CherryMode::Pick
+    } else if walk_flags.cherry_mark {
+        CherryMode::Mark
+    } else {
+        CherryMode::Off
+    };
+    if (walk_flags.cherry_pick || walk_flags.cherry_mark) && !walk_flags.left_right {
+        opts.left_right = true;
+    }
+
     let walk = repo.rev_walk();
     let token_refs = rev.rev_tokens(&[]);
 
@@ -119,13 +142,15 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
         if rev.max_count == Some(0) {
             return Ok(RevsOutcome {
                 commits: Vec::new(),
-                count: if left_right { None } else { Some(0) },
-                left_right: left_right.then_some(RevsLeftRightCount { left: 0, right: 0 }),
+                count: if walk_flags.left_right { None } else { Some(0) },
+                left_right: walk_flags
+                    .left_right
+                    .then_some(RevsLeftRightCount { left: 0, right: 0 }),
                 truncated: false,
                 next: None,
             });
         }
-        if left_right {
+        if walk_flags.left_right {
             let lr = walk.left_right_counts(&token_refs, &opts)?;
             return Ok(RevsOutcome {
                 commits: Vec::new(),
@@ -156,11 +181,15 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
     }
     let mut fetch_opts = opts.clone();
     fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
-    let oids = walk.commits(&token_refs, &fetch_opts)?;
+    let entries = walk.commit_entries(&token_refs, &fetch_opts)?;
+    let oids: Vec<ObjectId> = entries.iter().map(|e| e.oid).collect();
     let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
+    let take = oids.len();
+    let entries: Vec<RevWalkCommit> = entries.into_iter().take(take).collect();
     let now = context::wall_clock_now(env).unix_timestamp();
     let loader = CommitJsonLoader::new(&repo, &oids)?;
-    let commits = loader.load(&repo, &oids, now)?;
+    let mut commits = loader.load(&repo, &oids, now)?;
+    apply_walk_metadata(&mut commits, &entries);
     Ok(RevsOutcome {
         commits,
         count: None,
@@ -168,4 +197,52 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
         truncated,
         next: None,
     })
+}
+
+fn apply_walk_metadata(commits: &mut [CommitJson], entries: &[RevWalkCommit]) {
+    for (json, row) in commits.iter_mut().zip(entries.iter()) {
+        if !row.parents.is_empty() {
+            json.parents = row.parents.iter().map(ObjectId::to_hex).collect();
+        }
+        if let Some(side) = row.side {
+            json.side = Some(match side {
+                RevWalkSide::Left => "left".to_owned(),
+                RevWalkSide::Right => "right".to_owned(),
+            });
+        }
+        if row.equivalent {
+            json.equivalent = Some(true);
+        }
+    }
+}
+
+fn format_revs_line(row: &CommitJson, human_prefix: bool) -> String {
+    let mut out = String::new();
+    if human_prefix {
+        if row.equivalent == Some(true) {
+            out.push('=');
+        } else if let Some(side) = row.side.as_deref() {
+            out.push(match side {
+                "left" => '<',
+                "right" => '>',
+                _ => ' ',
+            });
+        }
+    } else if row.equivalent == Some(true) {
+        out.push_str("(equivalent) ");
+    } else if let Some(side) = row.side.as_deref() {
+        out.push_str(match side {
+            "left" => "(left) ",
+            "right" => "(right) ",
+            _ => "",
+        });
+    }
+    out.push_str(&row.oid);
+    for parent in &row.parents {
+        out.push(' ');
+        out.push_str(parent);
+    }
+    out.push_str("  ");
+    out.push_str(&row.subject);
+    out
 }

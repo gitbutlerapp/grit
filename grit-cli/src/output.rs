@@ -275,6 +275,14 @@ pub struct CommitJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub relative_date: Option<String>,
+    /// Symmetric-range side when `grit revs --left-right` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub side: Option<String>,
+    /// Patch-id equivalent mark when `grit revs --cherry-mark` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub equivalent: Option<bool>,
 }
 
 impl CommitJson {
@@ -290,6 +298,8 @@ impl CommitJson {
             message: commit.subject.clone(),
             refs: Vec::new(),
             relative_date: Some(crate::context::relative_date_from(commit.timestamp, now)),
+            side: None,
+            equivalent: None,
         }
     }
 }

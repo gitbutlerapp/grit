@@ -447,9 +447,18 @@ enum Command {
         /// Print only the number of reachable commits.
         #[arg(long)]
         count: bool,
-        /// With `--count`, print left/right counts for a symmetric range (`A...B`).
+        /// Mark left/right sides on `A...B`, or with `--count` print per-side totals.
         #[arg(long = "left-right")]
         left_right: bool,
+        /// Print rewritten parent oids after each commit (`git rev-list --parents`).
+        #[arg(long)]
+        parents: bool,
+        /// On symmetric ranges, omit patch-id equivalent commits (`git rev-list --cherry-pick`).
+        #[arg(long = "cherry-pick", conflicts_with = "cherry_mark")]
+        cherry_pick: bool,
+        /// On symmetric ranges, mark patch-id equivalent commits (`git rev-list --cherry-mark`).
+        #[arg(long = "cherry-mark", conflicts_with = "cherry_pick")]
+        cherry_mark: bool,
     },
     /// Find merge bases or test whether one commit is an ancestor of another.
     #[command(name = "merge-base")]
@@ -1046,7 +1055,23 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             rev,
             count,
             left_right,
-        } => emit(&commands::revs::run(rev, count, left_right)?, opts, ctx),
+            parents,
+            cherry_pick,
+            cherry_mark,
+        } => emit(
+            &commands::revs::run(
+                rev,
+                count,
+                commands::revs::RevsWalkFlags {
+                    parents,
+                    cherry_pick,
+                    cherry_mark,
+                    left_right,
+                },
+            )?,
+            opts,
+            ctx,
+        ),
         Command::MergeBase {
             a,
             b,

@@ -1904,6 +1904,35 @@ fn format_relative_date(diff: i64) -> String {
     }
 }
 
+/// Parent OIDs printed after a commit oid for `--parents` output.
+///
+/// When the walk used path limits, parents are rewritten through omitted commits in the
+/// output set (same rules as `git rev-list --parents -- path`). Otherwise raw navigation
+/// parents (including grafts) are returned.
+///
+/// # Errors
+///
+/// Returns object load errors when parent links cannot be read.
+pub fn commit_output_parents(
+    repo: &Repository,
+    oid: ObjectId,
+    output_commits: &HashSet<ObjectId>,
+    options: &RevListOptions,
+) -> Result<Vec<ObjectId>> {
+    if !options.wants_parent_rewrite() {
+        return Ok(Vec::new());
+    }
+    if !options.paths.is_empty() {
+        return visible_parents_for_graph_lib(repo, oid, output_commits, options.first_parent);
+    }
+    let grafts = crate::rev_parse::load_graft_parents(repo.git_dir());
+    let mut parents = load_navigation_parents_lib(repo, oid, &grafts)?;
+    if options.first_parent && parents.len() > 1 {
+        parents.truncate(1);
+    }
+    Ok(parents)
+}
+
 /// Render one commit according to the selected output mode.
 ///
 /// # Errors

@@ -136,6 +136,7 @@ impl RevSelectArgs {
                     refs: ref_selections(self),
                     first_parent: self.first_parent,
                     paths: self.paths.clone(),
+                    ..RevWalkListOptions::default()
                 });
             }
         }
@@ -151,6 +152,7 @@ impl RevSelectArgs {
             refs: ref_selections(self),
             first_parent: self.first_parent,
             paths: self.paths.clone(),
+            ..RevWalkListOptions::default()
         })
     }
 

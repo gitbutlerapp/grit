@@ -123,6 +123,13 @@
         "committer": {
           "$ref": "#/definitions/Person"
         },
+        "equivalent": {
+          "description": "Patch-id equivalent mark when `grit revs --cherry-mark` is set.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "message": {
           "description": "Full message body with trailing whitespace trimmed.",
           "type": "string"
@@ -145,6 +152,13 @@
         },
         "relative_date": {
           "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "side": {
+          "description": "Symmetric-range side when `grit revs --left-right` is set.",
           "type": [
             "string",
             "null"

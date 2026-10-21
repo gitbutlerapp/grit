@@ -8,7 +8,8 @@ order: 3
 ## Synopsis
 
 ```text
-grit revs <RANGE>... [-n <N>] [--count] [--left-right]
+grit revs <RANGE>... [-n <N>] [--count] [--left-right] [--parents]
+  [--cherry-pick | --cherry-mark]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
@@ -19,7 +20,7 @@ grit revs <RANGE>... [-n <N>] [--count] [--left-right]
 
 Walks commits reachable from one or more revision ranges and prints each commit’s full object id and subject (first line of the message), one commit per line. Ranges use the same syntax as Git’s `rev-list`: plain tips, `A..B`, symmetric difference `A...B`, and `^tip` exclusions.
 
-Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). When a commit-graph file is present, counting uses it for speed.
+Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). In listing mode, `--left-right` prefixes each commit with `<` or `>` (left or right side). `--parents` prints rewritten parent oids after each commit (path-limited walks rewrite through omitted commits, like `git rev-list --parents`). On symmetric ranges, `--cherry-pick` drops patch-id equivalent commits and `--cherry-mark` keeps them but sets `equivalent: true` in JSON (human output prefixes `=`). When a commit-graph file is present, counting uses it for speed.
 
 Path arguments after `--` limit history to commits that touched those paths. Operands use Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, `.` limits to that directory, and bare filenames are relative to the current directory, not the repository root.
 
@@ -30,7 +31,10 @@ Path arguments after `--` limit history to commits that touched those paths. Ope
 | `<RANGE>…` | One or more revision ranges (required unless a ref-set flag such as `--all` is used). |
 | `-n`, `--max-count <N>` | Stop after `N` commits (listing mode only). `--limit` is a hidden alias for one release. |
 | `--count` | Print only the commit count (or left/right counts with `--left-right`). |
-| `--left-right` | With `--count` and one `A...B` range, print `{left, right}` instead of a single total. |
+| `--left-right` | With `--count` and one `A...B` range, print tab-separated left/right totals; when listing, prefix each row with `<` or `>`. |
+| `--parents` | After each commit oid, print parent oids (rewritten when path limits apply). |
+| `--cherry-pick` | On `A...B`, omit commits that match the other side by patch-id (conflicts with `--cherry-mark`). |
+| `--cherry-mark` | On `A...B`, mark patch-id matches (`equivalent` in JSON, `=` prefix in human output). |
 | `--skip <N>` | Skip `N` commits after ordering. |
 | `--since`, `--after <date>` | Exclude commits older than this date (committer date). |
 | `--until`, `--before <date>` | Exclude commits newer than this date. |

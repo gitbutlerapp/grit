@@ -10,12 +10,15 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
-use grit_lib::revwalk::{LeftRightCounts, MergeFilter, RefSelection, RevWalkListOptions};
+use grit_lib::revwalk::{
+    CherryMode, LeftRightCounts, MergeFilter, RefSelection, RevWalkCommit, RevWalkListOptions,
+    RevWalkSide,
+};
 
 use support::{
-    assert_rev_list_commits_match_git, build_commit_dag, git, git_commit_graph_write,
-    git_merge_base, git_merge_base_is_ancestor, git_rev_list, setup_path_simplify_history,
-    HistoryRepo,
+    assert_rev_list_commits_match_git, build_commit_dag, commit_file, git, git_commit_graph_write,
+    git_merge_base, git_merge_base_is_ancestor, git_rev_list, git_rev_list_lines, git_rev_parse,
+    setup_path_simplify_history, HistoryRepo,
 };
 
 fn open_grit(wt: &Path) -> Repository {
@@ -676,6 +679,160 @@ fn left_right_counts_match_git_rev_list_left_right_count() {
         .left_right_counts(&[token], &RevWalkListOptions::default())
         .expect("left/right counts");
     assert_eq!(grit_counts, git_counts);
+}
+
+fn format_rev_walk_row(row: &RevWalkCommit) -> String {
+    let mut out = String::new();
+    if row.equivalent {
+        out.push('=');
+    } else if let Some(side) = row.side {
+        out.push(match side {
+            RevWalkSide::Left => '<',
+            RevWalkSide::Right => '>',
+        });
+    }
+    out.push_str(&row.oid.to_hex());
+    for parent in &row.parents {
+        out.push(' ');
+        out.push_str(&parent.to_hex());
+    }
+    out
+}
+
+fn grit_rev_walk_entries(
+    repo: &Repository,
+    tokens: &[&str],
+    opts: &RevWalkListOptions,
+) -> Vec<RevWalkCommit> {
+    repo.rev_walk()
+        .commit_entries(tokens, opts)
+        .expect("commit_entries")
+}
+
+fn cherry_symmetric_fixture(wt: &Path) -> (String, String) {
+    commit_file(wt, "shared.txt", "origin\n", "seed");
+    git(wt, &["branch", "-M", "main"]);
+    let base = git_rev_parse(wt, "HEAD").expect("base");
+    commit_file(wt, "shared.txt", "same\n", "left-patch");
+    git(wt, &["checkout", "-b", "side", &base.to_hex()]);
+    let _ = commit_file(wt, "side.txt", "side\n", "side-only");
+    let _ = commit_file(wt, "shared.txt", "same\n", "right-patch");
+    git(wt, &["checkout", "main"]);
+    ("main".to_owned(), "side".to_owned())
+}
+
+#[test]
+fn parents_rewritten_with_paths_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    setup_path_simplify_history(wt);
+    let repo = open_grit(wt);
+    let git_lines = git_rev_list_lines(wt, &["--parents", "rw6012-l", "--", "content.txt"]);
+    let grit_rows = grit_rev_walk_entries(
+        &repo,
+        &["rw6012-l"],
+        &RevWalkListOptions {
+            include_parents: true,
+            paths: vec!["content.txt".into()],
+            ..RevWalkListOptions::default()
+        },
+    );
+    assert_eq!(grit_rows.len(), git_lines.len());
+    for (row, git_line) in grit_rows.iter().zip(&git_lines) {
+        assert_eq!(format_rev_walk_row(row), git_line.trim());
+    }
+}
+
+#[test]
+fn cherry_pick_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let (main_ref, side_ref) = cherry_symmetric_fixture(wt);
+    let token = format!("{main_ref}...{side_ref}");
+    let repo = open_grit(wt);
+    let git_oids = git_rev_list(wt, &["--left-right", "--cherry-pick", &token]);
+    let grit_oids: Vec<_> = grit_rev_walk_entries(
+        &repo,
+        &[token.as_str()],
+        &RevWalkListOptions {
+            cherry: CherryMode::Pick,
+            left_right: true,
+            ..RevWalkListOptions::default()
+        },
+    )
+    .into_iter()
+    .map(|r| r.oid)
+    .collect();
+    assert_eq!(
+        grit_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
+        git_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn cherry_mark_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let (main_ref, side_ref) = cherry_symmetric_fixture(wt);
+    let token = format!("{main_ref}...{side_ref}");
+    let repo = open_grit(wt);
+    let git_lines = git_rev_list_lines(wt, &["--left-right", "--cherry-mark", &token]);
+    let grit_rows = grit_rev_walk_entries(
+        &repo,
+        &[token.as_str()],
+        &RevWalkListOptions {
+            cherry: CherryMode::Mark,
+            left_right: true,
+            ..RevWalkListOptions::default()
+        },
+    );
+    assert_eq!(grit_rows.len(), git_lines.len());
+    for (row, git_line) in grit_rows.iter().zip(&git_lines) {
+        assert_eq!(format_rev_walk_row(row), git_line.trim());
+        if git_line.starts_with('=') {
+            assert!(row.equivalent, "expected equivalent {}", row.oid.to_hex());
+        }
+    }
+}
+
+#[test]
+fn left_right_sides_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let oids = build_commit_dag(
+        wt,
+        &[("b", "a"), ("c", "b"), ("d", "c")],
+        &[("d", "refs/heads/main")],
+    );
+    git(wt, &["branch", "side", &oids["b"].to_hex()]);
+    git(wt, &["checkout", "side"]);
+    build_commit_dag(wt, &[("s1", "b"), ("s2", "s1")], &[]);
+    git(wt, &["checkout", "main"]);
+    let token = "main...side";
+    let repo = open_grit(wt);
+    let git_lines = git_rev_list_lines(wt, &["--left-right", token]);
+    let grit_rows = grit_rev_walk_entries(
+        &repo,
+        &[token],
+        &RevWalkListOptions {
+            left_right: true,
+            ..RevWalkListOptions::default()
+        },
+    );
+    assert_eq!(grit_rows.len(), git_lines.len());
+    for (row, git_line) in grit_rows.iter().zip(&git_lines) {
+        let expected_side = if git_line.starts_with('<') {
+            Some(RevWalkSide::Left)
+        } else if git_line.starts_with('>') {
+            Some(RevWalkSide::Right)
+        } else {
+            None
+        };
+        assert_eq!(row.side, expected_side);
+        let stripped = git_line.trim_start_matches(['<', '>', '=', ' '].as_ref());
+        let git_oid: ObjectId = stripped.split_whitespace().next().unwrap().parse().unwrap();
+        assert_eq!(row.oid, git_oid);
+    }
 }
 
 #[test]
