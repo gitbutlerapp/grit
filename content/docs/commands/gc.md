@@ -26,7 +26,7 @@ Bare **`grit gc`** runs, in order:
 
 1. **pack-refs** — merge loose refs into `packed-refs` (or compact reftable).
 2. **reflog-expire** — apply `gc.reflogExpire*` rules using the current time.
-3. **repack** — consolidate objects into packs. **`grit gc` applies Git’s auto-style repack heuristics** (`gc.autoPackLimit`, reachable vs unreachable packed objects): on a healthy single-pack clone with no loose objects, the repack step is skipped (similar to `git gc --auto`, not necessarily identical to every explicit `git gc` run). When a rebuild is needed, grit reuses on-disk bytes (`window=0`) with parallel workers (`pack.threads`). Writes a `.bitmap` when `repack.writeBitmaps` is true or the repository is bare.
+3. **repack** — consolidate reachable and retained unreachable objects into pack files (same full repack as [`grit repack`](repack.md)), removing redundant loose objects and merging multiple packs when present. Writes a `.bitmap` when `repack.writeBitmaps` is true or the repository is bare.
 4. **prune** — delete unreachable loose objects older than `gc.pruneExpire` (default `2.weeks.ago`).
 5. **commit-graph** — write `objects/info/commit-graph` with changed-path Bloom filters.
 

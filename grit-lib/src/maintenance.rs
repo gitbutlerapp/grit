@@ -348,7 +348,7 @@ impl Default for GcOptions {
     fn default() -> Self {
         Self {
             repack: RepackOptions {
-                auto_skip: true,
+                auto_skip: false,
                 ..RepackOptions::default()
             },
             expire_reflog: true,
@@ -366,7 +366,7 @@ impl GcOptions {
         Self {
             repack: RepackOptions {
                 dry_run,
-                auto_skip: true,
+                auto_skip: false,
                 ..RepackOptions::default()
             },
             expire_reflog: true,
@@ -380,7 +380,7 @@ impl GcOptions {
     pub fn with_reflog_policy(now_unix: i64, expire_reflog: bool) -> Self {
         Self {
             repack: RepackOptions {
-                auto_skip: true,
+                auto_skip: false,
                 ..RepackOptions::default()
             },
             expire_reflog,
@@ -395,7 +395,7 @@ impl GcOptions {
         Self {
             repack: RepackOptions {
                 dry_run,
-                auto_skip: true,
+                auto_skip: false,
                 ..RepackOptions::default()
             },
             expire_reflog: true,
