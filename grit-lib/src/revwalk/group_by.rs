@@ -256,9 +256,9 @@ fn try_count_authors_via_bitmap(
             try_bitmap_reachable_commit_set_for_specs(repo, positive, negative, &opts)?
         {
             if let Some(pack_idx) = index.backing_pack_index() {
-                let positions = reachable.reachable_commit_bitmap_positions().map_err(|e| {
-                    Error::CorruptObject(format!("pack bitmap: {e}"))
-                })?;
+                let positions = reachable
+                    .reachable_commit_bitmap_positions()
+                    .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
                 let mut counter = count_authors_at_pack_rows(
                     repo,
                     &objects_dir,
@@ -351,11 +351,9 @@ fn count_authors_at_pack_rows(
         .unwrap_or(1)
         .clamp(1, 8);
     if entries.len() < PARALLEL_AUTHOR_COUNT_MIN || threads <= 1 {
-        let mut reader = SingleLocalPackReader::open_for_pack_index(
-            objects_dir,
-            Arc::clone(pack_idx),
-        )?
-        .ok_or_else(|| Error::CorruptObject("missing pack reader".into()))?;
+        let mut reader =
+            SingleLocalPackReader::open_for_pack_index(objects_dir, Arc::clone(pack_idx))?
+                .ok_or_else(|| Error::CorruptObject("missing pack reader".into()))?;
         let mut counter = AuthorCounter::new();
         count_authors_at_pack_rows_serial(
             repo,
@@ -377,11 +375,9 @@ fn count_authors_at_pack_rows(
             let chunk_entries = chunk_entries.to_vec();
             let pack_idx = Arc::clone(pack_idx);
             handles.push(scope.spawn(move || -> Result<AuthorCounter> {
-                let mut reader = SingleLocalPackReader::open_for_pack_index(
-                    objects_dir,
-                    Arc::clone(&pack_idx),
-                )?
-                .ok_or_else(|| Error::CorruptObject("missing pack reader".into()))?;
+                let mut reader =
+                    SingleLocalPackReader::open_for_pack_index(objects_dir, Arc::clone(&pack_idx))?
+                        .ok_or_else(|| Error::CorruptObject("missing pack reader".into()))?;
                 let mut counter = AuthorCounter::new();
                 count_authors_at_pack_rows_serial(
                     repo,
@@ -396,9 +392,11 @@ fn count_authors_at_pack_rows(
         }
         let mut merged = AuthorCounter::new();
         for handle in handles {
-            merged.absorb(handle.join().map_err(|_| {
-                Error::CorruptObject("author count worker panicked".into())
-            })??);
+            merged.absorb(
+                handle
+                    .join()
+                    .map_err(|_| Error::CorruptObject("author count worker panicked".into()))??,
+            );
         }
         Ok(merged)
     })
@@ -544,16 +542,12 @@ fn count_authors_stack_walk(
     let excluded: HashSet<ObjectId> = if exclude.is_empty() {
         HashSet::new()
     } else {
-        let mut graph = crate::rev_list::CommitGraph::with_commit_graph(
-            repo,
-            false,
-            use_commit_graph,
-        );
+        let mut graph =
+            crate::rev_list::CommitGraph::with_commit_graph(repo, false, use_commit_graph);
         crate::rev_list::walk_closure(&mut graph, exclude)?
     };
-    let mut graph = use_commit_graph.then(|| {
-        crate::rev_list::CommitGraph::with_commit_graph(repo, first_parent, true)
-    });
+    let mut graph = use_commit_graph
+        .then(|| crate::rev_list::CommitGraph::with_commit_graph(repo, first_parent, true));
     let mut pack_reader: Option<SingleLocalPackReader> = None;
     let mut counter = AuthorCounter::new();
     let mut stack: Vec<ObjectId> = tips.to_vec();
@@ -588,9 +582,8 @@ fn parent_oids_from_commit_bytes(data: &[u8], first_parent: bool) -> Result<Vec<
             break;
         }
         if line.starts_with(b"parent ") {
-            let hex = std::str::from_utf8(&line[7..]).map_err(|_| {
-                Error::CorruptObject("commit parent is not UTF-8".into())
-            })?;
+            let hex = std::str::from_utf8(&line[7..])
+                .map_err(|_| Error::CorruptObject("commit parent is not UTF-8".into()))?;
             parents.push(ObjectId::from_hex(hex.trim())?);
             if first_parent {
                 break;

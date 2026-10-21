@@ -26,7 +26,8 @@ pub use graph::{
     GraphLayout, GraphLineKind, GraphRenderedLine, GraphRowTopology,
 };
 pub use group_by::{
-    group_commits_by_author, mailmap_for_grouping, AuthorGroup, GroupByAuthorOptions,
+    group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping, AuthorGroup,
+    GroupByAuthorOptions,
 };
 pub use handle::RevWalk;
 pub use queries::{

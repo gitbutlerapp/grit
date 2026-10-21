@@ -398,12 +398,7 @@ pub fn run(
                         GroupByAuthorOptions { count_only: true },
                     )
                     .context("could not group commits by author")?;
-                    return build_author_group_outcome_from_groups(
-                        &repo,
-                        grouped,
-                        false,
-                        display,
-                    );
+                    return build_author_group_outcome_from_groups(&repo, grouped, false, display);
                 }
                 let oids = repo
                     .rev_walk()

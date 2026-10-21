@@ -37,7 +37,11 @@ fn git_stdout(root: &std::path::Path, args: &[&str]) -> String {
         .args(args)
         .output()
         .expect("git");
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
@@ -101,9 +105,7 @@ fn write_similar_commit_fast_import(out: &mut Vec<u8>, commits: usize) -> std::i
     out.extend_from_slice(b"M 100644 inline seed.txt\n");
     out.extend_from_slice(b"data 5\nseed\n\n");
     for i in 2..=commits {
-        let msg = format!(
-            "subject: follow-up {i} with similar wording to encourage commit deltas"
-        );
+        let msg = format!("subject: follow-up {i} with similar wording to encourage commit deltas");
         writeln!(out, "commit refs/heads/main")?;
         writeln!(out, "mark :{i}")?;
         writeln!(out, "author Author <author@example.com> {i} +0000")?;

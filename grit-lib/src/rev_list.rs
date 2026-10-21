@@ -12,9 +12,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::bitmap_walk::{
-    bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet,
-};
+use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet};
 use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphChain};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
