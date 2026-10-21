@@ -3,7 +3,6 @@
 //! Layout matches Git's on-disk EWAH format (bit size, word count, big-endian u64 words,
 //! RLW index). See `gitformat-pack` bitmap sections and the Enhanced Word-Aligned Hybrid
 //! (EWAH) paper for the compression scheme.
-#![allow(dead_code)] // Pack/MIDX bitmap readers consume `Bitmap` / `EwahView` in a follow-up step.
 
 use thiserror::Error;
 
@@ -76,14 +75,6 @@ fn rlw_size(word: Eword) -> Eword {
 
 fn min_sz(a: usize, b: usize) -> usize {
     if a < b {
-        a
-    } else {
-        b
-    }
-}
-
-fn max_sz(a: usize, b: usize) -> usize {
-    if a > b {
         a
     } else {
         b
@@ -194,15 +185,6 @@ impl Bitmap {
             pending: 0,
         }
     }
-
-    /// Build from an explicit list of set bit indices.
-    pub(crate) fn from_set_bits(bits: impl IntoIterator<Item = usize>) -> Self {
-        let mut b = Self::new();
-        for i in bits {
-            b.set(i);
-        }
-        b
-    }
 }
 
 struct BitmapSetBitsIter<'a> {
@@ -292,10 +274,6 @@ impl<'a> EwahView<'a> {
         Ok(())
     }
 
-    pub(crate) fn bit_size(&self) -> usize {
-        self.bit_size
-    }
-
     fn word_be(&self, index: usize) -> Result<Eword, EwahError> {
         let start = 8 + index * 8;
         read_be64(self.data.get(start..).ok_or(EwahError::TruncatedWords)?)
@@ -312,6 +290,7 @@ impl<'a> EwahView<'a> {
     }
 
     /// OR logical words into `out`, advancing only through set runs and literal payloads.
+    #[cfg(any(test, feature = "unstable-bench-helpers"))]
     pub(crate) fn or_into(&self, out: &mut Bitmap) -> Result<(), EwahError> {
         let word_limit = self.bit_size.div_ceil(BITS_IN_EWORD);
         out.grow_words(word_limit);
@@ -344,47 +323,28 @@ impl<'a> EwahView<'a> {
     }
 
     /// Population count without materializing an uncompressed bitmap.
+    #[cfg(any(test, feature = "unstable-bench-helpers"))]
     pub(crate) fn count_ones(&self) -> Result<usize, EwahError> {
         let mut count = 0usize;
-        let mut pos = 0usize;
         let mut pointer = 0usize;
         while pointer < self.buffer_size {
             let rlw = self.word_be(pointer)?;
             if rlw_get_run_bit(rlw) {
                 count += rlw_get_running_len(rlw) as usize * BITS_IN_EWORD;
             }
-            pos += rlw_get_running_len(rlw) as usize * BITS_IN_EWORD;
             pointer += 1;
-            let mut k = 0u64;
-            while k < rlw_get_literal_words(rlw) {
-                let lit = self.word_be(pointer)?;
-                count += lit.count_ones() as usize;
-                pos += BITS_IN_EWORD;
+            for _ in 0..rlw_get_literal_words(rlw) {
+                count += self.word_be(pointer)?.count_ones() as usize;
                 pointer += 1;
-                k += 1;
             }
-            let _ = pos;
         }
         Ok(count)
-    }
-
-    /// XOR this bitmap with `other`, storing Git-compatible EWAH into `out`.
-    pub(crate) fn xor_with(
-        &self,
-        other: &EwahView<'_>,
-        out: &mut EwahBitmap,
-    ) -> Result<(), EwahError> {
-        let a = EwahBitmap::from_view(self)?;
-        let b = EwahBitmap::from_view(other)?;
-        *out = EwahBitmap::xor_ewah(&a, &b);
-        Ok(())
     }
 }
 
 /// Expands EWAH compressed storage into sequential logical 64-bit words.
 struct LogicalWordStream<'a> {
-    read_word: fn(&LogicalWordStream<'_>, usize) -> Result<Eword, EwahError>,
-    storage: StorageRef<'a>,
+    view: &'a EwahView<'a>,
     rlw_pos: usize,
     run_remaining: usize,
     run_value: Eword,
@@ -394,16 +354,10 @@ struct LogicalWordStream<'a> {
     finished: bool,
 }
 
-enum StorageRef<'a> {
-    View(&'a EwahView<'a>),
-    Buffer(&'a [Eword]),
-}
-
 impl<'a> LogicalWordStream<'a> {
     fn from_view(view: &'a EwahView<'a>) -> Result<Self, EwahError> {
         let mut stream = Self {
-            read_word: Self::read_view_word,
-            storage: StorageRef::View(view),
+            view,
             rlw_pos: 0,
             run_remaining: 0,
             literal_remaining: 0,
@@ -418,50 +372,12 @@ impl<'a> LogicalWordStream<'a> {
         Ok(stream)
     }
 
-    fn from_buffer(words: &'a [Eword]) -> Result<Self, EwahError> {
-        let mut stream = Self {
-            read_word: Self::read_buffer_word,
-            storage: StorageRef::Buffer(words),
-            rlw_pos: 0,
-            run_remaining: 0,
-            literal_remaining: 0,
-            literal_pos: 0,
-            segment_end: 0,
-            run_value: 0,
-            finished: words.is_empty(),
-        };
-        if !stream.finished {
-            stream.load_segment()?;
-        }
-        Ok(stream)
-    }
-
     fn buffer_len(&self) -> usize {
-        match self.storage {
-            StorageRef::View(v) => v.buffer_size,
-            StorageRef::Buffer(w) => w.len(),
-        }
-    }
-
-    fn read_view_word(this: &LogicalWordStream<'_>, idx: usize) -> Result<Eword, EwahError> {
-        match this.storage {
-            StorageRef::View(v) => v.word_be(idx),
-            StorageRef::Buffer(_) => Err(EwahError::InvalidRlwSegment { at: idx }),
-        }
-    }
-
-    fn read_buffer_word(this: &LogicalWordStream<'_>, idx: usize) -> Result<Eword, EwahError> {
-        match this.storage {
-            StorageRef::Buffer(w) => w
-                .get(idx)
-                .copied()
-                .ok_or(EwahError::InvalidRlwSegment { at: idx }),
-            StorageRef::View(_) => Err(EwahError::InvalidRlwSegment { at: idx }),
-        }
+        self.view.buffer_size
     }
 
     fn word_at(&self, idx: usize) -> Result<Eword, EwahError> {
-        (self.read_word)(self, idx)
+        self.view.word_be(idx)
     }
 
     fn load_segment(&mut self) -> Result<(), EwahError> {
@@ -632,14 +548,6 @@ impl EwahBitmap {
         1
     }
 
-    fn append_empty_words(&mut self, v: bool, number: usize) {
-        if number == 0 {
-            return;
-        }
-        self.bit_size += number * BITS_IN_EWORD;
-        self.add_empty_words_inner(v, number);
-    }
-
     fn append_word(&mut self, word: Eword) {
         self.bit_size += BITS_IN_EWORD;
         if word == 0 {
@@ -692,43 +600,6 @@ impl EwahBitmap {
             ewah.rlw_index = 0;
         }
         Ok(ewah)
-    }
-
-    /// XOR two EWAH bitmaps by zipping their logical word streams.
-    #[allow(clippy::while_let_loop)]
-    pub(crate) fn xor_ewah(a: &Self, b: &Self) -> Self {
-        let mut out = Self::new();
-        let Ok(mut stream_a) = LogicalWordStream::from_buffer(&a.buffer[..a.buffer_size]) else {
-            out.bit_size = b.bit_size;
-            return out;
-        };
-        let Ok(mut stream_b) = LogicalWordStream::from_buffer(&b.buffer[..b.buffer_size]) else {
-            out.bit_size = a.bit_size;
-            return out;
-        };
-
-        let mut wa = stream_a.next();
-        let mut wb = stream_b.next();
-        loop {
-            let left = match wa {
-                Ok(v) => v,
-                Err(_) => break,
-            };
-            let right = match wb {
-                Ok(v) => v,
-                Err(_) => break,
-            };
-            match (left, right) {
-                (None, None) => break,
-                (Some(a_word), Some(b_word)) => out.append_word(a_word ^ b_word),
-                (Some(a_word), None) => out.append_word(a_word),
-                (None, Some(b_word)) => out.append_word(b_word),
-            }
-            wa = stream_a.next();
-            wb = stream_b.next();
-        }
-        out.bit_size = max_sz(a.bit_size, b.bit_size);
-        out
     }
 
     /// Set bit `i` where `i >= self.bit_size` (Git `ewah_set` append-only).
@@ -812,12 +683,6 @@ impl EwahBitmap {
                 k += 1;
             }
         }
-    }
-
-    pub(crate) fn count_ones(&self) -> usize {
-        let mut count = 0usize;
-        self.each_set_bit(|_| count += 1);
-        count
     }
 }
 
@@ -914,7 +779,7 @@ mod tests {
         let mut bytes = Vec::new();
         ewah.serialize(&mut bytes);
         let (view, _) = EwahView::parse(&bytes).unwrap();
-        assert_eq!(view.count_ones().unwrap(), ewah.count_ones());
+        assert_eq!(view.count_ones().unwrap(), naive_from_ewah(&ewah).len());
     }
 
     #[test]
@@ -1042,7 +907,10 @@ mod tests {
     fn or_into_matches_expand_or() {
         let a_bits: Vec<usize> = (0..300).step_by(5).collect();
         let b_bits: Vec<usize> = (0..300).step_by(7).collect();
-        let mut a = Bitmap::from_set_bits(a_bits.iter().copied());
+        let mut a = Bitmap::new();
+        for &bit in &a_bits {
+            a.set(bit);
+        }
         let b_ewah = append_build(&b_bits);
         let mut b_bytes = Vec::new();
         b_ewah.serialize(&mut b_bytes);
@@ -1056,25 +924,6 @@ mod tests {
         a.or_assign(&expanded);
 
         assert_eq!(direct, a);
-    }
-
-    #[test]
-    fn xor_with_matches_xor_ewah() {
-        let a = append_build(&(0..400).step_by(11).collect::<Vec<_>>());
-        let b = append_build(&(0..400).step_by(13).collect::<Vec<_>>());
-        let mut a_bytes = Vec::new();
-        let mut b_bytes = Vec::new();
-        a.serialize(&mut a_bytes);
-        b.serialize(&mut b_bytes);
-        let (va, _) = EwahView::parse(&a_bytes).unwrap();
-        let (vb, _) = EwahView::parse(&b_bytes).unwrap();
-        let mut out = EwahBitmap::new();
-        va.xor_with(&vb, &mut out).unwrap();
-        let direct = EwahBitmap::xor_ewah(
-            &EwahBitmap::deserialize_prefix(&a_bytes).unwrap().0,
-            &EwahBitmap::deserialize_prefix(&b_bytes).unwrap().0,
-        );
-        assert!(ewah_bitmaps_equal(&out, &direct));
     }
 
     #[test]
