@@ -123,6 +123,26 @@ pub fn print_untracked(
     Ok(())
 }
 
+/// Print ignored paths under a heading.
+pub fn print_ignored(
+    w: &mut dyn Write,
+    paths: &[String],
+    path_opts: Option<&PathDisplayOptions>,
+) -> anyhow::Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    outln!(w, "## Ignored");
+    for path in paths {
+        let shown = path_opts
+            .map(|opts| format_inline_code(&opts.format_path_for_human(path)))
+            .unwrap_or_else(|| format_inline_code(path));
+        outln!(w, "- {shown}");
+    }
+    outln!(w);
+    Ok(())
+}
+
 /// Render a full diff outcome as Markdown (one fenced `diff` block per file).
 pub fn print_diff_files(
     w: &mut dyn Write,

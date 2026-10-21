@@ -166,6 +166,30 @@ pub fn read_reflog(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
     Ok(entries)
 }
 
+/// Count reflog entries for `refname` without parsing or retaining them.
+///
+/// Returns `0` when the reflog file is missing.
+pub(crate) fn reflog_entry_count(git_dir: &Path, refname: &str) -> Result<usize> {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
+        let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
+        let mut count = 0usize;
+        store.for_each_reflog_entry(refname, false, &mut |_| {
+            count += 1;
+            std::ops::ControlFlow::Continue(())
+        })?;
+        return Ok(count);
+    }
+    let path = reflog_path(git_dir, refname);
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    Ok(content.lines().filter(|line| !line.is_empty()).count())
+}
+
 /// Parse a single reflog line.
 ///
 /// Format: `<old-hex> <new-hex> <identity>\t<message>`

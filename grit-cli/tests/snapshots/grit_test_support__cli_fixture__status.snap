@@ -11,7 +11,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"branch\":\"main\",\"detached\":false,\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"target\":\"main\",\"ahead\":0,\"behind\":0,\"upstream\":null,\"commits\":[],\"staged\":[{\"path\":\"staged.txt\",\"status\":\"added\"}],\"unstaged\":[{\"path\":\"tracked.txt\",\"status\":\"modified\"}],\"untracked\":[\"untracked.txt\"],\"clean\":false,\"merging\":false}\n",
+    "stdout": "{\"branch\":\"main\",\"detached\":false,\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"target\":\"main\",\"ahead\":0,\"behind\":0,\"upstream\":null,\"commits\":[],\"staged\":[{\"path\":\"staged.txt\",\"status\":\"added\"}],\"unstaged\":[{\"path\":\"tracked.txt\",\"status\":\"modified\"}],\"untracked\":[\"untracked.txt\"],\"clean\":false,\"merging\":false,\"stash_count\":0}\n",
     "stderr": ""
   },
   "markdown": {

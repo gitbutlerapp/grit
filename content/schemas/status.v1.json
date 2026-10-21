@@ -281,6 +281,16 @@
         "null"
       ]
     },
+    "ignored": {
+      "description": "Ignored paths (only when `--ignored` is passed).",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "in_progress": {
       "description": "In-progress operations (e.g. `merge`, `rebase`), when any apply. Deprecated: prefer `operation`.",
       "items": {
@@ -308,6 +318,12 @@
         "$ref": "#/definitions/ChangeJson"
       },
       "type": "array"
+    },
+    "stash_count": {
+      "description": "Number of entries on the stash reflog.",
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "target": {
       "description": "Target branch name, or `null` when none applies / was found.",
@@ -346,6 +362,7 @@
     "detached",
     "merging",
     "staged",
+    "stash_count",
     "unstaged",
     "untracked"
   ],

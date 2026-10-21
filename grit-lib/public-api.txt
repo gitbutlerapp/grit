@@ -11453,8 +11453,47 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusModel
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusModel
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusModel
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusModel
+pub enum grit_lib::porcelain::status::StatusShortLine
+pub grit_lib::porcelain::status::StatusShortLine::Ignored
+pub grit_lib::porcelain::status::StatusShortLine::Tracked
+pub grit_lib::porcelain::status::StatusShortLine::Unmerged
+pub grit_lib::porcelain::status::StatusShortLine::Untracked
+impl core::clone::Clone for grit_lib::porcelain::status::StatusShortLine
+pub fn grit_lib::porcelain::status::StatusShortLine::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::status::StatusShortLine
+impl core::cmp::PartialEq for grit_lib::porcelain::status::StatusShortLine
+pub fn grit_lib::porcelain::status::StatusShortLine::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::status::StatusShortLine
+pub fn grit_lib::porcelain::status::StatusShortLine::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn grit_lib::porcelain::status::StatusShortLine::render_with<F>(&self, F) -> alloc::string::String
+impl core::marker::Freeze for grit_lib::porcelain::status::StatusShortLine
+impl core::marker::Send for grit_lib::porcelain::status::StatusShortLine
+impl core::marker::Sync for grit_lib::porcelain::status::StatusShortLine
+impl core::marker::Unpin for grit_lib::porcelain::status::StatusShortLine
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusShortLine
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusShortLine
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusShortLine
+pub enum grit_lib::porcelain::status::StatusShortPath
+pub grit_lib::porcelain::status::StatusShortPath::Rename
+pub grit_lib::porcelain::status::StatusShortPath::Single
+impl core::clone::Clone for grit_lib::porcelain::status::StatusShortPath
+pub fn grit_lib::porcelain::status::StatusShortPath::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::status::StatusShortPath
+impl core::cmp::PartialEq for grit_lib::porcelain::status::StatusShortPath
+pub fn grit_lib::porcelain::status::StatusShortPath::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::status::StatusShortPath
+pub fn grit_lib::porcelain::status::StatusShortPath::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn grit_lib::porcelain::status::StatusShortPath::render_with<F>(&self, F) -> alloc::string::String
+impl core::marker::Freeze for grit_lib::porcelain::status::StatusShortPath
+impl core::marker::Send for grit_lib::porcelain::status::StatusShortPath
+impl core::marker::Sync for grit_lib::porcelain::status::StatusShortPath
+impl core::marker::Unpin for grit_lib::porcelain::status::StatusShortPath
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusShortPath
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusShortPath
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusShortPath
 pub struct grit_lib::porcelain::status::StatusOptions
 pub grit_lib::porcelain::status::StatusOptions::ahead_behind: bool
+pub grit_lib::porcelain::status::StatusOptions::count_stash: bool
 pub grit_lib::porcelain::status::StatusOptions::ignored: grit_lib::porcelain::status::IgnoredMode
 pub grit_lib::porcelain::status::StatusOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::status::StatusOptions::renames: core::option::Option<grit_lib::porcelain::status::RenameDetection>
@@ -11499,6 +11538,8 @@ pub fn grit_lib::porcelain::status::dir_is_nested_submodule_worktree(&std::path:
 pub fn grit_lib::porcelain::status::expand_untracked_for_staging(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, alloc::vec::Vec<alloc::string::String>, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::porcelain::status::expand_untracked_for_staging_with_rules(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, alloc::vec::Vec<alloc::string::String>, &[alloc::string::String], &grit_lib::worktree::worktree_rules::WorktreeRules) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::porcelain::status::format_porcelain_v2(&grit_lib::porcelain::status::StatusModel, &grit_lib::objects::odb::Odb, core::option::Option<&std::path::Path>) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::porcelain::status::format_short(&grit_lib::porcelain::status::StatusModel) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::porcelain::status::short_status_lines(&grit_lib::porcelain::status::StatusModel) -> alloc::vec::Vec<grit_lib::porcelain::status::StatusShortLine>
 pub fn grit_lib::porcelain::status::normalize_status_conflicts(&mut alloc::vec::Vec<grit_lib::diff::DiffEntry>, &mut alloc::vec::Vec<grit_lib::diff::DiffEntry>, &[alloc::string::String])
 pub fn grit_lib::porcelain::status::pathspec_may_match_directory(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::status(&grit_lib::repo::Repository, &grit_lib::porcelain::status::StatusOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusModel>

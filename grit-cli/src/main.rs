@@ -946,8 +946,7 @@ struct ServeArgs {
 fn main() {
     stdio::configure();
     grit_trace::maybe_init_from_env();
-    let mut parse_argv = diff_args::normalize_diff_argv(std::env::args().collect());
-    commands::status::normalize_status_argv(&mut parse_argv);
+    let parse_argv = diff_args::normalize_diff_argv(std::env::args().collect());
     let cli = match Cli::try_parse_from(parse_argv) {
         Ok(cli) => cli,
         Err(err) if err.use_stderr() => {
