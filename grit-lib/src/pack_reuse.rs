@@ -14,7 +14,7 @@ use crate::bitmap_walk::ReachableSet;
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
 use crate::midx::{read_midx_btmp_ranges, read_midx_pack_idx_names, read_midx_preferred_idx_name};
-use crate::objects::ObjectId;
+use crate::objects::{oid_hash_map_from, ObjectId};
 use crate::pack::{
     find_position_by_pack_offset, pack_entry_raw_end, pack_entry_zlib_start,
     parse_pack_object_header, read_local_pack_indexes_cached, read_pack_bytes_cached,
@@ -156,7 +156,7 @@ impl StreamingReuse {
         out_offset: u64,
         in_pack_base: Option<u64>,
         opts: &PackBuildOptions,
-        oid_to_offset: &HashMap<ObjectId, u64>,
+        oid_to_offset: &crate::objects::OidHashMap<u64>,
     ) -> Result<Option<u64>> {
         if !self.marks_reuse(oid) {
             return Ok(None);
@@ -237,7 +237,7 @@ pub fn try_write_streaming_pack(
         &send,
         &have_closure,
         opts,
-        &blob_name_hashes,
+        &oid_hash_map_from(&blob_name_hashes),
         None,
     )?;
     progress(PackProgress::PlannedDeltas);

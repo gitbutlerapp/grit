@@ -16,7 +16,7 @@ use crate::commit_pretty::message_subject;
 use crate::connectivity::bundle_prerequisites_connected_to_refs;
 use crate::error::{Error, Result};
 use crate::index_pack::{ingest_received_pack_path_with_progress, IngestPackOptions};
-use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{oid_hash_map, parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
@@ -511,7 +511,7 @@ pub fn write_bundle(
             &send,
             &have_closure,
             &pack_opts,
-            &HashMap::new(),
+            &oid_hash_map(),
         )
         .map_err(|e| BundleError::Io(e.to_string()))?
     } else {

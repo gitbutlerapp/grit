@@ -590,7 +590,7 @@ pub(crate) fn build_pack_push_fast(
     }
     // Only pack objects attached to the new commits themselves (no parent walks).
     let empty_haves = HashSet::new();
-    let empty_name_hashes = HashMap::new();
+    let empty_name_hashes = crate::objects::oid_hash_map();
     collect_objects_for_commits_only(odb, &commits, Some(&exclude)).and_then(|mut send| {
         merge_annotated_tag_wants(odb, wants, &mut send)?;
         build_pack_from_send_list(odb, &send, &empty_haves, opts, &empty_name_hashes)

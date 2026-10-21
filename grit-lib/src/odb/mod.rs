@@ -54,7 +54,7 @@ use crate::diagnostics::NullDiagnostics;
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::validate_midx_referenced_packs_with_diagnostics;
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet, empty_oid_set, oid_hash_map, oid_hash_set};
 use crate::pack;
 use crate::pack_store::PackStore;
 use filetime::{set_file_mtime, FileTime};
@@ -226,9 +226,9 @@ pub struct Odb {
     /// When false, alternate object directories are not consulted ([`OdbBuilder::alternates`]).
     alternates_enabled: bool,
     /// Avoid re-reading the same loose object repeatedly during one repository session.
-    session_loose_reads: Arc<std::sync::Mutex<std::collections::HashMap<ObjectId, Object>>>,
+    session_loose_reads: Arc<std::sync::Mutex<OidHashMap<Object>>>,
     /// Parsed tree entries reused for the lifetime of this [`Odb`] handle (Git object cache).
-    session_tree_entries: Arc<Mutex<HashMap<ObjectId, Arc<Vec<crate::objects::TreeEntry>>>>>,
+    session_tree_entries: Arc<Mutex<OidHashMap< Arc<Vec<crate::objects::TreeEntry>>>>>,
 }
 
 const _: () = {
@@ -317,8 +317,8 @@ impl Odb {
             custom_primary: None,
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
-            session_loose_reads: Arc::new(Mutex::new(HashMap::new())),
-            session_tree_entries: Arc::new(Mutex::new(HashMap::new())),
+            session_loose_reads: Arc::new(Mutex::new(oid_hash_map())),
+            session_tree_entries: Arc::new(Mutex::new(oid_hash_map())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -368,8 +368,8 @@ impl Odb {
             custom_primary: None,
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
-            session_loose_reads: Arc::new(Mutex::new(HashMap::new())),
-            session_tree_entries: Arc::new(Mutex::new(HashMap::new())),
+            session_loose_reads: Arc::new(Mutex::new(oid_hash_map())),
+            session_tree_entries: Arc::new(Mutex::new(oid_hash_map())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -1000,7 +1000,7 @@ impl Odb {
         &self,
         pack_dir: &Path,
         keep_pack: &Path,
-        reachable: &HashSet<ObjectId>,
+        reachable: &OidHashSet,
         retention: UnreachablePackRetention,
     ) -> Result<usize> {
         if matches!(retention, UnreachablePackRetention::DropAll) {
@@ -1658,7 +1658,7 @@ impl Odb {
     ///
     /// Propagates enumeration failures from any consulted backend.
     pub fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
-        let mut seen = HashSet::new();
+        let mut seen = oid_hash_set();
         let mut visit = |store: &dyn ObjectStore| -> Result<bool> {
             store::for_each_propagate_break(store, &mut |oid| {
                 if !seen.insert(*oid) {
@@ -1692,7 +1692,7 @@ impl Odb {
     ///
     /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex.
     pub fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
+        let mut seen: OidHashSet = out.iter().copied().collect();
         if let Some(overlay) = self.overlay_store() {
             append_lookup_prefix_layer(overlay.as_ref(), prefix, limit, out, &mut seen)?;
             if limit != 0 && out.len() >= limit {
@@ -2107,7 +2107,7 @@ fn append_lookup_prefix_layer(
     prefix: &str,
     limit: usize,
     out: &mut Vec<ObjectId>,
-    seen: &mut HashSet<ObjectId>,
+    seen: &mut OidHashSet,
 ) -> Result<()> {
     let mut scratch = Vec::new();
     store.lookup_prefix(prefix, 0, &mut scratch)?;
@@ -2294,9 +2294,9 @@ fn superseded_pack_has_keep_marker(pack_dir: &Path, pack_path: &Path) -> bool {
     pack_dir.join(format!("{stem}.keep")).is_file()
 }
 
-fn oids_in_marker_kept_packs(pack_dir: &Path, keep_pack: &Path) -> Result<HashSet<ObjectId>> {
+fn oids_in_marker_kept_packs(pack_dir: &Path, keep_pack: &Path) -> Result<OidHashSet> {
     let keep_stem = keep_pack.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let mut oids = HashSet::new();
+    let mut oids = oid_hash_set();
     if !pack_dir.is_dir() {
         return Ok(oids);
     }
@@ -2889,7 +2889,6 @@ mod tests {
 
     #[test]
     fn freshen_pack_once_per_odb() {
-        use crate::objects::HashAlgo;
         use filetime::FileTime;
         use flate2::write::ZlibEncoder;
         use flate2::Compression;
@@ -3000,7 +2999,6 @@ mod tests {
 
     #[test]
     fn write_existing_packed_object_freshens_pack() {
-        use crate::objects::HashAlgo;
         use filetime::FileTime;
         use flate2::write::ZlibEncoder;
         use flate2::Compression;
@@ -3303,7 +3301,6 @@ mod tests {
     #[test]
     fn loose_only_read_records_loose_path_open() {
         use crate::hot_path_test_metrics::HotPathMetricsScope;
-        use crate::objects::ObjectKind;
 
         let dir = TempDir::new().unwrap();
         let objects = dir.path().join("objects");

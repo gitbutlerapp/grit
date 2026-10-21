@@ -18,9 +18,15 @@
 
 mod core;
 pub mod handle;
+mod oid_hashtable;
 
 pub use core::*;
 pub use handle::Objects;
+pub use oid_hashtable::{
+    empty_object_id_hash_set, empty_oid_byte_filter_map, empty_oid_set, oid_hash_map,
+    oid_hash_map_from, oid_hash_set,
+    oid_hash_set_from, OidBuildHasher, OidHashMap, OidHashSet, OidHasher,
+};
 
 pub use crate::change_id::{
     change_id, resolved_change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator,

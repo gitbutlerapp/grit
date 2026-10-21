@@ -14,7 +14,11 @@ use flate2::Compression;
 use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::error::{Error, Result};
 use crate::hash::HashingWriter;
-use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
+use crate::objects::{
+    empty_object_id_hash_set, oid_hash_map, oid_hash_map_from, oid_hash_set, oid_hash_set_from,
+    OidHashMap, OidHashSet, parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId,
+    ObjectKind,
+};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
@@ -205,8 +209,8 @@ pub struct PackObjects<'a> {
     opts: PackObjectsOptions,
     wants: Vec<ObjectId>,
     haves: Vec<ObjectId>,
-    have_shallow: HashSet<ObjectId>,
-    source_shallow: HashSet<ObjectId>,
+    have_shallow: OidHashSet,
+    source_shallow: OidHashSet,
     progress: Option<Box<dyn FnMut(PackProgress)>>,
 }
 
@@ -220,8 +224,8 @@ impl<'a> PackObjects<'a> {
             opts,
             wants: Vec::new(),
             haves: Vec::new(),
-            have_shallow: HashSet::new(),
-            source_shallow: HashSet::new(),
+            have_shallow: oid_hash_set(),
+            source_shallow: oid_hash_set(),
             progress: None,
         }
     }
@@ -250,14 +254,14 @@ impl<'a> PackObjects<'a> {
     /// Shallow grafts on the have side (local fetch).
     #[must_use]
     pub fn have_shallow_grafts(mut self, grafts: &HashSet<ObjectId>) -> Self {
-        self.have_shallow = grafts.clone();
+        self.have_shallow = grafts.iter().copied().collect();
         self
     }
 
     /// Shallow grafts on the source side (do not walk past on source).
     #[must_use]
     pub fn source_shallow_grafts(mut self, grafts: &HashSet<ObjectId>) -> Self {
-        self.source_shallow = grafts.clone();
+        self.source_shallow = grafts.iter().copied().collect();
         self
     }
 
@@ -284,12 +288,14 @@ impl<'a> PackObjects<'a> {
     /// Missing wants, corrupt objects, or I/O failures while writing.
     pub fn write_to(mut self, w: &mut dyn Write) -> Result<PackStats> {
         let opts = self.opts.build;
+        let have_shallow: HashSet<ObjectId> = self.have_shallow.iter().copied().collect();
+        let source_shallow: HashSet<ObjectId> = self.source_shallow.iter().copied().collect();
         let have_closure = crate::pack_object_select::reachable_closure_walk(
             self.odb,
             &self.haves,
             &HashSet::new(),
             true,
-            &self.have_shallow,
+            &have_shallow,
         )?;
         let selection = crate::pack_object_select::enumerate_pack_objects(
             self.source_odb,
@@ -297,8 +303,8 @@ impl<'a> PackObjects<'a> {
             &self.haves,
             &crate::pack_object_select::PackEnumerateOptions {
                 filter: None,
-                shallow_grafts: &self.source_shallow,
-                have_shallow_grafts: Some(&self.have_shallow),
+                shallow_grafts: &source_shallow,
+                have_shallow_grafts: Some(&have_shallow),
                 use_bitmaps: opts.use_bitmaps,
                 exclude_objects: Some(&have_closure),
             },
@@ -313,7 +319,7 @@ impl<'a> PackObjects<'a> {
                 &send,
                 &have_closure,
                 &opts,
-                &selection.blob_name_hashes,
+                &oid_hash_map_from(&selection.blob_name_hashes),
                 self.opts.search_threads,
             )?;
             self.fire(PackProgress::PlannedDeltas);
@@ -353,12 +359,14 @@ pub fn reachable_closure(
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
 ) -> Result<HashSet<ObjectId>> {
-    let mut seen = HashSet::new();
-    let order = collect_reachable_excluding(odb, roots, stop, skip_missing, shallow_grafts)?;
+    let stop = oid_hash_set_from(stop);
+    let shallow_grafts = oid_hash_set_from(shallow_grafts);
+    let mut seen = oid_hash_set();
+    let order = collect_reachable_excluding(odb, roots, &stop, skip_missing, &shallow_grafts)?;
     for oid in order {
         seen.insert(oid);
     }
-    Ok(seen)
+    Ok(seen.into_iter().collect())
 }
 
 /// Build a v2 packfile containing exactly the objects reachable from `wants`
@@ -373,8 +381,8 @@ pub fn build_pack(
         odb,
         wants,
         haves,
-        &HashSet::new(),
-        &HashSet::new(),
+        empty_object_id_hash_set(),
+        empty_object_id_hash_set(),
         None,
         opts,
     )
@@ -410,7 +418,7 @@ pub fn build_pack_with_shallow_and_filter(
         &selection.send,
         &selection.have_closure,
         opts,
-        &selection.blob_name_hashes,
+        &oid_hash_map_from(&selection.blob_name_hashes),
     )
 }
 
@@ -558,13 +566,13 @@ fn write_planned_entries(
     mut reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
 ) -> Result<crate::pack_reuse::ReuseWriteStats> {
     let algo = odb.hash_algo();
-    let payloads: HashMap<ObjectId, &[u8]> = plan
+    let payloads: OidHashMap< &[u8]> = plan
         .entries
         .iter()
         .map(|e| (e.oid, e.data.as_slice()))
         .collect();
-    let mut oid_to_offset: HashMap<ObjectId, u64> = HashMap::new();
-    let mut delta_index_by_base: HashMap<ObjectId, DeltaIndex> = HashMap::new();
+    let mut oid_to_offset: OidHashMap< u64> = oid_hash_map();
+    let mut delta_index_by_base: OidHashMap< DeltaIndex> = oid_hash_map();
     let mut body_written = 0u64;
 
     for entry in &plan.entries {
@@ -683,7 +691,7 @@ pub fn build_pack_from_send_list(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &HashMap<ObjectId, u32>,
+    blob_name_hashes: &OidHashMap< u32>,
 ) -> Result<Vec<u8>> {
     build_pack_from_send_list_with_parallel_threads(
         odb,
@@ -706,15 +714,16 @@ pub fn build_pack_with_write_threads(
     opts: &PackBuildOptions,
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
-    let have_closure = reachable_closure(odb, haves, &HashSet::new(), true, &HashSet::new())?;
+    let empty_shallow = empty_object_id_hash_set();
+    let have_closure = reachable_closure(odb, haves, empty_shallow, true, empty_shallow)?;
     let selection = crate::pack_object_select::enumerate_pack_objects(
         odb,
         wants,
         haves,
         &crate::pack_object_select::PackEnumerateOptions {
             filter: None,
-            shallow_grafts: &HashSet::new(),
-            have_shallow_grafts: Some(&HashSet::new()),
+            shallow_grafts: empty_shallow,
+            have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
         },
@@ -724,7 +733,7 @@ pub fn build_pack_with_write_threads(
         &selection.send,
         &selection.have_closure,
         opts,
-        &selection.blob_name_hashes,
+        &oid_hash_map_from(&selection.blob_name_hashes),
         None,
         write_threads,
     )
@@ -739,15 +748,16 @@ pub fn build_pack_with_parallel_threads(
     search_threads: Option<usize>,
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
-    let have_closure = reachable_closure(odb, haves, &HashSet::new(), true, &HashSet::new())?;
+    let empty_shallow = empty_object_id_hash_set();
+    let have_closure = reachable_closure(odb, haves, empty_shallow, true, empty_shallow)?;
     let selection = crate::pack_object_select::enumerate_pack_objects(
         odb,
         wants,
         haves,
         &crate::pack_object_select::PackEnumerateOptions {
             filter: None,
-            shallow_grafts: &HashSet::new(),
-            have_shallow_grafts: Some(&HashSet::new()),
+            shallow_grafts: empty_shallow,
+            have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
         },
@@ -757,7 +767,7 @@ pub fn build_pack_with_parallel_threads(
         &selection.send,
         &selection.have_closure,
         opts,
-        &selection.blob_name_hashes,
+        &oid_hash_map_from(&selection.blob_name_hashes),
         search_threads,
         write_threads,
     )
@@ -769,7 +779,7 @@ pub fn build_pack_from_send_list_with_write_threads(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &HashMap<ObjectId, u32>,
+    blob_name_hashes: &OidHashMap< u32>,
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
     build_pack_from_send_list_with_parallel_threads(
@@ -789,7 +799,7 @@ pub fn build_pack_from_send_list_with_parallel_threads(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &HashMap<ObjectId, u32>,
+    blob_name_hashes: &OidHashMap< u32>,
     search_threads: Option<usize>,
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
@@ -831,17 +841,17 @@ pub(crate) fn build_pack_for_local_fetch(
 fn collect_reachable_excluding(
     odb: &Odb,
     roots: &[ObjectId],
-    exclude: &HashSet<ObjectId>,
+    exclude: &OidHashSet,
     skip_missing: bool,
-    shallow_grafts: &HashSet<ObjectId>,
+    shallow_grafts: &OidHashSet,
 ) -> Result<Vec<ObjectId>> {
-    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let mut visited: OidHashSet = oid_hash_set();
     let mut ordered: Vec<ObjectId> = Vec::new();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
 
     let enqueue = |oid: ObjectId,
                    queue: &mut VecDeque<ObjectId>,
-                   visited: &mut HashSet<ObjectId>,
+                   visited: &mut OidHashSet,
                    ordered: &mut Vec<ObjectId>|
      -> bool {
         if !visited.insert(oid) {
@@ -1037,20 +1047,20 @@ pub(crate) fn plan_deltas(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    blob_name_hashes: &HashMap<ObjectId, u32>,
+    blob_name_hashes: &OidHashMap< u32>,
     search_threads: Option<usize>,
 ) -> Result<DeltaPlan> {
     // Reuse-only repacks (`window == 0`) stream from disk at serialize time; avoid
     // materializing every payload during planning.
     let lazy_payloads = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
-    let mut objects: HashMap<ObjectId, Object> = HashMap::new();
+    let mut objects: OidHashMap< Object> = oid_hash_map();
     if !lazy_payloads {
         for &oid in send {
             objects.insert(oid, odb.read(&oid)?);
         }
     }
 
-    let in_pack: HashSet<ObjectId> = send.iter().copied().collect();
+    let in_pack: OidHashSet = send.iter().copied().collect();
 
     // Delta islands (`--delta-islands`): only loaded when requested AND a git dir
     // is attached to the odb. An inactive island set (no `pack.island` config, or
@@ -1058,7 +1068,7 @@ pub(crate) fn plan_deltas(
     let islands = load_islands_for_pack(odb, &in_pack, opts);
 
     // target oid -> base oid (the object `target` deltas against).
-    let mut delta_to_base: HashMap<ObjectId, ObjectId> = HashMap::new();
+    let mut delta_to_base: OidHashMap< ObjectId> = oid_hash_map();
     // Deltas whose instruction stream is reused verbatim from an existing pack.
     let mut reused_zlib: HashMap<
         ObjectId,
@@ -1068,11 +1078,17 @@ pub(crate) fn plan_deltas(
     // On-disk delta reuse runs even with `--window=0` (no new deltas), matching Git pack-objects.
     if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
         let objects_dir = odb.objects_dir();
+        let in_pack_std: HashSet<ObjectId> = in_pack.iter().copied().collect();
+        let objects_std: HashMap<ObjectId, Object> = if lazy_payloads {
+            HashMap::new()
+        } else {
+            objects.iter().map(|(k, v)| (*k, v.clone())).collect()
+        };
         let candidates = crate::pack::collect_packed_delta_reuse_for_send(
             objects_dir,
-            &in_pack,
-            &in_pack,
-            &objects,
+            &in_pack_std,
+            &in_pack_std,
+            &objects_std,
         )?;
         for (t, (base, size, pack_bytes, zlib_start, zlib_end)) in candidates {
             if lazy_payloads {
@@ -1094,7 +1110,7 @@ pub(crate) fn plan_deltas(
     // Objects referenced as the base of a reused on-disk delta must be stored as
     // whole objects (or reuse their own on-disk delta), not as a freshly computed
     // window delta — otherwise REF bases no longer match `by_oid` during indexing.
-    let reuse_delta_bases: HashSet<ObjectId> = delta_to_base
+    let reuse_delta_bases: OidHashSet = delta_to_base
         .iter()
         .filter(|(t, _)| reused_zlib.contains_key(t))
         .map(|(_, b)| *b)
@@ -1110,7 +1126,7 @@ pub(crate) fn plan_deltas(
             &reuse_delta_bases,
             odb.hash_algo().len(),
         );
-        let skip_targets: HashSet<ObjectId> = delta_to_base.keys().copied().collect();
+        let skip_targets: OidHashSet = delta_to_base.keys().copied().collect();
         let window_found = crate::pack_delta::search_windowed_blob_deltas(
             odb,
             crate::pack_delta::DeltaSearchInput {
@@ -1130,7 +1146,7 @@ pub(crate) fn plan_deltas(
 
         if opts.thin {
             let hash_len = odb.hash_algo().len();
-            let mut external_blob_data: HashMap<ObjectId, Vec<u8>> = HashMap::new();
+            let mut external_blob_data: OidHashMap<Vec<u8>> = oid_hash_map();
             for &oid in have_closure {
                 if in_pack.contains(&oid) {
                     continue;
@@ -1198,7 +1214,11 @@ pub(crate) fn plan_deltas(
 
     if opts.max_depth > 0 && !delta_to_base.is_empty() {
         // Cap chain length. After snipping, any removed target reverts to whole.
-        crate::pack::apply_delta_depth_limit(&mut delta_to_base, opts.max_depth);
+        let mut delta_std: HashMap<ObjectId, ObjectId> =
+            delta_to_base.iter().map(|(k, v)| (*k, *v)).collect();
+        crate::pack::apply_delta_depth_limit(&mut delta_std, opts.max_depth);
+        delta_to_base.clear();
+        delta_to_base.extend(delta_std);
 
         // A reused delta whose target was snipped (or whose base ceased to be the
         // chosen base) reverts to a freshly-computed full/delta object.
@@ -1239,7 +1259,7 @@ pub(crate) fn plan_deltas(
 /// without a flag check.
 fn load_islands_for_pack(
     odb: &Odb,
-    in_pack: &HashSet<ObjectId>,
+    in_pack: &OidHashSet,
     opts: &PackBuildOptions,
 ) -> crate::delta_islands::DeltaIslands {
     if !opts.respect_islands {
@@ -1253,7 +1273,8 @@ fn load_islands_for_pack(
     };
     let env = crate::environment::Environment::empty();
     let cfg = crate::config::ConfigSet::load(&env, Some(git_dir), true).unwrap_or_default();
-    crate::delta_islands::load_delta_islands(&repo, &cfg, in_pack)
+    let in_pack_std: HashSet<ObjectId> = in_pack.iter().copied().collect();
+    crate::delta_islands::load_delta_islands(&repo, &cfg, &in_pack_std)
 }
 
 /// zlib-deflate `data` and append it to `buf`.

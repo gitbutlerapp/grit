@@ -22,7 +22,9 @@ use crate::config::ConfigSet;
 use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::delta_islands::DeltaIslands;
 use crate::error::{Error, Result};
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
+use crate::objects::{
+    HashAlgo, Object, ObjectId, ObjectKind, oid_hash_map, OidHashMap, OidHashSet,
+};
 use crate::odb::Odb;
 use crate::pack_objects::{
     append_pack_trailer, encode_ofs_delta_distance, encode_pack_object_header, pack_type_code,
@@ -35,11 +37,11 @@ use crate::parallel::{
 /// Try consecutive blob deltas in discovery order so bases precede targets in the pack stream.
 pub(crate) fn extend_send_order_blob_deltas(
     send: &[ObjectId],
-    objects: &HashMap<ObjectId, Object>,
-    blob_name_hashes: &HashMap<ObjectId, u32>,
+    objects: &OidHashMap<Object>,
+    blob_name_hashes: &OidHashMap<u32>,
     islands: &DeltaIslands,
-    delta_to_base: &mut HashMap<ObjectId, ObjectId>,
-    skip_targets: &HashSet<ObjectId>,
+    delta_to_base: &mut OidHashMap<ObjectId>,
+    skip_targets: &OidHashSet,
     hash_len: usize,
 ) {
     let mut recent_same_path: HashMap<u32, Vec<ObjectId>> = HashMap::new();
@@ -97,13 +99,13 @@ pub(crate) fn pack_delta_search_parallel_options(
 
 /// Inputs for [`search_windowed_blob_deltas`].
 pub(crate) struct DeltaSearchInput<'a> {
-    pub objects: &'a HashMap<ObjectId, Object>,
-    pub blob_name_hashes: &'a HashMap<ObjectId, u32>,
+    pub objects: &'a OidHashMap<Object>,
+    pub blob_name_hashes: &'a OidHashMap<u32>,
     pub islands: &'a DeltaIslands,
-    pub skip_targets: &'a HashSet<ObjectId>,
-    pub skip_as_target: &'a HashSet<ObjectId>,
+    pub skip_targets: &'a OidHashSet,
+    pub skip_as_target: &'a OidHashSet,
     /// Send-order / reuse deltas fixed before window search; used for warmup depth only.
-    pub warmup_delta_edges: &'a HashMap<ObjectId, ObjectId>,
+    pub warmup_delta_edges: &'a OidHashMap<ObjectId>,
     pub opts: &'a PackBuildOptions,
 }
 
@@ -115,7 +117,7 @@ pub(crate) fn search_windowed_blob_deltas(
     odb: &Odb,
     input: DeltaSearchInput<'_>,
     search_threads: Option<usize>,
-) -> Result<HashMap<ObjectId, ObjectId>> {
+) -> Result<OidHashMap<ObjectId>> {
     let DeltaSearchInput {
         objects,
         blob_name_hashes,
@@ -126,7 +128,7 @@ pub(crate) fn search_windowed_blob_deltas(
         opts,
     } = input;
     if opts.window == 0 || opts.max_depth == 0 {
-        return Ok(HashMap::new());
+        return Ok(oid_hash_map());
     }
 
     let cfg = pack_config(odb)?;
@@ -149,7 +151,7 @@ pub(crate) fn search_windowed_blob_deltas(
     sorted.sort_by(|a, b| type_size_sort(a, b, objects, blob_name_hashes));
 
     if sorted.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(oid_hash_map());
     }
 
     let par = pack_delta_search_parallel_options(odb, search_threads)?;
@@ -169,7 +171,7 @@ pub(crate) fn search_windowed_blob_deltas(
     };
 
     if workers <= 1 {
-        let mut out = HashMap::new();
+        let mut out = oid_hash_map();
         for (start, end) in &segments {
             let warmup = segment_warmup(&sorted, *start, opts.window);
             find_deltas_in_segment(
@@ -187,7 +189,7 @@ pub(crate) fn search_windowed_blob_deltas(
 
     let next_segment = Arc::new(AtomicUsize::new(0));
     let segments = Arc::new(segments);
-    let merged: Arc<Mutex<HashMap<ObjectId, ObjectId>>> = Arc::new(Mutex::new(HashMap::new()));
+    let merged: Arc<Mutex<OidHashMap<ObjectId>>> = Arc::new(Mutex::new(oid_hash_map()));
 
     thread::scope(|scope| {
         for _ in 0..workers {
@@ -202,7 +204,7 @@ pub(crate) fn search_windowed_blob_deltas(
                 }
                 let (start, end) = segments[seg_idx];
                 let warmup = segment_warmup(&sorted, start, opts.window);
-                let mut local = HashMap::new();
+                let mut local = oid_hash_map();
                 find_deltas_in_segment(
                     &sorted[start..end],
                     &warmup,
@@ -229,8 +231,8 @@ pub(crate) fn search_windowed_blob_deltas(
 fn type_size_sort(
     a: &ObjectId,
     b: &ObjectId,
-    objects: &HashMap<ObjectId, Object>,
-    name_hashes: &HashMap<ObjectId, u32>,
+    objects: &OidHashMap<Object>,
+    name_hashes: &OidHashMap<u32>,
 ) -> std::cmp::Ordering {
     let ha = name_hashes.get(a).copied().unwrap_or(0);
     let hb = name_hashes.get(b).copied().unwrap_or(0);
@@ -304,7 +306,7 @@ impl WindowSlot {
     }
 }
 
-fn delta_chain_depth(edges: &HashMap<ObjectId, ObjectId>, oid: ObjectId) -> usize {
+fn delta_chain_depth(edges: &OidHashMap<ObjectId>, oid: ObjectId) -> usize {
     let mut depth = 0usize;
     let mut cur = Some(oid);
     let mut guard = 0usize;
@@ -325,11 +327,11 @@ fn delta_chain_depth(edges: &HashMap<ObjectId, ObjectId>, oid: ObjectId) -> usiz
 fn find_deltas_in_segment(
     list: &[ObjectId],
     warmup: &[ObjectId],
-    objects: &HashMap<ObjectId, Object>,
+    objects: &OidHashMap<Object>,
     islands: &DeltaIslands,
     params: SegmentSearchParams,
-    out: &mut HashMap<ObjectId, ObjectId>,
-    prior_edges: &HashMap<ObjectId, ObjectId>,
+    out: &mut OidHashMap<ObjectId>,
+    prior_edges: &OidHashMap<ObjectId>,
 ) {
     if list.is_empty() {
         return;
@@ -832,7 +834,7 @@ fn zlib_compress(data: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::objects::ObjectKind;
+    use crate::objects::{Object, ObjectId, ObjectKind, oid_hash_map, oid_hash_set};
     use std::num::NonZeroUsize;
 
     #[test]
@@ -840,8 +842,8 @@ mod tests {
     fn parallel_segment_search_scales_on_large_blob_set() {
         use std::time::Instant;
 
-        let mut objects = HashMap::new();
-        let mut blob_name_hashes = HashMap::new();
+        let mut objects = oid_hash_map();
+        let mut blob_name_hashes = oid_hash_map();
         let mut sorted = Vec::new();
         for i in 0..200 {
             let hex = format!("{:040x}", i + 1);
@@ -864,8 +866,8 @@ mod tests {
             ..PackBuildOptions::default()
         };
         let islands = DeltaIslands::default();
-        let skip = HashSet::new();
-        let warmup_edges = HashMap::new();
+        let skip = oid_hash_set();
+        let warmup_edges = oid_hash_map();
         let run = |threads: usize| {
             search_windowed_blob_deltas(
                 &odb,
@@ -913,15 +915,15 @@ mod tests {
         base_data.push(b'a');
         let mut target_data = base_data.clone();
         target_data.push(b'b');
-        let mut objects = HashMap::new();
+        let mut objects = oid_hash_map();
         objects.insert(grand_oid, Object::new(ObjectKind::Blob, shared));
         objects.insert(base_oid, Object::new(ObjectKind::Blob, base_data));
         objects.insert(target_oid, Object::new(ObjectKind::Blob, target_data));
         let list = vec![target_oid];
         let warmup = vec![base_oid];
-        let mut prior = HashMap::new();
+        let mut prior = oid_hash_map();
         prior.insert(base_oid, grand_oid);
-        let mut out = HashMap::new();
+        let mut out = oid_hash_map();
         find_deltas_in_segment(
             &list,
             &warmup,

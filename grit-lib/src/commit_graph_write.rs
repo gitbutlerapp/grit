@@ -5,7 +5,7 @@ use std::io::Write;
 
 use crate::bloom::{BloomBuildOutcome, BloomFilterSettings};
 use crate::commit_graph_file::CommitGraphChain;
-use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{CommitData, HashAlgo, ObjectId, ObjectKind, OidHashMap, OidHashSet, empty_oid_set, oid_hash_map, oid_hash_set, parse_commit, serialize_commit};
 use crate::odb::Odb;
 
 const SIGNATURE: &[u8; 4] = b"CGPH";
@@ -75,8 +75,8 @@ pub fn load_commit_graph_commit_info(
 
 fn compute_topo_generations(
     sorted_oids: &[ObjectId],
-    infos: &HashMap<ObjectId, CommitGraphCommitInfo>,
-    oid_to_idx: &HashMap<ObjectId, u32>,
+    infos: &OidHashMap< CommitGraphCommitInfo>,
+    oid_to_idx: &OidHashMap< u32>,
 ) -> Vec<u32> {
     let n = sorted_oids.len();
     let mut gen = vec![0u32; n];
@@ -137,8 +137,8 @@ fn compute_topo_generations(
 
 fn compute_corrected_generations(
     sorted_oids: &[ObjectId],
-    infos: &HashMap<ObjectId, CommitGraphCommitInfo>,
-    oid_to_idx: &HashMap<ObjectId, u32>,
+    infos: &OidHashMap< CommitGraphCommitInfo>,
+    oid_to_idx: &OidHashMap< u32>,
     topo_gen: &[u32],
 ) -> Vec<u64> {
     let n = sorted_oids.len();
@@ -209,7 +209,7 @@ fn compute_corrected_generations(
 
 fn resolve_parent_edge(
     parent: ObjectId,
-    oid_to_idx: &HashMap<ObjectId, u32>,
+    oid_to_idx: &OidHashMap< u32>,
     base_count: u32,
     chain: Option<&CommitGraphChain>,
 ) -> u32 {
@@ -242,22 +242,22 @@ pub struct BloomWriteStats {
 /// Build raw commit-graph bytes (without touching the filesystem).
 pub fn build_commit_graph_bytes(
     sorted_oids: &[ObjectId],
-    infos: &HashMap<ObjectId, CommitGraphCommitInfo>,
+    infos: &OidHashMap< CommitGraphCommitInfo>,
     odb: &Odb,
     changed_paths: bool,
     bloom_settings: &BloomFilterSettings,
     base_chain: Option<&CommitGraphChain>,
     base_graph_hashes: &[&[u8]],
     max_new_filters: Option<u32>,
-    existing_filters: &HashMap<ObjectId, Vec<u8>>,
-    upgraded_filters: &HashMap<ObjectId, Vec<u8>>,
+    existing_filters: &OidHashMap< Vec<u8>>,
+    upgraded_filters: &OidHashMap< Vec<u8>>,
     write_generation_data: bool,
 ) -> crate::error::Result<(Vec<u8>, BloomWriteStats)> {
     let base_count: u32 = base_chain.map(CommitGraphChain::total_commits).unwrap_or(0);
     let algo = odb.hash_algo();
     let hash_len = algo.len();
 
-    let oid_to_idx: HashMap<ObjectId, u32> = sorted_oids
+    let oid_to_idx: OidHashMap< u32> = sorted_oids
         .iter()
         .enumerate()
         .map(|(i, o)| (*o, i as u32))
@@ -465,8 +465,8 @@ pub fn build_commit_graph_bytes(
 fn walk_reachable_commits_from_tip_stack(
     odb: &Odb,
     mut stack: Vec<ObjectId>,
-) -> crate::error::Result<HashSet<ObjectId>> {
-    let mut commits: HashSet<ObjectId> = HashSet::new();
+) -> crate::error::Result<OidHashSet> {
+    let mut commits: OidHashSet = oid_hash_set();
     while let Some(oid) = stack.pop() {
         if commits.contains(&oid) {
             continue;
@@ -509,7 +509,7 @@ fn walk_reachable_commits_from_tip_stack(
 /// Propagates ref listing or object read/parse failures.
 pub fn collect_reachable_commit_oids_for_repository(
     repo: &crate::repo::Repository,
-) -> crate::error::Result<HashSet<ObjectId>> {
+) -> crate::error::Result<OidHashSet> {
     use crate::refs;
     let odb = repo.odb();
     let mut stack: Vec<ObjectId> = Vec::new();
@@ -529,7 +529,7 @@ pub fn collect_reachable_commit_oids_for_repository(
 pub fn collect_reachable_commit_oids(
     git_dir: &std::path::Path,
     odb: &Odb,
-) -> crate::error::Result<HashSet<ObjectId>> {
+) -> crate::error::Result<OidHashSet> {
     use std::fs;
     let mut stack: Vec<ObjectId> = Vec::new();
 
@@ -795,7 +795,7 @@ pub fn count_referenced_commit_tips(
     // Peel each ref tip to the commit it ultimately references (an annotated tag points at a
     // commit) and collect distinct commit OIDs. Non-commit tips (e.g. tags pointing at trees)
     // are ignored, exactly like Git's OBJ_COMMIT check.
-    let mut commits: HashSet<ObjectId> = HashSet::new();
+    let mut commits: OidHashSet = oid_hash_set();
     for tip in tips {
         if let Ok(Some(commit_oid)) = odb.peel_to_commit(tip) {
             commits.insert(commit_oid);
@@ -849,7 +849,10 @@ mod tests {
 
     use crate::bloom::BloomFilterSettings;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
-    use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+    use crate::objects::{
+        empty_oid_byte_filter_map, oid_hash_map, serialize_commit, CommitData, ObjectId,
+        ObjectKind,
+    };
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::write_tree_from_index;
 
@@ -902,7 +905,7 @@ mod tests {
         let merge = empty_commit(&repo, vec![p1, p2, p3], "T <t@example.com> 4 +0000");
         let mut sorted = vec![p1, p2, p3, merge];
         sorted.sort();
-        let mut infos = HashMap::new();
+        let mut infos = oid_hash_map();
         for oid in &sorted {
             infos.insert(
                 *oid,
@@ -919,8 +922,8 @@ mod tests {
             None,
             &[],
             None,
-            &HashMap::new(),
-            &HashMap::new(),
+            empty_oid_byte_filter_map(),
+            empty_oid_byte_filter_map(),
             true,
         )
         .expect("write");
@@ -962,7 +965,7 @@ mod tests {
         });
         let tree = write_tree_from_index(&repo.odb(), &index, "").expect("tree");
         let mut sorted = Vec::new();
-        let mut infos = HashMap::new();
+        let mut infos = oid_hash_map();
         for t in [1i64, 2, 3] {
             let raw = serialize_commit(&CommitData {
                 tree,
@@ -993,8 +996,8 @@ mod tests {
             None,
             &[],
             Some(1),
-            &HashMap::new(),
-            &HashMap::new(),
+            empty_oid_byte_filter_map(),
+            empty_oid_byte_filter_map(),
             true,
         )
         .expect("write");

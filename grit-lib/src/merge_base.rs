@@ -9,7 +9,10 @@ use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{
+    ObjectId, ObjectKind, OidHashMap, OidHashSet, empty_oid_set, oid_hash_map, oid_hash_set,
+    oid_hash_set_from, parse_commit,
+};
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
@@ -89,11 +92,11 @@ pub fn merge_bases_first_vs_rest(
     }
     let mut cache = CommitGraphCache::new(repo);
     let first_anc = cache.ancestor_closure(first)?;
-    let mut others_union = HashSet::new();
+    let mut others_union = oid_hash_set();
     for &other in others {
         others_union.extend(cache.ancestor_closure(other)?);
     }
-    let candidates: HashSet<ObjectId> = first_anc.intersection(&others_union).copied().collect();
+    let candidates: OidHashSet = first_anc.intersection(&others_union).copied().collect();
     let all_minimal = reduce_to_best(candidates, &mut cache)?;
     if all_minimal.len() <= 1 {
         return Ok(all_minimal);
@@ -196,7 +199,7 @@ pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<Ob
     let mut cache = CommitGraphCache::new(repo);
     if commits.len() == 2 {
         let walked = walk_intersecting_histories(&mut cache, commits[0], &[commits[1]], true)?;
-        let candidates: HashSet<ObjectId> = walked.into_iter().collect();
+        let candidates: OidHashSet = walked.into_iter().collect();
         let mut bases = reduce_to_best(candidates, &mut cache)?;
         sort_merge_bases_for_git_output(&mut cache, &mut bases)?;
         return Ok(bases);
@@ -228,7 +231,7 @@ pub fn is_ancestor_odb_walk(
     if ancestor == descendant {
         return Ok(true);
     }
-    let mut seen = HashSet::new();
+    let mut seen = oid_hash_set();
     let mut queue = VecDeque::from([descendant]);
     while let Some(cur) = queue.pop_front() {
         if !seen.insert(cur) {
@@ -282,7 +285,7 @@ fn select_best_fork_point(repo: &Repository, candidates: &[ObjectId]) -> Result<
         return Ok(None);
     }
 
-    let mut best = HashSet::new();
+    let mut best = oid_hash_set();
     for &candidate in candidates {
         let mut dominated = false;
         for &other in candidates {
@@ -333,7 +336,7 @@ pub fn fork_point(
         .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
 
     let mut candidates = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = oid_hash_set();
 
     for entry in entries.iter().rev() {
         let oid = if entry.message.starts_with("checkout:") {
@@ -370,7 +373,7 @@ pub fn fork_point(
 /// Returns [`Error::CorruptObject`] if an encountered object is not a commit.
 pub fn ancestor_closure(repo: &Repository, tip: ObjectId) -> Result<HashSet<ObjectId>> {
     let mut cache = CommitGraphCache::new(repo);
-    cache.ancestor_closure(tip)
+    Ok(cache.ancestor_closure(tip)?.into_iter().collect())
 }
 
 /// Count symmetric-diff commits between two tips, matching `git rev-list --left-right A...B`.
@@ -504,16 +507,16 @@ impl PartialOrd for WalkDateKey {
 #[derive(Clone, Debug)]
 pub struct ReachableWalkState {
     heap: BinaryHeap<WalkDateKey>,
-    done: HashSet<ObjectId>,
-    queued: HashSet<ObjectId>,
+    done: OidHashSet,
+    queued: OidHashSet,
     /// Selected children not yet emitted, per parent (Git `limit_list` gating).
-    unfinished_children: HashMap<ObjectId, usize>,
+    unfinished_children: OidHashMap< usize>,
     /// Tips seeded on the heap up front (may emit before all children are shown).
-    seeded: HashSet<ObjectId>,
+    seeded: OidHashSet,
     seq: u64,
     hide: Vec<ObjectId>,
     /// Commits excluded because they are a hide tip or an ancestor of one.
-    hide_set: HashSet<ObjectId>,
+    hide_set: OidHashSet,
 }
 
 /// Serializable snapshot of [`ReachableWalkState`] for resuming a bounded walk.
@@ -546,13 +549,13 @@ impl ReachableWalkState {
         let mut cache = CommitGraphCache::new(repo);
         let mut state = Self {
             heap: BinaryHeap::new(),
-            done: HashSet::new(),
-            queued: HashSet::new(),
-            unfinished_children: HashMap::new(),
-            seeded: HashSet::new(),
+            done: oid_hash_set(),
+            queued: oid_hash_set(),
+            unfinished_children: oid_hash_map(),
+            seeded: oid_hash_set(),
             seq: 0,
             hide: hide_vec,
-            hide_set: HashSet::new(),
+            hide_set: oid_hash_set(),
         };
         for &tip in tips {
             if state.hide.contains(&tip) {
@@ -590,7 +593,7 @@ impl ReachableWalkState {
                 .collect(),
             seeded: seeded.into_iter().collect(),
             seq,
-            hide_set: HashSet::new(),
+            hide_set: oid_hash_set(),
             hide,
         }
     }
@@ -893,11 +896,12 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         && filter.until.is_none()
     {
         if let Some(graph) = &cache.graph {
+            let shallow: HashSet<ObjectId> = cache.shallow_boundaries.iter().copied().collect();
             if let Some(n) = graph.count_reachable_commits(
                 tips,
                 hide,
                 filter.first_parent_only,
-                &cache.shallow_boundaries,
+                &shallow,
             ) {
                 return Ok(n);
             }
@@ -926,7 +930,7 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     }
 
     let mut stack: Vec<ObjectId> = tips.to_vec();
-    let mut walked = HashSet::new();
+    let mut walked = oid_hash_set();
     let mut count = 0usize;
     while let Some(oid) = stack.pop() {
         if !walked.insert(oid) {
@@ -1188,7 +1192,7 @@ pub fn branch_base_for_tip(
     }
 
     let tip_chain = first_parent_chain(repo, tip)?;
-    let tip_positions: HashMap<ObjectId, usize> = tip_chain
+    let tip_positions: OidHashMap< usize> = tip_chain
         .iter()
         .copied()
         .enumerate()
@@ -1429,7 +1433,7 @@ fn enqueue_commit_for_intersect_walk(
     cache: &mut CommitGraphCache<'_>,
     pending: &mut BinaryHeap<RankedCommit>,
     tally: &mut OpenQueueTally,
-    labels: &mut HashMap<ObjectId, u8>,
+    labels: &mut OidHashMap< u8>,
     oid: ObjectId,
     extra: u8,
 ) -> Result<()> {
@@ -1457,7 +1461,7 @@ fn enqueue_commit_for_intersect_walk(
 fn dequeue_commit_for_intersect_walk(
     pending: &mut BinaryHeap<RankedCommit>,
     tally: &mut OpenQueueTally,
-    labels: &mut HashMap<ObjectId, u8>,
+    labels: &mut OidHashMap< u8>,
     allow_rank_stop: bool,
 ) -> Option<ObjectId> {
     let node = pending.pop()?;
@@ -1493,7 +1497,7 @@ fn walk_intersecting_histories(
     collect_every_base: bool,
 ) -> Result<Vec<ObjectId>> {
     let mut pending = BinaryHeap::new();
-    let mut labels: HashMap<ObjectId, u8> = HashMap::new();
+    let mut labels: OidHashMap< u8> = oid_hash_map();
     let mut tally = OpenQueueTally {
         open_on_a: 0,
         open_on_b: 0,
@@ -1560,7 +1564,7 @@ fn walk_intersecting_histories(
         }
     }
     if !collect_every_base && !bases.is_empty() {
-        let candidates: HashSet<ObjectId> = bases.into_iter().collect();
+        let candidates: OidHashSet = bases.into_iter().collect();
         bases = reduce_to_best(candidates, cache)?;
     }
     sort_merge_bases_for_git_output(cache, &mut bases)?;
@@ -1568,7 +1572,7 @@ fn walk_intersecting_histories(
 }
 
 fn reduce_to_best(
-    candidates: HashSet<ObjectId>,
+    candidates: OidHashSet,
     cache: &mut CommitGraphCache<'_>,
 ) -> Result<Vec<ObjectId>> {
     if candidates.is_empty() {
@@ -1595,9 +1599,9 @@ fn reduce_to_best(
 
 struct CommitGraphCache<'r> {
     repo: &'r Repository,
-    closures: HashMap<ObjectId, HashSet<ObjectId>>,
-    promisor_stop: std::collections::HashSet<ObjectId>,
-    shallow_boundaries: HashSet<ObjectId>,
+    closures: OidHashMap< OidHashSet>,
+    promisor_stop: OidHashSet,
+    shallow_boundaries: OidHashSet,
     /// Commit-graph file, when present: supplies parents + committer time without
     /// decompressing commit objects. Commits absent from it (or octopus merges)
     /// fall back to [`Self::parents_of`]'s object read.
@@ -1620,18 +1624,18 @@ impl<'r> CommitGraphCache<'r> {
         let promisor_stop = if repo_treats_promisor_packs(repo.git_dir(), &cfg) {
             read_promisor_missing_oids(repo.git_dir())
                 .into_iter()
-                .collect::<HashSet<ObjectId>>()
+                .collect::<OidHashSet>()
         } else {
-            HashSet::new()
+            oid_hash_set()
         };
         let graph = repo
             .caches()
             .commit_graph_chain(&repo.git_dir().join("objects"))
             .map(|arc| (*arc).clone());
-        let shallow_boundaries = load_shallow_boundaries(repo.git_dir());
+        let shallow_boundaries = oid_hash_set_from(&load_shallow_boundaries(repo.git_dir()));
         Self {
             repo,
-            closures: HashMap::new(),
+            closures: oid_hash_map(),
             promisor_stop,
             shallow_boundaries,
             graph,
@@ -1662,12 +1666,12 @@ impl<'r> CommitGraphCache<'r> {
         }
     }
 
-    fn ancestor_closure(&mut self, start: ObjectId) -> Result<HashSet<ObjectId>> {
+    fn ancestor_closure(&mut self, start: ObjectId) -> Result<OidHashSet> {
         if let Some(existing) = self.closures.get(&start) {
             return Ok(existing.clone());
         }
 
-        let mut visited = HashSet::new();
+        let mut visited = oid_hash_set();
         let mut queue = VecDeque::new();
         queue.push_back(start);
         while let Some(oid) = queue.pop_front() {
@@ -1815,7 +1819,7 @@ impl<'r> CommitGraphCache<'r> {
         let mut slop = SLOP;
 
         let mut heap: BinaryHeap<(i64, ObjectId)> = BinaryHeap::new();
-        let mut visited: HashSet<ObjectId> = HashSet::new();
+        let mut visited: OidHashSet = oid_hash_set();
         let d_time = self.commit_time(descendant)?;
         visited.insert(descendant);
         heap.push((d_time, descendant));
@@ -1847,7 +1851,6 @@ impl<'r> CommitGraphCache<'r> {
 mod tests {
     use super::*;
     use crate::environment::RepositoryOptions;
-    use crate::objects::ObjectKind;
     use crate::odb::Odb;
     use crate::repo::{InitOptions, Repository};
     use std::fs;

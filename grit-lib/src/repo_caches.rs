@@ -32,7 +32,7 @@ use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics, Warning};
 use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
-use crate::objects::ObjectId;
+use crate::objects::{ObjectId, oid_hash_map, oid_hash_set, empty_oid_set, OidHashMap, OidHashSet};
 use crate::pack_bitmap::BitmapIndexCache;
 use crate::precompose_config::{
     effective_core_precomposeunicode_with_config, filesystem_nfd_nfc_aliases,
@@ -43,8 +43,8 @@ use crate::repo::Repository;
 /// Parents and committer timestamps reused across rev-parse and revwalk on one handle.
 #[derive(Default)]
 pub(crate) struct CommitLinkageCache {
-    pub parents: HashMap<ObjectId, Vec<ObjectId>>,
-    pub times: HashMap<ObjectId, i64>,
+    pub parents: OidHashMap<Vec<ObjectId>>,
+    pub times: OidHashMap<i64>,
 }
 
 /// Per-repository cache arena (held behind [`Arc`] on [`Repository`]).
@@ -61,7 +61,7 @@ pub struct RepoCaches {
     local_config_source_path: Mutex<Option<PathBuf>>,
     attr_stack: Mutex<HashMap<(PathBuf, PathBuf), AttrStackCacheEntry>>,
     attr_bare: Mutex<HashMap<PathBuf, AttrStackCacheEntry>>,
-    attr_tree: Mutex<HashMap<ObjectId, Arc<ParsedGitAttributes>>>,
+    attr_tree: Mutex<OidHashMap< Arc<ParsedGitAttributes>>>,
     pathspec_precompose: OnceLock<bool>,
     ref_storage_format: Mutex<HashMap<PathBuf, RefStorageFormat>>,
     pub(crate) ref_stores: Mutex<HashMap<PathBuf, Arc<dyn crate::refs::store::RefStore>>>,
@@ -102,7 +102,7 @@ impl RepoCaches {
             local_config_source_path: Mutex::new(None),
             attr_stack: Mutex::new(HashMap::new()),
             attr_bare: Mutex::new(HashMap::new()),
-            attr_tree: Mutex::new(HashMap::new()),
+            attr_tree: Mutex::new(oid_hash_map()),
             pathspec_precompose: OnceLock::new(),
             ref_storage_format: Mutex::new(HashMap::new()),
             ref_stores: Mutex::new(HashMap::new()),
