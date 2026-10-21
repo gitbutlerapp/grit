@@ -2,11 +2,23 @@
 
 - baseline: `/tmp/daily-production-run1.json`
 - candidate: `/tmp/daily-production-run2.json`
-- compared rows: **57** (skipped pending 1, sub-20ms time 0, git median drift 0, grit median drift 0, missing 0)
+- compared rows: **57** (skipped pending 1, sub-20ms time 0, missing 0)
 
 | scenario | metric | ratio A | ratio B | drift | status |
 | --- | --- | ---: | ---: | ---: | --- |
-| *(none)* | | | | | ok |
-All daily scenario ratios within tolerance 0.1
-Compared 57 rows; skipped 1 pending, 0 sub-20ms time, 0 git median drift, 0 grit median drift; 0 missing in candidate
-compare_exit=0
+| `commit/small@synth-100k` | time | 0.4172 | 0.3686 | 0.1165 | **fail** |
+| `fetch/incremental@git-git` | time | 11.6372 | 12.9468 | 0.1011 | **fail** |
+| `merge-base/branches@git-git` | time | 12.8685 | 14.8467 | 0.1332 | **fail** |
+| `pull/fast-forward@git-git` | time | 11.9559 | 9.9838 | 0.1649 | **fail** |
+| `revs/count@git-git` | time | 1.3638 | 1.5444 | 0.1169 | **fail** |
+| `stash/push-pop@synth-10k` | time | 1.3989 | 1.7493 | 0.2003 | **fail** |
+| `status/dirty@synth-100k` | time | 1.3580 | 2.0238 | 0.3290 | **fail** |
+Daily ratio drift exceeds tolerance 0.1:
+  commit/small@synth-100k [time]: 0.4172 vs 0.3686 (delta 0.1165)
+  fetch/incremental@git-git [time]: 11.6372 vs 12.9468 (delta 0.1011)
+  merge-base/branches@git-git [time]: 12.8685 vs 14.8467 (delta 0.1332)
+  pull/fast-forward@git-git [time]: 11.9559 vs 9.9838 (delta 0.1649)
+  revs/count@git-git [time]: 1.3638 vs 1.5444 (delta 0.1169)
+  stash/push-pop@synth-10k [time]: 1.3989 vs 1.7493 (delta 0.2003)
+  status/dirty@synth-100k [time]: 1.3580 vs 2.0238 (delta 0.3290)
+compare_exit=1
