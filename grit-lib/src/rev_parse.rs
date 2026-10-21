@@ -2573,6 +2573,10 @@ fn resolve_base(
         }
     }
 
+    if crate::change_id::is_change_id_spec_token(spec) {
+        return crate::change_id::resolve_commit_by_change_id_prefix(repo, spec);
+    }
+
     // As a last resort, try resolving as an index path (porcelain / DWIM only).
     if !spec.contains(':') && !spec.starts_with('-') {
         if index_dwim {

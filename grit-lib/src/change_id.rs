@@ -10,7 +10,14 @@ use std::fmt;
 use thiserror::Error;
 
 use crate::config::ConfigSet;
-use crate::objects::{serialize_commit, CommitData, HashAlgo, ObjectId};
+use crate::error::{Error, Result};
+use crate::objects::{
+    parse_commit, read_commit_subject_line, serialize_commit, CommitData, HashAlgo, ObjectId,
+    ObjectKind,
+};
+use crate::repo::Repository;
+use crate::rev_list::{all_ref_commit_tips_for_walk, walk_closure_ordered, CommitGraph};
+use crate::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 
 const REVERSE_HEX_LEN: usize = 32;
 const CHANGE_ID_KEY: &[u8] = b"change-id";
@@ -54,6 +61,15 @@ impl ChangeIdGenerator for OsChangeIdGenerator {
         getrandom::getrandom(&mut buf).map_err(ChangeIdError::RandomFailed)?;
         Ok(buf)
     }
+}
+
+/// A commit whose resolved change id matched a prefix lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeIdMatch {
+    /// Commit object id.
+    pub oid: ObjectId,
+    /// Stored or derived change id for that commit.
+    pub change_id: ChangeId,
 }
 
 /// Resolved change id plus whether it came from a stored header.
@@ -263,6 +279,108 @@ pub fn resolved_change_id(oid: &ObjectId, data: &CommitData) -> ResolvedChangeId
             stored: false,
         }
     }
+}
+
+/// Whether `spec` can name a change id (4–32 chars, alphabet `k`–`z`).
+#[must_use]
+pub fn is_change_id_spec_token(spec: &str) -> bool {
+    let len = spec.len();
+    (4..=32).contains(&len) && spec.bytes().all(is_reverse_hex_byte)
+}
+
+/// Walk commits reachable from all refs and `HEAD`, returning those whose resolved
+/// change id starts with `prefix`.
+///
+/// # Errors
+///
+/// Propagates ref listing, graph walk, and object read failures.
+pub fn find_commits_by_change_id_prefix(
+    repo: &Repository,
+    prefix: &str,
+) -> Result<Vec<ChangeIdMatch>> {
+    debug_assert!(is_change_id_spec_token(prefix));
+    let tips = all_ref_commit_tips_for_walk(repo)?;
+    let mut graph = CommitGraph::with_commit_graph(repo, false, true);
+    let (_, order) = walk_closure_ordered(&mut graph, &tips)?;
+    let mut matches = Vec::new();
+    for oid in order {
+        let Ok(obj) = repo.read_replaced(&oid) else {
+            continue;
+        };
+        if obj.kind != ObjectKind::Commit {
+            continue;
+        }
+        let resolved = if commit_bytes_contain_change_id_header(&obj.data) {
+            let Ok(data) = parse_commit(&obj.data) else {
+                continue;
+            };
+            resolved_change_id(&oid, &data)
+        } else {
+            ResolvedChangeId {
+                id: ChangeId::derived_from_commit_id(&oid),
+                stored: false,
+            }
+        };
+        if resolved.id.as_str().starts_with(prefix) {
+            matches.push(ChangeIdMatch {
+                oid,
+                change_id: resolved.id,
+            });
+        }
+    }
+    matches.sort_by_key(|m| m.oid.to_hex());
+    Ok(matches)
+}
+
+/// Resolve a change-id token (full id or unique prefix) to a commit oid.
+///
+/// # Errors
+///
+/// Returns [`Error::ObjectNotFound`] when nothing matches,
+/// [`Error::RevParse`] with [`RevParseError::AmbiguousChangeId`] when several commits match.
+pub fn resolve_commit_by_change_id_prefix(repo: &Repository, prefix: &str) -> Result<ObjectId> {
+    let matches = find_commits_by_change_id_prefix(repo, prefix)?;
+    match matches.len() {
+        0 => Err(Error::ObjectNotFound(prefix.to_owned())),
+        1 => Ok(matches[0].oid),
+        _ => Err(RevParseError::AmbiguousChangeId {
+            prefix: prefix.to_owned(),
+            candidates: ambiguous_change_id_hints(repo, &matches)?,
+        }
+        .into()),
+    }
+}
+
+fn ambiguous_change_id_hints(
+    repo: &Repository,
+    matches: &[ChangeIdMatch],
+) -> Result<Vec<AmbiguousChangeIdHint>> {
+    let mut out = Vec::with_capacity(matches.len());
+    for m in matches {
+        let subject = repo
+            .read_replaced(&m.oid)
+            .ok()
+            .and_then(|obj| read_commit_subject_line(&obj.data).ok())
+            .unwrap_or_else(|| "(no subject)".to_owned());
+        out.push(AmbiguousChangeIdHint {
+            oid_hex: m.oid.to_hex(),
+            change_id: m.change_id.as_str().to_owned(),
+            subject,
+        });
+    }
+    Ok(out)
+}
+
+fn commit_bytes_contain_change_id_header(data: &[u8]) -> bool {
+    header_key_present(data, CHANGE_ID_KEY) || header_key_present(data, LEGACY_CHANGE_ID_KEY)
+}
+
+fn header_key_present(data: &[u8], key: &[u8]) -> bool {
+    if data.starts_with(key) {
+        return true;
+    }
+    data.windows(key.len() + 1)
+        .any(|w| w[0] == b'\n' && &w[1..] == key)
 }
 
 fn push_reverse_hex_nibble(out: &mut String, nibble: u8) {

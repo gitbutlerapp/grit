@@ -30,7 +30,7 @@ use crate::rev_parse::{
     abbreviate_object_id, ambiguous_object_hint_lines, parse_peel_suffix, resolve_revision,
     symbolic_full_name,
 };
-use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
+use crate::rev_parse_error::{AmbiguousChangeIdHint, AmbiguousObjectHint, RevParseError};
 
 /// Failure resolving a revision spec for object inspection.
 #[derive(Debug, Error)]
@@ -52,6 +52,15 @@ pub enum ResolveError {
         candidates: Vec<AmbiguousObjectHint>,
     },
 
+    /// A change-id prefix matches more than one commit.
+    #[error("ambiguous change id '{spec}'")]
+    AmbiguousChangeId {
+        /// User revision string.
+        spec: String,
+        /// Matching commits (oid, change id, subject).
+        candidates: Vec<AmbiguousChangeIdHint>,
+    },
+
     /// A path component is missing from the tree named by the revision.
     #[error("path '{path}' does not exist in '{revision}'")]
     PathNotInTree {
@@ -71,6 +80,12 @@ impl From<RevParseError> for ResolveError {
             }
             RevParseError::InvalidObjectName { name } => {
                 ResolveError::UnknownRevision { spec: name }
+            }
+            RevParseError::AmbiguousChangeId { prefix, candidates } => {
+                ResolveError::AmbiguousChangeId {
+                    spec: prefix,
+                    candidates,
+                }
             }
             other => ResolveError::UnknownRevision {
                 spec: other.to_string(),
@@ -129,6 +144,12 @@ impl Repository {
                     ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
                 return Err(ResolveError::AmbiguousShortObject {
                     spec: spec.to_owned(),
+                    candidates,
+                });
+            }
+            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
+                return Err(ResolveError::AmbiguousChangeId {
+                    spec: prefix,
                     candidates,
                 });
             }

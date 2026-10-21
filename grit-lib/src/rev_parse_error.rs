@@ -194,6 +194,26 @@ pub enum RevParseError {
     /// Internal describe helper failed to compile its regex.
     #[error("internal describe regex")]
     InternalDescribeRegex,
+
+    /// A change-id prefix matches more than one commit.
+    #[error("ambiguous change id '{prefix}'")]
+    AmbiguousChangeId {
+        /// User-supplied change-id or prefix.
+        prefix: String,
+        /// Matching commits in stable order (oid, then change id).
+        candidates: Vec<AmbiguousChangeIdHint>,
+    },
+}
+
+/// One commit when a change-id lookup is ambiguous.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmbiguousChangeIdHint {
+    /// Full commit object id (hex).
+    pub oid_hex: String,
+    /// Resolved change id (stored or derived).
+    pub change_id: String,
+    /// First line of the commit message.
+    pub subject: String,
 }
 
 /// One candidate line when a short object id is ambiguous.
