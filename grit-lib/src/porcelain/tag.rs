@@ -95,6 +95,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
             object_type: target_kind.as_str().to_owned(),
             tag: req.name.clone(),
             tagger: Some(tagger.clone()),
+            extra_headers: Vec::new(),
             message,
         };
         let bytes = serialize_tag(&tag);

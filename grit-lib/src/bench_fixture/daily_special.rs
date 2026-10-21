@@ -478,6 +478,7 @@ fn build_ref_records(
                 object_type: "commit".to_owned(),
                 tag: tag_name.clone(),
                 tagger: Some(tagger),
+                extra_headers: Vec::new(),
                 message: format!("annotated {tag_name}\n"),
             };
             let raw = serialize_tag(&tag);

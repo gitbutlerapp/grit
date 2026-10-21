@@ -10,7 +10,10 @@ use std::fmt;
 use thiserror::Error;
 
 use crate::config::ConfigSet;
-use crate::objects::{serialize_commit, CommitData, HashAlgo, ObjectId};
+use crate::objects::{
+    insert_header_before_signature, remove_header_lines, serialize_commit,
+    CommitData, HashAlgo, ObjectId,
+};
 
 const REVERSE_HEX_LEN: usize = 32;
 const CHANGE_ID_KEY: &[u8] = b"change-id";
@@ -249,7 +252,10 @@ pub fn change_id(data: &CommitData) -> Option<ChangeId> {
 /// Set or replace the `change-id` header (before any signature block).
 pub fn set_change_id(data: &mut CommitData, id: &ChangeId) {
     let line = format!("change-id {}\n", id.as_str());
-    data.extra_headers = insert_change_id_line(&data.extra_headers, line.as_bytes());
+    data.extra_headers =
+        insert_header_before_signature(&data.extra_headers, line.as_bytes(), |key| {
+            key == CHANGE_ID_KEY || key == LEGACY_CHANGE_ID_KEY
+        });
 }
 
 /// Stored header when present, otherwise [`ChangeId::derived_from_commit_id`].
@@ -278,76 +284,6 @@ fn strip_change_id_headers(extra: &mut Vec<u8>) {
     *extra = remove_header_lines(extra, |key| {
         key == CHANGE_ID_KEY || key == LEGACY_CHANGE_ID_KEY
     });
-}
-
-fn insert_change_id_line(extra: &[u8], line: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut pos = 0usize;
-    let mut inserted = false;
-    while pos < extra.len() {
-        let (key, block_end, is_continued) = next_header_block(extra, pos);
-        if !inserted && (key == b"gpgsig" || key == b"gpgsig-sha256") {
-            out.extend_from_slice(line);
-            inserted = true;
-        }
-        if key == CHANGE_ID_KEY || key == LEGACY_CHANGE_ID_KEY {
-            pos = block_end;
-            continue;
-        }
-        out.extend_from_slice(&extra[pos..block_end]);
-        pos = block_end;
-        let _ = is_continued;
-    }
-    if !inserted {
-        out.extend_from_slice(line);
-    }
-    out
-}
-
-fn remove_header_lines(extra: &[u8], drop_key: impl Fn(&[u8]) -> bool) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut pos = 0usize;
-    while pos < extra.len() {
-        let (key, block_end, _) = next_header_block(extra, pos);
-        if drop_key(key) {
-            pos = block_end;
-            continue;
-        }
-        out.extend_from_slice(&extra[pos..block_end]);
-        pos = block_end;
-    }
-    out
-}
-
-fn next_header_block(extra: &[u8], start: usize) -> (&[u8], usize, bool) {
-    let pos = start;
-    let line_start = pos;
-    let mut line_end = pos;
-    while line_end < extra.len() && extra[line_end] != b'\n' {
-        line_end += 1;
-    }
-    let after_nl = (line_end + 1).min(extra.len());
-    let line = &extra[line_start..line_end];
-    if line.first() == Some(&b' ') {
-        return (b"", after_nl, true);
-    }
-    let key_end = line.iter().position(|&b| b == b' ').unwrap_or(line.len());
-    let key = &line[..key_end];
-    let mut end = after_nl;
-    while end < extra.len() {
-        let ls = end;
-        let mut le = end;
-        while le < extra.len() && extra[le] != b'\n' {
-            le += 1;
-        }
-        let an = (le + 1).min(extra.len());
-        if extra.get(ls) == Some(&b' ') {
-            end = an;
-        } else {
-            break;
-        }
-    }
-    (key, end, false)
 }
 
 fn for_each_extra_header(

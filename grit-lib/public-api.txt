@@ -9152,6 +9152,23 @@ impl core::marker::Unpin for grit_lib::objects::CommitData
 impl core::marker::UnsafeUnpin for grit_lib::objects::CommitData
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::CommitData
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::CommitData
+pub struct grit_lib::objects::ExtraHeaderIter<'a>
+impl<'a> grit_lib::objects::ExtraHeaderIter<'a>
+pub fn grit_lib::objects::ExtraHeaderIter<'a>::new(&'a [u8]) -> Self
+impl<'a> core::clone::Clone for grit_lib::objects::ExtraHeaderIter<'a>
+pub fn grit_lib::objects::ExtraHeaderIter<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for grit_lib::objects::ExtraHeaderIter<'a>
+pub fn grit_lib::objects::ExtraHeaderIter<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::iter::traits::iterator::Iterator for grit_lib::objects::ExtraHeaderIter<'a>
+pub type grit_lib::objects::ExtraHeaderIter<'a>::Item = (&'a [u8], &'a [u8])
+pub fn grit_lib::objects::ExtraHeaderIter<'a>::next(&mut self) -> core::option::Option<Self::Item>
+impl<'a> core::marker::Freeze for grit_lib::objects::ExtraHeaderIter<'a>
+impl<'a> core::marker::Send for grit_lib::objects::ExtraHeaderIter<'a>
+impl<'a> core::marker::Sync for grit_lib::objects::ExtraHeaderIter<'a>
+impl<'a> core::marker::Unpin for grit_lib::objects::ExtraHeaderIter<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::ExtraHeaderIter<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::ExtraHeaderIter<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ExtraHeaderIter<'a>
 pub struct grit_lib::objects::HashVersionError(pub u8)
 impl core::clone::Clone for grit_lib::objects::HashVersionError
 pub fn grit_lib::objects::HashVersionError::clone(&self) -> Self
@@ -9308,6 +9325,7 @@ impl core::marker::UnsafeUnpin for grit_lib::change_id::ResolvedChangeId
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::change_id::ResolvedChangeId
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ResolvedChangeId
 pub struct grit_lib::objects::TagData
+pub grit_lib::objects::TagData::extra_headers: alloc::vec::Vec<u8>
 pub grit_lib::objects::TagData::message: alloc::string::String
 pub grit_lib::objects::TagData::object: grit_lib::objects::ObjectId
 pub grit_lib::objects::TagData::object_type: alloc::string::String
@@ -9350,18 +9368,24 @@ pub fn grit_lib::objects::ChangeIdGenerator::random_bytes(&self) -> core::result
 impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator
 pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
 pub fn grit_lib::objects::change_id(&grit_lib::objects::CommitData) -> core::option::Option<grit_lib::change_id::ChangeId>
+pub fn grit_lib::objects::extra_header_values<'a>(&'a [u8], &str) -> alloc::vec::Vec<&'a [u8]>
 pub fn grit_lib::objects::find_tree_entry_by_name<'a>(&'a [grit_lib::objects::TreeEntry], &[u8], bool) -> core::option::Option<&'a grit_lib::objects::TreeEntry>
 pub fn grit_lib::objects::find_tree_entry_by_name_dir_or_file<'a>(&'a [grit_lib::objects::TreeEntry], &[u8]) -> core::option::Option<&'a grit_lib::objects::TreeEntry>
+pub fn grit_lib::objects::insert_header_before_signature(&[u8], &[u8], impl core::ops::function::Fn(&[u8]) -> bool) -> alloc::vec::Vec<u8>
+pub fn grit_lib::objects::iter_extra_headers(&[u8]) -> grit_lib::objects::ExtraHeaderIter<'_>
+pub fn grit_lib::objects::next_header_block(&[u8], usize) -> (&[u8], usize, bool)
 pub fn grit_lib::objects::parse_commit(&[u8]) -> grit_lib::error::Result<grit_lib::objects::CommitData>
 pub fn grit_lib::objects::parse_tag(&[u8]) -> grit_lib::error::Result<grit_lib::objects::TagData>
 pub fn grit_lib::objects::parse_tree(&[u8]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::TreeEntry>>
 pub fn grit_lib::objects::parse_tree_with_oid_len(&[u8], usize) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::TreeEntry>>
 pub fn grit_lib::objects::read_commit_subject_line(&[u8]) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::objects::remove_header_lines(&[u8], impl core::ops::function::Fn(&[u8]) -> bool) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::resolved_change_id(&grit_lib::objects::ObjectId, &grit_lib::objects::CommitData) -> grit_lib::change_id::ResolvedChangeId
 pub fn grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::serialize_tag(&grit_lib::objects::TagData) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::serialize_tree(&[grit_lib::objects::TreeEntry]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::objects::set_change_id(&mut grit_lib::objects::CommitData, &grit_lib::change_id::ChangeId)
+pub fn grit_lib::objects::set_extra_header(&mut alloc::vec::Vec<u8>, &str, &[u8])
 pub fn grit_lib::objects::tag_header_field(&[u8], &[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::objects::tag_object_line_oid(&[u8]) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::tree_entry_cmp(&[u8], bool, &[u8], bool) -> core::cmp::Ordering

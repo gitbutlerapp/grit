@@ -1236,6 +1236,8 @@ pub struct TagData {
     pub tag: String,
     /// The tagger identity and timestamp (raw Git format).
     pub tagger: Option<String>,
+    /// Extra header lines after `tagger` and before the blank line (raw bytes, LF-terminated).
+    pub extra_headers: Vec<u8>,
     /// The tag message (everything after the blank line).
     pub message: String,
 }
@@ -1246,57 +1248,113 @@ pub struct TagData {
 ///
 /// Returns [`Error::CorruptObject`] if required headers are missing or malformed.
 pub fn parse_tag(data: &[u8]) -> Result<TagData> {
-    let text = std::str::from_utf8(data)
-        .map_err(|_| Error::CorruptObject("tag is not valid UTF-8".to_owned()))?;
+    #[derive(Clone, Copy)]
+    enum Continuation {
+        None,
+        Extra,
+    }
 
+    let mut pos = 0usize;
     let mut object = None;
     let mut object_type = None;
     let mut tag_name = None;
     let mut tagger = None;
-    let mut message = String::new();
-    let mut in_message = false;
+    let mut extra_headers = Vec::new();
+    let mut cont = Continuation::None;
 
-    for line in text.split('\n') {
-        if in_message {
-            message.push_str(line);
-            message.push('\n');
-            continue;
+    while pos < data.len() {
+        let line_start = pos;
+        let mut line_end = pos;
+        while line_end < data.len() && data[line_end] != b'\n' {
+            line_end += 1;
         }
+        let line = &data[line_start..line_end];
+        let after_nl = (line_end + 1).min(data.len());
         if line.is_empty() {
-            in_message = true;
+            let body = data.get(after_nl..).unwrap_or_default();
+            let message = std::str::from_utf8(body)
+                .map_err(|_| Error::CorruptObject("tag message is not valid UTF-8".to_owned()))?
+                .to_owned();
+            return Ok(TagData {
+                object: object
+                    .ok_or_else(|| Error::CorruptObject("tag missing object header".to_owned()))?,
+                object_type: object_type
+                    .ok_or_else(|| Error::CorruptObject("tag missing type header".to_owned()))?,
+                tag: tag_name
+                    .ok_or_else(|| Error::CorruptObject("tag missing tag header".to_owned()))?,
+                tagger,
+                extra_headers,
+                message,
+            });
+        }
+
+        if line.first() == Some(&b' ') {
+            match cont {
+                Continuation::Extra => {
+                    extra_headers.extend_from_slice(&data[line_start..after_nl]);
+                }
+                Continuation::None => {}
+            }
+            pos = after_nl;
             continue;
         }
-        if let Some(rest) = line.strip_prefix("object ") {
-            object = Some(rest.trim().parse::<ObjectId>()?);
-        } else if let Some(rest) = line.strip_prefix("type ") {
-            let typ = rest.trim();
-            if ObjectKind::from_tag_type_field(typ.as_bytes()).is_none() {
-                return Err(Error::CorruptObject(format!(
-                    "invalid 'type' value in tag: {typ}"
-                )));
+
+        let key_end = line
+            .iter()
+            .position(|&b| b == b' ')
+            .ok_or_else(|| Error::CorruptObject("malformed tag header line".to_owned()))?;
+        let key = &line[..key_end];
+        let rest = line.get(key_end + 1..).unwrap_or_default();
+
+        match key {
+            b"object" => {
+                let line_str = std::str::from_utf8(rest).map_err(|_| {
+                    Error::CorruptObject("tag object line is not valid UTF-8".to_owned())
+                })?;
+                object = Some(line_str.trim().parse::<ObjectId>()?);
+                cont = Continuation::None;
             }
-            object_type = Some(typ.to_owned());
-        } else if let Some(rest) = line.strip_prefix("tag ") {
-            tag_name = Some(rest.trim().to_owned());
-        } else if let Some(rest) = line.strip_prefix("tagger ") {
-            tagger = Some(rest.to_owned());
+            b"type" => {
+                let typ = std::str::from_utf8(rest).map_err(|_| {
+                    Error::CorruptObject("tag type line is not valid UTF-8".to_owned())
+                })?;
+                let typ = typ.trim();
+                if ObjectKind::from_tag_type_field(typ.as_bytes()).is_none() {
+                    return Err(Error::CorruptObject(format!(
+                        "invalid 'type' value in tag: {typ}"
+                    )));
+                }
+                object_type = Some(typ.to_owned());
+                cont = Continuation::None;
+            }
+            b"tag" => {
+                let line_str = std::str::from_utf8(rest).map_err(|_| {
+                    Error::CorruptObject("tag name line is not valid UTF-8".to_owned())
+                })?;
+                tag_name = Some(line_str.trim().to_owned());
+                cont = Continuation::None;
+            }
+            b"tagger" => {
+                tagger = Some(
+                    std::str::from_utf8(rest)
+                        .map_err(|_| {
+                            Error::CorruptObject("tag tagger line is not valid UTF-8".to_owned())
+                        })?
+                        .to_owned(),
+                );
+                cont = Continuation::None;
+            }
+            _ => {
+                cont = Continuation::Extra;
+                extra_headers.extend_from_slice(&data[line_start..after_nl]);
+            }
         }
+        pos = after_nl;
     }
 
-    // Strip one trailing newline that split adds
-    if message.ends_with('\n') {
-        message.pop();
-    }
-
-    Ok(TagData {
-        object: object
-            .ok_or_else(|| Error::CorruptObject("tag missing object header".to_owned()))?,
-        object_type: object_type
-            .ok_or_else(|| Error::CorruptObject("tag missing type header".to_owned()))?,
-        tag: tag_name.ok_or_else(|| Error::CorruptObject("tag missing tag header".to_owned()))?,
-        tagger,
-        message,
-    })
+    Err(Error::CorruptObject(
+        "tag missing blank line before message".to_owned(),
+    ))
 }
 
 /// Serialize a [`TagData`] into the raw bytes suitable for storage as a tag object.
@@ -1305,21 +1363,21 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
 /// (including timestamp and timezone) when present.
 #[must_use]
 pub fn serialize_tag(t: &TagData) -> Vec<u8> {
-    let mut out = String::new();
-    out.push_str(&format!("object {}\n", t.object));
-    out.push_str(&format!("type {}\n", t.object_type));
-    out.push_str(&format!("tag {}\n", t.tag));
+    let mut out = Vec::new();
+    out.extend_from_slice(format!("object {}\n", t.object).as_bytes());
+    out.extend_from_slice(format!("type {}\n", t.object_type).as_bytes());
+    out.extend_from_slice(format!("tag {}\n", t.tag).as_bytes());
     if let Some(ref tagger) = t.tagger {
-        out.push_str(&format!("tagger {tagger}\n"));
+        out.extend_from_slice(format!("tagger {tagger}\n").as_bytes());
     }
-    out.push('\n');
-    // Only add message if non-empty (don't add extra blank line for empty message)
+    out.extend_from_slice(&t.extra_headers);
+    out.push(b'\n');
     let msg = t.message.trim_end_matches('\n');
     if !msg.is_empty() {
-        out.push_str(msg);
-        out.push('\n');
+        out.extend_from_slice(msg.as_bytes());
+        out.push(b'\n');
     }
-    out.into_bytes()
+    out
 }
 
 /// Serialize a [`CommitData`] into the raw bytes suitable for storage.

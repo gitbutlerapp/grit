@@ -308,6 +308,7 @@ fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
         object_type: "blob".into(),
         tag: "v1".into(),
         tagger: Some("T <t@example.com> 1 +0000".into()),
+        extra_headers: Vec::new(),
         message: "annotated\n".into(),
     });
     let tag_oid = repo

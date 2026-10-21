@@ -338,6 +338,7 @@ mod tests {
             object_type: "commit".into(),
             tag: "v1".into(),
             tagger: Some("T <t@t> 0 +0000".into()),
+            extra_headers: Vec::new(),
             message: "release\n".into(),
         });
         let tag_oid = repo.odb().write(ObjectKind::Tag, &tag_bytes).expect("tag");

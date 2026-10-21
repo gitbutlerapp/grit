@@ -17,9 +17,14 @@
 //! ```
 
 mod core;
+mod extra_headers;
 pub mod handle;
 
 pub use core::*;
+pub use extra_headers::{
+    extra_header_values, insert_header_before_signature, iter_extra_headers, next_header_block,
+    remove_header_lines, set_extra_header, ExtraHeaderIter,
+};
 pub use handle::Objects;
 
 pub use crate::change_id::{

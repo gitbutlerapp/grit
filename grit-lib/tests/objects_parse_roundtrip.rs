@@ -291,6 +291,7 @@ fn serialize_tag_empty_message_has_no_extra_blank_line() {
         object_type: "commit".to_string(),
         tag: "empty-msg".to_string(),
         tagger: None,
+        extra_headers: Vec::new(),
         message: String::new(),
     };
     let bytes = serialize_tag(&tag);
@@ -324,6 +325,7 @@ fn serialize_parse_commit_tag_tree_identity() {
         object_type: "commit".to_string(),
         tag: "v1".to_string(),
         tagger: Some("T <t@example.com> 1 +0000".to_string()),
+        extra_headers: Vec::new(),
         message: "tag msg".to_string(),
     };
     let tag_bytes = serialize_tag(&tag);

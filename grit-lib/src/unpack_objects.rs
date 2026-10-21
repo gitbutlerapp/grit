@@ -1869,6 +1869,7 @@ mod tests {
             object_type: "commit".into(),
             tag: "v1".into(),
             tagger: Some("T <t@e.com>".into()),
+            extra_headers: Vec::new(),
             message: "annotated".into(),
         };
         let tag_data = serialize_tag(&tag);
