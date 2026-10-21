@@ -192,6 +192,7 @@ impl RevSelectArgs {
             first_parent: self.first_parent,
             paths: self.paths.clone(),
             commit_filter,
+            graph: false,
         })
     }
 

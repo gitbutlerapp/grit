@@ -13,11 +13,16 @@
 //! # }
 //! ```
 pub mod filter;
+pub mod graph;
 pub mod group_by;
 pub mod handle;
 pub mod queries;
 
 pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError, Pattern};
+pub use graph::{
+    list_commits_for_log_graph, rewrite_display_parents, rewrite_display_parents_map, GraphCharset,
+    GraphCommitInput, GraphLayout, GraphLineKind, GraphRenderedLine, GraphRowTopology,
+};
 pub use group_by::{
     group_commits_by_author, mailmap_for_grouping, AuthorGroup, GroupByAuthorOptions,
 };

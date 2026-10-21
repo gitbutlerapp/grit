@@ -10,7 +10,9 @@ use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
 use std::sync::Arc;
 
-use crate::rev_list::{rev_list, split_revision_token, RevListOptions, RevListResult};
+use crate::rev_list::{
+    rev_list, split_revision_token, OrderingMode, RevListOptions, RevListResult,
+};
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_revision_for_range_end,
@@ -77,6 +79,8 @@ pub struct RevWalkListOptions {
     pub paths: Vec<String>,
     /// Author/committer/grep filter (same semantics as `git rev-list` / `git log`).
     pub commit_filter: Option<Arc<CommitFilter>>,
+    /// Topological order and graph-friendly path handling (`log --graph`).
+    pub graph: bool,
 }
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
@@ -197,6 +201,7 @@ fn rev_list_options_from_walk(
 ) -> Result<RevListOptions> {
     let paths = repo.resolve_rev_walk_pathspecs(&walk.paths)?;
     let (min_parents, max_parents) = merge_filter_to_parent_bounds(walk.merges);
+    let graph = walk.graph;
     Ok(RevListOptions {
         first_parent: walk.first_parent,
         max_count: walk.limit,
@@ -209,6 +214,14 @@ fn rev_list_options_from_walk(
         all_refs,
         paths,
         count,
+        ordering: if graph {
+            OrderingMode::Topo
+        } else {
+            OrderingMode::Default
+        },
+        preserve_simplify_merges_graph_merges: graph,
+        path_graph_reorder: graph,
+        parent_rewrite: graph && !walk.paths.is_empty(),
         use_commit_graph: true,
         use_commit_graph_bloom: !walk.paths.is_empty(),
         paths_resolved_from_argv: !walk.paths.is_empty(),

@@ -9,7 +9,8 @@ order: 1
 
 ```text
 grit log [<REV>…] [-n <N>] [--cursor <token>] [--stat]
-  [--oneline] [--decorate] [--group-by author] [--count]
+  [--oneline] [--decorate] [--graph] [--graph-unicode]
+  [--group-by author] [--count]
   [--skip <N>] [--since|--after <date>] [--until|--before <date>]
   [--first-parent] [--merges | --no-merges] [--reverse]
   [--author <pat>] [--committer <pat>] [--grep <pat>]
@@ -29,6 +30,8 @@ When there's more history on a cursor-eligible walk, the last line shows the com
 Author, committer, and message filters match [`grit revs`](../revs/): patterns use Git's default POSIX BRE rules unless `-F` / `--fixed-strings` is set; multiple `--author` or `--committer` patterns OR together; multiple `--grep` patterns OR together unless `--all-match`; `--invert-grep` negates only the grep group; `-i` applies to all. When `log.mailmap` is unset or true (and `--no-mailmap` is not passed), `.mailmap` is applied before matching author or committer (same sources as Git). Invalid patterns exit **129** with `kind: "invalid_pattern"` in `--json` output.
 
 With `--stat`, each commit is followed by the files it changed and how many lines were added and removed in each, like [`grit show`](../show/). Merge commits show the change against their first parent.
+
+With `--graph`, human output draws a commit graph in the left margin (ASCII by default, or Unicode box-drawing with `--graph-unicode`). Graph mode uses topological ordering like Git's `log --graph`, including with path and author/committer/grep filters (filtered commits are skipped while keeping lane connectivity). `--graph` does not change `--json` output (scripting stays one commit per row); `--markdown` lists commits without graph columns and notes that `--graph` is human-only. `--graph` cannot be combined with `--stat`, `--group-by`, or `--cursor`.
 
 ## Options
 
@@ -51,6 +54,8 @@ With `--stat`, each commit is followed by the files it changed and how many line
 | `--remotes[=<glob>]` | Remote-tracking tips, optionally filtered by glob under `refs/remotes/`. |
 | `--stat` | Show which files each commit changed, with insertion and deletion counts. |
 | `--oneline` | One line per commit: short oid and subject (`--json` unchanged). With `--decorate`, refs appear in parentheses after the oid. |
+| `--graph` | Draw a commit graph beside each commit in human output only (implies topological order). |
+| `--graph-unicode` | Use Unicode box-drawing characters in `--graph` output (human only). |
 | `--decorate` | Show branch/tag/`HEAD` labels on each commit in human and Markdown output (refs are always in `--json`). |
 | `--group-by author` | Aggregate by author (mailmap-aware, sorted like `git shortlog -sne`). Uses the rev walk for the full selection (no cursor paging). |
 | `--count` | With `--group-by`, omit per-commit lists in `--json` (counts and author names only). |

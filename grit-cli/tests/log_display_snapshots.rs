@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use grit_test_support::CliFixture;
+use grit_test_support::{git, CliFixture};
 
 fn snapshot_dir() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/snapshots"))
@@ -46,6 +46,43 @@ fn log_decorate_snapshot() {
 }
 
 #[test]
+#[test]
+fn log_graph_linear() {
+    snapshot_fresh(
+        "log_graph_linear",
+        &["log", "--graph", "--oneline", "-n", "3"],
+        |f| {
+            f.run_ok(&["init"]);
+            f.write_repo_file("a.txt", "one\n");
+            f.run_ok(&["commit", "-m", "first"]);
+            f.write_repo_file("a.txt", "two\n");
+            f.run_ok(&["commit", "-m", "second"]);
+            f.write_repo_file("a.txt", "three\n");
+            f.run_ok(&["commit", "-m", "third"]);
+        },
+    );
+}
+
+#[test]
+fn log_graph_merge() {
+    snapshot_fresh(
+        "log_graph_merge",
+        &["log", "--graph", "--oneline", "-n", "10"],
+        |f| {
+            f.run_ok(&["init"]);
+            f.write_repo_file("f", "a\n");
+            f.run_ok(&["commit", "-m", "root"]);
+            f.run_ok(&["branch", "topic"]);
+            f.write_repo_file("t", "t\n");
+            f.run_ok(&["commit", "-m", "topic"]);
+            f.run_ok(&["checkout", "main"]);
+            f.write_repo_file("m", "m\n");
+            f.run_ok(&["commit", "-m", "mainline"]);
+            git(f.path(), &["merge", "--no-ff", "-m", "merge", "topic"]);
+        },
+    );
+}
+
 fn log_group_by_author_count_json() {
     let fixture = CliFixture::new();
     fixture.run_ok(&["init"]);

@@ -1,0 +1,22 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+assertion_line: 384
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "* 5b0f0de mainline\n* f3527e9 topic\n* 5fe236a root\n* b5ea30d second\n* 72934de first\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"error\":\"`grit log --graph` is for human output only; omit `--graph` when using `--json`\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "_`--graph` affects human output only; this listing omits graph columns._\n\n- `* 5b0f0de mainline`\n- `* f3527e9 topic`\n- `* 5fe236a root`\n- `* b5ea30d second`\n- `* 72934de first`\n",
+    "stderr": ""
+  }
+}

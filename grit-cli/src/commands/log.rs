@@ -5,6 +5,9 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
+use grit_lib::revwalk::graph::{
+    rewrite_display_parents_map, GraphCharset, GraphCommitInput, GraphLayout, GraphLineKind,
+};
 use grit_lib::revwalk::group_by::{
     group_commits_by_author, mailmap_for_grouping, GroupByAuthorOptions,
 };
@@ -12,6 +15,7 @@ use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::io::Write;
 
 use crate::commands::diff::diff_of_commit;
@@ -43,6 +47,8 @@ pub struct LogDisplayOptions {
     pub decorate: bool,
     pub group_by: Option<LogGroupBy>,
     pub group_count_only: bool,
+    pub graph: bool,
+    pub graph_unicode: bool,
 }
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
@@ -71,6 +77,12 @@ pub struct LogOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     oneline_lines: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    graph_lines: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    graph_note: Option<&'static str>,
 }
 
 /// Author aggregate in `--json` output when `--group-by author` is set.
@@ -99,7 +111,10 @@ impl HumanRender for LogOutcome {
         let now = ctx.now.unix_timestamp();
         let color = use_color();
         let head_branch = self.head_branch.as_deref();
-        if self.display.oneline {
+        if self.display.graph {
+            let _ = (now, color, head_branch);
+            self.render_graph_human(w)?;
+        } else if self.display.oneline {
             for line in &self.oneline_lines {
                 outln!(w, "{line}");
             }
@@ -151,7 +166,15 @@ impl MarkdownRender for LogOutcome {
             outln!(w, "No commits yet.");
             return Ok(());
         }
-        if self.display.oneline {
+        if let Some(note) = self.graph_note {
+            outln!(w, "_{note}_");
+            outln!(w);
+        }
+        if self.display.graph {
+            for line in &self.graph_lines {
+                outln!(w, "- `{line}`");
+            }
+        } else if self.display.oneline {
             for line in &self.oneline_lines {
                 outln!(w, "- `{line}`");
             }
@@ -195,6 +218,19 @@ pub fn run(
         if display.oneline {
             bail!("`grit log` cannot combine `--oneline` with `--group-by`");
         }
+        if display.graph {
+            bail!("`grit log` cannot combine `--graph` with `--group-by`");
+        }
+    }
+    if display.graph {
+        if stat {
+            bail!("`grit log` cannot combine `--stat` with `--graph`");
+        }
+        if output_mode == OutputMode::Json {
+            bail!(
+                "`grit log --graph` is for human output only; omit `--graph` when using `--json`"
+            );
+        }
     }
     let repo = context::discover()?;
     let env = repo.environment();
@@ -215,6 +251,9 @@ pub fn run(
     let continuation = cursor.or(deprecated_cursor);
     if display.group_by.is_some() && continuation.is_some() {
         bail!("`grit log` cannot combine `--cursor` with `--group-by`");
+    }
+    if display.graph && continuation.is_some() {
+        bail!("`grit log` cannot combine `--graph` with `--cursor`");
     }
     if let Some(token) = continuation.as_deref() {
         if !rev.paths.is_empty() {
@@ -261,18 +300,25 @@ pub fn run(
     let token_refs = rev.rev_tokens(&["HEAD"]);
     let page_size = rev.max_count.unwrap_or(PAGE);
 
-    let use_rev_walk = display.group_by.is_some()
+    let mut walk_opts = opts.clone();
+    walk_opts.graph = display.graph;
+
+    let use_rev_walk = display.graph
+        || display.group_by.is_some()
         || !rev.paths.is_empty()
         || rev.max_count.is_some()
-        || opts.commit_filter.as_ref().is_some_and(|f| f.is_active())
-        || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
+        || walk_opts
+            .commit_filter
+            .as_ref()
+            .is_some_and(|f| f.is_active())
+        || LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?.is_none();
 
     if use_rev_walk {
         if rev.max_count == Some(0) {
             return empty_outcome(display);
         }
         let walk = repo.rev_walk();
-        let mut fetch_opts = opts.clone();
+        let mut fetch_opts = walk_opts.clone();
         fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
         let oids = walk
             .commits(&token_refs, &fetch_opts)
@@ -327,6 +373,8 @@ fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
         display,
         head_branch: None,
         oneline_lines: Vec::new(),
+        graph_lines: Vec::new(),
+        graph_note: None,
     })
 }
 
@@ -375,6 +423,8 @@ fn build_author_group_outcome(
         display,
         head_branch: None,
         oneline_lines: Vec::new(),
+        graph_lines: Vec::new(),
+        graph_note: None,
     })
 }
 
@@ -434,6 +484,26 @@ fn build_commit_outcome(
         Vec::new()
     };
 
+    let graph_note = if display.graph && output_mode == OutputMode::Markdown {
+        Some("`--graph` affects human output only; this listing omits graph columns.")
+    } else {
+        None
+    };
+
+    let graph_lines = if display.graph && output_mode != OutputMode::Json {
+        build_graph_text_lines(
+            repo,
+            oids,
+            &commits,
+            &commit_rows,
+            display,
+            head_branch_ref,
+            now,
+        )?
+    } else {
+        Vec::new()
+    };
+
     Ok(LogOutcome {
         commits,
         groups: None,
@@ -444,5 +514,64 @@ fn build_commit_outcome(
         display,
         head_branch,
         oneline_lines,
+        graph_lines,
+        graph_note,
     })
+}
+
+impl LogOutcome {
+    fn render_graph_human(&self, w: &mut dyn Write) -> Result<()> {
+        for line in &self.graph_lines {
+            outln!(w, "{line}");
+        }
+        Ok(())
+    }
+}
+
+fn build_graph_text_lines(
+    repo: &grit_lib::repo::Repository,
+    oids: &[ObjectId],
+    commits: &[LogCommit],
+    summaries: &[CommitSummary],
+    display: LogDisplayOptions,
+    head_branch: Option<&str>,
+    now: i64,
+) -> Result<Vec<String>> {
+    let charset = if display.graph_unicode {
+        GraphCharset::UNICODE
+    } else {
+        GraphCharset::ASCII
+    };
+    let visible: HashSet<ObjectId> = oids.iter().copied().collect();
+    let parent_map = rewrite_display_parents_map(repo, &visible)?;
+    let inputs: Vec<GraphCommitInput> = oids
+        .iter()
+        .map(|&id| GraphCommitInput {
+            id,
+            parents: parent_map.get(&id).cloned().unwrap_or_default(),
+        })
+        .collect();
+    let mut layout = GraphLayout::new(charset);
+    let blocks = layout.render(&inputs);
+    let mut out = Vec::new();
+    for (block, (commit, summary)) in blocks.into_iter().zip(commits.iter().zip(summaries)) {
+        for graph_line in block {
+            if graph_line.kind == GraphLineKind::Padding {
+                out.push(graph_line.prefix.trim_end().to_owned());
+                continue;
+            }
+            let text = if display.oneline {
+                render_oneline_line(repo, &commit.commit, display.decorate, head_branch)?
+            } else {
+                let row = ui::commit_rows(std::slice::from_ref(summary), now)[0].clone();
+                if display.decorate {
+                    decorate_commit_row(&row, &commit.commit.refs, head_branch)
+                } else {
+                    row
+                }
+            };
+            out.push(format!("{}{text}", graph_line.prefix));
+        }
+    }
+    Ok(out)
 }
