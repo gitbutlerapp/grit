@@ -96,6 +96,9 @@ pub enum TagMode {
     None,
     /// Fetch tags that point at commits reachable from the refs being fetched
     /// (same idea as `git fetch --follow-tags`; not what `git clone` does).
+    ///
+    /// Tags the local repository already has at the advertised value are not
+    /// considered again, so they do not appear in [`FetchOutcome::updates`].
     #[default]
     Following,
     /// Fetch every advertised `refs/tags/*` ref (same idea as `git clone` and
@@ -1233,12 +1236,18 @@ pub fn fetch_local_with_progress(
     tag_shallow.extend(remote_shallow.iter().copied());
 
     if matches!(opts.tags, TagMode::All | TagMode::Following) {
+        let tags_present = if opts.tags == TagMode::Following {
+            crate::fetch::tags_already_local(local_git_dir, &remote_refs)
+        } else {
+            HashSet::new()
+        };
         apply_tag_mode(
             opts.tags,
             &remote_refs,
             &remote_odb,
             &tag_shallow,
             &negatives,
+            &tags_present,
             &mut matched,
             &mut matched_oids,
             &mut seen_remote_ref,
@@ -2145,6 +2154,10 @@ fn glob_matches(pattern: &str, refname: &str) -> bool {
 }
 
 /// Add tags to the matched set according to [`TagMode`].
+///
+/// Under `Following`, tags named in `already_local` (see
+/// [`crate::fetch::tags_already_local`]) are skipped, matching Git's auto-follow,
+/// which never reconsiders a tag the local repository already has.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_tag_mode(
     mode: TagMode,
@@ -2152,6 +2165,7 @@ pub(crate) fn apply_tag_mode(
     remote_odb: &Odb,
     shallow_boundaries: &HashSet<ObjectId>,
     negatives: &[RefspecItem],
+    already_local: &HashSet<String>,
     matched: &mut Vec<MatchedRef>,
     matched_oids: &mut HashSet<ObjectId>,
     seen_remote_ref: &mut HashSet<String>,
@@ -2160,50 +2174,60 @@ pub(crate) fn apply_tag_mode(
         return Ok(());
     }
 
+    // Tags this call may add, with the object each one peels to (`None` when
+    // the tag cannot be peeled; only the tag oid itself can then match).
+    let candidates: Vec<(&String, ObjectId, Option<ObjectId>)> = remote_refs
+        .iter()
+        .filter(|(name, _)| {
+            name.starts_with("refs/tags/")
+                && !seen_remote_ref.contains(name)
+                && !ref_excluded(name, negatives)
+                && !(mode == TagMode::Following && already_local.contains(name))
+        })
+        .map(|(name, oid)| {
+            let peeled = match mode {
+                TagMode::Following => remote_odb.peel_tags(*oid).ok().map(|(p, _)| p),
+                _ => None,
+            };
+            (name, *oid, peeled)
+        })
+        .collect();
+
     // For Following, decide reachability on the source ODB using both the local
     // and remote shallow grafts (unioned by the caller). Post-pack pruning via
     // [`crate::fetch::retain_following_tags`] still drops tags whose objects did
     // not arrive. Using the local ODB here would miss every tip on first fetch.
-    let remote_has_tags = remote_refs
-        .iter()
-        .any(|(name, _)| name.starts_with("refs/tags/"));
-    let following_closure: HashSet<ObjectId> = if mode == TagMode::Following && remote_has_tags {
+    let following_closure: HashSet<ObjectId> = if mode == TagMode::Following {
         let roots: Vec<ObjectId> = matched
             .iter()
             .filter(|m| !m.is_tag)
             .map(|m| m.oid)
             .collect();
-        crate::fetch::reachable_commits(remote_odb, &roots, shallow_boundaries)
+        let targets: HashSet<ObjectId> = candidates
+            .iter()
+            .map(|(_, oid, peeled)| peeled.unwrap_or(*oid))
+            .collect();
+        crate::fetch::reachable_commits(remote_odb, &roots, &targets, shallow_boundaries)
     } else {
         HashSet::new()
     };
 
-    for (name, oid) in remote_refs {
-        if !name.starts_with("refs/tags/") {
-            continue;
-        }
-        if seen_remote_ref.contains(name) || ref_excluded(name, negatives) {
-            continue;
-        }
+    for (name, oid, peeled) in candidates {
         let keep = match mode {
             TagMode::All => true,
+            // Keep when the tag (or what it peels to) is in the fetched closure.
             TagMode::Following => {
-                // Keep when the tag (or what it peels to) is in the fetched
-                // closure. Peel annotated tags to their target.
-                following_closure.contains(oid)
-                    || remote_odb
-                        .peel_tags(*oid)
-                        .is_ok_and(|(peeled, _)| following_closure.contains(&peeled))
+                following_closure.contains(&oid)
+                    || peeled.is_some_and(|p| following_closure.contains(&p))
             }
             TagMode::None => false,
         };
-        if keep {
-            seen_remote_ref.insert(name.clone());
-            matched_oids.insert(*oid);
+        if keep && seen_remote_ref.insert(name.clone()) {
+            matched_oids.insert(oid);
             matched.push(MatchedRef {
                 remote_ref: name.clone(),
                 local_ref: Some(name.clone()),
-                oid: *oid,
+                oid,
                 force: false,
                 is_tag: true,
                 advertised_peel: None,

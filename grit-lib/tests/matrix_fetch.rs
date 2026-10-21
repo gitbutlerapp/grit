@@ -1216,6 +1216,87 @@ fn matrix_incremental_shared_history() {
     );
 }
 
+// ===========================================================================
+// 9b. Incremental `Following` fetch when the local repo already has the old
+//     tags: the new reachable tag lands, unchanged tags are not rewritten or
+//     reported as modified, the unreachable tag stays out, and the resulting
+//     tag set equals what the system `git fetch` produces from the same remote.
+// ===========================================================================
+#[test]
+fn matrix_incremental_following_with_tags_already_local() {
+    let h = Harness::new();
+    let ran = for_each_driver(
+        &h,
+        &|w| build_source_work(w),
+        &|driver, fetch, served, local_git| {
+            let local_root = local_git.parent().unwrap();
+            let refspec = "+refs/heads/main:refs/remotes/origin/main";
+            let mut opts = FetchOptions {
+                refspecs: vec![refspec.to_owned()],
+                tags: TagMode::Following,
+                ..Default::default()
+            };
+            fetch(local_git, &mut opts)
+                .unwrap_or_else(|e| panic!("[{}] seed fetch failed: {e}", driver.name));
+            let v1_oid = rev_parse(served, "refs/tags/v1");
+            assert_eq!(resolve_ref(local_git, "refs/tags/v1").unwrap(), v1_oid);
+
+            let git_local = h
+                .path()
+                .join(format!("git-following-{}", driver.name.replace('/', "-")));
+            init_local(&git_local);
+            let served_str = served.to_str().unwrap();
+            git(&git_local, &["fetch", "-q", served_str, refspec]);
+
+            let work = h
+                .path()
+                .join(format!("following-work-{}", driver.name.replace('/', "-")));
+            git_clone_nonbare(served, &work);
+            git(&work, &["commit", "-q", "--allow-empty", "-m", "c3"]);
+            git(&work, &["tag", "-a", "v2", "-m", "release two"]);
+            git(&work, &["push", "-q", "origin", "main", "v2"]);
+            let v2_oid = rev_parse(served, "refs/tags/v2");
+
+            let outcome = fetch(local_git, &mut opts)
+                .unwrap_or_else(|e| panic!("[{}] incremental fetch failed: {e}", driver.name));
+            git(&git_local, &["fetch", "-q", served_str, refspec]);
+
+            let v2 = outcome
+                .updates
+                .iter()
+                .find(|u| u.remote_ref == "refs/tags/v2")
+                .unwrap_or_else(|| panic!("[{}] v2 missing from outcome", driver.name));
+            assert_eq!(v2.mode, UpdateMode::New, "[{}] v2 mode", driver.name);
+            assert_eq!(resolve_ref(local_git, "refs/tags/v2").unwrap(), v2_oid);
+            assert!(
+                outcome
+                    .updates
+                    .iter()
+                    .filter(|u| u.remote_ref == "refs/tags/v1")
+                    .all(|u| !u.mode.modified_repo()),
+                "[{}] unchanged v1 must not be reported as modified",
+                driver.name
+            );
+            assert!(
+                resolve_ref(local_git, "refs/tags/vside").is_err(),
+                "[{}] unreachable vside must stay out",
+                driver.name
+            );
+            assert_eq!(
+                git(local_root, &["for-each-ref", "refs/tags"]),
+                git(&git_local, &["for-each-ref", "refs/tags"]),
+                "[{}] grit and git must follow the same tags",
+                driver.name
+            );
+            fsck_clean(local_root);
+        },
+    );
+    assert!(
+        ran > 0,
+        "no transport driver was available for the incremental Following test"
+    );
+}
+
 /// Clone `bare` into a non-bare work tree `dst` with an `origin` remote, so a
 /// test can make a new commit and `push` it back to the served bare repo.
 fn git_clone_nonbare(bare: &Path, dst: &Path) {

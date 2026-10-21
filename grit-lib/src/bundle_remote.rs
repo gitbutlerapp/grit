@@ -278,12 +278,18 @@ fn complete_bundle_fetch(
     let mut tag_shallow = local_shallow.clone();
     tag_shallow.extend(remote_shallow.iter().copied());
 
+    let tags_present = if opts.tags == TagMode::Following {
+        crate::fetch::tags_already_local(local_git_dir, remote_refs)
+    } else {
+        HashSet::new()
+    };
     apply_tag_mode(
         opts.tags,
         remote_refs,
         local_odb,
         &tag_shallow,
         &negatives,
+        &tags_present,
         &mut matched,
         &mut matched_oids,
         &mut seen_remote_ref,
