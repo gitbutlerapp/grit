@@ -36,7 +36,7 @@ pub fn map_lib_revision_error(err: &LibError) -> Option<String> {
     }
 }
 
-/// Map [`ResolveError`] from [`Repository::resolve`](grit_lib::object_inspect::Repository::resolve).
+/// Map [`ResolveError`] from [`Repository::resolve`](grit_lib::repo::Repository::resolve).
 #[must_use]
 pub fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
     match err {

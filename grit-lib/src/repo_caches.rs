@@ -73,6 +73,8 @@ pub struct RepoCaches {
     commit_linkage: Mutex<CommitLinkageCache>,
     bitmap_index: BitmapIndexCache,
     diagnostics: Mutex<DiagnosticsHandle>,
+    /// Whether on-disk objects may contain `change-id` headers (`None` = not probed yet).
+    stored_change_id_header_likely: Mutex<Option<bool>>,
 }
 
 impl std::fmt::Debug for RepoCaches {
@@ -114,7 +116,12 @@ impl RepoCaches {
             commit_linkage: Mutex::new(CommitLinkageCache::default()),
             bitmap_index: BitmapIndexCache::default(),
             diagnostics: Mutex::new(diagnostics),
+            stored_change_id_header_likely: Mutex::new(None),
         })
+    }
+
+    pub(crate) fn stored_change_id_header_likely(&self) -> &Mutex<Option<bool>> {
+        &self.stored_change_id_header_likely
     }
 
     /// Cached [`crate::pack_bitmap::BitmapIndex`] for this repository handle.

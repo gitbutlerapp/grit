@@ -542,6 +542,8 @@ enum Command {
         #[arg(value_name = "PATH", last = true, allow_hyphen_values = true)]
         paths: Vec<String>,
         #[command(flatten)]
+        diff_flags: diff_args::DiffBehaviorArgs,
+        #[command(flatten)]
         format: diff_format::DiffFormatArgs,
     },
     /// Show information about a commit, tag, or branch (defaults to HEAD).
@@ -1173,6 +1175,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             quiet,
             commits,
             paths,
+            diff_flags,
             format,
         } => {
             let wants_exit_code = exit_code || quiet || no_index;
@@ -1183,6 +1186,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 against,
                 commits,
                 paths,
+                diff_flags,
                 format,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),

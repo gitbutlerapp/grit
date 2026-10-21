@@ -38,7 +38,7 @@ libc.workspace = true
 grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls"] }
 
 [dev-dependencies]
-grit-lib = { path = "../grit-lib" }
+grit-lib = { path = "../grit-lib", features = ["http-ureq"] }
 grit-test-support = { path = "../grit-test-support" }
 insta = { version = "1.42", features = ["json", "filters"] }
 serde_json.workspace = true

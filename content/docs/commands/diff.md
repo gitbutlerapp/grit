@@ -36,6 +36,13 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
 | `-U`, `--unified <n>` | Lines of context around each hunk when the output is a patch (bare `-U` means 3). |
+| `-M`, `--find-renames[=<n>]` | Detect renames; optional similarity threshold (`50` default, or `50%`). Attached `-M30` is accepted. |
+| `--no-renames` | Do not detect renames (show separate delete and add entries). |
+| `--diff-algorithm <algo>` | Line diff algorithm (`myers`, `patience`, `histogram`, …); overrides `diff.algorithm`. |
+| `--diff-filter <letters>` | Limit output to change types (`A` added, `D` deleted, `M` modified, `R` renamed, …). |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines. |
+| `-b`, `--ignore-space-change` | Ignore changes in the amount of whitespace. |
+| `--ignore-blank-lines` | Ignore changes whose lines are all blank. |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (Git `-W`). |
 | `-p`, `--patch` | Unified patch output (default when no other format flag is set). |
 | `--exit-code` | Exit with status **1** when there are changes (for scripts); **0** when clean. |

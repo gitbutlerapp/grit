@@ -4,18 +4,32 @@
 //! legacy `gitbutler-change-id` name). Identifiers can be randomly generated,
 //! derived from a commit id (Jujutsu-compatible), or controlled via
 //! [`ChangeIdPolicy`] and repository config.
+//!
+//! Library guide: [change ids](https://grit-scm.com/docs/library/change-ids)
+//!
+//! ```rust
+//! use grit_lib::change_id::ChangeId;
+//! use grit_lib::objects::ObjectId;
+//!
+//! let oid = ObjectId::from_hex(b"0000000000000000000000000000000000000001").unwrap();
+//! let derived = ChangeId::derived_from_commit_id(&oid);
+//! assert_eq!(derived.as_str().len(), 32);
+//! ```
 
 use std::collections::HashSet;
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::{
-    parse_commit, read_commit_subject_line, serialize_commit, CommitData, HashAlgo, ObjectId,
-    ObjectKind,
+    read_commit_subject_line, serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind,
 };
+use crate::pack::SingleLocalPackReader;
+use crate::parallel::{try_par_map_with_local, ParallelOp};
 use crate::repo::Repository;
 use crate::rev_list::{all_ref_commit_tips_for_walk, walk_closure_ordered, CommitGraph};
 use crate::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
@@ -23,6 +37,11 @@ use crate::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 const REVERSE_HEX_LEN: usize = 32;
 const CHANGE_ID_KEY: &[u8] = b"change-id";
 const LEGACY_CHANGE_ID_KEY: &[u8] = b"gitbutler-change-id";
+/// Minimum reachable commits before parallel stored-header scans (see `group_by` author walks).
+const PARALLEL_STORED_CHANGE_ID_SCAN_MIN: usize = 8192;
+const CHANGE_ID_PROBE_MARK: &str = "grit-change-id-probe";
+const PROBE_PRESENT: &[u8] = b"present\n";
+const PROBE_ABSENT: &[u8] = b"absent\n";
 
 /// A change identifier as stored in a commit header (reverse-hex or opaque text).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -308,55 +327,319 @@ pub fn find_commits_by_change_id_prefix(
     let mut graph = CommitGraph::with_commit_graph(repo, false, true);
     let (_, order) = walk_closure_ordered(&mut graph, &tips)?;
 
-    let mut matches = Vec::new();
-    let mut seen = HashSet::new();
+    let mut derived_hits = Vec::new();
+    let mut stored_scan = Vec::new();
     for oid in &order {
-        let derived = ChangeId::derived_from_commit_id(oid);
-        if derived.as_str().starts_with(prefix) {
-            let id = effective_change_id_for_commit(repo, *oid)?;
-            if id.as_str().starts_with(prefix) && seen.insert(*oid) {
+        if ChangeId::derived_from_commit_id(oid)
+            .as_str()
+            .starts_with(prefix)
+        {
+            derived_hits.push(*oid);
+        } else {
+            stored_scan.push(*oid);
+        }
+    }
+
+    let objects_dir = repo.git_dir().join("objects");
+    let scan_stored_headers = stored_change_id_headers_likely(repo, &objects_dir)?;
+    repo.odb().with_pack_read_context(|| {
+        let mut matches = Vec::new();
+        let mut seen = HashSet::new();
+        let mut pack_reader: Option<SingleLocalPackReader> = None;
+
+        for oid in derived_hits {
+            let derived = ChangeId::derived_from_commit_id(&oid);
+            let resolved = match stored_change_id_from_commit_oid(
+                repo,
+                &objects_dir,
+                &mut pack_reader,
+                oid,
+            )? {
+                Some(stored) => stored,
+                None => derived,
+            };
+            if resolved.as_str().starts_with(prefix) && seen.insert(oid) {
                 matches.push(ChangeIdMatch {
-                    oid: *oid,
-                    change_id: id,
+                    oid,
+                    change_id: resolved,
                 });
             }
-            continue;
         }
-        let Ok(obj) = repo.read_replaced(oid) else {
-            continue;
-        };
-        if obj.kind != ObjectKind::Commit {
-            continue;
-        }
-        if !commit_bytes_contain_change_id_header(&obj.data) {
-            continue;
-        }
-        let Ok(data) = parse_commit(&obj.data) else {
-            continue;
-        };
-        let resolved = resolved_change_id(oid, &data);
-        if resolved.id.as_str().starts_with(prefix) && seen.insert(*oid) {
-            matches.push(ChangeIdMatch {
-                oid: *oid,
-                change_id: resolved.id,
-            });
-        }
-    }
 
-    matches.sort_by_key(|m| m.oid.to_hex());
-    Ok(matches)
+        if scan_stored_headers {
+            let stored_matches =
+                find_stored_change_id_prefix_matches(repo, &objects_dir, &stored_scan, prefix)?;
+            for m in stored_matches {
+                if seen.insert(m.oid) {
+                    matches.push(m);
+                }
+            }
+        }
+
+        matches.sort_by_key(|m| m.oid.to_hex());
+        Ok(matches)
+    })
 }
 
-fn effective_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<ChangeId> {
-    let obj = repo.read_replaced(&oid)?;
+fn stored_change_id_headers_likely(repo: &Repository, objects_dir: &Path) -> Result<bool> {
+    let cache = repo.caches().stored_change_id_header_likely();
+    if let Some(v) = *cache.lock().unwrap_or_else(|e| e.into_inner()) {
+        return Ok(v);
+    }
+    let likely = probe_objects_for_change_id_headers(objects_dir)?;
+    *cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(likely);
+    Ok(likely)
+}
+
+fn probe_objects_for_change_id_headers(objects_dir: &Path) -> Result<bool> {
+    if let Some(likely) = read_change_id_probe_marker(objects_dir) {
+        return Ok(likely);
+    }
+    if objects_dir_has_loose_objects(objects_dir) {
+        write_change_id_probe_marker(objects_dir, true)?;
+        return Ok(true);
+    }
+    let pack_dir = objects_dir.join("pack");
+    if pack_dir.is_dir() {
+        for entry in fs::read_dir(&pack_dir).map_err(Error::Io)? {
+            let entry = entry.map_err(Error::Io)?;
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "pack") {
+                continue;
+            }
+            let data = fs::read(&path).map_err(Error::Io)?;
+            if object_bytes_may_contain_change_id_header(&data) {
+                write_change_id_probe_marker(objects_dir, true)?;
+                return Ok(true);
+            }
+        }
+    }
+    write_change_id_probe_marker(objects_dir, false)?;
+    Ok(false)
+}
+
+fn change_id_probe_marker_path(objects_dir: &Path) -> PathBuf {
+    objects_dir.join("info").join(CHANGE_ID_PROBE_MARK)
+}
+
+fn read_change_id_probe_marker(objects_dir: &Path) -> Option<bool> {
+    let path = change_id_probe_marker_path(objects_dir);
+    let data = fs::read(path).ok()?;
+    if data.starts_with(PROBE_PRESENT) {
+        Some(true)
+    } else if data.starts_with(PROBE_ABSENT) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn write_change_id_probe_marker(objects_dir: &Path, present: bool) -> Result<()> {
+    let path = change_id_probe_marker_path(objects_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(Error::Io)?;
+    }
+    let payload = if present { PROBE_PRESENT } else { PROBE_ABSENT };
+    fs::write(path, payload).map_err(Error::Io)
+}
+
+fn objects_dir_has_loose_objects(objects_dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(objects_dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.len() != 2 || !name.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Ok(hex_entries) = fs::read_dir(entry.path()) else {
+            continue;
+        };
+        if hex_entries.flatten().any(|e| e.path().is_file()) {
+            return true;
+        }
+    }
+    false
+}
+
+fn object_bytes_may_contain_change_id_header(data: &[u8]) -> bool {
+    header_key_present(data, CHANGE_ID_KEY) || header_key_present(data, LEGACY_CHANGE_ID_KEY)
+}
+
+fn find_stored_change_id_prefix_matches(
+    repo: &Repository,
+    objects_dir: &Path,
+    oids: &[ObjectId],
+    prefix: &str,
+) -> Result<Vec<ChangeIdMatch>> {
+    if oids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let config = repo.config()?;
+    let mut par_opts = repo
+        .thread_policy()
+        .resolve(ParallelOp::DiffContent, config.as_ref());
+    par_opts.min_items = PARALLEL_STORED_CHANGE_ID_SCAN_MIN;
+    let total_bytes = oids.len() * crate::pack::COMMIT_HEADER_READ_PREFIX;
+    let scan_results = try_par_map_with_local(
+        oids,
+        par_opts,
+        total_bytes,
+        || ChangeIdHeaderReader { pack_reader: None },
+        |reader, oid| stored_change_id_match_for_oid(repo, objects_dir, reader, oid, prefix),
+    )
+    .map_err(|e| match e {
+        crate::parallel::ParallelHashError::Task(err) => err,
+    })?;
+    Ok(scan_results.into_iter().flatten().collect())
+}
+
+struct ChangeIdHeaderReader {
+    pack_reader: Option<SingleLocalPackReader>,
+}
+
+fn stored_change_id_match_for_oid(
+    repo: &Repository,
+    objects_dir: &Path,
+    reader: &mut ChangeIdHeaderReader,
+    oid: &ObjectId,
+    prefix: &str,
+) -> Result<Option<ChangeIdMatch>> {
+    let Some(stored) =
+        stored_change_id_from_commit_oid(repo, objects_dir, &mut reader.pack_reader, *oid)?
+    else {
+        return Ok(None);
+    };
+    if stored.as_str().starts_with(prefix) {
+        Ok(Some(ChangeIdMatch {
+            oid: *oid,
+            change_id: stored,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+fn stored_change_id_from_commit_oid(
+    repo: &Repository,
+    objects_dir: &Path,
+    pack_reader: &mut Option<SingleLocalPackReader>,
+    oid: ObjectId,
+) -> Result<Option<ChangeId>> {
+    let Some(header) = read_commit_header_prefix(repo, objects_dir, pack_reader, oid)? else {
+        return Ok(None);
+    };
+    Ok(change_id_from_commit_object_header(&header))
+}
+
+fn read_commit_header_prefix(
+    repo: &Repository,
+    objects_dir: &Path,
+    pack_reader: &mut Option<SingleLocalPackReader>,
+    oid: ObjectId,
+) -> Result<Option<Vec<u8>>> {
+    for _ in 0..3 {
+        if pack_reader.is_none() {
+            *pack_reader = SingleLocalPackReader::open_allow_loose_for_commits(objects_dir, &oid)?;
+        }
+        let Some(reader) = pack_reader.as_mut() else {
+            break;
+        };
+        reader.clear_commit_header_prefix();
+        if let Some(prefix) = reader.read_commit_author_prefix_unordered(&oid)? {
+            return Ok(Some(prefix.to_vec()));
+        }
+        if !reader.contains_oid(&oid)? {
+            reader.clear_commit_header_prefix();
+            *pack_reader = None;
+            continue;
+        }
+        reader.clear_commit_header_prefix();
+        break;
+    }
+    let Ok(obj) = repo.read_replaced(&oid) else {
+        return Ok(None);
+    };
     if obj.kind != ObjectKind::Commit {
-        return Ok(ChangeId::derived_from_commit_id(&oid));
+        return Ok(None);
     }
-    if commit_bytes_contain_change_id_header(&obj.data) {
-        let data = parse_commit(&obj.data)?;
-        return Ok(resolved_change_id(&oid, &data).id);
+    Ok(Some(commit_header_bytes(&obj.data).to_vec()))
+}
+
+fn commit_header_bytes(data: &[u8]) -> &[u8] {
+    let mut pos = 0usize;
+    while pos < data.len() {
+        let line_start = pos;
+        let mut line_end = pos;
+        while line_end < data.len() && data[line_end] != b'\n' {
+            line_end += 1;
+        }
+        if line_start == line_end {
+            return &data[..line_start];
+        }
+        pos = line_end.saturating_add(1);
     }
-    Ok(ChangeId::derived_from_commit_id(&oid))
+    data
+}
+
+fn header_prefix_may_contain_change_id(header: &[u8]) -> bool {
+    header_key_present(header, CHANGE_ID_KEY) || header_key_present(header, LEGACY_CHANGE_ID_KEY)
+}
+
+/// Parse `change-id` / legacy header values from commit object bytes up to the message blank line.
+#[must_use]
+fn change_id_from_commit_object_header(data: &[u8]) -> Option<ChangeId> {
+    if !header_prefix_may_contain_change_id(data) {
+        return None;
+    }
+    let header = commit_header_bytes(data);
+    let mut legacy = None;
+    let mut pos = 0usize;
+    while pos < header.len() {
+        let line_start = pos;
+        let mut line_end = pos;
+        while line_end < header.len() && header[line_end] != b'\n' {
+            line_end += 1;
+        }
+        let line = &header[line_start..line_end];
+        let after_nl = (line_end + 1).min(header.len());
+        if line.is_empty() {
+            break;
+        }
+        if line.first() == Some(&b' ') {
+            pos = after_nl;
+            continue;
+        }
+        let key_end = line.iter().position(|&b| b == b' ').unwrap_or(line.len());
+        let key = &line[..key_end];
+        let value = line.get(key_end + 1..).unwrap_or_default();
+        if key == CHANGE_ID_KEY {
+            return Some(ChangeId::from_opaque(
+                String::from_utf8_lossy(value).into_owned(),
+            ));
+        }
+        if key == LEGACY_CHANGE_ID_KEY && legacy.is_none() {
+            legacy = Some(ChangeId::from_opaque(
+                String::from_utf8_lossy(value).into_owned(),
+            ));
+        }
+        pos = after_nl;
+        while pos < header.len() {
+            let ls = pos;
+            let mut le = pos;
+            while le < header.len() && header[le] != b'\n' {
+                le += 1;
+            }
+            let an = (le + 1).min(header.len());
+            if header.get(ls) == Some(&b' ') {
+                pos = an;
+            } else {
+                break;
+            }
+        }
+    }
+    legacy
 }
 
 /// Resolve a change-id token (full id or unique prefix) to a commit oid.
@@ -396,10 +679,6 @@ fn ambiguous_change_id_hints(
         });
     }
     Ok(out)
-}
-
-fn commit_bytes_contain_change_id_header(data: &[u8]) -> bool {
-    header_key_present(data, CHANGE_ID_KEY) || header_key_present(data, LEGACY_CHANGE_ID_KEY)
 }
 
 fn header_key_present(data: &[u8], key: &[u8]) -> bool {

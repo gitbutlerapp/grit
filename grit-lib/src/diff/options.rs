@@ -111,6 +111,8 @@ pub struct DiffOptions {
     pub whitespace: WhitespaceMode,
     /// When false, skip intra-line word emphasis (line-level hunks only).
     pub word_level_inline: bool,
+    /// Expand hunks to enclosing function boundaries (Git `-W`).
+    pub function_context: bool,
     /// When set, incremented on each blob ODB read during tree content loading (tests only).
     #[doc(hidden)]
     pub blob_read_counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
@@ -127,6 +129,7 @@ impl Default for DiffOptions {
             filter: None,
             whitespace: WhitespaceMode::default(),
             word_level_inline: true,
+            function_context: false,
             blob_read_counter: None,
         }
     }
@@ -142,6 +145,7 @@ impl PartialEq for DiffOptions {
             && self.filter == other.filter
             && self.whitespace == other.whitespace
             && self.word_level_inline == other.word_level_inline
+            && self.function_context == other.function_context
     }
 }
 

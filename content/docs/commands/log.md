@@ -61,6 +61,7 @@ With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape
 | `--name-only` | Changed paths only, one per line per commit. |
 | `--name-status` | Status letter and path(s) per line per commit. |
 | `-U`, `--unified <N>` | Context lines for `-p` (Git `-U`). |
+| `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries. |
 | `--oneline` | One line per commit: short oid and subject (`--json` unchanged). With `--decorate`, refs appear in parentheses after the oid. |
 | `--decorate` | Show branch/tag/`HEAD` labels on each commit in human and Markdown output (refs are always in `--json`). |
 | `--group-by author` | Aggregate by author (mailmap-aware, sorted like `git shortlog -sne`). Uses the rev walk for the full selection (no cursor paging). |

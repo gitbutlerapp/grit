@@ -6,19 +6,10 @@ use grit_lib::diff::{
     parse_diff_rename_threshold_percent, DiffAlgorithm, DiffOptions, RenameDetection,
 };
 
-/// Line-diff and tree-diff formatting flags (Git `-U` / unified context, `-M`, filters).
+/// Tree-diff behavior flags (`-M`, `--no-renames`, filters) for porcelain commands.
 #[derive(Debug, Clone, Default, Args)]
-pub struct DiffFormatArgs {
-    /// Lines of unchanged context around each change (Git `-U`). When omitted, uses
-    /// `diff.context` from config (default 3).
-    #[arg(
-        short = 'U',
-        long = "unified",
-        value_name = "LINES",
-        num_args = 0..=1,
-        default_missing_value = "3"
-    )]
-    pub unified: Option<usize>,
+#[command(name = "diff_behavior")]
+pub struct DiffBehaviorArgs {
     /// Detect renames; optional similarity threshold (`50` default, or `50%`). Use `-M`, `-M30`,
     /// or `--find-renames` / `--find-renames=30` (long form requires `=` when a threshold is given).
     #[arg(
@@ -50,14 +41,10 @@ pub struct DiffFormatArgs {
     pub ignore_blank_lines: bool,
 }
 
-impl DiffFormatArgs {
+impl DiffBehaviorArgs {
     /// Apply CLI overrides onto repository-configured [`DiffOptions`].
-    #[allow(dead_code)]
     pub fn to_options(&self, base: DiffOptions) -> Result<DiffOptions> {
-        let mut options = match self.unified {
-            Some(n) => base.with_context_lines(n),
-            None => base,
-        };
+        let mut options = base;
         if self.no_renames {
             options.renames = RenameDetection::Off;
         } else if let Some(threshold) = &self.find_renames {
@@ -90,30 +77,32 @@ impl DiffFormatArgs {
     }
 }
 
-/// Rewrite Git-style attached `-M` thresholds so clap can parse them (`-M30` → `-M=30`).
+/// Rewrite Git-style attached diff flags so clap can parse them (`-M30` → `-M=30`, `-U0` → `-U=0`).
 ///
-/// Only applies to the `diff` subcommand, after global flags and before `--`.
+/// Applies to porcelain commands that flatten [`DiffBehaviorArgs`] and `crate::diff_format::DiffFormatArgs` (`diff`, `show`, `log`), after global flags and before `--`.
 #[must_use]
 pub fn normalize_diff_argv(mut args: Vec<String>) -> Vec<String> {
-    let Some(diff_idx) = locate_diff_subcommand(&args) else {
+    let Some(cmd_idx) = locate_porcelain_diff_command(&args) else {
         return args;
     };
     let mut end = args.len();
-    for (i, arg) in args.iter().enumerate().skip(diff_idx + 1) {
+    for (i, arg) in args.iter().enumerate().skip(cmd_idx + 1) {
         if arg == "--" {
             end = i;
             break;
         }
     }
-    for arg in args.iter_mut().take(end).skip(diff_idx + 1) {
+    for arg in args.iter_mut().take(end).skip(cmd_idx + 1) {
         if let Some(replacement) = rewrite_attached_find_renames(arg) {
+            *arg = replacement;
+        } else if let Some(replacement) = rewrite_attached_unified(arg) {
             *arg = replacement;
         }
     }
     args
 }
 
-fn locate_diff_subcommand(args: &[String]) -> Option<usize> {
+fn locate_porcelain_diff_command(args: &[String]) -> Option<usize> {
     let mut i = 1;
     while i < args.len() {
         let token = args[i].as_str();
@@ -121,7 +110,7 @@ fn locate_diff_subcommand(args: &[String]) -> Option<usize> {
             i = skip_global_flag(args, i);
             continue;
         }
-        if token == "diff" {
+        if matches!(token, "diff" | "show" | "log") {
             return Some(i);
         }
         return None;
@@ -151,6 +140,17 @@ fn skip_global_flag(args: &[String], i: usize) -> usize {
         return i + 2;
     }
     i + 1
+}
+
+fn rewrite_attached_unified(token: &str) -> Option<String> {
+    if token == "-U" || token.starts_with("-U=") || token.starts_with("--unified") {
+        return None;
+    }
+    let rest = token.strip_prefix("-U")?;
+    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!("-U={rest}"))
 }
 
 fn rewrite_attached_find_renames(token: &str) -> Option<String> {

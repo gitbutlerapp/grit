@@ -17,6 +17,14 @@ Resolves one or more revision specs to an object id, plus the object type and un
 
 Each spec prints on its own line as `OID TYPE` (full hex by default). With `--short`, oids are abbreviated using the same uniqueness rules as elsewhere in grit.
 
+### Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Every spec resolved successfully. |
+| `1` | At least one spec failed (unknown revision, ambiguous short object id, or ambiguous change id with candidate rows on stderr). |
+| `2` | Usage error (unknown flag or command). |
+
 ## Options
 
 | Option | Description |
@@ -78,14 +86,6 @@ Example:
 Schema: [v1](/schemas/resolve/v1.json)
 
 Pass `--markdown` for a table of resolved specs, oids, kinds, and sizes.
-
-## Exit status
-
-| Code | Meaning |
-| ---: | --- |
-| `0` | Every spec resolved successfully. |
-| `1` | At least one spec failed (unknown revision, ambiguous short object id, or ambiguous change id with candidate rows on stderr). |
-| `2` | Usage error (unknown flag or command). |
 
 ## See also
 

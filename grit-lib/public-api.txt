@@ -3828,6 +3828,7 @@ impl !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffIndexToWorktr
 pub grit_lib::diff::DiffOptions::algorithm: grit_lib::diff::DiffAlgorithm
 pub grit_lib::diff::DiffOptions::context_lines: usize
 pub grit_lib::diff::DiffOptions::filter: core::option::Option<grit_lib::diff::DiffFilter>
+pub grit_lib::diff::DiffOptions::function_context: bool
 pub grit_lib::diff::DiffOptions::indent_heuristic: bool
 pub grit_lib::diff::DiffOptions::inter_hunk_context: usize
 pub grit_lib::diff::DiffOptions::renames: grit_lib::diff::RenameDetection
