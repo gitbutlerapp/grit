@@ -9568,6 +9568,122 @@ pub fn grit_lib::parallel::parallel_worthwhile(usize, usize, core::num::nonzero:
 pub fn grit_lib::parallel::try_par_map<T, R, E, F>(&[T], grit_lib::parallel::ParallelOptions, usize, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, F: core::ops::function::Fn(&T) -> core::result::Result<R, E> + core::marker::Sync
 pub fn grit_lib::parallel::try_par_map_force<T, R, E, F>(&[T], grit_lib::parallel::ParallelOptions, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, F: core::ops::function::Fn(&T) -> core::result::Result<R, E> + core::marker::Sync
 pub fn grit_lib::parallel::try_par_map_with_local<T, R, E, S, Init, F>(&[T], grit_lib::parallel::ParallelOptions, usize, Init, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, S: core::marker::Send, Init: core::ops::function::Fn() -> S + core::marker::Sync, F: core::ops::function::Fn(&mut S, &T) -> core::result::Result<R, E> + core::marker::Sync
+pub mod grit_lib::path_validate
+#[non_exhaustive] pub enum grit_lib::path_validate::PathComponentError
+pub grit_lib::path_validate::PathComponentError::ContainsNul
+pub grit_lib::path_validate::PathComponentError::ContainsSlash
+pub grit_lib::path_validate::PathComponentError::Dot
+pub grit_lib::path_validate::PathComponentError::DotDot
+pub grit_lib::path_validate::PathComponentError::DotGit
+pub grit_lib::path_validate::PathComponentError::Empty
+pub grit_lib::path_validate::PathComponentError::HfsDotGit
+pub grit_lib::path_validate::PathComponentError::NtfsBackslash
+pub grit_lib::path_validate::PathComponentError::NtfsDotGit
+pub grit_lib::path_validate::PathComponentError::NtfsDriveOrStream
+pub grit_lib::path_validate::PathComponentError::SymlinkedDotGitattributes
+pub grit_lib::path_validate::PathComponentError::SymlinkedDotGitignore
+pub grit_lib::path_validate::PathComponentError::SymlinkedDotGitmodules
+pub grit_lib::path_validate::PathComponentError::SymlinkedDotMailmap
+impl core::clone::Clone for grit_lib::path_validate::PathComponentError
+pub fn grit_lib::path_validate::PathComponentError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::path_validate::PathComponentError
+impl core::cmp::PartialEq for grit_lib::path_validate::PathComponentError
+pub fn grit_lib::path_validate::PathComponentError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::path_validate::PathComponentError
+impl core::fmt::Debug for grit_lib::path_validate::PathComponentError
+pub fn grit_lib::path_validate::PathComponentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::path_validate::PathComponentError
+pub fn grit_lib::path_validate::PathComponentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::path_validate::PathComponentError
+impl core::marker::StructuralPartialEq for grit_lib::path_validate::PathComponentError
+impl core::marker::Freeze for grit_lib::path_validate::PathComponentError
+impl core::marker::Send for grit_lib::path_validate::PathComponentError
+impl core::marker::Sync for grit_lib::path_validate::PathComponentError
+impl core::marker::Unpin for grit_lib::path_validate::PathComponentError
+impl core::marker::UnsafeUnpin for grit_lib::path_validate::PathComponentError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::path_validate::PathComponentError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::path_validate::PathComponentError
+pub struct grit_lib::path_validate::EntryMode(_)
+impl grit_lib::path_validate::EntryMode
+pub fn grit_lib::path_validate::EntryMode::is_symlink(self) -> bool
+pub const fn grit_lib::path_validate::EntryMode::new(u32) -> Self
+impl core::clone::Clone for grit_lib::path_validate::EntryMode
+pub fn grit_lib::path_validate::EntryMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::path_validate::EntryMode
+impl core::cmp::PartialEq for grit_lib::path_validate::EntryMode
+pub fn grit_lib::path_validate::EntryMode::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::path_validate::EntryMode
+pub fn grit_lib::path_validate::EntryMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::path_validate::EntryMode
+pub fn grit_lib::path_validate::EntryMode::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::path_validate::EntryMode
+impl core::marker::StructuralPartialEq for grit_lib::path_validate::EntryMode
+impl core::marker::Freeze for grit_lib::path_validate::EntryMode
+impl core::marker::Send for grit_lib::path_validate::EntryMode
+impl core::marker::Sync for grit_lib::path_validate::EntryMode
+impl core::marker::Unpin for grit_lib::path_validate::EntryMode
+impl core::marker::UnsafeUnpin for grit_lib::path_validate::EntryMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::path_validate::EntryMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::path_validate::EntryMode
+pub struct grit_lib::path_validate::ProtectOptions
+pub grit_lib::path_validate::ProtectOptions::protect_hfs: bool
+pub grit_lib::path_validate::ProtectOptions::protect_ntfs: bool
+impl grit_lib::path_validate::ProtectOptions
+pub fn grit_lib::path_validate::ProtectOptions::from_config(&grit_lib::config::ConfigSet) -> Self
+pub const fn grit_lib::path_validate::ProtectOptions::fsck() -> Self
+impl core::clone::Clone for grit_lib::path_validate::ProtectOptions
+pub fn grit_lib::path_validate::ProtectOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::path_validate::ProtectOptions
+impl core::cmp::PartialEq for grit_lib::path_validate::ProtectOptions
+pub fn grit_lib::path_validate::ProtectOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::path_validate::ProtectOptions
+pub fn grit_lib::path_validate::ProtectOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::path_validate::ProtectOptions
+pub fn grit_lib::path_validate::ProtectOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::path_validate::ProtectOptions
+pub fn grit_lib::path_validate::ProtectOptions::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::path_validate::ProtectOptions
+impl core::marker::StructuralPartialEq for grit_lib::path_validate::ProtectOptions
+impl core::marker::Freeze for grit_lib::path_validate::ProtectOptions
+impl core::marker::Send for grit_lib::path_validate::ProtectOptions
+impl core::marker::Sync for grit_lib::path_validate::ProtectOptions
+impl core::marker::Unpin for grit_lib::path_validate::ProtectOptions
+impl core::marker::UnsafeUnpin for grit_lib::path_validate::ProtectOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::path_validate::ProtectOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::path_validate::ProtectOptions
+pub struct grit_lib::path_validate::TreeEntryNameAudit
+pub grit_lib::path_validate::TreeEntryNameAudit::dot: bool
+pub grit_lib::path_validate::TreeEntryNameAudit::dotdot: bool
+pub grit_lib::path_validate::TreeEntryNameAudit::dotgit: bool
+pub grit_lib::path_validate::TreeEntryNameAudit::empty: bool
+pub grit_lib::path_validate::TreeEntryNameAudit::nul: bool
+pub grit_lib::path_validate::TreeEntryNameAudit::slash: bool
+impl grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::TreeEntryNameAudit::absorb(&mut self, Self)
+impl grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::TreeEntryNameAudit::first_error(self) -> core::result::Result<(), grit_lib::path_validate::PathComponentError>
+impl core::clone::Clone for grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::TreeEntryNameAudit::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::path_validate::TreeEntryNameAudit
+impl core::cmp::PartialEq for grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::TreeEntryNameAudit::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::TreeEntryNameAudit::default() -> Self
+impl core::fmt::Debug for grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::TreeEntryNameAudit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::path_validate::TreeEntryNameAudit
+impl core::marker::StructuralPartialEq for grit_lib::path_validate::TreeEntryNameAudit
+impl core::marker::Freeze for grit_lib::path_validate::TreeEntryNameAudit
+impl core::marker::Send for grit_lib::path_validate::TreeEntryNameAudit
+impl core::marker::Sync for grit_lib::path_validate::TreeEntryNameAudit
+impl core::marker::Unpin for grit_lib::path_validate::TreeEntryNameAudit
+impl core::marker::UnsafeUnpin for grit_lib::path_validate::TreeEntryNameAudit
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::path_validate::TreeEntryNameAudit
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::audit_tree_entry_name(&[u8], grit_lib::path_validate::ProtectOptions) -> grit_lib::path_validate::TreeEntryNameAudit
+pub fn grit_lib::path_validate::component_is_dotgit_alias(&[u8], grit_lib::path_validate::ProtectOptions) -> bool
+pub fn grit_lib::path_validate::validate_component(&[u8], grit_lib::path_validate::EntryMode, grit_lib::path_validate::ProtectOptions) -> core::result::Result<(), grit_lib::path_validate::PathComponentError>
+pub fn grit_lib::path_validate::validate_path(&[u8], grit_lib::path_validate::EntryMode, grit_lib::path_validate::ProtectOptions) -> core::result::Result<(), grit_lib::path_validate::PathComponentError>
 pub mod grit_lib::porcelain
 pub mod grit_lib::porcelain::add
 pub enum grit_lib::porcelain::add::StageMode

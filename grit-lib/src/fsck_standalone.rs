@@ -4,9 +4,9 @@
 //! documented camelCase fsck config keys. Detail strings are Grit-owned prose.
 
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
-use crate::dotfile::{is_hfs_dotgit, is_ntfs_dotgit};
 use crate::git_date::tm::date_overflows;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
+use crate::path_validate::{audit_tree_entry_name, ProtectOptions};
 
 /// Repository hash width for object-id fields in commit, tag, and tree headers.
 #[derive(Debug, Clone, Copy)]
@@ -645,51 +645,22 @@ fn audit_canonical_order(entries: &[ParsedTreeEntry]) -> (bool, bool) {
 }
 
 fn note_entry_shape(entry: &ParsedTreeEntry, problems: &mut TreeProblemSet) {
-    if entry.name == b"." {
+    let audit = audit_tree_entry_name(&entry.name, ProtectOptions::fsck());
+    if audit.dot {
         problems.dot_name = true;
     }
-    if entry.name == b".." {
+    if audit.dotdot {
         problems.dotdot_name = true;
     }
-    if entry.name.contains(&b'/') {
+    if audit.slash {
         problems.slash_in_name = true;
     }
     if entry.name.len() > MAX_TREE_ENTRY_LEN {
         problems.oversized_name = true;
     }
-    if tree_entry_name_is_dotgit(&entry.name) {
+    if audit.dotgit {
         problems.dotgit_alias = true;
     }
-    if let Ok(name_str) = std::str::from_utf8(&entry.name) {
-        if is_hfs_dotgit(name_str) || is_ntfs_dotgit(name_str) {
-            problems.dotgit_alias = true;
-        }
-        if scan_ntfs_backslash_dotgit(name_str) {
-            problems.dotgit_alias = true;
-        }
-    }
-}
-
-fn tree_entry_name_is_dotgit(name: &[u8]) -> bool {
-    if name == b".git" || name.eq_ignore_ascii_case(b"git~1") {
-        return true;
-    }
-    let Ok(s) = std::str::from_utf8(name) else {
-        return false;
-    };
-    is_hfs_dotgit(s) || is_ntfs_dotgit(s)
-}
-
-fn scan_ntfs_backslash_dotgit(name: &str) -> bool {
-    let mut slash_rest = name;
-    while let Some(idx) = slash_rest.find('\\') {
-        let after = &slash_rest[idx + 1..];
-        if is_ntfs_dotgit(after) {
-            return true;
-        }
-        slash_rest = after;
-    }
-    false
 }
 
 fn is_null_oid_bytes(raw: &[u8]) -> bool {
