@@ -1249,6 +1249,9 @@ impl Index {
         }
 
         let hash_len = hash_algo.len();
+        if data.len() < hash_len {
+            return Err(Error::IndexError("file too short for checksum".to_owned()));
+        }
         let (body, checksum) = data.split_at(data.len() - hash_len);
         if !checksum.iter().all(|&b| b == 0) {
             verify_trailer(hash_algo, data).map_err(|e| {
