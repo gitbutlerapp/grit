@@ -3,7 +3,7 @@
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::ident::{author_identity_line, parse_author_arg};
+use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
