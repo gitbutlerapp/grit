@@ -5,7 +5,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageOptions};
-use grit_lib::porcelain::commit::{commit_worktree, create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{commit_worktree, create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -38,6 +38,8 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: HookPolicy::default(),
+        dry_run: false,
     }
 }
 
@@ -260,6 +262,8 @@ fn commit_worktree_req(message: &str) -> CommitRequest {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
+        hooks: HookPolicy::default(),
+        dry_run: false,
     }
 }
 

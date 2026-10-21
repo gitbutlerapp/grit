@@ -187,7 +187,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
-    use crate::porcelain::commit::{create_commit, CommitRequest};
+    use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
     use crate::progress::NullProgress;
     use crate::repo::InitOptions;
 
@@ -208,6 +208,8 @@ mod tests {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         };
         create_commit(repo, &req, &mut NullProgress)
             .expect("commit")

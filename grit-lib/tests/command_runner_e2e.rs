@@ -7,7 +7,7 @@ use grit_lib::command_runner::{RecordedResponse, RecordingRunner};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::FilterError;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::crlf::run_filter;
@@ -107,6 +107,8 @@ fn create_commit_aborts_on_pre_commit_hook_failure() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -147,6 +149,8 @@ fn commit_msg_hook_receives_editmsg_path_argument() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

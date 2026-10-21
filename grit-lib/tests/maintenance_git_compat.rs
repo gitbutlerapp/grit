@@ -14,7 +14,7 @@ use grit_lib::maintenance::{
 use grit_lib::objects::pack::{clear_pack_cache, test_pack_cache_guard};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git_fsck;
@@ -103,6 +103,8 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -1213,6 +1215,8 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -1235,6 +1239,8 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

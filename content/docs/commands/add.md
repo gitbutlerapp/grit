@@ -28,6 +28,8 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 | `<path>...` | Files or directories to stage. Omit to stage every change. |
 | `-u`, `--update` | Stage tracked changes only (modified and deleted paths). Untracked files are left alone. With no paths, applies to the whole tree. |
 | `--dry-run` | List paths that would be staged without updating the index or writing objects. |
+| `-N`, `--intent-to-add` | Record intent-to-add entries (empty blob, extended flag) instead of hashing content. |
+| `-f`, `--force` | Stage ignored paths when named explicitly (instead of erroring with pathspec ignored). |
 | `--pathspec-from-file` | Read additional pathspecs from a file, or `-` for stdin (same rules as Git). |
 | `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
 | `--executable` | Stage listed regular files with mode `100755` in the index (requires at least one path). |
@@ -68,6 +70,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `modified` | string[] | Tracked paths updated in the index. |
 | `removed` | string[] | Tracked paths removed from the index (deleted in the worktree). |
 | `dry_run` | boolean | True when `--dry-run` was passed. |
+| `intent_to_add` | string[] | Paths recorded with intent-to-add (`-N` / `--intent-to-add`). |
 | `count` | number | Total paths in `added`, `modified`, and `removed`. |
 | `staged` | number | Same as `count` (kept for older scripts). |
 

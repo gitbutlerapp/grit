@@ -401,7 +401,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     use std::sync::Arc;
 
     use grit_lib::porcelain::add::stage_for_commit;
-    use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+    use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
     use grit_lib::progress::NullProgress;
     use grit_lib::refs;
     use grit_lib::refs::store::{MemoryRefStore, RawRef};
@@ -425,6 +425,8 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

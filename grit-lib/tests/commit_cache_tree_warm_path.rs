@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::{cache_tree_extension_valid, cache_tree_fully_valid};
 use grit_lib::index::Index;
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
 use grit_lib::porcelain::stage_tracked::{
     stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
 };
@@ -96,6 +96,8 @@ fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
+        hooks: HookPolicy::default(),
+        dry_run: false,
     }
 }
 

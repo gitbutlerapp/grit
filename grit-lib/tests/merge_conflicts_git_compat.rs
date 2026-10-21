@@ -5,7 +5,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -27,6 +27,8 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: HookPolicy::default(),
+        dry_run: false,
     }
 }
 

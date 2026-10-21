@@ -61,6 +61,10 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 | `<path>…` | After `--`, limit the commit to these paths (partial commit). |
 | `--amend` | Replace the tip commit on the current branch. |
 | `--allow-empty` | Record a commit even when staged content matches the parent tree (empty tree change). |
+| `--dry-run` | Compute the commit tree and file list without writing objects, updating refs, or running hooks. |
+| `-F`, `--message-file <path>` | Read the commit message from a file; use `-` for stdin (same body rules as `-m`). |
+| `--author <author>` | Override the author line (`Name <email>`); committer identity is unchanged unless you also set `GIT_COMMITTER_*`. |
+| `--no-verify` | Skip `pre-commit` and `commit-msg` hooks; `post-commit` still runs on a real commit. |
 
 ### Config
 
@@ -121,6 +125,11 @@ Pass `--json` for stable, scripting-friendly output:
 | `amended` | boolean | `true` when `--amend` was used |
 | `change_id` | string or null | Stored `change-id` header on the new commit, or `null` when absent |
 | `scope` | string | `auto_stage`, `staged`, or `paths` — how the index was prepared |
+| `dry_run` | boolean | `true` when `--dry-run` was passed |
+| `files` | array | Path-level changes (`path`, `status`, optional `old_path` for renames) |
+| `parents` | array of strings | Parent commit OIDs that would be stored |
+| `author` | object | `name`, `email`, and `date` recorded on the commit |
+| `hooks_run` | array of strings | Hook names that ran (`pre-commit`, `commit-msg`); empty on dry-run |
 
 Example:
 
@@ -148,6 +157,18 @@ Commit the index without auto-staging (with `commit.autoStage=true`, or always w
 ```console
 $ grit add a.txt
 $ grit commit --staged -m "index only"
+```
+
+Preview a commit without writing (message required):
+
+```console
+$ grit commit --dry-run -m "preview"
+```
+
+Read the message from stdin (agents):
+
+```console
+$ printf '%s\n' "Subject line" "" "Body." | grit commit --staged -F -
 ```
 
 ## Markdown output

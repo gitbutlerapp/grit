@@ -16,7 +16,7 @@ use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::IndexEntry;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use grit_lib::repo::Repository;
@@ -35,6 +35,8 @@ fn commit_request(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: HookPolicy::default(),
+        dry_run: false,
     }
 }
 

@@ -22,6 +22,7 @@ use crate::index::{
 use crate::objects::ObjectId;
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
+use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
@@ -179,7 +180,8 @@ pub(crate) fn stage_for_commit_on_index(
         dry_run,
         ..StageOptions::default()
     };
-    stage_inner_on_index(repo, &opts, progress, true, index, false)
+    // Tracked-scan staging writes blobs; use the diff-only path when previewing.
+    stage_inner_on_index(repo, &opts, progress, !dry_run, index, false)
 }
 
 /// Stage paths into a caller-owned index without writing it to disk.
@@ -402,6 +404,15 @@ fn stage_inner_on_index(
         validate_pathspecs(repo, index, work_tree, &unstaged, &untracked, opts, &rules)?;
     }
 
+    if opts.mode == StageMode::All {
+        validate_worktree_paths_for_staging(&rules, &untracked)?;
+        for entry in &unstaged {
+            if entry.status != DiffStatus::Deleted {
+                validate_worktree_paths_for_staging(&rules, &[entry.path().to_owned()])?;
+            }
+        }
+    }
+
     let matches =
         |path: &str| opts.pathspecs.is_empty() || repo.paths_match_pathspecs(path, &opts.pathspecs);
 
@@ -463,18 +474,18 @@ fn stage_inner_on_index(
             }
             if !dry_run {
                 icase_map.remove_alias_of(index, path.as_bytes());
-                apply_tracked_stage_plan(
-                    repo,
-                    work_tree,
-                    &path,
-                    &plan,
-                    staging_stats.get(&path),
-                    index,
-                    has_unmerged,
-                    opts.executable_hint,
-                    &matches,
-                )?;
             }
+            apply_tracked_stage_plan(
+                repo,
+                work_tree,
+                &path,
+                &plan,
+                staging_stats.get(&path),
+                index,
+                has_unmerged,
+                opts.executable_hint,
+                &matches,
+            )?;
             outcome.modified.push(path);
         }
     }
@@ -1067,6 +1078,23 @@ fn stage_untracked_path(
     entry.mode = mode;
     index.stage_file(entry);
     mark_fsmonitor_staged(index, &index_relpath);
+    Ok(())
+}
+
+fn validate_worktree_paths_for_staging(rules: &WorktreeRules, paths: &[String]) -> Result<()> {
+    let protect = ProtectOptions::from_config(rules.config());
+    for path in paths {
+        if path.ends_with('/') {
+            continue;
+        }
+        validate_path(
+            path.as_bytes(),
+            EntryMode::new(0o100644),
+            protect,
+            PathValidationKind::Worktree,
+        )
+        .map_err(|reason| Error::invalid_path_component(path, reason))?;
+    }
     Ok(())
 }
 

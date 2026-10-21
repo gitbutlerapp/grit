@@ -13,7 +13,7 @@ use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_test_support::git_fsck;
@@ -70,6 +70,8 @@ fn many_commits(repo: &Repository, n: usize) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )

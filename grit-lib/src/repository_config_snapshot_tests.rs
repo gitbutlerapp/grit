@@ -20,7 +20,7 @@ mod tests {
     use crate::objects::ObjectKind;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::checkout::checkout_between_trees;
-    use crate::porcelain::commit::{create_commit, CommitRequest};
+    use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::NullProgress;
     use crate::ref_storage::RefStorageFormat;
@@ -78,6 +78,8 @@ mod tests {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         };
         cascade_load_counters::measure(|| {
             create_commit(&repo3, &req, &mut NullProgress).unwrap();

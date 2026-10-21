@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::list_refs;
 use grit_lib::refs::ref_namespace::storage_ref_name;
@@ -250,6 +250,8 @@ fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

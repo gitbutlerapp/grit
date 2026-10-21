@@ -1498,7 +1498,7 @@ mod tests {
     use super::*;
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::porcelain::add::stage_for_commit;
-    use crate::porcelain::commit::{create_commit, CommitRequest};
+    use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
     use crate::progress::NullProgress;
     use crate::repo::InitOptions;
     use tempfile::TempDir;
@@ -1522,6 +1522,8 @@ mod tests {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -1583,6 +1585,8 @@ mod tests {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -1620,6 +1624,8 @@ mod tests {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -1649,6 +1655,8 @@ mod tests {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -1725,6 +1733,8 @@ mod tests {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -1753,6 +1763,8 @@ mod tests {
                     assume_worktree_synced: false,
                     skip_pre_commit_tree_match: false,
                     staged_change_count: None,
+                    hooks: HookPolicy::default(),
+                    dry_run: false,
                 },
                 &mut NullProgress,
             )
@@ -1816,6 +1828,8 @@ mod tests {
                     assume_worktree_synced: false,
                     skip_pre_commit_tree_match: false,
                     staged_change_count: None,
+                    hooks: HookPolicy::default(),
+                    dry_run: false,
                 },
                 &mut NullProgress,
             )

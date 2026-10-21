@@ -52,6 +52,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `commit/small@small` | Commit on small synth: grit commit bench vs git add+commit |
 | `commit/small@synth-100k` | Commit after staging ~1% paths: grit commit bench vs git add+commit |
 | `commit/small@synth-10k` | Commit staged changes vs git commit |
+| `commit/staged@synth-100k` | Commit index only: grit commit --staged vs git commit (after partial stage) |
+| `commit/paths@synth-10k` | Partial commit: grit commit -- \<paths\> vs git commit --only |
 | `init/empty@small` | Initialize empty repo: grit init vs git init in an empty directory |
 | `mv/file@synth-10k` | Rename tracked file: grit mv <src> <dst> vs git mv <src> <dst> |
 | `reset/hard@synth-10k` | Hard reset dirty tree: grit reset --hard HEAD vs git reset --hard HEAD |
@@ -252,6 +254,6 @@ Common paths not yet in the daily matrix or blocked on roadmap CLI:
 
 - **`grit log --author` / `--since` / `--until`** — `log/author@git-git` is registered as **pending** until revwalk author/date filters land (roadmap 2).
 - **`grit rebase` / `grit history rebase`** — Top-level rebase is a later roadmap item; no daily row until the history engine exposes it.
-- **`grit commit --staged` / path-only commit** — Roadmap 2 commit model; matrix still uses auto-stage `commit/small@*`.
+- **`grit commit --dry-run`** — Preview only; no daily row (covered indirectly by commit scenarios).
 - **Partial clone `--blobs`** — Fetch/clone blob filters land with roadmap partial-clone work.
 - **ODB/pack micro-ops** — Criterion `odb_backend` / pack ingest — not duplicated in daily census yet.

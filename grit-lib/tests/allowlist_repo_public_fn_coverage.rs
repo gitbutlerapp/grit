@@ -54,7 +54,7 @@ use grit_lib::objects::pack_objects::{
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::checkout::apply_index_file_mode;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::stash::worktree_bytes_for_index_mode;
 use grit_lib::porcelain::status::{expand_untracked_for_staging, status_path_matches_worktree};
 use grit_lib::porcelain::tag::{creator_date, get_tag_annotation, tag_contains, tag_points_at};
@@ -100,6 +100,8 @@ fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

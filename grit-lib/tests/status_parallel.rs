@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::porcelain::commit::HookPolicy;
 use grit_lib::porcelain::status::{status, IgnoredMode, StatusModel, StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -340,6 +341,8 @@ fn large_index_stat_refresh_parallel_matches_serial() {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: HookPolicy::default(),
+        dry_run: false,
     };
     grit_lib::porcelain::commit::create_commit(&repo, &req, &mut NullProgress).expect("commit");
     for rel in ["mix/00030.txt", "mix/00040.txt", "mix/00050.txt"] {

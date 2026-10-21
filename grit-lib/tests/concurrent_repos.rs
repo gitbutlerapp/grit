@@ -21,7 +21,7 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::notes::{write_notes_commit, NotesTreeEntry};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
@@ -203,6 +203,8 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -405,6 +407,8 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: HookPolicy::default(),
+                dry_run: false,
             },
             &mut NullProgress,
         )

@@ -173,7 +173,7 @@ pub fn commit_with_scope(
 
 /// Preview a commit for `scope` without mutating the repository (objects, index on disk, refs, hooks).
 ///
-/// Uses in-memory tree hashing ([`WriteTreePersistence::DryRun`]) and returns the same validation
+/// Uses in-memory tree hashing ([`crate::write_tree::WriteTreePersistence::DryRun`]) and returns the same validation
 /// errors as [`commit_with_scope`] for detached HEAD, unmerged index, and nothing-to-commit.
 ///
 /// # Errors
@@ -512,6 +512,7 @@ fn commit_files_index_vs_parent_tree(
     Ok(files)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish_commit_dry_run(
     repo: &Repository,
     index: &mut Index,

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
@@ -26,6 +26,8 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: HookPolicy::default(),
+        dry_run: false,
     }
 }
 

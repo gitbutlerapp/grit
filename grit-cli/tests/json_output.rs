@@ -2231,7 +2231,18 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     write_file(&seed.join("a.txt"), "hi\n");
 
     let added = gs_json(&seed, &["add"]);
-    assert_eq!(keys(&added), ["staged"]);
+    assert_eq!(
+        keys(&added),
+        [
+            "added",
+            "count",
+            "dry_run",
+            "intent_to_add",
+            "modified",
+            "removed",
+            "staged",
+        ]
+    );
 
     write_file(&seed.join("drop.txt"), "bye\n");
     gs_ok(&seed, &["add", "drop.txt"]);
@@ -2267,10 +2278,15 @@ fn schema_top_level_keys_are_stable() -> TestResult {
         keys(&committed),
         [
             "amended",
+            "author",
             "branch",
             "change_id",
             "changes",
+            "dry_run",
+            "files",
+            "hooks_run",
             "oid",
+            "parents",
             "scope",
             "subject"
         ]

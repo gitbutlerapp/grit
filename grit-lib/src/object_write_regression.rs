@@ -14,7 +14,7 @@ use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR, MODE_TREE};
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::porcelain::add::{stage, StageOptions};
-use crate::porcelain::commit::{create_commit, CommitRequest};
+use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use crate::progress::NullProgress;
 use crate::repo::{init_repository, Repository};
 use crate::write_tree::{cache_tree_update, write_tree_update_index, WriteTreeFlags};
@@ -257,6 +257,8 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -291,6 +293,8 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -415,6 +419,8 @@ fn pack_signature_not_restatted_per_object() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -488,6 +494,8 @@ fn pack_signature_not_restatted_per_object() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

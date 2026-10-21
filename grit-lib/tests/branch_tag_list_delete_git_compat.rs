@@ -11,7 +11,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{create_branch, delete_branch, list_branches};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::tag::{create_tag, delete_tag, list_tags, CreateTagRequest, TagKind};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -288,6 +288,8 @@ fn list_and_delete_on_reftable_backend() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

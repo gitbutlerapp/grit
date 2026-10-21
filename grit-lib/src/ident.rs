@@ -2,6 +2,16 @@
 //!
 //! Parses `Name <email> <unix-timestamp> <+HHMM>` with the same edge cases as Git:
 //! overflow, non-digit timestamps, and whitespace-only timestamps (sentinel handling).
+//!
+//! ```rust
+//! use grit_lib::ident::parse_author_arg;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let contact = parse_author_arg("Ada Lovelace <ada@example.com>")?;
+//! assert_eq!(contact.name, "Ada Lovelace");
+//! assert_eq!(contact.email, "ada@example.com");
+//! # Ok(())
+//! # }
+//! ```
 
 use crate::commit::assemble_identity;
 use crate::git_date::tm::date_overflows;

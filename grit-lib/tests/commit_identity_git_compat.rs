@@ -13,7 +13,7 @@ use grit_lib::config::ident_resolve::{
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::{parse_commit, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -131,6 +131,8 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: HookPolicy::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
