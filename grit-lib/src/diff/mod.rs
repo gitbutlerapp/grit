@@ -25,8 +25,6 @@ mod merge_commit;
 mod no_index;
 mod options;
 mod patch_log;
-pub mod pickaxe;
-mod posix_ere;
 mod targets;
 mod tree_content;
 mod unified_emit;
@@ -40,8 +38,7 @@ pub use files::{build_file_diffs, name_status_line, DiffFilesOutput};
 pub use filter::{DiffFilter, InvalidDiffFilter};
 pub use handle::Diff;
 pub use has_changes::{
-    preprocess_for_whitespace, text_sides_differ, HAS_CHANGES_CALL_COUNT,
-    WORKTREE_HAS_CHANGES_ENTRIES_SCANNED,
+    text_sides_differ, HAS_CHANGES_CALL_COUNT, WORKTREE_HAS_CHANGES_ENTRIES_SCANNED,
 };
 pub use merge_commit::{combined_structured_patch_body, commit_diff_files, DiffMerges};
 pub use no_index::{diff_paths, NoIndexError};
@@ -65,7 +62,6 @@ pub use patch_log::{
     write_diff_entry_log_patch, write_patch, write_patch_resolved, write_patch_structured,
     LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchTextOptions,
 };
-pub use pickaxe::{Pickaxe, PickaxeError, PickaxeKind};
 pub use targets::{
     resolve_diff_arguments, DiffArguments, DiffTarget, FileDiff, ResolveDiffArgumentsError,
 };

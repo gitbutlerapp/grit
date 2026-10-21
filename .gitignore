@@ -20,4 +20,3 @@ reports/*
 
 # Agent skills installed locally by tools (e.g. GitButler)
 .agents/skills/
-.auto-resolution/

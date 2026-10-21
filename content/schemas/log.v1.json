@@ -15,86 +15,6 @@
       ],
       "type": "string"
     },
-    "CommitJson": {
-      "description": "Shared commit object in JSON output (`log`, `show`, `revs`, `shortlog`, …).",
-      "properties": {
-        "author": {
-          "$ref": "#/definitions/Person"
-        },
-        "committer": {
-          "$ref": "#/definitions/Person"
-        },
-        "message": {
-          "description": "Full message body with trailing whitespace trimmed.",
-          "type": "string"
-        },
-        "oid": {
-          "type": "string"
-        },
-        "parents": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "refs": {
-          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
-          "items": {
-            "$ref": "#/definitions/CommitRefJson"
-          },
-          "type": "array"
-        },
-        "relative_date": {
-          "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "subject": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "author",
-        "committer",
-        "message",
-        "oid",
-        "parents",
-        "refs",
-        "subject"
-      ],
-      "type": "object"
-    },
-    "CommitRefJson": {
-      "description": "Ref decoration attached to a commit in JSON output.",
-      "properties": {
-        "kind": {
-          "$ref": "#/definitions/CommitRefKind"
-        },
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "name"
-      ],
-      "type": "object"
-    },
-    "CommitRefKind": {
-      "description": "Decoration category in JSON (`--json` contract).",
-      "enum": [
-        "branch",
-        "remote_branch",
-        "tag",
-        "stash",
-        "head",
-        "grafted",
-        "other"
-      ],
-      "type": "string"
-    },
     "DiffStat": {
       "description": "A diffstat: per-file insertion/deletion counts plus totals.",
       "properties": {
@@ -159,13 +79,6 @@
       "properties": {
         "binary": {
           "type": "boolean"
-        },
-        "combined_status": {
-          "description": "Per-parent combined status letters (`MM`, `DD`, …) for merge `--cc` name-status.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "hunks": {
           "description": "Patch hunks; omitted in JSON unless the output format is a full patch.",
@@ -289,13 +202,6 @@
     "Hunk": {
       "description": "A contiguous run of changes plus surrounding context.",
       "properties": {
-        "combined_header": {
-          "description": "Combined (`--cc`) hunk header; when set, [`Self::old_start`] / range fields are omitted from human output.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "context": {
           "description": "The enclosing definition line (function/struct/…), when found.",
           "type": [
@@ -367,15 +273,6 @@
             "null"
           ]
         },
-        "parents": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
         "segments": {
           "items": {
             "$ref": "#/definitions/Segment"
@@ -425,44 +322,10 @@
       ],
       "type": "object"
     },
-    "LogAuthorGroupJson": {
-      "description": "Author aggregate in `--json` output when `--group-by author` is set.",
-      "properties": {
-        "commits": {
-          "items": {
-            "$ref": "#/definitions/CommitJson"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "count": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "email": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "count",
-        "email",
-        "name"
-      ],
-      "type": "object"
-    },
     "LogCommit": {
       "description": "One commit in `grit log` JSON output.",
       "properties": {
         "author": {
-          "$ref": "#/definitions/Person"
-        },
-        "committer": {
           "$ref": "#/definitions/Person"
         },
         "files": {
@@ -475,25 +338,8 @@
             "null"
           ]
         },
-        "message": {
-          "description": "Full message body with trailing whitespace trimmed.",
-          "type": "string"
-        },
         "oid": {
           "type": "string"
-        },
-        "parents": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "refs": {
-          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
-          "items": {
-            "$ref": "#/definitions/CommitRefJson"
-          },
-          "type": "array"
         },
         "relative_date": {
           "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
@@ -529,11 +375,7 @@
       },
       "required": [
         "author",
-        "committer",
-        "message",
         "oid",
-        "parents",
-        "refs",
         "subject"
       ],
       "type": "object"
@@ -578,35 +420,21 @@
   "description": "Result of `grit log`: one page of commits, plus the next page's start (if any).",
   "properties": {
     "commits": {
-      "default": [],
       "items": {
         "$ref": "#/definitions/LogCommit"
       },
       "type": "array"
     },
-    "groups": {
-      "items": {
-        "$ref": "#/definitions/LogAuthorGroupJson"
-      },
-      "type": [
-        "array",
-        "null"
-      ]
-    },
     "next": {
-      "description": "Opaque continuation cursor for `--cursor`, or `null` when there is no further history.",
+      "description": "Opaque continuation cursor for `--before`, or `null` when there is no further history.",
       "type": [
         "string",
         "null"
       ]
-    },
-    "truncated": {
-      "description": "True when more commits matched the query than returned in this page (`-n` or default page size).",
-      "type": "boolean"
     }
   },
   "required": [
-    "truncated"
+    "commits"
   ],
   "title": "LogOutcome",
   "type": "object"

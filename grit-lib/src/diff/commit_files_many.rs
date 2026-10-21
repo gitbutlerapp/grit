@@ -163,6 +163,7 @@ fn diff_one_commit(
         entries.sort_by(|a, b| a.path().cmp(b.path()));
     }
     entries = filter_entries(diff.repository(), entries, pathspecs);
+    entries = crate::diff::apply_diff_filter(entries, opts.diff_options.filter);
     let mut output = build_file_diffs(
         odb,
         entries,

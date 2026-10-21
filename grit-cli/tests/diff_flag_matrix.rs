@@ -278,9 +278,14 @@ fn compare_text_case(fx: &Fixture, case: &Case) {
     let g = exec_grit(fx, grit_args);
     let r = exec_git(fx, git_args.clone());
     assert_eq!(
-        g.status, r.status,
+        g.status,
+        r.status,
         "{}: exit grit={:?} git={:?}\ngrit stderr: {}\ngit stderr: {}",
-        &case_label(case), g.status, r.status, g.stderr, r.stderr
+        &case_label(case),
+        g.status,
+        r.status,
+        g.stderr,
+        r.stderr
     );
     if g.ok() && r.ok() {
         let mut grit_stdout = if matches!(case.mode, Mode::Show) {
@@ -294,7 +299,8 @@ fn compare_text_case(fx: &Fixture, case: &Case) {
             git_stdout = sort_name_status_lines(&git_stdout);
         }
         assert_eq!(
-            grit_stdout, git_stdout,
+            grit_stdout,
+            git_stdout,
             "{}: stdout mismatch\ngrit: {:?}\ngit: {:?}",
             case_label(case),
             build_grit_args(fx, case.mode, case.out, case.flags),
@@ -512,7 +518,12 @@ fn compare_json_case(fx: &Fixture, case: &Case) {
     match case.mode {
         Mode::Log => {
             let grit_commits = grit_log_commits(&v);
-            assert_eq!(grit_commits.len(), 3, "{}: expected 3 commits", &case_label(case));
+            assert_eq!(
+                grit_commits.len(),
+                3,
+                "{}: expected 3 commits",
+                &case_label(case)
+            );
             let stat_flag_strings = flags_without_unified_context(case.flags);
             let stat_flags = flag_refs(&stat_flag_strings);
             for (oid, grit_files) in grit_commits {
@@ -566,14 +577,16 @@ fn compare_json_case(fx: &Fixture, case: &Case) {
                 .stdout,
             );
             let git_num = parse_git_numstat(
-                &exec_git(
-                    fx,
-                    build_git_args(fx, case.mode, Out::Numstat, &stat_flags),
-                )
-                .stdout,
+                &exec_git(fx, build_git_args(fx, case.mode, Out::Numstat, &stat_flags)).stdout,
             );
             let git_hunks = parse_git_patch_hunks(&patch_out.stdout);
-            assert_grit_files_match_git(&grit_files, &git_ns, &git_num, &git_hunks, &case_label(case));
+            assert_grit_files_match_git(
+                &grit_files,
+                &git_ns,
+                &git_num,
+                &git_hunks,
+                &case_label(case),
+            );
         }
         _ => {
             let grit_files = grit_files_from_value(&v);
@@ -590,7 +603,13 @@ fn compare_json_case(fx: &Fixture, case: &Case) {
                 &exec_git(fx, build_git_args(fx, case.mode, Out::Numstat, &stat_flags)).stdout,
             );
             let git_hunks = parse_git_patch_hunks(&patch_out.stdout);
-            assert_grit_files_match_git(&grit_files, &git_ns, &git_num, &git_hunks, &case_label(case));
+            assert_grit_files_match_git(
+                &grit_files,
+                &git_ns,
+                &git_num,
+                &git_hunks,
+                &case_label(case),
+            );
         }
     }
 }
@@ -708,11 +727,7 @@ fn matrix_cases() -> Vec<Case> {
                 if flags_conflict(flags) || !flags_apply_to_out(flags, out) {
                     continue;
                 }
-                cases.push(Case {
-                    mode,
-                    out,
-                    flags,
-                });
+                cases.push(Case { mode, out, flags });
             }
         }
     }

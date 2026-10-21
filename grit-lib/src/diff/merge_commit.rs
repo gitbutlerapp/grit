@@ -141,10 +141,12 @@ pub fn commit_diff_files(
             old_tree.as_ref(),
             Some(&commit.tree),
             "",
+            options,
             config,
             thread_policy,
         )?;
         let filtered = filter_entries(entries, pathspecs);
+        let filtered = crate::diff::apply_diff_filter(filtered, options.filter);
         return build_file_diffs(
             repo.odb(),
             filtered,
@@ -189,12 +191,11 @@ fn tree_diff_entries(
     old_tree: Option<&ObjectId>,
     new_tree: Option<&ObjectId>,
     prefix: &str,
+    options: &DiffOptions,
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
-    let threshold = crate::diff::renames_from_config(config)
-        .threshold_percent()
-        .unwrap_or(100);
+    let threshold = options.rename_threshold_u32();
     crate::diff::diff_trees_with_renames_and_policy(
         odb,
         old_tree,

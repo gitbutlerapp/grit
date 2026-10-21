@@ -215,6 +215,13 @@ impl DiffOptions {
         self
     }
 
+    /// Builder-style update of `-W` / function-context hunk expansion.
+    #[must_use]
+    pub fn with_function_context(mut self, function_context: bool) -> Self {
+        self.function_context = function_context;
+        self
+    }
+
     /// Builder-style update of whitespace comparison rules.
     #[must_use]
     pub fn with_whitespace(mut self, whitespace: WhitespaceMode) -> Self {

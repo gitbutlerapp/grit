@@ -555,7 +555,7 @@ fn build_commit_outcome(
 
     let many_results = if let Some(detail) = detail {
         let mut diff_options = DiffOptions::from_config(config.as_ref());
-        format.apply_context(&mut diff_options);
+        format.apply_to_options(&mut diff_options, config.as_ref())?;
         diff_options.word_level_inline = false;
         let opts = CommitFilesManyOptions {
             diff_options,

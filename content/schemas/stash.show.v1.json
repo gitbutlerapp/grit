@@ -18,10 +18,6 @@
     "DiffOutcome": {
       "description": "Result of `grit diff`.",
       "properties": {
-        "changed": {
-          "description": "Whether any selected change exists (matches `grit diff --quiet` / `--exit-code`).",
-          "type": "boolean"
-        },
         "files": {
           "items": {
             "$ref": "#/definitions/FileDiff"
@@ -40,7 +36,6 @@
         }
       },
       "required": [
-        "changed",
         "files"
       ],
       "type": "object"
@@ -109,13 +104,6 @@
       "properties": {
         "binary": {
           "type": "boolean"
-        },
-        "combined_status": {
-          "description": "Per-parent combined status letters (`MM`, `DD`, …) for merge `--cc` name-status.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "hunks": {
           "description": "Patch hunks; omitted in JSON unless the output format is a full patch.",
@@ -239,13 +227,6 @@
     "Hunk": {
       "description": "A contiguous run of changes plus surrounding context.",
       "properties": {
-        "combined_header": {
-          "description": "Combined (`--cc`) hunk header; when set, [`Self::old_start`] / range fields are omitted from human output.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "context": {
           "description": "The enclosing definition line (function/struct/…), when found.",
           "type": [
@@ -314,15 +295,6 @@
           "minimum": 0.0,
           "type": [
             "integer",
-            "null"
-          ]
-        },
-        "parents": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
             "null"
           ]
         },

@@ -132,35 +132,14 @@ impl ZlibInflateScratch {
             return self.inflate_prefix_zero(bytes);
         }
         let mut out = vec![0u8; max_out];
-        let consumed = self.decompress_prefix_into(bytes, max_out, &mut out)?;
-        Ok((out, consumed))
-    }
-
-    /// Decompress at most `max_out` bytes into `out`, reusing `out`'s capacity when possible.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::Zlib`] for invalid or truncated zlib data.
-    pub fn decompress_prefix_into(
-        &mut self,
-        bytes: &[u8],
-        max_out: usize,
-        out: &mut Vec<u8>,
-    ) -> Result<usize> {
-        out.clear();
-        if max_out == 0 {
-            let (_, consumed) = self.inflate_prefix_zero(bytes)?;
-            return Ok(consumed);
-        }
-        out.resize(max_out, 0);
-        let consumed = self.decompress_into(bytes, out, false)?;
+        let consumed = self.decompress_into(bytes, &mut out, false)?;
         out.truncate(
             self.dec
                 .total_out()
                 .try_into()
                 .map_err(|_| Error::CorruptObject("inflate output overflow".to_owned()))?,
         );
-        Ok(consumed)
+        Ok((out, consumed))
     }
 
     fn inflate_prefix_zero(&mut self, bytes: &[u8]) -> Result<(Vec<u8>, usize)> {
