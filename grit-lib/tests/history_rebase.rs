@@ -464,6 +464,7 @@ fn history_rebase_matches_git_replay_onto() {
     assert_eq!(u_g, u_git);
     assert_eq!(o_g, o_git);
     assert_eq!(t_g, t_git);
+    git(wt_g, &["config", "grit.changeIds", "false"]);
     let grit = open_grit(wt_g);
     let mut replay_opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, false);
     replay_opts.skip_applied = false;
@@ -514,6 +515,7 @@ fn history_rebase_matches_git_rebase() {
     assert_eq!(u_g, u_git);
     assert_eq!(o_g, o_git);
     assert_eq!(t_g, t_git);
+    git(wt_g, &["config", "grit.changeIds", "false"]);
     let grit = open_grit(wt_g);
     let plan = rebase_onto(
         &grit,

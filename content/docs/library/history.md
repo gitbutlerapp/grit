@@ -32,6 +32,10 @@ To assign staged hunks automatically, [`absorb`](rustdoc:grit_lib::revwalk::hist
 
 [`RewritePlan::replacement`](rustdoc:grit_lib::revwalk::history::RewritePlan::replacement) maps one original commit to its rewritten OID (`None` when dropped), and [`RewritePlan::head_change`](rustdoc:grit_lib::revwalk::history::RewritePlan::head_change) reports `HEAD`'s commit before and after the rewrite, or `None` when `HEAD` does not move. `grit history` builds its `--json` `head` field from it.
 
+## Change ids
+
+History planning preserves [`change-id`](rustdoc:grit_lib::change_id::change_id) and legacy `gitbutler-change-id` headers on rewritten commits (signatures are stripped). When [`ChangeIdPolicy`](rustdoc:grit_lib::change_id::ChangeIdPolicy) is enabled and the source commit has no stored id, the planner writes the Jujutsu-derived id for the original commit oid into the replacement object. Commits inserted during a rewrite (for example the parent created by [`split`](rustdoc:grit_lib::revwalk::history::split)) receive a new random id via [`ChangeIdPolicy::id_for_new_commit`](rustdoc:grit_lib::change_id::ChangeIdPolicy::id_for_new_commit). With `grit.changeIds=false`, existing headers are still copied but no derived or random ids are added. See [Change ids](change-ids.md) for header format and config.
+
 ## Errors
 
 [`HistoryError`](rustdoc:grit_lib::revwalk::history::HistoryError) covers planning failures (conflicts, out-of-scope commits, branch checked out elsewhere) and apply failures:

@@ -401,6 +401,7 @@ fn history_move_matches_git_rebase_reorder() {
     let wt2 = tempfile::tempdir().expect("copy dest");
     copy_repo(wt, wt2.path());
 
+    git(wt, &["config", "grit.changeIds", "false"]);
     let grit = open_grit(wt);
     let opts = RewriteOptions {
         scope: RefScope::Branches,

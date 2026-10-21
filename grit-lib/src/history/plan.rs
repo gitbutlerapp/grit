@@ -3,7 +3,11 @@
 use std::collections::{HashMap, HashSet};
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
+use crate::change_id::{
+    change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator, ChangeIdPolicy,
+};
 use crate::commit::signing::extra_headers_without_commit_signatures;
 use crate::commit_encoding::identity_raw_for_serialized_commit;
 use crate::error::Error;
@@ -12,7 +16,7 @@ use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::resolve_head;
@@ -55,8 +59,37 @@ fn record_merge_call() {
     MERGE_TREE_CALLS.fetch_add(1, Ordering::Relaxed);
 }
 
+struct ChangeIdWriteContext {
+    policy: ChangeIdPolicy,
+    generator: Arc<dyn ChangeIdGenerator>,
+    hash_algo: HashAlgo,
+}
+
+impl ChangeIdWriteContext {
+    fn from_repo(repo: &Repository) -> Result<Self, HistoryError> {
+        let config = repo.config().map_err(library_err)?;
+        Ok(Self {
+            policy: ChangeIdPolicy::from_config(config.as_ref()),
+            generator: repo.change_id_generator(),
+            hash_algo: repo.odb().hash_algo(),
+        })
+    }
+}
+
+fn change_id_err(err: ChangeIdError) -> HistoryError {
+    HistoryError::Planning {
+        message: err.to_string(),
+    }
+}
+
 /// Build a rewrite plan: walk affected history, write replacement commits to the ODB, and
 /// record ref movements without touching refs, the index, or the worktree.
+///
+/// Replacement commits preserve `change-id`, legacy `gitbutler-change-id`, and other extra
+/// headers from the template (signatures are stripped). When [`ChangeIdPolicy`](crate::change_id::ChangeIdPolicy)
+/// is enabled and the source commit has no stored change id, the rewritten commit stores the
+/// Jujutsu-derived id for the original commit oid. New commits inserted by the plan (for example
+/// split parents) receive fresh ids from [`ChangeIdPolicy::id_for_new_commit`](crate::change_id::ChangeIdPolicy::id_for_new_commit).
 ///
 /// # Errors
 ///
@@ -75,6 +108,8 @@ pub fn plan_rewrite(
             head: HeadEffect::default(),
         });
     }
+
+    let change_ids = ChangeIdWriteContext::from_repo(repo)?;
 
     let oldest = oldest_edited_commit(repo, edits)?;
     let scoped_refs = collect_scoped_refs(repo, opts, oldest)?;
@@ -175,6 +210,7 @@ pub fn plan_rewrite(
                 };
                 Some(write_new_commit(
                     repo,
+                    &change_ids,
                     insert.tree,
                     &parents,
                     &insert.author,
@@ -188,13 +224,27 @@ pub fn plan_rewrite(
 
         let (new_oid, new_field) = match edit {
             None => {
-                let oid =
-                    replay_commit_descendant(repo, &mapping, &old, old_oid, insert_parent, opts)?;
+                let oid = replay_commit_descendant(
+                    repo,
+                    &change_ids,
+                    &mapping,
+                    &old,
+                    old_oid,
+                    insert_parent,
+                    opts,
+                )?;
                 (oid, Some(oid))
             }
             Some(CommitEdit::InsertBefore(_)) => {
-                let oid =
-                    replay_commit_descendant(repo, &mapping, &old, old_oid, insert_parent, opts)?;
+                let oid = replay_commit_descendant(
+                    repo,
+                    &change_ids,
+                    &mapping,
+                    &old,
+                    old_oid,
+                    insert_parent,
+                    opts,
+                )?;
                 (oid, Some(oid))
             }
             Some(CommitEdit::SplitBefore { rest_message, .. }) => {
@@ -208,7 +258,9 @@ pub fn plan_rewrite(
                 let message = rest_message.as_deref().unwrap_or(&old.message);
                 let oid = write_rewritten_commit(
                     repo,
+                    &change_ids,
                     &old,
+                    old_oid,
                     old.tree,
                     &parent_list,
                     &old.author,
@@ -222,6 +274,7 @@ pub fn plan_rewrite(
                 let oid = if old.parents.len() > 1 {
                     replay_merge_descendant(
                         repo,
+                        &change_ids,
                         &mapping,
                         &old,
                         old_oid,
@@ -232,6 +285,7 @@ pub fn plan_rewrite(
                 } else {
                     replay_edited_commit(
                         repo,
+                        &change_ids,
                         &old,
                         old_oid,
                         &parent_list,
@@ -268,7 +322,9 @@ pub fn plan_rewrite(
                 let oid = if let Some(explicit_tree) = *tree {
                     write_rewritten_commit(
                         repo,
+                        &change_ids,
                         &old,
+                        old_oid,
                         explicit_tree,
                         &parent_list,
                         author,
@@ -278,6 +334,7 @@ pub fn plan_rewrite(
                 } else {
                     replay_edited_commit(
                         repo,
+                        &change_ids,
                         &old,
                         old_oid,
                         &parent_list,
@@ -332,6 +389,8 @@ pub fn plan_replay_linear_segment(
         });
     }
 
+    let change_ids = ChangeIdWriteContext::from_repo(repo)?;
+
     let scoped_refs = collect_scoped_refs(repo, opts, oldest)?;
     ensure_branches_not_checked_out_elsewhere(repo, &scoped_refs)?;
 
@@ -374,6 +433,7 @@ pub fn plan_replay_linear_segment(
         let parent_list: Vec<ObjectId> = parent.into_iter().collect();
         let new_oid = replay_edited_commit(
             repo,
+            &change_ids,
             &old,
             old_oid,
             &parent_list,
@@ -677,6 +737,7 @@ fn mapped_first_parent(
 
 fn replay_commit_descendant(
     repo: &Repository,
+    change_ids: &ChangeIdWriteContext,
     mapping: &HashMap<ObjectId, ObjectId>,
     old: &CommitData,
     old_oid: ObjectId,
@@ -684,13 +745,23 @@ fn replay_commit_descendant(
     opts: &RewriteOptions,
 ) -> Result<ObjectId, HistoryError> {
     if old.parents.len() > 1 {
-        return replay_merge_descendant(repo, mapping, old, old_oid, extra_parent, opts, None);
+        return replay_merge_descendant(
+            repo,
+            change_ids,
+            mapping,
+            old,
+            old_oid,
+            extra_parent,
+            opts,
+            None,
+        );
     }
-    replay_descendant(repo, mapping, old, old_oid, extra_parent, opts)
+    replay_descendant(repo, change_ids, mapping, old, old_oid, extra_parent, opts)
 }
 
 fn replay_descendant(
     repo: &Repository,
+    change_ids: &ChangeIdWriteContext,
     mapping: &HashMap<ObjectId, ObjectId>,
     old: &CommitData,
     old_oid: ObjectId,
@@ -700,6 +771,7 @@ fn replay_descendant(
     let (_, new_parent) = replay_parent_pair(repo, old, mapping, extra_parent)?;
     replay_edited_commit(
         repo,
+        change_ids,
         old,
         old_oid,
         &[new_parent],
@@ -710,8 +782,10 @@ fn replay_descendant(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn replay_merge_descendant(
     repo: &Repository,
+    change_ids: &ChangeIdWriteContext,
     mapping: &HashMap<ObjectId, ObjectId>,
     old: &CommitData,
     old_oid: ObjectId,
@@ -750,7 +824,9 @@ fn replay_merge_descendant(
             EmptyPolicy::Drop => Ok(new_first_parent),
             EmptyPolicy::Keep => write_rewritten_commit(
                 repo,
+                change_ids,
                 old,
+                old_oid,
                 result_tree,
                 &parent_list,
                 &old.author,
@@ -762,7 +838,9 @@ fn replay_merge_descendant(
 
     write_rewritten_commit(
         repo,
+        change_ids,
         old,
+        old_oid,
         result_tree,
         &parent_list,
         &old.author,
@@ -842,6 +920,7 @@ fn replay_merge_tree(
 #[allow(clippy::too_many_arguments)]
 fn replay_edited_commit(
     repo: &Repository,
+    change_ids: &ChangeIdWriteContext,
     old: &CommitData,
     old_oid: ObjectId,
     parent_list: &[ObjectId],
@@ -877,7 +956,9 @@ fn replay_edited_commit(
             EmptyPolicy::Drop => Ok(new_parent),
             EmptyPolicy::Keep => write_rewritten_commit(
                 repo,
+                change_ids,
                 old,
+                old_oid,
                 result_tree,
                 parent_list,
                 author,
@@ -889,7 +970,9 @@ fn replay_edited_commit(
 
     write_rewritten_commit(
         repo,
+        change_ids,
         old,
+        old_oid,
         result_tree,
         parent_list,
         author,
@@ -978,8 +1061,10 @@ fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryE
     Ok(load_commit(repo, commit)?.tree)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_new_commit(
     repo: &Repository,
+    change_ids: &ChangeIdWriteContext,
     tree: ObjectId,
     parents: &[ObjectId],
     author: &str,
@@ -987,7 +1072,7 @@ fn write_new_commit(
     message: &str,
     extra_headers: &[u8],
 ) -> Result<ObjectId, HistoryError> {
-    let data = CommitData {
+    let mut data = CommitData {
         tree,
         parents: parents.to_vec(),
         author: author.to_owned(),
@@ -999,14 +1084,24 @@ fn write_new_commit(
         raw_message: None,
         extra_headers: extra_headers.to_vec(),
     };
+    if let Some(id) = change_ids
+        .policy
+        .id_for_new_commit(&data, change_ids.hash_algo, change_ids.generator.as_ref())
+        .map_err(change_id_err)?
+    {
+        set_change_id(&mut data, &id);
+    }
     write_commit_data(repo, &data)
 }
 
 /// Write a replacement commit, preserving encoding and raw author/message bytes from `template`
 /// when those fields are unchanged while always applying the new committer.
+#[allow(clippy::too_many_arguments)]
 fn write_rewritten_commit(
     repo: &Repository,
+    change_ids: &ChangeIdWriteContext,
     template: &CommitData,
+    old_oid: ObjectId,
     tree: ObjectId,
     parents: &[ObjectId],
     author: &str,
@@ -1031,6 +1126,26 @@ fn write_rewritten_commit(
     } else {
         identity_raw_for_serialized_commit(&encoding, author, committer)
     };
+    let mut extra_headers = extra_headers_without_commit_signatures(&template.extra_headers);
+    if change_ids.policy.enabled() && change_id(template).is_none() {
+        let mut header_data = CommitData {
+            tree,
+            parents: parents.to_vec(),
+            author: author.to_owned(),
+            committer: committer.to_owned(),
+            author_raw: author_raw.clone(),
+            committer_raw: committer_raw.clone(),
+            encoding: encoding.clone(),
+            message: message.to_owned(),
+            raw_message: raw_message.clone(),
+            extra_headers: extra_headers.clone(),
+        };
+        set_change_id(
+            &mut header_data,
+            &ChangeId::derived_from_commit_id(&old_oid),
+        );
+        extra_headers = header_data.extra_headers;
+    }
     let data = CommitData {
         tree,
         parents: parents.to_vec(),
@@ -1041,7 +1156,7 @@ fn write_rewritten_commit(
         encoding,
         message: message.to_owned(),
         raw_message,
-        extra_headers: extra_headers_without_commit_signatures(&template.extra_headers),
+        extra_headers,
     };
     write_commit_data(repo, &data)
 }
@@ -1123,6 +1238,7 @@ pub fn plan_fold_range_at_head(
             message: "head-only fold requires RefScope::Head".into(),
         });
     }
+    let change_ids = ChangeIdWriteContext::from_repo(repo)?;
     let head = head_oid(repo)?;
     if tip != head {
         return Err(HistoryError::Planning {
@@ -1135,7 +1251,9 @@ pub fn plan_fold_range_at_head(
     }
     let new_oid = write_rewritten_commit(
         repo,
+        &change_ids,
         &oldest_commit,
+        oldest,
         tip_tree,
         &oldest_commit.parents,
         &oldest_commit.author,
@@ -1212,8 +1330,10 @@ mod merge_call_tests {
         .expect("init");
         let id = ident(1);
         let tree_a = blob_tree(&repo, "f.txt", b"a\n").expect("tree");
-        let a = write_new_commit(&repo, tree_a, &[], &id, &id, "a\n", &[]).expect("a");
-        let b = write_new_commit(&repo, tree_a, &[a], &id, &id, "b\n", &[]).expect("b");
+        let change_ids = ChangeIdWriteContext::from_repo(&repo).expect("change ids");
+        let a = write_new_commit(&repo, &change_ids, tree_a, &[], &id, &id, "a\n", &[]).expect("a");
+        let b =
+            write_new_commit(&repo, &change_ids, tree_a, &[a], &id, &id, "b\n", &[]).expect("b");
         write_ref(repo.git_dir(), "refs/heads/main", &b).expect("ref");
         let open =
             Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");

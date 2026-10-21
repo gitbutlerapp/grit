@@ -8,6 +8,10 @@
 //! here (even when the caller will dry-run apply later, new commit objects are still
 //! persisted).
 //!
+//! Replacement commits preserve change-id headers and other extra fields from the source
+//! (commit signatures are omitted). When change ids are enabled, headerless sources get a
+//! stored derived id; newly inserted commits get fresh ids (see [`crate::change_id`]).
+//!
 //! Library guide: history rewrite planning (see [`plan_rewrite`]).
 //!
 //! ```rust

@@ -295,6 +295,7 @@ fn history_drop_matches_git_rebase_drop() {
     let b = git(grit_dir.path(), &["rev-parse", "HEAD~"])
         .trim()
         .to_string();
+    git(grit_dir.path(), &["config", "grit.changeIds", "false"]);
     let replay_committer = "Test User <test@example.com> 1700000002 +0000".to_string();
     let grit = open_grit(grit_dir.path());
     let plan = history_drop(
@@ -367,6 +368,7 @@ fn history_drop_matches_git_history_when_available() {
         .trim()
         .to_string();
     let grit = open_grit(grit_dir.path());
+    git(grit_dir.path(), &["config", "grit.changeIds", "false"]);
     let plan = history_drop(
         &grit,
         b.parse().expect("oid"),
