@@ -11,7 +11,10 @@ use std::sync::OnceLock;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fixture::{build_deep_repack_read_sample, ObjectBenchFixtures};
 use flate2::read::ZlibDecoder;
-use grit_lib::objects::pack::{clear_pack_cache, read_object_from_pack, read_pack_index};
+use grit_lib::objects::pack::{
+    clear_pack_cache, read_object_from_pack, read_object_from_pack_into, read_pack_index,
+};
+use grit_lib::objects::ObjectKind;
 
 fn bench_idx_lookup(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
@@ -52,6 +55,18 @@ fn bench_packed_read(c: &mut Criterion) {
                 read_object_from_pack(&fx.packed_delta_idx, &fx.packed_delta_oid)
                     .expect("read delta chain"),
             )
+        });
+    });
+    group.bench_function("deep_delta_chain_read_into", |b| {
+        let mut buf = Vec::with_capacity(256 * 1024);
+        clear_pack_cache();
+        b.iter(|| {
+            clear_pack_cache();
+            black_box(
+                read_object_from_pack_into(&fx.packed_delta_idx, &fx.packed_delta_oid, &mut buf)
+                    .expect("read_into delta chain"),
+            );
+            black_box(buf.len());
         });
     });
     group.finish();

@@ -215,6 +215,20 @@ impl PackedObjects {
         )
     }
 
+    fn read_from_packs_into(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
+        self.with_pack(|objects_dir| {
+            match pack::read_object_from_packs_into(objects_dir, oid, buf) {
+                Ok(kind) => Ok(Some(kind)),
+                Err(Error::ObjectNotFound(_)) => Ok(None),
+                Err(err) => Err(err),
+            }
+        })
+    }
+
     fn read_info_from_packs(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         self.with_pack(
             |objects_dir| match pack::read_object_info_from_packs(objects_dir, oid) {
@@ -233,6 +247,10 @@ impl ObjectStore for PackedObjects {
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
         self.read_from_packs(oid)
+    }
+
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+        self.read_from_packs_into(oid, buf)
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {

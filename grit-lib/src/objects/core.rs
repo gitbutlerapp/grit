@@ -501,11 +501,41 @@ pub struct Object {
     pub data: Vec<u8>,
 }
 
+/// Borrowed view of an object's kind and uncompressed payload.
+///
+/// Produced by [`crate::odb::Odb::read_into`](crate::odb::Odb::read_into) and
+/// [`crate::odb::store::ObjectStore::read_into`](crate::odb::store::ObjectStore::read_into);
+/// the payload bytes live in the caller's buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectRef<'a> {
+    /// Object type after resolving any pack delta chain.
+    pub kind: ObjectKind,
+    /// Uncompressed payload (header stripped).
+    pub data: &'a [u8],
+}
+
+impl<'a> ObjectRef<'a> {
+    /// Borrow `buf` as an object payload with the given `kind`.
+    #[must_use]
+    pub fn from_buf(kind: ObjectKind, buf: &'a [u8]) -> Self {
+        Self { kind, data: buf }
+    }
+}
+
 impl Object {
     /// Construct a new object from its kind and raw data.
     #[must_use]
     pub fn new(kind: ObjectKind, data: Vec<u8>) -> Self {
         Self { kind, data }
+    }
+
+    /// Borrowed view of this object's kind and payload.
+    #[must_use]
+    pub fn as_ref(&self) -> ObjectRef<'_> {
+        ObjectRef {
+            kind: self.kind,
+            data: self.data.as_slice(),
+        }
     }
 
     /// Serialize to the canonical Git object format: `"<kind> <size>\0<data>"`.

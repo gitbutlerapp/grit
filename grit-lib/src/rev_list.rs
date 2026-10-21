@@ -3894,15 +3894,16 @@ fn commit_path_treesame_to_relevant_parents(
     if relevant.is_empty() {
         return Ok(true);
     }
+    let mut tree_buf = Vec::new();
     let commit = load_commit(repo, oid)?;
     let commit_map: HashMap<String, (ObjectId, u32)> =
-        flatten_tree_with_mode(repo, commit.tree, "")?
+        flatten_tree_with_mode(repo, commit.tree, "", &mut tree_buf)?
             .into_iter()
             .collect();
     for parent_oid in relevant {
         let parent = load_commit(repo, parent_oid)?;
         let parent_map: HashMap<String, (ObjectId, u32)> =
-            flatten_tree_with_mode(repo, parent.tree, "")?
+            flatten_tree_with_mode(repo, parent.tree, "", &mut tree_buf)?
                 .into_iter()
                 .collect();
         if path_differs_for_specs(&commit_map, &parent_map, paths) {
@@ -4217,12 +4218,13 @@ fn path_merge_survives_simplify(
     if paths.is_empty() {
         return Ok(false);
     }
+    let mut tree_buf = Vec::new();
     let commit = load_commit(repo, oid)?;
     if commit.parents.len() <= 1 {
         return Ok(false);
     }
     let commit_map: HashMap<String, (ObjectId, u32)> =
-        flatten_tree_with_mode(repo, commit.tree, "")?
+        flatten_tree_with_mode(repo, commit.tree, "", &mut tree_buf)?
             .into_iter()
             .collect();
     let mut treesame_parents = 0usize;
@@ -4232,7 +4234,7 @@ fn path_merge_survives_simplify(
     for (nth, parent_oid) in commit.parents.iter().enumerate() {
         let parent = load_commit(repo, *parent_oid)?;
         let parent_map: HashMap<String, (ObjectId, u32)> =
-            flatten_tree_with_mode(repo, parent.tree, "")?
+            flatten_tree_with_mode(repo, parent.tree, "", &mut tree_buf)?
                 .into_iter()
                 .collect();
         let differs = path_differs_for_specs(&commit_map, &parent_map, paths);
@@ -4299,15 +4301,16 @@ fn path_treesame_parents(
         return Ok(treesame);
     }
 
+    let mut tree_buf = Vec::new();
     let commit = load_commit(repo, oid)?;
     let commit_map: HashMap<String, (ObjectId, u32)> =
-        flatten_tree_with_mode(repo, commit.tree, "")?
+        flatten_tree_with_mode(repo, commit.tree, "", &mut tree_buf)?
             .into_iter()
             .collect();
     for parent_oid in parents {
         let parent = load_commit(repo, *parent_oid)?;
         let parent_map: HashMap<String, (ObjectId, u32)> =
-            flatten_tree_with_mode(repo, parent.tree, "")?
+            flatten_tree_with_mode(repo, parent.tree, "", &mut tree_buf)?
                 .into_iter()
                 .collect();
         if !path_differs_for_specs(&commit_map, &parent_map, paths) {
@@ -4912,6 +4915,8 @@ struct DenseWalkCache {
     component_hits: u64,
     component_misses: u64,
     tree_reads: u64,
+    /// Reused across tree reads in one dense walk.
+    tree_read_buf: Vec<u8>,
 }
 
 const LITERAL_TREE_DIFF_CAP: usize = 4096;
@@ -5409,16 +5414,23 @@ fn tree_has_pathspec_match_cached(
     tree_oid: ObjectId,
     prefix: &str,
     pathspecs: &[String],
-    _cache: Option<&mut DenseWalkCache>,
+    cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
-    let object = repo.odb().read(&tree_oid)?;
-    if object.kind != ObjectKind::Tree {
+    let mut fallback_buf = Vec::new();
+    let buf = if let Some(c) = cache {
+        c.tree_reads += 1;
+        &mut c.tree_read_buf
+    } else {
+        &mut fallback_buf
+    };
+    let kind = repo.odb().read_into(&tree_oid, buf)?;
+    if kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
             "object {tree_oid} is not a tree"
         )));
     }
     let oid_len = repo.odb().hash_algo().len();
-    for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
+    for entry in TreeRefIter::with_oid_len(buf.as_slice(), oid_len) {
         let entry = entry?;
         let name = String::from_utf8_lossy(entry.name);
         let path = if prefix.is_empty() {
@@ -7880,6 +7892,7 @@ struct TreeWalkState {
     seen_at_depth: HashMap<ObjectId, u64>,
     tree_blobs: HashMap<ObjectId, Arc<Vec<u8>>>,
     oid_len: Option<usize>,
+    tree_read_buf: Vec<u8>,
 }
 
 impl TreeWalkState {
@@ -7897,11 +7910,11 @@ impl TreeWalkState {
         if let Some(blob) = self.tree_blobs.get(&tree_oid) {
             return Ok(Arc::clone(blob));
         }
-        let object = repo.odb().read(&tree_oid)?;
-        if object.kind != ObjectKind::Tree {
+        let kind = repo.odb().read_into(&tree_oid, &mut self.tree_read_buf)?;
+        if kind != ObjectKind::Tree {
             return Err(rev_list_unexpected_kind(tree_oid, "tree"));
         }
-        let blob = Arc::new(object.data);
+        let blob = Arc::new(std::mem::take(&mut self.tree_read_buf));
         self.tree_blobs.insert(tree_oid, Arc::clone(&blob));
         Ok(blob)
     }
@@ -9166,17 +9179,19 @@ fn flatten_tree_with_mode(
     repo: &Repository,
     tree_oid: ObjectId,
     prefix: &str,
+    buf: &mut Vec<u8>,
 ) -> Result<Vec<(String, (ObjectId, u32))>> {
     let mut result = Vec::new();
-    let object = match repo.odb().read(&tree_oid) {
-        Ok(o) => o,
+    let kind = match repo.odb().read_into(&tree_oid, buf) {
+        Ok(k) => k,
         Err(_) => return Ok(result),
     };
-    if object.kind != ObjectKind::Tree {
+    if kind != ObjectKind::Tree {
         return Ok(result);
     }
     let oid_len = repo.odb().hash_algo().len();
-    for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
+    let mut subtrees = Vec::new();
+    for entry in TreeRefIter::with_oid_len(buf.as_slice(), oid_len) {
         let entry = entry?;
         let name = String::from_utf8_lossy(entry.name).to_string();
         let path = if prefix.is_empty() {
@@ -9190,10 +9205,13 @@ fn flatten_tree_with_mode(
             Err(err) => return Err(err),
         };
         if child_info.kind == ObjectKind::Tree {
-            result.extend(flatten_tree_with_mode(repo, entry.oid, &path)?);
+            subtrees.push((entry.oid, path));
         } else {
             result.push((path, (entry.oid, canon_tree_mode(entry.mode))));
         }
+    }
+    for (child_oid, path) in subtrees {
+        result.extend(flatten_tree_with_mode(repo, child_oid, &path, buf)?);
     }
     Ok(result)
 }

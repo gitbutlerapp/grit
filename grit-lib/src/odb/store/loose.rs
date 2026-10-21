@@ -184,6 +184,18 @@ impl ObjectStore for LooseStore {
         }
     }
 
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+        let path = self.object_path(oid);
+        let file = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(Error::Io(err)),
+        };
+        read_zlib_loose_payload_into(file, buf)?;
+        let kind = strip_decompressed_object_header(buf, None)?;
+        Ok(Some(kind))
+    }
+
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         let path = self.object_path(oid);
         if !path.is_file() {
@@ -377,6 +389,47 @@ pub fn read_zlib_loose_payload(file: File) -> Result<Vec<u8>> {
     let preset_dictionary = looks_like_zlib_header && (hdr[1] & 0x20) != 0;
     let mut scratch = ZlibInflateScratch::default();
     scratch.decompress_loose_payload(&hdr, read_file, preset_dictionary)
+}
+
+/// Decompress a loose object into `buf`, reusing its capacity.
+pub(crate) fn read_zlib_loose_payload_into(file: File, buf: &mut Vec<u8>) -> Result<()> {
+    let mut hdr = [0u8; 2];
+    let mut read_file = file;
+    read_file.read_exact(&mut hdr).map_err(Error::Io)?;
+    let cmf_flg = u16::from(hdr[0]) << 8 | u16::from(hdr[1]);
+    let looks_like_zlib_header = cmf_flg != 0 && cmf_flg % 31 == 0;
+    let preset_dictionary = looks_like_zlib_header && (hdr[1] & 0x20) != 0;
+    let mut scratch = ZlibInflateScratch::default();
+    scratch.decompress_loose_payload_into(&hdr, read_file, preset_dictionary, buf)
+}
+
+/// Remove the Git object header from decompressed bytes in `buf`, leaving only the payload.
+pub(crate) fn strip_decompressed_object_header(
+    buf: &mut Vec<u8>,
+    oid_hint: Option<&ObjectId>,
+) -> Result<ObjectKind> {
+    let nul = buf
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
+    let (kind, size) = parse_object_header_prefix(buf)?;
+    let payload_start = nul + 1;
+    let size_usize = usize::try_from(size)
+        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size}")))?;
+    if buf.len().saturating_sub(payload_start) != size_usize {
+        let oid_str = oid_hint
+            .map(ObjectId::to_hex)
+            .unwrap_or_else(|| hash_algo_digest_hex(HashAlgo::Sha1, buf));
+        return Err(Error::CorruptObject(format!(
+            "object {oid_str} size mismatch: header says {size}, got {}",
+            buf.len().saturating_sub(payload_start)
+        )));
+    }
+    if payload_start > 0 {
+        buf.copy_within(payload_start.., 0);
+    }
+    buf.truncate(size_usize);
+    Ok(kind)
 }
 
 /// Read kind and size from a loose object file without loading the full payload.

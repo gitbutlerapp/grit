@@ -160,6 +160,61 @@ impl FilesSource {
         matches!(err, Error::CorruptObject(_) | Error::Zlib(_))
     }
 
+    fn try_read_object_into(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
+        if oid.is_well_known_empty_tree() {
+            buf.clear();
+            return Ok(Some(ObjectKind::Tree));
+        }
+
+        let midx_pack_filter = self.midx_pack_filter_active();
+        let pack_opts = PackLookupOptions {
+            skip_midx_covered_packs: midx_pack_filter,
+            only_midx_covered_packs: false,
+        };
+
+        if self.use_midx {
+            match self.midx.read_into(oid, buf) {
+                Ok(Some(kind)) => return Ok(Some(kind)),
+                Ok(None) => {}
+                Err(Error::Midx(_)) => {}
+                Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        match pack::try_read_object_from_packs_with_options_into(
+            &self.objects_dir,
+            oid,
+            pack_opts,
+            buf,
+        ) {
+            Ok(kind) => return Ok(Some(kind)),
+            Err(Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+
+        if midx_pack_filter {
+            match pack::try_read_object_from_packs_with_options_into(
+                &self.objects_dir,
+                oid,
+                PackLookupOptions::MIDX_COVERED_PACKS,
+                buf,
+            ) {
+                Ok(kind) => return Ok(Some(kind)),
+                Err(Error::ObjectNotFound(_)) => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        #[cfg(test)]
+        crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
+        self.loose.read_into(oid, buf)
+    }
+
     fn try_read_object(&self, oid: &ObjectId) -> Result<Option<Object>> {
         if oid.is_well_known_empty_tree() {
             return Ok(Some(Object {
@@ -269,6 +324,24 @@ impl FilesSource {
         }
     }
 
+    fn read_with_pack_retry_into(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
+        match self.try_read_object_into(oid, buf) {
+            Ok(Some(kind)) => Ok(Some(kind)),
+            Ok(None) => {
+                if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
+                    self.try_read_object_into(oid, buf)
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     fn read_info_with_pack_retry(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         match self.try_read_info(oid) {
             Ok(Some(info)) => Ok(Some(info)),
@@ -330,6 +403,15 @@ impl ObjectStore for FilesSource {
         PackStore::with_context(self.packs.pack_store().clone(), || {
             self.read_with_pack_retry(oid)
         })
+    }
+
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+        let mut read = || self.read_with_pack_retry_into(oid, buf);
+        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+            read()
+        } else {
+            PackStore::with_context(self.packs.pack_store().clone(), read)
+        }
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {

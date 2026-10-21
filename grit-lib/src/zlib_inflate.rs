@@ -189,12 +189,25 @@ impl ZlibInflateScratch {
     pub fn decompress_loose_payload(
         &mut self,
         prefix: &[u8],
-        mut file: std::fs::File,
+        file: std::fs::File,
         preset_dictionary: bool,
     ) -> Result<Vec<u8>> {
-        self.reset();
-        let mut pending = prefix.to_vec();
         let mut out = Vec::new();
+        self.decompress_loose_payload_into(prefix, file, preset_dictionary, &mut out)?;
+        Ok(out)
+    }
+
+    /// Like [`Self::decompress_loose_payload`], but inflates into `out` (reusing capacity).
+    pub fn decompress_loose_payload_into(
+        &mut self,
+        prefix: &[u8],
+        mut file: std::fs::File,
+        preset_dictionary: bool,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        self.reset();
+        out.clear();
+        let mut pending = prefix.to_vec();
         let mut scratch = [0u8; READ_CHUNK];
         let mut eof = false;
         loop {
@@ -236,7 +249,7 @@ impl ZlibInflateScratch {
             let produced = (self.dec.total_out() - before_out) as usize;
             out.extend_from_slice(&out_chunk[..produced]);
             match status {
-                Status::StreamEnd => return Ok(out),
+                Status::StreamEnd => return Ok(()),
                 Status::Ok | Status::BufError => {
                     if eof && pending.is_empty() && status != Status::StreamEnd {
                         return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
@@ -244,6 +257,24 @@ impl ZlibInflateScratch {
                 }
             }
         }
+    }
+
+    /// Decompress a fixed-size pack zlib stream into `out`, advancing `*pos`.
+    pub fn decompress_fixed_into(
+        &mut self,
+        bytes: &[u8],
+        pos: &mut usize,
+        expected_size: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
+        let expected = usize::try_from(expected_size).map_err(|_| {
+            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+        })?;
+        out.clear();
+        out.resize(expected, 0);
+        let consumed = self.decompress_into(&bytes[*pos..], out, true)?;
+        *pos += consumed;
+        Ok(())
     }
 
     /// Advance past a zlib stream without retaining inflated bytes (for pack skipping).

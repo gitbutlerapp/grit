@@ -61,6 +61,23 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// Returns I/O or corruption errors from the backend; never [`Error::ObjectNotFound`].
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>>;
 
+    /// Load object payload into `buf`, reusing its capacity when possible.
+    ///
+    /// Default implementation delegates to [`Self::read`] and copies into `buf`.
+    /// Native backends should inflate or resolve deltas directly into `buf`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::read`].
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+        let Some(obj) = self.read(oid)? else {
+            return Ok(None);
+        };
+        buf.clear();
+        buf.extend_from_slice(&obj.data);
+        Ok(Some(obj.kind))
+    }
+
     /// Object kind and size without loading the full payload.
     ///
     /// # Errors

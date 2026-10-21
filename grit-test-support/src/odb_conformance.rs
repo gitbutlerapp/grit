@@ -47,6 +47,7 @@ pub fn run_read_suite<S: ObjectStore + 'static>(seed: impl Fn(&[(ObjectKind, Vec
     read_empty_blob_and_empty_tree(&seed);
     read_binary_data_with_nuls(&seed);
     read_large_blob_stream_matches_read(&seed);
+    read_into_matches_read(&seed);
     read_info_matches_read(&seed);
     read_contains_agreement_on_misses(&seed);
     read_for_each_object_yields_each_id_once(&seed);
@@ -119,6 +120,32 @@ pub fn read_binary_data_with_nuls<S: ObjectStore>(seed: &impl Fn(&[(ObjectKind, 
         .expect("read_binary_data_with_nuls: read")
         .expect("read_binary_data_with_nuls: hit");
     assert_eq!(obj.data, payload);
+}
+
+/// [`ObjectStore::read_into`] matches [`ObjectStore::read`] and reuses buffer capacity.
+pub fn read_into_matches_read<S: ObjectStore>(seed: &impl Fn(&[(ObjectKind, Vec<u8>)]) -> S) {
+    let algo = seed_algo(seed);
+    let specs = standard_object_specs(algo);
+    let store = seed(&specs);
+    let mut buf = Vec::with_capacity(4096);
+    let initial_cap = buf.capacity();
+    for (kind, data) in &specs {
+        let oid = hash::hash_object(algo, *kind, data);
+        let whole = store
+            .read(&oid)
+            .expect("read_into_matches_read: read")
+            .expect("read_into_matches_read: hit");
+        let got_kind = store
+            .read_into(&oid, &mut buf)
+            .expect("read_into_matches_read: read_into")
+            .expect("read_into_matches_read: hit");
+        assert_eq!(got_kind, whole.kind);
+        assert_eq!(buf, *data);
+        assert!(
+            buf.capacity() >= initial_cap,
+            "read_into must reuse buffer capacity across calls"
+        );
+    }
 }
 
 /// A large blob (≥ 8 MiB) matches whether read wholly or via [`ObjectStore::open_stream`].

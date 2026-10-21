@@ -5,7 +5,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 
 use super::{ObjectStore, ObjectStream};
 
@@ -44,6 +44,18 @@ impl ObjectStore for CompositeStore {
         for store in &self.stores {
             match store.read(oid) {
                 Ok(Some(obj)) => return Ok(Some(obj)),
+                Ok(None) => {}
+                Err(Error::Zlib(_) | Error::CorruptObject(_)) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(None)
+    }
+
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+        for store in &self.stores {
+            match store.read_into(oid, buf) {
+                Ok(Some(kind)) => return Ok(Some(kind)),
                 Ok(None) => {}
                 Err(Error::Zlib(_) | Error::CorruptObject(_)) => {}
                 Err(err) => return Err(err),

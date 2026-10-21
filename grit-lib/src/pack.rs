@@ -2395,6 +2395,16 @@ fn decompress_pack_data(
     scratch.decompress_fixed(bytes, pos, expected_size)
 }
 
+fn decompress_pack_data_into(
+    bytes: &[u8],
+    pos: &mut usize,
+    expected_size: u64,
+    scratch: &mut ZlibInflateScratch,
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    scratch.decompress_fixed_into(bytes, pos, expected_size, out)
+}
+
 /// Read and fully resolve one object from a pack file given its offset.
 ///
 /// Handles OFS_DELTA and REF_DELTA by recursively reading the base object.
@@ -2511,6 +2521,72 @@ fn apply_delta_chain_forward(
         });
     }
 
+    apply_delta_chain_forward_into(
+        &mut owned,
+        kind,
+        base_data,
+        whole_base,
+        pending,
+        result_pack_id,
+        result_offset,
+    )?;
+    Ok(owned)
+}
+
+/// Like [`apply_delta_chain_forward`], writing the final payload into `out`.
+fn apply_delta_chain_forward_into(
+    out: &mut Vec<u8>,
+    kind: ObjectKind,
+    base_data: &[u8],
+    whole_base: Option<(u32, u64)>,
+    pending: &[PendingDeltaFrame],
+    result_pack_id: u32,
+    result_offset: u64,
+) -> Result<()> {
+    if pending.is_empty() {
+        out.clear();
+        out.extend_from_slice(base_data);
+        return Ok(());
+    }
+
+    let caching = pack_cache::delta_base_caching_enabled();
+    let mut cache_inserts: Vec<(u32, u64, Arc<[u8]>)> =
+        Vec::with_capacity(if caching { pending.len() + 1 } else { 0 });
+    if caching {
+        if let Some((pid, off)) = whole_base {
+            cache_inserts.push((pid, off, Arc::from(base_data)));
+        }
+    }
+
+    let mut owned = Vec::new();
+    let mut scratch = Vec::new();
+    if caching {
+        let mut rolling: Option<Arc<[u8]>> = None;
+        for frame in pending.iter().rev() {
+            let base: &[u8] = match &rolling {
+                Some(arc) => arc.as_ref(),
+                None => base_data,
+            };
+            apply_delta_into(&mut scratch, base, &frame.delta)?;
+            mem::swap(&mut owned, &mut scratch);
+            let arc: Arc<[u8]> = Arc::from(owned.into_boxed_slice());
+            if frame.pack_id != result_pack_id || frame.offset != result_offset {
+                cache_inserts.push((frame.pack_id, frame.offset, Arc::clone(&arc)));
+            }
+            rolling = Some(arc);
+            owned = Vec::new();
+        }
+        pack_cache::put_delta_bases(kind, &cache_inserts);
+        match rolling {
+            Some(arc) => {
+                out.clear();
+                out.extend_from_slice(arc.as_ref());
+            }
+            None => mem::swap(out, &mut owned),
+        }
+        return Ok(());
+    }
+
     let mut use_initial_base = true;
     for frame in pending.iter().rev() {
         let base: &[u8] = if use_initial_base {
@@ -2522,7 +2598,8 @@ fn apply_delta_chain_forward(
         apply_delta_into(&mut scratch, base, &frame.delta)?;
         mem::swap(&mut owned, &mut scratch);
     }
-    Ok(owned)
+    mem::swap(out, &mut owned);
+    Ok(())
 }
 
 /// Starting index for a pack read: borrow the caller's [`PackIndex`], or hold a cached
@@ -2625,6 +2702,16 @@ fn resolve_pack_object_at(
     resolve_pack_object_at_with_bytes(start_idx, start_offset, objects_dir, state, None)
 }
 
+fn resolve_pack_object_at_into(
+    start_idx: PackIndexHandle<'_>,
+    start_offset: u64,
+    objects_dir: Option<&Path>,
+    state: &mut DeltaChainState,
+    out: &mut Vec<u8>,
+) -> Result<ObjectKind> {
+    resolve_pack_object_at_with_bytes_into(start_idx, start_offset, objects_dir, state, None, out)
+}
+
 fn resolve_pack_object_at_with_bytes(
     start_idx: PackIndexHandle<'_>,
     start_offset: u64,
@@ -2632,6 +2719,26 @@ fn resolve_pack_object_at_with_bytes(
     state: &mut DeltaChainState,
     pack_bytes_override: Option<&[u8]>,
 ) -> Result<(ObjectKind, Vec<u8>)> {
+    let mut out = Vec::new();
+    let kind = resolve_pack_object_at_with_bytes_into(
+        start_idx,
+        start_offset,
+        objects_dir,
+        state,
+        pack_bytes_override,
+        &mut out,
+    )?;
+    Ok((kind, out))
+}
+
+fn resolve_pack_object_at_with_bytes_into(
+    start_idx: PackIndexHandle<'_>,
+    start_offset: u64,
+    objects_dir: Option<&Path>,
+    state: &mut DeltaChainState,
+    pack_bytes_override: Option<&[u8]>,
+    out: &mut Vec<u8>,
+) -> Result<ObjectKind> {
     let pack_path = start_idx.get().pack_path.clone();
     let start_pack_id = pack_cache::pack_id_for(&pack_path);
     for attempt in 0..2 {
@@ -2643,7 +2750,10 @@ fn resolve_pack_object_at_with_bytes(
             state,
             pack_bytes_override,
         ) {
-            Ok(v) => return Ok(v),
+            Ok((kind, data)) => {
+                *out = data;
+                return Ok(kind);
+            }
             Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
                 if pack_cache::reload_pack_bytes_after_parse_failure(&pack_path)? {
                     state.visited.retain(|(id, _)| *id != start_pack_id);
@@ -3027,6 +3137,28 @@ pub fn read_object_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<Object> 
     })
 }
 
+/// Like [`read_object_from_pack`], inflating into `buf` and reusing its capacity.
+///
+/// # Errors
+///
+/// Same as [`read_object_from_pack`].
+pub fn read_object_from_pack_into(
+    idx: &PackIndex,
+    oid: &ObjectId,
+    buf: &mut Vec<u8>,
+) -> Result<ObjectKind> {
+    let Some(offset) = idx.find_offset(oid)? else {
+        return Err(Error::ObjectNotFound(oid.to_hex()));
+    };
+    if crate::pack_store::PackStore::has_context() {
+        return read_object_at_depth_into(idx, offset, 0, buf);
+    }
+    let store = crate::pack_store::PackStore::legacy_for_pack_path(&idx.pack_path);
+    crate::pack_store::PackStore::with_context(store, || {
+        read_object_at_depth_into(idx, offset, 0, buf)
+    })
+}
+
 /// Read [`ObjectInfo`] for `oid` stored in `idx`'s pack without inflating the full object body.
 ///
 /// # Errors
@@ -3201,9 +3333,22 @@ fn read_whole_pack_entry_object_fast(
     offset: u64,
     pack_bytes: &[u8],
 ) -> Option<Object> {
+    let mut data = Vec::new();
+    read_whole_pack_entry_object_into(idx, offset, pack_bytes, &mut data)
+        .map(|kind| Object::new(kind, data))
+}
+
+fn read_whole_pack_entry_object_into(
+    idx: &PackIndex,
+    offset: u64,
+    pack_bytes: &[u8],
+    out: &mut Vec<u8>,
+) -> Option<ObjectKind> {
     let pack_id = pack_cache::pack_id_for(&idx.pack_path);
     if let Some((kind, data)) = pack_cache::get_delta_base(pack_id, offset) {
-        return Some(Object::new(kind, data.to_vec()));
+        out.clear();
+        out.extend_from_slice(data.as_ref());
+        return Some(kind);
     }
     let mut pos = offset as usize;
     if pos >= pack_bytes.len() {
@@ -3215,12 +3360,40 @@ fn read_whole_pack_entry_object_fast(
             let kind = packed_type_to_kind(packed_type).ok()?;
             WHOLE_OBJECT_ZLIB.with(|slot| {
                 let mut inflate = slot.borrow_mut();
-                decompress_pack_data(pack_bytes, &mut pos, size, &mut inflate)
+                decompress_pack_data_into(pack_bytes, &mut pos, size, &mut inflate, out)
                     .ok()
-                    .map(|data| Object::new(kind, data))
+                    .map(|()| kind)
             })
         }
         PackedType::OfsDelta | PackedType::RefDelta => None,
+    }
+}
+
+fn read_object_from_packs_in_context_into(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    buf: &mut Vec<u8>,
+) -> Result<ObjectKind> {
+    match try_read_object_from_packs_with_options_into(
+        objects_dir,
+        oid,
+        PackLookupOptions::ALL_LOCAL_PACKS,
+        buf,
+    ) {
+        Ok(kind) => Ok(kind),
+        Err(err @ Error::ObjectNotFound(_)) => {
+            if reprepare_pack_directory_on_miss(objects_dir)? {
+                try_read_object_from_packs_with_options_into(
+                    objects_dir,
+                    oid,
+                    PackLookupOptions::ALL_LOCAL_PACKS,
+                    buf,
+                )
+            } else {
+                Err(err)
+            }
+        }
+        Err(err) => Err(err),
     }
 }
 
@@ -3271,10 +3444,23 @@ fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize)
 }
 
 fn read_object_at_depth(idx: &PackIndex, offset: u64, depth: usize) -> Result<Object> {
+    let mut data = Vec::new();
+    let kind = read_object_at_depth_into(idx, offset, depth, &mut data)?;
+    Ok(Object::new(kind, data))
+}
+
+fn read_object_at_depth_into(
+    idx: &PackIndex,
+    offset: u64,
+    depth: usize,
+    out: &mut Vec<u8>,
+) -> Result<ObjectKind> {
     if depth == 0 {
         let pack_id = pack_cache::pack_id_for(&idx.pack_path);
         if let Some((kind, data)) = pack_cache::get_delta_base(pack_id, offset) {
-            return Ok(Object::new(kind, data.to_vec()));
+            out.clear();
+            out.extend_from_slice(data.as_ref());
+            return Ok(kind);
         }
     }
     let pack_path = &idx.pack_path;
@@ -3294,15 +3480,21 @@ fn read_object_at_depth(idx: &PackIndex, offset: u64, depth: usize) -> Result<Ob
             }
         }
         if depth == 0 {
-            if let Some(obj) = read_whole_pack_entry_object_fast(idx, offset, &pack_bytes) {
-                return Ok(obj);
+            if let Some(kind) = read_whole_pack_entry_object_into(idx, offset, &pack_bytes, out) {
+                return Ok(kind);
             }
         }
         let resolved = with_pack_read_delta_state(depth, |state| {
-            resolve_pack_object_at(PackIndexHandle::Borrowed(idx), offset, objects_dir, state)
+            resolve_pack_object_at_into(
+                PackIndexHandle::Borrowed(idx),
+                offset,
+                objects_dir,
+                state,
+                out,
+            )
         });
         match resolved {
-            Ok((kind, data)) => return Ok(Object::new(kind, data)),
+            Ok(kind) => return Ok(kind),
             Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
                 if pack_cache::reload_pack_bytes_after_parse_failure(pack_path)? {
                     continue;
@@ -3583,10 +3775,7 @@ impl SingleLocalPackReader {
         self.read_commit_author_prefix_at_pack_offset(offset)
     }
 
-    fn read_commit_author_prefix_at_pack_offset(
-        &mut self,
-        offset: u64,
-    ) -> Result<Option<&[u8]>> {
+    fn read_commit_author_prefix_at_pack_offset(&mut self, offset: u64) -> Result<Option<&[u8]>> {
         let pack_bytes = self.pack_bytes.as_ref();
         let mut pos = offset as usize;
         if pos >= pack_bytes.len() {
@@ -3824,6 +4013,25 @@ pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Obje
     })
 }
 
+/// Like [`read_object_from_packs`], inflating into `buf` and reusing its capacity.
+///
+/// # Errors
+///
+/// Same as [`read_object_from_packs`].
+pub fn read_object_from_packs_into(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    buf: &mut Vec<u8>,
+) -> Result<ObjectKind> {
+    if crate::pack_store::PackStore::has_context() {
+        return read_object_from_packs_in_context_into(objects_dir, oid, buf);
+    }
+    let store = crate::pack_store::PackStore::legacy_for_objects_dir(objects_dir);
+    crate::pack_store::PackStore::with_context(store, || {
+        read_object_from_packs_in_context_into(objects_dir, oid, buf)
+    })
+}
+
 /// Search local packs for `oid` and return its kind and uncompressed size.
 ///
 /// # Errors
@@ -3913,6 +4121,45 @@ pub(crate) fn try_read_object_from_packs_with_options(
             Err(Error::ObjectNotFound(_)) => {}
             // The pack copy is unreadable (corrupt delta/zlib/header). A redundant
             // pack may still hold an intact copy, so remember the error and retry.
+            Err(err) => last_err = Some(err),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
+}
+
+/// Like [`try_read_object_from_packs_with_options`], writing the payload into `buf`.
+pub(crate) fn try_read_object_from_packs_with_options_into(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    opts: PackLookupOptions,
+    buf: &mut Vec<u8>,
+) -> Result<ObjectKind> {
+    if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
+    }
+    if let Some(obj) = pack_cache::try_read_object_via_single_pack_reader(objects_dir, oid)? {
+        buf.clear();
+        buf.extend_from_slice(&obj.data);
+        return Ok(obj.kind);
+    }
+    if let Some(obj) = pack_cache::try_read_from_hinted_pack(objects_dir, oid)? {
+        buf.clear();
+        buf.extend_from_slice(&obj.data);
+        return Ok(obj.kind);
+    }
+    let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
+    let mut last_err: Option<Error> = None;
+    for idx in &indexes {
+        let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, idx, oid)?
+        else {
+            continue;
+        };
+        match read_object_at_depth_into(idx, offset, 0, buf) {
+            Ok(kind) => {
+                pack_cache::remember_pack_hit(objects_dir, idx);
+                return Ok(kind);
+            }
+            Err(Error::ObjectNotFound(_)) => {}
             Err(err) => last_err = Some(err),
         }
     }

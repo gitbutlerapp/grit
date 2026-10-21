@@ -7738,7 +7738,9 @@ pub fn grit_lib::objects::odb::store::ObjectStore::lookup_prefix(&self, &str, us
 pub fn grit_lib::objects::odb::store::ObjectStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::store::ObjectStream<'_>>>
 pub fn grit_lib::objects::odb::store::ObjectStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::store::ObjectStream<'_>>>
 pub fn grit_lib::objects::odb::store::ObjectStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::ObjectStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
 pub fn grit_lib::objects::odb::store::ObjectStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::ObjectStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
 pub fn grit_lib::objects::odb::store::ObjectStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
 pub fn grit_lib::objects::odb::store::ObjectStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
 pub fn grit_lib::objects::odb::store::ObjectStore::refresh(&self) -> grit_lib::error::Result<bool>
@@ -8039,6 +8041,7 @@ pub fn grit_lib::objects::odb::Odb::open_stream(&self, &grit_lib::objects::Objec
 pub fn grit_lib::objects::odb::Odb::pack_store(&self) -> grit_lib::error::Result<&alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>>
 pub fn grit_lib::objects::odb::Odb::primary(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::FilesSource>>
 pub fn grit_lib::objects::odb::Odb::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::objects::odb::Odb::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<grit_lib::objects::ObjectKind>
 pub fn grit_lib::objects::odb::Odb::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::odb::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::odb::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>
@@ -8455,9 +8458,11 @@ pub fn grit_lib::objects::pack::read_idx_object_ids(&std::path::Path) -> grit_li
 pub fn grit_lib::objects::pack::read_local_pack_indexes(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::pack::PackIndex>>
 pub fn grit_lib::objects::pack::read_local_pack_indexes_cached(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<alloc::rcs::arc::Arc<grit_lib::objects::pack::PackIndex>>>
 pub fn grit_lib::objects::pack::read_object_from_pack(&grit_lib::objects::pack::PackIndex, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::objects::pack::read_object_from_pack_into(&grit_lib::objects::pack::PackIndex, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<grit_lib::objects::ObjectKind>
 pub fn grit_lib::objects::pack::read_object_from_pack_at_offset(&grit_lib::objects::pack::PackIndex, u64) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::pack::read_object_from_pack_bytes(&[u8], &grit_lib::objects::pack::PackIndex, &[u8]) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::pack::read_object_from_packs(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::objects::pack::read_object_from_packs_into(&std::path::Path, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<grit_lib::objects::ObjectKind>
 pub fn grit_lib::objects::pack::read_object_info_from_pack(&grit_lib::objects::pack::PackIndex, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::pack::read_object_info_from_pack_at_offset(&grit_lib::objects::pack::PackIndex, u64) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::pack::read_object_info_from_packs(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
@@ -11501,6 +11506,7 @@ pub fn grit_lib::objects::odb::Odb::open_stream(&self, &grit_lib::objects::Objec
 pub fn grit_lib::objects::odb::Odb::pack_store(&self) -> grit_lib::error::Result<&alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>>
 pub fn grit_lib::objects::odb::Odb::primary(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::FilesSource>>
 pub fn grit_lib::objects::odb::Odb::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::objects::odb::Odb::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<grit_lib::objects::ObjectKind>
 pub fn grit_lib::objects::odb::Odb::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::odb::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::odb::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>

@@ -394,8 +394,7 @@ impl Odb {
                 obj.kind.as_str()
             )));
         }
-        let parsed =
-            crate::objects::parse_tree_with_oid_len(&obj.data, self.hash_algo().len())?;
+        let parsed = crate::objects::parse_tree_with_oid_len(&obj.data, self.hash_algo().len())?;
         let arc = Arc::new(parsed);
         if let Ok(mut guard) = self.session_tree_entries.lock() {
             if guard.len() > 4096 {
@@ -1528,6 +1527,127 @@ impl Odb {
         }
 
         Err(Error::ObjectNotFound(oid.to_hex()))
+    }
+
+    /// Read and decompress an object into `buf`, reusing its capacity across calls.
+    ///
+    /// Resolution order matches [`Self::read`]. Returns a borrowed view of the payload
+    /// stored in `buf`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::read`].
+    pub fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<ObjectKind> {
+        if oid.is_well_known_empty_tree() {
+            buf.clear();
+            return Ok(ObjectKind::Tree);
+        }
+
+        if let Some(obj) = self.session_cached_loose_read(oid) {
+            buf.clear();
+            buf.extend_from_slice(&obj.data);
+            return Ok(obj.kind);
+        }
+
+        if let Some(obj) = self.overlay_read(oid) {
+            buf.clear();
+            buf.extend_from_slice(&obj.data);
+            return Ok(obj.kind);
+        }
+
+        if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, buf)? {
+            return Ok(kind);
+        }
+
+        let use_midx = self.multi_pack_index_reads_enabled();
+        if use_midx {
+            self.ensure_midx_prepared();
+        }
+
+        self.sync_delta_base_cache_limit();
+
+        let primary = self.primary_writable()?;
+        let files_primary = self.primary().ok();
+        let mut unreadable_local_loose = None;
+        let mut read_primary = || primary.read_into(oid, buf);
+        match if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+            read_primary()
+        } else {
+            self.with_pack_store_for(&self.objects_dir, read_primary)
+        } {
+            Ok(Some(kind)) => {
+                self.remember_session_loose_read(oid, &Object::new(kind, buf.clone()));
+                return Ok(kind);
+            }
+            Ok(None) => {}
+            Err(err)
+                if files_primary
+                    .as_ref()
+                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+            {
+                unreadable_local_loose = Some(err);
+            }
+            Err(err) => return Err(err),
+        }
+
+        if let Some(kind) = self.try_read_into_extra_sources(oid, buf)? {
+            self.remember_session_loose_read(oid, &Object::new(kind, buf.clone()));
+            return Ok(kind);
+        }
+
+        if self.alternates_enabled {
+            match self.sources()?.read_into(oid, buf) {
+                Ok(Some(kind)) => {
+                    self.remember_session_loose_read(oid, &Object::new(kind, buf.clone()));
+                    return Ok(kind);
+                }
+                Ok(None) => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        if let Some(err) = unreadable_local_loose {
+            return Err(err);
+        }
+
+        Err(Error::ObjectNotFound(oid.to_hex()))
+    }
+
+    fn try_read_into_extra_sources(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
+        for src in &self.extra_read_sources {
+            if let Some(kind) = src.read_into(oid, buf)? {
+                return Ok(Some(kind));
+            }
+        }
+        Ok(None)
+    }
+
+    fn try_read_packed_in_batch_context_into(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
+        if self.custom_primary.is_some()
+            || !PackStore::read_context_matches_objects_dir(&self.objects_dir)
+            || self.multi_pack_index_reads_enabled()
+        {
+            return Ok(None);
+        }
+        self.sync_delta_base_cache_limit();
+        match pack::try_read_object_from_packs_with_options_into(
+            &self.objects_dir,
+            oid,
+            pack::PackLookupOptions::ALL_LOCAL_PACKS,
+            buf,
+        ) {
+            Ok(kind) => Ok(Some(kind)),
+            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     /// Return the kind and uncompressed size of `oid` without loading the full object body.
