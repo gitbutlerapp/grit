@@ -460,6 +460,28 @@ pub fn should_sign_commit(config: &ConfigSet, sign_override: Option<bool>) -> Re
     }
 }
 
+/// Whether a new annotated tag object should be signed.
+///
+/// Honors `tag.gpgSign` (and `tag.gpgsign`) when `sign_override` is `None`.
+/// When `sign_override` is `Some(true)` or `Some(false)`, that choice wins over config.
+///
+/// # Errors
+///
+/// Returns [`Error::Config`] when `tag.gpgSign` holds a non-boolean value.
+pub fn should_sign_tag(config: &ConfigSet, sign_override: Option<bool>) -> Result<bool> {
+    if let Some(force) = sign_override {
+        return Ok(force);
+    }
+    match config
+        .get_bool("tag.gpgSign")
+        .or_else(|| config.get_bool("tag.gpgsign"))
+    {
+        Some(Ok(v)) => Ok(v),
+        Some(Err(e)) => Err(Error::Config(format!("tag.gpgSign: {e}").into())),
+        None => Ok(false),
+    }
+}
+
 /// Header name for an embedded commit signature for `hash_algo`.
 #[must_use]
 pub fn commit_gpg_sig_header(hash_algo: HashAlgo) -> &'static str {
@@ -493,6 +515,39 @@ pub fn sign_serialized_commit(
     let sig = sign_buffer(cfg, unsigned_bytes, &signing_key)?;
     let header = commit_gpg_sig_header(hash_algo);
     Ok(add_header_signature(unsigned_bytes, &sig, header))
+}
+
+/// Append an armored detached signature to a serialized tag object.
+///
+/// Tag signatures are stored after the tag body (unlike commits, which use a
+/// `gpgsig` header). See [`parse_signed_buffer`].
+#[must_use]
+pub fn append_tag_signature(unsigned_bytes: &[u8], sig: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(unsigned_bytes.len() + sig.len());
+    out.extend_from_slice(unsigned_bytes);
+    out.extend_from_slice(sig);
+    out
+}
+
+/// Sign a serialized tag object (without an appended signature).
+///
+/// Uses [`sign_buffer`] on `unsigned_bytes` and [`append_tag_signature`]. The
+/// signing key comes from `signing_key_override`, else `user.signingkey`, else
+/// [`committer_signing_default`] applied to `tagger_ident`.
+///
+/// # Errors
+///
+/// Returns [`Error::Signing`] when the signing program fails.
+pub fn sign_serialized_tag(
+    cfg: &GpgConfig,
+    unsigned_bytes: &[u8],
+    tagger_ident: &str,
+    signing_key_override: Option<&str>,
+) -> Result<Vec<u8>> {
+    let tagger_key = committer_signing_default(tagger_ident);
+    let signing_key = cfg.resolve_signing_key(signing_key_override, &tagger_key);
+    let sig = sign_buffer(cfg, unsigned_bytes, &signing_key)?;
+    Ok(append_tag_signature(unsigned_bytes, &sig))
 }
 
 /// Sign `payload` with `signing_key` using the configured program.
@@ -1809,6 +1864,28 @@ mod tests {
         cfg.add_command_override("commit.gpgsign", "true").unwrap();
         assert!(should_sign_commit(&cfg, None).unwrap());
         assert!(!should_sign_commit(&cfg, Some(false)).unwrap());
+    }
+
+    #[test]
+    fn should_sign_tag_honors_override_and_config() {
+        let mut cfg = ConfigSet::default();
+        assert!(!should_sign_tag(&cfg, None).unwrap());
+        assert!(should_sign_tag(&cfg, Some(true)).unwrap());
+        assert!(!should_sign_tag(&cfg, Some(false)).unwrap());
+
+        cfg.add_command_override("tag.gpgSign", "true").unwrap();
+        assert!(should_sign_tag(&cfg, None).unwrap());
+        assert!(!should_sign_tag(&cfg, Some(false)).unwrap());
+    }
+
+    #[test]
+    fn append_tag_signature_concatenates_armor() {
+        let body = b"object 0\ntype commit\ntag v1\ntagger t <t@e> 1 +0000\n\nmsg\n";
+        let sig = b"-----BEGIN SSH SIGNATURE-----\nX\n-----END SSH SIGNATURE-----\n";
+        let out = append_tag_signature(body, sig);
+        assert_eq!(out.len(), body.len() + sig.len());
+        assert_eq!(&out[..body.len()], body);
+        assert_eq!(&out[body.len()..], sig);
     }
 
     #[test]

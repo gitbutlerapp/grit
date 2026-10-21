@@ -841,6 +841,15 @@ enum Command {
         /// Object to tag (revision). Defaults to `HEAD`.
         #[arg(long = "object", value_name = "REV")]
         object: Option<String>,
+        /// Sign the tag object (implies annotated). Honors `tag.gpgSign` when omitted.
+        #[arg(short = 's', long = "sign", conflicts_with = "no_sign")]
+        sign: bool,
+        /// Do not sign even when `tag.gpgSign` is true.
+        #[arg(long = "no-sign", conflicts_with = "sign")]
+        no_sign: bool,
+        /// Signing key id or path (overrides `user.signingkey` for this tag).
+        #[arg(long = "signing-key", value_name = "KEY")]
+        signing_key: Option<String>,
     },
     /// List, add, or remove linked worktrees.
     Worktree {
@@ -1392,11 +1401,31 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             delete,
             message,
             object,
-        } => emit(
-            &commands::tag::run(name, delete, message, object, ctx.now)?,
-            opts,
-            ctx,
-        ),
+            sign,
+            no_sign,
+            signing_key,
+        } => {
+            let sign_override = if sign {
+                Some(true)
+            } else if no_sign {
+                Some(false)
+            } else {
+                None
+            };
+            emit(
+                &commands::tag::run(
+                    name,
+                    delete,
+                    message,
+                    object,
+                    sign_override,
+                    signing_key,
+                    ctx.now,
+                )?,
+                opts,
+                ctx,
+            )
+        }
         Command::Worktree { action } => match action {
             WorktreeAction::List => emit(&commands::worktree::run_list()?, opts, ctx),
             WorktreeAction::Add {

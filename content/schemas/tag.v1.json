@@ -86,13 +86,18 @@
             "string",
             "null"
           ]
+        },
+        "signed": {
+          "description": "Whether the tag object carries a cryptographic signature.",
+          "type": "boolean"
         }
       },
       "required": [
         "action",
         "kind",
         "name",
-        "oid"
+        "oid",
+        "signed"
       ],
       "type": "object"
     },

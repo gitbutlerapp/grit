@@ -5,6 +5,7 @@ use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ref_name_messages::tag_short_name_error_message;
 use anyhow::{bail, Context, Result};
+use grit_lib::commit::signing::should_sign_tag;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::porcelain::tag::{create_tag, tag_ref_metadata, CreateTagRequest, TagKind};
 use grit_lib::refs;
@@ -32,6 +33,8 @@ pub enum TagOutcome {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[schemars(skip_serializing_if = "Option::is_none")]
         peeled: Option<String>,
+        /// Whether the tag object carries a cryptographic signature.
+        signed: bool,
     },
     /// A tag was deleted.
     Delete { name: String },
@@ -109,12 +112,13 @@ impl MarkdownRender for TagOutcome {
                 oid,
                 kind,
                 peeled,
+                signed,
             } => {
                 let short = oid.get(..7).unwrap_or(oid.as_str());
-                let kind_note = if *kind == TagRefKind::Annotated {
-                    " (annotated)"
-                } else {
-                    ""
+                let kind_note = match (*kind, *signed) {
+                    (TagRefKind::Annotated, true) => " (annotated, signed)",
+                    (TagRefKind::Annotated, false) => " (annotated)",
+                    _ => "",
                 };
                 let peel = peeled
                     .as_ref()
@@ -134,13 +138,15 @@ pub fn run(
     delete: bool,
     message: Option<String>,
     object: Option<String>,
+    sign: Option<bool>,
+    signing_key: Option<String>,
     now: OffsetDateTime,
 ) -> Result<TagOutcome> {
     let repo = context::discover()?;
     match name {
         None => list(&repo),
         Some(name) if delete => delete_tag(&repo, &name),
-        Some(name) => create(&repo, &name, message, object, now),
+        Some(name) => create(&repo, &name, message, object, sign, signing_key, now),
     }
 }
 
@@ -173,6 +179,8 @@ fn create(
     name: &str,
     message: Option<String>,
     object: Option<String>,
+    sign: Option<bool>,
+    signing_key: Option<String>,
     now: OffsetDateTime,
 ) -> Result<TagOutcome> {
     if let Err(err) = validate_tag_short_name(name) {
@@ -191,7 +199,9 @@ fn create(
 
     let env = context::environment();
     let config = repo.config().context("could not load config")?;
-    let tagger = if message.is_some() {
+    let will_sign = should_sign_tag(&config, sign).context("could not read tag signing config")?;
+    let needs_annotated = message.is_some() || will_sign;
+    let tagger = if needs_annotated {
         Some(
             context::identity(&env, &config, IdentRole::Committer, now)
                 .context("could not resolve tagger identity")?,
@@ -207,6 +217,8 @@ fn create(
             target,
             message,
             tagger,
+            sign,
+            signing_key,
         },
     )
     .map_err(anyhow::Error::msg)?;
@@ -216,6 +228,7 @@ fn create(
         oid: outcome.oid.to_hex(),
         kind: outcome.kind.into(),
         peeled: outcome.peeled.map(|p| p.to_hex()),
+        signed: outcome.signed,
     })
 }
 

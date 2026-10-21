@@ -130,8 +130,8 @@ pub fn remove_header_lines(extra: &[u8], drop_key: impl Fn(&[u8]) -> bool) -> Ve
 /// Replace every header block named `name` with `line`, or append `line` when no such block exists.
 ///
 /// `line` must be a full header record (`name SP value LF`, plus any SP-prefixed continuation
-/// lines and their trailing LFs) in the same encoding used in [`CommitData::extra_headers`] /
-/// [`crate::objects::TagData::extra_headers`].
+/// lines and their trailing LFs) in the same encoding used in
+/// [`crate::objects::CommitData::extra_headers`] / [`crate::objects::TagData::extra_headers`].
 pub fn set_extra_header(extra: &mut Vec<u8>, name: &str, line: &[u8]) {
     let name_bytes = name.as_bytes();
     *extra = remove_header_lines(extra, |key| key == name_bytes);

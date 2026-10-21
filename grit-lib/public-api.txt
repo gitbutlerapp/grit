@@ -1193,14 +1193,17 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::commit::signing::Signatu
 pub const grit_lib::commit::signing::GPG_SIG_HEADER_SHA1: &str
 pub const grit_lib::commit::signing::GPG_SIG_HEADER_SHA256: &str
 pub fn grit_lib::commit::signing::add_header_signature(&[u8], &[u8], &str) -> alloc::vec::Vec<u8>
+pub fn grit_lib::commit::signing::append_tag_signature(&[u8], &[u8]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::commit::signing::commit_gpg_sig_header(grit_lib::objects::HashAlgo) -> &'static str
 pub fn grit_lib::commit::signing::committer_signing_default(&str) -> alloc::string::String
 pub fn grit_lib::commit::signing::extra_headers_without_commit_signatures(&[u8]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::commit::signing::extract_signed_payload(&[u8]) -> core::option::Option<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)>
 pub fn grit_lib::commit::signing::parse_signed_buffer(&[u8]) -> core::option::Option<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)>
 pub fn grit_lib::commit::signing::should_sign_commit(&grit_lib::config::ConfigSet, core::option::Option<bool>) -> grit_lib::error::Result<bool>
+pub fn grit_lib::commit::signing::should_sign_tag(&grit_lib::config::ConfigSet, core::option::Option<bool>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::commit::signing::sign_buffer(&grit_lib::commit::signing::GpgConfig, &[u8], &str) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::commit::signing::sign_serialized_commit(&grit_lib::commit::signing::GpgConfig, &[u8], &str, core::option::Option<&str>, grit_lib::objects::HashAlgo) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::commit::signing::sign_serialized_tag(&grit_lib::commit::signing::GpgConfig, &[u8], &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::commit::signing::verify_commit(&grit_lib::commit::signing::GpgConfig, &[u8]) -> grit_lib::error::Result<grit_lib::commit::signing::SignatureCheck>
 pub fn grit_lib::commit::signing::verify_tag(&grit_lib::commit::signing::GpgConfig, &[u8]) -> grit_lib::error::Result<grit_lib::commit::signing::SignatureCheck>
 pub mod grit_lib::commit::trailers
@@ -10665,6 +10668,7 @@ pub grit_lib::porcelain::tag::CreateTagOutcome::kind: grit_lib::porcelain::tag::
 pub grit_lib::porcelain::tag::CreateTagOutcome::name: alloc::string::String
 pub grit_lib::porcelain::tag::CreateTagOutcome::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::tag::CreateTagOutcome::peeled: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::tag::CreateTagOutcome::signed: bool
 impl core::clone::Clone for grit_lib::porcelain::tag::CreateTagOutcome
 pub fn grit_lib::porcelain::tag::CreateTagOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::tag::CreateTagOutcome
@@ -10683,6 +10687,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::CreateTa
 pub struct grit_lib::porcelain::tag::CreateTagRequest
 pub grit_lib::porcelain::tag::CreateTagRequest::message: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::tag::CreateTagRequest::name: alloc::string::String
+pub grit_lib::porcelain::tag::CreateTagRequest::sign: core::option::Option<bool>
+pub grit_lib::porcelain::tag::CreateTagRequest::signing_key: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::tag::CreateTagRequest::tagger: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::tag::CreateTagRequest::target: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::porcelain::tag::CreateTagRequest

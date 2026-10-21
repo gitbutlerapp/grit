@@ -11,13 +11,14 @@ order: 5
 grit tag
 grit tag <name>
 grit tag <name> -m <message>
+grit tag <name> -s -m <message>
 grit tag <name> --object <rev>
 grit tag -d <name>
 ```
 
 ## Description
 
-With no arguments, lists your tags. With a name and no `-m`, creates a **lightweight** tag pointing at `HEAD` (or `--object`). With `-m`, creates an **annotated** tag object with that message so releases can be verified with `git tag -v` / `git cat-file -p`.
+With no arguments, lists your tags. With a name and no `-m`, creates a **lightweight** tag pointing at `HEAD` (or `--object`). With `-m`, creates an **annotated** tag object with that message. Use `-s` / `--sign` (or `tag.gpgSign=true`) to cryptographically sign an annotated tag; signed tags verify with `git verify-tag` and system `git tag -v`.
 
 Tag names must be valid as `refs/tags/<name>` under Git's ref-name rules (same checks as `git check-ref-format refs/tags/<name>`). Invalid names are rejected before writing under `.git/refs`.
 
@@ -30,6 +31,9 @@ Tags are local until you publish them with [`grit push --tags`](../push/). Delet
 | `<name>` | The tag to create or delete. Omit to list tags. |
 | `-d`, `--delete` | Delete the tag locally. |
 | `-m`, `--message` | Annotated tag message. |
+| `-s`, `--sign` | Sign the tag object (implies annotated; honors `tag.gpgSign` when omitted). |
+| `--no-sign` | Do not sign, even when `tag.gpgSign` is true. |
+| `--signing-key` | Signing key id or path for this tag (overrides `user.signingkey`). |
 | `--object` | Revision to tag (default `HEAD`). |
 
 ## Examples
@@ -37,6 +41,9 @@ Tags are local until you publish them with [`grit push --tags`](../push/). Delet
 ```console
 $ grit tag v0.1 -m 'First release'
 Created tag v0.1
+
+$ grit tag v0.2 -s -m 'Signed release'
+Created tag v0.2
 
 $ grit tag
   v0.1
@@ -64,6 +71,7 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | `name` | string | For `create` or `delete`, the tag name. |
 | `oid` | string | For `create`, full id the tag ref points at (tag object or commit). |
 | `kind` | string | For `create` or list entries: `lightweight` or `annotated`. |
+| `signed` | boolean | For `create`, whether the tag object was signed. |
 | `peeled` | string | Commit oid when the tag peels to a commit. |
 
 Listing tags:
@@ -90,6 +98,7 @@ Creating an annotated tag:
   "name": "v0.1",
   "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
   "kind": "annotated",
+  "signed": false,
   "peeled": "abc1234567890abcdef1234567890abcdef123456"
 }
 ```
