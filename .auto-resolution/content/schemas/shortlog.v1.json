@@ -1,0 +1,150 @@
+{
+  "$id": "https://grit-scm.com/schemas/shortlog/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "CommitJson": {
+      "description": "Shared commit object in JSON output (`log`, `show`, `revs`, `shortlog`, …).",
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/Person"
+        },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "description": "Full message body with trailing whitespace trimmed.",
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "refs": {
+          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
+          "items": {
+            "$ref": "#/definitions/CommitRefJson"
+          },
+          "type": "array"
+        },
+        "relative_date": {
+          "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "committer",
+        "message",
+        "oid",
+        "parents",
+        "refs",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "CommitRefJson": {
+      "description": "Ref decoration attached to a commit in JSON output.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/CommitRefKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CommitRefKind": {
+      "description": "Decoration category in JSON (`--json` contract).",
+      "enum": [
+        "branch",
+        "remote_branch",
+        "tag",
+        "stash",
+        "head",
+        "grafted",
+        "other"
+      ],
+      "type": "string"
+    },
+    "Person": {
+      "description": "A parsed identity line (`Name <email> <epoch> <tz>`) for stable `--json` output.",
+      "properties": {
+        "date": {
+          "description": "Author or committer timestamp in RFC 3339.",
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit shortlog`.",
+  "properties": {
+    "ahead": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "commits": {
+      "items": {
+        "$ref": "#/definitions/CommitJson"
+      },
+      "type": "array"
+    },
+    "next": {
+      "description": "Continuation cursor when the list is resumable; always `null` for `shortlog` today.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target": {
+      "description": "Target branch name, or `null` when none could be resolved.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "truncated": {
+      "description": "True when more ahead commits exist than listed (`ahead` exceeds `commits.len()`).",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ahead",
+    "branch",
+    "commits",
+    "truncated"
+  ],
+  "title": "ShortlogOutcome",
+  "type": "object"
+}

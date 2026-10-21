@@ -1,0 +1,33 @@
+{
+  "$id": "https://grit-scm.com/schemas/commit/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit commit`.",
+  "properties": {
+    "amended": {
+      "type": "boolean"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "changes": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "oid": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "amended",
+    "branch",
+    "changes",
+    "oid",
+    "subject"
+  ],
+  "title": "CommitOutcome",
+  "type": "object"
+}

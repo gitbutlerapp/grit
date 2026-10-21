@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "error: --filter requires --json\n"
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "[\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"]\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "error: --filter requires --json\n"
+  }
+}

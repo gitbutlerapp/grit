@@ -1,0 +1,130 @@
+{
+  "$id": "https://grit-scm.com/schemas/ignore.check/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "IgnoreCheckEntryJson": {
+      "properties": {
+        "ignored": {
+          "type": "boolean"
+        },
+        "matched": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IgnoreMatchJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ignored",
+        "path"
+      ],
+      "type": "object"
+    },
+    "IgnoreMatchJson": {
+      "properties": {
+        "line_number": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "negative": {
+          "type": "boolean"
+        },
+        "pattern_text": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/IgnoreSourceJson"
+        }
+      },
+      "required": [
+        "line_number",
+        "negative",
+        "pattern_text",
+        "source"
+      ],
+      "type": "object"
+    },
+    "IgnoreSourceJson": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "per_directory"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "info_exclude"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "core_excludes_file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "description": "Result of `grit ignore check`.",
+  "properties": {
+    "any_ignored": {
+      "description": "Whether at least one queried path is ignored.",
+      "type": "boolean"
+    },
+    "entries": {
+      "description": "Per-path results (filtered by `--all`; default lists only ignored paths).",
+      "items": {
+        "$ref": "#/definitions/IgnoreCheckEntryJson"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "any_ignored",
+    "entries"
+  ],
+  "title": "IgnoreCheckOutcome",
+  "type": "object"
+}

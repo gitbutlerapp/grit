@@ -1,0 +1,416 @@
+# Campaign 1.1× scorecard targets for grit-bench campaign scenarios.
+# Ratios are grit_median_ms / git_median_ms (lower is faster for grit).
+
+[default]
+ratio = 1.1
+
+# Roadmap item 14 owns rev-list counting and serve-clone throughput work.
+[scenario."git-dot-git/revs-path-builtin-add-c"]
+documented = "path-limited rev walk on git.git (#1159); ratio tracked, no hard gate yet"
+followup = "GitHub issue #1159"
+
+[scenario."git-dot-git/log-path-doc-git-add-limit50"]
+documented = "bounded path-limited log on git.git (#1159); ratio tracked, no hard gate yet"
+followup = "GitHub issue #1159"
+
+[scenario."git-dot-git/revs-path-documentation"]
+documented = "directory pathspec rev walk on git.git (#1159); ratio tracked, no hard gate yet"
+followup = "GitHub issue #1159"
+
+[scenario."git-dot-git/rev-list-count"]
+owned_by_item_14 = true
+
+[scenario."git-dot-git/rev-list-count-objects"]
+owned_by_item_14 = true
+
+[scenario."git-dot-git/serve-clone"]
+owned_by_item_14 = true
+
+[scenario."chromium-synth/rev-list-count"]
+owned_by_item_14 = true
+
+[scenario."chromium-synth/rev-list-count-objects"]
+owned_by_item_14 = true
+
+[scenario."chromium-synth/serve-clone"]
+owned_by_item_14 = true
+
+[scenario."linux/rev-list-count"]
+owned_by_item_14 = true
+
+[scenario."linux/rev-list-count-objects"]
+owned_by_item_14 = true
+
+[scenario."linux/serve-clone"]
+owned_by_item_14 = true
+
+[scenario."revs-count-deep-no-graph"]
+owned_by_item_14 = true
+
+[scenario."revs-count-deep-commit-graph"]
+owned_by_item_14 = true
+
+[scenario."git-dot-git/merge-base"]
+documented = "grit merge-base exceeds VM memory on git.git until revwalk item 7 lands"
+followup = "ROADMAP item 7"
+
+[scenario."git-dot-git/gc"]
+documented = "grit gc on git.git exceeds factory VM memory; git side timed for ratio ledger"
+followup = "ROADMAP item 21"
+
+[scenario."chromium-synth/gc"]
+documented = "grit gc on chromium-class synthetic exceeds factory campaign time budget; git side timed for ratio ledger"
+followup = "ROADMAP item 21"
+
+[scenario."linux/gc"]
+documented = "grit gc on linux kernel clone exceeds factory campaign time budget; git side timed for ratio ledger"
+followup = "ROADMAP item 21"
+
+[scenario."git-dot-git/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP item 19"
+
+[scenario."chromium-synth/merge-base"]
+documented = "grit merge-base exceeds VM memory on chromium-class synthetic until revwalk item 7 lands"
+followup = "ROADMAP item 7"
+
+[scenario."chromium-synth/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP item 19"
+
+[scenario."linux/merge-base"]
+documented = "grit merge-base on linux kernel clone exceeds factory VM memory until revwalk item 7 lands"
+followup = "ROADMAP item 7"
+
+[scenario."linux/repack"]
+documented = "grit repack requires a worktree; bare remotes are measured with git repack only"
+followup = "ROADMAP item 19"
+
+[scenario."git-dot-git/fsck"]
+documented = "git.git tagger/mode deltas fail grit fsck while git fsck warns only"
+followup = "ROADMAP item 11"
+
+[scenario."chromium-synth/blame"]
+documented = "grit blame fails on deep synthetic .bin paths while git blame succeeds"
+followup = "ROADMAP item 27"
+
+[scenario."git-dot-git/status-dirty"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."git-dot-git/status-clean"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."git-dot-git/diff-dirty"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."git-dot-git/diff-clean"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."chromium-synth/status-dirty"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."chromium-synth/status-clean"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."chromium-synth/diff-dirty"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."chromium-synth/diff-clean"]
+documented = "Index stat cache and untracked walks still above 1.1× on git.git and chromium-class synthetic"
+followup = "ROADMAP item 22"
+
+[scenario."git-dot-git/add"]
+documented = "Staging, index write, and commit path still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 23"
+
+[scenario."git-dot-git/commit"]
+documented = "Staging, index write, and commit path still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 23"
+
+[scenario."chromium-synth/add"]
+documented = "Staging, index write, and commit path still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 23"
+
+[scenario."chromium-synth/commit"]
+documented = "Staging, index write, and commit path still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 23"
+
+[scenario."git-dot-git/switch"]
+documented = "Tree-diff-driven checkout/switch still above 1.1× on real and synthetic fixtures"
+followup = "ROADMAP item 24"
+
+[scenario."git-dot-git/switch-wide"]
+documented = "Tree-diff-driven checkout/switch still above 1.1× on real and synthetic fixtures"
+followup = "ROADMAP item 24"
+
+[scenario."chromium-synth/switch"]
+documented = "Tree-diff-driven checkout/switch still above 1.1× on real and synthetic fixtures"
+followup = "ROADMAP item 24"
+
+[scenario."chromium-synth/switch-wide"]
+documented = "Tree-diff-driven checkout/switch still above 1.1× on real and synthetic fixtures"
+followup = "ROADMAP item 24"
+
+[scenario."git-dot-git/pick"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."git-dot-git/merge"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."git-dot-git/revert"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."git-dot-git/stash-push-pop"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."chromium-synth/pick"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."chromium-synth/merge"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."chromium-synth/revert"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."chromium-synth/stash-push-pop"]
+documented = "In-memory tree merge and stash paths remain far above 1.1× on large worktrees"
+followup = "ROADMAP item 25"
+
+[scenario."git-dot-git/log"]
+documented = "Paginated log and patch generation still above 1.1× or fail on campaign fixtures"
+followup = "ROADMAP item 26"
+
+[scenario."git-dot-git/log-patch"]
+documented = "Paginated log and patch generation still above 1.1× or fail on campaign fixtures"
+followup = "ROADMAP item 26"
+
+[scenario."chromium-synth/log"]
+documented = "Paginated log and patch generation still above 1.1× or fail on campaign fixtures"
+followup = "ROADMAP item 26"
+
+[scenario."chromium-synth/log-patch"]
+documented = "Paginated log and patch generation still above 1.1× or fail on campaign fixtures"
+followup = "ROADMAP item 26"
+
+[scenario."git-dot-git/blame"]
+documented = "Deep blame on git.git remains above 1.1× without commit-graph/blame fast paths at scale"
+followup = "ROADMAP item 27"
+
+[scenario."blame-large-tail-full"]
+documented = "Regression guard for full-file blame on multi-kB tail-churn history (#1219)"
+followup = "GitHub issue #1219"
+
+[scenario."blame-large-tail-range"]
+documented = "Regression guard for blame -L on tail-churn large files (#1219)"
+followup = "GitHub issue #1219"
+
+[scenario."history-blame-large-full"]
+documented = "History-suite full-file tail-churn blame vs git (#1219)"
+followup = "GitHub issue #1219"
+
+[scenario."history-blame-large-range"]
+documented = "History-suite blame -L 100,120 on tail-churn fixture (#1219)"
+followup = "GitHub issue #1219"
+
+[scenario."git-dot-git/resolve"]
+documented = "Object resolution and bulk cat still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 28"
+
+[scenario."git-dot-git/cat"]
+documented = "Object resolution and bulk cat still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 28"
+
+[scenario."chromium-synth/resolve"]
+documented = "Object resolution and bulk cat still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 28"
+
+[scenario."chromium-synth/cat"]
+documented = "Object resolution and bulk cat still above 1.1× on campaign fixtures"
+followup = "ROADMAP item 28"
+
+[scenario."git-dot-git/fetch-incr-file"]
+documented = "File transport and incremental fetch/push still above 1.1× on large bare repos"
+followup = "ROADMAP item 29"
+
+[scenario."git-dot-git/push-file"]
+documented = "File transport and incremental fetch/push still above 1.1× on large bare repos"
+followup = "ROADMAP item 29"
+
+[scenario."chromium-synth/fetch-incr-file"]
+documented = "File transport and incremental fetch/push still above 1.1× on large bare repos"
+followup = "ROADMAP item 29"
+
+[scenario."chromium-synth/push-file"]
+documented = "File transport and incremental fetch/push still above 1.1× on large bare repos"
+followup = "ROADMAP item 29"
+
+[scenario."chromium-synth/clone-file"]
+documented = "File transport and incremental fetch/push still above 1.1× on large bare repos"
+followup = "ROADMAP item 29"
+
+[scenario."chromium-synth/fsck"]
+documented = "Full fsck on 400k-file synthetic worktree remains above 1.1×"
+followup = "ROADMAP item 30"
+
+[scenario."medium/diff-name-only"]
+documented = "Tree diff name-only on synth-10k smoke worktree ≈2.5× git (campaign smoke 2026-10-21)"
+followup = "ROADMAP item 2 (factory speed: diff list modes on medium fixture)"
+
+[scenario."medium/diff-w"]
+documented = "Worktree diff -w on synth-10k smoke ≈3.6× git (campaign smoke 2026-10-21)"
+followup = "ROADMAP item 2 (factory speed: whitespace-normalized diff on medium fixture)"
+
+[scenario."medium/show-patch"]
+documented = "Show largest-commit patch on synth-10k smoke ≈1.36× git (campaign smoke 2026-10-21)"
+followup = "ROADMAP item 2 (factory speed: show patch on medium fixture)"
+
+[scenario."medium/diff-quiet-clean"]
+documented = "diff --quiet timing on synth-10k smoke ≈2.4× git (uses full diff path today)"
+followup = "ROADMAP item 2 (factory speed: diff --quiet / has_changes fast path (step 6))"
+
+[scenario."medium/diff-quiet-dirty"]
+documented = "diff --quiet on dirty synth-10k smoke ≈3.3× git"
+followup = "ROADMAP item 2 (factory speed: diff --quiet / has_changes fast path (step 6))"
+
+[scenario."medium/log-name-status"]
+documented = "log --name-status --limit 20 on synth-10k smoke ≈2.1× git"
+followup = "ROADMAP item 2 (factory speed: log diff detail on medium fixture)"
+
+[scenario."medium/log-stat"]
+documented = "log --stat --limit 20 on synth-10k smoke above 1.1× git (single-run smoke baseline)"
+followup = "ROADMAP item 2 (factory speed: log diff detail on medium fixture)"
+
+[scenario."medium/status-dirty"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/status-clean"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/add"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/diff-dirty"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/diff-clean"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/log"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/merge-base"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/resolve"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/cat"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/switch"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/pick"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/merge"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/revert"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/stash-push-pop"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."medium/fsck"]
+documented = "Smoke campaign baseline single-run ratio; re-measure on production campaign"
+followup = "ROADMAP item 2 (refresh medium fixture baseline after full campaign run)"
+
+[scenario."git-dot-git/diff-name-only"]
+documented = "New diff output scenario on git.git; ratio tracked on smoke campaign run"
+followup = "ROADMAP item 2 (factory speed: diff list modes on git.git fixture)"
+
+[scenario."git-dot-git/diff-w"]
+documented = "New diff -w scenario on git.git; ratio tracked on smoke campaign run"
+followup = "ROADMAP item 2 (factory speed: whitespace diff on git.git fixture)"
+
+[scenario."git-dot-git/diff-quiet-clean"]
+documented = "diff --quiet on git.git smoke baseline"
+followup = "ROADMAP item 2 (factory speed: diff --quiet fast path)"
+
+[scenario."git-dot-git/diff-quiet-dirty"]
+documented = "diff --quiet dirty on git.git smoke baseline"
+followup = "ROADMAP item 2 (factory speed: diff --quiet fast path)"
+
+[scenario."git-dot-git/show-patch"]
+documented = "show patch on largest commit git.git smoke baseline"
+followup = "ROADMAP item 2 (factory speed: show patch on git.git)"
+
+[scenario."git-dot-git/log-stat"]
+documented = "log --stat on git.git smoke baseline"
+followup = "ROADMAP item 2 (factory speed: log diff detail on git.git)"
+
+[scenario."git-dot-git/log-name-status"]
+documented = "log --name-status on git.git smoke baseline"
+followup = "ROADMAP item 2 (factory speed: log diff detail on git.git)"
+
+[scenario."chromium-synth/diff-stat"]
+documented = "diff --stat on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: diff stat on chromium fixture)"
+
+[scenario."chromium-synth/diff-name-only"]
+documented = "diff --name-only on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: diff list modes on chromium fixture)"
+
+[scenario."chromium-synth/diff-w"]
+documented = "diff -w on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: whitespace diff on chromium fixture)"
+
+[scenario."chromium-synth/diff-quiet-clean"]
+documented = "diff --quiet on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: diff --quiet fast path)"
+
+[scenario."chromium-synth/diff-quiet-dirty"]
+documented = "diff --quiet dirty on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: diff --quiet fast path)"
+
+[scenario."chromium-synth/show-patch"]
+documented = "show patch on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: show patch on chromium fixture)"
+
+[scenario."chromium-synth/log-stat"]
+documented = "log --stat on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: log diff detail on chromium fixture)"
+
+[scenario."chromium-synth/log-name-status"]
+documented = "log --name-status on chromium-synth smoke baseline"
+followup = "ROADMAP item 2 (factory speed: log diff detail on chromium fixture)"
+

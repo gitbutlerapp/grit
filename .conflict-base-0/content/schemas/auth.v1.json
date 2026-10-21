@@ -1,0 +1,19 @@
+{
+  "$id": "https://grit-scm.com/schemas/auth/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit auth` (sign-in).",
+  "properties": {
+    "authenticated": {
+      "type": "boolean"
+    },
+    "host": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "authenticated",
+    "host"
+  ],
+  "title": "AuthOutcome",
+  "type": "object"
+}

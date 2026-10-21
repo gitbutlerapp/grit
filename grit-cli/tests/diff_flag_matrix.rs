@@ -78,14 +78,14 @@ fn setup_fixture() -> Fixture {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Out {
     Numstat,
     NameStatus,
     Json,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Mode {
     TwoCommit,
     Staged,
@@ -98,7 +98,10 @@ struct Case {
     mode: Mode,
     out: Out,
     flags: &'static [&'static str],
-    label: &'static str,
+}
+
+fn case_label(case: &Case) -> String {
+    format!("{:?}/{:?}/{:?}", case.mode, case.out, case.flags)
 }
 
 fn git_log_limit() -> &'static str {
@@ -277,7 +280,7 @@ fn compare_text_case(fx: &Fixture, case: &Case) {
     assert_eq!(
         g.status, r.status,
         "{}: exit grit={:?} git={:?}\ngrit stderr: {}\ngit stderr: {}",
-        case.label, g.status, r.status, g.stderr, r.stderr
+        &case_label(case), g.status, r.status, g.stderr, r.stderr
     );
     if g.ok() && r.ok() {
         let mut grit_stdout = if matches!(case.mode, Mode::Show) {
@@ -294,7 +297,7 @@ fn compare_text_case(fx: &Fixture, case: &Case) {
             grit_stdout,
             git_stdout,
             "{}: stdout mismatch\ngrit: {:?}\ngit: {:?}",
-            case.label,
+            &case_label(case),
             build_grit_args(fx, case.mode, case.out, case.flags),
             git_args,
         );
@@ -495,13 +498,13 @@ fn grit_file_summary(f: &Value) -> JsonFileSummary {
 
 fn compare_json_case(fx: &Fixture, case: &Case) {
     let g = exec_grit(fx, build_grit_args(fx, case.mode, Out::Json, case.flags));
-    assert!(g.ok(), "{}: {}", case.label, g.dump("grit json"));
+    assert!(g.ok(), "{}: {}", &case_label(case), g.dump("grit json"));
 
     let patch_out = exec_git(fx, build_git_args(fx, case.mode, Out::Json, case.flags));
     assert!(
         patch_out.ok(),
         "{}: {}",
-        case.label,
+        &case_label(case),
         patch_out.dump("git patch")
     );
 
@@ -510,7 +513,7 @@ fn compare_json_case(fx: &Fixture, case: &Case) {
     match case.mode {
         Mode::Log => {
             let grit_commits = grit_log_commits(&v);
-            assert_eq!(grit_commits.len(), 3, "{}: expected 3 commits", case.label);
+            assert_eq!(grit_commits.len(), 3, "{}: expected 3 commits", &case_label(case));
             let stat_flag_strings = flags_without_unified_context(case.flags);
             let stat_flags = flag_refs(&stat_flag_strings);
             for (oid, grit_files) in grit_commits {
@@ -548,39 +551,30 @@ fn compare_json_case(fx: &Fixture, case: &Case) {
                     &git_ns,
                     &git_num,
                     &git_hunks,
-                    &format!("{} log {oid}", case.label),
+                    &format!("{} log {oid}", &case_label(case)),
                 );
             }
         }
         Mode::Show => {
             let grit_files = grit_files_from_value(&v);
+            let stat_flag_strings = flags_without_unified_context(case.flags);
+            let stat_flags = flag_refs(&stat_flag_strings);
             let git_ns = parse_git_name_status(
                 &exec_git(
                     fx,
-                    vec![
-                        "show".into(),
-                        "--name-status".into(),
-                        "--format=".into(),
-                        "-M50".into(),
-                        fx.c2.clone(),
-                    ],
+                    build_git_args(fx, case.mode, Out::NameStatus, &stat_flags),
                 )
                 .stdout,
             );
             let git_num = parse_git_numstat(
                 &exec_git(
                     fx,
-                    vec![
-                        "show".into(),
-                        "--numstat".into(),
-                        "--format=".into(),
-                        fx.c2.clone(),
-                    ],
+                    build_git_args(fx, case.mode, Out::Numstat, &stat_flags),
                 )
                 .stdout,
             );
             let git_hunks = parse_git_patch_hunks(&patch_out.stdout);
-            assert_grit_files_match_git(&grit_files, &git_ns, &git_num, &git_hunks, case.label);
+            assert_grit_files_match_git(&grit_files, &git_ns, &git_num, &git_hunks, &case_label(case));
         }
         _ => {
             let grit_files = grit_files_from_value(&v);
@@ -597,7 +591,7 @@ fn compare_json_case(fx: &Fixture, case: &Case) {
                 &exec_git(fx, build_git_args(fx, case.mode, Out::Numstat, &stat_flags)).stdout,
             );
             let git_hunks = parse_git_patch_hunks(&patch_out.stdout);
-            assert_grit_files_match_git(&grit_files, &git_ns, &git_num, &git_hunks, case.label);
+            assert_grit_files_match_git(&grit_files, &git_ns, &git_num, &git_hunks, &case_label(case));
         }
     }
 }
@@ -665,138 +659,77 @@ fn assert_grit_files_match_git(
     }
 }
 
-const CASES: &[Case] = &[
-    // Two-commit diff: each flag at least once across modes; rename-aware cases here.
-    Case {
-        mode: Mode::TwoCommit,
-        out: Out::Numstat,
-        flags: &[],
-        label: "two_commit numstat baseline",
-    },
-    Case {
-        mode: Mode::TwoCommit,
-        out: Out::NameStatus,
-        flags: &["-M30"],
-        label: "two_commit name-status -M30",
-    },
-    Case {
-        mode: Mode::TwoCommit,
-        out: Out::Json,
-        flags: &["-U0"],
-        label: "two_commit json -U0",
-    },
-    Case {
-        mode: Mode::TwoCommit,
-        out: Out::Numstat,
-        flags: &["--no-renames"],
-        label: "two_commit numstat --no-renames",
-    },
-    Case {
-        mode: Mode::TwoCommit,
-        out: Out::NameStatus,
-        flags: &["--diff-filter=AM"],
-        label: "two_commit name-status filter AM",
-    },
-    Case {
-        mode: Mode::TwoCommit,
-        out: Out::Json,
-        flags: &["--diff-algorithm=patience"],
-        label: "two_commit json patience",
-    },
-    // Staged
-    Case {
-        mode: Mode::Staged,
-        out: Out::Json,
-        flags: &["-w"],
-        label: "staged json -w",
-    },
-    Case {
-        mode: Mode::Staged,
-        out: Out::Numstat,
-        flags: &["-b"],
-        label: "staged numstat -b",
-    },
-    Case {
-        mode: Mode::Staged,
-        out: Out::NameStatus,
-        flags: &["--ignore-blank-lines"],
-        label: "staged name-status ignore-blank-lines",
-    },
-    // Worktree
-    Case {
-        mode: Mode::Worktree,
-        out: Out::Json,
-        flags: &["-U1"],
-        label: "worktree json -U1",
-    },
-    Case {
-        mode: Mode::Worktree,
-        out: Out::NameStatus,
-        flags: &["--diff-filter=AM"],
-        label: "worktree name-status filter AM",
-    },
-    Case {
-        mode: Mode::Worktree,
-        out: Out::Numstat,
-        flags: &[],
-        label: "worktree numstat baseline",
-    },
-    // show
-    Case {
-        mode: Mode::Show,
-        out: Out::Numstat,
-        flags: &["-M30"],
-        label: "show numstat -M30",
-    },
-    Case {
-        mode: Mode::Show,
-        out: Out::NameStatus,
-        flags: &["--no-renames"],
-        label: "show name-status --no-renames",
-    },
-    Case {
-        mode: Mode::Show,
-        out: Out::Json,
-        flags: &["-w"],
-        label: "show json -w",
-    },
-    // log (JSON only — grit log human layout is not git-compatible)
-    Case {
-        mode: Mode::Log,
-        out: Out::Json,
-        flags: &["-M30"],
-        label: "log json -M30",
-    },
-    Case {
-        mode: Mode::Log,
-        out: Out::Json,
-        flags: &["--diff-algorithm=patience"],
-        label: "log json patience",
-    },
-    Case {
-        mode: Mode::Log,
-        out: Out::Json,
-        flags: &["-U0"],
-        label: "log json -U0",
-    },
-    Case {
-        mode: Mode::Log,
-        out: Out::Json,
-        flags: &["-b"],
-        label: "log json -b",
-    },
-    Case {
-        mode: Mode::Log,
-        out: Out::Json,
-        flags: &["--ignore-blank-lines"],
-        label: "log json ignore-blank-lines",
-    },
+const MATRIX_FLAGS: &[&[&str]] = &[
+    &[],
+    &["-w"],
+    &["-b"],
+    &["--ignore-blank-lines"],
+    &["-M"],
+    &["-M30"],
+    &["-M30%"],
+    &["--no-renames"],
+    &["--diff-filter=AM"],
+    &["--diff-algorithm=patience"],
+    &["-U0"],
+    &["-U1"],
 ];
+
+fn flags_conflict(flags: &[&str]) -> bool {
+    let no_renames = flags.contains(&"--no-renames");
+    let rename_flag = flags
+        .iter()
+        .any(|f| *f == "-M" || *f == "-M30" || *f == "-M30%");
+    no_renames && rename_flag
+}
+
+fn flags_apply_to_out(flags: &[&str], out: Out) -> bool {
+    let unified = flags.iter().any(|f| *f == "-U0" || *f == "-U1");
+    if unified && out != Out::Json {
+        return false;
+    }
+    true
+}
+
+fn matrix_cases() -> Vec<Case> {
+    let modes = [
+        Mode::TwoCommit,
+        Mode::Staged,
+        Mode::Worktree,
+        Mode::Show,
+        Mode::Log,
+    ];
+    let mut cases = Vec::new();
+    for mode in modes {
+        let outs: &[Out] = match mode {
+            Mode::Log => &[Out::Json],
+            _ => &[Out::Numstat, Out::NameStatus, Out::Json],
+        };
+        for &out in outs {
+            for flags in MATRIX_FLAGS {
+                if flags_conflict(flags) || !flags_apply_to_out(flags, out) {
+                    continue;
+                }
+                cases.push(Case {
+                    mode,
+                    out,
+                    flags,
+                });
+            }
+        }
+    }
+    cases
+}
 
 #[test]
 fn diff_flag_matrix_matches_git() {
     let fx = setup_fixture();
-    for case in CASES {
+    let cases = matrix_cases();
+    assert!(
+        cases.len() >= 20,
+        "expected full cross-product matrix, got {}",
+        cases.len()
+    );
+    for case in &cases {
         match case.out {
             Out::Json => compare_json_case(&fx, case),
             Out::Numstat | Out::NameStatus => compare_text_case(&fx, case),

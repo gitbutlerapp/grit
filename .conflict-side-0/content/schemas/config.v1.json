@@ -1,0 +1,123 @@
+{
+  "$id": "https://grit-scm.com/schemas/config/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ConfigEntry": {
+      "description": "One entry in a `list` outcome. `value` is `null` for a bare/valueless key.",
+      "properties": {
+        "file": {
+          "description": "Source file, when the entry is file-backed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "scope": {
+          "description": "Which config layer this entry came from (`system`, `global`, `local`, …).",
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "scope"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit config`, tagged by `action`.",
+  "oneOf": [
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "get"
+          ],
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "list"
+          ],
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/definitions/ConfigEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "entries"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "set"
+          ],
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "unset"
+          ],
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "key"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ConfigOutcome"
+}

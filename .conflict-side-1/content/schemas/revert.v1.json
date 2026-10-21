@@ -1,0 +1,26 @@
+{
+  "$id": "https://grit-scm.com/schemas/revert/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit revert`.",
+  "properties": {
+    "oid": {
+      "description": "The new revert commit on the current branch (full hex oid).",
+      "type": "string"
+    },
+    "source": {
+      "description": "The commit that was reverted (full hex oid).",
+      "type": "string"
+    },
+    "subject": {
+      "description": "Subject line of the revert commit.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "oid",
+    "source",
+    "subject"
+  ],
+  "title": "RevertOutcome",
+  "type": "object"
+}
