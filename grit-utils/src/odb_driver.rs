@@ -16,7 +16,7 @@ use grit_lib::objects::{parse_commit, Object, ObjectId};
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions, RevListResult};
-use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::revwalk::{CherryMode, RevWalkListOptions};
 
 /// Parse one stdin line for `git cat-file --batch` / `--batch-check` (hex OID, optional trailing fields).
 pub(crate) fn parse_cat_file_batch_oid_line(line: &[u8]) -> Result<ObjectId> {
@@ -275,6 +275,23 @@ pub fn rev_walk_left_right_count(repo: &Repository, range: &str) -> Result<()> {
         let counts = repo
             .rev_walk()
             .left_right_counts(&[range], &RevWalkListOptions::default())?;
+        println!("{} {}", counts.left, counts.right);
+        Ok(())
+    })
+}
+
+/// Symmetric left/right counts with `--cherry-pick` (matches `git rev-list --left-right --cherry-pick --count`).
+pub fn rev_walk_cherry_pick_left_right_count(repo: &Repository, range: &str) -> Result<()> {
+    repo.odb().with_pack_read_context(|| {
+        let counts = repo
+            .rev_walk()
+            .left_right_counts(
+                &[range],
+                &RevWalkListOptions {
+                    cherry: CherryMode::Pick,
+                    ..RevWalkListOptions::default()
+                },
+            )?;
         println!("{} {}", counts.left, counts.right);
         Ok(())
     })

@@ -92,6 +92,42 @@ fn seed_linear_repo(dir: &Path, n: usize) {
     }
 }
 
+fn seed_cherry_equivalent_repo(dir: &Path) {
+    fs::create_dir_all(dir).expect("mkdir");
+    assert!(grit_run(dir, &["init", "."]).status.success());
+    fs::write(dir.join("shared.txt"), "origin\n").expect("write");
+    assert!(grit_run(dir, &["add", "shared.txt"]).status.success());
+    assert!(grit_run(dir, &["commit", "seed"]).status.success());
+    let rename = Command::new("git")
+        .args(["-C", dir.to_str().expect("utf8"), "branch", "-M", "main"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .status()
+        .expect("git branch -M");
+    assert!(rename.success());
+    fs::write(dir.join("shared.txt"), "same\n").expect("write");
+    assert!(grit_run(dir, &["add", "shared.txt"]).status.success());
+    assert!(grit_run(dir, &["commit", "left-patch"]).status.success());
+    let base_out = Command::new("git")
+        .args(["-C", dir.to_str().expect("utf8"), "rev-parse", "HEAD~1"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git rev-parse");
+    assert!(base_out.status.success());
+    let base = String::from_utf8_lossy(&base_out.stdout).trim().to_owned();
+    assert!(grit_run(dir, &["switch", "-c", "side", &base])
+        .status
+        .success());
+    fs::write(dir.join("side.txt"), "side\n").expect("write");
+    assert!(grit_run(dir, &["add", "side.txt"]).status.success());
+    assert!(grit_run(dir, &["commit", "side-only"]).status.success());
+    fs::write(dir.join("shared.txt"), "same\n").expect("write");
+    assert!(grit_run(dir, &["add", "shared.txt"]).status.success());
+    assert!(grit_run(dir, &["commit", "right-patch"]).status.success());
+    assert!(grit_run(dir, &["switch", "main"]).status.success());
+}
+
 fn seed_diverged_repo(dir: &Path) {
     seed_linear_repo(dir, 3);
     assert!(grit_run(dir, &["branch", "side"]).status.success());
@@ -263,6 +299,53 @@ fn limit_hidden_alias_still_works() -> TestResult {
 }
 
 #[test]
+fn revs_plain_human_omits_parents() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-revs-plain-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_linear_repo(&dir, 3);
+    let out = grit_run(&dir, &["revs", "HEAD", "-n", "2"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for line in stdout.lines() {
+        let parts: Vec<_> = line.split("  ").collect();
+        assert_eq!(parts.len(), 2, "expected oid + subject only: {line}");
+        let oid_part = parts[0];
+        assert_eq!(
+            oid_part.split_whitespace().count(),
+            1,
+            "unexpected extra tokens before subject: {line}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn revs_cherry_pick_without_left_right_matches_git() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-revs-cherry-no-lr-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_diverged_repo(&dir);
+    let git_lines = git_rev_list_oids(&dir, &["--cherry-pick", "main...side"]);
+    let out = grit_run(&dir, &["revs", "--cherry-pick", "main...side"]);
+    assert!(out.status.success());
+    let grit_lines: Vec<_> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(grit_lines.len(), git_lines.len());
+    for (grit_line, git_line) in grit_lines.iter().zip(git_lines.iter()) {
+        assert!(
+            !grit_line.starts_with('<') && !grit_line.starts_with('>'),
+            "side marker without --left-right: {grit_line}"
+        );
+        let grit_oid = grit_line.split("  ").next().expect("oid");
+        let git_oid = git_line.split_whitespace().next().expect("git oid");
+        assert_eq!(grit_oid, git_oid);
+    }
+    Ok(())
+}
+
+#[test]
 fn revs_cherry_mark_json() -> TestResult {
     let dir = std::env::temp_dir().join(format!("grit-revs-cherry-mark-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -282,6 +365,89 @@ fn revs_cherry_mark_json() -> TestResult {
             assert_eq!(row["equivalent"].as_bool(), Some(true));
         }
     }
+    Ok(())
+}
+
+#[test]
+fn revs_cherry_pick_left_right_count_json() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-revs-cherry-count-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_cherry_equivalent_repo(&dir);
+    let git_out = Command::new("git")
+        .args([
+            "-C",
+            dir.to_str().expect("utf8"),
+            "rev-list",
+            "--left-right",
+            "--cherry-pick",
+            "--count",
+            "main...side",
+        ])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git count");
+    assert!(git_out.status.success());
+    let git_stdout = String::from_utf8_lossy(&git_out.stdout);
+    let parts: Vec<&str> = git_stdout.split_whitespace().collect();
+    let v = grit_json(
+        &dir,
+        &[
+            "revs",
+            "--count",
+            "--left-right",
+            "--cherry-pick",
+            "main...side",
+        ],
+    );
+    assert_eq!(v["left_right"]["left"], parts[0].parse::<u64>().unwrap());
+    assert_eq!(v["left_right"]["right"], parts[1].parse::<u64>().unwrap());
+    assert!(v["left_right"].get("equivalent").is_none());
+    Ok(())
+}
+
+#[test]
+fn revs_cherry_mark_left_right_count_json() -> TestResult {
+    let dir = std::env::temp_dir().join(format!(
+        "grit-revs-cherry-mark-count-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    seed_cherry_equivalent_repo(&dir);
+    let git_out = Command::new("git")
+        .args([
+            "-C",
+            dir.to_str().expect("utf8"),
+            "rev-list",
+            "--left-right",
+            "--cherry-mark",
+            "--count",
+            "main...side",
+        ])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git count");
+    assert!(git_out.status.success());
+    let git_stdout = String::from_utf8_lossy(&git_out.stdout);
+    let parts: Vec<&str> = git_stdout.split_whitespace().collect();
+    assert_eq!(parts.len(), 3);
+    let v = grit_json(
+        &dir,
+        &[
+            "revs",
+            "--count",
+            "--left-right",
+            "--cherry-mark",
+            "main...side",
+        ],
+    );
+    assert_eq!(v["left_right"]["left"], parts[0].parse::<u64>().unwrap());
+    assert_eq!(v["left_right"]["right"], parts[1].parse::<u64>().unwrap());
+    assert_eq!(
+        v["left_right"]["equivalent"],
+        parts[2].parse::<u64>().unwrap()
+    );
     Ok(())
 }
 

@@ -15045,8 +15045,11 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::RevWalkSide
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::RevWalkSide
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkSide
 pub struct grit_lib::revwalk::queries::LeftRightCounts
+pub grit_lib::revwalk::queries::LeftRightCounts::equivalent: core::option::Option<usize>
 pub grit_lib::revwalk::queries::LeftRightCounts::left: usize
 pub grit_lib::revwalk::queries::LeftRightCounts::right: usize
+impl grit_lib::revwalk::queries::LeftRightCounts
+pub const fn grit_lib::revwalk::queries::LeftRightCounts::new(usize, usize) -> Self
 impl core::clone::Clone for grit_lib::revwalk::queries::LeftRightCounts
 pub fn grit_lib::revwalk::queries::LeftRightCounts::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::queries::LeftRightCounts
@@ -15137,6 +15140,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::Rev
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 pub fn grit_lib::revwalk::queries::committer_cutoff_from_date(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::revwalk::queries::parse_rev_walk_tokens(&grit_lib::repo::Repository, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
+pub fn grit_lib::revwalk::queries::refresh_parent_rewrite_entries(&grit_lib::repo::Repository, &mut [grit_lib::revwalk::queries::RevWalkCommit], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::revwalk::queries::resolve_log_walk_tips_and_hide(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub mod grit_lib::revwalk::rev_list
 pub enum grit_lib::revwalk::rev_list::FilterObjectKind
@@ -15749,8 +15753,11 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::queries::RevWalkSide
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::RevWalkSide
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkSide
 pub struct grit_lib::revwalk::LeftRightCounts
+pub grit_lib::revwalk::LeftRightCounts::equivalent: core::option::Option<usize>
 pub grit_lib::revwalk::LeftRightCounts::left: usize
 pub grit_lib::revwalk::LeftRightCounts::right: usize
+impl grit_lib::revwalk::queries::LeftRightCounts
+pub const fn grit_lib::revwalk::queries::LeftRightCounts::new(usize, usize) -> Self
 impl core::clone::Clone for grit_lib::revwalk::queries::LeftRightCounts
 pub fn grit_lib::revwalk::queries::LeftRightCounts::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::queries::LeftRightCounts
@@ -15868,6 +15875,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::queries::Rev
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::queries::RevWalkParsedSpecs
 pub fn grit_lib::revwalk::committer_cutoff_from_date(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::revwalk::parse_rev_walk_tokens(&grit_lib::repo::Repository, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::queries::RevWalkParsedSpecs>
+pub fn grit_lib::revwalk::refresh_parent_rewrite_entries(&grit_lib::repo::Repository, &mut [grit_lib::revwalk::queries::RevWalkCommit], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::revwalk::resolve_log_walk_tips_and_hide(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::queries::RevWalkListOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 pub mod grit_lib::stash
 pub struct grit_lib::stash::FlatTreeEntry

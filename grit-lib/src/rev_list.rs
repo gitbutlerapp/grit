@@ -21,7 +21,8 @@ use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
 use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
-    commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
+    commits_reachable_excluding_ancestors_of_cutoffs, is_ancestor,
+    ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
@@ -1368,12 +1369,20 @@ pub fn rev_list(
             // "left" iff it is reachable from the left tip but not from the right tip, and vice
             // versa.  Using plain set intersection incorrectly labels the shared spine as "right"
             // only, which breaks `--cherry-pick` on `A...B` (t3419-rebase-patch-id).
-            let left_reach = walk_closure(&mut graph, &[left_oid])?;
-            let right_reach = walk_closure(&mut graph, &[right_oid])?;
-            for &oid in &ordered {
-                let from_left = left_reach.contains(&oid);
-                let from_right = right_reach.contains(&oid);
-                left_right_map.insert(oid, from_left && !from_right);
+            if options.cherry_pick || options.cherry_mark {
+                for &oid in &ordered {
+                    let from_left = is_ancestor(repo, oid, left_oid)?;
+                    let from_right = is_ancestor(repo, oid, right_oid)?;
+                    left_right_map.insert(oid, from_left && !from_right);
+                }
+            } else {
+                let left_reach = walk_closure(&mut graph, &[left_oid])?;
+                let right_reach = walk_closure(&mut graph, &[right_oid])?;
+                for &oid in &ordered {
+                    let from_left = left_reach.contains(&oid);
+                    let from_right = right_reach.contains(&oid);
+                    left_right_map.insert(oid, from_left && !from_right);
+                }
             }
         }
     }

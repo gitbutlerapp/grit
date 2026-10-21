@@ -290,10 +290,19 @@ fn git_rev_list_left_right_count(wt: &Path, args: &[&str]) -> LeftRightCounts {
     }
     let out = git(wt, &argv);
     let parts: Vec<&str> = out.split_whitespace().collect();
-    assert_eq!(parts.len(), 2, "git left-right count: {:?}", parts);
+    assert!(
+        parts.len() == 2 || parts.len() == 3,
+        "git left-right count: {:?}",
+        parts
+    );
     LeftRightCounts {
         left: parts[0].parse().expect("left"),
         right: parts[1].parse().expect("right"),
+        equivalent: if parts.len() == 3 {
+            Some(parts[2].parse().expect("equivalent"))
+        } else {
+            None
+        },
     }
 }
 
@@ -793,6 +802,48 @@ fn cherry_mark_matches_git() {
             assert!(row.equivalent, "expected equivalent {}", row.oid.to_hex());
         }
     }
+}
+
+#[test]
+fn cherry_pick_left_right_count_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let (main_ref, side_ref) = cherry_symmetric_fixture(wt);
+    let token = format!("{main_ref}...{side_ref}");
+    let repo = open_grit(wt);
+    let git_counts = git_rev_list_left_right_count(wt, &["--cherry-pick", token.as_str()]);
+    let grit_counts = repo
+        .rev_walk()
+        .left_right_counts(
+            &[token.as_str()],
+            &RevWalkListOptions {
+                cherry: CherryMode::Pick,
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("cherry-pick left/right counts");
+    assert_eq!(grit_counts, git_counts);
+}
+
+#[test]
+fn cherry_mark_left_right_count_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let (main_ref, side_ref) = cherry_symmetric_fixture(wt);
+    let token = format!("{main_ref}...{side_ref}");
+    let repo = open_grit(wt);
+    let git_counts = git_rev_list_left_right_count(wt, &["--cherry-mark", token.as_str()]);
+    let grit_counts = repo
+        .rev_walk()
+        .left_right_counts(
+            &[token.as_str()],
+            &RevWalkListOptions {
+                cherry: CherryMode::Mark,
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("cherry-mark left/right counts");
+    assert_eq!(grit_counts, git_counts);
 }
 
 #[test]

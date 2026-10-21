@@ -767,6 +767,10 @@ enum DriveCmd {
         repo: PathBuf,
         range: String,
     },
+    RevWalkCherryPickLeftRightCount {
+        repo: PathBuf,
+        range: String,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -925,6 +929,10 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
         DriveCmd::RevWalkLeftRightCount { repo, range } => {
             let repo = open_repo(repo)?;
             odb_driver::rev_walk_left_right_count(&repo, range)?;
+        }
+        DriveCmd::RevWalkCherryPickLeftRightCount { repo, range } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_walk_cherry_pick_left_right_count(&repo, range)?;
         }
     }
     Ok(())

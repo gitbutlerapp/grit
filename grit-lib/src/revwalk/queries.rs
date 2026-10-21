@@ -87,6 +87,20 @@ pub struct LeftRightCounts {
     pub left: usize,
     /// Commits reachable from the right tip but not the left tip.
     pub right: usize,
+    /// With `--cherry-mark --left-right --count`, Git prints a third equivalent-commit total.
+    pub equivalent: Option<usize>,
+}
+
+impl LeftRightCounts {
+    /// Left/right totals without a cherry-mark equivalent column.
+    #[must_use]
+    pub const fn new(left: usize, right: usize) -> Self {
+        Self {
+            left,
+            right,
+            equivalent: None,
+        }
+    }
 }
 
 /// Options for listing or counting commits through [`RevWalk`].
@@ -270,6 +284,34 @@ fn rev_list_options_from_walk(
     })
 }
 
+/// Recompute rewritten parent links after the output commit set changed (e.g. `-n` truncation).
+///
+/// # Errors
+///
+/// Propagates pathspec resolution and parent lookup errors.
+pub fn refresh_parent_rewrite_entries(
+    repo: &Repository,
+    entries: &mut [RevWalkCommit],
+    walk: &RevWalkListOptions,
+) -> Result<()> {
+    if !walk.include_parents || entries.is_empty() {
+        return Ok(());
+    }
+    let paths = repo.resolve_rev_walk_pathspecs(&walk.paths)?;
+    let rev_list_options = RevListOptions {
+        first_parent: walk.first_parent,
+        paths,
+        output_mode: OutputMode::Parents,
+        parent_rewrite: true,
+        ..RevListOptions::default()
+    };
+    let output_set: HashSet<ObjectId> = entries.iter().map(|e| e.oid).collect();
+    for entry in entries {
+        entry.parents = commit_output_parents(repo, entry.oid, &output_set, &rev_list_options)?;
+    }
+    Ok(())
+}
+
 fn rev_walk_commits_from_result(
     repo: &Repository,
     result: &RevListResult,
@@ -379,13 +421,31 @@ fn left_right_counts_from_combined_walk(
     let mut left = 0usize;
     let mut right = 0usize;
     for oid in &result.commits {
+        if options.cherry == CherryMode::Mark && result.cherry_equivalent.contains(oid) {
+            continue;
+        }
         match result.left_right_map.get(oid) {
             Some(true) => left += 1,
             Some(false) => right += 1,
             None => {}
         }
     }
-    Ok(LeftRightCounts { left, right })
+    let equivalent = if options.cherry == CherryMode::Mark {
+        Some(
+            result
+                .commits
+                .iter()
+                .filter(|oid| result.cherry_equivalent.contains(oid))
+                .count(),
+        )
+    } else {
+        None
+    };
+    Ok(LeftRightCounts {
+        left,
+        right,
+        equivalent,
+    })
 }
 
 impl<'repo> RevWalk<'repo> {
@@ -483,7 +543,8 @@ impl<'repo> RevWalk<'repo> {
             return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         };
 
-        if options.limit.is_none()
+        if options.cherry == CherryMode::Off
+            && options.limit.is_none()
             && options.paths.is_empty()
             && options.refs.is_empty()
             && options.skip == 0
@@ -501,10 +562,7 @@ impl<'repo> RevWalk<'repo> {
                 count_commits_reachable_excluding_ancestors_of(repo, &[left], &[right], filter)?;
             let right_count =
                 count_commits_reachable_excluding_ancestors_of(repo, &[right], &[left], filter)?;
-            return Ok(LeftRightCounts {
-                left: left_count,
-                right: right_count,
-            });
+            return Ok(LeftRightCounts::new(left_count, right_count));
         }
 
         left_right_counts_from_combined_walk(repo, options, &parsed, &positive, all_refs)

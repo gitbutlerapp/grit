@@ -17,9 +17,9 @@ pub mod queries;
 
 pub use handle::RevWalk;
 pub use queries::{
-    committer_cutoff_from_date, parse_rev_walk_tokens, resolve_log_walk_tips_and_hide, CherryMode,
-    LeftRightCounts, MergeFilter, RefSelection, RevWalkCommit, RevWalkListOptions,
-    RevWalkParsedSpecs, RevWalkSide,
+    committer_cutoff_from_date, parse_rev_walk_tokens, refresh_parent_rewrite_entries,
+    resolve_log_walk_tips_and_hide, CherryMode, LeftRightCounts, MergeFilter, RefSelection,
+    RevWalkCommit, RevWalkListOptions, RevWalkParsedSpecs, RevWalkSide,
 };
 
 pub mod rev_list {

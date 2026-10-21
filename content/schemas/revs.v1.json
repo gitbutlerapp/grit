@@ -120,6 +120,15 @@
     "RevsLeftRightCount": {
       "description": "Left/right counts for a symmetric range (`--left-right --count`).",
       "properties": {
+        "equivalent": {
+          "description": "Present for `--cherry-mark --left-right --count` (Git's third column).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "left": {
           "format": "uint",
           "minimum": 0.0,

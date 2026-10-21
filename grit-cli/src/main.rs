@@ -1068,6 +1068,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     cherry_mark,
                     left_right,
                 },
+                opts.mode,
             )?,
             opts,
             ctx,

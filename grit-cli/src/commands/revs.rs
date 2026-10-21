@@ -1,15 +1,17 @@
 //! `grit revs` — list or count commits matching revision ranges.
 
 use anyhow::{bail, Result};
-use grit_lib::objects::ObjectId;
-use grit_lib::revwalk::{CherryMode, LeftRightCounts, RevWalkCommit, RevWalkSide};
+use grit_lib::objects::{read_commit_subject_line, ObjectId};
+use grit_lib::revwalk::{
+    refresh_parent_rewrite_entries, CherryMode, LeftRightCounts, RevWalkCommit, RevWalkSide,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
-use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::rev_select::RevSelectArgs;
 
 /// Left/right counts for a symmetric range (`--left-right --count`).
@@ -17,6 +19,9 @@ use crate::rev_select::RevSelectArgs;
 pub struct RevsLeftRightCount {
     pub left: usize,
     pub right: usize,
+    /// Present for `--cherry-mark --left-right --count` (Git's third column).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equivalent: Option<usize>,
 }
 
 impl From<LeftRightCounts> for RevsLeftRightCount {
@@ -24,6 +29,7 @@ impl From<LeftRightCounts> for RevsLeftRightCount {
         Self {
             left: c.left,
             right: c.right,
+            equivalent: c.equivalent,
         }
     }
 }
@@ -51,12 +57,19 @@ pub struct RevsOutcome {
     pub truncated: bool,
     /// Continuation cursor when the list is resumable; always `null` for `revs` today.
     pub next: Option<String>,
+    /// Whether human/markdown lines include rewritten parent oids (`--parents`).
+    #[serde(skip)]
+    pub list_with_parents: bool,
 }
 
 impl HumanRender for RevsOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if let Some(lr) = self.left_right {
-            outln!(w, "{}\t{}", lr.left, lr.right);
+            if let Some(eq) = lr.equivalent {
+                outln!(w, "{}\t{}\t{}", lr.left, lr.right, eq);
+            } else {
+                outln!(w, "{}\t{}", lr.left, lr.right);
+            }
             return Ok(());
         }
         if let Some(n) = self.count {
@@ -64,7 +77,7 @@ impl HumanRender for RevsOutcome {
             return Ok(());
         }
         for row in &self.commits {
-            outln!(w, "{}", format_revs_line(row, true));
+            outln!(w, "{}", format_revs_line(row, true, self.list_with_parents));
         }
         Ok(())
     }
@@ -75,12 +88,22 @@ impl MarkdownRender for RevsOutcome {
         if let Some(lr) = self.left_right {
             outln!(w, "# Symmetric range counts");
             outln!(w);
-            outln!(
-                w,
-                "**Left:** {left} · **Right:** {right}",
-                left = lr.left,
-                right = lr.right
-            );
+            if let Some(eq) = lr.equivalent {
+                outln!(
+                    w,
+                    "**Left:** {left} · **Right:** {right} · **Equivalent:** {eq}",
+                    left = lr.left,
+                    right = lr.right,
+                    eq = eq
+                );
+            } else {
+                outln!(
+                    w,
+                    "**Left:** {left} · **Right:** {right}",
+                    left = lr.left,
+                    right = lr.right
+                );
+            }
             return Ok(());
         }
         if let Some(n) = self.count {
@@ -96,13 +119,22 @@ impl MarkdownRender for RevsOutcome {
             return Ok(());
         }
         for row in &self.commits {
-            outln!(w, "- {}", format_revs_line(row, false));
+            outln!(
+                w,
+                "- {}",
+                format_revs_line(row, false, self.list_with_parents)
+            );
         }
         Ok(())
     }
 }
 
-pub fn run(rev: RevSelectArgs, count: bool, walk_flags: RevsWalkFlags) -> Result<RevsOutcome> {
+pub fn run(
+    rev: RevSelectArgs,
+    count: bool,
+    walk_flags: RevsWalkFlags,
+    output: OutputMode,
+) -> Result<RevsOutcome> {
     if rev.revs.is_empty()
         && !rev.all
         && rev.branches.is_none()
@@ -131,9 +163,6 @@ pub fn run(rev: RevSelectArgs, count: bool, walk_flags: RevsWalkFlags) -> Result
     } else {
         CherryMode::Off
     };
-    if (walk_flags.cherry_pick || walk_flags.cherry_mark) && !walk_flags.left_right {
-        opts.left_right = true;
-    }
 
     let walk = repo.rev_walk();
     let token_refs = rev.rev_tokens(&[]);
@@ -143,11 +172,14 @@ pub fn run(rev: RevSelectArgs, count: bool, walk_flags: RevsWalkFlags) -> Result
             return Ok(RevsOutcome {
                 commits: Vec::new(),
                 count: if walk_flags.left_right { None } else { Some(0) },
-                left_right: walk_flags
-                    .left_right
-                    .then_some(RevsLeftRightCount { left: 0, right: 0 }),
+                left_right: walk_flags.left_right.then_some(RevsLeftRightCount {
+                    left: 0,
+                    right: 0,
+                    equivalent: walk_flags.cherry_mark.then_some(0),
+                }),
                 truncated: false,
                 next: None,
+                list_with_parents: false,
             });
         }
         if walk_flags.left_right {
@@ -158,6 +190,7 @@ pub fn run(rev: RevSelectArgs, count: bool, walk_flags: RevsWalkFlags) -> Result
                 left_right: Some(lr.into()),
                 truncated: false,
                 next: None,
+                list_with_parents: false,
             });
         }
         let n = walk.count(&token_refs, &opts)?;
@@ -167,6 +200,7 @@ pub fn run(rev: RevSelectArgs, count: bool, walk_flags: RevsWalkFlags) -> Result
             left_right: None,
             truncated: false,
             next: None,
+            list_with_parents: false,
         });
     }
 
@@ -177,46 +211,120 @@ pub fn run(rev: RevSelectArgs, count: bool, walk_flags: RevsWalkFlags) -> Result
             left_right: None,
             truncated: false,
             next: None,
+            list_with_parents: walk_flags.parents,
         });
     }
+
     let mut fetch_opts = opts.clone();
-    fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
-    let entries = walk.commit_entries(&token_refs, &fetch_opts)?;
+    let use_limit_plus_one = rev.max_count.is_some() && !walk_flags.parents;
+    fetch_opts.limit = if use_limit_plus_one {
+        fetch_limit_plus_one(rev.max_count)
+    } else {
+        rev.max_count
+    };
+    let mut entries = walk.commit_entries(&token_refs, &fetch_opts)?;
     let oids: Vec<ObjectId> = entries.iter().map(|e| e.oid).collect();
     let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
-    let take = oids.len();
-    let entries: Vec<RevWalkCommit> = entries.into_iter().take(take).collect();
+    entries.truncate(oids.len());
+    if walk_flags.parents {
+        refresh_parent_rewrite_entries(&repo, &mut entries, &opts)?;
+    }
+
     let now = context::wall_clock_now(env).unix_timestamp();
-    let loader = CommitJsonLoader::new(&repo, &oids)?;
-    let mut commits = loader.load(&repo, &oids, now)?;
-    apply_walk_metadata(&mut commits, &entries);
+    let commits = if output == OutputMode::Human {
+        load_revs_commits_light(&repo, &entries, walk_flags)?
+    } else {
+        let loader = CommitJsonLoader::new(&repo, &oids)?;
+        let mut rows = loader.load(&repo, &oids, now)?;
+        apply_walk_metadata(&mut rows, &entries, walk_flags);
+        rows
+    };
+
     Ok(RevsOutcome {
         commits,
         count: None,
         left_right: None,
         truncated,
         next: None,
+        list_with_parents: walk_flags.parents,
     })
 }
 
-fn apply_walk_metadata(commits: &mut [CommitJson], entries: &[RevWalkCommit]) {
-    for (json, row) in commits.iter_mut().zip(entries.iter()) {
-        if !row.parents.is_empty() {
-            json.parents = row.parents.iter().map(ObjectId::to_hex).collect();
-        }
-        if let Some(side) = row.side {
-            json.side = Some(match side {
+fn load_revs_commits_light(
+    repo: &grit_lib::repo::Repository,
+    entries: &[RevWalkCommit],
+    walk_flags: RevsWalkFlags,
+) -> Result<Vec<CommitJson>> {
+    let mut out = Vec::with_capacity(entries.len());
+    for row in entries {
+        let obj = repo.odb().read(&row.oid)?;
+        let subject = read_commit_subject_line(&obj.data)?;
+        let parents = if walk_flags.parents {
+            row.parents.iter().map(ObjectId::to_hex).collect()
+        } else {
+            Vec::new()
+        };
+        let side = if walk_flags.left_right {
+            row.side.map(|s| match s {
                 RevWalkSide::Left => "left".to_owned(),
                 RevWalkSide::Right => "right".to_owned(),
-            });
+            })
+        } else {
+            None
+        };
+        let equivalent = if walk_flags.cherry_mark && row.equivalent {
+            Some(true)
+        } else {
+            None
+        };
+        out.push(CommitJson {
+            oid: row.oid.to_hex(),
+            parents,
+            author: crate::output::Person {
+                name: String::new(),
+                email: String::new(),
+                date: String::new(),
+            },
+            committer: crate::output::Person {
+                name: String::new(),
+                email: String::new(),
+                date: String::new(),
+            },
+            subject: subject.clone(),
+            message: subject,
+            refs: Vec::new(),
+            relative_date: None,
+            side,
+            equivalent,
+        });
+    }
+    Ok(out)
+}
+
+fn apply_walk_metadata(
+    commits: &mut [CommitJson],
+    entries: &[RevWalkCommit],
+    walk_flags: RevsWalkFlags,
+) {
+    for (json, row) in commits.iter_mut().zip(entries.iter()) {
+        if walk_flags.parents {
+            json.parents = row.parents.iter().map(ObjectId::to_hex).collect();
         }
-        if row.equivalent {
+        if walk_flags.left_right {
+            if let Some(side) = row.side {
+                json.side = Some(match side {
+                    RevWalkSide::Left => "left".to_owned(),
+                    RevWalkSide::Right => "right".to_owned(),
+                });
+            }
+        }
+        if walk_flags.cherry_mark && row.equivalent {
             json.equivalent = Some(true);
         }
     }
 }
 
-fn format_revs_line(row: &CommitJson, human_prefix: bool) -> String {
+fn format_revs_line(row: &CommitJson, human_prefix: bool, show_parents: bool) -> String {
     let mut out = String::new();
     if human_prefix {
         if row.equivalent == Some(true) {
@@ -238,9 +346,11 @@ fn format_revs_line(row: &CommitJson, human_prefix: bool) -> String {
         });
     }
     out.push_str(&row.oid);
-    for parent in &row.parents {
-        out.push(' ');
-        out.push_str(parent);
+    if show_parents {
+        for parent in &row.parents {
+            out.push(' ');
+            out.push_str(parent);
+        }
     }
     out.push_str("  ");
     out.push_str(&row.subject);
