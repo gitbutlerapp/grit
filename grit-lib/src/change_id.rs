@@ -11,8 +11,8 @@ use thiserror::Error;
 
 use crate::config::ConfigSet;
 use crate::objects::{
-    insert_header_before_signature, remove_header_lines, serialize_commit,
-    CommitData, HashAlgo, ObjectId,
+    insert_header_before_signature, remove_header_lines, serialize_commit, CommitData, HashAlgo,
+    ObjectId,
 };
 
 const REVERSE_HEX_LEN: usize = 32;

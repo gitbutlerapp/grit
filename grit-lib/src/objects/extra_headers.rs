@@ -6,7 +6,8 @@
 
 /// Advance past one header block (first line plus any SP-prefixed continuations).
 ///
-/// Returns `(key, end_offset, _continued)` where `key` is empty for orphan continuation lines.
+/// `start` must be the offset of a header line within `extra` (not past its end). Returns
+/// `(key, end_offset, _continued)` where `key` is empty for orphan continuation lines.
 #[must_use]
 pub fn next_header_block(extra: &[u8], start: usize) -> (&[u8], usize, bool) {
     let pos = start;
@@ -82,11 +83,13 @@ impl<'a> Iterator for ExtraHeaderIter<'a> {
             .unwrap_or(line_end - line_start);
         let key = &self.extra[line_start..line_start + key_end];
         let (_, block_end, _) = next_header_block(self.extra, line_start);
-        let value_start = line_start + key_end + if key_end < line_end - line_start {
-            1
-        } else {
-            0
-        };
+        let value_start = line_start
+            + key_end
+            + if key_end < line_end - line_start {
+                1
+            } else {
+                0
+            };
         let mut value_end = block_end;
         if value_end > value_start && self.extra[value_end - 1] == b'\n' {
             value_end -= 1;
@@ -124,8 +127,11 @@ pub fn remove_header_lines(extra: &[u8], drop_key: impl Fn(&[u8]) -> bool) -> Ve
     out
 }
 
-/// Replace every header block named `name` with `line` (including its trailing LF), or append
-/// `line` when no such block exists.
+/// Replace every header block named `name` with `line`, or append `line` when no such block exists.
+///
+/// `line` must be a full header record (`name SP value LF`, plus any SP-prefixed continuation
+/// lines and their trailing LFs) in the same encoding used in [`CommitData::extra_headers`] /
+/// [`crate::objects::TagData::extra_headers`].
 pub fn set_extra_header(extra: &mut Vec<u8>, name: &str, line: &[u8]) {
     let name_bytes = name.as_bytes();
     *extra = remove_header_lines(extra, |key| key == name_bytes);

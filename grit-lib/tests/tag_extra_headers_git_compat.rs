@@ -53,6 +53,35 @@ fn git_cat_tag(repo: &std::path::Path, oid: &str) -> Vec<u8> {
 }
 
 #[test]
+fn tag_post_tagger_duplicate_object_header_roundtrips_byte_identical() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q", "-b", "main", "."]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "base"]);
+    let commit = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    let null = "0000000000000000000000000000000000000000";
+    let body = format!(
+        "object {commit}\ntype commit\ntag dup-object-extra\ntagger T <t@example.com> 1 +0000\n\
+object {null}\n extra continuation\n\nmessage\n"
+    );
+    let oid_hex = git_mktag(dir.path(), &body);
+    let raw = git_cat_tag(dir.path(), &oid_hex);
+    assert_eq!(raw, body.as_bytes());
+
+    let parsed = parse_tag(&raw).expect("parse");
+    assert_eq!(parsed.object.to_hex(), commit);
+    assert!(
+        parsed.extra_headers.windows(7).any(|w| w == b"object "),
+        "post-tagger object line must stay in extra_headers"
+    );
+    assert!(
+        String::from_utf8_lossy(&parsed.extra_headers).contains(" extra continuation"),
+        "continuation line must stay in extra_headers: {:?}",
+        String::from_utf8_lossy(&parsed.extra_headers)
+    );
+    assert_eq!(serialize_tag(&parsed), raw);
+}
+
+#[test]
 fn tag_with_unknown_headers_roundtrips_byte_identical() {
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init", "-q", "-b", "main", "."]);
