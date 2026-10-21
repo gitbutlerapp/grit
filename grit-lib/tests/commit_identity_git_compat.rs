@@ -131,6 +131,7 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: Default::default(),
         },
         &mut NullProgress,
     )

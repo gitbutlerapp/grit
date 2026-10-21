@@ -445,6 +445,9 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
         "changes"
     };
     outln!(w, "- **{}** {word} committed", outcome.changes);
+    if !outcome.hooks_run.is_empty() {
+        outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
+    }
     Ok(())
 }
 

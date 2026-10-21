@@ -1502,6 +1502,7 @@ mod tests {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: Default::default(),
             },
             &mut NullProgress,
         )

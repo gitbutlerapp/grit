@@ -684,10 +684,20 @@ enum Command {
     /// Stage every change and record a new commit.
     Commit {
         /// Commit message (you can also pass it with -m).
+        #[arg(conflicts_with = "message_file")]
         message: Option<String>,
         /// Commit message.
-        #[arg(short = 'm', long = "message", conflicts_with = "message")]
+        #[arg(short = 'm', long = "message", conflicts_with_all = ["message", "message_file"])]
         message_flag: Option<String>,
+        /// Read the commit message from a file (`-` for stdin).
+        #[arg(short = 'F', long = "message-file", conflicts_with_all = ["message", "message_flag"])]
+        message_file: Option<String>,
+        /// Author for this commit (`Name <email>`); committer is unchanged.
+        #[arg(long = "author")]
+        author_override: Option<String>,
+        /// Skip the `pre-commit` and `commit-msg` hooks.
+        #[arg(long = "no-verify")]
+        no_verify: bool,
         /// Stage every change first, then commit. This is the default behavior.
         #[arg(short = 'a', long = "all")]
         all: bool,
@@ -1329,11 +1339,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Commit {
             message,
             message_flag,
+            message_file,
+            author_override,
+            no_verify,
             all: _,
             amend,
             allow_empty,
         } => emit(
-            &commands::commit::run(message.or(message_flag), amend, allow_empty)?,
+            &commands::commit::run(
+                message.or(message_flag),
+                message_file,
+                author_override,
+                no_verify,
+                amend,
+                allow_empty,
+            )?,
             opts,
             ctx,
         ),

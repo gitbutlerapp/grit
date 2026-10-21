@@ -3,8 +3,11 @@
 //! Parses `Name <email> <unix-timestamp> <+HHMM>` with the same edge cases as Git:
 //! overflow, non-digit timestamps, and whitespace-only timestamps (sentinel handling).
 
+use crate::commit::assemble_identity;
 use crate::git_date::tm::date_overflows;
 use crate::objects::{HashAlgo, ObjectKind};
+use thiserror::Error;
+use time::OffsetDateTime;
 
 /// Parsed timestamp from a signature line for display and filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +174,79 @@ pub fn committer_unix_seconds_for_ordering(ident: &str) -> i64 {
     }
 }
 
+/// Name and email from a `git commit --author`-style argument (`Name <email>` or bare email).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorContact {
+    /// Display name (may be empty when the argument is a bare email address).
+    pub name: String,
+    /// Email address inside `<…>`.
+    pub email: String,
+}
+
+/// Failure to parse [`parse_author_arg`].
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum AuthorArgError {
+    /// The string is not a recognized author form.
+    #[error("invalid author: expected 'Name <email>' or a bare email address")]
+    InvalidFormat,
+    /// Angle brackets present but the email portion is empty.
+    #[error("invalid author: empty email")]
+    EmptyEmail,
+    /// Non-whitespace remains after the closing `>`.
+    #[error("invalid author: trailing text after '>'")]
+    TrailingText,
+}
+
+/// Parse `git commit --author` values: `Name <email>` or a bare email (no whitespace).
+///
+/// Git's search-existing-authors fallback is not implemented.
+///
+/// # Errors
+///
+/// Returns [`AuthorArgError`] when the string cannot be interpreted as an author.
+pub fn parse_author_arg(raw: &str) -> Result<AuthorContact, AuthorArgError> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Err(AuthorArgError::InvalidFormat);
+    }
+    if let Some(lt) = s.find('<') {
+        let rest = &s[lt + 1..];
+        let gt = rest.find('>').ok_or(AuthorArgError::InvalidFormat)?;
+        let email = &rest[..gt];
+        if email.is_empty() {
+            return Err(AuthorArgError::EmptyEmail);
+        }
+        let after = rest[gt + 1..].trim();
+        if !after.is_empty() {
+            return Err(AuthorArgError::TrailingText);
+        }
+        let name = s[..lt].trim_end_matches(|c: char| c.is_ascii_whitespace());
+        return Ok(AuthorContact {
+            name: name.to_owned(),
+            email: email.to_owned(),
+        });
+    }
+    if s.contains('@') && !s.chars().any(char::is_whitespace) {
+        return Ok(AuthorContact {
+            name: String::new(),
+            email: s.to_owned(),
+        });
+    }
+    Err(AuthorArgError::InvalidFormat)
+}
+
+/// Build a full author/committer header line from a parsed contact and timestamp inputs.
+///
+/// `date_override` is the raw `GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE` value when set.
+#[must_use]
+pub fn author_identity_line(
+    contact: &AuthorContact,
+    date_override: Option<&str>,
+    now: OffsetDateTime,
+) -> String {
+    assemble_identity(&contact.name, &contact.email, date_override, now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +267,32 @@ mod tests {
             parse_signature_tail(ident),
             Some(SignatureTail::Overflow)
         ));
+    }
+
+    #[test]
+    fn parse_author_arg_name_and_email() {
+        let c = parse_author_arg("A U Thor <author@example.com>").expect("parse");
+        assert_eq!(c.name, "A U Thor");
+        assert_eq!(c.email, "author@example.com");
+    }
+
+    #[test]
+    fn parse_author_arg_bare_email() {
+        let c = parse_author_arg("nobody@example.com").expect("parse");
+        assert!(c.name.is_empty());
+        assert_eq!(c.email, "nobody@example.com");
+    }
+
+    #[test]
+    fn parse_author_arg_rejects_empty_email_in_brackets() {
+        assert_eq!(parse_author_arg("Name <>"), Err(AuthorArgError::EmptyEmail));
+    }
+
+    #[test]
+    fn parse_author_arg_rejects_trailing_garbage() {
+        assert_eq!(
+            parse_author_arg("A <a@b.com> extra"),
+            Err(AuthorArgError::TrailingText)
+        );
     }
 }
