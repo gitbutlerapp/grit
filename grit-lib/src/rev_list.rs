@@ -6447,7 +6447,11 @@ fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
 }
 
 fn can_use_bounded_topo_limit_list(options: &RevListOptions) -> bool {
-    options.ordering == OrderingMode::Topo && bounded_limit_list_common_inner(options, true)
+    // `--skip` with topo must use the full sort path: incremental bounded topo does not yet
+    // match Git's `limit_list` skip semantics (see `rev_list_broad_ordering_and_limit_flags_match_git`).
+    options.ordering == OrderingMode::Topo
+        && options.skip == 0
+        && bounded_limit_list_common_inner(options, true)
 }
 
 fn bounded_limit_list_common(options: &RevListOptions) -> bool {
