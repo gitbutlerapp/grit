@@ -6,7 +6,9 @@
 use std::ffi::OsString;
 
 use thiserror::Error;
+use time::OffsetDateTime;
 
+use crate::commit::assemble_identity;
 #[cfg(unix)]
 use crate::commit_encoding::decode_bytes;
 use crate::config::ConfigSet;
@@ -68,6 +70,16 @@ impl IdentRole {
         match self {
             IdentRole::Author => "author.email",
             IdentRole::Committer => "committer.email",
+        }
+    }
+
+    /// Environment variable that overrides this role's timestamp
+    /// (`GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE`).
+    #[must_use]
+    pub fn env_date_key(self) -> &'static str {
+        match self {
+            IdentRole::Author => "GIT_AUTHOR_DATE",
+            IdentRole::Committer => "GIT_COMMITTER_DATE",
         }
     }
 
@@ -407,6 +419,57 @@ pub fn resolve_loose_committer_parts_with<E: IdentityEnv>(
     (name, email)
 }
 
+/// Resolve the full identity line (`Name <email> <epoch> <offset>`) for `role` when
+/// creating a commit, tag or notes commit.
+///
+/// Name and email come from [`resolve_name_with`] and [`resolve_email_with`], so this fails
+/// exactly when they do. The timestamp is the role's [`IdentRole::env_date_key`] variable
+/// when set and non-blank, otherwise `now`.
+///
+/// # Parameters
+///
+/// - `env`: environment supplying `GIT_*` identity and date variables.
+/// - `config`: configuration supplying `user.*`, `author.*` and `committer.*`.
+/// - `role`: whether to resolve the author or the committer.
+/// - `now`: timestamp (with its UTC offset) used when no date override is set.
+///
+/// # Errors
+///
+/// Returns [`IdentityError`] when no usable name or email is configured.
+pub fn resolve_identity_with<E: IdentityEnv>(
+    env: &E,
+    config: &ConfigSet,
+    role: IdentRole,
+    now: OffsetDateTime,
+) -> Result<String, IdentityError> {
+    let name = resolve_name_with(env, config, role)?;
+    let email = resolve_email_with(env, config, role)?;
+    let date = env
+        .var(role.env_date_key())
+        .filter(|d| !d.trim().is_empty());
+    Ok(assemble_identity(&name, &email, date.as_deref(), now))
+}
+
+/// Best-effort committer identity line (`Name <email> <epoch> <offset>`) for reflog entries.
+///
+/// Uses [`resolve_loose_committer_parts_with`], so it never fails, and always stamps `now`
+/// (callers that want `GIT_COMMITTER_DATE` honoured fold it into `now`).
+///
+/// # Parameters
+///
+/// - `env`: environment supplying `GIT_*` identity variables.
+/// - `config`: configuration supplying `committer.*` and `user.*`.
+/// - `now`: timestamp (with its UTC offset) recorded on the line.
+#[must_use]
+pub fn resolve_loose_committer_identity_with<E: IdentityEnv>(
+    env: &E,
+    config: &ConfigSet,
+    now: OffsetDateTime,
+) -> String {
+    let (name, email) = resolve_loose_committer_parts_with(env, config);
+    assemble_identity(&name, &email, None, now)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -469,5 +532,101 @@ mod tests {
             &config,
             IdentRole::Committer
         ));
+    }
+
+    fn vars(pairs: &[(&str, &str)]) -> MapEnv {
+        MapEnv(
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        )
+    }
+
+    fn fixed_now() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(1_112_911_993)
+            .expect("epoch")
+            .to_offset(time::UtcOffset::from_hms(-7, 0, 0).expect("offset"))
+    }
+
+    #[test]
+    fn identity_line_uses_now_without_date_override() {
+        let env = vars(&[
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+        ]);
+        let line =
+            resolve_identity_with(&env, &ConfigSet::default(), IdentRole::Author, fixed_now())
+                .expect("identity");
+        assert_eq!(line, "A U Thor <author@example.com> 1112911993 -0700");
+    }
+
+    #[test]
+    fn identity_line_honours_only_its_own_role_date() {
+        let env = vars(&[
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+            ("GIT_COMMITTER_NAME", "C O Mitter"),
+            ("GIT_COMMITTER_EMAIL", "committer@example.com"),
+            ("GIT_COMMITTER_DATE", "@1234567890 +0100"),
+        ]);
+        let config = ConfigSet::default();
+        let committer = resolve_identity_with(&env, &config, IdentRole::Committer, fixed_now())
+            .expect("committer");
+        assert_eq!(
+            committer,
+            "C O Mitter <committer@example.com> 1234567890 +0100"
+        );
+        let author =
+            resolve_identity_with(&env, &config, IdentRole::Author, fixed_now()).expect("author");
+        assert_eq!(author, "A U Thor <author@example.com> 1112911993 -0700");
+    }
+
+    #[test]
+    fn identity_line_treats_blank_date_override_as_unset() {
+        let env = vars(&[
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+            ("GIT_AUTHOR_DATE", "  "),
+        ]);
+        let line =
+            resolve_identity_with(&env, &ConfigSet::default(), IdentRole::Author, fixed_now())
+                .expect("identity");
+        assert_eq!(line, "A U Thor <author@example.com> 1112911993 -0700");
+    }
+
+    #[test]
+    fn identity_line_fails_like_strict_email_resolution() {
+        let env = vars(&[("USER", "alice"), ("GIT_AUTHOR_NAME", "Alice")]);
+        let err =
+            resolve_identity_with(&env, &ConfigSet::default(), IdentRole::Author, fixed_now())
+                .expect_err("no configured email");
+        assert_eq!(
+            err,
+            IdentityError::MissingConfiguredEmail {
+                role: IdentRole::Author
+            }
+        );
+    }
+
+    #[test]
+    fn loose_committer_identity_never_fails_and_ignores_date_override() {
+        let env = vars(&[
+            ("USER", "alice"),
+            ("HOSTNAME", "host.example"),
+            ("GIT_COMMITTER_DATE", "@1234567890 +0100"),
+        ]);
+        let mut config = ConfigSet::default();
+        config
+            .add_command_override("user.name", "Alice")
+            .expect("override");
+        let line = resolve_loose_committer_identity_with(&env, &config, fixed_now());
+        assert_eq!(line, "Alice <alice@host.example> 1112911993 -0700");
+    }
+
+    #[test]
+    fn env_date_key_matches_role() {
+        assert_eq!(IdentRole::Author.env_date_key(), "GIT_AUTHOR_DATE");
+        assert_eq!(IdentRole::Committer.env_date_key(), "GIT_COMMITTER_DATE");
     }
 }

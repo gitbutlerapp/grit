@@ -27,7 +27,6 @@
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::environment::offset_from_epoch_and_tz;
 use crate::git_date::parse::parse_date;
 
 /// Normalise a date string into Git's stored `<epoch> <offset>` timestamp.
@@ -106,12 +105,6 @@ pub fn parse_date_to_git_timestamp(date_str: &str) -> Option<String> {
     }
 
     None
-}
-
-/// [`OffsetDateTime`] for a repository wall clock and optional `TZ`-style zone string.
-#[must_use]
-pub fn identity_now_from_epoch(epoch: i64, tz: Option<&str>) -> OffsetDateTime {
-    offset_from_epoch_and_tz(epoch, tz)
 }
 
 /// Format a timestamp in Git's format: `<epoch> <offset>`.

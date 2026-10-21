@@ -1235,7 +1235,6 @@ pub fn grit_lib::commit::trailers::format_trailers(&str, &grit_lib::commit::trai
 pub fn grit_lib::commit::trailers::message_ends_with_trailer(&str, &grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::commit::assemble_identity(&str, &str, core::option::Option<&str>, time::offset_date_time::OffsetDateTime) -> alloc::string::String
 pub fn grit_lib::commit::format_git_timestamp(time::offset_date_time::OffsetDateTime) -> alloc::string::String
-pub fn grit_lib::commit::identity_now_from_epoch(i64, core::option::Option<&str>) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::commit::parse_date_to_git_timestamp(&str) -> core::option::Option<alloc::string::String>
 pub mod grit_lib::config
 pub mod grit_lib::config::dotfile
@@ -1733,6 +1732,7 @@ pub enum grit_lib::config::ident_resolve::IdentRole
 pub grit_lib::config::ident_resolve::IdentRole::Author
 pub grit_lib::config::ident_resolve::IdentRole::Committer
 impl grit_lib::config::ident_resolve::IdentRole
+pub fn grit_lib::config::ident_resolve::IdentRole::env_date_key(self) -> &'static str
 pub fn grit_lib::config::ident_resolve::IdentRole::missing_email_hint(self) -> &'static str
 impl core::clone::Clone for grit_lib::config::ident_resolve::IdentRole
 pub fn grit_lib::config::ident_resolve::IdentRole::clone(&self) -> Self
@@ -1790,6 +1790,8 @@ pub fn grit_lib::config::ident_resolve::read_git_identity_name_env_with<E: grit_
 pub fn grit_lib::config::ident_resolve::read_git_identity_name_from_env_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::ident_resolve::resolve_email_lenient_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> alloc::string::String
 pub fn grit_lib::config::ident_resolve::resolve_email_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
+pub fn grit_lib::config::ident_resolve::resolve_identity_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
+pub fn grit_lib::config::ident_resolve::resolve_loose_committer_identity_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, time::offset_date_time::OffsetDateTime) -> alloc::string::String
 pub fn grit_lib::config::ident_resolve::resolve_loose_committer_parts_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet) -> (alloc::string::String, alloc::string::String)
 pub fn grit_lib::config::ident_resolve::resolve_name_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
 pub mod grit_lib::config::init_filesystem
@@ -10878,6 +10880,7 @@ pub fn grit_lib::repo::Repository::environment(&self) -> &grit_lib::config::envi
 pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
 pub fn grit_lib::repo::Repository::git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
+pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
@@ -14318,6 +14321,7 @@ pub fn grit_lib::repo::Repository::environment(&self) -> &grit_lib::config::envi
 pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
 pub fn grit_lib::repo::Repository::git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
+pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool

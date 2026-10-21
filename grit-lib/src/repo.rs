@@ -521,6 +521,17 @@ impl Repository {
         crate::git_date::tm::process_wall_clock_sec()
     }
 
+    /// [`Self::wall_clock_epoch`] in this handle's `TZ`, for stamping author, committer and
+    /// reflog identity lines (see
+    /// [`resolve_identity_with`](crate::config::ident_resolve::resolve_identity_with)).
+    #[must_use]
+    pub fn identity_now(&self) -> time::OffsetDateTime {
+        crate::environment::offset_from_epoch_and_tz(
+            self.wall_clock_epoch(),
+            self.environment.tz.as_deref(),
+        )
+    }
+
     /// Subprocess runner used for hooks, filters, and helpers.
     #[must_use]
     pub fn command_runner(&self) -> Arc<dyn CommandRunner> {

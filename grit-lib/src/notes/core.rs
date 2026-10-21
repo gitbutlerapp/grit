@@ -18,7 +18,7 @@ use std::fs;
 
 use time::{OffsetDateTime, UtcOffset};
 
-use crate::commit::{assemble_identity, identity_now_from_epoch};
+use crate::commit::assemble_identity;
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::ident::parse_signature_times;
@@ -443,7 +443,7 @@ pub fn remove_note_entry(entries: &mut Vec<NotesTreeEntry>, object_hex: &str) ->
 /// Author and committer lines for notes commits written without explicit identities.
 fn wall_clock_notes_idents(repo: &Repository) -> Result<(String, String)> {
     let config = repo.config()?;
-    let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
+    let now = repo.identity_now();
     Ok((
         notes_ident(repo.environment(), config.as_ref(), IdentRole::Author, now),
         notes_ident(

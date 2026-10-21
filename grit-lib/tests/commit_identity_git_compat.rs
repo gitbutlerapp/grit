@@ -5,11 +5,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use grit_lib::commit::assemble_identity;
 use grit_lib::config::environment::{offset_from_epoch_and_tz, Environment, RepositoryOptions};
 use grit_lib::config::ident_resolve::{
     identity_email_is_configured_with, resolve_email_lenient_with, resolve_email_with,
-    resolve_name_with, IdentRole, IdentityError,
+    resolve_identity_with, IdentRole, IdentityError,
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::{parse_commit, ObjectKind};
@@ -17,30 +16,8 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
-use time::OffsetDateTime;
 
 const FIXED_EPOCH: i64 = 1_112_911_993;
-
-fn identity_from_environment(
-    env: &Environment,
-    config: &ConfigSet,
-    role: IdentRole,
-    now: OffsetDateTime,
-) -> Result<String, IdentityError> {
-    let date_key = match role {
-        IdentRole::Author => "GIT_AUTHOR_DATE",
-        IdentRole::Committer => "GIT_COMMITTER_DATE",
-    };
-    let date_override = env.var(date_key).filter(|d| !d.trim().is_empty());
-    let name = resolve_name_with(env, config, role)?;
-    let email = resolve_email_lenient_with(env, config, role);
-    Ok(assemble_identity(
-        &name,
-        &email,
-        date_override.as_deref(),
-        now,
-    ))
-}
 
 #[test]
 fn strict_identity_refuses_synthetic_email_without_config() {
@@ -120,10 +97,15 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
     )
     .expect("stage");
     let config = repo.config().expect("config");
-    let now = offset_from_epoch_and_tz(FIXED_EPOCH, env.tz.as_deref());
-    let author = identity_from_environment(&env, config.as_ref(), IdentRole::Author, now)
+    let now = repo.identity_now();
+    assert_eq!(
+        now,
+        offset_from_epoch_and_tz(FIXED_EPOCH, env.tz.as_deref()),
+        "identity_now follows the handle's reference time and TZ"
+    );
+    let author = resolve_identity_with(&env, config.as_ref(), IdentRole::Author, now)
         .expect("author identity");
-    let committer = identity_from_environment(&env, config.as_ref(), IdentRole::Committer, now)
+    let committer = resolve_identity_with(&env, config.as_ref(), IdentRole::Committer, now)
         .expect("committer identity");
 
     let outcome = create_commit(

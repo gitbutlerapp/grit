@@ -55,6 +55,8 @@ Larger subsystems use [`repo_handles`](rustdoc:grit_lib::repo_handles):
 
 Transport options, stash identity, and notes author/committer lines are passed in as arguments on those methods (no hidden wall-clock reads in the handle layer).
 
+To build those lines the way Git does, call [`resolve_identity_with`](rustdoc:grit_lib::config::ident_resolve::resolve_identity_with) with the repository's environment and config, an [`IdentRole`](rustdoc:grit_lib::config::ident_resolve::IdentRole) and a timestamp. It honours `GIT_AUTHOR_*` / `GIT_COMMITTER_*` (including the `*_DATE` overrides) and `user.*` config, and fails with a typed `IdentityError` when no identity is configured. Reflog entries use [`resolve_loose_committer_identity_with`](rustdoc:grit_lib::config::ident_resolve::resolve_loose_committer_identity_with), which never fails. [`Repository::identity_now`](rustdoc:grit_lib::repo::Repository::identity_now) gives the handle's clock (its reference time when one was set) in its `TZ`.
+
 ## Errors
 
 Library operations return `grit_lib::error::Result`. The `Error` enum covers I/O, missing objects, bad repository layout, and invalid user input. Match on variants in application code; the `grit` CLI maps them to exit codes and messages separately.

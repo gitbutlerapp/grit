@@ -30,12 +30,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
-use crate::commit::{assemble_identity, identity_now_from_epoch};
 use crate::config::ConfigSet;
 use crate::diff::diff_trees;
 use crate::error::{Error, Result};
 use crate::ident_resolve::{
-    resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
+    resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
 };
 use crate::index::{Index, IndexEntry};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
@@ -342,14 +341,8 @@ pub fn integrate_branch(
     }
 
     let config = repo.config()?;
-    let author =
-        strict_commit_identity(repo, config.as_ref(), IdentRole::Author, "GIT_AUTHOR_DATE")?;
-    let committer = strict_commit_identity(
-        repo,
-        config.as_ref(),
-        IdentRole::Committer,
-        "GIT_COMMITTER_DATE",
-    )?;
+    let author = strict_commit_identity(repo, config.as_ref(), IdentRole::Author)?;
+    let committer = strict_commit_identity(repo, config.as_ref(), IdentRole::Committer)?;
 
     apply_clean_tree_merge_to_worktree(repo, &into_tree, &merged)?;
 
@@ -541,19 +534,9 @@ fn strict_commit_identity(
     repo: &Repository,
     config: &ConfigSet,
     role: IdentRole,
-    date_var: &str,
 ) -> Result<String> {
-    let env = repo.environment();
-    let name = resolve_name_with(env, config, role).map_err(|e| Error::Message(e.to_string()))?;
-    let email = resolve_email_with(env, config, role).map_err(|e| Error::Message(e.to_string()))?;
-    let now = identity_now_from_epoch(
-        env.var("SOURCE_DATE_EPOCH")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| time::OffsetDateTime::now_utc().unix_timestamp()),
-        env.var("TZ").as_deref(),
-    );
-    let date = env.var(date_var);
-    Ok(assemble_identity(&name, &email, date.as_deref(), now))
+    resolve_identity_with(repo.environment(), config, role, repo.identity_now())
+        .map_err(|e| Error::Message(e.to_string()))
 }
 
 fn move_branch(
@@ -566,14 +549,7 @@ fn move_branch(
     refs::write_ref(repo.git_dir(), refname, &new)?;
     let env = repo.environment();
     let config = ConfigSet::load(env, Some(repo.git_dir()), true).unwrap_or_default();
-    let now = identity_now_from_epoch(
-        env.var("SOURCE_DATE_EPOCH")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| time::OffsetDateTime::now_utc().unix_timestamp()),
-        env.var("TZ").as_deref(),
-    );
-    let (name, email) = resolve_loose_committer_parts_with(env, &config);
-    let who = assemble_identity(&name, &email, None, now);
+    let who = resolve_loose_committer_identity_with(env, &config, repo.identity_now());
     let _ = refs::append_reflog(repo.git_dir(), refname, &old, &new, &who, reason, false);
     let _ = refs::append_reflog(repo.git_dir(), "HEAD", &old, &new, &who, reason, false);
     Ok(())

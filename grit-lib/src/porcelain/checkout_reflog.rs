@@ -1,10 +1,9 @@
 //! Reflog entries for branch checkout and branch creation (Git-compatible messages).
 
-use crate::commit::{assemble_identity, identity_now_from_epoch};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::Result;
-use crate::ident_resolve::resolve_loose_committer_parts_with;
+use crate::ident_resolve::resolve_loose_committer_identity_with;
 use crate::objects::ObjectId;
 use crate::refs::{self, append_reflog_with_config, create_ref_with_reflog, delete_ref};
 use crate::repo::Repository;
@@ -14,14 +13,7 @@ use crate::state::{resolve_head, HeadState};
 pub fn checkout_reflog_identity(repo: &Repository) -> String {
     let env = repo.environment();
     let config = ConfigSet::load(env, Some(repo.git_dir()), true).unwrap_or_default();
-    let now = identity_now_from_epoch(
-        env.var("SOURCE_DATE_EPOCH")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| time::OffsetDateTime::now_utc().unix_timestamp()),
-        env.var("TZ").as_deref(),
-    );
-    let (name, email) = resolve_loose_committer_parts_with(env, &config);
-    assemble_identity(&name, &email, None, now)
+    resolve_loose_committer_identity_with(env, &config, repo.identity_now())
 }
 
 /// `from` side of `checkout: moving from … to …` for the current `HEAD` state.
