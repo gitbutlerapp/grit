@@ -28,8 +28,8 @@ use grit_lib::diff::{
     read_submodule_head_oid, read_worktree_side_bytes_for_diff, resolve_diff_arguments,
     structured::SideBytes, submodule_porcelain_flags, tree_diff_structured_parallel, write_patch,
     write_patch_resolved, write_patch_structured, DiffDetail, DiffEntry, DiffFilesOutput,
-    DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, PatchResolvedSide,
-    PatchTextOptions, TreeDiffStructured,
+    DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, PatchResolvedSide, PatchTextOptions,
+    TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -1657,21 +1657,29 @@ fn render_file(
 }
 
 fn render_hunk(w: &mut dyn Write, hunk: &Hunk, width: usize, color: bool) -> Result<()> {
-    let old_rng = format_hunk_range(hunk.old_start, hunk.old_lines);
-    let new_rng = format_hunk_range(hunk.new_start, hunk.new_lines);
-    let range = format!("@@ -{old_rng} +{new_rng} @@");
-    match (&hunk.context, color) {
-        (Some(ctx), true) => {
-            outln!(w, "{}", paint(color, "33", &format!("┄┄ {range} {ctx}")));
+    if let Some(header) = &hunk.combined_header {
+        if color {
+            outln!(w, "{}", paint(color, "33", &format!("┄┄ {header}")));
+        } else {
+            outln!(w, "{header}");
         }
-        (Some(ctx), false) => {
-            outln!(w, "{range} {ctx}");
-        }
-        (None, false) => {
-            outln!(w, "{range}");
-        }
-        (None, true) => {
-            outln!(w, "{}", paint(color, "33", &format!("┄┄ {range}")));
+    } else {
+        let old_rng = format_hunk_range(hunk.old_start, hunk.old_lines);
+        let new_rng = format_hunk_range(hunk.new_start, hunk.new_lines);
+        let range = format!("@@ -{old_rng} +{new_rng} @@");
+        match (&hunk.context, color) {
+            (Some(ctx), true) => {
+                outln!(w, "{}", paint(color, "33", &format!("┄┄ {range} {ctx}")));
+            }
+            (Some(ctx), false) => {
+                outln!(w, "{range} {ctx}");
+            }
+            (None, false) => {
+                outln!(w, "{range}");
+            }
+            (None, true) => {
+                outln!(w, "{}", paint(color, "33", &format!("┄┄ {range}")));
+            }
         }
     }
 
@@ -1686,6 +1694,27 @@ fn render_hunk(w: &mut dyn Write, hunk: &Hunk, width: usize, color: bool) -> Res
 }
 
 fn render_line(line: &Line, width: usize, color: bool) -> String {
+    if let Some(parents) = &line.parents {
+        let markers: String = parents
+            .iter()
+            .map(|s| s.chars().next().unwrap_or(' '))
+            .collect();
+        let raw: String = line.segments.iter().map(|s| s.text.as_str()).collect();
+        let text = expand_tabs(&raw, markers.len() + 1);
+        let (base_bg, emph_bg) = match line.kind {
+            LineKind::Del => (BG_DEL, BG_DEL_EMPH),
+            LineKind::Add => (BG_ADD, BG_ADD_EMPH),
+            LineKind::Context => ("", ""),
+        };
+        if !color || base_bg.is_empty() {
+            return format!("{markers} {text}");
+        }
+        return format!(
+            "{markers} {}",
+            paint_colored_body(&line.segments, base_bg, emph_bg, 0)
+        );
+    }
+
     let (base_bg, emph_bg, num_code, sign) = match line.kind {
         LineKind::Del => (BG_DEL, BG_DEL_EMPH, FG_DEL_NUM, '-'),
         LineKind::Add => (BG_ADD, BG_ADD_EMPH, FG_ADD_NUM, '+'),
@@ -1704,20 +1733,26 @@ fn render_line(line: &Line, width: usize, color: bool) -> String {
         return format!("{gutter}{sign} {}", expand_tabs(&raw, 0));
     }
 
-    // Colored: paint the background behind the text only (brighter for the
-    // emphasized word-level changes). We deliberately do NOT pad to a fixed
-    // width — padding past the terminal edge would wrap onto extra rows and
-    // render those as blank colored bands.
+    format!(
+        "{gutter}{}",
+        paint_colored_body(&line.segments, base_bg, emph_bg, 0)
+    )
+}
+
+fn paint_colored_body(
+    segments: &[Segment],
+    base_bg: &str,
+    emph_bg: &str,
+    tab_col: usize,
+) -> String {
     let mut body = String::new();
-    let mut col = 0;
-    for seg in &line.segments {
+    let mut col = tab_col;
+    for seg in segments {
         let text = expand_tabs(&seg.text, col);
         col += text.chars().count();
         if base_bg.is_empty() {
             body.push_str(&text);
         } else {
-            // Pair the dark background with an explicit light foreground so the
-            // text is legible regardless of the terminal's theme.
             let bg = if seg.emphasis { emph_bg } else { base_bg };
             body.push_str(&format!("\x1b[{FG_ON_DIFF};{bg}m{text}"));
         }
@@ -1725,7 +1760,7 @@ fn render_line(line: &Line, width: usize, color: bool) -> String {
     if !base_bg.is_empty() {
         body.push_str(RESET);
     }
-    format!("{gutter}{body}")
+    body
 }
 
 /// Render one line-number cell, right-aligned to `width`, colored when the line

@@ -69,6 +69,10 @@ pub enum ShowPathOutcome {
         text: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         data_base64: Option<String>,
+        /// Raw blob bytes for human stdout (same as `git show rev:path`).
+        #[serde(skip)]
+        #[schemars(skip)]
+        raw: Vec<u8>,
     },
     Tree {
         spec: String,
@@ -319,6 +323,7 @@ fn show_rev_path(spec: &str) -> Result<ShowPathOutcome> {
                 binary,
                 text,
                 data_base64,
+                raw: obj.data,
             })
         }
         ObjectKind::Tree => {
@@ -391,22 +396,8 @@ fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
 impl HumanRender for ShowPathOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            ShowPathOutcome::Blob {
-                binary, text, spec, ..
-            } => {
-                if *binary {
-                    outln!(w, "Binary file");
-                    return Ok(());
-                }
-                if let Some(t) = text {
-                    w.write_all(t.as_bytes())
-                        .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
-                    return Ok(());
-                }
-                let (repo, _) = context::discover_with_warnings()?;
-                let resolved = repo.resolve(spec)?;
-                let obj = repo.read_object_raw_for_display(&resolved.oid)?;
-                w.write_all(&obj.data)
+            ShowPathOutcome::Blob { raw, .. } => {
+                w.write_all(raw)
                     .map_err(|e| anyhow::anyhow!("writing blob: {e}"))?;
                 Ok(())
             }
@@ -618,6 +609,7 @@ impl MarkdownRender for ShowOutcome {
             print_markdown_message(w, &body)?;
             outln!(w);
         }
+        render_markdown_stat(w, &self.stat, None)?;
         self.diff.render_markdown(w, ctx)?;
         Ok(())
     }

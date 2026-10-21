@@ -108,10 +108,11 @@ pub fn commit_diff_files(
     if commit.parents.len() < 2 || merges == DiffMerges::FirstParent {
         let lib_files =
             collect_files_for_target(repo, &DiffTarget::Commit(*commit_oid), pathspecs, *options)?;
-        let files = lib_files
+        let mut files: Vec<FileDiff> = lib_files
             .into_iter()
             .map(|f| first_parent_file_diff(f, detail))
             .collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
         return Ok(DiffFilesOutput {
             files,
             totals: None,
@@ -236,6 +237,7 @@ fn combined_commit_diff_files(
         }
         files.push(file);
     }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
 
     let totals = if detail == DiffDetail::Stat {
         Some(DiffTotals {

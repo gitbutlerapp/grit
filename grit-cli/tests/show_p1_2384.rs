@@ -31,11 +31,21 @@ fn two_parent_merge(dir: &std::path::Path) -> ObjectId {
     std::fs::write(dir.join("file"), "one\n").unwrap();
     git(dir, &["add", "file"]);
     git(dir, &["commit", "-qm", "p1"]);
-    git(dir, &["checkout", "-q", &root]);
+    git(dir, &["checkout", "-q", "-b", "p2", &root]);
     std::fs::write(dir.join("file"), "two\n").unwrap();
     git(dir, &["add", "file"]);
     git(dir, &["commit", "-qm", "p2"]);
-    git(dir, &["checkout", "-q", "-b", "merge", "p1"]);
+    git(dir, &["checkout", "-q", "p1"]);
+    let merge = Command::new("git")
+        .current_dir(dir)
+        .args(["merge", "--no-edit", "p2"])
+        .output()
+        .expect("git merge");
+    assert!(
+        merge.status.code() == Some(1) || merge.status.success(),
+        "merge: {}",
+        String::from_utf8_lossy(&merge.stderr)
+    );
     std::fs::write(dir.join("file"), "merged\n").unwrap();
     git(dir, &["add", "file"]);
     git(dir, &["commit", "-qm", "merge"]);
@@ -121,9 +131,16 @@ fn show_rev_path_binary_blob_human_and_json() {
         .output()
         .expect("grit show");
     assert!(grit_human.status.success());
+
+    let git_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["show", "HEAD:binary.dat"])
+        .output()
+        .expect("git show");
+    assert!(git_out.status.success());
     assert_eq!(
-        String::from_utf8_lossy(&grit_human.stdout).trim(),
-        "Binary file"
+        grit_human.stdout, git_out.stdout,
+        "human show must match git raw bytes"
     );
 
     let json = gs_json(dir.path(), &["show", "HEAD:binary.dat"]);
@@ -163,6 +180,83 @@ fn show_merge_combined_json_line_kinds() {
     assert!(
         lines.iter().any(|l| l["kind"] == "add"),
         "combined JSON lines should include add kind: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|l| l.get("parents").is_some()),
+        "combined JSON lines should include parents arrays: {lines:?}"
+    );
+}
+
+#[test]
+fn show_rev_path_colon_matches_git_and_cat() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("a:b"), "payload\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "colon"]);
+    grit(dir.path(), &["init"]).expect_ok();
+
+    let git_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["show", "HEAD:a:b"])
+        .output()
+        .expect("git");
+    assert!(git_out.status.success());
+
+    let grit_out = Command::new(env!("CARGO_BIN_EXE_grit"))
+        .current_dir(dir.path())
+        .args(["show", "HEAD:a:b"])
+        .output()
+        .expect("grit");
+    assert!(grit_out.status.success());
+    assert_eq!(grit_out.stdout, git_out.stdout);
+
+    let cat_out = Command::new(env!("CARGO_BIN_EXE_grit"))
+        .current_dir(dir.path())
+        .args(["cat", "HEAD:a:b"])
+        .output()
+        .expect("cat");
+    assert!(cat_out.status.success());
+    assert_eq!(cat_out.stdout, git_out.stdout);
+}
+
+#[test]
+fn show_rename_file_order_matches_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("z-old.txt"), "z\n").unwrap();
+    std::fs::write(dir.path().join("middle.txt"), "m\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "init"]);
+    git(dir.path(), &["mv", "z-old.txt", "z-new.txt"]);
+    std::fs::write(dir.path().join("middle.txt"), "m2\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "rename"]);
+    grit(dir.path(), &["init"]).expect_ok();
+
+    let git_names: Vec<String> = String::from_utf8_lossy(
+        &Command::new("git")
+            .current_dir(dir.path())
+            .args(["show", "--name-only", "--format=", "HEAD"])
+            .output()
+            .expect("git")
+            .stdout,
+    )
+    .lines()
+    .filter(|l| !l.is_empty())
+    .map(str::to_owned)
+    .collect();
+
+    let json = gs_json(dir.path(), &["show", "HEAD"]);
+    let grit_names: Vec<String> = json["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .map(|f| f["path"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        grit_names, git_names,
+        "rename diffs should sort by path like git"
     );
 }
 
