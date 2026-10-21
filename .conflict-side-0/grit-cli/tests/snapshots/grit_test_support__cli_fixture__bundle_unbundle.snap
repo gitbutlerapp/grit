@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Unbundled snap.bundle (7 objects, 475 bytes).\nb5ea30de417ac84c09b8cfc0acf5f2c39efc611f HEAD\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"path\":\"snap.bundle\",\"references\":[{\"name\":\"HEAD\",\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"}],\"objects\":7,\"bytes\":475}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Bundle unbundle\n\n- **path:** `snap.bundle`\n- **objects:** 7\n- **bytes:** 475\n\n| Ref | OID |\n| --- | --- |\n| `HEAD` | `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f` |\n\n",
+    "stderr": ""
+  }
+}

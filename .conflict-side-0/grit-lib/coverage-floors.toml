@@ -1,0 +1,290 @@
+# grit-lib line-coverage floors (percent). Ratchet: scripts/coverage.py --update
+# Regenerate floors after intentional gains; never lower minimums by hand.
+
+[meta]
+baseline = "183dacae1"
+updated = "2026-10-13"
+
+[core]
+groups = ["odb", "pack", "midx", "commit-graph"]
+minimum = 85.0
+
+[total]
+minimum = 80.0
+
+[aggregate.history]
+groups = ["index", "index-ext", "diff", "revwalk", "revparse", "merge", "stash-notes-worktree"]
+minimum = 85.0
+
+[aggregate.refs-config]
+groups = ["refs", "reflog", "config", "ignore", "attributes"]
+minimum = 82.4
+
+[group.attributes]
+files = [
+    "attributes.rs",
+]
+minimum = 85.0
+
+[group.commit-graph]
+files = [
+    "commit_graph_file.rs",
+    "commit_graph_write.rs",
+    "bloom.rs",
+]
+minimum = 86.5
+
+[group.config]
+files = [
+    "config.rs",
+]
+minimum = 82.9
+
+[group.diff]
+files = [
+    "diff.rs",
+    "diff_indent_heuristic.rs",
+    "diffstat.rs",
+    "structured_diff.rs",
+    "combined_tree_diff.rs",
+    "combined_diff_patch.rs",
+    "merge_diff.rs",
+]
+minimum = 85.0
+
+[group.ignore]
+files = [
+    "ignore.rs",
+    "wildmatch.rs",
+]
+minimum = 87.2
+
+[group.index]
+files = [
+    "index.rs",
+    "write_tree.rs",
+    "resolve_undo.rs",
+    "sparse_checkout.rs",
+]
+minimum = 85.0
+
+[group.index-ext]
+files = [
+    "split_index.rs",
+    "untracked_cache.rs",
+    "index_name_hash_lazy.rs",
+]
+minimum = 85.0
+
+[group.merge]
+files = [
+    "merge_trees.rs",
+    "merge_file.rs",
+    "porcelain/merge.rs",
+    "porcelain/cherry_pick.rs",
+]
+minimum = 85.5
+
+[group.midx]
+files = [
+    "midx.rs",
+]
+minimum = 84.9
+
+[group.odb]
+files = [
+    "odb/mod.rs",
+    "odb/store/mod.rs",
+    "odb/store/packs.rs",
+]
+minimum = 81.1
+
+[group.pack]
+files = [
+    "pack.rs",
+    "pack_index.rs",
+    "pack_rev.rs",
+    "pack_map.rs",
+    "pack_index_build.rs",
+    "pack_zlib.rs",
+    "pack_bitmap/error.rs",
+    "pack_bitmap/index.rs",
+    "pack_bitmap/order.rs",
+    "bitmap_walk.rs",
+    "pack_bitmap/writer.rs",
+]
+minimum = 84.3
+
+[group.reflog]
+files = [
+    "reflog.rs",
+]
+minimum = 85.0
+
+[group.refs]
+files = [
+    "refs/mod.rs",
+    "reftable.rs",
+    "check_ref_format.rs",
+]
+minimum = 80.6
+
+[group.revparse]
+files = [
+    "rev_parse.rs",
+    "rev_parse_error.rs",
+    "merge_base.rs",
+]
+minimum = 85.0
+
+[file."rev_parse.rs"]
+minimum = 85.0
+
+[group.revwalk]
+files = [
+    "rev_list.rs",
+    "rev_list_error.rs",
+]
+minimum = 85.0
+
+[group.stash-notes-worktree]
+files = [
+    "porcelain/stash.rs",
+    "notes.rs",
+    "patch_ids.rs",
+    "worktree.rs",
+    "worktree_ref.rs",
+]
+minimum = 85.0
+
+[group.supporting]
+files = [
+    "objects/core.rs",
+    "zlib_inflate.rs",
+    "unpack_objects.rs",
+    "index_pack.rs",
+    "delta_encode.rs",
+    "promisor.rs",
+    "fsck_standalone.rs",
+]
+minimum = 86.0
+
+[file."attributes.rs"]
+minimum = 85.0
+
+[file."bloom.rs"]
+minimum = 91.6
+
+[file."check_ref_format.rs"]
+minimum = 96.1
+
+[file."combined_diff_patch.rs"]
+minimum = 83.9
+
+[file."combined_tree_diff.rs"]
+minimum = 83.3
+
+[file."commit_graph_file.rs"]
+minimum = 85.0
+
+[file."commit_graph_write.rs"]
+minimum = 88.2
+
+[file."config/core.rs"]
+minimum = 82.9
+
+[file."delta_encode.rs"]
+minimum = 91.0
+
+[file."fsck_standalone.rs"]
+minimum = 86.1
+
+[file."ignore.rs"]
+minimum = 84.1
+
+[file."index/core.rs"]
+minimum = 83.8
+
+[file."sparse_checkout.rs"]
+minimum = 83.4
+
+[file."index_pack.rs"]
+minimum = 88.5
+
+[file."merge_diff.rs"]
+minimum = 33.7
+
+[file."midx.rs"]
+minimum = 84.9
+
+[file."objects/core.rs"]
+minimum = 88.1
+
+[file."odb/mod.rs"]
+minimum = 83.3
+
+[file."odb/store/mod.rs"]
+minimum = 89.3
+
+[file."odb/store/packs.rs"]
+minimum = 57.8
+
+[file."pack.rs"]
+minimum = 85.3
+
+[file."pack_bitmap/error.rs"]
+minimum = 0.0
+
+[file."pack_bitmap/index.rs"]
+minimum = 79.8
+
+[file."pack_bitmap/order.rs"]
+minimum = 71.6
+
+[file."pack_bitmap/writer.rs"]
+minimum = 76.1
+
+[file."pack_index.rs"]
+minimum = 89.7
+
+[file."pack_index_build.rs"]
+minimum = 88.5
+
+[file."pack_map.rs"]
+minimum = 91.1
+
+[file."pack_rev.rs"]
+minimum = 89.3
+
+[file."pack_zlib.rs"]
+minimum = 73.4
+
+[file."promisor.rs"]
+minimum = 82.0
+
+[file."reflog.rs"]
+minimum = 84.2
+
+[file."refs/mod.rs"]
+minimum = 77.1
+
+[file."reftable.rs"]
+minimum = 83.8
+
+[file."unpack_objects.rs"]
+minimum = 83.9
+
+[file."wildmatch.rs"]
+minimum = 95.9
+
+[file."zlib_inflate.rs"]
+minimum = 85.0
+
+[file."diff_indent_heuristic.rs"]
+minimum = 85.0
+
+[file."diffstat.rs"]
+minimum = 85.0
+
+[file."diff/core.rs"]
+minimum = 60.6

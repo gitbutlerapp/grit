@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Removed note for b5ea30d\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"remove\",\"notes_ref\":\"refs/notes/commits\",\"objects\":[\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\"]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Removed notes on `refs/notes/commits`:\n- `b5ea30d`\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "  rejected origin refs/heads/main: not a fast-forward — run `grit pull` first\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"remote\":\"origin\",\"branch\":\"main\",\"results\":[{\"ref\":\"refs/heads/main\",\"status\":\"rejected\",\"reason\":\"not a fast-forward — run `grit pull` first\"}],\"rejected\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "## Push to `origin`\n- **`refs/heads/main`** · rejected `origin refs/heads/main`: not a fast-forward — run `grit pull` first\n",
+    "stderr": ""
+  }
+}

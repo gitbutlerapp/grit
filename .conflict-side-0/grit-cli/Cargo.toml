@@ -1,0 +1,48 @@
+[package]
+name = "grit-cli"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "A simplified alternative CLI for Grit"
+repository = "https://github.com/gitbutlerapp/grit"
+readme = "README.md"
+
+[[bin]]
+name = "grit"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq"] }
+time.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+jaq-core = "3.1"
+jaq-json = "2.0"
+jaq-std = "3.0"
+terminal_size.workspace = true
+# `inline` enables word-level intra-line highlighting for `grit diff`.
+similar = { workspace = true, features = ["inline"] }
+libc.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls"] }
+
+[dev-dependencies]
+grit-lib = { path = "../grit-lib" }
+grit-test-support = { path = "../grit-test-support" }
+insta = { version = "1.42", features = ["json", "filters"] }
+serde_json.workspace = true
+tempfile = "3"
+jsonschema = "0.29"

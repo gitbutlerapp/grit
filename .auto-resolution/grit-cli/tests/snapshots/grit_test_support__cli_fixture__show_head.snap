@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "branch main\ncommit b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\nAuthor: Test <test@example.com>\nDate:   2023-11-14T22:13:20Z\n\n    second\n\n second.txt  |   1 +\n tracked.txt |   2 +-\n 2 files changed, 2 insertions(+), 1 deletion(-)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"kind\":\"branch\",\"ref_name\":\"main\",\"commit\":{\"oid\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"parents\":[\"72934dedd47ecaf7e340fd6c5ef46620187fb317\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"second\",\"message\":\"second\"},\"stat\":{\"files\":[{\"path\":\"second.txt\",\"status\":\"added\",\"insertions\":1,\"deletions\":0,\"binary\":false},{\"path\":\"tracked.txt\",\"status\":\"modified\",\"insertions\":1,\"deletions\":1,\"binary\":false}],\"files_changed\":2,\"insertions\":2,\"deletions\":1}}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "# Branch `main`\n\n# Commit `b5ea30d`\n\n**Oid:** `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f`\n**Author:** Test <test@example.com>\n**Date:** 2023-11-14T22:13:20Z\n\n## second\n\n## Changes\n\n| File | + | − |\n| --- | ---: | ---: |\n| `second.txt` | 1 | 0 |\n| `tracked.txt` | 1 | 1 |\n\n2 files changed, 2 insertions(+), 1 deletion(-)\n",
+    "stderr": ""
+  }
+}

@@ -512,6 +512,12 @@ enum Command {
         /// Compare the worktree to this ref's tree instead of HEAD (no commit arguments).
         #[arg(long = "against", value_name = "REF")]
         against: Option<String>,
+        /// Exit with 1 when there are changes, 0 when clean (no output unless combined with other flags).
+        #[arg(long = "exit-code")]
+        exit_code: bool,
+        /// Print nothing; implies `--exit-code`.
+        #[arg(long = "quiet")]
+        quiet: bool,
         /// One commit (that commit's patch), two commits (tree diff), or a range `A..B` / `A...B`.
         #[arg(value_name = "COMMIT")]
         commits: Vec<String>,
@@ -1119,11 +1125,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             staged,
             unstaged,
             against,
+            exit_code,
+            quiet,
             commits,
             paths,
             format,
-        } => emit(
-            &commands::diff::run(commands::diff::DiffRunOptions {
+        } => {
+            let exit_code = exit_code || quiet;
+            let outcome = commands::diff::run(commands::diff::DiffRunOptions {
                 staged,
                 unstaged,
                 against,

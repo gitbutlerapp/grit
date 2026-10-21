@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Fast-forwarded origin/main → 844d29b\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"result\":\"fast_forward\",\"branch\":\"origin/main\",\"oid\":\"844d29b74b461835b1c1915bc8b7756bf8e89fae\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Merge\n\n- Fast-forwarded **`origin/main`** → `844d29b`\n",
+    "stderr": ""
+  }
+}
