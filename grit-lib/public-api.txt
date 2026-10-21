@@ -10720,9 +10720,13 @@ pub grit_lib::porcelain::status::RenameDetection::copies: bool
 pub grit_lib::porcelain::status::RenameDetection::threshold: u32
 impl core::clone::Clone for grit_lib::porcelain::status::RenameDetection
 pub fn grit_lib::porcelain::status::RenameDetection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::status::RenameDetection
+impl core::cmp::PartialEq for grit_lib::porcelain::status::RenameDetection
+pub fn grit_lib::porcelain::status::RenameDetection::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::porcelain::status::RenameDetection
 pub fn grit_lib::porcelain::status::RenameDetection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for grit_lib::porcelain::status::RenameDetection
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::status::RenameDetection
 impl core::marker::Freeze for grit_lib::porcelain::status::RenameDetection
 impl core::marker::Send for grit_lib::porcelain::status::RenameDetection
 impl core::marker::Sync for grit_lib::porcelain::status::RenameDetection
@@ -10800,7 +10804,10 @@ pub fn grit_lib::porcelain::status::format_porcelain_v2(&grit_lib::porcelain::st
 pub fn grit_lib::porcelain::status::normalize_status_conflicts(&mut alloc::vec::Vec<grit_lib::diff::DiffEntry>, &mut alloc::vec::Vec<grit_lib::diff::DiffEntry>, &[alloc::string::String])
 pub fn grit_lib::porcelain::status::pathspec_may_match_directory(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::status(&grit_lib::repo::Repository, &grit_lib::porcelain::status::StatusOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusModel>
+pub fn grit_lib::porcelain::status::status_diff_entry_matches_pathspec(&grit_lib::diff::DiffEntry, &[alloc::string::String]) -> bool
+pub fn grit_lib::porcelain::status::status_options_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<grit_lib::porcelain::status::StatusOptions, grit_lib::error::ConfigError>
 pub fn grit_lib::porcelain::status::status_path_matches(&str, &[alloc::string::String]) -> bool
+pub fn grit_lib::porcelain::status::status_renames_from_config(&grit_lib::config::ConfigSet) -> core::option::Option<grit_lib::porcelain::status::RenameDetection>
 pub fn grit_lib::porcelain::status::status_path_matches_worktree(&grit_lib::repo::Repository, &grit_lib::index::Index, &std::path::Path, &str, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::status_path_matches_worktree_with_rules(&grit_lib::repo::Repository, &grit_lib::index::Index, &std::path::Path, &str, &[alloc::string::String], core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>) -> bool
 pub fn grit_lib::porcelain::status::untracked_mode_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<grit_lib::porcelain::status::UntrackedMode, grit_lib::error::ConfigError>

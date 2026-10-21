@@ -360,6 +360,20 @@ pub fn status_dirty_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     )
 }
 
+pub fn status_paths_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["status", "--", "data/d0000"]),
+        sh_devnull(&ctx.git, &["status", "-s", "--", "data/d0000"]),
+    )
+}
+
+pub fn status_renamed_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["status"]),
+        sh_devnull(&ctx.git, &["status", "-s"]),
+    )
+}
+
 pub fn add_modified_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_script(shell_grit_add_modified_set(&ctx.grit)),

@@ -304,6 +304,9 @@ impl CommitJson {
 pub struct ChangeJson {
     pub path: String,
     pub status: ChangeStatus,
+    /// Previous path for renames and copies (`null` when not applicable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
 }
 
 /// Machine-readable diff change status (`--json` / `--markdown` contract).
@@ -344,6 +347,7 @@ pub fn change_json(entry: &DiffEntry) -> ChangeJson {
     ChangeJson {
         path: entry_path(entry).to_owned(),
         status: entry.status.into(),
+        old_path: entry.old_path.clone(),
     }
 }
 

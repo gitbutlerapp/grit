@@ -25,6 +25,8 @@ $ grit status --json
 
 Plain `grit` is the same as `grit status`. Keys: `branch`, `detached`, `head`, `target` (the branch your work is headed for), `ahead`, `commits` (up to ten not on the target; each commit row includes `change_id` and `change_id_stored`), `staged`, `unstaged`, `untracked`, `clean`.
 
+Limit to paths with `grit status -- <path>…` (same pathspec rules as `grit add`). Untracked listing: `--untracked no|normal|all`, or Git-style `-u` / `-uno` / `-uall`. Staged renames in `--json` use `{ "status": "renamed", "path": "new", "old_path": "old" }`; human output shows `old → new`. Rename detection follows `status.renames` / `diff.renames` (on by default; set `status.renames=false` to disable).
+
 The target branch is the first that exists of: the `target.branch` config value, `origin/master`, `origin/main`, `master`, `main`. Change it with `grit config target.branch origin/develop`.
 
 ## Reading history and changes

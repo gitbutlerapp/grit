@@ -65,6 +65,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `status/dirty@small` | Dirty worktree on small synth: grit status vs git status -s |
 | `status/dirty@synth-100k` | Dirty worktree (~1% modified): grit status vs git status -s |
 | `status/dirty@synth-10k` | Dirty worktree status vs git status -s |
+| `status/paths@synth-100k` | Path-limited status: grit status -- data/d0000 vs git status -s -- data/d0000 |
+| `status/renamed@synth-10k` | Staged rename in status: grit status vs git status -s after git mv |
 | `switch/branch@synth-10k` | Switch branch vs git switch |
 
 ## diff

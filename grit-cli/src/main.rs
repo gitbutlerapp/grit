@@ -558,11 +558,8 @@ enum Command {
     /// Show what's changed and where you are (this is the default).
     #[command(alias = "st")]
     Status {
-        /// How untracked paths are listed: `normal` (default) collapses wholly
-        /// untracked directories; `all` lists every file; `no` omits untracked paths.
-        /// When omitted, uses `status.showUntrackedFiles` from config.
-        #[arg(long = "untracked", value_name = "MODE")]
-        untracked: Option<commands::status::UntrackedListing>,
+        #[command(flatten)]
+        status: commands::status::StatusCliArgs,
     },
     /// List the commits on this branch that aren't on the target branch yet.
     #[command(alias = "sl")]
@@ -914,7 +911,8 @@ struct ServeArgs {
 
 fn main() {
     stdio::configure();
-    let parse_argv = diff_args::normalize_diff_argv(std::env::args().collect());
+    let mut parse_argv = diff_args::normalize_diff_argv(std::env::args().collect());
+    commands::status::normalize_status_argv(&mut parse_argv);
     let cli = match Cli::try_parse_from(parse_argv) {
         Ok(cli) => cli,
         Err(err) if err.use_stderr() => {
@@ -1057,7 +1055,9 @@ fn reject_non_human_plumbing(cli: &Cli, opts: &OutputOptions) -> Result<()> {
 }
 
 fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
-    match cli.command.unwrap_or(Command::Status { untracked: None }) {
+    match cli.command.unwrap_or(Command::Status {
+        status: commands::status::StatusCliArgs::default(),
+    }) {
         Command::Init {
             path,
             bare,
@@ -1229,7 +1229,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 ctx,
             )
         }
-        Command::Status { untracked } => emit(&commands::status::run(untracked)?, opts, ctx),
+        Command::Status { status } => emit(&commands::status::run(&status)?, opts, ctx),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add {
             pathspecs,

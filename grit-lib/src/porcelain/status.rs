@@ -64,7 +64,7 @@ pub enum IgnoredMode {
 
 /// Rename/copy detection settings for the status diffs (`status.renames` /
 /// `--find-renames`, `status.renameLimit`, copy detection).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenameDetection {
     /// Rename similarity threshold, as a percentage (e.g. `50` for 50%).
     pub threshold: u32,
@@ -147,6 +147,78 @@ impl Default for StatusOptions {
             fsmonitor_query_boundary: None,
         }
     }
+}
+
+/// Default rename similarity threshold for `git status` when detection is enabled (`-M50`).
+const STATUS_RENAME_DEFAULT_THRESHOLD: u32 = 50;
+
+/// Build [`StatusOptions`] from repository config (untracked mode and rename detection).
+///
+/// CLI callers merge command-line overrides for [`StatusOptions::untracked`],
+/// [`StatusOptions::pathspecs`], and other flags after calling this.
+pub fn status_options_from_config(
+    config: &ConfigSet,
+) -> std::result::Result<StatusOptions, ConfigError> {
+    Ok(StatusOptions {
+        untracked: untracked_mode_from_config(config)?,
+        renames: status_renames_from_config(config),
+        ..StatusOptions::default()
+    })
+}
+
+/// Resolve rename detection for status from `status.renames`, then `diff.renames`.
+///
+/// When both keys are absent, rename detection is **on** (Git default). Either key set to
+/// `false`/`no`/`off`/`0` disables detection.
+#[must_use]
+pub fn status_renames_from_config(config: &ConfigSet) -> Option<RenameDetection> {
+    if let Some(v) = config.get("status.renames") {
+        return parse_status_renames_config_value(&v);
+    }
+    if let Some(v) = config.get("diff.renames") {
+        return parse_status_renames_config_value(&v);
+    }
+    Some(RenameDetection {
+        threshold: STATUS_RENAME_DEFAULT_THRESHOLD,
+        copies: false,
+    })
+}
+
+fn parse_status_renames_config_value(raw: &str) -> Option<RenameDetection> {
+    let v = raw.trim();
+    if v.eq_ignore_ascii_case("false")
+        || v.eq_ignore_ascii_case("no")
+        || v.eq_ignore_ascii_case("off")
+        || v == "0"
+    {
+        return None;
+    }
+    let copies = v.eq_ignore_ascii_case("copy") || v.eq_ignore_ascii_case("copies");
+    Some(RenameDetection {
+        threshold: STATUS_RENAME_DEFAULT_THRESHOLD,
+        copies,
+    })
+}
+
+/// Whether a diff entry should appear in a pathspec-limited status report.
+///
+/// For renames and copies, Git shows the entry when **either** the old or new path matches.
+#[must_use]
+pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String]) -> bool {
+    if pathspecs.is_empty() {
+        return true;
+    }
+    if entry
+        .new_path
+        .as_ref()
+        .is_some_and(|p| status_path_matches(p, pathspecs))
+    {
+        return true;
+    }
+    entry
+        .old_path
+        .as_ref()
+        .is_some_and(|p| status_path_matches(p, pathspecs))
 }
 
 /// The computed result of `git status`: everything the renderers need, with no
@@ -1563,7 +1635,11 @@ pub fn status(
     } else {
         crate::diff::diff_index_to_tree(repo.odb(), &index, head_tree.as_ref(), false)?
             .into_iter()
-            .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
+            .filter(|e| {
+                opts.pathspecs.is_empty()
+                    || opts.renames.is_some()
+                    || status_path_matches(e.path(), &opts.pathspecs)
+            })
             .collect()
     };
 
@@ -1592,7 +1668,11 @@ pub fn status(
     let mut persist_index = index_stat_refresh_changed;
     let mut unstaged: Vec<DiffEntry> = unstaged_raw
         .into_iter()
-        .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
+        .filter(|e| {
+            opts.pathspecs.is_empty()
+                || opts.renames.is_some()
+                || status_path_matches(e.path(), &opts.pathspecs)
+        })
         .collect();
 
     if let Some(rd) = opts.renames {
@@ -1616,7 +1696,15 @@ pub fn status(
         )?;
     }
 
-    let conflicts = conflict_paths_from_index(&index);
+    if !opts.pathspecs.is_empty() && opts.renames.is_some() {
+        staged.retain(|e| status_diff_entry_matches_pathspec(e, &opts.pathspecs));
+        unstaged.retain(|e| status_diff_entry_matches_pathspec(e, &opts.pathspecs));
+    }
+
+    let conflicts: Vec<String> = conflict_paths_from_index(&index)
+        .into_iter()
+        .filter(|p| status_path_matches(p, &opts.pathspecs))
+        .collect();
     normalize_status_conflicts(&mut staged, &mut unstaged, &conflicts);
 
     let (untracked, ignored) = if opts.untracked == UntrackedMode::No {
@@ -2290,6 +2378,226 @@ mod status_op_tests {
     }
 
     #[test]
+    fn status_options_from_config_renames_off() {
+        let cfg_dir = tempfile::TempDir::new().unwrap();
+        fs::write(
+            cfg_dir.path().join("config"),
+            "[status]\n\trenames = false\n",
+        )
+        .unwrap();
+        let cfg = ConfigSet::load(
+            &crate::environment::Environment::empty(),
+            Some(cfg_dir.path()),
+            true,
+        )
+        .unwrap();
+        let opts = status_options_from_config(&cfg).unwrap();
+        assert_eq!(opts.renames, None);
+    }
+
+    #[test]
+    fn status_pathspec_limits_all_sections() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        fs::create_dir_all(root.join("scoped")).unwrap();
+        fs::create_dir_all(root.join("other")).unwrap();
+        fs::write(root.join("scoped/tracked.txt"), b"v1\n").unwrap();
+        fs::write(root.join("other/outside.txt"), b"x\n").unwrap();
+        grit_test_support::git(root, &["add", "scoped/tracked.txt", "other/outside.txt"]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+
+        fs::write(root.join("scoped/tracked.txt"), b"v2\n").unwrap();
+        fs::write(root.join("scoped/staged.txt"), b"new staged\n").unwrap();
+        grit_test_support::git(root, &["add", "scoped/staged.txt"]);
+        fs::write(root.join("scoped/untracked.txt"), b"?\n").unwrap();
+        fs::write(root.join("other/untracked-out.txt"), b"?\n").unwrap();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let opts = StatusOptions {
+            pathspecs: vec!["scoped".into()],
+            renames: Some(RenameDetection {
+                threshold: 50,
+                copies: false,
+            }),
+            ..StatusOptions::default()
+        };
+        let model = status(&repo, &opts, &mut NullProgress).unwrap();
+
+        assert!(
+            model.staged.iter().all(|e| e.path().starts_with("scoped/")),
+            "staged must be scoped: {:?}",
+            model.staged
+        );
+        assert!(
+            model
+                .unstaged
+                .iter()
+                .all(|e| e.path().starts_with("scoped/")),
+            "unstaged must be scoped: {:?}",
+            model.unstaged
+        );
+        assert!(
+            model
+                .untracked
+                .iter()
+                .all(|p| p.starts_with("scoped/") || p == "scoped/"),
+            "untracked must be scoped: {:?}",
+            model.untracked
+        );
+        assert!(
+            !model.untracked.iter().any(|p| p.contains("other/")),
+            "outside untracked must be omitted"
+        );
+    }
+
+    #[test]
+    fn status_rename_staged_reports_old_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        grit_test_support::git(root, &["init", "-q", "-b", "main", "."]);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("a.txt"), b"a\n").unwrap();
+        grit_test_support::git(root, &["add", "a.txt"]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+        grit_test_support::git(root, &["mv", "a.txt", "b.txt"]);
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let opts = StatusOptions {
+            renames: Some(RenameDetection {
+                threshold: 50,
+                copies: false,
+            }),
+            ..StatusOptions::default()
+        };
+        let model = status(&repo, &opts, &mut NullProgress).unwrap();
+        let renamed: Vec<_> = model
+            .staged
+            .iter()
+            .filter(|e| e.status == crate::diff::DiffStatus::Renamed)
+            .collect();
+        assert_eq!(
+            renamed.len(),
+            1,
+            "expected one staged rename: {:?}",
+            model.staged
+        );
+        assert_eq!(renamed[0].old_path.as_deref(), Some("a.txt"));
+        assert_eq!(renamed[0].new_path.as_deref(), Some("b.txt"));
+    }
+
+    #[test]
+    fn status_rename_either_side_matches_pathspec() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        grit_test_support::git(root, &["init", "-q", "-b", "main", "."]);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("old.txt"), b"x\n").unwrap();
+        grit_test_support::git(root, &["add", "old.txt"]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+        grit_test_support::git(root, &["mv", "old.txt", "new.txt"]);
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let opts_old = StatusOptions {
+            pathspecs: vec!["old.txt".into()],
+            renames: Some(RenameDetection {
+                threshold: 50,
+                copies: false,
+            }),
+            ..StatusOptions::default()
+        };
+        let model_old = status(&repo, &opts_old, &mut NullProgress).unwrap();
+        assert!(
+            model_old
+                .staged
+                .iter()
+                .any(|e| e.status == crate::diff::DiffStatus::Renamed),
+            "pathspec on old side must show rename: {:?}",
+            model_old.staged
+        );
+
+        let opts_new = StatusOptions {
+            pathspecs: vec!["new.txt".into()],
+            renames: Some(RenameDetection {
+                threshold: 50,
+                copies: false,
+            }),
+            ..StatusOptions::default()
+        };
+        let model_new = status(&repo, &opts_new, &mut NullProgress).unwrap();
+        assert!(
+            model_new
+                .staged
+                .iter()
+                .any(|e| e.status == crate::diff::DiffStatus::Renamed),
+            "pathspec on new side must show rename: {:?}",
+            model_new.staged
+        );
+    }
+
+    #[test]
+    fn status_unstaged_delete_and_untracked_add_not_rename() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        grit_test_support::git(root, &["init", "-q", "-b", "main", "."]);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("gone.txt"), b"x\n").unwrap();
+        grit_test_support::git(root, &["add", "gone.txt"]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+        fs::remove_file(root.join("gone.txt")).unwrap();
+        fs::write(root.join("fresh.txt"), b"y\n").unwrap();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let opts = StatusOptions {
+            renames: Some(RenameDetection {
+                threshold: 50,
+                copies: false,
+            }),
+            ..StatusOptions::default()
+        };
+        let model = status(&repo, &opts, &mut NullProgress).unwrap();
+        assert!(
+            model
+                .unstaged
+                .iter()
+                .any(|e| e.status == crate::diff::DiffStatus::Deleted && e.path() == "gone.txt"),
+            "deleted tracked file: {:?}",
+            model.unstaged
+        );
+        assert!(
+            model.untracked.iter().any(|p| p == "fresh.txt"),
+            "untracked add stays untracked: {:?}",
+            model.untracked
+        );
+        assert!(
+            !model
+                .unstaged
+                .iter()
+                .any(|e| e.status == crate::diff::DiffStatus::Renamed),
+            "must not fold delete+untracked into rename: {:?}",
+            model.unstaged
+        );
+    }
+
     fn warm_status_after_git_status_reuses_untr_without_rescanning() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();

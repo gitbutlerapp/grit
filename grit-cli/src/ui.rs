@@ -265,6 +265,26 @@ fn status_color(status: &DiffStatus) -> &'static str {
     }
 }
 
+fn format_change_path(entry: &DiffEntry, path_opts: Option<&PathDisplayOptions>) -> String {
+    let format_one = |p: &str| {
+        path_opts
+            .map(|opts| opts.format_path_for_human(p))
+            .unwrap_or_else(|| p.to_owned())
+    };
+    match entry.status {
+        DiffStatus::Renamed | DiffStatus::Copied => {
+            let old = entry.old_path.as_deref().unwrap_or("");
+            let new = entry.new_path.as_deref().unwrap_or("");
+            if old.is_empty() || new.is_empty() {
+                format_one(entry_path(entry))
+            } else {
+                format!("{} → {}", format_one(old), format_one(new))
+            }
+        }
+        _ => format_one(entry_path(entry)),
+    }
+}
+
 /// Print a titled group of diff entries (does nothing when empty).
 ///
 /// Each line is `  <glyph>  <label>  <path>`: the glyph and the fixed-width label
@@ -284,10 +304,7 @@ pub fn print_change_group(
         let g = glyph(&entry.status);
         let l = label(entry);
         let marker = format!("{g}  {l:<width$}", width = LABEL_WIDTH);
-        let repo_path = entry_path(entry);
-        let shown = path_opts
-            .map(|opts| opts.format_path_for_human(repo_path))
-            .unwrap_or_else(|| repo_path.to_owned());
+        let shown = format_change_path(entry, path_opts);
         outln!(
             w,
             "  {}  {}",

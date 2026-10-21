@@ -9,7 +9,7 @@ use super::super::helpers::{
     reset_hard_bench, reset_mixed_bench, restore_paths_bench, rm_dir_bench, scenario_spec,
     setup_big_blobs, setup_deep_tree, setup_hot_path_switch, setup_init_empty,
     setup_shape_worktree, setup_small, setup_stash_repo, setup_synth100k, stash_bench,
-    status_clean_bench, status_dirty_bench, switch_bench,
+    status_clean_bench, status_dirty_bench, status_paths_bench, status_renamed_bench, switch_bench,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;
@@ -97,6 +97,25 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         matrix_status("status/dirty@deep-tree", setup_deep_tree, false),
         matrix_status("status/dirty@small", setup_small, false),
     ]);
+
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("status/paths@synth-100k"),
+        pending: false,
+        setup: setup_synth100k,
+        prepare: prepare_worktree_status_dirty,
+        build_git: |c| status_paths_bench(c).1,
+        build_grit: |c| status_paths_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("status/renamed@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_worktree_mv_file,
+        build_git: |c| status_renamed_bench(c).1,
+        build_grit: |c| status_renamed_bench(c).0,
+        correctness: None,
+    });
 
     plans.push(DailyHeadlinePlan {
         spec: scenario_spec("add/all@synth-100k"),
