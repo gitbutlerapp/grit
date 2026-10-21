@@ -169,7 +169,7 @@ fn scale_special_spec(spec: SpecialSpec) -> SpecialSpec {
         big_binary_revisions,
         big_binary_min_bytes: 1024 * 1024,
         big_binary_max_bytes: 2 * 1024 * 1024,
-        loose_after_pack: if spec.tree_min_depth > 0 {
+        loose_after_pack: if spec.tree_min_depth > 0 || big_binary_count > 0 {
             0
         } else {
             (spec.loose_after_pack / 2).max(1)

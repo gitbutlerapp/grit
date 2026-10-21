@@ -5,7 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 export PATH="/usr/local/cargo/bin:${PATH:-}"
-export GRIT_BENCH_DAILY_LOW_MEMORY="${GRIT_BENCH_DAILY_LOW_MEMORY:-1}"
+# Full-size @repo fixtures only; do not silently substitute smoke tiers under matrix ids.
+unset GRIT_BENCH_DAILY_LOW_MEMORY
 
 BENCH="./target/release/grit-bench"
 RUN1="/tmp/daily-production-run1.json"
@@ -34,6 +35,10 @@ merge_daily_parts() {
       generated_at: $first.generated_at,
       machine: $first.machine,
       tools: $first.tools,
+      capture: (
+        [.[].capture? // empty]
+        | if length == 0 then null else .[0] end
+      ),
       scenarios: (map(.scenarios) | add | unique_by(.id) | sort_by(.id))
     }
   ' "$@" >"$out"
@@ -42,13 +47,15 @@ merge_daily_parts() {
 run_daily_merged() {
   local label=$1
   local out=$2
-  local tmpdir start end id
+  local tmpdir start end id part area t0 t1 elapsed area_file
   tmpdir=$(mktemp -d)
+  area_file=$(mktemp)
   start=$(date +%s)
   echo "${label} started $(date -Is) (sequential --only ${#DAILY_IDS[@]} scenarios)"
   for id in "${DAILY_IDS[@]}"; do
     echo "  scenario=${id} …"
     local attempt=1
+    t0=$(date +%s.%N)
     while ! "$BENCH" daily --offline --only "$id" --baseline-grit "${BASELINE_GRIT}" \
       --output "${tmpdir}/${id//\//@-}.json"; do
       attempt=$((attempt + 1))
@@ -58,11 +65,56 @@ run_daily_merged() {
       fi
       echo "  retry ${id} (attempt ${attempt}/3)…" >&2
     done
+    t1=$(date +%s.%N)
+    elapsed=$(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.3f", b - a }')
+    part="${tmpdir}/${id//\//@-}.json"
+    area=$(jq -r '.scenarios[0].area // empty' "$part")
+    if [[ -n "$area" ]]; then
+      echo "${area} ${elapsed}" >>"$area_file"
+    fi
   done
   merge_daily_parts "$out" "${tmpdir}"/*.json
   rm -rf "${tmpdir}"
   end=$(date +%s)
-  echo "${label} wall_seconds=$((end - start))"
+  total_wall=$((end - start))
+  cores=$(jq -c '.machine.logical_cores' "$out")
+  if [[ -s "$area_file" ]]; then
+    areas_json=$(
+      awk '{a[$1]+=$2} END {for (k in a) print k, a[k]}' "$area_file" \
+        | jq -R -s '
+            split("\n") | map(select(length > 0))
+            | map(split(" "))
+            | map({key: .[0], value: (.[1] | tonumber)})
+            | from_entries
+          '
+    )
+    jq --argjson areas "$areas_json" --argjson total "$total_wall" --argjson cores "$cores" '
+      .capture = (
+        (.capture // {})
+        | .fixture_policy = (
+            .fixture_policy
+            // "full-size fixture cache tiers for every @repo id in the daily matrix"
+          )
+        | .area_wall_seconds = $areas
+        | .total_wall_seconds = $total
+        | .logical_cores = $cores
+      )
+    ' "$out" >"${out}.tmp" && mv "${out}.tmp" "$out"
+  else
+    jq --argjson total "$total_wall" --argjson cores "$cores" '
+      .capture = (
+        (.capture // {})
+        | .fixture_policy = (
+            .fixture_policy
+            // "full-size fixture cache tiers for every @repo id in the daily matrix"
+          )
+        | .total_wall_seconds = $total
+        | .logical_cores = $cores
+      )
+    ' "$out" >"${out}.tmp" && mv "${out}.tmp" "$out"
+  fi
+  rm -f "$area_file"
+  echo "${label} wall_seconds=${total_wall}"
 }
 
 attempt=1

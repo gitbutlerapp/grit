@@ -123,6 +123,21 @@ pub struct DailyScenarioResult {
     pub pending: bool,
 }
 
+/// How fixtures were chosen for this capture (when not the default full-size cache).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DailyCaptureInfo {
+    /// Human-readable fixture policy (for example smoke-sized special shapes under low-memory capture).
+    pub fixture_policy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area_wall_seconds: Option<std::collections::HashMap<String, f64>>,
+    /// Wall seconds for the full merged `--only` capture run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_wall_seconds: Option<f64>,
+    /// Host logical CPU count at capture time (duplicate of `machine.logical_cores` for dashboard readers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_cores: Option<u32>,
+}
+
 /// Full daily census report (`grit-daily-bench/1`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DailyBenchReport {
@@ -130,6 +145,8 @@ pub struct DailyBenchReport {
     pub generated_at: String,
     pub machine: MachineInfo,
     pub tools: DailyToolVersions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<DailyCaptureInfo>,
     pub scenarios: Vec<DailyScenarioResult>,
 }
 
@@ -175,6 +192,7 @@ mod tests {
                 baseline_grit: None,
                 baseline_grit_commit: None,
             },
+            capture: None,
             scenarios: vec![DailyScenarioResult {
                 id: HEADLINE_SCENARIOS[0].id.to_string(),
                 area: Area::Worktree,
