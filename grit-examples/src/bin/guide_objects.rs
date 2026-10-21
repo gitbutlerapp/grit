@@ -5,6 +5,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{
     parse_commit, parse_tree, serialize_commit, serialize_tree, CommitData, ObjectKind, TreeEntry,
+    TreeRefIter,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use std::path::{Path, PathBuf};
@@ -48,8 +49,13 @@ fn write_demo_objects(
         .write(ObjectKind::Commit, &serialize_commit(&commit))?;
 
     let tree_obj = repo.objects().read(&tree_oid)?;
-    let entries = parse_tree(&tree_obj.data)?;
-    assert_eq!(entries[0].oid, blob_oid);
+    let mut iter_entries = TreeRefIter::infer_oid_len(&tree_obj.data)?;
+    let first = iter_entries
+        .next()
+        .expect("tree entry")
+        .expect("parse entry");
+    assert_eq!(first.oid, blob_oid);
+    assert_eq!(parse_tree(&tree_obj.data)?[0].oid, blob_oid);
 
     let commit_obj = repo.objects().read(&commit_oid)?;
     let parsed = parse_commit(&commit_obj.data)?;

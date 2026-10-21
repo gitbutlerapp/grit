@@ -7,7 +7,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::error::Error;
 use crate::ewah_bitmap::Bitmap;
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, TreeRefIter};
 use crate::pack::read_object_info_from_packs;
 use crate::pack_bitmap::{BitmapError, BitmapIndex};
 use crate::repo::Repository;
@@ -572,8 +572,9 @@ fn walk_tree(
         return Ok(());
     }
     mark_index_or_extended(index, bits, extended, extended_set, tree, ObjectKind::Tree);
-    let entries = parse_tree(&object.data)?;
-    for entry in entries {
+    let oid_len = repo.odb().hash_algo().len();
+    for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
+        let entry = entry?;
         // Submodule gitlinks name commits in another object store; do not walk them.
         if entry.mode == 0o160000 {
             continue;

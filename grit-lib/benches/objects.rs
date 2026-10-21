@@ -3,6 +3,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 mod fixture;
+mod s7;
 
 use std::hint::black_box;
 use std::io::Read;
@@ -17,7 +18,7 @@ use grit_lib::objects::hash::{hash_object, hash_objects_parallel};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
 use grit_lib::objects::unpack_objects::apply_delta;
-use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::objects::{parse_tree, HashAlgo, ObjectKind, TreeRefIter};
 
 fn bench_sha1_throughput(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
@@ -260,6 +261,27 @@ fn bench_exists_local_10k_oids_packed(c: &mut Criterion) {
     });
 }
 
+fn bench_tree_iter(c: &mut Criterion) {
+    let fx = s7::HistoryBenchFixtures::global();
+    let odb = fx.repo.odb();
+    let obj = odb.read(&fx.wide_tree).expect("read wide tree");
+    let data = obj.data.as_slice();
+    let oid_len = odb.hash_algo().len();
+    let mut group = c.benchmark_group("tree_iter");
+    group.throughput(Throughput::Elements(10_000));
+    group.bench_function("parse_tree", |b| {
+        b.iter(|| black_box(parse_tree(black_box(data)).expect("parse")))
+    });
+    group.bench_function("tree_ref_iter", |b| {
+        b.iter(|| {
+            for entry in TreeRefIter::with_oid_len(black_box(data), oid_len) {
+                black_box(entry.expect("entry"));
+            }
+        })
+    });
+    group.finish();
+}
+
 fn bench_delta_apply(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
     let mut group = c.benchmark_group("delta_apply");
@@ -286,6 +308,7 @@ criterion_group!(
     bench_packed_read,
     bench_idx_lookup,
     bench_exists_local_10k_oids_packed,
+    bench_tree_iter,
     bench_delta_apply
 );
 criterion_main!(objects);

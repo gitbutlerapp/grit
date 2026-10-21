@@ -35,7 +35,9 @@ use crate::diff_rename_parallel::{
 };
 use crate::error::{Error, Result};
 use crate::index::{CacheTreeNode, Index, IndexEntry, MODE_SYMLINK};
-use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{
+    parse_commit, CommitData, ObjectId, ObjectKind, TreeEntry, TreeRefIter,
+};
 use crate::odb::Odb;
 use crate::parallel::ThreadPolicy;
 use crate::repo::Repository;
@@ -7939,9 +7941,10 @@ pub fn flatten_tree_entries(
         out: &mut Vec<(String, String, ObjectId)>,
     ) -> Result<()> {
         let obj = odb.read(tree_oid)?;
-        let entries = parse_tree(&obj.data)?;
-        for e in entries {
-            let name = String::from_utf8_lossy(&e.name);
+        let oid_len = odb.hash_algo().len();
+        for e in TreeRefIter::with_oid_len(&obj.data, oid_len) {
+            let e = e?;
+            let name = String::from_utf8_lossy(e.name);
             let path = if prefix.is_empty() {
                 name.to_string()
             } else {

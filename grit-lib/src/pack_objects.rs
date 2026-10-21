@@ -14,7 +14,9 @@ use flate2::Compression;
 use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::error::{Error, Result};
 use crate::hash::HashingWriter;
-use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
+use crate::objects::{
+    parse_commit, parse_tag, HashAlgo, Object, ObjectId, ObjectKind, TreeRefIter,
+};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
@@ -858,6 +860,8 @@ fn collect_reachable_excluding(
         enqueue(root, &mut queue, &mut visited, &mut ordered);
     }
 
+    let oid_len = odb.hash_algo().len();
+
     while let Some(oid) = queue.pop_front() {
         let obj = match odb.read(&oid) {
             Ok(o) => o,
@@ -878,7 +882,8 @@ fn collect_reachable_excluding(
                 enqueue(commit.tree, &mut queue, &mut visited, &mut ordered);
             }
             ObjectKind::Tree => {
-                for entry in parse_tree(&obj.data)? {
+                for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
+                    let entry = entry?;
                     // Skip submodule (gitlink) entries: the commit they name
                     // lives in another object store and is not part of this pack.
                     if entry.mode == 0o160000 {

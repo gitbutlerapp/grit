@@ -545,6 +545,120 @@ impl TreeEntry {
     }
 }
 
+/// A single tree entry borrowing name bytes from the tree object payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TreeEntryRef<'a> {
+    /// Unix file mode (e.g. `0o100644` for a regular file, `0o040000` for a tree).
+    pub mode: u32,
+    /// Entry name (file or directory name only, no path separators).
+    pub name: &'a [u8],
+    /// The object ID of the blob or sub-tree.
+    pub oid: ObjectId,
+}
+
+impl TreeEntryRef<'_> {
+    /// Allocate an owning [`TreeEntry`] with the same mode, name, and OID.
+    #[must_use]
+    pub fn to_owned(&self) -> TreeEntry {
+        TreeEntry {
+            mode: self.mode,
+            name: self.name.to_vec(),
+            oid: self.oid,
+        }
+    }
+}
+
+/// Iterator over tree entries borrowing from the tree object's raw payload.
+///
+/// Construct with [`Self::with_oid_len`] when the hash width is known, or
+/// [`Self::infer_oid_len`] to detect SHA-1 vs SHA-256 like [`parse_tree`].
+#[derive(Debug, Clone)]
+pub struct TreeRefIter<'a> {
+    data: &'a [u8],
+    pos: usize,
+    oid_len: usize,
+}
+
+impl<'a> TreeRefIter<'a> {
+    /// Iterate `data` assuming each entry ends with an OID of `oid_len` bytes.
+    #[must_use]
+    pub fn with_oid_len(data: &'a [u8], oid_len: usize) -> Self {
+        Self {
+            data,
+            pos: 0,
+            oid_len,
+        }
+    }
+
+    /// Detect OID width and return an iterator (SHA-1 first, then SHA-256).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the blob does not parse as a tree.
+    pub fn infer_oid_len(data: &'a [u8]) -> Result<Self> {
+        match Self::with_oid_len(data, HashAlgo::Sha1.len()).collect::<Result<Vec<_>>>() {
+            Ok(_) => Ok(Self::with_oid_len(data, HashAlgo::Sha1.len())),
+            Err(sha1_err) => {
+                match Self::with_oid_len(data, HashAlgo::Sha256.len()).collect::<Result<Vec<_>>>() {
+                    Ok(_) => Ok(Self::with_oid_len(data, HashAlgo::Sha256.len())),
+                    Err(_) => Err(sha1_err),
+                }
+            }
+        }
+    }
+
+    fn next_entry(&mut self) -> Result<Option<TreeEntryRef<'a>>> {
+        if self.pos >= self.data.len() {
+            return Ok(None);
+        }
+        let start = self.pos;
+        let sp = self.data[self.pos..]
+            .iter()
+            .position(|&b| b == b' ')
+            .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
+        let mode_bytes = &self.data[self.pos..self.pos + sp];
+        let mode = std::str::from_utf8(mode_bytes)
+            .ok()
+            .and_then(|s| u32::from_str_radix(s, 8).ok())
+            .ok_or_else(|| {
+                Error::CorruptObject(format!(
+                    "invalid tree mode: {}",
+                    String::from_utf8_lossy(mode_bytes)
+                ))
+            })?;
+        self.pos += sp + 1;
+
+        let nul = self.data[self.pos..]
+            .iter()
+            .position(|&b| b == 0)
+            .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
+        let name = &self.data[self.pos..self.pos + nul];
+        self.pos += nul + 1;
+
+        if self.pos + self.oid_len > self.data.len() {
+            return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
+        }
+        let oid = ObjectId::from_bytes(&self.data[self.pos..self.pos + self.oid_len])?;
+        self.pos += self.oid_len;
+
+        debug_assert!(self.pos >= start);
+        let _ = start;
+        Ok(Some(TreeEntryRef { mode, name, oid }))
+    }
+}
+
+impl<'a> Iterator for TreeRefIter<'a> {
+    type Item = Result<TreeEntryRef<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next_entry() {
+            Ok(Some(entry)) => Some(Ok(entry)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
+
 /// Parse the raw data of a tree object into its entries.
 ///
 /// # Format
@@ -556,17 +670,9 @@ impl TreeEntry {
 ///
 /// Returns [`Error::CorruptObject`] if the data is malformed.
 pub fn parse_tree(data: &[u8]) -> Result<Vec<TreeEntry>> {
-    // A tree blob does not record its OID width; it is fixed by the repo's
-    // hash algorithm. Rather than thread `HashAlgo` through ~140 call sites,
-    // infer the width: a well-formed tree only parses cleanly (consuming the
-    // whole buffer) with the correct OID length. Try SHA-1 (20) first, then
-    // SHA-256 (32).
-    match parse_tree_with_oid_len(data, HashAlgo::Sha1.len()) {
-        Ok(entries) => Ok(entries),
-        Err(sha1_err) => {
-            parse_tree_with_oid_len(data, HashAlgo::Sha256.len()).map_err(|_| sha1_err)
-        }
-    }
+    TreeRefIter::infer_oid_len(data)?
+        .map(|entry| entry.map(|e| e.to_owned()))
+        .collect()
 }
 
 /// Parse a tree blob assuming a fixed raw OID width (`oid_len` bytes).
@@ -574,45 +680,9 @@ pub fn parse_tree(data: &[u8]) -> Result<Vec<TreeEntry>> {
 /// Returns an error if the data does not parse cleanly into whole entries of
 /// that width (used by [`parse_tree`] to detect the hash algorithm).
 pub fn parse_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntry>> {
-    let mut entries = Vec::new();
-    let mut pos = 0;
-
-    while pos < data.len() {
-        // Find the space separating mode from name
-        let sp = data[pos..]
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
-        let mode_bytes = &data[pos..pos + sp];
-        let mode = std::str::from_utf8(mode_bytes)
-            .ok()
-            .and_then(|s| u32::from_str_radix(s, 8).ok())
-            .ok_or_else(|| {
-                Error::CorruptObject(format!(
-                    "invalid tree mode: {}",
-                    String::from_utf8_lossy(mode_bytes)
-                ))
-            })?;
-        pos += sp + 1;
-
-        // Find the NUL separating name from the raw OID
-        let nul = data[pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
-        let name = data[pos..pos + nul].to_vec();
-        pos += nul + 1;
-
-        if pos + oid_len > data.len() {
-            return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
-        }
-        let oid = ObjectId::from_bytes(&data[pos..pos + oid_len])?;
-        pos += oid_len;
-
-        entries.push(TreeEntry { mode, name, oid });
-    }
-
-    Ok(entries)
+    TreeRefIter::with_oid_len(data, oid_len)
+        .map(|entry| entry.map(|e| e.to_owned()))
+        .collect()
 }
 
 /// Build the raw bytes of a tree object from a slice of entries.
@@ -1485,6 +1555,21 @@ mod commit_parse_tests {
         assert_eq!(oid.loose_suffix().len(), 38);
         assert!(ObjectId::is_hex_len(40));
         assert!(ObjectId::is_loose_suffix_len(38));
+    }
+
+    #[test]
+    fn tree_ref_iter_public_api_smoke() {
+        let data = serialize_tree(&[TreeEntry {
+            mode: 0o100644,
+            name: b"a".to_vec(),
+            oid: ObjectId::from_hex("0123456789012345678901234567890123456789").unwrap(),
+        }]);
+        let mut iter = TreeRefIter::infer_oid_len(&data).expect("infer");
+        let entry = iter.next().unwrap().expect("entry");
+        assert_eq!(entry.name, b"a");
+        let _owned = entry.to_owned();
+        let _vec = parse_tree(&data).expect("parse");
+        let _ = TreeRefIter::with_oid_len(&data, HashAlgo::Sha1.len());
     }
 
     #[test]

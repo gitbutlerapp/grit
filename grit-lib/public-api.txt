@@ -8392,6 +8392,7 @@ impl grit_lib::objects::pack::SingleLocalPackReader
 pub fn grit_lib::objects::pack::SingleLocalPackReader::open(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::open_allow_loose(&std::path::Path) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::pack_offset(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<u64>>
+pub fn grit_lib::objects::pack::SingleLocalPackReader::read_commit_author_prefix(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<&[u8]>>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_info(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::read_object(&mut self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::pack::SingleLocalPackReader::try_read_commit_header_prefix(&mut self, &grit_lib::objects::ObjectId, usize) -> grit_lib::error::Result<core::option::Option<alloc::vec::Vec<u8>>>
@@ -9319,6 +9320,46 @@ impl core::marker::Unpin for grit_lib::objects::TreeEntry
 impl core::marker::UnsafeUnpin for grit_lib::objects::TreeEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::TreeEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::TreeEntry
+pub struct grit_lib::objects::TreeEntryRef<'a>
+pub grit_lib::objects::TreeEntryRef::mode: u32
+pub grit_lib::objects::TreeEntryRef::name: &'a [u8]
+pub grit_lib::objects::TreeEntryRef::oid: grit_lib::objects::ObjectId
+impl grit_lib::objects::TreeEntryRef<'_>
+pub fn grit_lib::objects::TreeEntryRef<'_>::to_owned(&self) -> grit_lib::objects::TreeEntry
+impl<'a> core::clone::Clone for grit_lib::objects::TreeEntryRef<'a>
+pub fn grit_lib::objects::TreeEntryRef<'a>::clone(&self) -> Self
+impl<'a> core::cmp::Eq for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::cmp::PartialEq for grit_lib::objects::TreeEntryRef<'a>
+pub fn grit_lib::objects::TreeEntryRef<'a>::eq(&self, &Self) -> bool
+impl<'a> core::fmt::Debug for grit_lib::objects::TreeEntryRef<'a>
+pub fn grit_lib::objects::TreeEntryRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::marker::StructuralPartialEq for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::marker::Freeze for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::marker::Send for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::marker::Sync for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::marker::Unpin for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::TreeEntryRef<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::TreeEntryRef<'a>
+pub struct grit_lib::objects::TreeRefIter<'a>
+impl<'a> grit_lib::objects::TreeRefIter<'a>
+pub fn grit_lib::objects::TreeRefIter<'a>::infer_oid_len(&'a [u8]) -> grit_lib::error::Result<Self>
+pub fn grit_lib::objects::TreeRefIter<'a>::with_oid_len(&'a [u8], usize) -> Self
+impl<'a> core::clone::Clone for grit_lib::objects::TreeRefIter<'a>
+pub fn grit_lib::objects::TreeRefIter<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for grit_lib::objects::TreeRefIter<'a>
+pub fn grit_lib::objects::TreeRefIter<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::iter::traits::iterator::Iterator for grit_lib::objects::TreeRefIter<'a>
+pub type grit_lib::objects::TreeRefIter<'a>::Item = core::result::Result<grit_lib::objects::TreeEntryRef<'a>, grit_lib::error::Error>
+pub fn grit_lib::objects::TreeRefIter<'a>::next(&mut self) -> core::option::Option<Self::Item>
+impl<'a> core::marker::Freeze for grit_lib::objects::TreeRefIter<'a>
+impl<'a> core::marker::Send for grit_lib::objects::TreeRefIter<'a>
+impl<'a> core::marker::Sync for grit_lib::objects::TreeRefIter<'a>
+impl<'a> core::marker::Unpin for grit_lib::objects::TreeRefIter<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::TreeRefIter<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::TreeRefIter<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::TreeRefIter<'a>
 pub trait grit_lib::objects::ChangeIdGenerator: core::marker::Send + core::marker::Sync
 pub fn grit_lib::objects::ChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
 impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator

@@ -38,7 +38,9 @@ use crate::gitmodules::{DotFsckIssue, DotFsckTracker};
 use crate::index::MODE_GITLINK;
 use crate::midx::verify_midx;
 use crate::objects::HashAlgo;
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{
+    parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind, TreeEntry, TreeEntryRef, TreeRefIter,
+};
 use crate::odb::Odb;
 use crate::pack::{prepare_pack_for_object_fsck, PackFsckTrailerIssue};
 use crate::pack_fsck_verify::{verify_pack_objects_offset_order, PackFsckObjectOutcome};
@@ -1122,14 +1124,7 @@ fn walk_connectivity(
                 );
             }
             ObjectKind::Tree => {
-                let entries = match parse_tree(&obj.data) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        push_corrupt_parse(&mut issues, config, strict, oid, e);
-                        continue;
-                    }
-                };
-                walk_tree_entries(
+                walk_tree_entries_from_data(
                     odb,
                     store_links,
                     config,
@@ -1138,7 +1133,8 @@ fn walk_connectivity(
                     &mut queue,
                     &mut seen,
                     oid,
-                    &entries,
+                    &obj.data,
+                    algo.len(),
                 );
             }
             ObjectKind::Tag => {
@@ -1225,6 +1221,41 @@ fn child_exists_with_kind(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn walk_tree_entries_from_data(
+    odb: &Odb,
+    store_links: &HashMap<ObjectId, ValidatedObjectLinks>,
+    config: &ConfigSet,
+    strict: bool,
+    issues: &mut Vec<FsckIssue>,
+    queue: &mut VecDeque<(ObjectId, ObjectId, WalkRootKind)>,
+    seen: &mut HashSet<ObjectId>,
+    tree_oid: ObjectId,
+    tree_data: &[u8],
+    oid_len: usize,
+) {
+    for entry in TreeRefIter::with_oid_len(tree_data, oid_len) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                push_corrupt_parse(issues, config, strict, tree_oid, err);
+                break;
+            }
+        };
+        walk_one_tree_entry(
+            odb,
+            store_links,
+            config,
+            strict,
+            issues,
+            queue,
+            seen,
+            tree_oid,
+            entry,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn walk_tree_entries(
     odb: &Odb,
     store_links: &HashMap<ObjectId, ValidatedObjectLinks>,
@@ -1237,39 +1268,68 @@ fn walk_tree_entries(
     entries: &[TreeEntry],
 ) {
     for entry in entries {
-        if entry.mode == MODE_GITLINK {
-            continue;
-        }
-        if let Some(expected) = kind_for_tree_mode(entry.mode) {
-            match child_exists_with_kind(odb, store_links, entry.oid, expected) {
-                ChildKindProbe::Missing => {
-                    if should_emit(config, strict, "missingObject") {
-                        issues.push(FsckIssue::MissingObject {
-                            oid: entry.oid,
-                            referrer: MissingObjectReferrer::Object(tree_oid),
-                        });
-                    }
-                }
-                ChildKindProbe::WrongKind => {
-                    if should_emit(config, strict, "brokenLink") {
-                        issues.push(FsckIssue::BrokenLink {
-                            tree: tree_oid,
-                            name: String::from_utf8_lossy(&entry.name).into_owned(),
-                            mode: entry.mode,
-                            target: entry.oid,
-                        });
-                    }
-                }
-                ChildKindProbe::Matches => enqueue(queue, seen, entry.oid, tree_oid),
-            }
-        } else if should_emit(config, strict, "brokenLink") {
-            issues.push(FsckIssue::BrokenLink {
-                tree: tree_oid,
-                name: String::from_utf8_lossy(&entry.name).into_owned(),
+        walk_one_tree_entry(
+            odb,
+            store_links,
+            config,
+            strict,
+            issues,
+            queue,
+            seen,
+            tree_oid,
+            TreeEntryRef {
                 mode: entry.mode,
-                target: entry.oid,
-            });
+                name: &entry.name,
+                oid: entry.oid,
+            },
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_one_tree_entry(
+    odb: &Odb,
+    store_links: &HashMap<ObjectId, ValidatedObjectLinks>,
+    config: &ConfigSet,
+    strict: bool,
+    issues: &mut Vec<FsckIssue>,
+    queue: &mut VecDeque<(ObjectId, ObjectId, WalkRootKind)>,
+    seen: &mut HashSet<ObjectId>,
+    tree_oid: ObjectId,
+    entry: TreeEntryRef<'_>,
+) {
+    if entry.mode == MODE_GITLINK {
+        return;
+    }
+    if let Some(expected) = kind_for_tree_mode(entry.mode) {
+        match child_exists_with_kind(odb, store_links, entry.oid, expected) {
+            ChildKindProbe::Missing => {
+                if should_emit(config, strict, "missingObject") {
+                    issues.push(FsckIssue::MissingObject {
+                        oid: entry.oid,
+                        referrer: MissingObjectReferrer::Object(tree_oid),
+                    });
+                }
+            }
+            ChildKindProbe::WrongKind => {
+                if should_emit(config, strict, "brokenLink") {
+                    issues.push(FsckIssue::BrokenLink {
+                        tree: tree_oid,
+                        name: String::from_utf8_lossy(entry.name).into_owned(),
+                        mode: entry.mode,
+                        target: entry.oid,
+                    });
+                }
+            }
+            ChildKindProbe::Matches => enqueue(queue, seen, entry.oid, tree_oid),
         }
+    } else if should_emit(config, strict, "brokenLink") {
+        issues.push(FsckIssue::BrokenLink {
+            tree: tree_oid,
+            name: String::from_utf8_lossy(entry.name).into_owned(),
+            mode: entry.mode,
+            target: entry.oid,
+        });
     }
 }
 

@@ -12,9 +12,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::bitmap_walk::{
-    bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet,
-};
+use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet};
 use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphChain};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
@@ -25,7 +23,10 @@ use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{
+    find_tree_entry_by_name_in_data, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind,
+    TreeRefIter,
+};
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
@@ -5413,9 +5414,11 @@ fn tree_has_pathspec_match_cached(
     pathspecs: &[String],
     _cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
-    let entries = read_parsed_tree(repo, tree_oid)?;
-    for entry in &entries {
-        let name = String::from_utf8_lossy(&entry.name);
+    let object = repo.odb().read(&tree_oid)?;
+    let oid_len = repo.odb().hash_algo().len();
+    for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
+        let entry = entry?;
+        let name = String::from_utf8_lossy(entry.name);
         let path = if prefix.is_empty() {
             name.into_owned()
         } else {
@@ -7781,12 +7784,15 @@ fn tree_oid_at_path(
     }
     let mut current = root_tree;
     for component in path_prefix.split('/').filter(|part| !part.is_empty()) {
-        let entries = tree_state.tree_entries(repo, current)?;
-        let Some(entry) = entries.iter().find(|entry| {
-            entry.mode == MODE_TREE && String::from_utf8_lossy(&entry.name) == component
-        }) else {
+        let blob = tree_state.tree_blob(repo, current)?;
+        let oid_len = tree_state.oid_len(repo);
+        let Some(entry) = find_tree_entry_by_name_in_data(&blob, oid_len, component.as_bytes())?
+        else {
             return Ok(None);
         };
+        if entry.mode != MODE_TREE {
+            return Ok(None);
+        }
         current = entry.oid;
     }
     Ok(Some(current))
@@ -7807,10 +7813,9 @@ fn entry_oid_at_path(
         };
         tree
     };
-    let entries = tree_state.tree_entries(repo, dir_tree)?;
-    Ok(entries
-        .iter()
-        .find_map(|entry| (String::from_utf8_lossy(&entry.name) == name).then_some(entry.oid)))
+    let blob = tree_state.tree_blob(repo, dir_tree)?;
+    let oid_len = tree_state.oid_len(repo);
+    Ok(find_tree_entry_by_name_in_data(&blob, oid_len, name.as_bytes())?.map(|entry| entry.oid))
 }
 
 fn subtree_unchanged_in_all_parents(
@@ -7861,7 +7866,8 @@ fn entry_unchanged_in_all_parents(
 #[derive(Debug, Default)]
 struct TreeWalkState {
     seen_at_depth: HashMap<ObjectId, u64>,
-    parsed_trees: HashMap<ObjectId, Arc<Vec<crate::objects::TreeEntry>>>,
+    tree_blobs: HashMap<ObjectId, Arc<Vec<u8>>>,
+    oid_len: Option<usize>,
 }
 
 impl TreeWalkState {
@@ -7869,21 +7875,23 @@ impl TreeWalkState {
         Self::default()
     }
 
-    fn tree_entries(
-        &mut self,
-        repo: &Repository,
-        tree_oid: ObjectId,
-    ) -> Result<Arc<Vec<crate::objects::TreeEntry>>> {
-        if let Some(entries) = self.parsed_trees.get(&tree_oid) {
-            return Ok(Arc::clone(entries));
+    fn oid_len(&mut self, repo: &Repository) -> usize {
+        *self
+            .oid_len
+            .get_or_insert_with(|| repo.odb().hash_algo().len())
+    }
+
+    fn tree_blob(&mut self, repo: &Repository, tree_oid: ObjectId) -> Result<Arc<Vec<u8>>> {
+        if let Some(blob) = self.tree_blobs.get(&tree_oid) {
+            return Ok(Arc::clone(blob));
         }
         let object = repo.odb().read(&tree_oid)?;
         if object.kind != ObjectKind::Tree {
             return Err(rev_list_unexpected_kind(tree_oid, "tree"));
         }
-        let entries = Arc::new(parse_tree(&object.data)?);
-        self.parsed_trees.insert(tree_oid, Arc::clone(&entries));
-        Ok(entries)
+        let blob = Arc::new(object.data);
+        self.tree_blobs.insert(tree_oid, Arc::clone(&blob));
+        Ok(blob)
     }
 
     /// Returns `true` if this tree at `depth` should be skipped (already entered at same or
@@ -8004,12 +8012,13 @@ fn collect_pathspec_matching_tree_objects_inner(
             "object {tree_oid} is not a tree"
         )));
     }
-    let entries = parse_tree(&object.data)?;
-    for entry in entries {
+    let oid_len = repo.odb().hash_algo().len();
+    for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
+        let entry = entry?;
         if entry.mode == 0o160000 {
             continue;
         }
-        let name = String::from_utf8_lossy(&entry.name);
+        let name = String::from_utf8_lossy(entry.name);
         let path = if prefix.is_empty() {
             name.into_owned()
         } else {
@@ -8500,8 +8509,8 @@ fn collect_tree_objects_filtered(
             }
         }
     }
-    let entries = match tree_state.tree_entries(repo, tree_oid) {
-        Ok(entries) => entries,
+    let tree_blob = match tree_state.tree_blob(repo, tree_oid) {
+        Ok(blob) => blob,
         Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
             if missing_action.reports_missing() && missing_seen.insert(tree_oid) {
                 missing.push(tree_oid);
@@ -8510,6 +8519,7 @@ fn collect_tree_objects_filtered(
         }
         Err(err) => return Err(err),
     };
+    let oid_len = tree_state.oid_len(repo);
 
     let bits = match filter {
         None => ListFilterBits {
@@ -8585,11 +8595,12 @@ fn collect_tree_objects_filtered(
 
     let needs_child_read_info =
         object_walk_needs_child_read_info(filter, sparse_lines, missing_action);
-    for entry in entries.iter() {
+    for entry in TreeRefIter::with_oid_len(tree_blob.as_slice(), oid_len) {
+        let entry = entry?;
         if entry.mode == 0o160000 {
             continue;
         }
-        let name = String::from_utf8_lossy(&entry.name).to_string();
+        let name = String::from_utf8_lossy(entry.name).to_string();
         let path = if prefix.is_empty() {
             name.clone()
         } else {
@@ -9152,9 +9163,10 @@ fn flatten_tree_with_mode(
     if object.kind != ObjectKind::Tree {
         return Ok(result);
     }
-    let entries = parse_tree(&object.data)?;
-    for entry in entries {
-        let name = String::from_utf8_lossy(&entry.name).to_string();
+    let oid_len = repo.odb().hash_algo().len();
+    for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
+        let entry = entry?;
+        let name = String::from_utf8_lossy(entry.name).to_string();
         let path = if prefix.is_empty() {
             name
         } else {
