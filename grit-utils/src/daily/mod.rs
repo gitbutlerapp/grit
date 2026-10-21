@@ -21,7 +21,7 @@ pub use compare::{
     compare_daily_files, compare_daily_reports, render_daily_compare_markdown, DailyCompareMetric,
     DailyCompareMismatch, DailyCompareOutcome, TIME_RATIO_MIN_GIT_MS,
 };
-pub use coverage::all_registry_scenarios;
+pub use coverage::{all_registry_scenarios, executable_scenario_ids};
 pub use matrix_registry::MATRIX_SCENARIOS;
 pub use registry::{
     Area, HeadlineScenario, RepoShape, ScenarioSpec, HEADLINE_SCENARIOS, REMOTE_MATRIX_SCENARIOS,
