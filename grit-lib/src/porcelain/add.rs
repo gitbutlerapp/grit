@@ -454,11 +454,11 @@ fn stage_inner_on_index(
     }
 
     if has_unmerged && (!opts.pathspecs.is_empty() || opts.mode == StageMode::Update) {
-        outcome
-            .modified
-            .extend(stage_unmerged_paths_matching_pathspecs(
-                repo, work_tree, &matches, index, &rules, dry_run,
-            )?);
+        let (modified, removed) = stage_unmerged_paths_matching_pathspecs(
+            repo, work_tree, &matches, index, &rules, dry_run,
+        )?;
+        outcome.modified.extend(modified);
+        outcome.removed.extend(removed);
     }
 
     if opts.executable_hint != StageExecutableHint::None && !opts.pathspecs.is_empty() {
@@ -500,14 +500,15 @@ fn stage_unmerged_paths_matching_pathspecs(
     index: &mut Index,
     rules: &WorktreeRules,
     dry_run: bool,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, Vec<String>)> {
     let mut unmerged: BTreeMap<Vec<u8>, ()> = BTreeMap::new();
     for entry in &index.entries {
         if entry.stage() != 0 {
             unmerged.insert(entry.path.clone(), ());
         }
     }
-    let mut updated = Vec::new();
+    let mut modified = Vec::new();
+    let mut removed = Vec::new();
     for raw_path in unmerged.keys() {
         let rel = match std::str::from_utf8(raw_path) {
             Ok(s) => s,
@@ -519,10 +520,18 @@ fn stage_unmerged_paths_matching_pathspecs(
         let abs = work_tree.join(rel);
         let meta = match fs::symlink_metadata(&abs) {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(e) if worktree_path_is_missing(&e) => {
+                if dry_run {
+                    removed.push(rel.to_owned());
+                } else if index.remove(raw_path) {
+                    removed.push(rel.to_owned());
+                }
+                continue;
+            }
+            Err(e) => return Err(Error::Io(e)),
         };
         if dry_run {
-            updated.push(rel.to_owned());
+            modified.push(rel.to_owned());
             continue;
         }
         let file_attrs = rules.file_attrs(rel, false);
@@ -542,9 +551,13 @@ fn stage_unmerged_paths_matching_pathspecs(
         entry.mode = mode;
         index.stage_file(entry);
         mark_fsmonitor_staged(index, rel);
-        updated.push(rel.to_owned());
+        modified.push(rel.to_owned());
     }
-    Ok(updated)
+    Ok((modified, removed))
+}
+
+fn worktree_path_is_missing(err: &std::io::Error) -> bool {
+    matches!(err.kind(), std::io::ErrorKind::NotFound)
 }
 
 struct TrackedStagePlan {
@@ -1954,6 +1967,110 @@ mod tests {
             "pathless -u must clear unmerged stages"
         );
         assert!(index.get(b"f", 0).is_some());
+    }
+
+    #[test]
+    fn add_update_unmerged_deletion_pathless() {
+        if !std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("f"), b"base\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+
+        let base = repo.odb().write(ObjectKind::Blob, b"base\n").unwrap();
+        let theirs = repo.odb().write(ObjectKind::Blob, b"base\nfeat\n").unwrap();
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+        index
+            .entries
+            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+        write_index(&repo, &mut index);
+        let _ = fs::remove_file(root.join("f"));
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                mode: StageMode::Update,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.removed, vec!["f".to_owned()]);
+        assert!(outcome.modified.is_empty());
+        assert_eq!(outcome.total(), 1);
+
+        let index = repo.load_index().unwrap();
+        assert!(
+            !index.has_unmerged_entries(),
+            "deletion resolution must drop all conflict stages"
+        );
+        assert!(index.get(b"f", 0).is_none());
+
+        let unmerged_lines: Vec<String> = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["ls-files", "-u"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+        assert!(
+            unmerged_lines.is_empty(),
+            "git ls-files -u after grit add -u: {unmerged_lines:?}"
+        );
+
+        let tmp2 = TempDir::new().unwrap();
+        let root2 = tmp2.path();
+        grit_test_support::git(root2, &["init", "-q", "-b", "main"]);
+        grit_test_support::git(root2, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root2, &["config", "user.name", "Test"]);
+        fs::write(root2.join("f"), b"base\n").unwrap();
+        grit_test_support::git(root2, &["add", "f"]);
+        grit_test_support::git(root2, &["commit", "-qm", "seed"]);
+        let repo2 = Repository::discover(Some(root2), &RepositoryOptions::empty()).unwrap();
+        let mut index2 = Index::new();
+        index2
+            .entries
+            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+        index2
+            .entries
+            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+        write_index(&repo2, &mut index2);
+        let _ = fs::remove_file(root2.join("f"));
+        grit_test_support::git(root2, &["add", "-u"]);
+        let git_unmerged: Vec<String> = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["ls-files", "-u"])
+                .current_dir(root2)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+        assert!(
+            git_unmerged.is_empty(),
+            "git add -u reference must clear unmerged entries"
+        );
     }
 
     #[test]
