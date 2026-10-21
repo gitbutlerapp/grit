@@ -104,3 +104,25 @@ cargo build --release -p grit-cli -p grit-utils
 | `--offline` | Do not clone `git.git` (fixtures must already be cached) |
 
 All **17 headline** ids run in **`--smoke`** mode (including the four **remote** headlines on cached `git-git` bare and synth-10k bare remotes). Additional **remote matrix** rows (`fetch/noop`, `ls-remote/all`, HTTP clone/fetch/push) run on full daily reports and in `grit-utils` remote e2e tests. CI job **`bench-daily-smoke`** runs the smoke command above; timings are not gated.
+
+### Consecutive-run stability (`daily compare`)
+
+Full factory captures run **`grit-bench daily`** twice back-to-back (release build, fixtures prepared, optional **`--baseline-grit`** pointed at the latest release binary). Stability is checked with:
+
+```bash
+./target/release/grit-bench daily compare grit-utils/baselines/daily/latest.json \
+  grit-utils/baselines/daily/second.json --tolerance 0.10 --markdown
+```
+
+Time-ratio drift applies when git median wall time is **above 20 ms** on both captures; peak-RSS ratios are always compared when medians are stable. The committed transcript lives in **`grit-utils/baselines/daily/consecutive-compare.txt`** (exit **0** at ±10% tolerance).
+
+Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** after building release binaries and setting **`GRIT_BENCH_BASELINE_GRIT`**. The capture script prepares only fixtures the daily matrix uses (not full **`synth-l`**) and runs **`daily --area …`** sequentially, merging partial JSON reports, so peak RSS stays within factory VM limits.
+
+| Baseline file | Role |
+| --- | --- |
+| `grit-utils/baselines/daily/latest.json` | First consecutive full daily report |
+| `grit-utils/baselines/daily/second.json` | Second consecutive full daily report |
+| `grit-utils/baselines/daily/consecutive-compare.txt` | `daily compare … --tolerance 0.10` output |
+
+*(Per-area and total wall times for the committed capture are recorded below once the full matrix run completes on the factory VM.)*
+>>>>>>> 6eb90a204 (bench: run daily baseline capture by functional area)
