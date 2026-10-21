@@ -102,6 +102,8 @@ pub struct DiffOptions {
     pub renames: RenameDetection,
     /// When false, skip intra-line word emphasis (line-level hunks only).
     pub word_level_inline: bool,
+    /// Expand hunks to enclosing function boundaries (Git `-W` / `--function-context`).
+    pub function_context: bool,
 }
 
 impl Default for DiffOptions {
@@ -113,6 +115,7 @@ impl Default for DiffOptions {
             indent_heuristic: true,
             renames: RenameDetection::default(),
             word_level_inline: true,
+            function_context: false,
         }
     }
 }
@@ -157,6 +160,13 @@ impl DiffOptions {
     #[must_use]
     pub fn with_word_level_inline(mut self, word_level_inline: bool) -> Self {
         self.word_level_inline = word_level_inline;
+        self
+    }
+
+    /// Builder-style update of Git `-W` function-context hunks.
+    #[must_use]
+    pub fn with_function_context(mut self, function_context: bool) -> Self {
+        self.function_context = function_context;
         self
     }
 

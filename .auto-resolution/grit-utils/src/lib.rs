@@ -4,6 +4,7 @@ pub mod bench_env;
 pub mod binary;
 pub mod bitmap_fixture;
 pub mod bitmap_suite;
+pub mod campaign_diff_scenarios;
 pub mod campaign_matrix;
 pub mod campaign_prep;
 pub mod campaign_suite;

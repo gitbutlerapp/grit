@@ -354,6 +354,24 @@ fn filtered_worktree_file_changes(
     Ok(filter_file_changes(raw, repo, pathspecs))
 }
 
+/// Default `grit diff` file list: full HEAD↔worktree, or unstaged-only when paths are given
+/// (matches `git diff -- <path>`).
+fn default_worktree_file_changes(
+    repo: &grit_lib::repo::Repository,
+    against: Option<&str>,
+    pathspecs: &[String],
+) -> Result<Vec<FileChange>> {
+    if against.is_some() || pathspecs.is_empty() {
+        filtered_worktree_file_changes(repo, against, pathspecs)
+    } else {
+        Ok(filter_file_changes(
+            unstaged_changes(repo)?,
+            repo,
+            pathspecs,
+        ))
+    }
+}
+
 fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -> DiffOutcome {
     let files = changes
         .into_iter()
@@ -503,7 +521,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         disambiguate_diff_revision_and_paths(&repo, opts.commits, opts.paths);
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
-    opts.format.apply_context(&mut diff_options);
+    opts.format.apply_to_options(&mut diff_options);
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
@@ -579,30 +597,16 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         0 => {
             let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
             let against_ref = opts.against.as_deref();
+            let changes = default_worktree_file_changes(&repo, against_ref, &pathspecs)?;
             let outcome = match detail {
                 DiffDetail::NameOnly | DiffDetail::NameStatus => {
-                    let entries = filter_diff_entries(unstaged_entries(&repo)?, &repo, &pathspecs);
-                    outcome_from_entries(&repo, entries, detail, diff_options, format)?
+                    outcome_from_change_names(changes, format)
                 }
-                DiffDetail::Stat => outcome_stat_from_changes(
-                    filter_file_changes(unstaged_changes(&repo)?, &repo, &pathspecs),
-                    diff_options,
-                    format,
-                ),
-                DiffDetail::Patch => outcome_from_changes(
-                    filtered_worktree_file_changes(&repo, against_ref, &pathspecs)?,
-                    &config,
-                    &thread_policy,
-                    diff_options,
-                    format,
-                ),
-                _ => outcome_from_changes(
-                    filtered_worktree_file_changes(&repo, against_ref, &pathspecs)?,
-                    &config,
-                    &thread_policy,
-                    diff_options,
-                    format,
-                ),
+                DiffDetail::Stat => outcome_stat_from_changes(changes, diff_options, format),
+                DiffDetail::Patch => {
+                    outcome_from_changes(changes, &config, &thread_policy, diff_options, format)
+                }
+                _ => outcome_from_changes(changes, &config, &thread_policy, diff_options, format),
             };
             return Ok(finish_outcome(&repo, format, outcome));
         }
@@ -713,7 +717,7 @@ pub fn diff_for_commit(
     let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
-    opts.format.apply_context(&mut diff_options);
+    opts.format.apply_to_options(&mut diff_options);
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
@@ -722,6 +726,7 @@ pub fn diff_for_commit(
         repo,
         &pathspecs,
     );
+    diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
     Ok(finish_outcome(
         repo,
         format,
@@ -1727,7 +1732,7 @@ fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
         new_encoding_lossy: structured.new_encoding_lossy,
         binary: fc.binary,
         content_changed: fc.content_changed,
-        similarity: None,
+        similarity: fc.similarity,
         stat: None,
         hunks: Some(hunks),
     }

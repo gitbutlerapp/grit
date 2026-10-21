@@ -3312,6 +3312,7 @@ impl !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffIndexToWorktr
 #[non_exhaustive] pub struct grit_lib::diff::DiffOptions
 pub grit_lib::diff::DiffOptions::algorithm: grit_lib::diff::DiffAlgorithm
 pub grit_lib::diff::DiffOptions::context_lines: usize
+pub grit_lib::diff::DiffOptions::function_context: bool
 pub grit_lib::diff::DiffOptions::indent_heuristic: bool
 pub grit_lib::diff::DiffOptions::inter_hunk_context: usize
 pub grit_lib::diff::DiffOptions::renames: grit_lib::diff::RenameDetection
@@ -3322,6 +3323,7 @@ pub fn grit_lib::diff::DiffOptions::from_config(&grit_lib::config::ConfigSet) ->
 pub fn grit_lib::diff::DiffOptions::resolve_indent_heuristic(&grit_lib::config::ConfigSet, bool, bool) -> bool
 pub fn grit_lib::diff::DiffOptions::with_algorithm(self, grit_lib::diff::DiffAlgorithm) -> Self
 pub fn grit_lib::diff::DiffOptions::with_context_lines(self, usize) -> Self
+pub fn grit_lib::diff::DiffOptions::with_function_context(self, bool) -> Self
 pub fn grit_lib::diff::DiffOptions::with_indent_heuristic(self, bool) -> Self
 pub fn grit_lib::diff::DiffOptions::with_inter_hunk_context(self, usize) -> Self
 pub fn grit_lib::diff::DiffOptions::with_renames(self, grit_lib::diff::RenameDetection) -> Self

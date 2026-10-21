@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "timestamp": "2026-10-17T02:36:35.645586499Z",
+  "timestamp": "2026-10-21T03:09:05.314579122Z",
   "machine": {
     "cpu_model": "Intel(R) Xeon(R) Processor",
     "physical_cores": 4,
@@ -14,8 +14,8 @@
   },
   "tools": {
     "git": "git version 2.43.0",
-    "grit": "grit 0.5.9",
-    "grit_commit": "00ee4e597ef0f3a01ebcb5f0f4c444ce42c42477"
+    "grit": "grit 0.5.14",
+    "grit_commit": "0097b315ed1586998ec3e8c4a2d774ed0e010dd4"
   },
   "scenarios": [
     {
@@ -1852,44 +1852,8 @@
       "ratio": 0.0,
       "grit_failure": {
         "kind": "command_failed",
-        "message": "hyperfine failed: Error: Command 'cd '/tmp/grit-bench-odb-cache/git-dot-git-worktree' && GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL='/tmp/grit-bench-scratch/.grit-bench-empty-config' GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=Bench GIT_AUTHOR_EMAIL=b@example.com GIT_COMMITTER_NAME=Bench GIT_COMMITTER_EMAIL=b@example.com '/bin/sh' '-c' 'set -eu\nbefore=\"\"\nfor _ in $(seq 1 100); do\n  if [ -z \"$before\" ]; then\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log) || exit $?\n  else\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log --before=\"$before\") || exit $?\n  fi\n  printf '\"'\"'%s\\n'\"'\"' \"$page\" | awk '\"'\"'!/^→/ && !/^$/ {print}'\"'\"'\n  before=$(printf '\"'\"'%s\\n'\"'\"' \"$page\" | sed -n '\"'\"'s/^→ more: grit log --before=//p'\"'\"')\n  [ -z \"$before\" ] && break\ndone'' terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong."
+        "message": "hyperfine failed: Error: Command 'cd '/tmp/grit-bench-odb-cache/git-dot-git-worktree' && GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL='/tmp/grit-bench-scratch/.grit-bench-empty-config' GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=Bench GIT_AUTHOR_EMAIL=b@example.com GIT_COMMITTER_NAME=Bench GIT_COMMITTER_EMAIL=b@example.com '/bin/sh' '-c' 'set -eu\nbefore=\"\"\nfor _ in $(seq 1 100); do\n  if [ -z \"$before\" ]; then\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log) || exit $?\n  else\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log --before=\"$before\") || exit $?\n  fi\n  printf '\"'\"'%s\\n'\"'\"' \"$page\" | awk '\"'\"'!/^\u2192/ && !/^$/ {print}'\"'\"'\n  before=$(printf '\"'\"'%s\\n'\"'\"' \"$page\" | sed -n '\"'\"'s/^\u2192 more: grit log --before=//p'\"'\"')\n  [ -z \"$before\" ] && break\ndone'' terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong."
       }
-    },
-    {
-      "id": "git-dot-git/log-patch",
-      "group": "log",
-      "fixture": "git-dot-git",
-      "description": "log -p over 200 commits",
-      "driver": "lib",
-      "git": {
-        "mean_ms": 1905.62102802,
-        "median_ms": 1892.14634782,
-        "stddev_ms": 31.204456094837735,
-        "min_ms": 1890.2504808200001,
-        "max_ms": 1961.4214668200002,
-        "runs_ms": [
-          1890.2504808200001,
-          1891.95512482,
-          1892.3317198200004,
-          1892.14634782,
-          1961.4214668200002
-        ]
-      },
-      "grit": {
-        "mean_ms": 22824.963054400003,
-        "median_ms": 22710.3160254,
-        "stddev_ms": 302.61605512721866,
-        "min_ms": 22574.9815174,
-        "max_ms": 23349.3765144,
-        "runs_ms": [
-          22783.1239514,
-          23349.3765144,
-          22707.0172634,
-          22710.3160254,
-          22574.9815174
-        ]
-      },
-      "ratio": 12.00240988312836
     },
     {
       "id": "git-dot-git/blame",
@@ -9755,44 +9719,8 @@
       "ratio": 0.0,
       "grit_failure": {
         "kind": "command_failed",
-        "message": "hyperfine failed: Error: Command 'cd '/tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183-worktree' && GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL='/tmp/grit-bench-scratch/.grit-bench-empty-config' GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=Bench GIT_AUTHOR_EMAIL=b@example.com GIT_COMMITTER_NAME=Bench GIT_COMMITTER_EMAIL=b@example.com '/bin/sh' '-c' 'set -eu\nbefore=\"\"\nfor _ in $(seq 1 100); do\n  if [ -z \"$before\" ]; then\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log) || exit $?\n  else\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log --before=\"$before\") || exit $?\n  fi\n  printf '\"'\"'%s\\n'\"'\"' \"$page\" | awk '\"'\"'!/^→/ && !/^$/ {print}'\"'\"'\n  before=$(printf '\"'\"'%s\\n'\"'\"' \"$page\" | sed -n '\"'\"'s/^→ more: grit log --before=//p'\"'\"')\n  [ -z \"$before\" ] && break\ndone'' terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong."
+        "message": "hyperfine failed: Error: Command 'cd '/tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183-worktree' && GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL='/tmp/grit-bench-scratch/.grit-bench-empty-config' GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=Bench GIT_AUTHOR_EMAIL=b@example.com GIT_COMMITTER_NAME=Bench GIT_COMMITTER_EMAIL=b@example.com '/bin/sh' '-c' 'set -eu\nbefore=\"\"\nfor _ in $(seq 1 100); do\n  if [ -z \"$before\" ]; then\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log) || exit $?\n  else\n    page=$('\"'\"'/workspace/target/release/grit'\"'\"' log --before=\"$before\") || exit $?\n  fi\n  printf '\"'\"'%s\\n'\"'\"' \"$page\" | awk '\"'\"'!/^\u2192/ && !/^$/ {print}'\"'\"'\n  before=$(printf '\"'\"'%s\\n'\"'\"' \"$page\" | sed -n '\"'\"'s/^\u2192 more: grit log --before=//p'\"'\"')\n  [ -z \"$before\" ] && break\ndone'' terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong."
       }
-    },
-    {
-      "id": "chromium-synth/log-patch",
-      "group": "log",
-      "fixture": "chromium-synth-f400000-d40000-c100000-r50000-s1129466183",
-      "description": "log -p over 200 commits",
-      "driver": "lib",
-      "git": {
-        "mean_ms": 46492.185736119995,
-        "median_ms": 46275.73468232,
-        "stddev_ms": 490.836719597032,
-        "min_ms": 46048.864374319994,
-        "max_ms": 47051.300662320005,
-        "runs_ms": [
-          46991.191640319994,
-          46048.864374319994,
-          46275.73468232,
-          47051.300662320005,
-          46093.83732132
-        ]
-      },
-      "grit": {
-        "mean_ms": 472633.7041456001,
-        "median_ms": 469700.4195918,
-        "stddev_ms": 8414.012617815544,
-        "min_ms": 466337.7412218,
-        "max_ms": 487042.9330818,
-        "runs_ms": [
-          472679.7277778,
-          469700.4195918,
-          467407.6990548,
-          466337.7412218,
-          487042.9330818
-        ]
-      },
-      "ratio": 10.15003700786738
     },
     {
       "id": "chromium-synth/blame",
@@ -14515,6 +14443,1210 @@
         ]
       },
       "ratio": 2.1302924329336275
+    },
+    {
+      "id": "git-dot-git/diff-stat",
+      "group": "diff",
+      "fixture": "git-dot-git",
+      "description": "tree diff --stat between hot-path base and main tip",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 93.5102714,
+        "median_ms": 93.5102714,
+        "stddev_ms": 0.0,
+        "min_ms": 93.5102714,
+        "max_ms": 93.5102714,
+        "runs_ms": [
+          93.5102714
+        ]
+      },
+      "grit": {
+        "mean_ms": 80.51196700000001,
+        "median_ms": 80.51196700000001,
+        "stddev_ms": 0.0,
+        "min_ms": 80.51196700000001,
+        "max_ms": 80.51196700000001,
+        "runs_ms": [
+          80.51196700000001
+        ]
+      },
+      "ratio": 0.8609959718286094
+    },
+    {
+      "id": "git-dot-git/diff-name-only",
+      "group": "diff",
+      "fixture": "git-dot-git",
+      "description": "tree diff --name-only between base and tip",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.9902778999999997,
+        "median_ms": 1.9902778999999997,
+        "stddev_ms": 0.0,
+        "min_ms": 1.9902778999999997,
+        "max_ms": 1.9902778999999997,
+        "runs_ms": [
+          1.9902778999999997
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.48577226,
+        "median_ms": 4.48577226,
+        "stddev_ms": 0.0,
+        "min_ms": 4.48577226,
+        "max_ms": 4.48577226,
+        "runs_ms": [
+          4.48577226
+        ]
+      },
+      "ratio": 2.253842169477941
+    },
+    {
+      "id": "git-dot-git/diff-w",
+      "group": "diff",
+      "fixture": "git-dot-git",
+      "description": "worktree diff -w (ignore all space)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 25.288864840000002,
+        "median_ms": 25.288864840000002,
+        "stddev_ms": 0.0,
+        "min_ms": 25.288864840000002,
+        "max_ms": 25.288864840000002,
+        "runs_ms": [
+          25.288864840000002
+        ]
+      },
+      "grit": {
+        "mean_ms": 28.002566300000005,
+        "median_ms": 28.002566300000005,
+        "stddev_ms": 0.0,
+        "min_ms": 28.002566300000005,
+        "max_ms": 28.002566300000005,
+        "runs_ms": [
+          28.002566300000005
+        ]
+      },
+      "ratio": 1.1073081562643996
+    },
+    {
+      "id": "git-dot-git/diff-quiet-clean",
+      "group": "diff",
+      "fixture": "git-dot-git",
+      "description": "worktree diff --quiet on clean tree",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 4.2408570800000005,
+        "median_ms": 4.2408570800000005,
+        "stddev_ms": 0.0,
+        "min_ms": 4.2408570800000005,
+        "max_ms": 4.2408570800000005,
+        "runs_ms": [
+          4.2408570800000005
+        ]
+      },
+      "grit": {
+        "mean_ms": 27.47309574,
+        "median_ms": 27.47309574,
+        "stddev_ms": 0.0,
+        "min_ms": 27.47309574,
+        "max_ms": 27.47309574,
+        "runs_ms": [
+          27.47309574
+        ]
+      },
+      "ratio": 6.478194200310093
+    },
+    {
+      "id": "git-dot-git/diff-quiet-dirty",
+      "group": "diff",
+      "fixture": "git-dot-git",
+      "description": "worktree diff --quiet with modified tracked files",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3.87899886,
+        "median_ms": 3.87899886,
+        "stddev_ms": 0.0,
+        "min_ms": 3.87899886,
+        "max_ms": 3.87899886,
+        "runs_ms": [
+          3.87899886
+        ]
+      },
+      "grit": {
+        "mean_ms": 59.52300974,
+        "median_ms": 59.52300974,
+        "stddev_ms": 0.0,
+        "min_ms": 59.52300974,
+        "max_ms": 59.52300974,
+        "runs_ms": [
+          59.52300974
+        ]
+      },
+      "ratio": 15.344941282091535
+    },
+    {
+      "id": "git-dot-git/show-patch",
+      "group": "show",
+      "fixture": "git-dot-git",
+      "description": "show largest shortstat commit (cached scan)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3.260564100000001,
+        "median_ms": 3.260564100000001,
+        "stddev_ms": 0.0,
+        "min_ms": 3.260564100000001,
+        "max_ms": 3.260564100000001,
+        "runs_ms": [
+          3.260564100000001
+        ]
+      },
+      "grit": {
+        "mean_ms": 215.31627515999998,
+        "median_ms": 215.31627515999998,
+        "stddev_ms": 0.0,
+        "min_ms": 215.31627515999998,
+        "max_ms": 215.31627515999998,
+        "runs_ms": [
+          215.31627515999998
+        ]
+      },
+      "ratio": 66.03651041854994
+    },
+    {
+      "id": "git-dot-git/log-stat",
+      "group": "log",
+      "fixture": "git-dot-git",
+      "description": "log --stat over recent commits",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 238.0106068,
+        "median_ms": 238.0106068,
+        "stddev_ms": 0.0,
+        "min_ms": 238.0106068,
+        "max_ms": 238.0106068,
+        "runs_ms": [
+          238.0106068
+        ]
+      },
+      "grit": {
+        "mean_ms": 406.95089629999995,
+        "median_ms": 406.95089629999995,
+        "stddev_ms": 0.0,
+        "min_ms": 406.95089629999995,
+        "max_ms": 406.95089629999995,
+        "runs_ms": [
+          406.95089629999995
+        ]
+      },
+      "ratio": 1.7098015158709303
+    },
+    {
+      "id": "git-dot-git/log-name-status",
+      "group": "log",
+      "fixture": "git-dot-git",
+      "description": "log --name-status over recent commits",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 4.55926012,
+        "median_ms": 4.55926012,
+        "stddev_ms": 0.0,
+        "min_ms": 4.55926012,
+        "max_ms": 4.55926012,
+        "runs_ms": [
+          4.55926012
+        ]
+      },
+      "grit": {
+        "mean_ms": 17.41373154,
+        "median_ms": 17.41373154,
+        "stddev_ms": 0.0,
+        "min_ms": 17.41373154,
+        "max_ms": 17.41373154,
+        "runs_ms": [
+          17.41373154
+        ]
+      },
+      "ratio": 3.819420494042792
+    },
+    {
+      "id": "git-dot-git/log-patch",
+      "group": "log",
+      "fixture": "git-dot-git",
+      "description": "log -p over recent commits (grit log --limit, git log -p -n)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 248.06565466,
+        "median_ms": 248.06565466,
+        "stddev_ms": 0.0,
+        "min_ms": 248.06565466,
+        "max_ms": 248.06565466,
+        "runs_ms": [
+          248.06565466
+        ]
+      },
+      "grit": {
+        "mean_ms": 376.27620542,
+        "median_ms": 376.27620542,
+        "stddev_ms": 0.0,
+        "min_ms": 376.27620542,
+        "max_ms": 376.27620542,
+        "runs_ms": [
+          376.27620542
+        ]
+      },
+      "ratio": 1.516841200510913
+    },
+    {
+      "id": "chromium-synth/diff-stat",
+      "group": "diff",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "tree diff --stat between hot-path base and main tip",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.46762912,
+        "median_ms": 2.46762912,
+        "stddev_ms": 0.0,
+        "min_ms": 2.46762912,
+        "max_ms": 2.46762912,
+        "runs_ms": [
+          2.46762912
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.545833760000001,
+        "median_ms": 4.545833760000001,
+        "stddev_ms": 0.0,
+        "min_ms": 4.545833760000001,
+        "max_ms": 4.545833760000001,
+        "runs_ms": [
+          4.545833760000001
+        ]
+      },
+      "ratio": 1.8421867869674033
+    },
+    {
+      "id": "chromium-synth/diff-name-only",
+      "group": "diff",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "tree diff --name-only between base and tip",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.55278348,
+        "median_ms": 1.55278348,
+        "stddev_ms": 0.0,
+        "min_ms": 1.55278348,
+        "max_ms": 1.55278348,
+        "runs_ms": [
+          1.55278348
+        ]
+      },
+      "grit": {
+        "mean_ms": 2.94826478,
+        "median_ms": 2.94826478,
+        "stddev_ms": 0.0,
+        "min_ms": 2.94826478,
+        "max_ms": 2.94826478,
+        "runs_ms": [
+          2.94826478
+        ]
+      },
+      "ratio": 1.89869664249648
+    },
+    {
+      "id": "chromium-synth/diff-w",
+      "group": "diff",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "worktree diff -w (ignore all space)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.8544409400000001,
+        "median_ms": 1.8544409400000001,
+        "stddev_ms": 0.0,
+        "min_ms": 1.8544409400000001,
+        "max_ms": 1.8544409400000001,
+        "runs_ms": [
+          1.8544409400000001
+        ]
+      },
+      "grit": {
+        "mean_ms": 3.9305235200000004,
+        "median_ms": 3.9305235200000004,
+        "stddev_ms": 0.0,
+        "min_ms": 3.9305235200000004,
+        "max_ms": 3.9305235200000004,
+        "runs_ms": [
+          3.9305235200000004
+        ]
+      },
+      "ratio": 2.1195193846399873
+    },
+    {
+      "id": "chromium-synth/diff-quiet-clean",
+      "group": "diff",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "worktree diff --quiet on clean tree",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.88727354,
+        "median_ms": 1.88727354,
+        "stddev_ms": 0.0,
+        "min_ms": 1.88727354,
+        "max_ms": 1.88727354,
+        "runs_ms": [
+          1.88727354
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.064119699999999,
+        "median_ms": 4.064119699999999,
+        "stddev_ms": 0.0,
+        "min_ms": 4.064119699999999,
+        "max_ms": 4.064119699999999,
+        "runs_ms": [
+          4.064119699999999
+        ]
+      },
+      "ratio": 2.153434366488283
+    },
+    {
+      "id": "chromium-synth/diff-quiet-dirty",
+      "group": "diff",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "worktree diff --quiet with modified tracked files",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.9870565600000005,
+        "median_ms": 1.9870565600000005,
+        "stddev_ms": 0.0,
+        "min_ms": 1.9870565600000005,
+        "max_ms": 1.9870565600000005,
+        "runs_ms": [
+          1.9870565600000005
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.988463080000001,
+        "median_ms": 4.988463080000001,
+        "stddev_ms": 0.0,
+        "min_ms": 4.988463080000001,
+        "max_ms": 4.988463080000001,
+        "runs_ms": [
+          4.988463080000001
+        ]
+      },
+      "ratio": 2.5104786549206226
+    },
+    {
+      "id": "chromium-synth/show-patch",
+      "group": "show",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "show largest shortstat commit (cached scan)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3.4346768400000003,
+        "median_ms": 3.4346768400000003,
+        "stddev_ms": 0.0,
+        "min_ms": 3.4346768400000003,
+        "max_ms": 3.4346768400000003,
+        "runs_ms": [
+          3.4346768400000003
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.31690082,
+        "median_ms": 4.31690082,
+        "stddev_ms": 0.0,
+        "min_ms": 4.31690082,
+        "max_ms": 4.31690082,
+        "runs_ms": [
+          4.31690082
+        ]
+      },
+      "ratio": 1.2568579290271744
+    },
+    {
+      "id": "chromium-synth/log-stat",
+      "group": "log",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "log --stat over recent commits",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3.8159723000000008,
+        "median_ms": 3.8159723000000008,
+        "stddev_ms": 0.0,
+        "min_ms": 3.8159723000000008,
+        "max_ms": 3.8159723000000008,
+        "runs_ms": [
+          3.8159723000000008
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.5704308199999994,
+        "median_ms": 4.5704308199999994,
+        "stddev_ms": 0.0,
+        "min_ms": 4.5704308199999994,
+        "max_ms": 4.5704308199999994,
+        "runs_ms": [
+          4.5704308199999994
+        ]
+      },
+      "ratio": 1.1977106909292812
+    },
+    {
+      "id": "chromium-synth/log-name-status",
+      "group": "log",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "log --name-status over recent commits",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.0038638600000005,
+        "median_ms": 2.0038638600000005,
+        "stddev_ms": 0.0,
+        "min_ms": 2.0038638600000005,
+        "max_ms": 2.0038638600000005,
+        "runs_ms": [
+          2.0038638600000005
+        ]
+      },
+      "grit": {
+        "mean_ms": 3.9089488799999996,
+        "median_ms": 3.9089488799999996,
+        "stddev_ms": 0.0,
+        "min_ms": 3.9089488799999996,
+        "max_ms": 3.9089488799999996,
+        "runs_ms": [
+          3.9089488799999996
+        ]
+      },
+      "ratio": 1.950705812918847
+    },
+    {
+      "id": "chromium-synth/log-patch",
+      "group": "log",
+      "fixture": "chromium-synth-f200-d20-c50-r10-s42",
+      "description": "log -p over recent commits (grit log --limit, git log -p -n)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 4.40991602,
+        "median_ms": 4.40991602,
+        "stddev_ms": 0.0,
+        "min_ms": 4.40991602,
+        "max_ms": 4.40991602,
+        "runs_ms": [
+          4.40991602
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.798142200000001,
+        "median_ms": 4.798142200000001,
+        "stddev_ms": 0.0,
+        "min_ms": 4.798142200000001,
+        "max_ms": 4.798142200000001,
+        "runs_ms": [
+          4.798142200000001
+        ]
+      },
+      "ratio": 1.0880348238468271
+    },
+    {
+      "id": "medium/status-dirty",
+      "group": "status",
+      "fixture": "synth-10k-smoke",
+      "description": "status on dirty worktree (git -s vs grit status)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.3650124200000002,
+        "median_ms": 2.3650124200000002,
+        "stddev_ms": 0.0,
+        "min_ms": 2.3650124200000002,
+        "max_ms": 2.3650124200000002,
+        "runs_ms": [
+          2.3650124200000002
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.408827820000001,
+        "median_ms": 4.408827820000001,
+        "stddev_ms": 0.0,
+        "min_ms": 4.408827820000001,
+        "max_ms": 4.408827820000001,
+        "runs_ms": [
+          4.408827820000001
+        ]
+      },
+      "ratio": 1.8641880197821543
+    },
+    {
+      "id": "medium/status-clean",
+      "group": "status",
+      "fixture": "synth-10k-smoke",
+      "description": "status on clean worktree",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.5402054200000004,
+        "median_ms": 2.5402054200000004,
+        "stddev_ms": 0.0,
+        "min_ms": 2.5402054200000004,
+        "max_ms": 2.5402054200000004,
+        "runs_ms": [
+          2.5402054200000004
+        ]
+      },
+      "grit": {
+        "mean_ms": 5.337964200000001,
+        "median_ms": 5.337964200000001,
+        "stddev_ms": 0.0,
+        "min_ms": 5.337964200000001,
+        "max_ms": 5.337964200000001,
+        "runs_ms": [
+          5.337964200000001
+        ]
+      },
+      "ratio": 2.1013907607519395
+    },
+    {
+      "id": "medium/add",
+      "group": "add",
+      "fixture": "synth-10k-smoke",
+      "description": "stage all changes (git add -A vs grit add)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.1006325400000003,
+        "median_ms": 2.1006325400000003,
+        "stddev_ms": 0.0,
+        "min_ms": 2.1006325400000003,
+        "max_ms": 2.1006325400000003,
+        "runs_ms": [
+          2.1006325400000003
+        ]
+      },
+      "grit": {
+        "mean_ms": 10.9096686,
+        "median_ms": 10.9096686,
+        "stddev_ms": 0.0,
+        "min_ms": 10.9096686,
+        "max_ms": 10.9096686,
+        "runs_ms": [
+          10.9096686
+        ]
+      },
+      "ratio": 5.193515949248314
+    },
+    {
+      "id": "medium/commit",
+      "group": "commit",
+      "fixture": "synth-10k-smoke",
+      "description": "stage all + commit after modifying ~20% of files",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 13.557634400000001,
+        "median_ms": 13.557634400000001,
+        "stddev_ms": 0.0,
+        "min_ms": 13.557634400000001,
+        "max_ms": 13.557634400000001,
+        "runs_ms": [
+          13.557634400000001
+        ]
+      },
+      "grit": {
+        "mean_ms": 10.082791080000002,
+        "median_ms": 10.082791080000002,
+        "stddev_ms": 0.0,
+        "min_ms": 10.082791080000002,
+        "max_ms": 10.082791080000002,
+        "runs_ms": [
+          10.082791080000002
+        ]
+      },
+      "ratio": 0.7436984050845921
+    },
+    {
+      "id": "medium/diff-dirty",
+      "group": "diff",
+      "fixture": "synth-10k-smoke",
+      "description": "worktree diff with 5 modified files",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.6365956200000005,
+        "median_ms": 1.6365956200000005,
+        "stddev_ms": 0.0,
+        "min_ms": 1.6365956200000005,
+        "max_ms": 1.6365956200000005,
+        "runs_ms": [
+          1.6365956200000005
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.890503020000001,
+        "median_ms": 4.890503020000001,
+        "stddev_ms": 0.0,
+        "min_ms": 4.890503020000001,
+        "max_ms": 4.890503020000001,
+        "runs_ms": [
+          4.890503020000001
+        ]
+      },
+      "ratio": 2.9882171015464403
+    },
+    {
+      "id": "medium/diff-clean",
+      "group": "diff",
+      "fixture": "synth-10k-smoke",
+      "description": "worktree diff on clean tree",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.09757058,
+        "median_ms": 2.09757058,
+        "stddev_ms": 0.0,
+        "min_ms": 2.09757058,
+        "max_ms": 2.09757058,
+        "runs_ms": [
+          2.09757058
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.1188629,
+        "median_ms": 4.1188629,
+        "stddev_ms": 0.0,
+        "min_ms": 4.1188629,
+        "max_ms": 4.1188629,
+        "runs_ms": [
+          4.1188629
+        ]
+      },
+      "ratio": 1.9636349495329017
+    },
+    {
+      "id": "medium/diff-stat",
+      "group": "diff",
+      "fixture": "synth-10k-smoke",
+      "description": "tree diff --stat between hot-path base and main tip",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 4.345069339999999,
+        "median_ms": 4.345069339999999,
+        "stddev_ms": 0.0,
+        "min_ms": 4.345069339999999,
+        "max_ms": 4.345069339999999,
+        "runs_ms": [
+          4.345069339999999
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.72774466,
+        "median_ms": 4.72774466,
+        "stddev_ms": 0.0,
+        "min_ms": 4.72774466,
+        "max_ms": 4.72774466,
+        "runs_ms": [
+          4.72774466
+        ]
+      },
+      "ratio": 1.0880711652808746
+    },
+    {
+      "id": "medium/diff-name-only",
+      "group": "diff",
+      "fixture": "synth-10k-smoke",
+      "description": "tree diff --name-only between base and tip",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.12814172,
+        "median_ms": 1.12814172,
+        "stddev_ms": 0.0,
+        "min_ms": 1.12814172,
+        "max_ms": 1.12814172,
+        "runs_ms": [
+          1.12814172
+        ]
+      },
+      "grit": {
+        "mean_ms": 2.84364442,
+        "median_ms": 2.84364442,
+        "stddev_ms": 0.0,
+        "min_ms": 2.84364442,
+        "max_ms": 2.84364442,
+        "runs_ms": [
+          2.84364442
+        ]
+      },
+      "ratio": 2.520644675741626
+    },
+    {
+      "id": "medium/diff-w",
+      "group": "diff",
+      "fixture": "synth-10k-smoke",
+      "description": "worktree diff -w (ignore all space)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.6184132600000003,
+        "median_ms": 1.6184132600000003,
+        "stddev_ms": 0.0,
+        "min_ms": 1.6184132600000003,
+        "max_ms": 1.6184132600000003,
+        "runs_ms": [
+          1.6184132600000003
+        ]
+      },
+      "grit": {
+        "mean_ms": 5.75516744,
+        "median_ms": 5.75516744,
+        "stddev_ms": 0.0,
+        "min_ms": 5.75516744,
+        "max_ms": 5.75516744,
+        "runs_ms": [
+          5.75516744
+        ]
+      },
+      "ratio": 3.556055540474254
+    },
+    {
+      "id": "medium/diff-quiet-clean",
+      "group": "diff",
+      "fixture": "synth-10k-smoke",
+      "description": "worktree diff --quiet on clean tree",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.39897424,
+        "median_ms": 2.39897424,
+        "stddev_ms": 0.0,
+        "min_ms": 2.39897424,
+        "max_ms": 2.39897424,
+        "runs_ms": [
+          2.39897424
+        ]
+      },
+      "grit": {
+        "mean_ms": 5.6657345800000005,
+        "median_ms": 5.6657345800000005,
+        "stddev_ms": 0.0,
+        "min_ms": 5.6657345800000005,
+        "max_ms": 5.6657345800000005,
+        "runs_ms": [
+          5.6657345800000005
+        ]
+      },
+      "ratio": 2.3617321459858616
+    },
+    {
+      "id": "medium/diff-quiet-dirty",
+      "group": "diff",
+      "fixture": "synth-10k-smoke",
+      "description": "worktree diff --quiet with modified tracked files",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.66487214,
+        "median_ms": 1.66487214,
+        "stddev_ms": 0.0,
+        "min_ms": 1.66487214,
+        "max_ms": 1.66487214,
+        "runs_ms": [
+          1.66487214
+        ]
+      },
+      "grit": {
+        "mean_ms": 5.491802020000001,
+        "median_ms": 5.491802020000001,
+        "stddev_ms": 0.0,
+        "min_ms": 5.491802020000001,
+        "max_ms": 5.491802020000001,
+        "runs_ms": [
+          5.491802020000001
+        ]
+      },
+      "ratio": 3.298632902824598
+    },
+    {
+      "id": "medium/show-patch",
+      "group": "show",
+      "fixture": "synth-10k-smoke",
+      "description": "show largest shortstat commit (cached scan)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 4.4272941800000005,
+        "median_ms": 4.4272941800000005,
+        "stddev_ms": 0.0,
+        "min_ms": 4.4272941800000005,
+        "max_ms": 4.4272941800000005,
+        "runs_ms": [
+          4.4272941800000005
+        ]
+      },
+      "grit": {
+        "mean_ms": 6.0403764,
+        "median_ms": 6.0403764,
+        "stddev_ms": 0.0,
+        "min_ms": 6.0403764,
+        "max_ms": 6.0403764,
+        "runs_ms": [
+          6.0403764
+        ]
+      },
+      "ratio": 1.3643494546368726
+    },
+    {
+      "id": "medium/log-stat",
+      "group": "log",
+      "fixture": "synth-10k-smoke",
+      "description": "log --stat over recent commits",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 7.884396720000001,
+        "median_ms": 7.884396720000001,
+        "stddev_ms": 0.0,
+        "min_ms": 7.884396720000001,
+        "max_ms": 7.884396720000001,
+        "runs_ms": [
+          7.884396720000001
+        ]
+      },
+      "grit": {
+        "mean_ms": 7.366137300000001,
+        "median_ms": 7.366137300000001,
+        "stddev_ms": 0.0,
+        "min_ms": 7.366137300000001,
+        "max_ms": 7.366137300000001,
+        "runs_ms": [
+          7.366137300000001
+        ]
+      },
+      "ratio": 0.934267714017313
+    },
+    {
+      "id": "medium/log-name-status",
+      "group": "log",
+      "fixture": "synth-10k-smoke",
+      "description": "log --name-status over recent commits",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2.1954575,
+        "median_ms": 2.1954575,
+        "stddev_ms": 0.0,
+        "min_ms": 2.1954575,
+        "max_ms": 2.1954575,
+        "runs_ms": [
+          2.1954575
+        ]
+      },
+      "grit": {
+        "mean_ms": 4.59398916,
+        "median_ms": 4.59398916,
+        "stddev_ms": 0.0,
+        "min_ms": 4.59398916,
+        "max_ms": 4.59398916,
+        "runs_ms": [
+          4.59398916
+        ]
+      },
+      "ratio": 2.0924974225189965
+    },
+    {
+      "id": "medium/log-patch",
+      "group": "log",
+      "fixture": "synth-10k-smoke",
+      "description": "log -p over recent commits (grit log --limit, git log -p -n)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 8.77865614,
+        "median_ms": 8.77865614,
+        "stddev_ms": 0.0,
+        "min_ms": 8.77865614,
+        "max_ms": 8.77865614,
+        "runs_ms": [
+          8.77865614
+        ]
+      },
+      "grit": {
+        "mean_ms": 8.370665500000001,
+        "median_ms": 8.370665500000001,
+        "stddev_ms": 0.0,
+        "min_ms": 8.370665500000001,
+        "max_ms": 8.370665500000001,
+        "runs_ms": [
+          8.370665500000001
+        ]
+      },
+      "ratio": 0.9535247042948878
+    },
+    {
+      "id": "medium/log",
+      "group": "log",
+      "fixture": "synth-10k-smoke",
+      "description": "last 20 commits one line each (paged grit log, 2 pages)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.5338491800000005,
+        "median_ms": 1.5338491800000005,
+        "stddev_ms": 0.0,
+        "min_ms": 1.5338491800000005,
+        "max_ms": 1.5338491800000005,
+        "runs_ms": [
+          1.5338491800000005
+        ]
+      },
+      "grit": {
+        "mean_ms": 2.9342208999999997,
+        "median_ms": 2.9342208999999997,
+        "stddev_ms": 0.0,
+        "min_ms": 2.9342208999999997,
+        "max_ms": 2.9342208999999997,
+        "runs_ms": [
+          2.9342208999999997
+        ]
+      },
+      "ratio": 1.9129787584461198
+    },
+    {
+      "id": "medium/merge-base",
+      "group": "merge-base",
+      "fixture": "synth-10k-smoke",
+      "description": "merge-base between main tip and topic commit",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 0.97305826,
+        "median_ms": 0.97305826,
+        "stddev_ms": 0.0,
+        "min_ms": 0.97305826,
+        "max_ms": 0.97305826,
+        "runs_ms": [
+          0.97305826
+        ]
+      },
+      "grit": {
+        "mean_ms": 2.6149661800000006,
+        "median_ms": 2.6149661800000006,
+        "stddev_ms": 0.0,
+        "min_ms": 2.6149661800000006,
+        "max_ms": 2.6149661800000006,
+        "runs_ms": [
+          2.6149661800000006
+        ]
+      },
+      "ratio": 2.6873685651669006
+    },
+    {
+      "id": "medium/resolve",
+      "group": "resolve",
+      "fixture": "synth-10k-smoke",
+      "description": "resolve HEAD",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 0.9860817399999998,
+        "median_ms": 0.9860817399999998,
+        "stddev_ms": 0.0,
+        "min_ms": 0.9860817399999998,
+        "max_ms": 0.9860817399999998,
+        "runs_ms": [
+          0.9860817399999998
+        ]
+      },
+      "grit": {
+        "mean_ms": 3.1698726200000005,
+        "median_ms": 3.1698726200000005,
+        "stddev_ms": 0.0,
+        "min_ms": 3.1698726200000005,
+        "max_ms": 3.1698726200000005,
+        "runs_ms": [
+          3.1698726200000005
+        ]
+      },
+      "ratio": 3.2146144598519806
+    },
+    {
+      "id": "medium/cat",
+      "group": "cat",
+      "fixture": "synth-10k-smoke",
+      "description": "cat HEAD tree object",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1.4950502,
+        "median_ms": 1.4950502,
+        "stddev_ms": 0.0,
+        "min_ms": 1.4950502,
+        "max_ms": 1.4950502,
+        "runs_ms": [
+          1.4950502
+        ]
+      },
+      "grit": {
+        "mean_ms": 2.7007433600000006,
+        "median_ms": 2.7007433600000006,
+        "stddev_ms": 0.0,
+        "min_ms": 2.7007433600000006,
+        "max_ms": 2.7007433600000006,
+        "runs_ms": [
+          2.7007433600000006
+        ]
+      },
+      "ratio": 1.8064566393824104
+    },
+    {
+      "id": "medium/switch",
+      "group": "switch",
+      "fixture": "synth-10k-smoke",
+      "description": "switch between campaign-a and campaign-b",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 13.08679628,
+        "median_ms": 13.08679628,
+        "stddev_ms": 0.0,
+        "min_ms": 13.08679628,
+        "max_ms": 13.08679628,
+        "runs_ms": [
+          13.08679628
+        ]
+      },
+      "grit": {
+        "mean_ms": 14.60796588,
+        "median_ms": 14.60796588,
+        "stddev_ms": 0.0,
+        "min_ms": 14.60796588,
+        "max_ms": 14.60796588,
+        "runs_ms": [
+          14.60796588
+        ]
+      },
+      "ratio": 1.116236974080871
+    },
+    {
+      "id": "medium/pick",
+      "group": "pick",
+      "fixture": "synth-10k-smoke",
+      "description": "pick topic commit",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3.5407411399999997,
+        "median_ms": 3.5407411399999997,
+        "stddev_ms": 0.0,
+        "min_ms": 3.5407411399999997,
+        "max_ms": 3.5407411399999997,
+        "runs_ms": [
+          3.5407411399999997
+        ]
+      },
+      "grit": {
+        "mean_ms": 6.76849784,
+        "median_ms": 6.76849784,
+        "stddev_ms": 0.0,
+        "min_ms": 6.76849784,
+        "max_ms": 6.76849784,
+        "runs_ms": [
+          6.76849784
+        ]
+      },
+      "ratio": 1.9116048229382847
+    },
+    {
+      "id": "medium/merge",
+      "group": "merge",
+      "fixture": "synth-10k-smoke",
+      "description": "merge campaign-topic",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 5.713374620000001,
+        "median_ms": 5.713374620000001,
+        "stddev_ms": 0.0,
+        "min_ms": 5.713374620000001,
+        "max_ms": 5.713374620000001,
+        "runs_ms": [
+          5.713374620000001
+        ]
+      },
+      "grit": {
+        "mean_ms": 6.94797604,
+        "median_ms": 6.94797604,
+        "stddev_ms": 0.0,
+        "min_ms": 6.94797604,
+        "max_ms": 6.94797604,
+        "runs_ms": [
+          6.94797604
+        ]
+      },
+      "ratio": 1.2160897021662478
+    },
+    {
+      "id": "medium/revert",
+      "group": "revert",
+      "fixture": "synth-10k-smoke",
+      "description": "revert topic commit",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 5.27658476,
+        "median_ms": 5.27658476,
+        "stddev_ms": 0.0,
+        "min_ms": 5.27658476,
+        "max_ms": 5.27658476,
+        "runs_ms": [
+          5.27658476
+        ]
+      },
+      "grit": {
+        "mean_ms": 6.728633200000001,
+        "median_ms": 6.728633200000001,
+        "stddev_ms": 0.0,
+        "min_ms": 6.728633200000001,
+        "max_ms": 6.728633200000001,
+        "runs_ms": [
+          6.728633200000001
+        ]
+      },
+      "ratio": 1.275187172393683
+    },
+    {
+      "id": "medium/stash-push-pop",
+      "group": "stash",
+      "fixture": "synth-10k-smoke",
+      "description": "stash push then pop",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 18.8650011,
+        "median_ms": 18.8650011,
+        "stddev_ms": 0.0,
+        "min_ms": 18.8650011,
+        "max_ms": 18.8650011,
+        "runs_ms": [
+          18.8650011
+        ]
+      },
+      "grit": {
+        "mean_ms": 28.235083940000003,
+        "median_ms": 28.235083940000003,
+        "stddev_ms": 0.0,
+        "min_ms": 28.235083940000003,
+        "max_ms": 28.235083940000003,
+        "runs_ms": [
+          28.235083940000003
+        ]
+      },
+      "ratio": 1.4966913487219464
+    },
+    {
+      "id": "medium/fsck",
+      "group": "maintenance",
+      "fixture": "synth-10k-smoke",
+      "description": "fsck --no-dangling on worktree",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 13.353938900000001,
+        "median_ms": 13.353938900000001,
+        "stddev_ms": 0.0,
+        "min_ms": 13.353938900000001,
+        "max_ms": 13.353938900000001,
+        "runs_ms": [
+          13.353938900000001
+        ]
+      },
+      "grit": {
+        "mean_ms": 16.431867800000003,
+        "median_ms": 16.431867800000003,
+        "stddev_ms": 0.0,
+        "min_ms": 16.431867800000003,
+        "max_ms": 16.431867800000003,
+        "runs_ms": [
+          16.431867800000003
+        ]
+      },
+      "ratio": 1.2304884665901834
     }
   ]
 }

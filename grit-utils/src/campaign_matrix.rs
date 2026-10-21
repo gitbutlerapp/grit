@@ -5,6 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
+use crate::campaign_diff_scenarios::append_diff_output_benchmark_scenarios;
 use crate::campaign_prep::{
     ensure_campaign_hot_path, load_campaign_hot_path_meta, reset_campaign_worktree_clean,
     restore_campaign_worktree_to_main, switch_wide_meta, sync_grit_index_to_git,
@@ -85,7 +86,7 @@ pub fn run_fixture_cli_matrix(
     hyperfine: &Path,
     git: &Path,
     grit: &Path,
-    bench_exe: &Path,
+    _bench_exe: &Path,
     cfg: &RunConfig,
     fixture: &CampaignFixture,
     smoke: bool,
@@ -259,6 +260,18 @@ pub fn run_fixture_cli_matrix(
         },
         &fixture.worktree,
     )?);
+
+    append_diff_output_benchmark_scenarios(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        fixture.id,
+        &fixture.label,
+        &fixture.worktree,
+        smoke,
+        &mut out,
+    )?;
 
     let log_limit: usize = if smoke { 20 } else { 1000 };
     let page_size = LOG_BENCH_GRIT_PAGE_COUNT.max(1);

@@ -10,6 +10,7 @@ use crate::campaign_matrix::{
     run_fixture_cli_matrix, run_fixture_file_transport_matrix, CampaignFixture,
 };
 use crate::chromium_synth::{ensure_chromium_synthetic, ChromiumSynthSpec};
+use crate::fixture_registry::{self, FixtureKind};
 use crate::network_fixture::NetworkProfile;
 use crate::network_suite::run_network_suite;
 use crate::real_repo_fixture::{
@@ -120,6 +121,36 @@ pub fn run_campaign_suite(
         opts.smoke,
         true,
     )?);
+
+    let medium_kind = if opts.smoke {
+        FixtureKind::Synth10kSmoke
+    } else {
+        FixtureKind::Synth10k
+    };
+    let (_medium_bare, _medium_record) = fixture_registry::ensure_cached(git, medium_kind, false)?;
+    let medium_bare = fixture_registry::cache_root().join(medium_kind.cache_name());
+    let medium_worktree = ensure_worktree_clone(
+        git,
+        &medium_bare,
+        &format!("medium-{}-worktree", medium_kind.cache_name()),
+        medium_kind.cache_name(),
+    )?;
+    scenarios.extend(run_fixture_cli_matrix(
+        hyperfine,
+        git,
+        grit,
+        bench_exe,
+        cfg,
+        &CampaignFixture {
+            id: "medium",
+            label: medium_kind.cache_name().into(),
+            bare: medium_bare,
+            worktree: medium_worktree,
+        },
+        opts.smoke,
+        false,
+    )?);
+
     if linux_fixture_enabled(opts.with_linux) {
         let linux_tag =
             std::env::var("GRIT_BENCH_LINUX_TAG").unwrap_or_else(|_| DEFAULT_LINUX_TAG.to_owned());

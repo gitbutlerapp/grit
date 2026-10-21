@@ -44,8 +44,21 @@ pub struct DiffFormatArgs {
         conflicts_with_all = ["patch", "stat", "numstat", "shortstat", "name_only"]
     )]
     pub name_status: bool,
-    /// Lines of context around each change (Git `-U`).
-    #[arg(short = 'U', long = "unified", value_name = "N")]
+    /// Expand hunks to enclosing function boundaries (Git `-W`).
+    #[arg(
+        short = 'W',
+        long = "function-context",
+        conflicts_with_all = ["stat", "numstat", "shortstat", "name_only", "name_status"]
+    )]
+    pub function_context: bool,
+    /// Lines of context around each change (Git `-U`; bare `-U` means 3).
+    #[arg(
+        short = 'U',
+        long = "unified",
+        value_name = "N",
+        num_args = 0..=1,
+        default_missing_value = "3"
+    )]
     pub unified_context: Option<usize>,
 }
 
@@ -110,10 +123,13 @@ impl DiffFormatArgs {
         self.name_status
     }
 
-    /// Apply `-U` to shared line-diff options.
-    pub fn apply_context(&self, diff_options: &mut DiffOptions) {
+    /// Apply CLI flags to shared line-diff options.
+    pub fn apply_to_options(&self, diff_options: &mut DiffOptions) {
         if let Some(n) = self.unified_context {
             diff_options.context_lines = n;
+        }
+        if self.function_context {
+            diff_options.function_context = true;
         }
     }
 }
