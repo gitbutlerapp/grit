@@ -1576,19 +1576,16 @@ fn checkout_tree_changes_with_progress(
             }
             let mode = parse_git_mode(&change.new_mode);
             if mode == MODE_GITLINK {
-                if let Some(existing) = index.get(path.as_bytes(), 0) {
+                let index_path = checkout_stored_index_path_bytes(path);
+                let abs = checkout_stored_worktree_abs(work_tree, path);
+                if let Some(existing) = index.get(&index_path, 0) {
                     if existing.oid == change.new_oid
                         && existing.mode == MODE_GITLINK
-                        && gitlink_worktree_matches_index(&work_tree.join(path))
+                        && gitlink_worktree_matches_index(&abs)
                     {
-                        let abs = work_tree.join(path);
                         let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-                        let mut entry = entry_from_metadata(
-                            &meta,
-                            path.as_bytes(),
-                            change.new_oid,
-                            MODE_GITLINK,
-                        );
+                        let mut entry =
+                            entry_from_metadata(&meta, &index_path, change.new_oid, MODE_GITLINK);
                         entry.size = 0;
                         plan.push(CheckoutPlanSlot::Ready(entry));
                         progress.inc(1);
@@ -1596,9 +1593,7 @@ fn checkout_tree_changes_with_progress(
                     }
                 }
                 materialize_gitlink_worktree(work_tree, path, &mut dir_cache)?;
-                let abs = work_tree.join(path);
-                let mut entry =
-                    entry_from_stat(&abs, path.as_bytes(), change.new_oid, MODE_GITLINK)?;
+                let mut entry = entry_from_stat(&abs, &index_path, change.new_oid, MODE_GITLINK)?;
                 entry.size = 0;
                 plan.push(CheckoutPlanSlot::Ready(entry));
                 progress.inc(1);

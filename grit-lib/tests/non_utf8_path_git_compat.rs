@@ -23,6 +23,9 @@ use grit_lib::repo_relpath;
 use grit_test_support::git;
 
 const BAD_NAME: &[u8] = b"bad\xffname.txt";
+const BAD_GITLINK: &[u8] = b"bad\xffsub";
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const GITLINK_OID: &str = "855827c583bc30645ba427885caa40c5b81764d2";
 const RESERVED_LITERAL: &str = "grit+pathhex:6162";
 
 fn bad_path(root: &std::path::Path) -> std::path::PathBuf {
@@ -71,6 +74,53 @@ fn git_porcelain(root: &std::path::Path) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn non_utf8_gitlink_added_by_checkout_between_trees() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("gitlink-add");
+    std::fs::create_dir(&root).expect("mkdir");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["config", "user.email", "t@example.com"]);
+    git(&root, &["config", "user.name", "Test"]);
+    let cacheinfo = format!("160000,{GITLINK_OID},");
+    let mut cacheinfo_os = std::ffi::OsString::from(cacheinfo);
+    cacheinfo_os.push(OsStr::from_bytes(BAD_GITLINK));
+    let update = Command::new("git")
+        .current_dir(&root)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .arg("update-index")
+        .arg("--add")
+        .arg("--cacheinfo")
+        .arg(cacheinfo_os)
+        .output()
+        .expect("git update-index");
+    assert!(
+        update.status.success(),
+        "git update-index: {}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+    let tree_with_gitlink =
+        ObjectId::from_hex(&git_stdout(&root, &["write-tree"])).expect("tree oid");
+    let empty_tree = ObjectId::from_hex(EMPTY_TREE).expect("empty tree");
+
+    let repo = open_repo(&root);
+    checkout_between_trees(&repo, Some(&empty_tree), &tree_with_gitlink)
+        .expect("checkout must materialize non-UTF-8 gitlink");
+
+    let gitlink_dir = root.join(OsStr::from_bytes(BAD_GITLINK));
+    assert!(
+        gitlink_dir.is_dir(),
+        "non-UTF-8 gitlink path must exist as directory: {:?}",
+        gitlink_dir
+    );
+    let loaded = repo.index_handle().load().expect("index");
+    assert!(
+        loaded.get(BAD_GITLINK, 0).is_some(),
+        "index must record gitlink at raw byte path"
+    );
 }
 
 #[test]
