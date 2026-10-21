@@ -1,0 +1,43 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: cargo-fuzz (weekly)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 180
+    env:
+      CXX: g++
+      CC: gcc
+      RUSTFLAGS: -C linker=g++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build fuzz targets
+        working-directory: grit-lib/fuzz
+        run: cargo +nightly fuzz build
+
+      - name: Fuzz each target (10 minutes)
+        working-directory: grit-lib/fuzz
+        run: |
+          set -e
+          for target in $(cargo +nightly fuzz list); do
+            echo "=== fuzz run $target (600s max) ==="
+            cargo +nightly fuzz run "$target" -- \
+              -max_total_time=600 \
+              "corpus/$target" || true
+          done

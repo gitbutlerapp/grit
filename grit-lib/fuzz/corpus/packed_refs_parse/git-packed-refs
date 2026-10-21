@@ -1,0 +1,5 @@
+# pack-refs with: peeled fully-peeled sorted 
+0f4fac7cdfcd41acaba2b7b9840d7b0b9b94e85f refs/heads/master
+0f4fac7cdfcd41acaba2b7b9840d7b0b9b94e85f refs/heads/seed
+a7155fe0d173b2b1d06c1b0c9781e88ac1b856d9 refs/tags/v0.1
+^0f4fac7cdfcd41acaba2b7b9840d7b0b9b94e85f

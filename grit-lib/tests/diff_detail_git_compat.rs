@@ -3,7 +3,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions, DiffTarget};
+use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions};
 use grit_lib::objects::{ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -102,5 +102,4 @@ fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
     )
     .expect("name-only");
     assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
-    let _target = DiffTarget::Trees;
 }

@@ -1,5 +1,6 @@
 [workspace]
 members = ["grit-lib", "grit-protocol", "grit-http-server", "grit-cli", "grit-utils", "grit-examples", "grit-test-support"]
+exclude = ["grit-lib/fuzz"]
 default-members = ["grit-lib", "grit-protocol", "grit-cli"]
 resolver = "2"
 

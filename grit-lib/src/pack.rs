@@ -3583,10 +3583,7 @@ impl SingleLocalPackReader {
         self.read_commit_author_prefix_at_pack_offset(offset)
     }
 
-    fn read_commit_author_prefix_at_pack_offset(
-        &mut self,
-        offset: u64,
-    ) -> Result<Option<&[u8]>> {
+    fn read_commit_author_prefix_at_pack_offset(&mut self, offset: u64) -> Result<Option<&[u8]>> {
         let pack_bytes = self.pack_bytes.as_ref();
         let mut pos = offset as usize;
         if pos >= pack_bytes.len() {

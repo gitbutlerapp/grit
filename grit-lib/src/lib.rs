@@ -333,6 +333,9 @@ pub(crate) mod write_tree;
 pub(crate) mod ws;
 pub(crate) mod zlib_inflate;
 
+#[doc(hidden)]
+pub mod fuzz;
+
 pub use ref_storage::RefStorageFormat;
 
 pub use objects::bench_fixture;

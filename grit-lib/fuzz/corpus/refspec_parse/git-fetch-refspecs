@@ -1,0 +1,2 @@
++refs/heads/*:refs/remotes/origin/*
+refs/heads/main:refs/heads/main

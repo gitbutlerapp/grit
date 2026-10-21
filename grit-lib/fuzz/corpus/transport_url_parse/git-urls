@@ -1,0 +1,4 @@
+https://github.com/git/git.git
+file:///tmp/repo.git
+/var/tmp/local.git
+host:path/to/repo
