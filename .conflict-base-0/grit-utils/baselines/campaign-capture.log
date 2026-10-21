@@ -1,0 +1,40 @@
+Run 1 → /tmp/campaign-production-run1.json
+git:  /usr/bin/git (git version 2.43.0)
+grit: /workspace/target/release/grit (grit 0.5.11)
+hyperfine: /usr/local/cargo/bin/hyperfine
+
+Running campaign benchmarks...
+Cloning /tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183.git into worktree /tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183-worktree …
+Ledger written to /tmp/campaign-production-run1.ledger.md
+Results written to /tmp/campaign-production-run1.json
+Run 2 → /tmp/campaign-production-run2.json
+git:  /usr/bin/git (git version 2.43.0)
+grit: /workspace/target/release/grit (grit 0.5.11)
+hyperfine: /usr/local/cargo/bin/hyperfine
+
+Running campaign benchmarks...
+Cloning https://github.com/git/git.git at tag v2.47.0 (bare, single-branch) into /tmp/grit-bench-odb-cache/git.git-bitmaps …
+Preparing git.git fixture (repack -adb, commit-graph write --reachable) …
+Cloning /tmp/grit-bench-odb-cache/git.git-bitmaps into worktree /tmp/grit-bench-odb-cache/git-dot-git-worktree …
+Cloning /tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183.git into worktree /tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183-worktree …
+Ledger written to /tmp/campaign-production-run2.ledger.md
+Results written to /tmp/campaign-production-run2.json
+Compare consecutive runs (±10% tolerance)
+Ratio drift exceeds tolerance 0.1:
+  git-dot-git/merge: 3.5221 vs 3.0643 (delta 0.1300)
+  git-dot-git/push-file: 3.3371 vs 3.7333 (delta 0.1061)
+  chromium-synth/commit: 1.2829 vs 1.0712 (delta 0.1650)
+git:  /usr/bin/git (git version 2.43.0)
+grit: /workspace/target/release/grit (grit 0.5.11)
+hyperfine: /usr/local/cargo/bin/hyperfine
+
+Running campaign benchmarks...
+Cloning https://github.com/git/git.git at tag v2.47.0 (bare, single-branch) into /tmp/grit-bench-odb-cache/git.git-bitmaps …
+Preparing git.git fixture (repack -adb, commit-graph write --reachable) …
+Cloning /tmp/grit-bench-odb-cache/git.git-bitmaps into worktree /tmp/grit-bench-odb-cache/git-dot-git-worktree …
+Cloning /tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183.git into worktree /tmp/grit-bench-odb-cache/chromium-synth-f400000-d40000-c100000-r50000-s1129466183-worktree …
+Ledger written to /tmp/campaign-production-run3.ledger.md
+Results written to /tmp/campaign-production-run3.json
+
+--- Regenerated compare from committed campaign-before/after (review fix) ---
+exit=0

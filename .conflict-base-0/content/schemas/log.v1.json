@@ -1,0 +1,318 @@
+{
+  "$id": "https://grit-scm.com/schemas/log/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ChangeStatus": {
+      "description": "Machine-readable diff change status (`--json` / `--markdown` contract).",
+      "enum": [
+        "added",
+        "deleted",
+        "modified",
+        "type_changed",
+        "renamed",
+        "copied",
+        "unmerged"
+      ],
+      "type": "string"
+    },
+    "CommitJson": {
+      "description": "Shared commit object in JSON output (`log`, `show`, `revs`, `shortlog`, …).",
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/Person"
+        },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "description": "Full message body with trailing whitespace trimmed.",
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "refs": {
+          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
+          "items": {
+            "$ref": "#/definitions/CommitRefJson"
+          },
+          "type": "array"
+        },
+        "relative_date": {
+          "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "committer",
+        "message",
+        "oid",
+        "parents",
+        "refs",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "CommitRefJson": {
+      "description": "Ref decoration attached to a commit in JSON output.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/CommitRefKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CommitRefKind": {
+      "description": "Decoration category in JSON (`--json` contract).",
+      "enum": [
+        "branch",
+        "remote_branch",
+        "tag",
+        "stash",
+        "head",
+        "grafted",
+        "other"
+      ],
+      "type": "string"
+    },
+    "DiffStat": {
+      "description": "A diffstat: per-file insertion/deletion counts plus totals.",
+      "properties": {
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/FileStat"
+          },
+          "type": "array"
+        },
+        "files_changed": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "files",
+        "files_changed",
+        "insertions"
+      ],
+      "type": "object"
+    },
+    "FileStat": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ChangeStatus"
+        }
+      },
+      "required": [
+        "binary",
+        "deletions",
+        "insertions",
+        "path",
+        "status"
+      ],
+      "type": "object"
+    },
+    "LogAuthorGroupJson": {
+      "description": "Author aggregate in `--json` output when `--group-by author` is set.",
+      "properties": {
+        "commits": {
+          "items": {
+            "$ref": "#/definitions/CommitJson"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "count": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    },
+    "LogCommit": {
+      "description": "One commit in `grit log` JSON output.",
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/Person"
+        },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "description": "Full message body with trailing whitespace trimmed.",
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "refs": {
+          "description": "Ref decorations (branches, tags, `HEAD`, …) for this commit.",
+          "items": {
+            "$ref": "#/definitions/CommitRefJson"
+          },
+          "type": "array"
+        },
+        "relative_date": {
+          "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stat": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DiffStat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The files the commit changed, only with `--stat`."
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "committer",
+        "message",
+        "oid",
+        "parents",
+        "refs",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "Person": {
+      "description": "A parsed identity line (`Name <email> <epoch> <tz>`) for stable `--json` output.",
+      "properties": {
+        "date": {
+          "description": "Author or committer timestamp in RFC 3339.",
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit log`: one page of commits, plus the next page's start (if any).",
+  "properties": {
+    "commits": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/LogCommit"
+      },
+      "type": "array"
+    },
+    "groups": {
+      "items": {
+        "$ref": "#/definitions/LogAuthorGroupJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "next": {
+      "description": "Opaque continuation cursor for `--cursor`, or `null` when there is no further history.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "truncated": {
+      "description": "True when more commits matched the query than returned in this page (`-n` or default page size).",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "truncated"
+  ],
+  "title": "LogOutcome",
+  "type": "object"
+}

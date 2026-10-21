@@ -1,0 +1,84 @@
+{
+  "$id": "https://grit-scm.com/schemas/fsck/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "DanglingJson": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "oid"
+      ],
+      "type": "object"
+    },
+    "FsckIssueJson": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "kind",
+        "severity"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit fsck` / `grit verify`.",
+  "properties": {
+    "dangling": {
+      "items": {
+        "$ref": "#/definitions/DanglingJson"
+      },
+      "type": "array"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/definitions/FsckIssueJson"
+      },
+      "type": "array"
+    },
+    "objects_checked": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "ok": {
+      "description": "True when no error-severity issues were found.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "dangling",
+    "issues",
+    "objects_checked",
+    "ok"
+  ],
+  "title": "FsckOutcome",
+  "type": "object"
+}

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "b5ea30d (Test [TIME_AGO]    1) tracked v2\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"file\":\"tracked.txt\",\"rev\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"lines\":[{\"commit\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"original_line\":1,\"final_line\":1,\"content\":\"tracked v2\"}],\"commits\":{\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\":{\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"summary\":\"second\"}}}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Blame: `tracked.txt`\n\nRevision `b5ea30de417ac84c09b8cfc0acf5f2c39efc611f`\n\n| Line | Commit | Author | Date | Original | Content |\n| ---: | --- | --- | --- | ---: | --- |\n| 1 | `b5ea30d` | Test | [TIME_AGO] | 1 | tracked v2 |\n\n",
+    "stderr": ""
+  }
+}

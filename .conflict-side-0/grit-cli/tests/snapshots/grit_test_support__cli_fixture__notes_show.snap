@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "snapshot note\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"show\",\"notes_ref\":\"refs/notes/commits\",\"object\":\"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\"body\":\"snapshot note\\n\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Note on `b5ea30d` (`refs/notes/commits`):\n\n```text\nsnapshot note\n```\n",
+    "stderr": ""
+  }
+}
