@@ -1356,6 +1356,7 @@ pub(crate) fn build_fetch_matched_set(
             user_refspecs: opts.refspecs.clone(),
             configured_refspecs: opts.configured_refspecs.clone(),
             remote_name: opts.remote_name.clone(),
+            allow_missing_explicit_for_prune: opts.prune,
         },
         remote,
     )?;
@@ -1389,7 +1390,8 @@ pub(crate) fn build_fetch_matched_set(
         }
     };
 
-    let matched = crate::fetch_request::matched_refs_from_plan(&plan, remote)?;
+    let matched =
+        crate::fetch_request::matched_refs_with_negatives(&plan, remote, &negatives, opts.prune)?;
     Ok(FetchMatchSet {
         matched,
         positive,

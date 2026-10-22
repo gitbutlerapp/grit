@@ -261,6 +261,9 @@ pub struct FetchRefspecInput {
     pub configured_refspecs: Vec<String>,
     /// Short remote name when fetching a configured remote (`origin`).
     pub remote_name: Option<String>,
+    /// When true, explicit refspec sources missing from the advertisement are
+    /// kept on the plan so a later prune pass can delete stale tracking refs.
+    pub allow_missing_explicit_for_prune: bool,
 }
 
 fn refspec_item_is_explicit(item: &RefspecItem) -> bool {
@@ -356,7 +359,16 @@ impl FetchRefspecPlan {
                 continue;
             }
             let (remote_ref, kind, oid) =
-                resolve_explicit_source(src_raw, &remote_index, remote.head_oid, spec)?;
+                match resolve_explicit_source(src_raw, &remote_index, remote.head_oid, spec) {
+                    Ok(resolved) => resolved,
+                    Err(FetchRefspecError::SourceNotFound { .. })
+                        if input.allow_missing_explicit_for_prune =>
+                    {
+                        let remote_ref = explicit_remote_ref_for_prune(src_raw);
+                        (remote_ref, FetchRefspecSourceKind::ExactRemoteRef, None)
+                    }
+                    Err(e) => return Err(e),
+                };
             let local_ref = resolve_explicit_destination(item.dst.as_deref(), &remote_ref);
             explicit.push(ResolvedFetchRef {
                 remote_ref,
@@ -388,20 +400,24 @@ impl FetchRefspecPlan {
     }
 }
 
-/// Build [`MatchedRef`] rows from a resolved plan and advertised remote refs.
-pub(crate) fn matched_refs_from_plan(
+/// Build [`MatchedRef`] rows from a resolved plan and advertised remote refs,
+/// using a caller-supplied negative list (for [`FetchOptions::negative_refspecs`](crate::remote::transfer::FetchOptions::negative_refspecs))
+/// and optionally skipping explicit sources missing on the remote when
+/// `prune_missing_explicit` is set (vanished-ref `--prune` fetch).
+pub(crate) fn matched_refs_with_negatives(
     plan: &FetchRefspecPlan,
     remote: FetchRemoteAdvertisement<'_>,
+    negatives: &[RefspecItem],
+    prune_missing_explicit: bool,
 ) -> Result<Vec<MatchedRef>, FetchRefspecError> {
     match plan {
-        FetchRefspecPlan::Pattern {
-            positive,
-            negatives,
-        } => pattern_matched_refs(remote.refs, positive, negatives),
+        FetchRefspecPlan::Pattern { positive, .. } => {
+            pattern_matched_refs(remote.refs, positive, negatives)
+        }
         FetchRefspecPlan::Mixed {
             explicit,
             pattern_positive,
-            negatives,
+            ..
         } => {
             let mut matched = pattern_matched_refs(remote.refs, pattern_positive, negatives)?;
             let remote_index: HashMap<&str, ObjectId> =
@@ -414,6 +430,8 @@ pub(crate) fn matched_refs_from_plan(
                     o
                 } else if let Some(o) = remote_index.get(entry.remote_ref.as_str()).copied() {
                     o
+                } else if prune_missing_explicit {
+                    continue;
                 } else {
                     return Err(FetchRefspecError::SourceNotFound {
                         ref_name: entry.remote_ref.clone(),
@@ -525,6 +543,16 @@ fn append_opportunistic_tracking(
                 source_kind: FetchRefspecSourceKind::ExactRemoteRef,
             });
         }
+    }
+}
+
+/// Best-effort remote ref name for an explicit refspec when the source vanished
+/// and `--prune` will delete the stale tracking ref.
+fn explicit_remote_ref_for_prune(src: &str) -> String {
+    if src.starts_with("refs/") {
+        src.to_owned()
+    } else {
+        format!("refs/heads/{src}")
     }
 }
 
@@ -681,6 +709,17 @@ mod tests {
         }
     }
 
+    fn matched_from_plan(
+        plan: &FetchRefspecPlan,
+        remote: FetchRemoteAdvertisement<'_>,
+    ) -> Vec<MatchedRef> {
+        let negatives = match plan {
+            FetchRefspecPlan::Pattern { negatives, .. }
+            | FetchRefspecPlan::Mixed { negatives, .. } => negatives.as_slice(),
+        };
+        matched_refs_with_negatives(plan, remote, negatives, false).unwrap()
+    }
+
     #[test]
     fn dwim_prefers_heads_over_tags() {
         let refs = remote_refs(&["refs/heads/main", "refs/tags/main"]);
@@ -727,11 +766,12 @@ mod tests {
                 user_refspecs: vec!["main".into(), "+refs/heads/*:refs/remotes/other/*".into()],
                 configured_refspecs: vec![],
                 remote_name: Some("origin".into()),
+                ..Default::default()
             },
             adv(&refs),
         )
         .unwrap();
-        let matched = matched_refs_from_plan(&plan, adv(&refs)).unwrap();
+        let matched = matched_from_plan(&plan, adv(&refs));
         assert!(
             matched
                 .iter()
@@ -748,11 +788,12 @@ mod tests {
                 user_refspecs: vec!["main".into()],
                 configured_refspecs: vec!["refs/heads/main:refs/remotes/origin/main".into()],
                 remote_name: Some("origin".into()),
+                ..Default::default()
             },
             adv(&refs),
         )
         .unwrap();
-        let matched = matched_refs_from_plan(&plan, adv(&refs)).unwrap();
+        let matched = matched_from_plan(&plan, adv(&refs));
         assert!(
             matched
                 .iter()
@@ -762,18 +803,70 @@ mod tests {
     }
 
     #[test]
+    fn extra_negative_refspec_excludes_from_wildcard_match() {
+        let refs = remote_refs(&["refs/heads/main", "refs/heads/topic", "refs/heads/side"]);
+        let plan = FetchRefspecPlan::resolve(
+            &FetchRefspecInput {
+                user_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+                ..Default::default()
+            },
+            adv(&refs),
+        )
+        .unwrap();
+        let extra = vec![parse_fetch_refspec("^refs/heads/topic").unwrap()];
+        let matched = matched_refs_with_negatives(&plan, adv(&refs), &extra, false).unwrap();
+        assert!(
+            matched
+                .iter()
+                .any(|m| m.local_ref.as_deref() == Some("refs/remotes/origin/main")),
+            "main must match"
+        );
+        assert!(
+            matched
+                .iter()
+                .any(|m| m.local_ref.as_deref() == Some("refs/remotes/origin/side")),
+            "side must match"
+        );
+        assert!(
+            !matched
+                .iter()
+                .any(|m| m.local_ref.as_deref() == Some("refs/remotes/origin/topic")),
+            "negative refspec must drop topic"
+        );
+    }
+
+    #[test]
+    fn prune_skips_missing_explicit_source_instead_of_error() {
+        let refs = remote_refs(&["refs/heads/main"]);
+        let plan = FetchRefspecPlan::resolve(
+            &FetchRefspecInput {
+                user_refspecs: vec!["+refs/heads/topic:refs/remotes/origin/topic".into()],
+                configured_refspecs: vec![],
+                remote_name: None,
+                allow_missing_explicit_for_prune: true,
+            },
+            adv(&refs),
+        )
+        .unwrap();
+        let matched = matched_refs_with_negatives(&plan, adv(&refs), &[], true).unwrap();
+        assert!(
+            matched.is_empty(),
+            "vanished explicit source with prune must not error or match"
+        );
+    }
+
+    #[test]
     fn duplicate_remote_ref_two_destinations() {
         let refs = remote_refs(&["refs/heads/main"]);
         let plan = FetchRefspecPlan::resolve(
             &FetchRefspecInput {
                 user_refspecs: vec!["main:refs/heads/a".into(), "main:refs/heads/b".into()],
-                configured_refspecs: vec![],
-                remote_name: None,
+                ..Default::default()
             },
             adv(&refs),
         )
         .unwrap();
-        let matched = matched_refs_from_plan(&plan, adv(&refs)).unwrap();
+        let matched = matched_from_plan(&plan, adv(&refs));
         assert_eq!(
             matched
                 .iter()
@@ -790,13 +883,12 @@ mod tests {
         let plan = FetchRefspecPlan::resolve(
             &FetchRefspecInput {
                 user_refspecs: vec![format!("{oid}:refs/heads/imported")],
-                configured_refspecs: vec![],
-                remote_name: None,
+                ..Default::default()
             },
             adv(&refs),
         )
         .unwrap();
-        let matched = matched_refs_from_plan(&plan, adv(&refs)).unwrap();
+        let matched = matched_from_plan(&plan, adv(&refs));
         assert_eq!(matched.len(), 1);
         assert_eq!(matched[0].oid, oid);
     }
