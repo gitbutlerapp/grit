@@ -1,0 +1,22 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+assertion_line: 384
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Reverted 0678d03 → 5037fa0 Revert \"third\"\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"source\":\"0678d0320dac162a518bfd0ee738896acdcc0f6b\",\"oid\":\"5037fa02af57b10451f2892f46c25dafaa1fe67b\",\"subject\":\"Revert \\\"third\\\"\",\"change_id\":\"mtzmkvmqwtokzkoxyqszntusqpszxxpo\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Revert\n\n- `0678d03` → `5037fa0` — Revert \"third\"\n",
+    "stderr": ""
+  }
+}
