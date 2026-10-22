@@ -787,16 +787,42 @@ enum Command {
         #[command(flatten)]
         paths: crate::pathspec_args::TrailingPathspecArgs,
     },
-    /// List branches, or create / delete one.
+    /// List branches, or create / delete / rename / configure one.
     Branch {
-        /// Name of the branch to create. Omit to list branches.
+        /// Branch to create, delete, rename, or configure upstream for. Omit to list.
         name: Option<String>,
+        /// Start commit when creating (`grit branch <name> <start>`).
+        start: Option<String>,
+        /// Overwrite an existing branch when creating or renaming.
+        #[arg(short = 'f', long = "force", conflicts_with = "force_move")]
+        force: bool,
+        /// Configure upstream from the start point when creating.
+        #[arg(short = 't', long = "track", conflicts_with = "no_track")]
+        track: bool,
+        /// Do not configure upstream when creating.
+        #[arg(long = "no-track", conflicts_with = "track")]
+        no_track: bool,
+        /// Set upstream for the named branch (or the current branch when omitted).
+        #[arg(short = 'u', long = "set-upstream-to", value_name = "UPSTREAM")]
+        set_upstream_to: Option<String>,
+        /// Remove upstream configuration for the named branch (or the current branch).
+        #[arg(long = "unset-upstream")]
+        unset_upstream: bool,
+        /// Rename a branch: `-m <new>` or `-m <old> <new>`.
+        #[arg(short = 'm', long = "move", value_name = "NAME", num_args = 1..=2)]
+        rename: Option<Vec<String>>,
+        /// Rename the current branch to `<name>`, replacing `<name>` if it exists.
+        #[arg(short = 'M', conflicts_with_all = ["force", "rename"])]
+        force_move: bool,
         /// Delete the named branch instead of creating it.
         #[arg(short = 'd', long = "delete")]
         delete: bool,
         /// Delete even when the branch is not fully merged into the current branch.
-        #[arg(short = 'D', long = "force")]
+        #[arg(short = 'D', long = "force-delete")]
         force_delete: bool,
+        /// Preview the operation without updating refs, config, or reflogs.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Switch to another branch, remote branch, or detached commit.
     #[command(alias = "checkout", alias = "co")]
@@ -1571,10 +1597,32 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         ),
         Command::Branch {
             name,
+            start,
+            force,
+            track,
+            no_track,
+            set_upstream_to,
+            unset_upstream,
+            rename,
+            force_move,
             delete,
             force_delete,
+            dry_run,
         } => emit(
-            &commands::branch::run(name, delete, force_delete)?,
+            &commands::branch::run(commands::branch::BranchRunOptions {
+                name,
+                start,
+                force,
+                track,
+                no_track,
+                set_upstream_to,
+                unset_upstream,
+                rename,
+                force_move,
+                delete,
+                force_delete,
+                dry_run,
+            })?,
             opts,
             ctx,
         ),

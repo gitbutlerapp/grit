@@ -77,11 +77,16 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | --- | --- |
 | List branches | `grit branch` |
 | Create a branch at the current commit (no switch) | `grit branch <name>` |
+| Create at a specific commit | `grit branch <name> <start>` |
+| Create with upstream tracking | `grit branch -t <name> <remote>/<branch>` or rely on `branch.autoSetupMerge` |
+| Rename a branch | `grit branch -m [<old>] <new>` or `grit branch -M <new>` (force) |
+| Set / clear upstream | `grit branch -u <upstream> [<name>]`, `grit branch --unset-upstream [<name>]` |
+| Preview any branch mutation | add `--dry-run --json` (no ref, config, or reflog changes) |
 | Create and switch | `grit switch -c <name>` |
 | Switch | `grit switch <name>` (also `grit checkout`, `grit co`) |
 | Delete a merged branch | `grit branch -d <name>` |
+| Delete regardless of merge | `grit branch --force-delete <name>` (short `-D`) |
 | Predict merge conflicts (no repo changes) | `grit merge --check <branch>` (exit 0 = clean/ff/up to date, 1 = would conflict; `--json` → `result: clean\|conflicts\|…`) |
-| Delete regardless | `grit branch -D <name>` |
 
 `grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run when checkout would overwrite local edits or untracked files. Preflight with `grit switch <branch> --dry-run --json` (checks only; reports `changed_paths`) before switching. On refusal, `--json` emits `kind: would_overwrite` with `reason` (`local_changes` or `untracked`) and sorted `paths`.
 
