@@ -1449,7 +1449,7 @@ fn visit_untracked_directory(
         gitlinks,
         matcher,
         ignored_mode,
-        true,
+        show_all,
         false,
         None,
         precompose_unicode,
