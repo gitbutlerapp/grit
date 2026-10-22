@@ -28,6 +28,7 @@
 
 pub mod handle;
 pub mod listing;
+pub mod query_reachability;
 pub mod store;
 pub mod version_sort;
 

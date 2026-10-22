@@ -30,6 +30,7 @@ use crate::error::Error;
 use crate::ident::committer_unix_seconds_for_ordering_bytes;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::refs::query_reachability;
 use crate::refs::store::{RefEntry, RefStore};
 use crate::refs::version_sort::compare_refname_versions;
 use crate::repo::Repository;
@@ -100,6 +101,16 @@ pub struct RefQuery {
     pub sort: RefSort,
     /// Maximum number of refs to return after sorting (`None` = unlimited).
     pub limit: Option<usize>,
+    /// Keep refs whose peeled commit contains every listed commit (`--contains`).
+    pub contains: Vec<ObjectId>,
+    /// Exclude refs whose peeled commit contains any listed commit (`--no-contains`).
+    pub no_contains: Vec<ObjectId>,
+    /// Keep branch tips merged into every listed commit (`--merged`).
+    pub merged: Vec<ObjectId>,
+    /// Exclude branch tips merged into any listed commit (`--no-merged`).
+    pub no_merged: Vec<ObjectId>,
+    /// Keep refs whose oid or tag peel chain matches any listed object (`--points-at`).
+    pub points_at: Vec<ObjectId>,
 }
 
 /// Class of ref for display and JSON (`head`, `remote`, `tag`, …).
@@ -149,6 +160,12 @@ pub enum RefQueryError {
     /// Creator-date sort was requested but no object database was supplied.
     #[error("creator-date sort requires an object database")]
     MissingObjectDatabase,
+    /// Filter object id is not present in the object database.
+    #[error("object {0} not found")]
+    MissingObject(ObjectId),
+    /// `--contains` / `--merged` target does not resolve to a commit.
+    #[error("object {0} is not a commit")]
+    NotCommit(ObjectId),
 }
 
 type QueryResult<T> = std::result::Result<T, RefQueryError>;
@@ -360,7 +377,7 @@ where
             creator_date: 0,
         });
     }
-    finish_query(collected.into_values().collect(), query, options, odb)
+    finish_query(collected.into_values().collect(), query, options, odb, None)
 }
 
 /// Collect refs from `store` under each namespace in `query`, then filter, sort, and limit.
@@ -383,7 +400,7 @@ pub fn query_listings_on_store(
             ControlFlow::Continue(())
         })?;
     }
-    finish_query(collected.into_values().collect(), query, options, odb)
+    finish_query(collected.into_values().collect(), query, options, odb, None)
 }
 
 /// Query refs on `repo` (respects linked-worktree visibility and injected ref stores).
@@ -417,6 +434,7 @@ pub fn query_refs(
         query,
         options,
         Some(repo.odb()),
+        Some(repo),
     )
 }
 
@@ -499,16 +517,36 @@ fn patterns_match(short_name: &str, patterns: &[String], ignore_case: bool) -> b
         .any(|p| pattern_matches_short_name(short_name, p, ignore_case))
 }
 
+fn query_has_reachability(query: &RefQuery) -> bool {
+    !query.contains.is_empty()
+        || !query.no_contains.is_empty()
+        || !query.merged.is_empty()
+        || !query.no_merged.is_empty()
+        || !query.points_at.is_empty()
+}
+
 fn finish_query(
     mut collected: Vec<CollectedRef>,
     query: &RefQuery,
     options: &RefQueryOptions,
     odb: Option<&Odb>,
+    repo: Option<&Repository>,
 ) -> QueryResult<Vec<RefListing>> {
     if let Some(odb) = odb {
         for entry in &mut collected {
             fill_peeled_from_odb(odb, entry);
         }
+    }
+    if query_has_reachability(query) {
+        let repo = repo.ok_or(RefQueryError::MissingObjectDatabase)?;
+        let mut reach_rows: Vec<(String, ObjectId, Option<ObjectId>)> = collected
+            .iter()
+            .map(|c| (c.full_name.clone(), c.oid, c.peeled))
+            .collect();
+        query_reachability::filter_listings_by_reachability(repo, query, &mut reach_rows)?;
+        let keep: std::collections::HashSet<String> =
+            reach_rows.into_iter().map(|(name, _, _)| name).collect();
+        collected.retain(|c| keep.contains(&c.full_name));
     }
     if matches!(query.sort.key, SortKey::Date) {
         let odb = odb.ok_or(RefQueryError::MissingObjectDatabase)?;

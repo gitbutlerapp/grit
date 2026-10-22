@@ -53,6 +53,7 @@ fn grit_sorted_refnames(
             reverse,
         },
         limit,
+        ..RefQuery::default()
     };
     query_refs(repo, &query, options)
         .expect("query_refs")
