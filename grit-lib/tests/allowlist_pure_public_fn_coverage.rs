@@ -16,10 +16,8 @@ use grit_lib::command_runner::{run_program, CommandStdin, CommandStdio, Recordin
 use grit_lib::commit::signing::{GpgConfig, SignatureCheck};
 use grit_lib::config::config_file_display_for_error;
 use grit_lib::config::dotfile::is_ntfs_dot_gitignore;
-use grit_lib::config::environment::Environment;
 use grit_lib::config::ident::SignatureTimestamp;
 use grit_lib::config::ident::{fsck_commit_idents, timestamp_for_at_ct};
-use grit_lib::config::ident_resolve::{peek_name_with, IdentRole};
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
     detect_copies, format_stat_line, read_submodule_head_for_checkout,
@@ -128,10 +126,6 @@ author A <a@b> 0 +0000\ncommitter C <c@d> 0 +0000\n\nm\n";
     let _ = fsck_commit_idents(commit_bytes, HashAlgo::Sha1);
     let _ = timestamp_for_at_ct(SignatureTimestamp::Sentinel);
     let _ = timestamp_for_at_ct(SignatureTimestamp::Valid(1));
-
-    let env = Environment::empty();
-    let cfg = ConfigSet::new();
-    let _ = peek_name_with(&env, &cfg, IdentRole::Author);
 
     let items = [1u8, 2, 3];
     let threads = NonZeroUsize::new(2).expect("nz");

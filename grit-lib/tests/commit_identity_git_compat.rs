@@ -7,8 +7,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::{offset_from_epoch_and_tz, Environment, RepositoryOptions};
 use grit_lib::config::ident_resolve::{
-    identity_email_is_configured_with, resolve_email_lenient_with, resolve_email_with,
-    resolve_identity_with, IdentRole, IdentityError,
+    resolve_email_with, resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
+    IdentityError,
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::{parse_commit, ObjectKind};
@@ -26,11 +26,6 @@ fn strict_identity_refuses_synthetic_email_without_config() {
         .map(|(k, v)| (OsString::from(k), OsString::from(v)));
     let env = Environment::from_vars(vars, PathBuf::new());
     let config = ConfigSet::default();
-    assert!(!identity_email_is_configured_with(
-        &env,
-        &config,
-        IdentRole::Author
-    ));
     let err = resolve_email_with(&env, &config, IdentRole::Author).expect_err("strict email");
     assert_eq!(
         err,
@@ -38,8 +33,12 @@ fn strict_identity_refuses_synthetic_email_without_config() {
             role: IdentRole::Author
         }
     );
-    let lenient = resolve_email_lenient_with(&env, &config, IdentRole::Author);
-    assert_eq!(lenient, "alice@host.example");
+    let now = time::OffsetDateTime::from_unix_timestamp(FIXED_EPOCH).expect("epoch");
+    let loose = resolve_loose_committer_identity_with(&env, &config, now);
+    assert!(
+        loose.ends_with(" <alice@host.example> 1112911993 +0000"),
+        "reflog identity still synthesizes an email: {loose}"
+    );
 }
 
 #[test]

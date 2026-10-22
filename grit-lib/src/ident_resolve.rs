@@ -12,7 +12,7 @@ use crate::commit::assemble_identity;
 #[cfg(unix)]
 use crate::commit_encoding::decode_bytes;
 use crate::config::ConfigSet;
-use crate::ident_config::ident_default_name;
+use crate::ident_config::{env_user_name, ident_default_name};
 
 /// Environment access used for identity resolution.
 pub trait IdentityEnv {
@@ -99,8 +99,7 @@ pub enum IdentityError {
     /// `user.useConfigOnly` disables email auto-detection and no config email was provided.
     ///
     /// The Display text here is a terse, functional description of the
-    /// condition. The user-facing setup guidance is rendered by the
-    /// (GPL-licensed) CLI layer, which maps this variant to its own message.
+    /// condition. User-facing setup guidance is rendered by `grit-cli`.
     #[error("email auto-detection is disabled (user.useConfigOnly) and no configured email is available")]
     AutoDetectionDisabled {
         /// Identity role being resolved.
@@ -152,32 +151,27 @@ pub fn read_git_identity_name_env_with<E: IdentityEnv>(env: &E, key: &str) -> Gi
     }
 }
 
-/// Read `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME` from the supplied environment.
-///
-/// Returns [`None`] when the variable is unset or set to whitespace only. A set-but-empty
-/// value (after trim) is still [`None`] here; use [`read_git_identity_name_env_with`] when the
-/// distinction matters.
-#[must_use]
-pub fn read_git_identity_name_from_env_with<E: IdentityEnv>(env: &E, key: &str) -> Option<String> {
+/// The value of a `GIT_*_NAME` variable when it is set (possibly to `""`).
+fn name_env_with<E: IdentityEnv>(env: &E, key: &str) -> Option<String> {
     match read_git_identity_name_env_with(env, key) {
+        GitIdentityNameEnv::Set(name) => Some(name),
         GitIdentityNameEnv::Unset => None,
-        GitIdentityNameEnv::Set(s) if s.is_empty() => None,
-        GitIdentityNameEnv::Set(s) => Some(s),
     }
 }
 
+/// `value` trimmed, or [`None`] when it is missing or blank.
+fn non_blank(value: Option<String>) -> Option<String> {
+    value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
+}
+
 fn use_config_only(config: &ConfigSet) -> bool {
-    match config.get_bool("user.useConfigOnly") {
-        Some(Ok(b)) => b,
-        Some(Err(_)) => false,
-        None => false,
-    }
+    matches!(config.get_bool("user.useConfigOnly"), Some(Ok(true)))
 }
 
 fn config_mail_given(config: &ConfigSet) -> bool {
     ["user.email", "author.email", "committer.email"]
         .iter()
-        .any(|key| config.get(key).is_some_and(|v| !v.trim().is_empty()))
+        .any(|key| non_blank(config.get(key)).is_some())
 }
 
 fn ident_name_has_non_crud(name: &str) -> bool {
@@ -196,10 +190,7 @@ fn ident_name_has_non_crud(name: &str) -> bool {
 }
 
 fn synthetic_email_with<E: IdentityEnv>(env: &E) -> String {
-    let user = env
-        .var("USER")
-        .or_else(|| env.var("USERNAME"))
-        .unwrap_or_else(|| "unknown".to_owned());
+    let user = env_user_name(env);
     let host = env.var("HOSTNAME").unwrap_or_else(|| "unknown".to_owned());
     let domain = if host.contains('.') {
         host
@@ -209,135 +200,54 @@ fn synthetic_email_with<E: IdentityEnv>(env: &E) -> String {
     format!("{user}@{domain}")
 }
 
-fn resolve_email_inner_with<E: IdentityEnv>(
-    env: &E,
-    config: &ConfigSet,
-    role: IdentRole,
-    honor_use_config_only: bool,
-) -> Result<String, IdentityError> {
-    if let Some(v) = env.var(role.env_email_key()) {
-        let t = v.trim();
-        if !t.is_empty() {
-            return Ok(t.to_owned());
-        }
-    }
-
-    if let Some(v) = config.get(role.config_email_key()) {
-        let t = v.trim();
-        if !t.is_empty() {
-            return Ok(t.to_owned());
-        }
-    }
-
-    if let Some(v) = config.get("user.email") {
-        let t = v.trim();
-        if !t.is_empty() {
-            return Ok(t.to_owned());
-        }
-    }
-
-    if honor_use_config_only && use_config_only(config) && !config_mail_given(config) {
-        return Err(IdentityError::AutoDetectionDisabled { role });
-    }
-
-    if let Some(v) = env.var("EMAIL") {
-        let t = v.trim();
-        if !t.is_empty() {
-            return Ok(t.to_owned());
-        }
-    }
-
-    if honor_use_config_only {
-        return Err(IdentityError::MissingConfiguredEmail { role });
-    }
-
-    Ok(synthetic_email_with(env))
-}
-
-/// Returns whether strict commit identity resolution can produce an email for `role`.
-#[must_use]
-pub fn identity_email_is_configured_with<E: IdentityEnv>(
-    env: &E,
-    config: &ConfigSet,
-    role: IdentRole,
-) -> bool {
-    resolve_email_inner_with(env, config, role, true).is_ok()
-}
-
 /// Resolve email for a role when creating commits (honors `user.useConfigOnly`).
+///
+/// Looks at `GIT_<ROLE>_EMAIL`, `<role>.email`, `user.email`, then (unless
+/// `user.useConfigOnly` is set without any configured email) `EMAIL`. Never synthesizes
+/// an address from the user and host names.
+///
+/// # Errors
+///
+/// [`IdentityError::AutoDetectionDisabled`] when `user.useConfigOnly` blocks the `EMAIL`
+/// fallback, [`IdentityError::MissingConfiguredEmail`] when no source provides an email.
 pub fn resolve_email_with<E: IdentityEnv>(
     env: &E,
     config: &ConfigSet,
     role: IdentRole,
 ) -> Result<String, IdentityError> {
-    resolve_email_inner_with(env, config, role, true)
-}
-
-/// Resolve email without failing on `user.useConfigOnly` (e.g. `git var -l`, reflog-style).
-#[must_use]
-pub fn resolve_email_lenient_with<E: IdentityEnv>(
-    env: &E,
-    config: &ConfigSet,
-    role: IdentRole,
-) -> String {
-    resolve_email_inner_with(env, config, role, false).unwrap_or_else(|_| synthetic_email_with(env))
-}
-
-/// Name from env and config without erroring (for `git var -l`).
-#[must_use]
-pub fn peek_name_with<E: IdentityEnv>(
-    env: &E,
-    config: &ConfigSet,
-    role: IdentRole,
-) -> Option<String> {
-    match read_git_identity_name_env_with(env, role.env_name_key()) {
-        GitIdentityNameEnv::Set(s) => {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        }
-        GitIdentityNameEnv::Unset => {
-            if let Some(v) = config.get(role.config_name_key()) {
-                let t = v.trim();
-                if !t.is_empty() {
-                    return Some(t.to_owned());
-                }
-            }
-            let d = ident_default_name(config, env);
-            if d.is_empty() {
-                None
-            } else {
-                Some(d)
-            }
-        }
+    let configured = non_blank(env.var(role.env_email_key()))
+        .or_else(|| non_blank(config.get(role.config_email_key())))
+        .or_else(|| non_blank(config.get("user.email")));
+    if let Some(email) = configured {
+        return Ok(email);
     }
+    if use_config_only(config) && !config_mail_given(config) {
+        return Err(IdentityError::AutoDetectionDisabled { role });
+    }
+    non_blank(env.var("EMAIL")).ok_or(IdentityError::MissingConfiguredEmail { role })
 }
 
 /// Resolve name for a role when creating commits.
+///
+/// A set `GIT_<ROLE>_NAME` wins even when empty; otherwise `<role>.name`, then Git's
+/// default name (`user.name`, or the system user name).
+///
+/// # Errors
+///
+/// Fails like [`resolve_email_with`] when no email is available, with
+/// [`IdentityError::EmptyName`] for an empty name and [`IdentityError::InvalidName`] for a
+/// name made only of characters Git strips.
 pub fn resolve_name_with<E: IdentityEnv>(
     env: &E,
     config: &ConfigSet,
     role: IdentRole,
 ) -> Result<String, IdentityError> {
-    let email = resolve_email_inner_with(env, config, role, true)?;
+    let email = resolve_email_with(env, config, role)?;
 
-    let name: String = match read_git_identity_name_env_with(env, role.env_name_key()) {
-        GitIdentityNameEnv::Set(s) => s,
-        GitIdentityNameEnv::Unset => {
-            if let Some(v) = config.get(role.config_name_key()) {
-                let t = v.trim();
-                if !t.is_empty() {
-                    t.to_owned()
-                } else {
-                    ident_default_name(config, env)
-                }
-            } else {
-                ident_default_name(config, env)
-            }
-        }
-    };
+    let name = name_env_with(env, role.env_name_key()).unwrap_or_else(|| {
+        non_blank(config.get(role.config_name_key()))
+            .unwrap_or_else(|| ident_default_name(config, env))
+    });
 
     if name.is_empty() {
         return Err(IdentityError::EmptyName { email, role });
@@ -348,75 +258,6 @@ pub fn resolve_name_with<E: IdentityEnv>(
     }
 
     Ok(name)
-}
-
-/// Committer name/email for reflog and other non-strict contexts: never errors; always has an email.
-#[must_use]
-pub fn resolve_loose_committer_parts_with<E: IdentityEnv>(
-    env: &E,
-    config: &ConfigSet,
-) -> (String, String) {
-    let name = match read_git_identity_name_env_with(env, "GIT_COMMITTER_NAME") {
-        GitIdentityNameEnv::Set(s) => {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        }
-        GitIdentityNameEnv::Unset => read_git_identity_name_from_env_with(env, "GIT_AUTHOR_NAME"),
-    }
-    .or_else(|| {
-        config
-            .get("committer.name")
-            .map(|s| s.trim().to_owned())
-            .filter(|s| !s.is_empty())
-    })
-    .or_else(|| {
-        config
-            .get("user.name")
-            .map(|s| s.trim().to_owned())
-            .filter(|s| !s.is_empty())
-    })
-    .or_else(|| {
-        let d = ident_default_name(config, env);
-        if d.is_empty() {
-            None
-        } else {
-            Some(d)
-        }
-    })
-    .unwrap_or_else(|| "Unknown".to_owned());
-
-    let email = env
-        .var("GIT_COMMITTER_EMAIL")
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            env.var("GIT_AUTHOR_EMAIL")
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-        })
-        .or_else(|| {
-            config
-                .get("committer.email")
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-        })
-        .or_else(|| {
-            config
-                .get("user.email")
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-        })
-        .or_else(|| {
-            env.var("EMAIL")
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-        })
-        .unwrap_or_else(|| synthetic_email_with(env));
-
-    (name, email)
 }
 
 /// Resolve the full identity line (`Name <email> <epoch> <offset>`) for `role` when
@@ -452,7 +293,10 @@ pub fn resolve_identity_with<E: IdentityEnv>(
 
 /// Best-effort committer identity line (`Name <email> <epoch> <offset>`) for reflog entries.
 ///
-/// Uses [`resolve_loose_committer_parts_with`], so it never fails, and always stamps `now`
+/// Never fails: the name comes from `GIT_COMMITTER_NAME` (or, when that is unset,
+/// `GIT_AUTHOR_NAME`), `committer.name`, `user.name`, the system user name, then
+/// `"Unknown"`; the email from `GIT_COMMITTER_EMAIL`, `GIT_AUTHOR_EMAIL`, `committer.email`,
+/// `user.email`, `EMAIL`, then a synthesized `user@host` address. It always stamps `now`
 /// (callers that want `GIT_COMMITTER_DATE` honoured fold it into `now`).
 ///
 /// # Parameters
@@ -466,7 +310,19 @@ pub fn resolve_loose_committer_identity_with<E: IdentityEnv>(
     config: &ConfigSet,
     now: OffsetDateTime,
 ) -> String {
-    let (name, email) = resolve_loose_committer_parts_with(env, config);
+    let name = name_env_with(env, "GIT_COMMITTER_NAME")
+        .or_else(|| name_env_with(env, "GIT_AUTHOR_NAME"))
+        .filter(|name| !name.is_empty())
+        .or_else(|| non_blank(config.get("committer.name")))
+        .or_else(|| non_blank(config.get("user.name")))
+        .or_else(|| Some(ident_default_name(config, env)).filter(|name| !name.is_empty()))
+        .unwrap_or_else(|| "Unknown".to_owned());
+    let email = non_blank(env.var("GIT_COMMITTER_EMAIL"))
+        .or_else(|| non_blank(env.var("GIT_AUTHOR_EMAIL")))
+        .or_else(|| non_blank(config.get("committer.email")))
+        .or_else(|| non_blank(config.get("user.email")))
+        .or_else(|| non_blank(env.var("EMAIL")))
+        .unwrap_or_else(|| synthetic_email_with(env));
     assemble_identity(&name, &email, None, now)
 }
 
@@ -500,22 +356,71 @@ mod tests {
                 role: IdentRole::Author
             }
         );
-        assert!(!identity_email_is_configured_with(
-            &env,
-            &config,
-            IdentRole::Author
-        ));
     }
 
     #[test]
-    fn lenient_email_resolution_still_synthesizes_without_config() {
-        let env = MapEnv(HashMap::from([
-            ("USER".to_owned(), "alice".to_owned()),
-            ("HOSTNAME".to_owned(), "host.example".to_owned()),
-        ]));
-        let config = ConfigSet::default();
-        let email = resolve_email_lenient_with(&env, &config, IdentRole::Author);
-        assert_eq!(email, "alice@host.example");
+    fn strict_email_falls_back_to_email_env_unless_config_only() {
+        let env = vars(&[("EMAIL", " mail@example.com ")]);
+        let mut config = ConfigSet::default();
+        assert_eq!(
+            resolve_email_with(&env, &config, IdentRole::Author).expect("EMAIL"),
+            "mail@example.com"
+        );
+        config
+            .add_command_override("user.useConfigOnly", "true")
+            .expect("override");
+        assert_eq!(
+            resolve_email_with(&env, &config, IdentRole::Author).expect_err("config only"),
+            IdentityError::AutoDetectionDisabled {
+                role: IdentRole::Author
+            }
+        );
+        config
+            .add_command_override("author.email", "  ")
+            .expect("override");
+        config
+            .add_command_override("committer.email", "c@example.com")
+            .expect("override");
+        assert_eq!(
+            resolve_email_with(&env, &config, IdentRole::Author).expect("mail given"),
+            "mail@example.com",
+            "a configured email for any role re-enables the EMAIL fallback"
+        );
+    }
+
+    #[test]
+    fn strict_name_keeps_set_but_empty_env_override() {
+        let env = vars(&[("GIT_AUTHOR_NAME", "  "), ("GIT_AUTHOR_EMAIL", "a@b.c")]);
+        let mut config = ConfigSet::default();
+        config
+            .add_command_override("user.name", "Alice")
+            .expect("override");
+        assert_eq!(
+            resolve_name_with(&env, &config, IdentRole::Author).expect_err("empty"),
+            IdentityError::EmptyName {
+                email: "a@b.c".to_owned(),
+                role: IdentRole::Author
+            }
+        );
+        let env = vars(&[("GIT_AUTHOR_EMAIL", "a@b.c")]);
+        config
+            .add_command_override("author.name", " Author Name ")
+            .expect("override");
+        assert_eq!(
+            resolve_name_with(&env, &config, IdentRole::Author).expect("config"),
+            "Author Name"
+        );
+        assert_eq!(
+            resolve_name_with(
+                &vars(&[("GIT_AUTHOR_EMAIL", "a@b.c"), ("GIT_AUTHOR_NAME", ",;")]),
+                &config,
+                IdentRole::Author
+            )
+            .expect_err("crud"),
+            IdentityError::InvalidName {
+                name: ",;".to_owned()
+            }
+        );
     }
 
     #[test]
@@ -527,11 +432,6 @@ mod tests {
             .expect("override");
         let email = resolve_email_with(&env, &config, IdentRole::Committer).expect("configured");
         assert_eq!(email, "me@example.com");
-        assert!(identity_email_is_configured_with(
-            &env,
-            &config,
-            IdentRole::Committer
-        ));
     }
 
     fn vars(pairs: &[(&str, &str)]) -> MapEnv {
@@ -622,6 +522,51 @@ mod tests {
             .expect("override");
         let line = resolve_loose_committer_identity_with(&env, &config, fixed_now());
         assert_eq!(line, "Alice <alice@host.example> 1112911993 -0700");
+    }
+
+    #[test]
+    fn loose_committer_identity_prefers_committer_then_author_env() {
+        let env = vars(&[
+            ("GIT_COMMITTER_NAME", "C O Mitter"),
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("GIT_COMMITTER_EMAIL", " "),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+        ]);
+        let line = resolve_loose_committer_identity_with(&env, &ConfigSet::default(), fixed_now());
+        assert_eq!(line, "C O Mitter <author@example.com> 1112911993 -0700");
+
+        let env = vars(&[("GIT_AUTHOR_NAME", "A U Thor"), ("EMAIL", "e@example.com")]);
+        let line = resolve_loose_committer_identity_with(&env, &ConfigSet::default(), fixed_now());
+        assert_eq!(line, "A U Thor <e@example.com> 1112911993 -0700");
+    }
+
+    #[test]
+    fn loose_committer_identity_empty_committer_name_skips_author_env() {
+        let env = vars(&[
+            ("GIT_COMMITTER_NAME", ""),
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("USER", "alice"),
+            ("HOSTNAME", "box"),
+        ]);
+        let mut config = ConfigSet::default();
+        config
+            .add_command_override("user.name", "User Name")
+            .expect("override");
+        config
+            .add_command_override("committer.name", " Committer Name ")
+            .expect("override");
+        config
+            .add_command_override("user.email", "user@example.com")
+            .expect("override");
+        let line = resolve_loose_committer_identity_with(&env, &config, fixed_now());
+        assert_eq!(line, "Committer Name <user@example.com> 1112911993 -0700");
+
+        let mut config = ConfigSet::default();
+        config
+            .add_command_override("user.name", "User Name")
+            .expect("override");
+        let line = resolve_loose_committer_identity_with(&env, &config, fixed_now());
+        assert_eq!(line, "User Name <alice@box.(none)> 1112911993 -0700");
     }
 
     #[test]

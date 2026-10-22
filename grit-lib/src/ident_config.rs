@@ -30,23 +30,23 @@ pub fn ident_default_name(config: &ConfigSet, env: &impl IdentityEnv) -> String 
     }
 }
 
+/// `USER`, then `USERNAME`, then `"unknown"`.
+pub(crate) fn env_user_name(env: &impl IdentityEnv) -> String {
+    env.var("USER")
+        .or_else(|| env.var("USERNAME"))
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
 #[cfg(unix)]
 fn passwd_short_username(env: &impl IdentityEnv) -> String {
-    fn env_fallback(env: &impl IdentityEnv) -> String {
-        env.var("USER")
-            .or_else(|| env.var("USERNAME"))
-            .unwrap_or_else(|| "unknown".to_owned())
-    }
     // `User::from_uid` wraps `getpwuid_r`; the short name is its `pw_name`.
     match nix::unistd::User::from_uid(nix::unistd::Uid::current()) {
         Ok(Some(user)) => user.name,
-        _ => env_fallback(env),
+        _ => env_user_name(env),
     }
 }
 
 #[cfg(not(unix))]
 fn passwd_short_username(env: &impl IdentityEnv) -> String {
-    env.var("USER")
-        .or_else(|| env.var("USERNAME"))
-        .unwrap_or_else(|| "unknown".to_owned())
+    env_user_name(env)
 }

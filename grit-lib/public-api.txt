@@ -1991,15 +1991,10 @@ pub fn grit_lib::config::ident_resolve::IdentityEnv::var_os(&self, &str) -> core
 impl grit_lib::config::ident_resolve::IdentityEnv for grit_lib::config::environment::Environment
 pub fn grit_lib::config::environment::Environment::var(&self, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::environment::Environment::var_os(&self, &str) -> core::option::Option<std::ffi::os_str::OsString>
-pub fn grit_lib::config::ident_resolve::identity_email_is_configured_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> bool
-pub fn grit_lib::config::ident_resolve::peek_name_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::ident_resolve::read_git_identity_name_env_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &str) -> grit_lib::config::ident_resolve::GitIdentityNameEnv
-pub fn grit_lib::config::ident_resolve::read_git_identity_name_from_env_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &str) -> core::option::Option<alloc::string::String>
-pub fn grit_lib::config::ident_resolve::resolve_email_lenient_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> alloc::string::String
 pub fn grit_lib::config::ident_resolve::resolve_email_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
 pub fn grit_lib::config::ident_resolve::resolve_identity_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
 pub fn grit_lib::config::ident_resolve::resolve_loose_committer_identity_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, time::offset_date_time::OffsetDateTime) -> alloc::string::String
-pub fn grit_lib::config::ident_resolve::resolve_loose_committer_parts_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet) -> (alloc::string::String, alloc::string::String)
 pub fn grit_lib::config::ident_resolve::resolve_name_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
 pub mod grit_lib::config::init_filesystem
 pub struct grit_lib::config::init_filesystem::InitFilesystemConfigOptions
