@@ -13,8 +13,8 @@ use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::reftable::{
-    read_write_options, reftable_storage_location, LogRecord, RefValue, ReftableStack,
-    ReftableTransactionUpdate, TablesListLock, WriteOptions,
+    read_write_options, reftable_storage_location, LogRecord, RefValue, ReftableError,
+    ReftableStack, ReftableTransactionUpdate, TablesListLock, WriteOptions,
 };
 use crate::repo::init_repository;
 
@@ -322,14 +322,18 @@ fn record_to_raw(rec: &crate::reftable::RefRecord) -> Option<RawRef> {
 
 fn map_reftable_err(err: Error) -> RefStoreError {
     match err {
-        Error::InvalidRef(msg) if msg.contains("cannot lock references") => {
-            RefStoreError::LockHeld {
-                name: "refs".to_owned(),
-            }
-        }
-        Error::Message(msg) if msg.contains("ref transaction rejected") => {
-            RefStoreError::Corrupt(msg)
-        }
+        Error::Reftable(ReftableError::Locked { .. }) => RefStoreError::LockHeld {
+            name: "refs".to_owned(),
+        },
+        Error::Reftable(ReftableError::ExpectedMismatch {
+            refname,
+            expected,
+            actual,
+        }) => RefStoreError::ExpectedMismatch {
+            name: refname,
+            expected: Expected::Oid(expected),
+            actual: actual.map(RawRef::Direct),
+        },
         other => RefStoreError::Corrupt(other.to_string()),
     }
 }
@@ -687,5 +691,47 @@ impl Drop for ReftablePrepared<'_> {
         if let Ok(mut guard_state) = self.store.prepared.lock() {
             guard_state.take();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_reftable_err_keeps_lock_and_cas_failures_typed() {
+        let locked = map_reftable_err(
+            ReftableError::Locked {
+                lock_path: PathBuf::from("reftable/tables.list.lock"),
+            }
+            .into(),
+        );
+        assert!(matches!(locked, RefStoreError::LockHeld { name } if name == "refs"));
+
+        let expected = ObjectId::from_bytes(&[0x31; 20]).expect("oid");
+        let actual = ObjectId::from_bytes(&[0x32; 20]).expect("oid");
+        let mismatch = map_reftable_err(
+            ReftableError::ExpectedMismatch {
+                refname: "refs/heads/main".to_owned(),
+                expected,
+                actual: Some(actual),
+            }
+            .into(),
+        );
+        match mismatch {
+            RefStoreError::ExpectedMismatch {
+                name,
+                expected: Expected::Oid(want),
+                actual: Some(RawRef::Direct(found)),
+            } => {
+                assert_eq!(name, "refs/heads/main");
+                assert_eq!(want, expected);
+                assert_eq!(found, actual);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        let corrupt = map_reftable_err(ReftableError::BadMagic.into());
+        assert!(matches!(corrupt, RefStoreError::Corrupt(msg) if msg.contains("bad magic")));
     }
 }

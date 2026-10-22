@@ -74,6 +74,200 @@ const DEFAULT_BLOCK_SIZE: u32 = 4096;
 /// How many records between restart points.
 const RESTART_INTERVAL: usize = 16;
 
+/// A reftable failure: malformed table bytes, a locked stack, or a rejected update.
+///
+/// Wrapped by [`Error::Reftable`]. Corruption variants describe what was wrong
+/// with the bytes; [`Self::Locked`] and [`Self::ExpectedMismatch`] are the
+/// conditions callers usually want to react to (retry, or re-read and redo).
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ReftableError {
+    /// The file is shorter than its header and footer require.
+    #[error("reftable: file is too small ({len} bytes)")]
+    TooSmall {
+        /// Number of bytes available.
+        len: usize,
+    },
+
+    /// The header or footer does not start with the `REFT` magic.
+    #[error("reftable: bad magic bytes")]
+    BadMagic,
+
+    /// The header names a format version other than 1 (SHA-1) or 2 (SHA-256).
+    #[error("reftable: unsupported format version {version}")]
+    UnsupportedVersion {
+        /// Version byte from the header.
+        version: u8,
+    },
+
+    /// The footer repeats a different version than the header.
+    #[error("reftable: footer version {footer} does not match header version {header}")]
+    FooterVersionMismatch {
+        /// Version byte from the header.
+        header: u8,
+        /// Version byte from the footer.
+        footer: u8,
+    },
+
+    /// The footer's CRC-32 does not match its contents.
+    #[error("reftable: footer checksum mismatch (stored {stored:08x}, computed {computed:08x})")]
+    FooterChecksumMismatch {
+        /// CRC-32 recorded in the footer.
+        stored: u32,
+        /// CRC-32 computed over the footer bytes.
+        computed: u32,
+    },
+
+    /// The data ends inside a field.
+    #[error("reftable: truncated {field}")]
+    Truncated {
+        /// Field that was cut short.
+        field: ReftableField,
+    },
+
+    /// A text field is not valid UTF-8.
+    #[error("reftable: {field} is not valid UTF-8")]
+    InvalidUtf8 {
+        /// Field holding the invalid bytes.
+        field: ReftableField,
+    },
+
+    /// A prefix-compressed key claims more shared bytes than the previous key has.
+    #[error("reftable: {field} prefix is longer than the previous key")]
+    PrefixTooLong {
+        /// Key whose prefix length is out of range.
+        field: ReftableField,
+    },
+
+    /// A ref record uses a value type outside the format's four kinds.
+    #[error("reftable: unknown ref value type {value_type}")]
+    UnknownValueType {
+        /// The 3-bit value type found in the record.
+        value_type: u8,
+    },
+
+    /// A block's length points outside the file.
+    #[error("reftable: invalid block length")]
+    InvalidBlockLength,
+
+    /// A block's restart table is out of range or overlaps its records.
+    #[error("reftable: invalid restart table")]
+    InvalidRestartTable,
+
+    /// A log record key lacks the `refname NUL update_index` layout.
+    #[error("reftable: malformed log record key")]
+    InvalidLogKey,
+
+    /// `tables.list` names a table that is not part of the loaded stack.
+    #[error("reftable: tables.list names missing table {name}")]
+    MissingTable {
+        /// Table file name from `tables.list`.
+        name: String,
+    },
+
+    /// [`ReftableWriter::add_ref`] was called out of name order.
+    #[error("reftable: refs must be added in sorted order ('{next}' after '{previous}')")]
+    UnsortedRefs {
+        /// Name of the ref added before.
+        previous: String,
+        /// Name of the ref that did not sort after it.
+        next: String,
+    },
+
+    /// A record does not fit in an empty block of the configured size.
+    #[error("reftable: record does not fit in a block")]
+    EntryTooLarge,
+
+    /// A record with an empty key was written.
+    #[error("reftable: record has an empty key")]
+    EmptyRecordKey,
+
+    /// Another writer holds `tables.list.lock`.
+    #[error("reftable: stack is locked by another writer ({})", lock_path.display())]
+    Locked {
+        /// Path of the held lock file.
+        lock_path: PathBuf,
+    },
+
+    /// The `tables.list.lock` guard was used after its lock had been committed.
+    #[error("reftable: tables.list lock was already released")]
+    LockReleased,
+
+    /// A compare-and-swap update found a different value than it required.
+    #[error(
+        "reftable: '{refname}' expected {expected} but found {}",
+        actual.map_or_else(|| "<absent>".to_owned(), |oid| oid.to_hex())
+    )]
+    ExpectedMismatch {
+        /// Ref the update targeted.
+        refname: String,
+        /// Object id the update required.
+        expected: ObjectId,
+        /// Object id found, or `None` when the ref does not exist.
+        actual: Option<ObjectId>,
+    },
+}
+
+/// A field of a reftable file, named by [`ReftableError`] variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReftableField {
+    /// A variable-length integer.
+    Varint,
+    /// The 4-byte block header (type and length).
+    BlockHeader,
+    /// The key of an index record.
+    IndexKey,
+    /// A ref name (in a ref record or a log key).
+    RefName,
+    /// The object id of a one-value ref record.
+    ObjectId,
+    /// The two object ids of a peeled ref record or a log record.
+    ObjectIdPair,
+    /// The target of a symbolic ref record.
+    SymrefTarget,
+    /// The key of a log record.
+    LogKey,
+    /// The committer name of a log record.
+    LogName,
+    /// The committer email of a log record.
+    LogEmail,
+    /// The timezone offset of a log record.
+    LogTimezone,
+    /// The message of a log record.
+    LogMessage,
+    /// The file footer.
+    Footer,
+}
+
+impl std::fmt::Display for ReftableField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Varint => "varint",
+            Self::BlockHeader => "block header",
+            Self::IndexKey => "index key",
+            Self::RefName => "ref name",
+            Self::ObjectId => "object id",
+            Self::ObjectIdPair => "object id pair",
+            Self::SymrefTarget => "symref target",
+            Self::LogKey => "log key",
+            Self::LogName => "log name",
+            Self::LogEmail => "log email",
+            Self::LogTimezone => "log timezone offset",
+            Self::LogMessage => "log message",
+            Self::Footer => "footer",
+        })
+    }
+}
+
+fn truncated(field: ReftableField) -> Error {
+    ReftableError::Truncated { field }.into()
+}
+
+fn invalid_utf8(field: ReftableField) -> Error {
+    ReftableError::InvalidUtf8 { field }.into()
+}
+
 // ---------------------------------------------------------------------------
 // Varint encoding (Git pack-style)
 // ---------------------------------------------------------------------------
@@ -104,13 +298,13 @@ fn put_varint(mut val: u64, out: &mut Vec<u8>) -> usize {
 /// Decode a varint from `data` starting at `pos`. Returns (value, new_pos).
 fn get_varint(data: &[u8], mut pos: usize) -> Result<(u64, usize)> {
     if pos >= data.len() {
-        return Err(Error::InvalidRef("varint: unexpected end of data".into()));
+        return Err(truncated(ReftableField::Varint));
     }
     let mut val = (data[pos] & 0x7f) as u64;
     while data[pos] & 0x80 != 0 {
         pos += 1;
         if pos >= data.len() {
-            return Err(Error::InvalidRef("varint: unexpected end of data".into()));
+            return Err(truncated(ReftableField::Varint));
         }
         val = ((val + 1) << 7) | (data[pos] & 0x7f) as u64;
     }
@@ -266,10 +460,11 @@ impl ReftableWriter {
     pub fn add_ref(&mut self, rec: RefRecord) -> Result<()> {
         if let Some(last) = self.refs.last() {
             if rec.name <= last.name {
-                return Err(Error::InvalidRef(format!(
-                    "reftable: refs must be sorted, got '{}' after '{}'",
-                    rec.name, last.name
-                )));
+                return Err(ReftableError::UnsortedRefs {
+                    previous: last.name.clone(),
+                    next: rec.name,
+                }
+                .into());
             }
         }
         self.refs.push(rec);
@@ -521,7 +716,7 @@ impl BlockWriter {
     fn add(&mut self, rec: &EncRecord, opts: &WriteOptions) -> Result<bool> {
         let key = rec.key();
         if key.is_empty() {
-            return Err(Error::InvalidRef("reftable: empty record key".into()));
+            return Err(ReftableError::EmptyRecordKey.into());
         }
         let restart = self.entries.is_multiple_of(self.restart_interval);
         let prev: &[u8] = if restart { &[] } else { &self.last_key };
@@ -722,32 +917,25 @@ impl WriterState {
         if self.block.is_none() {
             self.reinit_block(typ);
         }
-        // Attempt to add.
-        let opts = self.opts.clone();
-        let fit = {
-            let bw = self
-                .block
-                .as_mut()
-                .ok_or_else(|| Error::InvalidRef("reftable: no active block writer".into()))?;
-            bw.add(rec, &opts)?
-        };
-        if fit {
+        if self.add_to_block(rec)? {
             return Ok(());
         }
         // Block full: flush and retry in a fresh block.
         self.flush_block()?;
         self.reinit_block(typ);
-        let opts = self.opts.clone();
-        let bw = self
-            .block
-            .as_mut()
-            .ok_or_else(|| Error::InvalidRef("reftable: no active block writer".into()))?;
-        if !bw.add(rec, &opts)? {
-            return Err(Error::InvalidRef(
-                "reftable: transaction failure: entry too large".into(),
-            ));
+        if !self.add_to_block(rec)? {
+            return Err(ReftableError::EntryTooLarge.into());
         }
         Ok(())
+    }
+
+    /// Add `rec` to the open block. Returns `Ok(false)` when it does not fit
+    /// (or no block is open).
+    fn add_to_block(&mut self, rec: &EncRecord) -> Result<bool> {
+        match self.block.as_mut() {
+            Some(bw) => bw.add(rec, &self.opts),
+            None => Ok(false),
+        }
     }
 
     fn add_ref(&mut self, r: &RefRecord) -> Result<()> {
@@ -966,32 +1154,16 @@ impl WriterState {
         if self.block.is_none() {
             self.reinit_block(typ);
         }
-        let opts = self.opts.clone();
         let rec = EncRecord::Obj {
             prefix: prefix.clone(),
             offsets: offsets.to_vec(),
         };
-        let fit = {
-            let bw = self
-                .block
-                .as_mut()
-                .ok_or_else(|| Error::InvalidRef("reftable: no active block writer".into()))?;
-            bw.add(&rec, &opts)?
-        };
-        if fit {
+        if self.add_to_block(&rec)? {
             return Ok(());
         }
         self.flush_block()?;
         self.reinit_block(typ);
-        let opts = self.opts.clone();
-        let fit = {
-            let bw = self
-                .block
-                .as_mut()
-                .ok_or_else(|| Error::InvalidRef("reftable: no active block writer".into()))?;
-            bw.add(&rec, &opts)?
-        };
-        if fit {
+        if self.add_to_block(&rec)? {
             return Ok(());
         }
         // Drop offsets entirely.
@@ -999,12 +1171,7 @@ impl WriterState {
             prefix,
             offsets: Vec::new(),
         };
-        let opts = self.opts.clone();
-        let bw = self
-            .block
-            .as_mut()
-            .ok_or_else(|| Error::InvalidRef("reftable: no active block writer".into()))?;
-        bw.add(&rec, &opts)?;
+        self.add_to_block(&rec)?;
         Ok(())
     }
 
@@ -1093,26 +1260,22 @@ impl ReftableReader {
         if data.len() < HEADER_SIZE + FOOTER_V1_SIZE {
             // Could be an empty table (header + footer only = 24 + 68 = 92)
             if data.len() < HEADER_SIZE {
-                return Err(Error::InvalidRef("reftable: file too small".into()));
+                return Err(ReftableError::TooSmall { len: data.len() }.into());
             }
         }
 
         // Parse header
         if &data[0..4] != REFTABLE_MAGIC {
-            return Err(Error::InvalidRef("reftable: bad magic".into()));
+            return Err(ReftableError::BadMagic.into());
         }
         let version = data[4];
         if version != 1 && version != 2 {
-            return Err(Error::InvalidRef(format!(
-                "reftable: unsupported version {version}"
-            )));
+            return Err(ReftableError::UnsupportedVersion { version }.into());
         }
         // Parse footer
         let footer_size = if version == 2 { 72 } else { FOOTER_V1_SIZE };
         if data.len() < footer_size {
-            return Err(Error::InvalidRef(
-                "reftable: file too small for footer".into(),
-            ));
+            return Err(ReftableError::TooSmall { len: data.len() }.into());
         }
         let footer_start = data.len() - footer_size;
         let footer = parse_footer(&data[footer_start..], version)?;
@@ -1351,7 +1514,7 @@ impl ReftableReader {
 
     fn block_record_range(&self, block_pos: usize) -> Result<(usize, usize)> {
         if block_pos + 4 > self.data.len() {
-            return Err(Error::InvalidRef("reftable: truncated block header".into()));
+            return Err(truncated(ReftableField::BlockHeader));
         }
         let block_len = read_u24(&self.data, block_pos + 1);
         let header_len = self.header_len();
@@ -1362,7 +1525,7 @@ impl ReftableReader {
             block_pos + block_len
         };
         if records_end > self.data.len() || records_end < 2 {
-            return Err(Error::InvalidRef("reftable: invalid block length".into()));
+            return Err(ReftableError::InvalidBlockLength.into());
         }
         let records_data_start = block_pos + 4;
         let restart_table_start =
@@ -1491,14 +1654,15 @@ fn decode_index_record(data: &[u8], pos: usize, prev_key: &[u8]) -> Result<(Vec<
     let mut key = Vec::with_capacity(prefix_len as usize + suffix_len);
     if prefix_len > 0 {
         if (prefix_len as usize) > prev_key.len() {
-            return Err(Error::InvalidRef(
-                "reftable: index prefix_len exceeds prev key".into(),
-            ));
+            return Err(ReftableError::PrefixTooLong {
+                field: ReftableField::IndexKey,
+            }
+            .into());
         }
         key.extend_from_slice(&prev_key[..prefix_len as usize]);
     }
     if p + suffix_len > data.len() {
-        return Err(Error::InvalidRef("reftable: index suffix overflows".into()));
+        return Err(truncated(ReftableField::IndexKey));
     }
     key.extend_from_slice(&data[p..p + suffix_len]);
     p += suffix_len;
@@ -1523,20 +1687,20 @@ fn decode_ref_record(
     let mut name = Vec::with_capacity(prefix_len as usize + suffix_len);
     if prefix_len > 0 {
         if (prefix_len as usize) > prev_name.len() {
-            return Err(Error::InvalidRef(
-                "reftable: prefix_len exceeds prev name".into(),
-            ));
+            return Err(ReftableError::PrefixTooLong {
+                field: ReftableField::RefName,
+            }
+            .into());
         }
         name.extend_from_slice(&prev_name[..prefix_len as usize]);
     }
     if p + suffix_len > data.len() {
-        return Err(Error::InvalidRef("reftable: suffix overflows block".into()));
+        return Err(truncated(ReftableField::RefName));
     }
     name.extend_from_slice(&data[p..p + suffix_len]);
     p += suffix_len;
 
-    let name_str = String::from_utf8(name)
-        .map_err(|_| Error::InvalidRef("reftable: invalid UTF-8 in ref name".into()))?;
+    let name_str = String::from_utf8(name).map_err(|_| invalid_utf8(ReftableField::RefName))?;
 
     let (update_index_delta, mut p) = get_varint(data, p)?;
     let update_index = min_update_index + update_index_delta;
@@ -1545,7 +1709,7 @@ fn decode_ref_record(
         VALUE_DELETION => RefValue::Deletion,
         VALUE_ONE_OID => {
             if p + hash_size > data.len() {
-                return Err(Error::InvalidRef("reftable: truncated OID".into()));
+                return Err(truncated(ReftableField::ObjectId));
             }
             let oid = ObjectId::from_bytes(&data[p..p + hash_size])?;
             p += hash_size;
@@ -1553,7 +1717,7 @@ fn decode_ref_record(
         }
         VALUE_TWO_OID => {
             if p + 2 * hash_size > data.len() {
-                return Err(Error::InvalidRef("reftable: truncated OID pair".into()));
+                return Err(truncated(ReftableField::ObjectIdPair));
             }
             let oid = ObjectId::from_bytes(&data[p..p + hash_size])?;
             p += hash_size;
@@ -1566,19 +1730,15 @@ fn decode_ref_record(
             p = p2;
             let target_len = target_len as usize;
             if p + target_len > data.len() {
-                return Err(Error::InvalidRef(
-                    "reftable: truncated symref target".into(),
-                ));
+                return Err(truncated(ReftableField::SymrefTarget));
             }
             let target = String::from_utf8(data[p..p + target_len].to_vec())
-                .map_err(|_| Error::InvalidRef("reftable: invalid UTF-8 in symref".into()))?;
+                .map_err(|_| invalid_utf8(ReftableField::SymrefTarget))?;
             p += target_len;
             RefValue::Symref(target)
         }
         _ => {
-            return Err(Error::InvalidRef(format!(
-                "reftable: unknown value_type {value_type}"
-            )));
+            return Err(ReftableError::UnknownValueType { value_type }.into());
         }
     };
 
@@ -1607,14 +1767,15 @@ fn decode_log_record(
     let mut key = Vec::with_capacity(prefix_len as usize + suffix_len);
     if prefix_len > 0 {
         if (prefix_len as usize) > prev_key.len() {
-            return Err(Error::InvalidRef(
-                "reftable: log prefix_len exceeds prev key".into(),
-            ));
+            return Err(ReftableError::PrefixTooLong {
+                field: ReftableField::LogKey,
+            }
+            .into());
         }
         key.extend_from_slice(&prev_key[..prefix_len as usize]);
     }
     if p + suffix_len > data.len() {
-        return Err(Error::InvalidRef("reftable: log suffix overflows".into()));
+        return Err(truncated(ReftableField::LogKey));
     }
     key.extend_from_slice(&data[p..p + suffix_len]);
     p += suffix_len;
@@ -1623,16 +1784,16 @@ fn decode_log_record(
     let null_pos = key
         .iter()
         .position(|&b| b == 0)
-        .ok_or_else(|| Error::InvalidRef("reftable: log key missing null separator".into()))?;
+        .ok_or(ReftableError::InvalidLogKey)?;
     let refname = String::from_utf8(key[..null_pos].to_vec())
-        .map_err(|_| Error::InvalidRef("reftable: invalid UTF-8 in log refname".into()))?;
+        .map_err(|_| invalid_utf8(ReftableField::RefName))?;
     if null_pos + 9 > key.len() {
-        return Err(Error::InvalidRef("reftable: log key too short".into()));
+        return Err(ReftableError::InvalidLogKey.into());
     }
     let reversed_idx = u64::from_be_bytes(
         key[null_pos + 1..null_pos + 9]
             .try_into()
-            .map_err(|_| Error::InvalidRef("reftable: log key too short".into()))?,
+            .map_err(|_| ReftableError::InvalidLogKey)?,
     );
     let update_index = 0xffffffffffffffffu64 - reversed_idx;
 
@@ -1657,7 +1818,7 @@ fn decode_log_record(
 
     // log_type == 1: standard log data
     if p + 2 * hash_size > data.len() {
-        return Err(Error::InvalidRef("reftable: truncated log OIDs".into()));
+        return Err(truncated(ReftableField::ObjectIdPair));
     }
     let old_id = ObjectId::from_bytes(&data[p..p + hash_size])?;
     p += hash_size;
@@ -1668,27 +1829,27 @@ fn decode_log_record(
     p = p2;
     let name_len = name_len as usize;
     if p + name_len > data.len() {
-        return Err(Error::InvalidRef("reftable: truncated log name".into()));
+        return Err(truncated(ReftableField::LogName));
     }
     let name = String::from_utf8(data[p..p + name_len].to_vec())
-        .map_err(|_| Error::InvalidRef("reftable: invalid UTF-8 in log name".into()))?;
+        .map_err(|_| invalid_utf8(ReftableField::LogName))?;
     p += name_len;
 
     let (email_len, p2) = get_varint(data, p)?;
     p = p2;
     let email_len = email_len as usize;
     if p + email_len > data.len() {
-        return Err(Error::InvalidRef("reftable: truncated log email".into()));
+        return Err(truncated(ReftableField::LogEmail));
     }
     let email = String::from_utf8(data[p..p + email_len].to_vec())
-        .map_err(|_| Error::InvalidRef("reftable: invalid UTF-8 in log email".into()))?;
+        .map_err(|_| invalid_utf8(ReftableField::LogEmail))?;
     p += email_len;
 
     let (time_seconds, p2) = get_varint(data, p)?;
     p = p2;
 
     if p + 2 > data.len() {
-        return Err(Error::InvalidRef("reftable: truncated tz_offset".into()));
+        return Err(truncated(ReftableField::LogTimezone));
     }
     let tz_offset = i16::from_be_bytes([data[p], data[p + 1]]);
     p += 2;
@@ -1697,10 +1858,10 @@ fn decode_log_record(
     p = p2;
     let msg_len = msg_len as usize;
     if p + msg_len > data.len() {
-        return Err(Error::InvalidRef("reftable: truncated log message".into()));
+        return Err(truncated(ReftableField::LogMessage));
     }
     let message = String::from_utf8(data[p..p + msg_len].to_vec())
-        .map_err(|_| Error::InvalidRef("reftable: invalid UTF-8 in log message".into()))?;
+        .map_err(|_| invalid_utf8(ReftableField::LogMessage))?;
     p += msg_len;
 
     Ok((
@@ -1900,10 +2061,8 @@ fn cached_reader_for_name<'a>(
         .table_names
         .iter()
         .position(|n| n == table_name)
-        .ok_or_else(|| {
-            Error::InvalidRef(format!(
-                "reftable stack references missing table {table_name}"
-            ))
+        .ok_or_else(|| ReftableError::MissingTable {
+            name: table_name.to_owned(),
         })?;
     Ok(&cached.readers[idx])
 }
@@ -1953,7 +2112,7 @@ impl TablesListLock {
         self.lock
             .as_ref()
             .map(|lock| lock.lock_path())
-            .ok_or_else(|| Error::Message("tables.list lock was released".into()))
+            .ok_or_else(|| ReftableError::LockReleased.into())
     }
 }
 
@@ -2495,11 +2654,10 @@ impl ReftableStack {
         if self.table_names.len() <= 2 {
             return Ok(());
         }
-        let newest =
-            self.table_names.last().cloned().ok_or_else(|| {
-                Error::InvalidRef("reftable: table stack unexpectedly empty".into())
-            })?;
-        let old_names: Vec<String> = self.table_names[..self.table_names.len() - 1].to_vec();
+        let Some((newest, old_names)) = self.table_names.split_last() else {
+            return Ok(());
+        };
+        let (newest, old_names) = (newest.clone(), old_names.to_vec());
         let prefix_stack = Self::subset_stack(self.reftable_dir.clone(), old_names.clone());
         let refs = prefix_stack.read_refs()?;
         let logs = prefix_stack.read_all_logs()?;
@@ -2688,14 +2846,12 @@ impl ReftableStack {
                 if let Some(expected) = update.expected_old {
                     let current = current_by_name.get(&update.refname).copied();
                     if current != Some(expected) {
-                        return Err(Error::Message(format!(
-                            "ref transaction rejected: '{}' expected {} but found {}",
-                            update.refname,
-                            expected.to_hex(),
-                            current
-                                .map(|o| o.to_hex())
-                                .unwrap_or_else(|| "<absent>".to_owned()),
-                        )));
+                        return Err(ReftableError::ExpectedMismatch {
+                            refname: update.refname.clone(),
+                            expected,
+                            actual: current,
+                        }
+                        .into());
                     }
                 }
             }
@@ -2922,14 +3078,11 @@ impl ReftableStack {
                 "\n"
             };
         fs::write(guard.path()?, &content).map_err(Error::Io)?;
-        let lock = guard
-            .lock
-            .take()
-            .ok_or_else(|| Error::Message("tables.list lock was released".into()))?;
+        let lock = guard.lock.take().ok_or(ReftableError::LockReleased)?;
         lock.commit_to(&tables_list).map_err(|err| match err {
             crate::lockfile::LockError::Io { source, .. } => Error::Io(source),
-            crate::lockfile::LockError::Held { .. } => {
-                Error::InvalidRef("cannot lock references: data is locked".to_owned())
+            crate::lockfile::LockError::Held { path } => {
+                ReftableError::Locked { lock_path: path }.into()
             }
         })?;
         invalidate_stack_table_cache(&self.reftable_dir);
@@ -2955,9 +3108,7 @@ impl ReftableStack {
         .unwrap_or_else(|_| ConfigSet::new());
         let wait = LockWait::reftable_tables_list(Some(&config));
         let file_lock = LockFile::acquire(&lock, wait).map_err(|err| match err {
-            LockError::Held { .. } => {
-                Error::InvalidRef("cannot lock references: data is locked".to_owned())
-            }
+            LockError::Held { path } => ReftableError::Locked { lock_path: path }.into(),
             LockError::Io { source, .. } => Error::Io(source),
         })?;
         Ok(TablesListLock::new(file_lock))
@@ -3020,9 +3171,7 @@ pub(crate) fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathB
 
 fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Result<ObjectId> {
     if depth >= crate::refs::SYMREF_MAXDEPTH {
-        return Err(Error::InvalidRef(format!(
-            "reftable: symlink too deep: {refname}"
-        )));
+        return Err(RefStoreError::SymrefLoop.into());
     }
 
     // On-disk `.git/HEAD` is often a `.invalid` stub; the live symref or OID is in the stack.
@@ -3672,10 +3821,10 @@ fn should_log_ref_updates(git_dir: &Path) -> bool {
 pub fn dump_reftable_blocks(path: &Path) -> Result<String> {
     let data = fs::read(path).map_err(Error::Io)?;
     if data.len() < HEADER_SIZE {
-        return Err(Error::InvalidRef("reftable: file too small".into()));
+        return Err(ReftableError::TooSmall { len: data.len() }.into());
     }
     if &data[0..4] != REFTABLE_MAGIC {
-        return Err(Error::InvalidRef("reftable: bad magic".into()));
+        return Err(ReftableError::BadMagic.into());
     }
     let version = data[4];
     let header_size = if version == 2 { 28 } else { 24 };
@@ -3707,9 +3856,9 @@ pub fn dump_reftable_blocks(path: &Path) -> Result<String> {
             break;
         }
         let block_type = data[pos];
-        if !is_block_type(block_type) {
+        let Some(section) = block_section_name(block_type) else {
             break;
-        }
+        };
 
         // block_size field: be24 at pos+1.
         if pos + 4 > data.len() {
@@ -3758,13 +3907,6 @@ pub fn dump_reftable_blocks(path: &Path) -> Result<String> {
         };
 
         if block_type != section_type {
-            let section = match block_type {
-                BLOCK_TYPE_LOG => "log",
-                BLOCK_TYPE_REF => "ref",
-                BLOCK_TYPE_OBJ => "obj",
-                BLOCK_TYPE_INDEX => "idx",
-                _ => return Err(Error::InvalidRef("reftable: bad block type".into())),
-            };
             section_type = block_type;
             out.push_str(&format!("{section}:\n"));
         }
@@ -3782,8 +3924,16 @@ pub fn dump_reftable_blocks(path: &Path) -> Result<String> {
     Ok(out)
 }
 
-fn is_block_type(t: u8) -> bool {
-    t == BLOCK_TYPE_REF || t == BLOCK_TYPE_LOG || t == BLOCK_TYPE_OBJ || t == BLOCK_TYPE_INDEX
+/// Section label `test-tool dump-reftable -b` prints for a block type, or `None`
+/// when the byte is not a block type.
+fn block_section_name(block_type: u8) -> Option<&'static str> {
+    match block_type {
+        BLOCK_TYPE_LOG => Some("log"),
+        BLOCK_TYPE_REF => Some("ref"),
+        BLOCK_TYPE_OBJ => Some("obj"),
+        BLOCK_TYPE_INDEX => Some("idx"),
+        _ => None,
+    }
 }
 
 fn be16(data: &[u8], off: usize) -> u16 {
@@ -3856,29 +4006,21 @@ fn restart_table_start_for_block(
     records_data_start: usize,
 ) -> Result<usize> {
     if records_end < 2 || records_end > data.len() {
-        return Err(Error::InvalidRef(
-            "reftable: block trailer out of bounds".into(),
-        ));
+        return Err(ReftableError::InvalidBlockLength.into());
     }
     let rc = read_u16(data, records_end - 2);
     if rc > MAX_RESTARTS {
-        return Err(Error::InvalidRef(format!(
-            "reftable: restart count out of range: {rc}"
-        )));
+        return Err(ReftableError::InvalidRestartTable.into());
     }
     let restart_bytes = rc * 3;
     let Some(restart_table_start) = records_end
         .checked_sub(2)
         .and_then(|without_count| without_count.checked_sub(restart_bytes))
     else {
-        return Err(Error::InvalidRef(
-            "reftable: restart table larger than block".into(),
-        ));
+        return Err(ReftableError::InvalidRestartTable.into());
     };
     if restart_table_start < records_data_start {
-        return Err(Error::InvalidRef(
-            "reftable: restart table overlaps block records".into(),
-        ));
+        return Err(ReftableError::InvalidRestartTable.into());
     }
     Ok(restart_table_start)
 }
@@ -3887,18 +4029,20 @@ fn restart_table_start_for_block(
 fn parse_footer(data: &[u8], version: u8) -> Result<Footer> {
     let footer_size = if version == 2 { 72 } else { FOOTER_V1_SIZE };
     if data.len() < footer_size {
-        return Err(Error::InvalidRef("reftable: footer too small".into()));
+        return Err(ReftableError::TooSmall { len: data.len() }.into());
     }
 
     // Verify magic
     if &data[0..4] != REFTABLE_MAGIC {
-        return Err(Error::InvalidRef("reftable: bad footer magic".into()));
+        return Err(ReftableError::BadMagic.into());
     }
     let fver = data[4];
     if fver != version {
-        return Err(Error::InvalidRef(format!(
-            "reftable: footer version mismatch: header={version}, footer={fver}"
-        )));
+        return Err(ReftableError::FooterVersionMismatch {
+            header: version,
+            footer: fver,
+        }
+        .into());
     }
 
     // Footer-size validated above, so every fixed-width slice below is in
@@ -3906,7 +4050,7 @@ fn parse_footer(data: &[u8], version: u8) -> Result<Footer> {
     let read_u64 = |slice: &[u8]| -> Result<u64> {
         let bytes: [u8; 8] = slice
             .try_into()
-            .map_err(|_| Error::InvalidRef("reftable: truncated footer field".into()))?;
+            .map_err(|_| truncated(ReftableField::Footer))?;
         Ok(u64::from_be_bytes(bytes))
     };
 
@@ -3923,13 +4067,15 @@ fn parse_footer(data: &[u8], version: u8) -> Result<Footer> {
     // CRC-32 check
     let crc_bytes: [u8; 4] = data[footer_size - 4..footer_size]
         .try_into()
-        .map_err(|_| Error::InvalidRef("reftable: truncated footer CRC".into()))?;
+        .map_err(|_| truncated(ReftableField::Footer))?;
     let crc_stored = u32::from_be_bytes(crc_bytes);
     let crc_computed = crc32(&data[..footer_size - 4]);
     if crc_stored != crc_computed {
-        return Err(Error::InvalidRef(format!(
-            "reftable: footer CRC mismatch: stored={crc_stored:08x}, computed={crc_computed:08x}"
-        )));
+        return Err(ReftableError::FooterChecksumMismatch {
+            stored: crc_stored,
+            computed: crc_computed,
+        }
+        .into());
     }
 
     Ok(Footer {
@@ -4463,5 +4609,152 @@ mod tests {
 
         let after = fs::read_to_string(&tables_list).unwrap_or_default();
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn truncated_varint_is_typed() {
+        let err = get_varint(&[0x80], 0).expect_err("continuation byte without a successor");
+        assert!(matches!(
+            err,
+            Error::Reftable(ReftableError::Truncated {
+                field: ReftableField::Varint
+            })
+        ));
+        assert!(matches!(
+            get_varint(&[], 0),
+            Err(Error::Reftable(ReftableError::Truncated {
+                field: ReftableField::Varint
+            }))
+        ));
+    }
+
+    #[test]
+    fn writer_rejects_unsorted_refs_with_both_names() {
+        let oid = ObjectId::from_bytes(&[0x11; 20]).expect("oid");
+        let mut writer = ReftableWriter::new(WriteOptions::default(), 1, 1);
+        writer
+            .add_ref(RefRecord {
+                name: "refs/heads/b".to_owned(),
+                update_index: 1,
+                value: RefValue::Val1(oid),
+            })
+            .expect("first ref");
+        let err = writer
+            .add_ref(RefRecord {
+                name: "refs/heads/a".to_owned(),
+                update_index: 1,
+                value: RefValue::Val1(oid),
+            })
+            .expect_err("out of order");
+        match err {
+            Error::Reftable(ReftableError::UnsortedRefs { previous, next }) => {
+                assert_eq!(previous, "refs/heads/b");
+                assert_eq!(next, "refs/heads/a");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reader_reports_footer_version_mismatch_and_short_files() {
+        let data = ReftableWriter::new(WriteOptions::default(), 1, 1)
+            .finish()
+            .expect("empty table");
+        let footer_start = data.len() - FOOTER_V1_SIZE;
+
+        let mut mismatched = data.clone();
+        mismatched[footer_start + 4] = 2;
+        assert!(matches!(
+            ReftableReader::new(mismatched),
+            Err(Error::Reftable(ReftableError::FooterVersionMismatch {
+                header: 1,
+                footer: 2
+            }))
+        ));
+
+        assert!(matches!(
+            ReftableReader::new(data[..10].to_vec()),
+            Err(Error::Reftable(ReftableError::TooSmall { len: 10 }))
+        ));
+        assert!(matches!(
+            ReftableReader::new(data[..HEADER_SIZE + 4].to_vec()),
+            Err(Error::Reftable(ReftableError::TooSmall { .. }))
+        ));
+    }
+
+    #[test]
+    fn write_transaction_reports_expected_mismatch() {
+        use crate::repo::init_repository;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = repo.git_dir();
+        let opts = read_write_options(&git_dir);
+        let current = ObjectId::from_bytes(&[0x21; 20]).expect("oid");
+        let stale = ObjectId::from_bytes(&[0x22; 20]).expect("oid");
+        let mut stack = ReftableStack::open(&git_dir).expect("open");
+        stack
+            .write_transaction(
+                vec![ReftableTransactionUpdate {
+                    refname: "refs/heads/topic".to_owned(),
+                    value: Some(RefValue::Val1(current)),
+                    log: None,
+                    expected_old: None,
+                }],
+                &opts,
+            )
+            .expect("seed topic");
+
+        let update = |refname: &str| ReftableTransactionUpdate {
+            refname: refname.to_owned(),
+            value: Some(RefValue::Val1(stale)),
+            log: None,
+            expected_old: Some(stale),
+        };
+        match stack.write_transaction(vec![update("refs/heads/topic")], &opts) {
+            Err(Error::Reftable(ReftableError::ExpectedMismatch {
+                refname,
+                expected,
+                actual,
+            })) => {
+                assert_eq!(refname, "refs/heads/topic");
+                assert_eq!(expected, stale);
+                assert_eq!(actual, Some(current));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let err = stack
+            .write_transaction(vec![update("refs/heads/absent")], &opts)
+            .expect_err("absent ref");
+        assert!(matches!(
+            &err,
+            Error::Reftable(ReftableError::ExpectedMismatch { actual: None, .. })
+        ));
+        assert!(err.to_string().ends_with("but found <absent>"), "{err}");
+    }
+
+    #[test]
+    fn error_display_names_the_field() {
+        assert_eq!(
+            ReftableError::Truncated {
+                field: ReftableField::LogEmail
+            }
+            .to_string(),
+            "reftable: truncated log email"
+        );
+        assert_eq!(
+            Error::from(ReftableError::InvalidUtf8 {
+                field: ReftableField::SymrefTarget
+            })
+            .to_string(),
+            "reftable: symref target is not valid UTF-8"
+        );
     }
 }

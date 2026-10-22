@@ -4664,6 +4664,7 @@ pub grit_lib::error::Error::ReflogIndexOutOfRange::index: usize
 pub grit_lib::error::Error::ReflogIndexOutOfRange::refname: alloc::string::String
 pub grit_lib::error::Error::ReflogUnknownRef
 pub grit_lib::error::Error::ReflogUnknownRef::refname: alloc::string::String
+pub grit_lib::error::Error::Reftable(grit_lib::refs::reftable::ReftableError)
 pub grit_lib::error::Error::RemoteReadFailed
 pub grit_lib::error::Error::ReplaySourceAtHead
 pub grit_lib::error::Error::RestoreConflictMissingOurs
@@ -4764,6 +4765,8 @@ impl core::convert::From<grit_lib::porcelain::tag::TagError> for grit_lib::error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::tag::TagError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::prelude::MidxError) -> Self
+impl core::convert::From<grit_lib::refs::reftable::ReftableError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::refs::reftable::ReftableError) -> Self
 impl core::convert::From<grit_lib::refs::store::RefStoreError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::refs::store::RefStoreError) -> Self
 impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::error::Error
@@ -12796,6 +12799,7 @@ pub grit_lib::prelude::Error::ReflogIndexOutOfRange::index: usize
 pub grit_lib::prelude::Error::ReflogIndexOutOfRange::refname: alloc::string::String
 pub grit_lib::prelude::Error::ReflogUnknownRef
 pub grit_lib::prelude::Error::ReflogUnknownRef::refname: alloc::string::String
+pub grit_lib::prelude::Error::Reftable(grit_lib::refs::reftable::ReftableError)
 pub grit_lib::prelude::Error::RemoteReadFailed
 pub grit_lib::prelude::Error::ReplaySourceAtHead
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs
@@ -12896,6 +12900,8 @@ impl core::convert::From<grit_lib::porcelain::tag::TagError> for grit_lib::error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::tag::TagError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::prelude::MidxError) -> Self
+impl core::convert::From<grit_lib::refs::reftable::ReftableError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::refs::reftable::ReftableError) -> Self
 impl core::convert::From<grit_lib::refs::store::RefStoreError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::refs::store::RefStoreError) -> Self
 impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::error::Error
@@ -14886,6 +14892,89 @@ impl core::marker::Unpin for grit_lib::refs::reftable::RefValue
 impl core::marker::UnsafeUnpin for grit_lib::refs::reftable::RefValue
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reftable::RefValue
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reftable::RefValue
+#[non_exhaustive] pub enum grit_lib::refs::reftable::ReftableError
+pub grit_lib::refs::reftable::ReftableError::BadMagic
+pub grit_lib::refs::reftable::ReftableError::EmptyRecordKey
+pub grit_lib::refs::reftable::ReftableError::EntryTooLarge
+pub grit_lib::refs::reftable::ReftableError::ExpectedMismatch
+pub grit_lib::refs::reftable::ReftableError::ExpectedMismatch::actual: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::refs::reftable::ReftableError::ExpectedMismatch::expected: grit_lib::objects::ObjectId
+pub grit_lib::refs::reftable::ReftableError::ExpectedMismatch::refname: alloc::string::String
+pub grit_lib::refs::reftable::ReftableError::FooterChecksumMismatch
+pub grit_lib::refs::reftable::ReftableError::FooterChecksumMismatch::computed: u32
+pub grit_lib::refs::reftable::ReftableError::FooterChecksumMismatch::stored: u32
+pub grit_lib::refs::reftable::ReftableError::FooterVersionMismatch
+pub grit_lib::refs::reftable::ReftableError::FooterVersionMismatch::footer: u8
+pub grit_lib::refs::reftable::ReftableError::FooterVersionMismatch::header: u8
+pub grit_lib::refs::reftable::ReftableError::InvalidBlockLength
+pub grit_lib::refs::reftable::ReftableError::InvalidLogKey
+pub grit_lib::refs::reftable::ReftableError::InvalidRestartTable
+pub grit_lib::refs::reftable::ReftableError::InvalidUtf8
+pub grit_lib::refs::reftable::ReftableError::InvalidUtf8::field: grit_lib::refs::reftable::ReftableField
+pub grit_lib::refs::reftable::ReftableError::LockReleased
+pub grit_lib::refs::reftable::ReftableError::Locked
+pub grit_lib::refs::reftable::ReftableError::Locked::lock_path: std::path::PathBuf
+pub grit_lib::refs::reftable::ReftableError::MissingTable
+pub grit_lib::refs::reftable::ReftableError::MissingTable::name: alloc::string::String
+pub grit_lib::refs::reftable::ReftableError::PrefixTooLong
+pub grit_lib::refs::reftable::ReftableError::PrefixTooLong::field: grit_lib::refs::reftable::ReftableField
+pub grit_lib::refs::reftable::ReftableError::TooSmall
+pub grit_lib::refs::reftable::ReftableError::TooSmall::len: usize
+pub grit_lib::refs::reftable::ReftableError::Truncated
+pub grit_lib::refs::reftable::ReftableError::Truncated::field: grit_lib::refs::reftable::ReftableField
+pub grit_lib::refs::reftable::ReftableError::UnknownValueType
+pub grit_lib::refs::reftable::ReftableError::UnknownValueType::value_type: u8
+pub grit_lib::refs::reftable::ReftableError::UnsortedRefs
+pub grit_lib::refs::reftable::ReftableError::UnsortedRefs::next: alloc::string::String
+pub grit_lib::refs::reftable::ReftableError::UnsortedRefs::previous: alloc::string::String
+pub grit_lib::refs::reftable::ReftableError::UnsupportedVersion
+pub grit_lib::refs::reftable::ReftableError::UnsupportedVersion::version: u8
+impl core::convert::From<grit_lib::refs::reftable::ReftableError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::refs::reftable::ReftableError) -> Self
+impl core::error::Error for grit_lib::refs::reftable::ReftableError
+impl core::fmt::Debug for grit_lib::refs::reftable::ReftableError
+pub fn grit_lib::refs::reftable::ReftableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::refs::reftable::ReftableError
+pub fn grit_lib::refs::reftable::ReftableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::refs::reftable::ReftableError
+impl core::marker::Send for grit_lib::refs::reftable::ReftableError
+impl core::marker::Sync for grit_lib::refs::reftable::ReftableError
+impl core::marker::Unpin for grit_lib::refs::reftable::ReftableError
+impl core::marker::UnsafeUnpin for grit_lib::refs::reftable::ReftableError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reftable::ReftableError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reftable::ReftableError
+#[non_exhaustive] pub enum grit_lib::refs::reftable::ReftableField
+pub grit_lib::refs::reftable::ReftableField::BlockHeader
+pub grit_lib::refs::reftable::ReftableField::Footer
+pub grit_lib::refs::reftable::ReftableField::IndexKey
+pub grit_lib::refs::reftable::ReftableField::LogEmail
+pub grit_lib::refs::reftable::ReftableField::LogKey
+pub grit_lib::refs::reftable::ReftableField::LogMessage
+pub grit_lib::refs::reftable::ReftableField::LogName
+pub grit_lib::refs::reftable::ReftableField::LogTimezone
+pub grit_lib::refs::reftable::ReftableField::ObjectId
+pub grit_lib::refs::reftable::ReftableField::ObjectIdPair
+pub grit_lib::refs::reftable::ReftableField::RefName
+pub grit_lib::refs::reftable::ReftableField::SymrefTarget
+pub grit_lib::refs::reftable::ReftableField::Varint
+impl core::clone::Clone for grit_lib::refs::reftable::ReftableField
+pub fn grit_lib::refs::reftable::ReftableField::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::reftable::ReftableField
+impl core::cmp::PartialEq for grit_lib::refs::reftable::ReftableField
+pub fn grit_lib::refs::reftable::ReftableField::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::refs::reftable::ReftableField
+pub fn grit_lib::refs::reftable::ReftableField::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::refs::reftable::ReftableField
+pub fn grit_lib::refs::reftable::ReftableField::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::refs::reftable::ReftableField
+impl core::marker::StructuralPartialEq for grit_lib::refs::reftable::ReftableField
+impl core::marker::Freeze for grit_lib::refs::reftable::ReftableField
+impl core::marker::Send for grit_lib::refs::reftable::ReftableField
+impl core::marker::Sync for grit_lib::refs::reftable::ReftableField
+impl core::marker::Unpin for grit_lib::refs::reftable::ReftableField
+impl core::marker::UnsafeUnpin for grit_lib::refs::reftable::ReftableField
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reftable::ReftableField
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reftable::ReftableField
 pub struct grit_lib::refs::reftable::LogRecord
 pub grit_lib::refs::reftable::LogRecord::email: alloc::string::String
 pub grit_lib::refs::reftable::LogRecord::message: alloc::string::String

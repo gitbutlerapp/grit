@@ -645,6 +645,10 @@ pub enum Error {
     #[error(transparent)]
     RefStore(#[from] crate::refs::store::RefStoreError),
 
+    /// Reftable file, stack, or transaction failure.
+    #[error(transparent)]
+    Reftable(#[from] crate::reftable::ReftableError),
+
     /// Filter or EOL conversion failure.
     #[error(transparent)]
     Filter(#[from] FilterError),

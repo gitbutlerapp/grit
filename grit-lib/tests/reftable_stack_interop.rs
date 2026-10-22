@@ -19,7 +19,7 @@ use grit_lib::refs::reftable::{
     reftable_read_reflog, reftable_read_symbolic_ref, reftable_reflog_exists,
     reftable_replace_reflog, reftable_resolve_ref, reftable_write_ref,
     reftable_write_ref_with_write_options, reftable_write_symref, reftable_write_transaction,
-    RefValue, ReftableStack, ReftableTransactionUpdate,
+    RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate,
 };
 use grit_lib::refs::{read_head, resolve_ref};
 use grit_lib::state::{resolve_head, HeadState};
@@ -342,8 +342,11 @@ fn stack_tables_list_and_update_index_mechanics() {
     )
     .expect_err("write with lock held");
     assert!(
-        matches!(err, Error::InvalidRef(_)),
-        "expected InvalidRef lock error, got {err:?}"
+        matches!(
+            &err,
+            Error::Reftable(ReftableError::Locked { lock_path }) if *lock_path == lock
+        ),
+        "expected reftable Locked error, got {err:?}"
     );
     assert_eq!(
         fs::read_to_string(&list_path).expect("tables.list after failed write"),
