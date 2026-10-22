@@ -418,6 +418,9 @@ fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> PullOu
             ahead: None,
             behind: None,
         },
+        IntegrateBranchOutcome::Squashed | IntegrateBranchOutcome::Stopped => {
+            unreachable!("pull does not use squash or no-commit merge modes")
+        }
     }
 }
 

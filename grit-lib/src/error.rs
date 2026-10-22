@@ -753,6 +753,10 @@ pub enum Error {
     #[error("{0}")]
     Message(String),
 
+    /// A merge was requested with fast-forward only, but the histories diverged.
+    #[error("not possible to fast-forward; refusing to merge")]
+    NotFastForward,
+
     /// The index tree matches the parent commit tree and [`allow_empty`](crate::porcelain::commit::CommitRequest::allow_empty) is false.
     #[error("nothing to commit")]
     NothingToCommit,

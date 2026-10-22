@@ -38,7 +38,10 @@ use crate::ident_resolve::{
     resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
 };
 use crate::index::{Index, IndexEntry};
-use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
+use crate::merge_base::{
+    is_ancestor, merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of,
+    ReachableWalkLimit,
+};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_three_way,
@@ -250,7 +253,42 @@ pub struct MergeConflictDetail {
     pub kind: MergeConflictKind,
 }
 
-/// Options for [`integrate_branch`].
+/// Fast-forward policy for branch integration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum FastForwardPolicy {
+    /// Fast-forward when `other_oid` is a descendant of `into_oid`.
+    #[default]
+    Allow,
+    /// Refuse when a fast-forward is not possible; nothing changes.
+    Only,
+    /// Always record a merge commit when a real merge is required, even when a fast-forward is possible.
+    Never,
+}
+
+/// Whether integration stops before creating a commit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MergeCommitMode {
+    /// Create a merge commit (or fast-forward) on success without conflicts.
+    #[default]
+    Commit,
+    /// Apply the merge to the index and worktree but leave `MERGE_HEAD` for a follow-up commit.
+    NoCommit,
+    /// Apply the merged tree and write `SQUASH_MSG` without updating the branch ref.
+    Squash,
+}
+
+/// Options for [`integrate_branch_with`].
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct MergeOptions {
+    /// When to fast-forward versus creating a merge commit.
+    pub fast_forward: FastForwardPolicy,
+    /// Whether to stop before committing.
+    pub commit: MergeCommitMode,
+    /// Overrides the default merge commit / `MERGE_MSG` text when set.
+    pub message: Option<String>,
+}
+
+/// Options for [`integrate_branch_with_options`] (pull fast-forward toggle).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IntegrateBranchOptions {
     /// When `false`, a fast-forward is not performed even when `other_oid` is a
@@ -262,6 +300,19 @@ impl Default for IntegrateBranchOptions {
     fn default() -> Self {
         Self {
             allow_fast_forward: true,
+        }
+    }
+}
+
+impl From<IntegrateBranchOptions> for MergeOptions {
+    fn from(options: IntegrateBranchOptions) -> Self {
+        Self {
+            fast_forward: if options.allow_fast_forward {
+                FastForwardPolicy::Allow
+            } else {
+                FastForwardPolicy::Never
+            },
+            ..Self::default()
         }
     }
 }
@@ -292,6 +343,10 @@ pub enum IntegrateBranchOutcome {
         /// Per-path conflict classification (same order as `paths` after sorting).
         details: Vec<MergeConflictDetail>,
     },
+    /// A `--squash` merge applied the merged tree and wrote `SQUASH_MSG`.
+    Squashed,
+    /// A `--no-commit` merge applied the merged tree and recorded merge state.
+    Stopped,
 }
 
 /// Integrate `other_oid` into the branch `into_ref` (currently at `into_oid`).
@@ -311,28 +366,29 @@ pub fn integrate_branch(
     other_oid: ObjectId,
     label: &str,
 ) -> Result<IntegrateBranchOutcome> {
-    integrate_branch_with_options(
+    integrate_branch_with(
         repo,
         into_ref,
         into_oid,
         other_oid,
         label,
-        IntegrateBranchOptions::default(),
+        &MergeOptions::default(),
     )
 }
 
-/// Like [`integrate_branch`], with explicit fast-forward policy.
+/// Integrate `other_oid` into the branch at `into_ref` with explicit merge options.
 ///
 /// # Errors
 ///
-/// Same as [`integrate_branch`].
-pub fn integrate_branch_with_options(
+/// Same as [`integrate_branch`], plus [`Error::NotFastForward`] when
+/// [`FastForwardPolicy::Only`] cannot fast-forward.
+pub fn integrate_branch_with(
     repo: &Repository,
     into_ref: &str,
     into_oid: ObjectId,
     other_oid: ObjectId,
     label: &str,
-    options: IntegrateBranchOptions,
+    options: &MergeOptions,
 ) -> Result<IntegrateBranchOutcome> {
     if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
         return Ok(IntegrateBranchOutcome::UpToDate);
@@ -340,8 +396,24 @@ pub fn integrate_branch_with_options(
 
     let into_tree = commit_tree(repo, &into_oid)?;
     let other_tree = commit_tree(repo, &other_oid)?;
+    let ff_possible = is_ancestor(repo, into_oid, other_oid)?;
 
-    if options.allow_fast_forward && is_ancestor(repo, into_oid, other_oid)? {
+    if matches!(options.fast_forward, FastForwardPolicy::Only) && !ff_possible {
+        return Err(Error::NotFastForward);
+    }
+
+    if should_take_fast_forward(options, ff_possible) {
+        if matches!(options.commit, MergeCommitMode::Squash) {
+            merge_checkout_tree_transition(repo, Some(&into_tree), &other_tree)?;
+            let mut snapshot = crate::porcelain::worktree_guard::load_worktree_snapshot(repo)?;
+            let ff_index =
+                compose_fast_forward_index(repo, other_tree, into_tree, &snapshot.index)?;
+            snapshot.index = ff_index;
+            repo.write_index(&mut snapshot.index)?;
+            write_squash_msg_file(repo, into_oid, other_oid)?;
+            return Ok(IntegrateBranchOutcome::Squashed);
+        }
+
         merge_checkout_tree_transition(repo, Some(&into_tree), &other_tree)?;
         move_branch(
             repo,
@@ -389,39 +461,208 @@ pub fn integrate_branch_with_options(
         let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
         ensure_merge_tree_transition_allowed(repo, Some(&into_tree), &materialized)?;
         apply_conflict_merge_worktree(repo, &into_tree, &merged)?;
-        record_merge_in_progress(repo.git_dir(), into_oid, other_oid, label)?;
+        if !matches!(options.commit, MergeCommitMode::Squash) {
+            record_merge_in_progress(
+                repo.git_dir(),
+                into_oid,
+                other_oid,
+                merge_message_text(label, options.message.as_deref()),
+            )?;
+        }
         return Ok(IntegrateBranchOutcome::Conflicts { paths, details });
     }
-
-    let config = repo.config()?;
-    let author = strict_commit_identity(repo, config.as_ref(), IdentRole::Author)?;
-    let committer = strict_commit_identity(repo, config.as_ref(), IdentRole::Committer)?;
 
     merge_checkout_tree_transition(repo, Some(&into_tree), &merged.result_tree)?;
     let mut snapshot = crate::porcelain::worktree_guard::load_worktree_snapshot(repo)?;
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, &merged)?;
     repo.write_index(&mut snapshot.index)?;
 
-    let mut commit = CommitData {
-        tree: merged.result_tree,
-        parents: vec![into_oid, other_oid],
-        author,
-        committer,
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("Merge {label}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
+    match options.commit {
+        MergeCommitMode::Squash => {
+            write_squash_msg_file(repo, into_oid, other_oid)?;
+            Ok(IntegrateBranchOutcome::Squashed)
+        }
+        MergeCommitMode::NoCommit => {
+            record_merge_in_progress(
+                repo.git_dir(),
+                into_oid,
+                other_oid,
+                merge_message_text(label, options.message.as_deref()),
+            )?;
+            if matches!(options.fast_forward, FastForwardPolicy::Never) {
+                write_merge_mode_no_ff(repo.git_dir())?;
+            }
+            Ok(IntegrateBranchOutcome::Stopped)
+        }
+        MergeCommitMode::Commit => {
+            let config = repo.config()?;
+            let author = strict_commit_identity(repo, config.as_ref(), IdentRole::Author)?;
+            let committer = strict_commit_identity(repo, config.as_ref(), IdentRole::Committer)?;
+            let mut commit = CommitData {
+                tree: merged.result_tree,
+                parents: vec![into_oid, other_oid],
+                author,
+                committer,
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: merge_message_text(label, options.message.as_deref()),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            };
+            let policy = ChangeIdPolicy::from_config(config.as_ref());
+            stamp_change_id_on_new_commit(repo, &policy, &mut commit)?;
+            let oid = write_commit_object(repo, &commit, None)?;
+            move_branch(repo, into_ref, into_oid, oid, &format!("merge {label}"))?;
+            Ok(IntegrateBranchOutcome::Merged {
+                oid,
+                change_id: change_id(&commit),
+            })
+        }
+    }
+}
+
+/// Like [`integrate_branch`], with explicit fast-forward policy for [`pull`](crate::porcelain::pull).
+///
+/// # Errors
+///
+/// Same as [`integrate_branch_with`].
+pub fn integrate_branch_with_options(
+    repo: &Repository,
+    into_ref: &str,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+    options: IntegrateBranchOptions,
+) -> Result<IntegrateBranchOutcome> {
+    integrate_branch_with(repo, into_ref, into_oid, other_oid, label, &options.into())
+}
+
+fn should_take_fast_forward(options: &MergeOptions, ff_possible: bool) -> bool {
+    if !ff_possible {
+        return false;
+    }
+    if matches!(options.fast_forward, FastForwardPolicy::Never) {
+        return false;
+    }
+    !matches!(options.commit, MergeCommitMode::NoCommit)
+}
+
+fn merge_message_text(label: &str, override_message: Option<&str>) -> String {
+    if let Some(msg) = override_message {
+        let trimmed = msg.trim();
+        if trimmed.is_empty() {
+            return format!("Merge {label}\n");
+        }
+        if msg.ends_with('\n') {
+            return msg.to_owned();
+        }
+        return format!("{trimmed}\n");
+    }
+    format!("Merge {label}\n")
+}
+
+fn write_merge_mode_no_ff(git_dir: &Path) -> Result<()> {
+    fs::write(git_dir.join("MERGE_MODE"), "no-ff\n").map_err(Error::Io)
+}
+
+fn write_squash_msg_file(repo: &Repository, into_oid: ObjectId, other_oid: ObjectId) -> Result<()> {
+    let body = format_git_squash_msg(repo, into_oid, other_oid)?;
+    fs::write(repo.git_dir().join("SQUASH_MSG"), body).map_err(Error::Io)
+}
+
+fn format_git_squash_msg(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+) -> Result<String> {
+    let (_, mut commits) = walk_commits_reachable_excluding_ancestors_of(
+        repo,
+        std::slice::from_ref(&other_oid),
+        std::slice::from_ref(&into_oid),
+        ReachableWalkLimit::Unlimited,
+    )?;
+    commits.reverse();
+    let mut out = String::from("Squashed commit of the following:\n\n");
+    for oid in commits {
+        let obj = repo.odb().read(&oid)?;
+        let commit = parse_commit(&obj.data)?;
+        out.push_str(&format!("commit {}\n", oid.to_hex()));
+        out.push_str(&format!("Author: {}\n", squash_author_line(&commit.author)));
+        out.push_str(&format!("Date:   {}\n\n", squash_date_line(&commit.author)));
+        for line in commit.message.lines() {
+            out.push_str(&format!("    {line}\n"));
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn squash_author_line(author: &str) -> String {
+    let Some(lt) = author.find('<') else {
+        return author.trim().to_owned();
     };
-    let policy = ChangeIdPolicy::from_config(config.as_ref());
-    stamp_change_id_on_new_commit(repo, &policy, &mut commit)?;
-    let oid = write_commit_object(repo, &commit, None)?;
-    move_branch(repo, into_ref, into_oid, oid, &format!("merge {label}"))?;
-    Ok(IntegrateBranchOutcome::Merged {
-        oid,
-        change_id: change_id(&commit),
-    })
+    let Some(gt) = author[lt..].find('>') else {
+        return author.trim().to_owned();
+    };
+    let name = author[..lt].trim();
+    let email = &author[lt..=lt + gt];
+    format!("{name} {email}")
+}
+
+fn squash_date_line(author: &str) -> String {
+    let parts: Vec<&str> = author.rsplitn(3, ' ').collect();
+    if parts.len() < 2 {
+        return String::new();
+    }
+    let ts_str = parts[1];
+    let offset_str = parts[0];
+    let Ok(ts) = ts_str.parse::<i64>() else {
+        return format!("{ts_str} {offset_str}");
+    };
+    let tz_bytes = offset_str.as_bytes();
+    let tz_secs: i64 = if tz_bytes.len() >= 5 {
+        let sign = if tz_bytes[0] == b'-' { -1 } else { 1 };
+        let h: i64 = offset_str[1..3].parse().unwrap_or(0);
+        let m: i64 = offset_str[3..5].parse().unwrap_or(0);
+        sign * (h * 3600 + m * 60)
+    } else {
+        0
+    };
+    let adjusted = ts + tz_secs;
+    let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    let weekday = match dt.weekday() {
+        time::Weekday::Monday => "Mon",
+        time::Weekday::Tuesday => "Tue",
+        time::Weekday::Wednesday => "Wed",
+        time::Weekday::Thursday => "Thu",
+        time::Weekday::Friday => "Fri",
+        time::Weekday::Saturday => "Sat",
+        time::Weekday::Sunday => "Sun",
+    };
+    let month = match dt.month() {
+        time::Month::January => "Jan",
+        time::Month::February => "Feb",
+        time::Month::March => "Mar",
+        time::Month::April => "Apr",
+        time::Month::May => "May",
+        time::Month::June => "Jun",
+        time::Month::July => "Jul",
+        time::Month::August => "Aug",
+        time::Month::September => "Sep",
+        time::Month::October => "Oct",
+        time::Month::November => "Nov",
+        time::Month::December => "Dec",
+    };
+    format!(
+        "{weekday} {month} {:02} {:02}:{:02}:{:02} {} {offset_str}",
+        dt.day(),
+        dt.hour(),
+        dt.minute(),
+        dt.second(),
+        dt.year()
+    )
 }
 
 fn stored_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<Option<ChangeId>> {
@@ -630,7 +871,7 @@ fn record_merge_in_progress(
     git_dir: &Path,
     into_oid: ObjectId,
     other_oid: ObjectId,
-    label: &str,
+    merge_msg: String,
 ) -> Result<()> {
     fs::write(
         git_dir.join("MERGE_HEAD"),
@@ -642,11 +883,7 @@ fn record_merge_in_progress(
         format!("{}\n", into_oid.to_hex()),
     )
     .map_err(Error::Io)?;
-    fs::write(
-        git_dir.join("MERGE_MSG"),
-        format!("Merge branch '{label}'\n"),
-    )
-    .map_err(Error::Io)?;
+    fs::write(git_dir.join("MERGE_MSG"), merge_msg).map_err(Error::Io)?;
     Ok(())
 }
 

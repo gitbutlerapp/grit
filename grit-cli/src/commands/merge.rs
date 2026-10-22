@@ -6,13 +6,15 @@
 
 use crate::context;
 use crate::markdown;
+use crate::message_input::{read_message_input, MessageInputArgs};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
+use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{
-    abort_branch_merge, integrate_branch, IntegrateBranchOutcome, MergeConflictDetail,
-    MergeConflictKind,
+    abort_branch_merge, integrate_branch_with, FastForwardPolicy, IntegrateBranchOutcome,
+    MergeCommitMode, MergeConflictDetail, MergeConflictKind, MergeOptions,
 };
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -20,6 +22,16 @@ use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
+
+/// CLI flags for `grit merge` beyond the branch name and `--abort`.
+#[derive(Debug, Clone, Default)]
+pub struct MergeRunOptions {
+    pub ff_only: bool,
+    pub no_ff: bool,
+    pub no_commit: bool,
+    pub squash: bool,
+    pub message: MessageInputArgs,
+}
 
 /// Merge / pull integration result (`--json` contract).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -30,6 +42,9 @@ pub enum MergeResult {
     Merged,
     Conflicts,
     Aborted,
+    Squashed,
+    Stopped,
+    RefusedNotFf,
     #[allow(dead_code)]
     SetUpstream,
 }
@@ -60,6 +75,10 @@ pub struct MergeOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub conflict_details: Option<Vec<MergeConflictJson>>,
+    /// Suggested follow-up commands for `squashed` and `stopped`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub next_steps: Option<Vec<String>>,
 }
 
 /// One conflicted path in `--json` merge output.
@@ -82,6 +101,7 @@ impl MergeOutcome {
             upstream: None,
             conflicts: None,
             conflict_details: None,
+            next_steps: None,
         }
     }
 
@@ -94,6 +114,7 @@ impl MergeOutcome {
             upstream: None,
             conflicts: None,
             conflict_details: None,
+            next_steps: None,
         }
     }
 
@@ -106,6 +127,53 @@ impl MergeOutcome {
             upstream: None,
             conflicts: None,
             conflict_details: None,
+            next_steps: None,
+        }
+    }
+
+    fn squashed(label: &str) -> Self {
+        Self {
+            result: MergeResult::Squashed,
+            branch: label.to_owned(),
+            oid: None,
+            change_id: None,
+            upstream: None,
+            conflicts: None,
+            conflict_details: None,
+            next_steps: Some(vec![
+                "grit commit".into(),
+                "Review SQUASH_MSG or pass -m / --message-file".into(),
+            ]),
+        }
+    }
+
+    fn stopped(label: &str) -> Self {
+        Self {
+            result: MergeResult::Stopped,
+            branch: label.to_owned(),
+            oid: None,
+            change_id: None,
+            upstream: None,
+            conflicts: None,
+            conflict_details: None,
+            next_steps: Some(vec![
+                "grit commit".into(),
+                "grit merge --continue".into(),
+                "grit merge --abort".into(),
+            ]),
+        }
+    }
+
+    fn refused_not_ff(label: &str) -> Self {
+        Self {
+            result: MergeResult::RefusedNotFf,
+            branch: label.to_owned(),
+            oid: None,
+            change_id: None,
+            upstream: None,
+            conflicts: None,
+            conflict_details: None,
+            next_steps: None,
         }
     }
 
@@ -125,6 +193,7 @@ impl MergeOutcome {
             upstream: None,
             conflicts: Some(paths),
             conflict_details,
+            next_steps: None,
         }
     }
 
@@ -137,6 +206,7 @@ impl MergeOutcome {
             upstream: None,
             conflicts: None,
             conflict_details: None,
+            next_steps: None,
         }
     }
 
@@ -156,6 +226,7 @@ impl MergeOutcome {
             upstream: Some(upstream.to_owned()),
             conflicts: None,
             conflict_details: None,
+            next_steps: None,
         }
     }
 }
@@ -200,6 +271,27 @@ impl HumanRender for MergeOutcome {
                 "Merged {} into the current branch ({short})",
                 self.branch
             ),
+            MergeResult::Squashed => {
+                outln!(
+                    w,
+                    "Squash merge applied from {} — run `grit commit` to record the squashed commit",
+                    self.branch
+                );
+            }
+            MergeResult::Stopped => {
+                outln!(
+                    w,
+                    "Merge from {} applied — run `grit commit` or `grit merge --continue` to finish",
+                    self.branch
+                );
+            }
+            MergeResult::RefusedNotFf => {
+                outln!(
+                    w,
+                    "Cannot fast-forward {} — histories have diverged (use merge without --ff-only)",
+                    self.branch
+                );
+            }
             MergeResult::Conflicts => {
                 if let Some(details) = &self.conflict_details {
                     for item in details {
@@ -242,7 +334,7 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
-pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
+pub fn run(branch: Option<&str>, abort: bool, options: MergeRunOptions) -> Result<MergeOutcome> {
     let repo = context::discover()?;
 
     if abort {
@@ -264,11 +356,35 @@ pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
     };
 
     let other_oid = resolve_branch(&repo, branch)?;
-    integrate(&repo, &refname, head_oid, other_oid, branch)
+    let merge_options = build_merge_options(&options)?;
+    integrate_with_options(&repo, &refname, head_oid, other_oid, branch, &merge_options)
+}
+
+fn build_merge_options(run: &MergeRunOptions) -> Result<MergeOptions> {
+    let fast_forward = if run.ff_only {
+        FastForwardPolicy::Only
+    } else if run.no_ff {
+        FastForwardPolicy::Never
+    } else {
+        FastForwardPolicy::Allow
+    };
+    let commit = if run.squash {
+        MergeCommitMode::Squash
+    } else if run.no_commit {
+        MergeCommitMode::NoCommit
+    } else {
+        MergeCommitMode::Commit
+    };
+    Ok(MergeOptions {
+        fast_forward,
+        commit,
+        message: read_message_input(&run.message)?,
+    })
 }
 
 /// Integrate `other` into the branch `into_ref` (currently at `into_oid`):
-/// up-to-date, fast-forward, or three-way merge. Shared with `grit pull`.
+/// up-to-date, fast-forward, or three-way merge. Retained for callers that merge via this helper.
+#[allow(dead_code)]
 pub fn integrate(
     repo: &Repository,
     into_ref: &str,
@@ -276,16 +392,44 @@ pub fn integrate(
     other_oid: ObjectId,
     label: &str,
 ) -> Result<MergeOutcome> {
-    match integrate_branch(repo, into_ref, into_oid, other_oid, label)? {
-        IntegrateBranchOutcome::UpToDate => Ok(MergeOutcome::up_to_date(label)),
+    integrate_with_options(
+        repo,
+        into_ref,
+        into_oid,
+        other_oid,
+        label,
+        &MergeOptions::default(),
+    )
+}
+
+fn integrate_with_options(
+    repo: &Repository,
+    into_ref: &str,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+    options: &MergeOptions,
+) -> Result<MergeOutcome> {
+    match integrate_branch_with(repo, into_ref, into_oid, other_oid, label, options) {
+        Ok(outcome) => Ok(map_integrate_outcome(outcome, label)),
+        Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label)),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> MergeOutcome {
+    match outcome {
+        IntegrateBranchOutcome::UpToDate => MergeOutcome::up_to_date(label),
         IntegrateBranchOutcome::FastForward { oid, change_id } => {
-            Ok(MergeOutcome::fast_forward(label, oid, change_id))
+            MergeOutcome::fast_forward(label, oid, change_id)
         }
         IntegrateBranchOutcome::Merged { oid, change_id } => {
-            Ok(MergeOutcome::merged(label, oid, change_id))
+            MergeOutcome::merged(label, oid, change_id)
         }
+        IntegrateBranchOutcome::Squashed => MergeOutcome::squashed(label),
+        IntegrateBranchOutcome::Stopped => MergeOutcome::stopped(label),
         IntegrateBranchOutcome::Conflicts { details, .. } => {
-            Ok(MergeOutcome::conflicts(label, details))
+            MergeOutcome::conflicts(label, details)
         }
     }
 }
@@ -319,6 +463,9 @@ mod tests {
                 "fast_forward",
             ),
             (MergeOutcome::merged("topic", oid, None), "merged"),
+            (MergeOutcome::squashed("topic"), "squashed"),
+            (MergeOutcome::stopped("topic"), "stopped"),
+            (MergeOutcome::refused_not_ff("topic"), "refused_not_ff"),
             (
                 MergeOutcome::conflicts(
                     "topic",

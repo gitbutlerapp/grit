@@ -6,7 +6,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{
-    commit_with_scope, default_commit_scope, CommitRequest, CommitScope,
+    commit_with_scope, default_commit_scope, pending_commit_message, CommitRequest, CommitScope,
 };
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{resolve_head, HeadState};
@@ -90,7 +90,14 @@ pub fn run(
     let message = match message {
         Some(m) if !m.trim().is_empty() => Some(m),
         None if amend => None,
-        _ => {
+        None => pending_commit_message(&repo)
+            .context("could not read pending commit message")?
+            .filter(|m| !m.trim().is_empty()),
+        _ => None,
+    };
+    let message = match message {
+        Some(m) => Some(m),
+        None => {
             if matches!(scope, CommitScope::AutoStage) {
                 stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
             }

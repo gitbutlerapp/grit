@@ -88,7 +88,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 
 ## Combining work
 
-- `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`).
+- `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`). Common flags: `--ff-only` (exit 128 when diverged), `--no-ff`, `--squash` (writes `SQUASH_MSG`; finish with `grit commit`), `--no-commit` (Git merge state; finish with `grit commit`), `-m` / `--message-file`.
 - `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
 - `grit revert <commit>` undoes one non-merge commit with a new inverse commit (`Revert "…"` message).
 - On a conflict these commands list the conflicting files, exit 1 and change nothing. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (same rules as `git restore`; index stays unmerged). To finish a merge, pick, or revert, fix the files, `grit add` the paths, and `grit commit`, or run the matching `git` command on the same repo.

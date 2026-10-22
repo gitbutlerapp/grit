@@ -22,7 +22,7 @@ use crate::repo::Repository;
 use crate::signing::{
     extra_headers_without_commit_signatures, should_sign_commit, sign_serialized_commit, GpgConfig,
 };
-use crate::state::{finish_merge_state, read_merge_heads, resolve_head, HeadState};
+use crate::state::{finish_merge_state, read_merge_heads, read_merge_msg, resolve_head, HeadState};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{
     cache_tree_extension_valid, is_empty_tree_oid, write_tree_update_index, WriteTreeFlags,
@@ -94,6 +94,22 @@ pub fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
     } else {
         CommitScope::Staged
     }
+}
+
+/// Default message for the next commit when `SQUASH_MSG` or merge `MERGE_MSG` is present.
+///
+/// # Errors
+///
+/// Propagates I/O and merge-state read failures.
+pub fn pending_commit_message(repo: &Repository) -> Result<Option<String>> {
+    let squash = repo.git_dir().join("SQUASH_MSG");
+    if squash.is_file() {
+        return fs::read_to_string(squash).map_err(Error::Io).map(Some);
+    }
+    if !read_merge_heads(repo.git_dir())?.is_empty() {
+        return read_merge_msg(repo.git_dir());
+    }
+    Ok(None)
 }
 
 /// Record a commit using `scope` to decide how the index is prepared.
@@ -390,6 +406,11 @@ fn create_commit_with_index(
     }
 
     let mut message = req.message.trim().to_owned();
+    if message.is_empty() && !req.amend {
+        if let Some(pending) = pending_commit_message(repo)? {
+            message = pending;
+        }
+    }
     if req.amend && message.is_empty() {
         message = amend_default_message.unwrap_or_default();
     }

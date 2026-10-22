@@ -1,0 +1,214 @@
+//! Merge option compatibility with the system `git` binary.
+
+use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::error::Error;
+use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
+use grit_lib::porcelain::merge::{
+    integrate_branch_with, FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
+};
+use grit_lib::repo::Repository;
+use grit_test_support::git;
+use std::process::Command;
+
+fn grit_repo(tmp: &tempfile::TempDir) -> Repository {
+    Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("open grit repo")
+}
+
+fn setup_identities(path: &std::path::Path) {
+    git(path, &["config", "user.email", "t@example.com"]);
+    git(path, &["config", "user.name", "Test"]);
+}
+
+fn diverged_repo() -> (tempfile::TempDir, ObjectId, ObjectId) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main"]);
+    setup_identities(tmp.path());
+    std::fs::write(tmp.path().join("shared.txt"), "base\n").expect("write");
+    git(tmp.path(), &["add", "shared.txt"]);
+    git(tmp.path(), &["commit", "-m", "base"]);
+    git(tmp.path(), &["switch", "-c", "topic"]);
+    std::fs::write(tmp.path().join("shared.txt"), "topic\n").expect("write");
+    git(tmp.path(), &["add", "shared.txt"]);
+    git(tmp.path(), &["commit", "-m", "topic"]);
+    let topic: ObjectId = git(tmp.path(), &["rev-parse", "topic"])
+        .trim()
+        .parse()
+        .expect("topic");
+    git(tmp.path(), &["checkout", "main"]);
+    std::fs::write(tmp.path().join("main-only.txt"), "main\n").expect("write");
+    git(tmp.path(), &["add", "main-only.txt"]);
+    git(tmp.path(), &["commit", "-m", "main"]);
+    let main: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .expect("main");
+    (tmp, main, topic)
+}
+
+fn linear_ff_repo() -> (tempfile::TempDir, ObjectId, ObjectId) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main"]);
+    setup_identities(tmp.path());
+    std::fs::write(tmp.path().join("f.txt"), "a\n").expect("write");
+    git(tmp.path(), &["add", "f.txt"]);
+    git(tmp.path(), &["commit", "-m", "base"]);
+    let main: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .expect("main");
+    git(tmp.path(), &["switch", "-c", "topic"]);
+    std::fs::write(tmp.path().join("f.txt"), "b\n").expect("write");
+    git(tmp.path(), &["add", "f.txt"]);
+    git(tmp.path(), &["commit", "-m", "topic"]);
+    let topic: ObjectId = git(tmp.path(), &["rev-parse", "topic"])
+        .trim()
+        .parse()
+        .expect("topic");
+    git(tmp.path(), &["switch", "main"]);
+    (tmp, main, topic)
+}
+
+#[test]
+fn ff_only_refuses_divergent_and_changes_nothing() {
+    let (tmp, main, topic) = diverged_repo();
+    let head_before = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let index_before = std::fs::read(tmp.path().join(".git/index")).expect("index");
+
+    let repo = grit_repo(&tmp);
+    let err = integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions {
+            fast_forward: FastForwardPolicy::Only,
+            ..MergeOptions::default()
+        },
+    )
+    .expect_err("ff-only must fail");
+    assert!(matches!(err, Error::NotFastForward));
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]).trim(), head_before);
+    assert_eq!(
+        std::fs::read(tmp.path().join(".git/index")).expect("index"),
+        index_before
+    );
+    git(tmp.path(), &["fsck", "--strict"]);
+}
+
+#[test]
+fn no_ff_creates_two_parent_commit_git_fsck_clean() {
+    let (tmp, main, topic) = linear_ff_repo();
+    let repo = grit_repo(&tmp);
+    let outcome = integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions {
+            fast_forward: FastForwardPolicy::Never,
+            ..MergeOptions::default()
+        },
+    )
+    .expect("no-ff merge");
+    let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
+        panic!("expected merged, got {outcome:?}");
+    };
+    let obj = repo.odb().read(&oid).expect("read merge commit");
+    assert_eq!(obj.kind, ObjectKind::Commit);
+    let commit = parse_commit(&obj.data).expect("parse");
+    assert_eq!(commit.parents.len(), 2);
+    assert_eq!(commit.parents[0], main);
+    assert_eq!(commit.parents[1], topic);
+    git(tmp.path(), &["fsck", "--strict"]);
+}
+
+#[test]
+fn squash_writes_squash_msg_no_merge_head() {
+    let (tmp, main, topic) = linear_ff_repo();
+    let repo = grit_repo(&tmp);
+    let outcome = integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions {
+            commit: MergeCommitMode::Squash,
+            ..MergeOptions::default()
+        },
+    )
+    .expect("squash merge");
+    assert_eq!(outcome, IntegrateBranchOutcome::Squashed);
+    assert!(!tmp.path().join(".git/MERGE_HEAD").exists());
+    assert!(tmp.path().join(".git/SQUASH_MSG").exists());
+    assert_eq!(
+        git(tmp.path(), &["rev-parse", "HEAD"]).trim(),
+        main.to_hex()
+    );
+    git(tmp.path(), &["commit", "--no-edit"]);
+    let parent_count = git(tmp.path(), &["rev-list", "--count", "-n", "1", "HEAD"])
+        .trim()
+        .to_owned();
+    assert_eq!(parent_count, "1", "squash commit must be single-parent");
+    git(tmp.path(), &["fsck", "--strict"]);
+}
+
+#[test]
+fn no_commit_state_readable_by_git() {
+    let (tmp, main, topic) = linear_ff_repo();
+    let repo = grit_repo(&tmp);
+    let outcome = integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions {
+            commit: MergeCommitMode::NoCommit,
+            ..MergeOptions::default()
+        },
+    )
+    .expect("no-commit merge");
+    assert_eq!(outcome, IntegrateBranchOutcome::Stopped);
+    assert!(tmp.path().join(".git/MERGE_HEAD").exists());
+    let status = Command::new("git")
+        .current_dir(tmp.path())
+        .args(["status"])
+        .output()
+        .expect("git status");
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        stdout.contains("merging") || stdout.contains("Merging"),
+        "git status should report merge in progress: {stdout}"
+    );
+    git(tmp.path(), &["commit", "--no-edit"]);
+    git(tmp.path(), &["fsck", "--strict"]);
+}
+
+#[test]
+fn message_override_used() {
+    let (tmp, main, topic) = diverged_repo();
+    let repo = grit_repo(&tmp);
+    let custom = "Custom merge title\n";
+    let outcome = integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions {
+            message: Some(custom.to_owned()),
+            ..MergeOptions::default()
+        },
+    )
+    .expect("merge with message");
+    let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
+        panic!("expected merged, got {outcome:?}");
+    };
+    let obj = repo.odb().read(&oid).expect("read commit");
+    let commit = parse_commit(&obj.data).expect("parse");
+    assert_eq!(commit.message, custom);
+    git(tmp.path(), &["fsck", "--strict"]);
+}
