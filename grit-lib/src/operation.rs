@@ -3,6 +3,13 @@
 //! Merge, cherry-pick, revert (and later rebase) use the same [`Conflict`] shapes and
 //! [`ConflictKind`] names. Status porcelain uses a separate, Git-compatible
 //! [`ConflictKind`](crate::porcelain::status::ConflictKind) for `--porcelain=v2` XY codes.
+//!
+//! ```rust
+//! use grit_lib::operation::ConflictKind;
+//! # fn main() {
+//! assert_eq!(ConflictKind::Content.as_str(), "content");
+//! # }
+//! ```
 
 use crate::diff::merge_trees::TreeMergeOutput;
 use crate::index::Index;
