@@ -3577,4 +3577,115 @@ mod status_op_tests {
             "ignored paths must match git status --ignored --porcelain (!! lines)"
         );
     }
+
+    #[test]
+    fn split_tracked_untracked_tasks_only_splits_plain_recursions() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .output()
+                .expect("spawn git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+        fs::create_dir_all(root.join("pkg/a/inner")).unwrap();
+        fs::write(root.join("pkg/a/f1"), b"1\n").unwrap();
+        fs::write(root.join("pkg/a/inner/f2"), b"2\n").unwrap();
+        git(&["add", "pkg"]);
+        git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,pkg/gl",
+        ]);
+        fs::create_dir_all(root.join("pkg/gl")).unwrap();
+        fs::write(root.join("pkg/gl/in-sub"), b"s\n").unwrap();
+        fs::create_dir_all(root.join("pkg/u")).unwrap();
+        fs::write(root.join("pkg/u/new"), b"n\n").unwrap();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let index = repo.load_index().unwrap();
+        let rules = crate::worktree_rules::WorktreeRules::from_repository(&repo, &index).unwrap();
+        let mut matcher = rules.ignore().clone();
+        let tracked =
+            crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(&index, false);
+        let gitlinks: HashSet<String> = ["pkg/gl".to_owned()].into_iter().collect();
+        let root_tasks: Vec<UntrackedEntryTask> = named_entries_sorted(fs::read_dir(root).unwrap())
+            .into_iter()
+            .filter(|(name, _)| name.as_slice() == b"pkg")
+            .map(|(name, entry)| UntrackedEntryTask {
+                parent: Arc::from(""),
+                name,
+                entry,
+            })
+            .collect();
+
+        let tasks = split_tracked_untracked_tasks(
+            root_tasks,
+            usize::MAX,
+            &repo,
+            &index,
+            &gitlinks,
+            false,
+            &tracked,
+            &mut matcher,
+        );
+        let queued: Vec<(String, String)> = tasks
+            .iter()
+            .map(|t| {
+                (
+                    t.parent.to_string(),
+                    String::from_utf8_lossy(&t.name).into_owned(),
+                )
+            })
+            .collect();
+        let expected: Vec<(String, String)> = [
+            ("pkg/a", "f1"),
+            ("pkg/a/inner", "f2"),
+            ("pkg", "gl"),
+            ("pkg", "u"),
+        ]
+        .into_iter()
+        .map(|(p, n)| (p.to_owned(), n.to_owned()))
+        .collect();
+        assert_eq!(
+            queued, expected,
+            "tracked directories split in order; the gitlink and the untracked directory stay whole"
+        );
+
+        let one_round = split_tracked_untracked_tasks(
+            named_entries_sorted(fs::read_dir(root).unwrap())
+                .into_iter()
+                .filter(|(name, _)| name.as_slice() == b"pkg")
+                .map(|(name, entry)| UntrackedEntryTask {
+                    parent: Arc::from(""),
+                    name,
+                    entry,
+                })
+                .collect(),
+            2,
+            &repo,
+            &index,
+            &gitlinks,
+            false,
+            &tracked,
+            &mut matcher,
+        );
+        assert_eq!(
+            one_round.len(),
+            3,
+            "splitting stops once enough directories are queued"
+        );
+    }
 }
