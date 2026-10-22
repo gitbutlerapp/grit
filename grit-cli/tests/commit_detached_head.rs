@@ -1,4 +1,4 @@
-//! GitHub issue #956: grit commit on detached HEAD must fail without staging.
+//! Detached HEAD commits (GitHub issue #1513) and failed-commit index safety (#956).
 
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
@@ -112,9 +112,14 @@ fn git_status_short(dir: &Path) -> String {
     git(dir, &["status", "--short"]).stdout
 }
 
+fn head_oid(dir: &Path) -> String {
+    git_ok(dir, &["rev-parse", "HEAD"]);
+    git(dir, &["rev-parse", "HEAD"]).stdout.trim().to_owned()
+}
+
 #[test]
-fn commit_on_detached_head_fails_without_staging() -> TestResult {
-    let scratch = Scratch::new("956")?;
+fn commit_on_detached_head_advances_head_and_git_fsck() -> TestResult {
+    let scratch = Scratch::new("1513")?;
     let root = scratch.path();
     gs(root, ["init"]);
     git_ok(root, &["config", "user.name", "R"]);
@@ -122,29 +127,46 @@ fn commit_on_detached_head_fails_without_staging() -> TestResult {
     fs::write(root.join("a.txt"), b"a\n")?;
     let first = gs(root, ["commit", "-m", "one"]);
     assert_eq!(first.status, Some(0), "{}", first.dump());
+    let tip_before_detach = head_oid(root);
     git_ok(root, &["checkout", "--detach"]);
-    fs::write(root.join("e.txt"), b"y\n")?;
-    assert_eq!(git_status_short(root).trim(), "?? e.txt");
+    assert_eq!(head_oid(root), tip_before_detach);
 
-    let human = gs(root, ["commit", "-m", "x"]);
-    assert_ne!(human.status, Some(0), "{}", human.dump());
+    fs::write(root.join("d.txt"), b"d\n")?;
+    assert_eq!(git_status_short(root).trim(), "?? d.txt");
+
+    let human = gs(root, ["commit", "-m", "detached"]);
+    assert_eq!(human.status, Some(0), "{}", human.dump());
     assert!(
-        human.stderr.contains("detached"),
-        "human stderr should mention detached HEAD: {}",
+        human.stdout.contains("detached HEAD"),
+        "human output should label detached HEAD: {}",
         human.dump()
     );
-    assert_eq!(
-        git_status_short(root).trim(),
-        "?? e.txt",
-        "index must stay unchanged after refused commit"
-    );
+    assert_ne!(head_oid(root), tip_before_detach);
+    assert_eq!(git_status_short(root).trim(), "");
 
-    let amend = gs(root, ["commit", "--amend", "-m", "amend"]);
-    assert_ne!(amend.status, Some(0), "{}", amend.dump());
+    git_ok(root, &["fsck", "--strict"]);
+
+    Ok(())
+}
+
+#[test]
+fn failed_commit_on_detached_head_does_not_mutate_head() -> TestResult {
+    let scratch = Scratch::new("956-fail")?;
+    let root = scratch.path();
+    gs(root, ["init"]);
+    git_ok(root, &["config", "user.name", "R"]);
+    git_ok(root, &["config", "user.email", "r@e.com"]);
+    fs::write(root.join("a.txt"), b"a\n")?;
+    assert_eq!(gs(root, ["commit", "-m", "one"]).status, Some(0));
+    git_ok(root, &["checkout", "--detach"]);
+    let head_at_detach = head_oid(root);
+
+    let nothing = gs(root, ["commit", "-m", "noop"]);
+    assert_ne!(nothing.status, Some(0), "{}", nothing.dump());
     assert_eq!(
-        git_status_short(root).trim(),
-        "?? e.txt",
-        "amend on detached HEAD must not stage either"
+        head_oid(root),
+        head_at_detach,
+        "nothing-to-commit must not advance detached HEAD"
     );
 
     Ok(())

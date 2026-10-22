@@ -140,8 +140,7 @@ pub fn run(
     let repo = context::discover()?;
 
     match resolve_head(repo.git_dir())? {
-        HeadState::Branch { .. } => {}
-        HeadState::Detached { .. } => bail!("HEAD is detached; grit commit needs a branch"),
+        HeadState::Branch { .. } | HeadState::Detached { .. } => {}
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     }
 
@@ -388,7 +387,6 @@ fn scope_json(scope: &CommitScope) -> CommitScopeJson {
 fn map_commit_error(err: Error) -> anyhow::Error {
     match err {
         Error::NothingToCommit => anyhow::anyhow!("nothing to commit — working tree clean"),
-        Error::DetachedHead => anyhow::anyhow!("HEAD is detached; grit commit needs a branch"),
         Error::IndexUnmerged => anyhow::anyhow!(
             "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again"
         ),

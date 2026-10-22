@@ -70,7 +70,7 @@ $ grit commit -m "Explain what changed and why"
 
 `grit add --json` returns `{added, modified, removed, intent_to_add, dry_run, count, staged}` with repository-relative paths. Use `--dry-run` before bulk staging to bound agent work; path lists are sorted and stable. With `--patch-file`, paths come from the patch (same JSON fields as path-based staging).
 
-`grit commit` fails with "nothing to commit" on a clean tree unless you pass `--allow-empty`. It also refuses a detached HEAD.
+`grit commit` fails with "nothing to commit" on a clean tree unless you pass `--allow-empty`. On detached HEAD it advances `HEAD` without moving a branch; use `grit switch -c <name>` to keep the commits on a new branch.
 
 Each commit gets a stable **`change-id`** header (on by default) that survives `--amend`. Disable with `grit config grit.changeIds false` when you need Git-identical commit objects. See the docs site section on change ids for derivation and testing config.
 

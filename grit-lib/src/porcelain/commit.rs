@@ -28,7 +28,10 @@ use crate::porcelain::add::{stage_on_index, StageMode, StageOptions};
 use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
 use crate::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository;
 use crate::progress::ProgressSink;
-use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
+use crate::refs::{
+    update_branch_for_commit_with_config, update_detached_head_for_commit_with_config,
+    BranchCommitRefUpdate,
+};
 use crate::repo::Repository;
 use crate::signing::{
     extra_headers_without_commit_signatures, should_sign_commit, sign_serialized_commit, GpgConfig,
@@ -191,7 +194,7 @@ pub fn commit_with_scope(
 /// Preview a commit for `scope` without mutating the repository (objects, index on disk, refs, hooks).
 ///
 /// Uses in-memory blob hashing during staging (no new loose objects) and returns the same validation
-/// errors as [`commit_with_scope`] for detached HEAD, unmerged index, and nothing-to-commit.
+/// errors as [`commit_with_scope`] for unmerged index and nothing-to-commit.
 ///
 /// # Errors
 ///
@@ -448,7 +451,7 @@ fn enrich_commit_message(
 pub struct CommitOutcome {
     /// OID of the new commit object written to the object database.
     pub oid: ObjectId,
-    /// Short branch name (e.g. `main`, not `refs/heads/main`).
+    /// Short branch name (e.g. `main`), or `detached HEAD` when not on a branch.
     pub branch: String,
     /// Parent commit OID, or `None` for the root commit on an unborn branch.
     pub parent: Option<ObjectId>,
@@ -480,7 +483,6 @@ pub struct CommitOutcome {
 ///
 /// # Errors
 ///
-/// - [`Error::DetachedHead`] when `HEAD` is not on a branch.
 /// - [`Error::AmendUnborn`] when [`CommitRequest::amend`] is set but the branch has no commits yet.
 /// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false (not applied when amending).
 /// - [`Error::IndexUnmerged`] when the index has conflict stages.
@@ -798,13 +800,18 @@ fn create_commit_with_index(
     persist_index: Option<&mut Index>,
 ) -> Result<CommitOutcome> {
     let head = resolve_head(repo.git_dir())?;
-    let (refname, short_name, mut parent) = match head {
+    let (refname, short_name, mut parent, head_detached) = match head {
         HeadState::Branch {
             refname,
             short_name,
             oid,
-        } => (refname, short_name, oid),
-        HeadState::Detached { .. } => return Err(Error::DetachedHead),
+        } => (refname, short_name, oid, false),
+        HeadState::Detached { oid } => (
+            "HEAD".to_owned(),
+            "detached HEAD".to_owned(),
+            Some(oid),
+            true,
+        ),
         HeadState::Invalid => {
             return Err(Error::Message("HEAD is in an unknown state".into()));
         }
@@ -1114,17 +1121,28 @@ fn create_commit_with_index(
         diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
     };
 
-    update_branch_for_commit_with_config(
-        repo.git_dir(),
-        &BranchCommitRefUpdate {
-            branch_ref: &refname,
+    if head_detached {
+        update_detached_head_for_commit_with_config(
+            repo.git_dir(),
             expected_old,
-            new_oid: oid,
-            identity: &req.committer,
-            reflog_message: &reflog_msg,
-        },
-        config.as_ref(),
-    )?;
+            oid,
+            &req.committer,
+            &reflog_msg,
+            config.as_ref(),
+        )?;
+    } else {
+        update_branch_for_commit_with_config(
+            repo.git_dir(),
+            &BranchCommitRefUpdate {
+                branch_ref: &refname,
+                expected_old,
+                new_oid: oid,
+                identity: &req.committer,
+                reflog_message: &reflog_msg,
+            },
+            config.as_ref(),
+        )?;
+    }
 
     if concluding_merge {
         let _ = finish_merge_state(repo)?;
@@ -1444,7 +1462,7 @@ mod tests {
     }
 
     #[test]
-    fn create_commit_detached_head() {
+    fn create_commit_detached_head_advances_head() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let repo = init_repo(root);
@@ -1453,8 +1471,15 @@ mod tests {
         let first = create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
         fs::write(repo.git_dir().join("HEAD"), first.oid.to_hex()).unwrap();
 
-        let err = create_commit(&repo, &commit_req("detached"), &mut NullProgress).unwrap_err();
-        assert!(matches!(err, Error::DetachedHead));
+        fs::write(root.join("b.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let second = create_commit(&repo, &commit_req("second"), &mut NullProgress).unwrap();
+        assert_eq!(second.branch, "detached HEAD");
+        assert_eq!(second.parent, Some(first.oid));
+        let head = fs::read_to_string(repo.git_dir().join("HEAD")).unwrap();
+        assert_eq!(head.trim(), second.oid.to_hex());
+        let main_tip = crate::refs::resolve_ref(repo.git_dir(), "refs/heads/main").unwrap();
+        assert_eq!(main_tip, first.oid, "branch tip must stay unchanged");
     }
 
     #[test]
