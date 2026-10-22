@@ -1,0 +1,97 @@
+{
+  "$id": "https://grit-scm.com/schemas/merge/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "MergeConflictJson": {
+      "description": "One conflicted path in `--json` merge output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "MergeResult": {
+      "description": "Merge / pull integration result (`--json` contract).",
+      "enum": [
+        "up_to_date",
+        "fast_forward",
+        "merged",
+        "conflicts",
+        "aborted",
+        "set_upstream"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Result of `grit merge` (and the merge half of `grit pull`).",
+  "properties": {
+    "branch": {
+      "description": "The merge source label (for `set_upstream`, the branch being set).",
+      "type": "string"
+    },
+    "change_id": {
+      "description": "Stored `change-id` on the resulting commit when `oid` is set and a header is present.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "conflict_details": {
+      "description": "Structured conflict metadata when `result` is `conflicts`.",
+      "items": {
+        "$ref": "#/definitions/MergeConflictJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "conflicts": {
+      "description": "Conflicted paths when `result` is `conflicts`.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "oid": {
+      "description": "Resulting commit (fast-forward target, merge commit, or adopted upstream).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "result": {
+      "$ref": "#/definitions/MergeResult"
+    },
+    "upstream": {
+      "description": "For `set_upstream` (unborn `grit pull`): the upstream the branch was set to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "branch",
+    "result"
+  ],
+  "title": "MergeOutcome",
+  "type": "object"
+}

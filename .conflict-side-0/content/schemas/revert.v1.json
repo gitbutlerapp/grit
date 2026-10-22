@@ -1,0 +1,183 @@
+{
+  "$id": "https://grit-scm.com/schemas/revert/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ConflictJson": {
+      "description": "One conflicted path in `--json` operation output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "RevertCommitEntry": {
+      "description": "One revert commit created on the current branch.",
+      "properties": {
+        "change_id": {
+          "description": "Stored `change-id` on the revert commit, or JSON `null` when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oid": {
+          "description": "New revert commit on the current branch (full hex oid).",
+          "type": "string"
+        },
+        "source": {
+          "description": "Source commit that was reverted (full hex oid).",
+          "type": "string"
+        },
+        "subject": {
+          "description": "Subject line of the revert commit.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "oid",
+        "source",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "RevertResult": {
+      "description": "High-level result of `grit revert`.",
+      "oneOf": [
+        {
+          "description": "Every requested step finished (or `--dry-run` printed the plan).",
+          "enum": [
+            "completed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The sequence stopped on merge conflicts.",
+          "enum": [
+            "conflicts"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`--abort` restored the pre-revert state.",
+          "enum": [
+            "aborted"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A step would be empty and `--empty stop` halted the sequence.",
+          "enum": [
+            "empty"
+          ],
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "description": "Result of `grit revert`.",
+  "properties": {
+    "alternatives": {
+      "description": "Mutually exclusive options (`--abort`, `--skip`) when paused.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "change_id": {
+      "description": "`change-id` on the last revert commit, when `result` is `completed`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commits": {
+      "description": "Revert commits created in this invocation (newest first).",
+      "items": {
+        "$ref": "#/definitions/RevertCommitEntry"
+      },
+      "type": "array"
+    },
+    "conflicts": {
+      "description": "Conflicted paths when `result` is `conflicts`.",
+      "items": {
+        "$ref": "#/definitions/ConflictJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "dropped": {
+      "description": "Source commits skipped as empty per `--empty drop`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "dry_run": {
+      "description": "True when `--dry-run` was set (no refs or objects were updated).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "next_steps": {
+      "description": "Suggested follow-up commands when `result` is `conflicts` or `empty`.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "oid": {
+      "description": "The last revert commit created (full hex), when `result` is `completed`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "result": {
+      "$ref": "#/definitions/RevertResult"
+    },
+    "source": {
+      "description": "The last source commit reverted in this invocation (full hex), when `result` is `completed`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subject": {
+      "description": "Subject of the last revert commit, when `result` is `completed`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "commits",
+    "dropped",
+    "result"
+  ],
+  "title": "RevertOutcome",
+  "type": "object"
+}

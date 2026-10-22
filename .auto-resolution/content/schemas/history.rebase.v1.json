@@ -1,0 +1,195 @@
+{
+  "$id": "https://grit-scm.com/schemas/history.rebase/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ConflictJson": {
+      "description": "One conflicted path in `--json` operation output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "HeadPair": {
+      "description": "`HEAD` commit before and after rewrite.",
+      "properties": {
+        "new": {
+          "description": "Commit OID at `HEAD` after rewrite (full hex).",
+          "type": "string"
+        },
+        "old": {
+          "description": "Commit OID at `HEAD` before rewrite (full hex).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "new",
+        "old"
+      ],
+      "type": "object"
+    },
+    "RebaseResult": {
+      "description": "High-level result of `grit rebase`.",
+      "enum": [
+        "completed",
+        "conflicts",
+        "aborted"
+      ],
+      "type": "string"
+    },
+    "RefPair": {
+      "description": "One ref tip before and after rewrite.",
+      "properties": {
+        "name": {
+          "description": "Deprecated duplicate of [`Self::ref_name`]; removed in a future release.",
+          "type": "string"
+        },
+        "new": {
+          "description": "New tip OID (full hex).",
+          "type": "string"
+        },
+        "old": {
+          "description": "Previous tip OID (full hex).",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Full ref name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "new",
+        "old",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "RewrittenPair": {
+      "description": "One commit OID before and after rewrite.",
+      "properties": {
+        "change_id": {
+          "description": "Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new": {
+          "description": "Replacement commit OID (full hex), or JSON `null` when the commit was dropped.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old": {
+          "description": "Commit OID before rewrite (full hex).",
+          "type": "string"
+        },
+        "subject": {
+          "description": "First line of the replacement commit message, or the original when dropped.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "old"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit rebase` and `grit history rebase`.",
+  "properties": {
+    "alternatives": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "conflicts": {
+      "items": {
+        "$ref": "#/definitions/ConflictJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "head": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HeadPair"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes."
+    },
+    "next_steps": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "operation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "refs": {
+      "items": {
+        "$ref": "#/definitions/RefPair"
+      },
+      "type": "array"
+    },
+    "result": {
+      "$ref": "#/definitions/RebaseResult"
+    },
+    "rewritten": {
+      "items": {
+        "$ref": "#/definitions/RewrittenPair"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "head",
+    "result"
+  ],
+  "title": "RebaseCliOutcome",
+  "type": "object"
+}

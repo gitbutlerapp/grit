@@ -806,7 +806,28 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
     outln!(w, "## Pick");
     outln!(w);
     match outcome.result {
-        PickResult::Aborted => outln!(w, "Pick aborted."),
+        PickResult::Picked | PickResult::Skipped => {
+            if outcome.dry_run == Some(true) {
+                outln!(w, "- Would pick **{}** commit(s)", outcome.commits.len());
+                for row in &outcome.commits {
+                    let src = short_hex(&row.source);
+                    outln!(w, "  - `{src}`");
+                }
+            } else {
+                for row in &outcome.commits {
+                    let src = short_hex(&row.source);
+                    if let Some(oid) = &row.oid {
+                        let new = short_hex(oid);
+                        outln!(w, "- `{src}` → `{new}` — {}", row.subject);
+                    } else {
+                        outln!(w, "- `{src}` — {} (no commit)", row.subject);
+                    }
+                }
+                if !outcome.dropped.is_empty() {
+                    outln!(w, "- Dropped **{}** empty commit(s)", outcome.dropped.len());
+                }
+            }
+        }
         PickResult::Conflicts => {
             outln!(w, "- Pick stopped with conflicts");
             outln!(w);
@@ -820,28 +841,17 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
             )?;
         }
         PickResult::Empty => {
-            outln!(w, "- Pick stopped on an empty commit");
+            if let Some(row) = outcome.commits.last() {
+                let src = short_hex(&row.source);
+                outln!(w, "- Stopped on empty commit `{src}` — {}", row.subject);
+            }
             crate::operation_output::render_operation_guidance_markdown(
                 outcome.next_steps.as_deref().unwrap_or(&[]),
                 outcome.alternatives.as_deref(),
                 w,
             )?;
         }
-        PickResult::Completed => {
-            if outcome.dry_run == Some(true) {
-                outln!(w, "- Would pick {} commit(s)", outcome.commits.len());
-                for entry in &outcome.commits {
-                    let src = short_hex(&entry.source);
-                    outln!(w, "  - `{src}`");
-                }
-            } else {
-                for entry in &outcome.commits {
-                    let src = short_hex(&entry.source);
-                    let new = short_hex(&entry.oid);
-                    outln!(w, "- `{src}` → `{new}` — {}", entry.subject);
-                }
-            }
-        }
+        PickResult::Aborted => outln!(w, "Pick aborted."),
     }
     Ok(())
 }

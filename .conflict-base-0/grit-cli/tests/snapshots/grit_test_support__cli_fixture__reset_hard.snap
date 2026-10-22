@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Reset refs/heads/main to 062ca6e (hard)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"mode\":\"hard\",\"target\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"previous\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"ref\":\"refs/heads/main\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Reset\n\n- **ref:** `refs/heads/main`\n- **mode:** `hard`\n- **target:** `062ca6e74f5603f4d09063c0f46cd07d8c96e019`\n- **previous:** `83352a61f6715ec3f0a297c6d6150725154fb833`\n",
+    "stderr": ""
+  }
+}

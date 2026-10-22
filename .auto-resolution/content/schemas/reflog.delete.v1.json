@@ -1,0 +1,18 @@
+{
+  "$id": "https://grit-scm.com/schemas/reflog.delete/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit reflog delete`.",
+  "properties": {
+    "deleted": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "deleted"
+  ],
+  "title": "ReflogDeleteOutcome",
+  "type": "object"
+}

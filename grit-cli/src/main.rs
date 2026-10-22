@@ -1041,7 +1041,7 @@ enum Command {
     },
     /// Cherry-pick commits onto the current branch.
     Pick {
-        /// Commits to pick (any revision spec — full / short oid, branch, HEAD~2, …).
+        /// Commits or ranges to pick (`A..B`, branch tips, oids). Omit with `--continue`, `--abort`, or `--skip`.
         #[arg(
             required_unless_present_any = ["continue_pick", "abort", "skip"],
             value_name = "COMMIT"
@@ -1059,12 +1059,15 @@ enum Command {
         /// Skip the current pick step and continue with the next commit.
         #[arg(long = "skip", conflicts_with_all = ["continue_pick", "abort"])]
         skip: bool,
+        /// Append `(cherry picked from commit …)` to each new commit message.
+        #[arg(short = 'x', long = "record-origin")]
+        record_origin: bool,
         /// Apply the pick to the index only; do not create a commit yet.
         #[arg(long = "no-commit")]
         no_commit: bool,
         /// When a pick step would not change the tree: stop (default), keep an empty commit, or drop the step.
-        #[arg(long = "empty", value_enum, default_value_t = commands::pick::ReplayEmptyPolicyArg::Stop)]
-        empty: commands::pick::ReplayEmptyPolicyArg,
+        #[arg(long = "empty", value_enum, default_value_t = commands::pick::PickEmptyArg::Stop)]
+        empty: commands::pick::PickEmptyArg,
         /// Replace the pick message (single commit only).
         #[arg(
             short = 'm',
@@ -2396,32 +2399,34 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             continue_pick,
             abort,
             skip,
+            record_origin,
             no_commit,
             empty,
             message,
             message_file,
             dry_run,
         } => {
-            let outcome = commands::pick::run(&commands::pick::PickRunOptions {
+            let outcome = commands::pick::run(commands::pick::PickRunOptions {
                 commits,
-                mainline,
                 continue_pick,
                 abort,
                 skip,
+                record_origin,
                 no_commit,
                 empty,
                 message,
                 message_file,
+                mainline,
                 dry_run,
             })?;
+            emit(&outcome, opts, ctx)?;
             if matches!(
                 outcome.result,
                 commands::pick::PickResult::Conflicts | commands::pick::PickResult::Empty
             ) {
-                emit(&outcome, opts, ctx)?;
                 std::process::exit(1);
             }
-            emit(&outcome, opts, ctx)
+            Ok(())
         }
         Command::Revert {
             commits,

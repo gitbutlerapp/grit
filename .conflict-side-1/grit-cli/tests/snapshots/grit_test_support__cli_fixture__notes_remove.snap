@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Removed note for 83352a6\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"remove\",\"notes_ref\":\"refs/notes/commits\",\"objects\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Removed notes on `refs/notes/commits`:\n- `83352a6`\n",
+    "stderr": ""
+  }
+}

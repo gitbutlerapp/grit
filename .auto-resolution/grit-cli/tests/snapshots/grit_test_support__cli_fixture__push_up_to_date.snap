@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "  origin refs/heads/main already up to date\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"remote\":\"origin\",\"kind\":\"branch\",\"branch\":\"main\",\"results\":[{\"ref\":\"refs/heads/main\",\"status\":\"up_to_date\",\"old_oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new_oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"forced\":false,\"src\":\"refs/heads/main\"}],\"rejected\":false,\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Push to `origin`\n- **`refs/heads/main`** · `origin refs/heads/main` already up to date\n",
+    "stderr": ""
+  }
+}
