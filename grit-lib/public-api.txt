@@ -16482,7 +16482,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::fetch_request
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::fetch_request::ResolvedFetchRef
 pub fn grit_lib::remote::fetch_request::refname_match_fetch_dwim(&str, &str) -> u32
 pub fn grit_lib::remote::fetch_request::resolve_fetch_invocation(&grit_lib::config::ConfigSet, core::option::Option<&str>, &[alloc::string::String], &str) -> grit_lib::remote::fetch_request::FetchInvocation
-pub fn grit_lib::remote::fetch_request::resolve_fetch_remote(&grit_lib::config::ConfigSet, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
+pub fn grit_lib::remote::fetch_request::resolve_remote_argument(&grit_lib::config::ConfigSet, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
 pub mod grit_lib::remote::github_auth
 #[non_exhaustive] pub enum grit_lib::remote::github_auth::DeviceFlowError
 pub grit_lib::remote::github_auth::DeviceFlowError::AccessDenied
@@ -17362,6 +17362,8 @@ pub grit_lib::remote::transfer::UpdateMode::TagUpdateRejected
 pub grit_lib::remote::transfer::UpdateMode::Unborn
 pub grit_lib::remote::transfer::UpdateMode::UpToDate
 impl grit_lib::remote::transfer::UpdateMode
+pub fn grit_lib::remote::transfer::UpdateMode::is_rejected(self) -> bool
+pub fn grit_lib::remote::transfer::UpdateMode::is_reported(self) -> bool
 pub fn grit_lib::remote::transfer::UpdateMode::modified_repo(self) -> bool
 impl core::clone::Clone for grit_lib::remote::transfer::UpdateMode
 pub fn grit_lib::remote::transfer::UpdateMode::clone(&self) -> Self
@@ -17436,6 +17438,9 @@ pub grit_lib::remote::transfer::FetchOutcome::transfer: grit_lib::remote::transf
 pub grit_lib::remote::transfer::FetchOutcome::updates: alloc::vec::Vec<grit_lib::remote::transfer::RefUpdate>
 impl grit_lib::remote::transfer::FetchOutcome
 pub fn grit_lib::remote::transfer::FetchOutcome::branch_count(&self) -> u64
+pub fn grit_lib::remote::transfer::FetchOutcome::changed_ref_count(&self) -> usize
+pub fn grit_lib::remote::transfer::FetchOutcome::has_rejections(&self) -> bool
+pub fn grit_lib::remote::transfer::FetchOutcome::reported_updates(&self) -> impl core::iter::traits::iterator::Iterator<Item = &grit_lib::remote::transfer::RefUpdate>
 pub fn grit_lib::remote::transfer::FetchOutcome::tag_count(&self) -> u64
 impl core::clone::Clone for grit_lib::remote::transfer::FetchOutcome
 pub fn grit_lib::remote::transfer::FetchOutcome::clone(&self) -> Self
@@ -18072,9 +18077,12 @@ pub fn grit_lib::remote::url_rewrite::rewrite_fetch_url(&grit_lib::config::Confi
 pub fn grit_lib::remote::url_rewrite::rewrite_push_url(&grit_lib::config::ConfigSet, &str) -> alloc::string::String
 pub enum grit_lib::remote::RemoteError
 pub grit_lib::remote::RemoteError::HttpUnavailable
+pub grit_lib::remote::RemoteError::InvalidRemoteName(alloc::string::String)
 pub grit_lib::remote::RemoteError::InvalidUrl(alloc::string::String)
 pub grit_lib::remote::RemoteError::Library(grit_lib::error::Error)
 pub grit_lib::remote::RemoteError::NoUrl
+pub grit_lib::remote::RemoteError::RemoteExists(alloc::string::String)
+pub grit_lib::remote::RemoteError::UnknownRemote(alloc::string::String)
 pub grit_lib::remote::RemoteError::UnsupportedScheme
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteError::from(grit_lib::error::Error) -> Self
@@ -18167,6 +18175,26 @@ impl core::marker::Unpin for grit_lib::remote::ListRefsOptions
 impl core::marker::UnsafeUnpin for grit_lib::remote::ListRefsOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::ListRefsOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::ListRefsOptions
+pub struct grit_lib::remote::PeeledRemoteRef
+pub grit_lib::remote::PeeledRemoteRef::name: alloc::string::String
+pub grit_lib::remote::PeeledRemoteRef::oid: grit_lib::objects::ObjectId
+pub grit_lib::remote::PeeledRemoteRef::peeled: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::remote::PeeledRemoteRef::symref_target: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::remote::PeeledRemoteRef
+pub fn grit_lib::remote::PeeledRemoteRef::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::PeeledRemoteRef
+impl core::cmp::PartialEq for grit_lib::remote::PeeledRemoteRef
+pub fn grit_lib::remote::PeeledRemoteRef::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::PeeledRemoteRef
+pub fn grit_lib::remote::PeeledRemoteRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::PeeledRemoteRef
+impl core::marker::Freeze for grit_lib::remote::PeeledRemoteRef
+impl core::marker::Send for grit_lib::remote::PeeledRemoteRef
+impl core::marker::Sync for grit_lib::remote::PeeledRemoteRef
+impl core::marker::Unpin for grit_lib::remote::PeeledRemoteRef
+impl core::marker::UnsafeUnpin for grit_lib::remote::PeeledRemoteRef
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::PeeledRemoteRef
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::PeeledRemoteRef
 pub struct grit_lib::remote::Remote
 pub grit_lib::remote::Remote::fetch_refspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::Remote::name: core::option::Option<alloc::string::String>
@@ -18194,6 +18222,8 @@ pub struct grit_lib::remote::RemoteRef
 pub grit_lib::remote::RemoteRef::name: alloc::string::String
 pub grit_lib::remote::RemoteRef::oid: grit_lib::objects::ObjectId
 pub grit_lib::remote::RemoteRef::symref_target: core::option::Option<alloc::string::String>
+impl grit_lib::remote::RemoteRef
+pub fn grit_lib::remote::RemoteRef::peeled_tag(&self) -> core::option::Option<&str>
 impl core::clone::Clone for grit_lib::remote::RemoteRef
 pub fn grit_lib::remote::RemoteRef::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::RemoteRef
@@ -18214,6 +18244,7 @@ pub trait grit_lib::remote::HttpClientFactory: core::marker::Send + core::marker
 pub fn grit_lib::remote::HttpClientFactory::create(&self, &grit_lib::config::ConfigSet) -> core::result::Result<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>, grit_lib::remote::RemoteError>
 impl grit_lib::remote::HttpClientFactory for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::create(&self, &grit_lib::config::ConfigSet) -> core::result::Result<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>, grit_lib::remote::RemoteError>
+pub fn grit_lib::remote::fold_peeled_refs(&[grit_lib::remote::RemoteRef]) -> alloc::vec::Vec<grit_lib::remote::PeeledRemoteRef>
 pub fn grit_lib::remote::list_refs_from_git_dir(&std::path::Path, core::option::Option<&grit_lib::objects::odb::Odb>, &grit_lib::remote::ListRefsOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::remote::RemoteRef>, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::parse_remote_url(&str) -> core::result::Result<grit_lib::remote::RemoteUrl, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::query_remote_refs_in_memory(alloc::vec::Vec<grit_lib::remote::RemoteRef>, &grit_lib::remote::ListRefsOptions, &grit_lib::refs::listing::RefQueryOptions) -> alloc::vec::Vec<grit_lib::remote::RemoteRef>
@@ -18435,6 +18466,24 @@ impl core::marker::Unpin for grit_lib::repo_handles::NoteAddOutcome
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::NoteAddOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::NoteAddOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::NoteAddOutcome
+pub struct grit_lib::repo_handles::ConfiguredRemote
+pub grit_lib::repo_handles::ConfiguredRemote::name: alloc::string::String
+pub grit_lib::repo_handles::ConfiguredRemote::url: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::repo_handles::ConfiguredRemote
+pub fn grit_lib::repo_handles::ConfiguredRemote::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::ConfiguredRemote
+impl core::cmp::PartialEq for grit_lib::repo_handles::ConfiguredRemote
+pub fn grit_lib::repo_handles::ConfiguredRemote::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::ConfiguredRemote
+pub fn grit_lib::repo_handles::ConfiguredRemote::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo_handles::ConfiguredRemote
+impl core::marker::Freeze for grit_lib::repo_handles::ConfiguredRemote
+impl core::marker::Send for grit_lib::repo_handles::ConfiguredRemote
+impl core::marker::Sync for grit_lib::repo_handles::ConfiguredRemote
+impl core::marker::Unpin for grit_lib::repo_handles::ConfiguredRemote
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::ConfiguredRemote
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::ConfiguredRemote
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::ConfiguredRemote
 pub struct grit_lib::repo_handles::ExpireOptions
 pub grit_lib::repo_handles::ExpireOptions::all: bool
 pub grit_lib::repo_handles::ExpireOptions::expire: core::option::Option<alloc::string::String>
@@ -18652,6 +18701,8 @@ impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles:
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RepositoryReflogs<'repo>
 pub struct grit_lib::repo_handles::RepositoryRemotes<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryRemotes<'repo>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::add(&self, &str, &str) -> core::result::Result<(), grit_lib::remote::RemoteError>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::configured(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::repo_handles::ConfiguredRemote>>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::fetch(&self, &grit_lib::remote::Remote, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::FetchOutcome, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::fetch_all(&self, &grit_lib::config::ConfigSet, &grit_lib::remote::transfer::FetchOptions, core::option::Option<bool>, core::option::Option<bool>, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, core::result::Result<grit_lib::remote::transfer::FetchOutcome, grit_lib::remote::RemoteError>)>>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::get(&self, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
@@ -18745,6 +18796,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::StashPu
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::StashPushOptions
 pub fn grit_lib::repo_handles::configured_remote_names(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::repo_handles::configured_remote_names_in_config_order(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::repo_handles::configured_remotes(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<grit_lib::repo_handles::ConfiguredRemote>
 pub fn grit_lib::repo_handles::remote_skip_fetch_all(&grit_lib::config::ConfigSet, &str) -> bool
 pub mod grit_lib::revwalk
 pub mod grit_lib::revwalk::commit_graph

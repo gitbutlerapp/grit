@@ -13,7 +13,7 @@ use crate::config::ConfigSet;
 use crate::objects::ObjectId;
 use crate::refspec::{parse_fetch_refspec, RefspecError, RefspecItem};
 use crate::remote::{Remote, RemoteError};
-use crate::repo_handles::configured_remote_names;
+use crate::repo_handles::{configured_remote_names, has_remote_section};
 use crate::transfer::{match_positive, ref_excluded, MatchedRef};
 
 /// How an explicit fetch refspec source side was resolved against advertised refs.
@@ -140,28 +140,28 @@ pub struct FetchInvocation {
     pub user_refspecs: Vec<String>,
 }
 
-/// Resolve a configured remote name or literal URL/path for fetch and pull.
+/// Resolve the repository argument of fetch, pull, or a ref listing into a [`Remote`].
+///
+/// `remote_or_url` is already known to name the repository (it is not a refspec), so a
+/// configured remote name wins, and anything that looks like a URL, an scp-style
+/// `host:path`, or an existing filesystem path becomes an anonymous [`Remote::from_url`].
 ///
 /// # Errors
 ///
-/// Returns [`RemoteError`] when `remote_or_url` is not a configured remote and does not
-/// look like a URL or filesystem path.
-pub fn resolve_fetch_remote(
+/// - [`RemoteError::NoUrl`] when the remote has a config section but no `url`.
+/// - [`RemoteError::UnknownRemote`] when `remote_or_url` is neither configured nor URL-like.
+/// - URL parse errors from [`Remote::from_config`] / [`Remote::from_url`].
+pub fn resolve_remote_argument(
     config: &ConfigSet,
     remote_or_url: &str,
 ) -> Result<Remote, RemoteError> {
-    if configured_remote_names(config)
-        .iter()
-        .any(|name| name == remote_or_url)
-    {
+    if has_remote_section(config, remote_or_url) {
         return Remote::from_config(config, remote_or_url);
     }
-    if is_fetch_remote_token(config, remote_or_url) {
+    if looks_like_path_or_url(remote_or_url) || remote_or_url.contains(':') {
         return Remote::from_url(remote_or_url);
     }
-    Err(RemoteError::Library(crate::error::Error::Message(format!(
-        "unknown remote '{remote_or_url}'"
-    ))))
+    Err(RemoteError::UnknownRemote(remote_or_url.to_owned()))
 }
 
 /// Classify `grit fetch [<remote>] [<refspec>…]` positionals (no refspec parsing).
@@ -209,22 +209,27 @@ fn is_fetch_remote_token(config: &ConfigSet, token: &str) -> bool {
     if configured_remote_names(config).iter().any(|n| n == token) {
         return true;
     }
-    if Path::new(token).exists() {
-        return true;
-    }
-    if token.contains("://")
-        || token.starts_with('/')
-        || token.starts_with("./")
-        || token.starts_with("../")
-        || token.ends_with(".git")
-        || token.ends_with(".bundle")
-    {
+    if looks_like_path_or_url(token) {
         return true;
     }
     if token.contains(':') && !token.contains(' ') {
         return !looks_like_fetch_refspec(token);
     }
     false
+}
+
+/// A URL with a scheme, a repository path, or an existing filesystem path.
+///
+/// Colon-only forms (`host:path`) are left to the caller: they are a URL in the remote
+/// position but may be a `src:dst` refspec in a positional list.
+fn looks_like_path_or_url(token: &str) -> bool {
+    token.contains("://")
+        || token.starts_with('/')
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.ends_with(".git")
+        || token.ends_with(".bundle")
+        || Path::new(token).exists()
 }
 
 /// True when `token` is an explicit `src:dst` fetch refspec, not an scp-style remote URL.
@@ -1085,6 +1090,48 @@ mod tests {
                 user_refspecs: vec![],
             }
         );
+    }
+
+    #[test]
+    fn resolve_remote_argument_prefers_configured_then_url_forms() {
+        use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+        use crate::remote::RemoteUrl;
+
+        let file = ConfigFile::parse(
+            std::path::Path::new("cfg"),
+            "[remote \"origin\"]\n\turl = /tmp/x.git\n[remote \"nourl\"]\n\tfetch = +refs/heads/*:refs/remotes/nourl/*\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        let mut config = ConfigSet::new();
+        config.merge(&file);
+
+        let origin = resolve_remote_argument(&config, "origin").expect("origin");
+        assert_eq!(origin.name.as_deref(), Some("origin"));
+
+        for url in [
+            "https://example.com/r.git",
+            "./sibling",
+            "../sibling",
+            "/abs/repo",
+            "git@host:org/repo",
+            "host:repo",
+        ] {
+            let remote = resolve_remote_argument(&config, url).expect(url);
+            assert_eq!(remote.name, None, "{url}");
+        }
+        assert!(matches!(
+            resolve_remote_argument(&config, "host:repo").map(|r| r.fetch_url().clone()),
+            Ok(RemoteUrl::Ssh(_))
+        ));
+
+        assert!(matches!(
+            resolve_remote_argument(&config, "nourl"),
+            Err(RemoteError::NoUrl)
+        ));
+        let err = resolve_remote_argument(&config, "nosuch").expect_err("unknown");
+        assert!(matches!(&err, RemoteError::UnknownRemote(name) if name == "nosuch"));
+        assert_eq!(err.to_string(), "unknown remote 'nosuch'");
     }
 
     #[test]

@@ -2,7 +2,8 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use crate::config::ConfigSet;
+use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Result;
 use crate::fetch::Progress;
 use crate::remote::{
@@ -49,6 +50,53 @@ impl<'repo> RepositoryRemotes<'repo> {
     pub fn list(&self) -> Result<Vec<String>> {
         let config = self.repo.config()?;
         Ok(configured_remote_names(config.as_ref()))
+    }
+
+    /// Every remote with a `remote.<name>.*` section, sorted by name, with its URL.
+    ///
+    /// Unlike [`Self::list`], this includes remotes that have config but no
+    /// `remote.<name>.url` (their [`ConfiguredRemote::url`] is `None`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`Repository::config`] failures.
+    pub fn configured(&self) -> Result<Vec<ConfiguredRemote>> {
+        let config = self.repo.config()?;
+        Ok(configured_remotes(config.as_ref()))
+    }
+
+    /// Add remote `name` at `url` to the repository's local config.
+    ///
+    /// Writes `remote.<name>.url` and the default fetch refspec
+    /// `+refs/heads/*:refs/remotes/<name>/*` to the shared repository config (also from a
+    /// linked worktree), then reloads [`Repository::config`]. The URL is stored as given and
+    /// not validated, like Git.
+    ///
+    /// # Errors
+    ///
+    /// - [`RemoteError::InvalidRemoteName`] when `refs/remotes/<name>/…` would not be a valid ref.
+    /// - [`RemoteError::RemoteExists`] when any `remote.<name>.*` key is already configured.
+    /// - [`RemoteError::Library`] when the config cannot be read, parsed, or written.
+    pub fn add(&self, name: &str, url: &str) -> std::result::Result<(), RemoteError> {
+        if !is_valid_remote_name(name) {
+            return Err(RemoteError::InvalidRemoteName(name.to_owned()));
+        }
+        if has_remote_section(self.repo.config()?.as_ref(), name) {
+            return Err(RemoteError::RemoteExists(name.to_owned()));
+        }
+        let path = crate::repo::local_config_write_path(self.repo.git_dir());
+        let mut file = match ConfigFile::from_path(&path, ConfigScope::Local)? {
+            Some(file) => file,
+            None => ConfigFile::parse(&path, "", ConfigScope::Local)?,
+        };
+        file.set(&format!("remote.{name}.url"), url)?;
+        file.set(
+            &format!("remote.{name}.fetch"),
+            &format!("+refs/heads/*:refs/remotes/{name}/*"),
+        )?;
+        file.write()?;
+        self.repo.reload_config()?;
+        Ok(())
     }
 
     /// Load `remote.<name>` URL(s) and fetch refspecs from config.
@@ -272,6 +320,60 @@ pub fn configured_remote_names_in_config_order(config: &ConfigSet) -> Vec<String
     names
 }
 
+/// A remote that has a `remote.<name>.*` section in config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfiguredRemote {
+    /// Remote name (the config subsection).
+    pub name: String,
+    /// Last `remote.<name>.url` value, or `None` when the section has no URL.
+    pub url: Option<String>,
+}
+
+/// Every remote with at least one `remote.<name>.*` key, sorted by name.
+///
+/// This is the set Git treats as configured remotes (for listing and for refusing to
+/// add a duplicate), which is wider than [`configured_remote_names`].
+#[must_use]
+pub fn configured_remotes(config: &ConfigSet) -> Vec<ConfiguredRemote> {
+    let mut names = BTreeSet::new();
+    for entry in config.entries() {
+        let Some(rest) = entry.key.strip_prefix("remote.") else {
+            continue;
+        };
+        if let Some((name, _key)) = rest.rsplit_once('.') {
+            names.insert(name);
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| ConfiguredRemote {
+            name: name.to_owned(),
+            url: config.get(&format!("remote.{name}.url")),
+        })
+        .collect()
+}
+
+/// Whether any `remote.<name>.*` key exists (membership in [`configured_remotes`]).
+pub(crate) fn has_remote_section(config: &ConfigSet, name: &str) -> bool {
+    config.entries().iter().any(|entry| {
+        entry
+            .key
+            .strip_prefix("remote.")
+            .and_then(|rest| rest.rsplit_once('.'))
+            .is_some_and(|(section, _key)| section == name)
+    })
+}
+
+/// Whether `name` can name a remote: its tracking refs `refs/remotes/<name>/…` must be valid.
+fn is_valid_remote_name(name: &str) -> bool {
+    !name.is_empty()
+        && check_refname_format(
+            &format!("refs/remotes/{name}/test"),
+            &RefNameOptions::default(),
+        )
+        .is_ok()
+}
+
 /// Collect remote subsection names that declare a `url` key.
 #[must_use]
 pub fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
@@ -293,9 +395,104 @@ pub fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        configured_remote_names, configured_remote_names_in_config_order, remote_skip_fetch_all,
+        configured_remote_names, configured_remote_names_in_config_order, configured_remotes,
+        has_remote_section, is_valid_remote_name, remote_skip_fetch_all, ConfiguredRemote,
     };
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+    use crate::remote::RemoteError;
+    use crate::repo::{InitOptions, Repository};
+
+    fn config_set(text: &str) -> ConfigSet {
+        let file = ConfigFile::parse(std::path::Path::new("cfg"), text, ConfigScope::Local)
+            .expect("parse");
+        let mut set = ConfigSet::new();
+        set.merge(&file);
+        set
+    }
+
+    #[test]
+    fn configured_remotes_include_sections_without_url() {
+        let set = config_set(
+            "[remote \"zeta\"]\n\turl = /tmp/z.git\n[remote \"team.prod\"]\n\tfetch = +refs/heads/*:refs/remotes/team.prod/*\n[remote \"zeta\"]\n\turl = /tmp/z2.git\n",
+        );
+        assert_eq!(
+            configured_remotes(&set),
+            vec![
+                ConfiguredRemote {
+                    name: "team.prod".to_owned(),
+                    url: None,
+                },
+                ConfiguredRemote {
+                    name: "zeta".to_owned(),
+                    url: Some("/tmp/z2.git".to_owned()),
+                },
+            ]
+        );
+        assert_eq!(configured_remote_names(&set), vec!["zeta".to_owned()]);
+        assert!(has_remote_section(&set, "team.prod"));
+        assert!(has_remote_section(&set, "zeta"));
+        assert!(!has_remote_section(&set, "team"));
+    }
+
+    #[test]
+    fn remote_name_validation_follows_tracking_ref_rules() {
+        for ok in ["origin", "team.prod", "a/b", "up-stream"] {
+            assert!(is_valid_remote_name(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            ".",
+            "..",
+            "a..b",
+            "has space",
+            "x:y",
+            "star*",
+            "end.lock",
+        ] {
+            assert!(!is_valid_remote_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn add_writes_url_and_default_fetch_refspec() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        repo.remotes()
+            .add("upstream", "https://example.com/r.git")
+            .expect("add");
+        let config = repo.config().expect("config");
+        assert_eq!(
+            config.get("remote.upstream.url").as_deref(),
+            Some("https://example.com/r.git")
+        );
+        assert_eq!(
+            config.get_all("remote.upstream.fetch"),
+            vec!["+refs/heads/*:refs/remotes/upstream/*".to_owned()]
+        );
+        assert_eq!(repo.remotes().list().expect("list"), vec!["upstream"]);
+    }
+
+    #[test]
+    fn add_rejects_existing_and_invalid_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        repo.remotes().add("origin", "/tmp/a.git").expect("add");
+        assert!(matches!(
+            repo.remotes().add("origin", "/tmp/b.git"),
+            Err(RemoteError::RemoteExists(name)) if name == "origin"
+        ));
+        assert!(matches!(
+            repo.remotes().add("bad name", "/tmp/b.git"),
+            Err(RemoteError::InvalidRemoteName(name)) if name == "bad name"
+        ));
+        assert_eq!(
+            repo.config()
+                .expect("config")
+                .get("remote.origin.url")
+                .as_deref(),
+            Some("/tmp/a.git")
+        );
+    }
 
     #[test]
     fn configured_remote_names_in_config_order_preserves_file_order() {

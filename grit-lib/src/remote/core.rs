@@ -63,6 +63,16 @@ pub enum RemoteError {
     /// Smart HTTP requires the `http-ureq` feature or an injected HTTP client factory.
     #[error("HTTP remotes require the http-ureq feature or an HttpClientFactory")]
     HttpUnavailable,
+    /// The argument is neither a configured remote name nor a URL or path.
+    #[error("unknown remote '{0}'")]
+    UnknownRemote(String),
+    /// [`RepositoryRemotes::add`](crate::repo_handles::RepositoryRemotes::add) found an
+    /// existing `remote.<name>.*` section.
+    #[error("remote '{0}' already exists")]
+    RemoteExists(String),
+    /// The name cannot be used for a remote (`refs/remotes/<name>/…` would not be a valid ref).
+    #[error("'{0}' is not a valid remote name")]
+    InvalidRemoteName(String),
     /// An underlying library error.
     #[error(transparent)]
     Library(#[from] Error),
@@ -178,6 +188,48 @@ pub struct RemoteRef {
     pub oid: ObjectId,
     /// Symbolic-ref target when [`ListRefsOptions::symrefs`] is set (`HEAD` only on v0/v1).
     pub symref_target: Option<String>,
+}
+
+impl RemoteRef {
+    /// For a peeled `refs/tags/<tag>^{}` line ([`ListRefsOptions::peel`]), the tag ref it
+    /// belongs to; `None` for every other ref.
+    #[must_use]
+    pub fn peeled_tag(&self) -> Option<&str> {
+        self.name.strip_suffix("^{}")
+    }
+}
+
+/// One advertised ref with its peeled `^{}` line folded in (see [`fold_peeled_refs`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeeledRemoteRef {
+    /// Full reference name (never ends in `^{}`).
+    pub name: String,
+    /// Object id the ref points at (the tag object for annotated tags).
+    pub oid: ObjectId,
+    /// Object the annotated tag peels to, when the listing carried a `^{}` line for it.
+    pub peeled: Option<ObjectId>,
+    /// Symbolic-ref target, as in [`RemoteRef::symref_target`].
+    pub symref_target: Option<String>,
+}
+
+/// Fold peeled `^{}` lines from a [`Remote::list_refs`] result into their tag refs.
+///
+/// Keeps the order of `refs` and drops the `^{}` rows themselves.
+#[must_use]
+pub fn fold_peeled_refs(refs: &[RemoteRef]) -> Vec<PeeledRemoteRef> {
+    let peeled: std::collections::HashMap<&str, ObjectId> = refs
+        .iter()
+        .filter_map(|r| Some((r.peeled_tag()?, r.oid)))
+        .collect();
+    refs.iter()
+        .filter(|r| r.peeled_tag().is_none())
+        .map(|r| PeeledRemoteRef {
+            name: r.name.clone(),
+            oid: r.oid,
+            peeled: peeled.get(r.name.as_str()).copied(),
+            symref_target: r.symref_target.clone(),
+        })
+        .collect()
 }
 
 /// Options controlling [`Remote::list_refs`] output, aligned with `git ls-remote`.
@@ -1178,6 +1230,46 @@ fn peel_tag(odb: &Odb, oid: &ObjectId) -> Option<ObjectId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn remote_ref(name: &str, hex_digit: char) -> RemoteRef {
+        RemoteRef {
+            name: name.to_owned(),
+            oid: ObjectId::from_hex(&hex_digit.to_string().repeat(40)).unwrap(),
+            symref_target: None,
+        }
+    }
+
+    #[test]
+    fn fold_peeled_refs_attaches_peeled_lines_and_keeps_order() {
+        let mut head = remote_ref("HEAD", '1');
+        head.symref_target = Some("refs/heads/main".to_owned());
+        let refs = vec![
+            head,
+            remote_ref("refs/heads/main", '1'),
+            remote_ref("refs/tags/light", '1'),
+            remote_ref("refs/tags/v1", '2'),
+            remote_ref("refs/tags/v1^{}", '1'),
+        ];
+        let folded = fold_peeled_refs(&refs);
+        let names: Vec<&str> = folded.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["HEAD", "refs/heads/main", "refs/tags/light", "refs/tags/v1"]
+        );
+        assert_eq!(folded[0].symref_target.as_deref(), Some("refs/heads/main"));
+        assert_eq!(folded[2].peeled, None);
+        assert_eq!(folded[3].oid, refs[3].oid);
+        assert_eq!(folded[3].peeled, Some(refs[4].oid));
+    }
+
+    #[test]
+    fn peeled_tag_only_matches_peel_suffix() {
+        assert_eq!(
+            remote_ref("refs/tags/v1^{}", '1').peeled_tag(),
+            Some("refs/tags/v1")
+        );
+        assert_eq!(remote_ref("refs/tags/v1", '1').peeled_tag(), None);
+    }
 
     #[test]
     fn remote_url_parse_table() {

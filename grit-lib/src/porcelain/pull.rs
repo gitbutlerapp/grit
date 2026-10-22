@@ -13,7 +13,7 @@ use crate::config::ident_resolve::{resolve_identity_with, IdentRole};
 use crate::config::parse_git_config_maybe_bool;
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
-use crate::fetch_request::resolve_fetch_remote;
+use crate::fetch_request::resolve_remote_argument;
 use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor, merge_bases_first_vs_rest};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::checkout_between_trees;
@@ -380,8 +380,8 @@ where
 
     let core: std::result::Result<PullOutcome, PullError> = (|| {
         if remote_name != "." {
-            let remote =
-                resolve_fetch_remote(config.as_ref(), &remote_name).map_err(PullError::Remote)?;
+            let remote = resolve_remote_argument(config.as_ref(), &remote_name)
+                .map_err(PullError::Remote)?;
             remote
                 .fetch(repo, fetch_opts, progress, http_factory)
                 .map_err(PullError::Remote)?;

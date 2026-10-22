@@ -28,9 +28,10 @@ pub use bundle::RepositoryBundles;
 pub use hooks::{HookInfo, HookSource, RepositoryHooks};
 pub use notes::{Note, NoteAddOutcome, NoteListing, NotesWriteOptions, RepositoryNotes};
 pub use reflog::{ExpireOptions, IndexedReflogEntry, ReflogExpireOutcome, RepositoryReflogs};
+pub(crate) use remote::has_remote_section;
 pub use remote::{
-    configured_remote_names, configured_remote_names_in_config_order, remote_skip_fetch_all,
-    RepositoryRemotes,
+    configured_remote_names, configured_remote_names_in_config_order, configured_remotes,
+    remote_skip_fetch_all, ConfiguredRemote, RepositoryRemotes,
 };
 pub use stash::{RepositoryStash, StashApplyOptions, StashPushOptions};
 pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};

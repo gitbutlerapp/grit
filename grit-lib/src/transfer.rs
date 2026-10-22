@@ -71,6 +71,25 @@ impl UpdateMode {
             Self::New | Self::FastForward | Self::Forced | Self::DeletedMissing
         )
     }
+
+    /// Returns whether fetch refused this update (non-fast-forward without force, a moved
+    /// tag, or a source missing on the remote).
+    #[must_use]
+    pub fn is_rejected(self) -> bool {
+        matches!(
+            self,
+            Self::NonFastForwardRejected | Self::TagUpdateRejected | Self::SourceObjectNotFound
+        )
+    }
+
+    /// Returns whether this update belongs in a fetch report: the ref changed
+    /// ([`Self::modified_repo`]) or the update was refused ([`Self::is_rejected`]).
+    ///
+    /// Up-to-date, no-op and unborn refs are left out.
+    #[must_use]
+    pub fn is_reported(self) -> bool {
+        self.modified_repo() || self.is_rejected()
+    }
 }
 
 /// The resolved outcome of one reference during a fetch.
@@ -458,6 +477,29 @@ impl FetchOutcome {
             .iter()
             .filter(|u| u.remote_ref.starts_with("refs/tags/") && !u.remote_ref.ends_with("^{}"))
             .count() as u64
+    }
+
+    /// Updates worth reporting to a user, in fetch order ([`UpdateMode::is_reported`]).
+    pub fn reported_updates(&self) -> impl Iterator<Item = &RefUpdate> {
+        self.updates.iter().filter(|u| u.mode.is_reported())
+    }
+
+    /// Number of local refs this fetch changed ([`UpdateMode::modified_repo`]).
+    ///
+    /// For a [`FetchOptions::dry_run`] fetch this counts the refs that *would* change;
+    /// nothing was written.
+    #[must_use]
+    pub fn changed_ref_count(&self) -> usize {
+        self.updates
+            .iter()
+            .filter(|u| u.mode.modified_repo())
+            .count()
+    }
+
+    /// Whether any ref update was refused ([`UpdateMode::is_rejected`]).
+    #[must_use]
+    pub fn has_rejections(&self) -> bool {
+        self.updates.iter().any(|u| u.mode.is_rejected())
     }
 }
 
@@ -2999,5 +3041,63 @@ mod tests {
         assert!(UpdateMode::DeletedMissing.modified_repo());
         assert!(!UpdateMode::TagUpdateRejected.modified_repo());
         assert!(!UpdateMode::UpToDate.modified_repo());
+    }
+
+    #[test]
+    fn update_mode_report_classification_covers_every_mode() {
+        use UpdateMode::*;
+        for (mode, reported, rejected) in [
+            (New, true, false),
+            (FastForward, true, false),
+            (Forced, true, false),
+            (DeletedMissing, true, false),
+            (NonFastForwardRejected, true, true),
+            (TagUpdateRejected, true, true),
+            (SourceObjectNotFound, true, true),
+            (UpToDate, false, false),
+            (NoChangeNeeded, false, false),
+            (Unborn, false, false),
+        ] {
+            assert_eq!(mode.is_reported(), reported, "{mode:?}");
+            assert_eq!(mode.is_rejected(), rejected, "{mode:?}");
+            assert!(!(mode.modified_repo() && mode.is_rejected()), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn fetch_outcome_summarizes_reported_changed_and_rejected_refs() {
+        let update = |name: &str, mode| RefUpdate {
+            remote_ref: format!("refs/heads/{name}"),
+            local_ref: Some(format!("refs/remotes/origin/{name}")),
+            old_oid: None,
+            new_oid: None,
+            mode,
+            note: None,
+        };
+        let outcome = FetchOutcome {
+            updates: vec![
+                update("same", UpdateMode::UpToDate),
+                update("new", UpdateMode::New),
+                update("ff", UpdateMode::FastForward),
+                update("noop", UpdateMode::NoChangeNeeded),
+            ],
+            ..Default::default()
+        };
+        let reported: Vec<&str> = outcome
+            .reported_updates()
+            .map(|u| u.remote_ref.as_str())
+            .collect();
+        assert_eq!(reported, ["refs/heads/new", "refs/heads/ff"]);
+        assert_eq!(outcome.changed_ref_count(), 2);
+        assert!(!outcome.has_rejections());
+
+        let rejected = FetchOutcome {
+            updates: vec![update("diverged", UpdateMode::NonFastForwardRejected)],
+            ..Default::default()
+        };
+        assert_eq!(rejected.changed_ref_count(), 0);
+        assert!(rejected.has_rejections());
+        assert_eq!(rejected.reported_updates().count(), 1);
+        assert!(FetchOutcome::default().reported_updates().next().is_none());
     }
 }
