@@ -4525,6 +4525,7 @@ pub grit_lib::error::Error::MergeCommit
 pub grit_lib::error::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::Message(alloc::string::String)
 pub grit_lib::error::Error::Midx(grit_lib::prelude::MidxError)
+pub grit_lib::error::Error::NoReplayInProgress
 pub grit_lib::error::Error::NotARepository(alloc::string::String)
 pub grit_lib::error::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::error::Error::NoteAlreadyExists
@@ -4571,6 +4572,8 @@ pub grit_lib::error::Error::ReflogIndexOutOfRange::refname: alloc::string::Strin
 pub grit_lib::error::Error::ReflogUnknownRef
 pub grit_lib::error::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::error::Error::RemoteReadFailed
+pub grit_lib::error::Error::ReplayAbortHeadMoved
+pub grit_lib::error::Error::ReplayContinueUnmerged
 pub grit_lib::error::Error::ReplaySourceAtHead
 pub grit_lib::error::Error::RestoreConflictMissingOurs
 pub grit_lib::error::Error::RestoreConflictMissingOurs::path: alloc::string::String
@@ -4582,6 +4585,8 @@ pub grit_lib::error::Error::RestoreConflictWithSource
 pub grit_lib::error::Error::RestoreConflictWithStaged
 pub grit_lib::error::Error::RevList(grit_lib::revwalk::rev_list_error::RevListError)
 pub grit_lib::error::Error::RevParse(grit_lib::revwalk::rev_parse_error::RevParseError)
+pub grit_lib::error::Error::SequencerUnknownCommand
+pub grit_lib::error::Error::SequencerUnknownCommand::command: alloc::string::String
 pub grit_lib::error::Error::Signing(alloc::string::String)
 pub grit_lib::error::Error::StashCouldNotRestoreUntracked
 pub grit_lib::error::Error::StashCouldNotRestoreUntracked::path: alloc::string::String
@@ -11438,6 +11443,98 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayRequest
 pub fn grit_lib::porcelain::replay::replay_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::replay::ReplayRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay::ReplayOutcome>
+pub mod grit_lib::porcelain::replay_sequence
+pub enum grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Drop
+pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Keep
+pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Stop
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub enum grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::created: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::created_so_far: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::current: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::created_so_far: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::current: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub fn grit_lib::porcelain::replay_sequence::SequenceOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub fn grit_lib::porcelain::replay_sequence::SequenceOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub fn grit_lib::porcelain::replay_sequence::SequenceOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub struct grit_lib::porcelain::replay_sequence::ReplayOptions
+pub grit_lib::porcelain::replay_sequence::ReplayOptions::conflict_style: grit_lib::diff::merge_file::ConflictStyle
+pub grit_lib::porcelain::replay_sequence::ReplayOptions::empty: grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub grit_lib::porcelain::replay_sequence::ReplayOptions::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::porcelain::replay_sequence::ReplayOptions::mainline: core::option::Option<core::num::nonzero::NonZeroU32>
+pub grit_lib::porcelain::replay_sequence::ReplayOptions::message_override: core::option::Option<alloc::string::String>
+pub grit_lib::porcelain::replay_sequence::ReplayOptions::no_commit: bool
+pub grit_lib::porcelain::replay_sequence::ReplayOptions::record_origin: bool
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub fn grit_lib::porcelain::replay_sequence::ReplayOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub fn grit_lib::porcelain::replay_sequence::ReplayOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub fn grit_lib::porcelain::replay_sequence::ReplayOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub struct grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+pub grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::committer: alloc::string::String
+pub grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::direction: grit_lib::porcelain::replay::ReplayDirection
+pub grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::options: grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+pub fn grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+pub fn grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+pub fn grit_lib::porcelain::replay_sequence::abort_replay_sequence(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::replay_sequence::continue_replay_sequence(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::porcelain::replay_sequence::skip_replay_step(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::porcelain::replay_sequence::start_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub mod grit_lib::porcelain::reset
 pub enum grit_lib::porcelain::reset::ResetMode
 pub grit_lib::porcelain::reset::ResetMode::Hard
@@ -12252,6 +12349,7 @@ pub grit_lib::prelude::Error::MergeCommit
 pub grit_lib::prelude::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::Message(alloc::string::String)
 pub grit_lib::prelude::Error::Midx(grit_lib::prelude::MidxError)
+pub grit_lib::prelude::Error::NoReplayInProgress
 pub grit_lib::prelude::Error::NotARepository(alloc::string::String)
 pub grit_lib::prelude::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::prelude::Error::NoteAlreadyExists
@@ -12298,6 +12396,8 @@ pub grit_lib::prelude::Error::ReflogIndexOutOfRange::refname: alloc::string::Str
 pub grit_lib::prelude::Error::ReflogUnknownRef
 pub grit_lib::prelude::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::prelude::Error::RemoteReadFailed
+pub grit_lib::prelude::Error::ReplayAbortHeadMoved
+pub grit_lib::prelude::Error::ReplayContinueUnmerged
 pub grit_lib::prelude::Error::ReplaySourceAtHead
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs::path: alloc::string::String
@@ -12309,6 +12409,8 @@ pub grit_lib::prelude::Error::RestoreConflictWithSource
 pub grit_lib::prelude::Error::RestoreConflictWithStaged
 pub grit_lib::prelude::Error::RevList(grit_lib::revwalk::rev_list_error::RevListError)
 pub grit_lib::prelude::Error::RevParse(grit_lib::revwalk::rev_parse_error::RevParseError)
+pub grit_lib::prelude::Error::SequencerUnknownCommand
+pub grit_lib::prelude::Error::SequencerUnknownCommand::command: alloc::string::String
 pub grit_lib::prelude::Error::Signing(alloc::string::String)
 pub grit_lib::prelude::Error::StashCouldNotRestoreUntracked
 pub grit_lib::prelude::Error::StashCouldNotRestoreUntracked::path: alloc::string::String

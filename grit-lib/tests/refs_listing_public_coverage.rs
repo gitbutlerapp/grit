@@ -96,6 +96,7 @@ fn references_query_peels_annotated_tags() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -184,6 +185,7 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -236,6 +238,7 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )
