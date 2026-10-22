@@ -126,6 +126,11 @@ while true; do
   echo "Run 2 → ${RUN2}"
   run_daily_merged "daily run 2" "${RUN2}" 2>&1 | tee "${BASELINE_DIR}/second-run.log"
 
+  pair_dir="${BASELINE_DIR}/pairs"
+  mkdir -p "${pair_dir}"
+  cp "${RUN1}" "${pair_dir}/attempt-${attempt}-run1.json"
+  cp "${RUN2}" "${pair_dir}/attempt-${attempt}-run2.json"
+
   echo "Compare consecutive runs (±${TOLERANCE} tolerance)"
   set +e
   "$BENCH" daily compare "${RUN1}" "${RUN2}" --tolerance "${TOLERANCE}" --markdown \
