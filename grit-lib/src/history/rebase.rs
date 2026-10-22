@@ -45,7 +45,7 @@ impl RebaseOntoOptions {
 /// # Errors
 ///
 /// Returns [`HistoryError::Conflict`] and other planning
-/// failures from [`plan_rewrite`].
+/// failures from [`crate::history::plan::plan_rewrite`].
 pub fn rebase_onto(
     repo: &Repository,
     upstream: ObjectId,

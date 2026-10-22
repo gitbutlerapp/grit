@@ -1,3 +1,0 @@
-ancestorEntries = ["grit-lib/src/remote/push_plan.rs"]
-ourEntries = ["grit-lib/src/remote/push_plan.rs"]
-theirEntries = ["grit-lib/src/remote/push_plan.rs"]

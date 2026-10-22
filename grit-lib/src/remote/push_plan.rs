@@ -9,9 +9,11 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::branch_tracking::remote_tracking_ref_for_remote_ref;
-use crate::config::ConfigSet;
-use crate::objects::ObjectId;
+use crate::branch_tracking::{apply_push_set_upstream, remote_tracking_ref_for_remote_ref};
+use crate::config::{parse_git_config_maybe_bool, ConfigSet};
+use crate::merge_base::is_ancestor;
+use crate::objects::{ObjectId, ObjectKind};
+use crate::push_report::PushRefResult;
 use crate::refs;
 use crate::refspec::{parse_push_refspec, RefspecItem};
 use crate::repo::Repository;
@@ -55,6 +57,10 @@ pub struct PushRequest {
     pub delete: Vec<String>,
     /// Force or force-with-lease mode from CLI flags.
     pub force: ForceMode,
+    /// Push annotated tags reachable from the commits being pushed (`--follow-tags`).
+    pub follow_tags: bool,
+    /// After a successful branch push, write `branch.<name>.remote` / `.merge` (`-u`).
+    pub set_upstream: bool,
 }
 
 /// A fully resolved push target.
@@ -195,10 +201,90 @@ pub fn resolve_push(
     let remote = configured_remote_for_push(repo, config, request.remote.as_deref())?;
     validate_remote(config, &remote)?;
 
-    if request.refspecs.is_empty() {
-        let mut resolved = resolve_default_push(repo, config, &remote, ctx)?;
-        apply_force_mode(repo, config, &remote, &mut resolved.specs, &request.force)?;
-        return Ok(resolved);
+    let follow_tags = request.follow_tags || push_follow_tags_config(config);
+
+    let mut resolved = if request.refspecs.is_empty() {
+        resolve_default_push(repo, config, &remote, ctx)?
+    } else {
+        let mut specs = Vec::new();
+        for spec in &request.refspecs {
+            specs.extend(resolve_cli_refspec(repo, config, &remote, spec, ctx)?);
+        }
+        let branch_label = branch_label_from_specs(repo, &specs);
+        ResolvedPush {
+            remote,
+            specs,
+            branch_label,
+            kind: PushPlanKind::Refspecs,
+        }
+    };
+
+    if follow_tags {
+        let extra = follow_tag_push_specs(repo, &resolved.specs, ctx)?;
+        resolved.specs.extend(extra);
+    }
+
+    apply_force_mode(
+        repo,
+        config,
+        &resolved.remote,
+        &mut resolved.specs,
+        &request.force,
+    )?;
+    Ok(resolved)
+}
+
+/// Whether `push.followTags` is enabled in config (default false).
+#[must_use]
+pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
+    config
+        .get("push.followTags")
+        .or_else(|| config.get("push.followtags"))
+        .and_then(|v| parse_git_config_maybe_bool(&v))
+        .unwrap_or(false)
+}
+
+/// Append annotated tag refspecs reachable from the updates in `specs`.
+///
+/// Matches `git push --follow-tags`: lightweight tags are skipped, tags already on the remote
+/// are skipped, and reachability uses commit-graph ancestor checks from pushed tips (any ref
+/// namespace). Tag refspecs and specs whose source is a tag object do not seed the walk.
+pub fn follow_tag_push_specs(
+    repo: &Repository,
+    specs: &[PushRefSpec],
+    ctx: &PushPlanContext,
+) -> PlanResult<Vec<PushRefSpec>> {
+    let tips = push_follow_tip_commits(repo, specs)?;
+    if tips.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let existing: HashSet<&str> = specs.iter().map(|s| s.dst.as_str()).collect();
+    let odb = repo.odb();
+    let mut out = Vec::new();
+    for (tag_name, tag_oid) in list_local_refs(repo.git_dir(), "refs/tags/")? {
+        if ctx.remote_ref_names.contains(&tag_name) || existing.contains(tag_name.as_str()) {
+            continue;
+        }
+        let Ok(obj) = odb.read(&tag_oid) else {
+            continue;
+        };
+        if obj.kind != ObjectKind::Tag {
+            continue;
+        }
+        let Ok((peeled, _)) = odb.peel_tags(tag_oid) else {
+            continue;
+        };
+        if !tag_reachable_from_push_tips(repo, peeled, &tips)? {
+            continue;
+        }
+        out.push(push_spec(
+            Some(tag_oid),
+            Some(tag_name.clone()),
+            tag_name,
+            false,
+            false,
+        ));
     }
     Ok(out)
 }
@@ -218,21 +304,62 @@ pub fn apply_set_upstream_after_push(
     if !set_upstream || dry_run {
         return Ok(Vec::new());
     }
-    let branch_label = branch_label_from_specs(repo, &specs);
-    let mut resolved = ResolvedPush {
-        remote,
-        specs,
-        branch_label,
-        kind: PushPlanKind::Refspecs,
+    apply_push_set_upstream(repo, remote, specs, results)
+}
+
+fn push_follow_tip_commits(repo: &Repository, specs: &[PushRefSpec]) -> PlanResult<Vec<ObjectId>> {
+    let mut tips = Vec::new();
+    for spec in specs {
+        if spec.delete || is_tag_push_spec(repo, spec) {
+            continue;
+        }
+        if let Some(commit) = peel_push_src_to_commit(repo, spec) {
+            tips.push(commit);
+        }
+    }
+    Ok(tips)
+}
+
+fn is_tag_push_spec(repo: &Repository, spec: &PushRefSpec) -> bool {
+    if spec.dst.starts_with("refs/tags/") {
+        return true;
+    }
+    let Some(src) = spec.src else {
+        return false;
     };
-    apply_force_mode(
-        repo,
-        config,
-        &resolved.remote,
-        &mut resolved.specs,
-        &request.force,
-    )?;
-    Ok(resolved)
+    let Ok(obj) = repo.odb().read(&src) else {
+        return false;
+    };
+    obj.kind == ObjectKind::Tag
+}
+
+fn peel_push_src_to_commit(repo: &Repository, spec: &PushRefSpec) -> Option<ObjectId> {
+    let src = spec.src?;
+    let odb = repo.odb();
+    let Ok(obj) = odb.read(&src) else {
+        return None;
+    };
+    match obj.kind {
+        ObjectKind::Commit => Some(src),
+        ObjectKind::Tag => odb.peel_tags(src).ok().map(|(commit, _)| commit),
+        _ => None,
+    }
+}
+
+fn tag_reachable_from_push_tips(
+    repo: &Repository,
+    peeled: ObjectId,
+    tips: &[ObjectId],
+) -> PlanResult<bool> {
+    for &tip in tips {
+        if peeled == tip {
+            return Ok(true);
+        }
+        if is_ancestor(repo, peeled, tip).map_err(|e| PushPlanError::Message(e.to_string()))? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn resolve_delete_push(

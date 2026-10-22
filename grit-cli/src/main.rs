@@ -1012,6 +1012,18 @@ enum Command {
             conflicts_with = "force"
         )]
         force_with_lease: Option<Option<String>>,
+        /// Set `branch.<name>.remote` and `branch.<name>.merge` for each pushed branch.
+        #[arg(short = 'u', long = "set-upstream")]
+        set_upstream: bool,
+        /// All ref updates succeed or none are applied.
+        #[arg(long = "atomic")]
+        atomic: bool,
+        /// Server-side push option (repeatable; `GIT_PUSH_OPTION_*` in hooks).
+        #[arg(short = 'o', long = "push-option", value_name = "OPTION")]
+        push_option: Vec<String>,
+        /// Push annotated tags reachable from the commits being pushed.
+        #[arg(long = "follow-tags")]
+        follow_tags: bool,
         /// Remote name (when not using `--remote`).
         #[arg(value_name = "REMOTE")]
         remote_name: Option<String>,
@@ -2116,6 +2128,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             dry_run,
             force,
             force_with_lease,
+            set_upstream,
+            atomic,
+            push_option,
+            follow_tags,
             remote_name,
             refspecs,
         } => {
@@ -2132,6 +2148,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 dry_run,
                 force,
                 force_with_lease,
+                set_upstream,
+                atomic,
+                &push_option,
+                follow_tags,
             )?;
             emit(&outcome, opts, ctx)?;
             // The outcome (per-ref results) is reported in both modes; a rejected

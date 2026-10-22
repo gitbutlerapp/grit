@@ -258,6 +258,92 @@ fn follow_tags_matches_git_push_follow_tags() {
     assert!(!git_tags.contains("refs/tags/ann-unreach"));
 }
 
+fn refs_on_bare(bare: &Path) -> HashSet<String> {
+    let out = git_cmd(&["for-each-ref", "--format=%(refname)"])
+        .in_dir(bare)
+        .exec();
+    assert!(out.ok(), "for-each-ref: {}", out.stderr);
+    out.stdout
+        .lines()
+        .filter(|l| !l.is_empty() && !l.ends_with("^{}"))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn follow_tags_custom_dst_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = tmp.path().join("local");
+    let bare_git = tmp.path().join("remote-git.git");
+    let bare_grit = tmp.path().join("remote-grit.git");
+    std::fs::create_dir_all(&local).unwrap();
+    std::fs::create_dir_all(&bare_git).unwrap();
+    std::fs::create_dir_all(&bare_grit).unwrap();
+    git(&local, &["init", "-q", "-b", "main"]);
+    std::fs::write(local.join("f"), "1\n").unwrap();
+    git(&local, &["add", "f"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    git(&local, &["tag", "light"]);
+    git(&local, &["tag", "-a", "-m", "ann-reach", "ann-reach"]);
+    git(&local, &["branch", "orphan"]);
+    git(&local, &["checkout", "-q", "orphan"]);
+    std::fs::write(local.join("g"), "2\n").unwrap();
+    git(&local, &["add", "g"]);
+    git(&local, &["commit", "-q", "-m", "orphan"]);
+    git(&local, &["tag", "-a", "-m", "ann-unreach", "ann-unreach"]);
+    git(&local, &["checkout", "-q", "main"]);
+    git(&bare_git, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(&bare_grit, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(
+        &local,
+        &["remote", "add", "git", bare_git.to_str().unwrap()],
+    );
+    git(
+        &local,
+        &["push", "--follow-tags", "git", "main:refs/custom/main"],
+    );
+    git(&local, &["remote", "remove", "git"]);
+    git(
+        &local,
+        &["remote", "add", "grit", bare_grit.to_str().unwrap()],
+    );
+
+    let repo = open_repo(&local);
+    let config = load_config(&repo);
+    let ctx = ctx_from_bare(&bare_grit);
+    let branch_specs = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            remote: Some("grit".into()),
+            refspecs: vec!["main:refs/custom/main".into()],
+            follow_tags: true,
+            ..Default::default()
+        },
+        &ctx,
+    )
+    .expect("plan")
+    .specs;
+    push_local(
+        repo.git_dir(),
+        &bare_grit,
+        &branch_specs,
+        &PushOptions {
+            tracking_remote: Some("grit".into()),
+            ..Default::default()
+        },
+    )
+    .expect("grit push");
+
+    let git_refs = refs_on_bare(&bare_git);
+    let grit_refs = refs_on_bare(&bare_grit);
+    assert_eq!(git_refs, grit_refs);
+    assert!(git_refs.contains("refs/custom/main"));
+    assert!(git_refs.contains("refs/tags/ann-reach"));
+    assert!(!git_refs.contains("refs/tags/light"));
+    assert!(!git_refs.contains("refs/tags/ann-unreach"));
+}
+
 #[test]
 fn follow_tags_on_up_to_date_branch_includes_older_annotated_tag() {
     let tmp = tempfile::tempdir().expect("tempdir");

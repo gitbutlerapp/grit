@@ -1,5 +1,0 @@
-# pack-refs with: peeled fully-peeled sorted 
-2726cbc21d4c606c2942417c6970d9d227684afb refs/heads/master
-2726cbc21d4c606c2942417c6970d9d227684afb refs/heads/seed
-227662f885cfa350687d823c3bc65f11e435a92a refs/tags/v0.1
-^2726cbc21d4c606c2942417c6970d9d227684afb

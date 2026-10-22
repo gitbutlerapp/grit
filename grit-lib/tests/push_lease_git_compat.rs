@@ -66,17 +66,31 @@ fn load_config(repo: &Repository) -> ConfigSet {
     ConfigSet::load(&Environment::empty(), Some(repo.git_dir()), true).expect("config")
 }
 
-fn remote_names(bare: &Path) -> HashSet<String> {
+fn push_plan_context(bare: &Path) -> PushPlanContext {
     let out = Command::new("git")
         .current_dir(bare)
-        .args(["for-each-ref", "--format=%(refname)"])
+        .args(["for-each-ref", "--format=%(refname) %(objectname)"])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
         .expect("for-each-ref");
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(str::to_owned)
-        .collect()
+    let mut remote_ref_names = HashSet::new();
+    let mut remote_branch_tips = HashSet::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Some((name, hex)) = line.split_once(' ') else {
+            continue;
+        };
+        if name.ends_with("^{}") {
+            continue;
+        }
+        remote_ref_names.insert(name.to_owned());
+        if name.starts_with("refs/heads/") {
+            remote_branch_tips.insert(ObjectId::from_hex(hex).expect("oid"));
+        }
+    }
+    PushPlanContext {
+        remote_ref_names,
+        remote_branch_tips,
+    }
 }
 
 struct Fixture {
@@ -133,9 +147,7 @@ impl Fixture {
 fn grit_push_request(work: &Path, bare: &Path, request: PushRequest) -> PushOutcome {
     let repo = open_repo(work);
     let config = load_config(&repo);
-    let ctx = PushPlanContext {
-        remote_ref_names: remote_names(bare),
-    };
+    let ctx = push_plan_context(bare);
     let plan = resolve_push(&repo, &config, &request, &ctx).expect("plan");
     Remote::from_config(&config, "origin")
         .expect("remote")

@@ -14,6 +14,10 @@ grit push --delete <ref>
 grit push --dry-run
 grit push --force-with-lease[=<rev>]
 grit push --force
+grit push -u [--set-upstream]
+grit push --atomic
+grit push -o <option> [--push-option <option>]
+grit push --follow-tags
 grit push --remote <name>   # hidden alias for one release
 ```
 
@@ -31,6 +35,14 @@ With `--delete`, deletes remote branches or tags (short names map like Git).
 
 `--force-with-lease` updates a remote ref only when it still matches the local remote-tracking ref mapped from the push destination (or when the ref is absent if there is no tracking ref). Use `--force-with-lease=<rev>` when pushing exactly one ref to compare against a specific commit. `--force` overwrites the remote ref unconditionally. The two flags cannot be combined.
 
+`-u` / `--set-upstream` writes `branch.<name>.remote` and `branch.<name>.merge` for each successfully pushed branch (skipped with `--dry-run`).
+
+`--atomic` requires every ref update in the push to succeed or none are applied (when the transport supports it).
+
+`-o` / `--push-option` sends server-side push options (for example `ci.skip`) on smart HTTP; `file://` remotes reject non-empty push options.
+
+`--follow-tags` pushes annotated tags that point to commits reachable from the refs being pushed (lightweight tags and unreachable annotated tags are skipped). The config key `push.followTags` enables the same behavior by default.
+
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
 ## Options
@@ -45,6 +57,10 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `-f`, `--force` | Overwrite remote refs when the update is not a fast-forward. |
 | `--force-with-lease` | Push only if the remote ref matches the local remote-tracking ref (or is absent when there is no tracking ref). |
 | `--force-with-lease=<rev>` | Same check against `<rev>` (exactly one ref must be pushed). |
+| `-u`, `--set-upstream` | Set upstream config for pushed branches. |
+| `--atomic` | All ref updates succeed or none are applied. |
+| `-o`, `--push-option` | Server-side push option (repeatable; smart HTTP only). |
+| `--follow-tags` | Push annotated tags reachable from the commits being pushed. |
 | `--remote` | Hidden alias for the remote name (prefer the positional `<remote>`). |
 
 ## Examples

@@ -3,8 +3,9 @@
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::remote::push_plan::{
-    configured_remote_for_push, parse_force_mode, resolve_push, PushPlanContext, PushPlanError,
-    PushPlanKind, PushRequest,
+    apply_set_upstream_after_push, configured_remote_for_push, parse_force_mode,
+    push_follow_tags_config, resolve_push, PushPlanContext, PushPlanError, PushPlanKind,
+    PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::PushOptions;
@@ -162,6 +163,10 @@ pub fn run(
     dry_run: bool,
     force: bool,
     force_with_lease: Option<Option<String>>,
+    set_upstream: bool,
+    atomic: bool,
+    push_options: &[String],
+    follow_tags: bool,
 ) -> Result<PushOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
@@ -173,19 +178,19 @@ pub fn run(
 
     let force_mode = parse_force_mode(&repo, force, force_with_lease).map_err(plan_error)?;
 
-    let plan = resolve_push(
-        &repo,
-        &config,
-        &PushRequest {
-            remote: remote_override,
-            refspecs,
-            tags,
-            delete: delete_refs.to_vec(),
-            force: force_mode,
-        },
-        &plan_ctx,
-    )
-    .map_err(plan_error)?;
+    let follow = follow_tags || push_follow_tags_config(&config);
+
+    let push_request = PushRequest {
+        remote: remote_override,
+        refspecs,
+        tags,
+        delete: delete_refs.to_vec(),
+        force: force_mode,
+        follow_tags: follow,
+        set_upstream,
+    };
+
+    let plan = resolve_push(&repo, &config, &push_request, &plan_ctx).map_err(plan_error)?;
 
     let factory = DefaultHttpClientFactory;
     let wire = PushWireOptions {
