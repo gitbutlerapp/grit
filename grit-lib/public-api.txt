@@ -21123,6 +21123,7 @@ pub grit_lib::state::WtStatusState::cherry_pick_head_oid: core::option::Option<g
 pub grit_lib::state::WtStatusState::cherry_pick_in_progress: bool
 pub grit_lib::state::WtStatusState::detached_at: bool
 pub grit_lib::state::WtStatusState::detached_from: core::option::Option<alloc::string::String>
+pub grit_lib::state::WtStatusState::grit_replay_sequencer: bool
 pub grit_lib::state::WtStatusState::merge_in_progress: bool
 pub grit_lib::state::WtStatusState::rebase_branch: core::option::Option<alloc::string::String>
 pub grit_lib::state::WtStatusState::rebase_in_progress: bool
