@@ -178,7 +178,9 @@ $ grit push
   rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
 ```
 
-After rewriting commits with [`grit history`](../history/) (reword, drop, fixup, or squash), fetch so your remote-tracking refs are current, then push with a lease:
+To replay your own commits onto another base without fetching first, use [`grit rebase`](../rebase/) (default upstream is `@{upstream}`; `--onto` for Git's `--onto`).
+
+After rewriting commits with [`grit history`](../history/) (reword, drop, fixup, squash, or rebase), fetch so your remote-tracking refs are current, then push with a lease:
 
 ```console
 $ grit fetch origin

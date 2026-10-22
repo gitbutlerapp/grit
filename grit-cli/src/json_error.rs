@@ -29,6 +29,10 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub conflicts: Option<Vec<String>>,
+    /// Commit that could not be replayed cleanly, when `kind == "conflict"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
     /// Overwrite details when `kind == "would_overwrite"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -54,19 +58,28 @@ impl fmt::Display for StructuredCliError {
 
 impl StdError for StructuredCliError {}
 
-/// Build an error for a merge or pick that would introduce conflicts.
-pub fn operation_conflict(operation: &str, mut paths: Vec<String>) -> Error {
+/// Build an error for a merge, pick, or rebase that would introduce conflicts.
+pub fn operation_conflict(
+    operation: &str,
+    mut paths: Vec<String>,
+    commit: Option<ObjectId>,
+) -> Error {
     paths.sort();
     paths.dedup();
     let list = paths.join("\n  ");
+    let commit_line = commit
+        .as_ref()
+        .map(|oid| format!("\n  commit {}", &oid.to_hex()[..7.min(oid.to_hex().len())]))
+        .unwrap_or_default();
     let human = format!(
-        "{operation} has conflicts in:\n  {list}\n\nNothing was changed. grit can't resolve conflicts yet."
+        "{operation} has conflicts in:{commit_line}\n  {list}\n\nNothing was changed. grit can't resolve conflicts yet."
     );
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
             error: format!("{operation} has conflicts"),
             kind: "conflict",
             conflicts: Some(paths),
+            commit: commit.map(|oid| oid.to_hex()),
             would_overwrite: None,
             oid: None,
         },
@@ -84,6 +97,7 @@ pub fn hash_collision(oid: ObjectId) -> Error {
             error: "SHA-1 hash collision".to_owned(),
             kind: "hash_collision",
             conflicts: None,
+            commit: None,
             would_overwrite: None,
             oid: Some(hex),
         },
@@ -105,6 +119,7 @@ pub fn would_overwrite_error(
             error: human.clone(),
             kind: "would_overwrite",
             conflicts: None,
+            commit: None,
             would_overwrite: Some(WouldOverwriteJson {
                 reason: reason_str,
                 paths,
@@ -196,6 +211,7 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
             error: "SHA-1 hash collision".to_owned(),
             kind: "hash_collision",
             conflicts: None,
+            commit: None,
             would_overwrite: None,
             oid: Some(hex),
         }
@@ -210,6 +226,7 @@ pub fn incompatible_output_flags(human: impl Into<String>, kind: &'static str) -
             error: human.clone(),
             kind,
             conflicts: None,
+            commit: None,
             would_overwrite: None,
             oid: None,
         },
@@ -240,6 +257,7 @@ pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) 
             error: human.clone(),
             kind: "invalid_pattern",
             conflicts: None,
+            commit: None,
             would_overwrite: None,
             oid: None,
         },
@@ -256,6 +274,7 @@ pub fn invalid_pickaxe(err: grit_lib::diff::PickaxeError) -> Error {
             error: human.clone(),
             kind: "invalid_pattern",
             conflicts: None,
+            commit: None,
             would_overwrite: None,
             oid: None,
         },

@@ -244,6 +244,30 @@
         ]
       },
       "ratio": 0.8057228145584939
+    },
+    {
+      "id": "rebase/onto@synth-10k",
+      "group": "history",
+      "fixture": "history-rewrite-prod",
+      "description": "rebase onto upstream vs git rebase on history-rewrite fixture",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 46.87832,
+        "median_ms": 46.87832,
+        "stddev_ms": 0.0,
+        "min_ms": 46.87832,
+        "max_ms": 46.87832,
+        "runs_ms": [46.87832]
+      },
+      "grit": {
+        "mean_ms": 43.221452,
+        "median_ms": 43.221452,
+        "stddev_ms": 0.0,
+        "min_ms": 43.221452,
+        "max_ms": 43.221452,
+        "runs_ms": [43.221452]
+      },
+      "ratio": 0.9219923410224597
     }
   ]
 }

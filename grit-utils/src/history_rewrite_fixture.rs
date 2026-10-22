@@ -31,6 +31,7 @@ pub struct HistoryRewriteMeta {
     pub fixup_path: String,
     pub squash_range: String,
     pub squash_rebase_parent: String,
+    pub rebase_upstream: String,
     pub bench_message: String,
 }
 
@@ -201,6 +202,7 @@ fn write_meta(_git: &Path, repo: &Path, smoke: bool) -> Result<HistoryRewriteMet
         fixup_path: fixup_path.clone(),
         squash_range: format!("HEAD~{squash_count}..HEAD"),
         squash_rebase_parent: format!("HEAD~{squash_count}"),
+        rebase_upstream: format!("HEAD~{reword_depth}"),
         bench_message,
     };
     let body = serde_json::to_string_pretty(&meta).context("serialize meta")?;

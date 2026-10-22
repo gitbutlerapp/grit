@@ -237,6 +237,32 @@ fn snapshot_history_reword() {
     );
 }
 
+fn prepare_history_rebase(fixture: &CliFixture) {
+    std::fs::write(fixture.path().join("rebase.txt"), "two\n").expect("write");
+    fixture
+        .run(&["add", "rebase.txt"])
+        .expect_success("stage rebase.txt");
+    fixture
+        .run(&["commit", "-m", "second"])
+        .expect_success("second commit");
+    std::fs::write(fixture.path().join("rebase.txt"), "three\n").expect("write");
+    fixture
+        .run(&["add", "rebase.txt"])
+        .expect_success("stage rebase.txt");
+    fixture
+        .run(&["commit", "-m", "third"])
+        .expect_success("third commit");
+}
+
+#[test]
+fn snapshot_history_rebase() {
+    snapshot_fresh(
+        "history_rebase",
+        &["rebase", "HEAD~2", "--dry-run"],
+        prepare_history_rebase,
+    );
+}
+
 fn prepare_history_drop(fixture: &CliFixture) {
     fixture
         .run(&["commit", "-m", "third on main"])

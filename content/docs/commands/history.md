@@ -12,10 +12,11 @@ grit history drop <commit>
 grit history move <commit> (--before <anchor> | --after <anchor>)
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
-grit history drop|move|reword|fixup|squash|absorb … [--dry-run] [--update-refs=(branches|head)]
+grit history drop|move|reword|fixup|squash|absorb|rebase … [--dry-run] [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer]
 grit history fixup <commit> [--empty=(drop|keep|abort)] [-m|--message-file]
 grit history squash <range>… [-m|--message-file|--combine]
 grit history absorb [--base <rev>]
+grit history rebase [<upstream>] [--onto <rev>]
 ```
 
 ## Description
@@ -60,6 +61,10 @@ Assign **staged** hunks into the commits that last touched overlapping lines (be
 
 `--base` is exclusive: commits at and before the base are not considered. When omitted, grit hides other local branch tips, applies an upstream fork-point when configured, and caps the stack at ten commits.
 
+### `rebase`
+
+Replay commits on the current branch onto `<upstream>` (or `--onto`), matching [`grit rebase`](rebase.md). Prefer the top-level command for everyday use; `grit history rebase` shares the same handler and JSON shape (`operation: "rebase"`).
+
 ### `squash`
 
 Fold every commit in a **connected** revision range into the **oldest** commit in that range, then replay descendants onto the new history. The squashed commit keeps the oldest commit's author and parents; its tree matches the range tip. By default the squashed commit keeps the oldest commit's message (including `amend!` handling inside the range). Use `-m` / `--message-file` for an explicit message, or `--combine` for an autosquash-style combined message from every commit in the range.
@@ -77,6 +82,8 @@ The range uses the same revision syntax as `git rev-list` (for example `HEAD~3..
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |
+| `--empty` | `drop` (default), `keep`, or `abort` when a replay would become empty. |
+| `--keep-committer` | Preserve committer ident and timestamp on replayed commits. |
 
 ## Examples
 

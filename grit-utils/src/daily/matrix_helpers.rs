@@ -13,9 +13,12 @@ use super::plan::{DailyHeadlineContext, DailyPrepare, DailySetup};
 use super::runner::BenchArgv;
 use crate::fixture_registry::FixtureKind;
 use crate::history_rewrite_compat::{
-    git_reword_primary_is_history, reword_git_rebase_scenario, reword_scenario,
+    git_reword_primary_is_history, rebase_onto_scenario, reword_git_rebase_scenario,
+    reword_scenario,
 };
-use crate::history_rewrite_fixture::{ensure_history_rewrite_work, load_history_rewrite_meta};
+use crate::history_rewrite_fixture::{
+    ensure_history_rewrite_work, load_history_rewrite_meta, HistoryRewriteMeta,
+};
 use crate::history_rewrite_prepare::{install_history_rewrite_env, BARE_ENV, WORK_ENV};
 use crate::hot_path_fixture::{setup_pick_merge_fixture, setup_switch_fixture, HotPathRepoSpec};
 use crate::maintenance_suite::{git_env, seed_loose_objects};
@@ -454,6 +457,38 @@ pub fn tag_create_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["tag", name]),
         sh_devnull(&ctx.git, &["tag", name]),
+    )
+}
+
+pub fn rebase_onto_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let Some(meta) = ctx.history_meta.as_ref() else {
+        return noop_bench();
+    };
+    let (grit_argv, git_argv) = rebase_onto_scenario(&ctx.grit, &ctx.git, meta);
+    (
+        BenchArgv::new("/bin/sh", grit_argv),
+        BenchArgv::new("/bin/sh", git_argv),
+    )
+}
+
+pub fn rebase_onto_git_git_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let meta = HistoryRewriteMeta {
+        commit_count: 0,
+        reword: String::new(),
+        reword_rebase_line: 0,
+        drop: String::new(),
+        drop_rebase_line: 0,
+        fixup: String::new(),
+        fixup_path: String::new(),
+        squash_range: String::new(),
+        squash_rebase_parent: String::new(),
+        rebase_upstream: "HEAD~40".into(),
+        bench_message: String::new(),
+    };
+    let (grit_argv, git_argv) = rebase_onto_scenario(&ctx.grit, &ctx.git, &meta);
+    (
+        BenchArgv::new("/bin/sh", grit_argv),
+        BenchArgv::new("/bin/sh", git_argv),
     )
 }
 

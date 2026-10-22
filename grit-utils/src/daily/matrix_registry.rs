@@ -408,6 +408,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "History reword vs git history reword or scripted rebase",
     },
     ScenarioSpec {
+        id: "rebase/onto@synth-10k",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Rebase onto upstream vs git rebase on synth-10k history fixture",
+    },
+    ScenarioSpec {
+        id: "rebase/onto@git-git",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Rebase onto upstream vs git rebase on git.git clone",
+    },
+    ScenarioSpec {
         id: "stash/list@synth-10k",
         area: Area::Branching,
         headline: false,

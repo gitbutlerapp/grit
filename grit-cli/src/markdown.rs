@@ -808,6 +808,10 @@ pub fn print_history_rewrite_outcome(
 ) -> anyhow::Result<()> {
     outln!(w, "## {title}");
     outln!(w);
+    if outcome.operation == "rebase" && outcome.rewritten.is_empty() {
+        outln!(w, "- Already up to date");
+        return Ok(());
+    }
     if outcome.dry_run {
         outln!(w, "- Dry run (refs unchanged)");
     }

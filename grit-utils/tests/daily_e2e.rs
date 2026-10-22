@@ -140,6 +140,8 @@ const BRANCHING_MAINTENANCE_MISC_MATRIX_IDS: [&str; 29] = [
     "revert/one@synth-10k",
     "pick/one@synth-100k",
     "history/reword@synth-10k",
+    "rebase/onto@synth-10k",
+    "rebase/onto@git-git",
     "stash/list@synth-10k",
     "gc/pack-refs@synth-10k",
     "gc/default@synth-10k",

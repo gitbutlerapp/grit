@@ -100,6 +100,29 @@ pub fn reword_git_rebase_scenario(repo: &Path) -> Vec<String> {
     script_scenario(repo, ".grit-bench/git-reword-rebase.sh")
 }
 
+/// Grit and git argv for `rebase <upstream>` at the configured depth.
+pub fn rebase_onto_scenario(
+    grit: &Path,
+    git: &Path,
+    meta: &HistoryRewriteMeta,
+) -> (Vec<String>, Vec<String>) {
+    let grit_cmd = format!(
+        "{} rebase {} >/dev/null",
+        shell_quote(&grit.to_string_lossy()),
+        shell_quote(&meta.rebase_upstream)
+    );
+    let git_cmd = format!(
+        "{} {} rebase {} >/dev/null",
+        history_env_prefix(),
+        shell_quote(&git.to_string_lossy()),
+        shell_quote(&meta.rebase_upstream)
+    );
+    (
+        vec!["-c".into(), format!("set -eu; {grit_cmd}")],
+        vec!["-c".into(), format!("set -eu; {git_cmd}")],
+    )
+}
+
 pub fn drop_scenario(
     grit: &Path,
     git: &Path,

@@ -6,15 +6,18 @@ use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
+use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
-    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
-    RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
+    move_commit, plan_rebase, reword, squash, staged_fixup_paths, verify_rewrite_plan,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment,
+    HunkRange, Placement, RebaseOntoOptions, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
+    RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
+use grit_lib::revwalk::rev_parse_error::RevParseError;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -73,6 +76,12 @@ pub struct HistoryRewriteArgs {
     /// Which refs to rewrite: all descendant branches (default) or only `HEAD`.
     #[arg(long = "update-refs", value_enum, default_value_t = UpdateRefs::Branches)]
     pub update_refs: UpdateRefs,
+    /// When a replayed commit would become empty: drop (default), keep, or abort.
+    #[arg(long = "empty", value_enum, default_value_t = EmptyPolicyArg::Drop)]
+    pub empty: EmptyPolicyArg,
+    /// Keep original committer name, email, and timestamp on replayed commits.
+    #[arg(long = "keep-committer")]
+    pub keep_committer: bool,
 }
 
 /// Result of `grit history drop`, `move`, `reword`, `fixup` and `squash`.
@@ -91,7 +100,18 @@ pub struct HistoryRewriteOutcome {
 }
 
 impl HistoryRewriteOutcome {
-    fn new(operation: &str, plan: &RewritePlan, dry_run: bool) -> Self {
+    /// Outcome when there is nothing to replay (`rewritten` is empty).
+    pub fn up_to_date(operation: &str, dry_run: bool) -> Self {
+        Self {
+            operation: operation.into(),
+            rewritten: Vec::new(),
+            refs: Vec::new(),
+            head: None,
+            dry_run,
+        }
+    }
+
+    pub(crate) fn new(operation: &str, plan: &RewritePlan, dry_run: bool) -> Self {
         Self {
             operation: operation.into(),
             rewritten: plan
@@ -205,6 +225,10 @@ fn render_rewrite_rows(
 
 impl HumanRender for HistoryRewriteOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.operation == "rebase" && self.rewritten.is_empty() {
+            outln!(w, "Already up to date");
+            return Ok(());
+        }
         if self.dry_run {
             outln!(w, "Dry run — refs would change:");
         } else if self.operation == "drop" {
@@ -213,6 +237,8 @@ impl HumanRender for HistoryRewriteOutcome {
                 "Dropped 1 commit, replayed {} descendant commit(s)",
                 self.rewritten.len()
             );
+        } else if self.operation == "rebase" {
+            outln!(w, "Rebased {} commit(s)", self.rewritten.len());
         } else {
             let verb = match self.operation.as_str() {
                 "fixup" => "Fixed up",
@@ -233,6 +259,7 @@ impl MarkdownRender for HistoryRewriteOutcome {
             "fixup" => "History fixup",
             "squash" => "History squash",
             "reword" => "History reword",
+            "rebase" => "History rebase",
             _ => "History rewrite",
         };
         markdown::print_history_rewrite_outcome(w, title, self)
@@ -262,9 +289,9 @@ impl Rewrite {
             config,
             options: RewriteOptions {
                 scope: shared.update_refs.into(),
-                empty: EmptyPolicy::Drop,
+                empty: shared.empty.into(),
                 committer,
-                preserve_committer: false,
+                preserve_committer: shared.keep_committer,
                 sign: !shared.dry_run,
             },
         })
@@ -365,7 +392,6 @@ pub fn run_fixup(
     commit: &str,
     message: Option<String>,
     message_file: Option<String>,
-    empty: EmptyPolicyArg,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
     let message = read_message(message, message_file)?;
@@ -379,11 +405,8 @@ pub fn run_fixup(
         commit_oid,
         &FixupOptions {
             message,
-            empty: empty.into(),
-            rewrite: RewriteOptions {
-                empty: empty.into(),
-                ..rewrite.options.clone()
-            },
+            empty: rewrite.options.empty,
+            rewrite: rewrite.options.clone(),
         },
     )
     .map_err(on_err)?;
@@ -557,6 +580,62 @@ impl MarkdownRender for HistoryAbsorbOutcome {
     }
 }
 
+/// Replay local commits onto a new base (`grit rebase` / `grit history rebase`).
+pub fn run_rebase(
+    upstream: Option<String>,
+    onto: Option<String>,
+    shared: &HistoryRewriteArgs,
+) -> Result<HistoryRewriteOutcome> {
+    let on_err = history_error("rebase");
+    let repo = context::discover()?;
+    let branch_tip = resolve_commit(&repo, "HEAD", "HEAD")?;
+    let upstream_oid = resolve_rebase_upstream(&repo, upstream.as_deref())?;
+    let onto_oid = onto
+        .as_deref()
+        .map(|rev| resolve_commit(&repo, rev, "onto"))
+        .transpose()?;
+    let rewrite = Rewrite::new(repo, shared)?;
+    let request = RebaseRequest {
+        upstream: upstream_oid,
+        onto: onto_oid,
+        branch_tip,
+    };
+    let opts = RebaseOntoOptions::new(rewrite.options.clone());
+    let plan = plan_rebase(&rewrite.repo, &request, &opts).map_err(on_err)?;
+    match plan {
+        RebasePlan::UpToDate => Ok(HistoryRewriteOutcome::up_to_date("rebase", shared.dry_run)),
+        RebasePlan::Conflict { commit, paths } => Err(json_error::operation_conflict(
+            "rebase",
+            paths,
+            Some(commit),
+        )),
+        RebasePlan::Plan(plan) => {
+            verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
+            if !shared.dry_run {
+                let effective_onto = onto_oid.unwrap_or(upstream_oid);
+                let message = format!("rebase: onto {}", short(&effective_onto.to_hex()));
+                apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?)
+                    .map_err(on_err)?;
+            }
+            Ok(HistoryRewriteOutcome::new("rebase", &plan, shared.dry_run))
+        }
+    }
+}
+
+fn resolve_rebase_upstream(repo: &Repository, upstream: Option<&str>) -> Result<ObjectId> {
+    let spec = upstream.unwrap_or("@{upstream}");
+    match resolve_revision_as_commit(repo, spec) {
+        Ok(oid) => Ok(oid),
+        Err(LibError::RevParse(RevParseError::NoUpstream { branch })) if upstream.is_none() => {
+            anyhow::bail!(
+                "no upstream configured for branch '{branch}'\n\
+                 Set one with `grit branch --set-upstream <remote>/<branch>`"
+            )
+        }
+        Err(other) => Err(other).with_context(|| format!("could not resolve upstream '{spec}'")),
+    }
+}
+
 /// Assign staged hunks into history and replay descendants once.
 pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<HistoryAbsorbOutcome> {
     let on_err = history_error("history absorb");
@@ -612,7 +691,9 @@ fn read_message(message: Option<String>, message_file: Option<String>) -> Result
 }
 
 /// Error mapper for `operation` (for example `history drop`), for use with `map_err`.
-fn history_error(operation: &'static str) -> impl Fn(HistoryError) -> anyhow::Error + Copy {
+pub(crate) fn history_error(
+    operation: &'static str,
+) -> impl Fn(HistoryError) -> anyhow::Error + Copy {
     move |err| map_history_error(err, operation)
 }
 
@@ -632,7 +713,7 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         HistoryError::Conflict { mut paths, .. } => {
             paths.sort();
             paths.dedup();
-            json_error::operation_conflict(operation, paths)
+            json_error::operation_conflict(operation, paths, None)
         }
         HistoryError::Planning { message } => {
             anyhow::anyhow!("history rewrite planning failed: {message}")
