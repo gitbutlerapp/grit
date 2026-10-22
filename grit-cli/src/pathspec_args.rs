@@ -12,7 +12,11 @@ pub struct PathspecArgs {
     #[arg(value_name = "PATH")]
     pub paths: Vec<String>,
     /// Read pathspecs from a file (`-` for stdin) instead of or in addition to argv paths.
-    #[arg(long = "pathspec-from-file", value_name = "FILE|-")]
+    #[arg(
+        long = "pathspec-from-file",
+        value_name = "FILE|-",
+        allow_hyphen_values = true
+    )]
     pub pathspec_from_file: Option<String>,
     /// `--pathspec-from-file` entries are NUL-separated.
     #[arg(long = "pathspec-file-nul", requires = "pathspec_from_file")]
@@ -26,7 +30,11 @@ pub struct TrailingPathspecArgs {
     #[arg(value_name = "PATH", last = true, allow_hyphen_values = true)]
     pub paths: Vec<String>,
     /// Read pathspecs from a file (`-` for stdin) instead of or in addition to argv paths.
-    #[arg(long = "pathspec-from-file", value_name = "FILE|-")]
+    #[arg(
+        long = "pathspec-from-file",
+        value_name = "FILE|-",
+        allow_hyphen_values = true
+    )]
     pub pathspec_from_file: Option<String>,
     /// `--pathspec-from-file` entries are NUL-separated.
     #[arg(long = "pathspec-file-nul", requires = "pathspec_from_file")]

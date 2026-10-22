@@ -5,6 +5,7 @@
 //! doubles as the home base: running `grit` with no arguments shows you where you
 //! are, what's changed, and what to do next.
 
+mod clap_value_args;
 mod cli_messages;
 mod commands;
 mod commits_json;
@@ -185,7 +186,7 @@ enum StashAction {
     /// Save local changes to the stash and reset the working tree.
     Push {
         /// Stash message.
-        #[arg(short = 'm', long = "message")]
+        #[arg(short = 'm', long = "message", allow_hyphen_values = true)]
         message: Option<String>,
         /// Include untracked files in the stash.
         #[arg(short = 'u', long = "include-untracked")]
@@ -246,17 +247,23 @@ enum HistoryAction {
         /// Commit to reword (revision spec).
         commit: String,
         /// New commit message.
-        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with = "message_file",
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Read the new message from a file (`-` for stdin).
         #[arg(
             long = "message-file",
             value_name = "PATH|-",
-            conflicts_with = "message"
+            conflicts_with = "message",
+            allow_hyphen_values = true
         )]
         message_file: Option<String>,
         /// Replacement author ident (`Name <email>` or bare email).
-        #[arg(long = "author")]
+        #[arg(long = "author", allow_hyphen_values = true)]
         author: Option<String>,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
@@ -266,13 +273,19 @@ enum HistoryAction {
         /// Commit to fix up (revision spec).
         commit: String,
         /// Replace the target commit message.
-        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with = "message_file",
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Read the replacement message from a file (`-` for stdin).
         #[arg(
             long = "message-file",
             value_name = "PATH|-",
-            conflicts_with = "message"
+            conflicts_with = "message",
+            allow_hyphen_values = true
         )]
         message_file: Option<String>,
         #[command(flatten)]
@@ -291,17 +304,23 @@ enum HistoryAction {
         /// Commit to split (revision spec).
         commit: String,
         /// Message for the new parent commit (the peeled-off changes).
-        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with = "message_file",
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Read the new parent message from a file (`-` for stdin).
         #[arg(
             long = "message-file",
             value_name = "PATH|-",
-            conflicts_with = "message"
+            conflicts_with = "message",
+            allow_hyphen_values = true
         )]
         message_file: Option<String>,
         /// Replace the remaining commit's message after the split.
-        #[arg(long = "rest-message")]
+        #[arg(long = "rest-message", allow_hyphen_values = true)]
         rest_message: Option<String>,
         #[command(flatten)]
         paths: crate::pathspec_args::TrailingPathspecArgs,
@@ -319,13 +338,19 @@ enum HistoryAction {
         #[arg(required = true)]
         range: Vec<String>,
         /// Message for the squashed commit (default: keep the oldest commit's message).
-        #[arg(short = 'm', long = "message", conflicts_with_all = ["message_file", "combine"])]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with_all = ["message_file", "combine"],
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Read the squashed commit message from a file (`-` for stdin).
         #[arg(
             long = "message-file",
             value_name = "PATH|-",
-            conflicts_with_all = ["message", "combine"]
+            conflicts_with_all = ["message", "combine"],
+            allow_hyphen_values = true
         )]
         message_file: Option<String>,
         /// Build a combined autosquash-style message from every commit in the range.
@@ -351,7 +376,7 @@ enum NotesAction {
         /// Revision to attach the note to.
         rev: String,
         /// Note text.
-        #[arg(short = 'm', long = "message")]
+        #[arg(short = 'm', long = "message", allow_hyphen_values = true)]
         message: String,
         /// Replace an existing note.
         #[arg(long)]
@@ -757,22 +782,32 @@ enum Command {
     /// Stage every change and record a new commit.
     Commit {
         /// Commit message (you can also pass it with -m).
-        #[arg(conflicts_with = "message_file")]
+        #[arg(conflicts_with = "message_file", allow_hyphen_values = true)]
         message: Option<String>,
         /// Commit message.
-        #[arg(short = 'm', long = "message", conflicts_with_all = ["message", "message_file"])]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with_all = ["message", "message_file"],
+            allow_hyphen_values = true
+        )]
         message_flag: Option<String>,
         /// Read the commit message from a file (`-` for stdin).
-        #[arg(short = 'F', long = "message-file", conflicts_with_all = ["message", "message_flag"])]
+        #[arg(
+            short = 'F',
+            long = "message-file",
+            conflicts_with_all = ["message", "message_flag"],
+            allow_hyphen_values = true
+        )]
         message_file: Option<String>,
         /// Author for this commit (`Name <email>`); committer is unchanged.
-        #[arg(long = "author")]
+        #[arg(long = "author", allow_hyphen_values = true)]
         author_override: Option<String>,
         /// Override the author date (Git date formats, RFC 3339, `@epoch`, …).
         #[arg(long = "date")]
         author_date: Option<String>,
         /// Append a commit trailer (`key=value` or `key: value`); repeat for multiple trailers.
-        #[arg(long = "trailer", value_name = "KEY=VALUE")]
+        #[arg(long = "trailer", value_name = "KEY=VALUE", allow_hyphen_values = true)]
         trailers: Vec<String>,
         /// Append a `Signed-off-by` trailer for the committer.
         #[arg(short = 's', long = "signoff")]
@@ -908,7 +943,12 @@ enum Command {
         #[arg(long = "continue", conflicts_with_all = ["abort", "check"])]
         continue_merge: bool,
         /// Commit message (only with `--continue`; overrides `MERGE_MSG`).
-        #[arg(short = 'm', long = "message", requires = "continue_merge")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            requires = "continue_merge",
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Predict whether the merge would succeed without changing refs, index, or worktree.
         #[arg(long = "check", conflicts_with_all = ["abort", "continue_merge"])]
@@ -941,10 +981,19 @@ enum Command {
         #[arg(long = "empty", value_enum, default_value_t = commands::pick::ReplayEmptyPolicyArg::Stop)]
         empty: commands::pick::ReplayEmptyPolicyArg,
         /// Replace the pick message (single commit only).
-        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with = "message_file",
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Read the pick message from a file (single commit only).
-        #[arg(long = "message-file", conflicts_with = "message")]
+        #[arg(
+            long = "message-file",
+            conflicts_with = "message",
+            allow_hyphen_values = true
+        )]
         message_file: Option<String>,
         /// List commits that would be picked without changing refs or the worktree.
         #[arg(long = "dry-run")]
@@ -977,10 +1026,19 @@ enum Command {
         #[arg(long = "empty", value_enum, default_value_t = commands::revert::ReplayEmptyPolicyArg::Stop)]
         empty: commands::revert::ReplayEmptyPolicyArg,
         /// Replace the revert message (single commit only).
-        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with = "message_file",
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Read the revert message from a file (single commit only).
-        #[arg(long = "message-file", conflicts_with = "message")]
+        #[arg(
+            long = "message-file",
+            conflicts_with = "message",
+            allow_hyphen_values = true
+        )]
         message_file: Option<String>,
         /// List commits that would be reverted without changing refs or the worktree.
         #[arg(long = "dry-run")]
@@ -994,7 +1052,12 @@ enum Command {
     /// Save or restore shelved work.
     Stash {
         /// Stash message (bare `grit stash` / `grit stash push`).
-        #[arg(short = 'm', long = "message", global = true)]
+        #[arg(
+            short = 'm',
+            long = "message",
+            global = true,
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Include untracked files (bare `grit stash` / `grit stash push`).
         #[arg(short = 'u', long = "include-untracked", global = true)]
@@ -1125,14 +1188,20 @@ enum Command {
         #[arg(short = 'd', long = "delete")]
         delete: bool,
         /// Annotated tag message (`-m` creates an annotated tag).
-        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            conflicts_with = "message_file",
+            allow_hyphen_values = true
+        )]
         message: Option<String>,
         /// Read the annotated tag message from a file (`-` reads stdin).
         #[arg(
             short = 'F',
             long = "file",
             value_name = "PATH|-",
-            conflicts_with = "message"
+            conflicts_with = "message",
+            allow_hyphen_values = true
         )]
         message_file: Option<String>,
         /// Object to tag (revision). Defaults to `HEAD`.
