@@ -78,7 +78,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 - `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`).
 - `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
 - `grit revert <commit>` undoes one non-merge commit with a new inverse commit (`Revert "…"` message).
-- On a conflict these commands list the conflicting files, exit 1 and change nothing. grit can't resolve conflicts yet; to finish, run `git merge <branch>`, `git cherry-pick <commit>`, or `git revert <commit>`, fix the files and commit.
+- On a conflict these commands list the conflicting files, exit 1 and change nothing. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (same rules as `git restore`; index stays unmerged). To finish a merge, pick, or revert, fix the files, `grit add` the paths, and `grit commit`, or run the matching `git` command on the same repo.
 
 ## Remotes
 
@@ -116,7 +116,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## What grit doesn't do
 
-grit has no equivalent of `rebase`, `reset`, partial staging, interactive commands, annotated or signed tags, or conflict resolution. Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
+grit has no equivalent of `rebase`, `reset`, partial staging, interactive commands, annotated or signed tags, or full conflict resolution (no `merge --continue` yet). Use `grit restore --ours|--theirs|--merge` to compare sides or restore markers; use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
 
 ## More
 

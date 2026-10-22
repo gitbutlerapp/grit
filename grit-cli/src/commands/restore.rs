@@ -1,7 +1,11 @@
 //! `grit restore` — restore working tree and/or index paths.
 
 use anyhow::{Context, Result};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreOutcome, RestoreSource};
+use grit_lib::porcelain::restore::{
+    restore_paths, ConflictSide, RestoreOptions, RestoreOutcome, RestoreSource,
+};
+
+use crate::conflict_style::{self, ConflictStyleArg};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -68,9 +72,21 @@ pub fn run(
     staged: bool,
     worktree: bool,
     source: Option<String>,
+    conflict_side: Option<ConflictSide>,
+    merge: bool,
+    conflict_style: Option<ConflictStyleArg>,
 ) -> Result<RestoreCliOutcome> {
     args.require_non_empty()?;
     let repo = context::discover()?;
+    let remerge = if merge || conflict_style.is_some() {
+        Some(
+            conflict_style
+                .map(Into::into)
+                .unwrap_or_else(|| conflict_style::conflict_style_from_repo(&repo)),
+        )
+    } else {
+        None
+    };
     let resolved = args.resolve(&repo)?;
 
     let restore_source = match source {
@@ -103,6 +119,8 @@ pub fn run(
         source: restore_source,
         staged,
         worktree,
+        stage: conflict_side,
+        remerge,
     };
 
     let outcome = restore_paths(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))?;

@@ -4552,6 +4552,14 @@ pub grit_lib::error::Error::PathspecIgnored
 pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecNoMatch
 pub grit_lib::error::Error::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::error::Error::RestoreConflictMissingOurs
+pub grit_lib::error::Error::RestoreConflictMissingOurs::path: alloc::string::String
+pub grit_lib::error::Error::RestoreConflictMissingTheirs
+pub grit_lib::error::Error::RestoreConflictMissingTheirs::path: alloc::string::String
+pub grit_lib::error::Error::RestoreConflictNotUnmerged
+pub grit_lib::error::Error::RestoreConflictNotUnmerged::path: alloc::string::String
+pub grit_lib::error::Error::RestoreConflictWithSource
+pub grit_lib::error::Error::RestoreConflictWithStaged
 pub grit_lib::error::Error::PushOptionsUnsupported
 pub grit_lib::error::Error::ReceivedPackTempMissing
 pub grit_lib::error::Error::ReceivedPackTempMissing::path: std::path::PathBuf
@@ -11165,10 +11173,31 @@ impl core::marker::Unpin for grit_lib::porcelain::restore::RestoreSource
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::restore::RestoreSource
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::restore::RestoreSource
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::RestoreSource
+pub enum grit_lib::porcelain::restore::ConflictSide
+pub grit_lib::porcelain::restore::ConflictSide::Ours
+pub grit_lib::porcelain::restore::ConflictSide::Theirs
+impl core::clone::Clone for grit_lib::porcelain::restore::ConflictSide
+pub fn grit_lib::porcelain::restore::ConflictSide::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::restore::ConflictSide
+impl core::cmp::PartialEq for grit_lib::porcelain::restore::ConflictSide
+pub fn grit_lib::porcelain::restore::ConflictSide::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::restore::ConflictSide
+pub fn grit_lib::porcelain::restore::ConflictSide::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::restore::ConflictSide
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::restore::ConflictSide
+impl core::marker::Freeze for grit_lib::porcelain::restore::ConflictSide
+impl core::marker::Send for grit_lib::porcelain::restore::ConflictSide
+impl core::marker::Sync for grit_lib::porcelain::restore::ConflictSide
+impl core::marker::Unpin for grit_lib::porcelain::restore::ConflictSide
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::restore::ConflictSide
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::restore::ConflictSide
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::ConflictSide
 pub struct grit_lib::porcelain::restore::RestoreOptions
 pub grit_lib::porcelain::restore::RestoreOptions::pathspec_sources: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::restore::RestoreOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::restore::RestoreOptions::remerge: core::option::Option<grit_lib::diff::merge_file::ConflictStyle>
 pub grit_lib::porcelain::restore::RestoreOptions::source: grit_lib::porcelain::restore::RestoreSource
+pub grit_lib::porcelain::restore::RestoreOptions::stage: core::option::Option<grit_lib::porcelain::restore::ConflictSide>
 pub grit_lib::porcelain::restore::RestoreOptions::staged: bool
 pub grit_lib::porcelain::restore::RestoreOptions::worktree: bool
 impl core::clone::Clone for grit_lib::porcelain::restore::RestoreOptions

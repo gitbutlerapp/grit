@@ -440,6 +440,8 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
                 source: RestoreSource::Tree(evil_tree_oid),
                 staged: false,
                 worktree: true,
+                stage: None,
+                remerge: None,
             },
         )
         .unwrap_err();

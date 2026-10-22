@@ -8,6 +8,7 @@
 mod cli_messages;
 mod commands;
 mod commits_json;
+mod conflict_style;
 mod context;
 mod dates;
 mod diagnostics;
@@ -810,6 +811,18 @@ enum Command {
         /// Tree or commit to restore from.
         #[arg(long)]
         source: Option<String>,
+        /// For unmerged paths, write our side (index stage 2) into the worktree.
+        #[arg(long = "ours", conflicts_with_all = ["theirs", "merge", "conflict_style"])]
+        ours: bool,
+        /// For unmerged paths, write their side (index stage 3) into the worktree.
+        #[arg(long = "theirs", conflicts_with_all = ["ours", "merge", "conflict_style"])]
+        theirs: bool,
+        /// Rebuild conflict markers in the worktree from index stages.
+        #[arg(long = "merge", conflicts_with_all = ["ours", "theirs"])]
+        merge: bool,
+        /// Conflict marker style (implies `--merge`).
+        #[arg(long = "conflict", value_enum, conflicts_with_all = ["ours", "theirs"])]
+        conflict_style: Option<conflict_style::ConflictStyleArg>,
     },
     /// Download refs and objects from a remote.
     Fetch {
@@ -1633,11 +1646,33 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             staged,
             worktree,
             source,
-        } => emit(
-            &commands::restore::run(&pathspecs, staged, worktree, source)?,
-            opts,
-            ctx,
-        ),
+            ours,
+            theirs,
+            merge,
+            conflict_style,
+        } => {
+            use grit_lib::porcelain::restore::ConflictSide;
+            let side = if ours {
+                Some(ConflictSide::Ours)
+            } else if theirs {
+                Some(ConflictSide::Theirs)
+            } else {
+                None
+            };
+            emit(
+                &commands::restore::run(
+                    &pathspecs,
+                    staged,
+                    worktree,
+                    source,
+                    side,
+                    merge,
+                    conflict_style,
+                )?,
+                opts,
+                ctx,
+            )
+        }
         Command::Fetch {
             remote,
             prune,

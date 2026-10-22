@@ -279,6 +279,8 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             source: RestoreSource::Index,
             staged: false,
             worktree: true,
+            stage: None,
+            remerge: None,
         },
     )
     .expect("restore worktree from index");

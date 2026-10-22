@@ -13,18 +13,29 @@ use crate::diff::{
 use crate::error::{Error, Result};
 use crate::index::index_file_mtime;
 use crate::index::{entry_from_metadata, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK};
+use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
+use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
 use crate::pathspec::{
     pathspec_is_exclude, sorted_paths_match_pathspec, PathspecListMatcher, PathspecMatchContext,
 };
 use crate::porcelain::checkout::{
-    remove_empty_parent_dirs, worktree_bytes_from_index_blob, write_to_worktree_cached,
-    LeadingDirCache,
+    remove_empty_parent_dirs, worktree_bytes_from_index_blob, write_smudged_blob_to_worktree,
+    write_to_worktree_cached, LeadingDirCache,
 };
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 use crate::worktree_rules::WorktreeRules;
+
+/// Unmerged index side to check out into the worktree (`git restore --ours|--theirs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictSide {
+    /// Index stage 2 (current branch / HEAD side of the conflict).
+    Ours,
+    /// Index stage 3 (incoming side of the conflict).
+    Theirs,
+}
 
 /// Where explicit `--source` content comes from; default targets use the index or `HEAD`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +59,10 @@ pub struct RestoreOptions {
     pub staged: bool,
     /// Restore the working tree (`--worktree`, or implied when `--staged` is absent).
     pub worktree: bool,
+    /// For unmerged paths, check out stage 2 or 3 into the worktree only.
+    pub stage: Option<ConflictSide>,
+    /// Rebuild conflict markers in the worktree from unmerged index stages (`--merge`).
+    pub remerge: Option<ConflictStyle>,
 }
 
 /// Outcome of a restore operation: paths written and paths removed in each target.
@@ -78,6 +93,11 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
 
     if opts.pathspecs.is_empty() {
         return Err(Error::Message("you must specify path(s) to restore".into()));
+    }
+
+    if opts.stage.is_some() || opts.remerge.is_some() {
+        validate_conflict_restore_options(opts)?;
+        return restore_conflict_paths(repo, work_tree, opts);
     }
 
     let mut index = repo.load_index()?;
@@ -181,6 +201,245 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
         outcome.removed.dedup();
     }
     Ok(outcome)
+}
+
+fn validate_conflict_restore_options(opts: &RestoreOptions) -> Result<()> {
+    if opts.staged {
+        return Err(Error::RestoreConflictWithStaged);
+    }
+    if !matches!(opts.source, RestoreSource::Index) {
+        return Err(Error::RestoreConflictWithSource);
+    }
+    if opts.stage.is_some() && opts.remerge.is_some() {
+        return Err(Error::Message(
+            "cannot combine --ours/--theirs with --merge".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn restore_conflict_paths(
+    repo: &Repository,
+    work_tree: &Path,
+    opts: &RestoreOptions,
+) -> Result<RestoreOutcome> {
+    let index = repo.load_index()?;
+    let pathspec_ctx = repo.pathspec_match_context();
+    let include_resolved_undo = opts.remerge.is_some();
+    let matched = collect_conflict_matched_paths(
+        &index,
+        &opts.pathspecs,
+        include_resolved_undo,
+        pathspec_ctx,
+    );
+    validate_unmerged_pathspecs(opts, &matched, pathspec_ctx)?;
+
+    let mut outcome = RestoreOutcome::default();
+    let rules = WorktreeRules::from_repository(repo, &index)?;
+
+    if let Some(side) = opts.stage {
+        for path in &matched {
+            restore_conflict_side(repo, work_tree, &index, path, side, &rules, &mut outcome)?;
+        }
+        return Ok(outcome);
+    }
+
+    let style = opts
+        .remerge
+        .unwrap_or_else(|| conflict_style_from_config(repo));
+    let mut index = index;
+    let mut index_dirty = false;
+    for path in &matched {
+        restore_conflict_remerge(
+            repo,
+            work_tree,
+            &mut index,
+            path,
+            style,
+            &rules,
+            &mut outcome,
+            &mut index_dirty,
+        )?;
+    }
+    if index_dirty {
+        repo.write_index(&mut index)?;
+    }
+    Ok(outcome)
+}
+
+fn conflict_style_from_config(repo: &Repository) -> ConflictStyle {
+    let Ok(config) = repo.config() else {
+        return ConflictStyle::Merge;
+    };
+    let Some(value) = config.get("merge.conflictStyle") else {
+        return ConflictStyle::Merge;
+    };
+    match value.as_str() {
+        "diff3" => ConflictStyle::Diff3,
+        "zdiff3" => ConflictStyle::ZealousDiff3,
+        _ => ConflictStyle::Merge,
+    }
+}
+
+fn collect_conflict_matched_paths(
+    index: &Index,
+    pathspecs: &[String],
+    include_resolved_undo: bool,
+    pathspec_ctx: PathspecMatchContext,
+) -> BTreeSet<String> {
+    let matcher = PathspecListMatcher::new(pathspecs, pathspec_ctx);
+    let mut paths = BTreeSet::new();
+    for entry in &index.entries {
+        if entry.stage() == 0 {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path);
+        if matcher.matches(&path) {
+            paths.insert(path.into_owned());
+        }
+    }
+    if include_resolved_undo {
+        if let Some(undo) = &index.resolve_undo {
+            for path_bytes in undo.keys() {
+                let path = String::from_utf8_lossy(path_bytes);
+                if matcher.matches(&path) {
+                    paths.insert(path.into_owned());
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn validate_unmerged_pathspecs(
+    opts: &RestoreOptions,
+    matched: &BTreeSet<String>,
+    pathspec_ctx: PathspecMatchContext,
+) -> Result<()> {
+    let sources = if opts.pathspec_sources.is_empty() {
+        &opts.pathspecs
+    } else {
+        &opts.pathspec_sources
+    };
+    let matched_sorted: Vec<&str> = matched.iter().map(String::as_str).collect();
+    for (label, resolved) in sources.iter().zip(opts.pathspecs.iter()) {
+        if pathspec_is_exclude(label) {
+            continue;
+        }
+        if !sorted_paths_match_pathspec(resolved, &matched_sorted, pathspec_ctx) {
+            return Err(Error::PathspecNoMatch {
+                spec: label.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn restore_conflict_side(
+    repo: &Repository,
+    work_tree: &Path,
+    index: &Index,
+    path: &str,
+    side: ConflictSide,
+    rules: &WorktreeRules,
+    outcome: &mut RestoreOutcome,
+) -> Result<()> {
+    let stage = match side {
+        ConflictSide::Ours => 2u8,
+        ConflictSide::Theirs => 3u8,
+    };
+    let path_bytes = path.as_bytes();
+    let Some(entry) = index.get(path_bytes, stage) else {
+        return Err(match side {
+            ConflictSide::Ours => Error::RestoreConflictMissingOurs {
+                path: path.to_string(),
+            },
+            ConflictSide::Theirs => Error::RestoreConflictMissingTheirs {
+                path: path.to_string(),
+            },
+        });
+    };
+    if entry.mode == MODE_GITLINK {
+        return Ok(());
+    }
+    write_smudged_blob_to_worktree(repo, work_tree, rules, path, &entry.oid, entry.mode)?;
+    outcome.restored.push(path.to_string());
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn restore_conflict_remerge(
+    repo: &Repository,
+    work_tree: &Path,
+    index: &mut Index,
+    path: &str,
+    style: ConflictStyle,
+    rules: &WorktreeRules,
+    outcome: &mut RestoreOutcome,
+    index_dirty: &mut bool,
+) -> Result<()> {
+    let path_bytes = path.as_bytes();
+    if index.get(path_bytes, 0).is_some()
+        && !path_has_unmerged(index, path_bytes)
+        && index.unmerge_path_from_resolve_undo(path_bytes)
+    {
+        *index_dirty = true;
+    }
+    let (Some(base), Some(ours), Some(theirs)) = (
+        index.get(path_bytes, 1),
+        index.get(path_bytes, 2),
+        index.get(path_bytes, 3),
+    ) else {
+        return Err(Error::RestoreConflictNotUnmerged {
+            path: path.to_string(),
+        });
+    };
+    if base.mode == MODE_GITLINK || ours.mode == MODE_GITLINK || theirs.mode == MODE_GITLINK {
+        return Ok(());
+    }
+    let base_blob = repo.odb().read(&base.oid)?;
+    let ours_blob = repo.odb().read(&ours.oid)?;
+    let theirs_blob = repo.odb().read(&theirs.oid)?;
+    let input = MergeInput {
+        base: &base_blob.data,
+        ours: &ours_blob.data,
+        theirs: &theirs_blob.data,
+        label_ours: "ours",
+        label_base: "base",
+        label_theirs: "theirs",
+        favor: MergeFavor::None,
+        style,
+        marker_size: 7,
+        diff_algorithm: None,
+        ignore_all_space: false,
+        ignore_space_change: false,
+        ignore_space_at_eol: false,
+        ignore_cr_at_eol: false,
+    };
+    let merged = merge(&input)?;
+    let mode = conflict_worktree_mode(ours.mode, theirs.mode);
+    let merged_oid = repo.odb().write(ObjectKind::Blob, &merged.content)?;
+    write_smudged_blob_to_worktree(repo, work_tree, rules, path, &merged_oid, mode)?;
+    outcome.restored.push(path.to_string());
+    Ok(())
+}
+
+fn path_has_unmerged(index: &Index, path: &[u8]) -> bool {
+    index
+        .entries
+        .iter()
+        .any(|e| e.path == path && e.stage() != 0)
+}
+
+fn conflict_worktree_mode(ours_mode: u32, theirs_mode: u32) -> u32 {
+    if ours_mode == theirs_mode {
+        ours_mode
+    } else if matches!(ours_mode, 0o100644 | 0o100755) && matches!(theirs_mode, 0o100644 | 0o100755)
+    {
+        0o100644
+    } else {
+        ours_mode
+    }
 }
 
 fn pathspecs_select_all_tracked(pathspecs: &[String]) -> bool {
@@ -740,6 +999,8 @@ mod tests {
                 source: RestoreSource::Index,
                 staged: false,
                 worktree: true,
+                stage: None,
+                remerge: None,
             },
         )
         .expect("restore");

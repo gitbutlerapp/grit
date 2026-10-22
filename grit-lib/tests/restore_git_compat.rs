@@ -55,6 +55,8 @@ fn restore_opts(
         source,
         staged,
         worktree,
+        stage: None,
+        remerge: None,
     }
 }
 
@@ -153,6 +155,8 @@ fn restore_source_head_parent() {
             }),
             staged: false,
             worktree: false,
+            stage: None,
+            remerge: None,
         },
     )
     .expect("restore source");
@@ -187,6 +191,8 @@ fn restore_source_worktree_only_leaves_index_at_head() {
             source: RestoreSource::Tree(parent_tree),
             staged: false,
             worktree: false,
+            stage: None,
+            remerge: None,
         },
     )
     .expect("restore source worktree");
@@ -229,6 +235,8 @@ fn restore_deletion_skips_directory_collision() {
             source: RestoreSource::Tree(head_tree_oid),
             staged: false,
             worktree: true,
+            stage: None,
+            remerge: None,
         },
     )
     .expect("restore delete attempt");
@@ -290,6 +298,8 @@ fn restore_removes_path_missing_in_source() {
             source: RestoreSource::Tree(head_tree_oid),
             staged: false,
             worktree: false,
+            stage: None,
+            remerge: None,
         },
     )
     .expect("restore removal");
@@ -461,6 +471,8 @@ fn restore_pathspec_exclude_skips_excluded_paths() {
             source: RestoreSource::Index,
             staged: false,
             worktree: false,
+            stage: None,
+            remerge: None,
         },
     )
     .expect("restore with exclude");

@@ -686,6 +686,35 @@ pub enum Error {
         spec: String,
     },
 
+    /// [`crate::porcelain::restore::restore_paths`] conflict options were combined with `--staged`.
+    #[error("conflict restore options cannot be used with --staged")]
+    RestoreConflictWithStaged,
+
+    /// [`crate::porcelain::restore::restore_paths`] conflict options were combined with `--source`.
+    #[error("conflict restore options cannot be used with --source")]
+    RestoreConflictWithSource,
+
+    /// A conflict side was missing from the index for the requested path.
+    #[error("path '{path}' does not have their version")]
+    RestoreConflictMissingTheirs {
+        /// Repository-relative path.
+        path: String,
+    },
+
+    /// A conflict side was missing from the index for the requested path.
+    #[error("path '{path}' does not have our version")]
+    RestoreConflictMissingOurs {
+        /// Repository-relative path.
+        path: String,
+    },
+
+    /// Three-way remerge needs stages 1, 2, and 3 in the index.
+    #[error("path '{path}' is not unmerged")]
+    RestoreConflictNotUnmerged {
+        /// Repository-relative path.
+        path: String,
+    },
+
     /// A literal pathspec names a file under a symlink directory component.
     #[error("pathspec '{spec}' is beyond a symbolic link")]
     PathspecBeyondSymlink {
