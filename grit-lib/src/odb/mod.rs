@@ -231,7 +231,71 @@ pub struct Odb {
     /// Avoid re-reading the same loose object repeatedly during one repository session.
     session_loose_reads: Arc<std::sync::Mutex<OidHashMap<Object>>>,
     /// Parsed tree entries reused for the lifetime of this [`Odb`] handle (Git object cache).
-    session_tree_entries: Arc<Mutex<OidHashMap<Arc<Vec<crate::objects::TreeEntry>>>>>,
+    session_tree_entries: Arc<Mutex<SessionTreeEntries>>,
+}
+
+/// Recently parsed trees for [`Odb::cached_tree_entries`], bounded by total entry count.
+#[derive(Default)]
+struct SessionTreeEntries {
+    trees: OidHashMap<Arc<Vec<crate::objects::TreeEntry>>>,
+    entries: usize,
+}
+
+impl SessionTreeEntries {
+    /// Total tree entries kept before the cache starts over. A parsed entry costs
+    /// roughly 80 bytes, so this holds a few MiB: enough for the trees a diff of
+    /// neighbouring commits revisits, without growing with history size.
+    const ENTRY_BUDGET: usize = 1 << 16;
+
+    fn insert(&mut self, oid: ObjectId, tree: Arc<Vec<crate::objects::TreeEntry>>) {
+        if self.entries + tree.len() > Self::ENTRY_BUDGET {
+            self.trees.clear();
+            self.entries = 0;
+        }
+        self.entries += tree.len();
+        self.trees.insert(oid, tree);
+    }
+}
+
+#[cfg(test)]
+mod session_tree_entries_tests {
+    use super::*;
+    use crate::objects::TreeEntry;
+
+    fn tree(entries: usize) -> Arc<Vec<TreeEntry>> {
+        let entry = TreeEntry {
+            mode: 0o100644,
+            name: b"f".to_vec(),
+            oid: ObjectId::zero(),
+        };
+        Arc::new(vec![entry; entries])
+    }
+
+    fn oid(n: u8) -> ObjectId {
+        ObjectId::from_bytes(&[n; 20]).expect("oid")
+    }
+
+    #[test]
+    fn cache_starts_over_when_the_entry_budget_is_exceeded() {
+        let mut cache = SessionTreeEntries::default();
+        let half = SessionTreeEntries::ENTRY_BUDGET / 2;
+        cache.insert(oid(1), tree(half));
+        cache.insert(oid(2), tree(half));
+        assert_eq!(cache.entries, SessionTreeEntries::ENTRY_BUDGET);
+        assert_eq!(cache.trees.len(), 2);
+
+        cache.insert(oid(3), tree(1));
+        assert_eq!(cache.trees.len(), 1);
+        assert!(cache.trees.contains_key(&oid(3)));
+        assert_eq!(cache.entries, 1);
+
+        cache.insert(oid(4), tree(SessionTreeEntries::ENTRY_BUDGET * 2));
+        assert_eq!(
+            cache.trees.len(),
+            1,
+            "an oversized tree replaces everything"
+        );
+    }
 }
 
 const _: () = {
@@ -321,7 +385,7 @@ impl Odb {
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
             session_loose_reads: Arc::new(Mutex::new(oid_hash_map())),
-            session_tree_entries: Arc::new(Mutex::new(oid_hash_map())),
+            session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -372,7 +436,7 @@ impl Odb {
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
             session_loose_reads: Arc::new(Mutex::new(oid_hash_map())),
-            session_tree_entries: Arc::new(Mutex::new(oid_hash_map())),
+            session_tree_entries: Arc::new(Mutex::new(SessionTreeEntries::default())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -386,7 +450,7 @@ impl Odb {
         oid: &ObjectId,
     ) -> Result<Arc<Vec<crate::objects::TreeEntry>>> {
         if let Ok(guard) = self.session_tree_entries.lock() {
-            if let Some(entries) = guard.get(oid) {
+            if let Some(entries) = guard.trees.get(oid) {
                 return Ok(Arc::clone(entries));
             }
         }
@@ -400,9 +464,6 @@ impl Odb {
         let parsed = crate::objects::parse_tree_with_oid_len(&obj.data, self.hash_algo().len())?;
         let arc = Arc::new(parsed);
         if let Ok(mut guard) = self.session_tree_entries.lock() {
-            if guard.len() > 4096 {
-                guard.clear();
-            }
             guard.insert(*oid, Arc::clone(&arc));
         }
         Ok(arc)
