@@ -1037,6 +1037,22 @@ impl PackedRefsFileView {
         Ok(self.lookup_entry(path, refname)?.map(|(oid, _)| oid))
     }
 
+    /// Smallest packed ref strictly under `refname/`, with its object id.
+    ///
+    /// A sorted file only parses the records sharing `refname` as a prefix.
+    pub(crate) fn first_descendant(
+        &self,
+        path: &Path,
+        refname: &str,
+    ) -> Result<Option<(String, ObjectId)>> {
+        let leaf_dir = format!("{refname}/");
+        Ok(self
+            .map_for_prefix(path, Some(refname))?
+            .into_iter()
+            .filter(|(name, _)| name.starts_with(&leaf_dir))
+            .min_by(|a, b| a.0.cmp(&b.0)))
+    }
+
     /// Refs whose names start with `prefix` (all refs for `None`).
     ///
     /// Every line the scan covers is parsed strictly, peel and comment lines included. In a
@@ -1447,18 +1463,39 @@ pub fn create_ref_with_reflog(
         true,
     )
     .unwrap_or_default();
-    let reflog = if should_autocreate_reflog_with_config(&config, git_dir, refname) {
-        Some(ReflogUpdate {
+    let store = open_ref_store(git_dir)?;
+    create_ref_with_reflog_on_store(
+        store.as_ref(),
+        git_dir,
+        &config,
+        refname,
+        oid,
+        identity,
+        message,
+    )
+}
+
+/// [`create_ref_with_reflog`] through an already-open store with already-loaded `config`, so
+/// a caller holding a [`crate::repo::Repository`] reuses its packed-refs and config caches.
+pub(crate) fn create_ref_with_reflog_on_store(
+    store: &dyn RefStore,
+    git_dir: &Path,
+    config: &ConfigSet,
+    refname: &str,
+    oid: &ObjectId,
+    identity: &str,
+    message: &str,
+) -> Result<()> {
+    let reflog =
+        should_autocreate_reflog_with_config(config, git_dir, refname).then(|| ReflogUpdate {
             identity: identity.to_owned(),
             message: message.to_owned(),
             time: time::OffsetDateTime::now_utc(),
             old_oid: None,
             new_oid: None,
-        })
-    } else {
-        None
-    };
-    store_write_value(
+        });
+    store_write_value_on_store(
+        store,
         git_dir,
         refname,
         Some(StoreRawRef::Direct(*oid)),

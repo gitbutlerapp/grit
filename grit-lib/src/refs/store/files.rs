@@ -25,8 +25,11 @@ use super::routing::{resolve_common_dir, route_ref_storage_with_namespace, RefSt
 use super::transaction::expected_matches;
 use super::transaction::RefTransaction;
 use super::types::Expected;
-use super::validation::{validate_storable_refname, verify_create_conflicts};
+use super::validation::{
+    validate_storable_refname, verify_create_conflicts, verify_name_available_for_create,
+};
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
+use crate::refs::RefnameUnavailable;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -164,6 +167,16 @@ impl FilesRefStore {
         Ok(())
     }
 
+    fn first_packed_descendant(&self, storage_name: &str) -> Result<Option<(String, ObjectId)>> {
+        self.refresh_packed_cache_if_stale()?;
+        let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(ref file) = guard.file else {
+            return Ok(None);
+        };
+        let path = super::paths::packed_refs_path(&self.common_dir);
+        file.first_descendant(&path, storage_name)
+    }
+
     fn lookup_packed_oid(&self, storage_name: &str) -> Result<Option<ObjectId>> {
         self.refresh_packed_cache_if_stale()?;
         let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
@@ -174,19 +187,121 @@ impl FilesRefStore {
         file.lookup_oid(&path, storage_name)
     }
 
-    fn batch_may_create_ref(&self, updates: &[RefUpdate]) -> Result<bool> {
-        for update in updates {
-            if update.flags.log_only {
-                continue;
+    /// Add to `refs` every existing ref that can block creating a new ref of `updates`: its
+    /// ancestors (`refs/heads/a` for `refs/heads/a/b`) and the refs under `<name>/`.
+    ///
+    /// `refs` must already hold every update target that exists. With these neighbors,
+    /// [`verify_create_conflicts`] reaches the same verdict as against the whole store, so a
+    /// create costs a few lookups instead of reading every ref and reflog.
+    fn insert_create_conflict_neighbors(
+        &self,
+        refs: &mut BTreeMap<String, RawRef>,
+        updates: &[RefUpdate],
+    ) -> Result<()> {
+        let creates: Vec<&str> = updates
+            .iter()
+            .filter(|u| u.new_value.is_some() && !u.flags.log_only && !refs.contains_key(&u.name))
+            .map(|u| u.name.as_str())
+            .collect();
+        for name in creates {
+            for (slash, _) in name.match_indices('/') {
+                let ancestor = &name[..slash];
+                if refs.contains_key(ancestor) {
+                    continue;
+                }
+                if let Some(raw) = self.read_existing_ref_named(ancestor)? {
+                    refs.insert(ancestor.to_owned(), raw);
+                }
             }
-            if update.new_value.is_none() {
-                continue;
-            }
-            if self.read_raw(&update.name)?.is_none() {
-                return Ok(true);
+            for (descendant, raw) in self.descendant_refs(name)? {
+                refs.entry(descendant).or_insert(raw);
             }
         }
-        Ok(false)
+        Ok(())
+    }
+
+    /// Whether `name` can be created next to the refs on disk and the other names of its batch
+    /// (`extras`), under the rules of [`crate::refs::verify_refname_available_for_create`].
+    ///
+    /// Lookups go through this store's packed-refs cache, which revalidates against the file's
+    /// size and mtime, instead of re-reading `packed-refs` for every ancestor. Any file under
+    /// `<name>/` blocks the create, since the directory could not be replaced by the ref file.
+    /// Unreadable refs count as absent, as in the path-based check.
+    fn verify_create_available(
+        &self,
+        name: &str,
+        extras: &BTreeSet<String>,
+    ) -> std::result::Result<(), RefnameUnavailable> {
+        let mut blocking = BTreeSet::new();
+        for (slash, _) in name.match_indices('/') {
+            let ancestor = &name[..slash];
+            if let Ok(Some(_)) = self.read_existing_ref_named(ancestor) {
+                blocking.insert(ancestor.to_owned());
+            }
+        }
+        let storage = self.route(name).storage_name;
+        let mut storage_names = BTreeSet::new();
+        for base in self.store_bases() {
+            collect_loose_file_names(&base.join(&storage), &storage, &mut storage_names);
+        }
+        if storage.contains('/') {
+            if let Ok(Some((packed, _))) = self.first_packed_descendant(&storage) {
+                storage_names.insert(packed);
+            }
+        }
+        blocking.extend(storage_names.iter().map(|s| self.logical_name(s)));
+        verify_name_available_for_create(name, &blocking, extras)
+    }
+
+    fn store_bases(&self) -> impl Iterator<Item = &Path> {
+        let common = self.common_dir.as_path();
+        let git = self.git_dir.as_path();
+        std::iter::once(common).chain((git != common).then_some(git))
+    }
+
+    /// The value of `name` as a full listing would report it: a parseable loose file in either
+    /// store directory, else a visible packed record. Directories and unparseable files are
+    /// not refs.
+    fn read_existing_ref_named(&self, name: &str) -> Result<Option<RawRef>> {
+        let storage = self.route(name).storage_name;
+        for base in self.store_bases() {
+            let path = base.join(&storage);
+            if !path.is_file() {
+                continue;
+            }
+            if let Ok(r) = read_ref_file(&path) {
+                return Ok(Some(ref_to_raw(r)));
+            }
+        }
+        if !self.packed_storage_visible(&storage) {
+            return Ok(None);
+        }
+        Ok(self.lookup_packed_oid(&storage)?.map(RawRef::Direct))
+    }
+
+    /// Loose refs under `<name>/` in either store directory, plus the first packed one.
+    fn descendant_refs(&self, name: &str) -> Result<BTreeMap<String, RawRef>> {
+        let storage = self.route(name).storage_name;
+        let mut storage_map = BTreeMap::new();
+        for base in self.store_bases() {
+            let dir = base.join(&storage);
+            if dir.is_dir() {
+                collect_loose_raw_refs(&dir, &format!("{storage}/"), &mut storage_map)?;
+            }
+        }
+        // Refs live under `refs/`, so a one-level name has no packed descendants; skipping it
+        // also avoids scanning from a pseudoref like `ORIG_HEAD` to the end of the file.
+        if storage.contains('/') {
+            if let Some((packed, oid)) = self.first_packed_descendant(&storage)? {
+                if self.packed_storage_visible(&packed) {
+                    storage_map.entry(packed).or_insert(RawRef::Direct(oid));
+                }
+            }
+        }
+        Ok(storage_map
+            .into_iter()
+            .map(|(storage, value)| (self.logical_name(&storage), value))
+            .collect())
     }
 
     /// Load `start` and any further symbolic targets into `refs` (up to [`crate::refs::SYMREF_MAXDEPTH`]).
@@ -287,10 +402,6 @@ impl FilesRefStore {
             return Ok(Some(RawRef::Direct(oid)));
         }
         Ok(None)
-    }
-
-    fn load_raw_map(&self) -> Result<BTreeMap<String, RawRef>> {
-        self.load_raw_map_prefix("")
     }
 
     fn packed_storage_visible(&self, storage: &str) -> bool {
@@ -412,28 +523,6 @@ impl FilesRefStore {
             }
         }
         Ok(out)
-    }
-
-    fn load_reflog_map(&self) -> Result<BTreeMap<String, Vec<ReflogEntry>>> {
-        let mut out = BTreeMap::new();
-        for base in [self.common_dir.as_path(), self.git_dir.as_path()] {
-            let logs = base.join("logs");
-            if logs.is_dir() {
-                collect_reflog_refs(&logs, "", self, &mut out)?;
-            }
-        }
-        Ok(out)
-    }
-
-    fn load_batch_state(&self) -> Result<RefBatchState> {
-        let mut refs = self.load_raw_map()?;
-        // Empty-prefix ref listing intentionally omits `HEAD` (Git `for-each-ref` behavior), but
-        // batch transactions must treat an existing `HEAD` as an update, not a create.
-        self.insert_head_for_batch_state(&mut refs)?;
-        Ok(RefBatchState {
-            refs,
-            reflogs: self.load_reflog_map()?,
-        })
     }
 
     fn insert_head_for_batch_state(&self, map: &mut BTreeMap<String, RawRef>) -> Result<()> {
@@ -670,15 +759,7 @@ impl FilesRefStore {
             }
         }
         if update.new_value.is_some() && actual_ref.is_none() && !batch_differs {
-            let skip = HashSet::new();
-            if let Err(reason) = crate::refs::verify_refname_available_for_create(
-                &self.git_dir,
-                &update.name,
-                batch_extras,
-                &skip,
-            ) {
-                return Err(reason.into());
-            }
+            self.verify_create_available(&update.name, batch_extras)?;
         }
         Ok(())
     }
@@ -957,16 +1038,11 @@ impl RefStore for FilesRefStore {
             });
         }
 
-        let preliminary = if self
-            .batch_may_create_ref(&updates)
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
-        {
-            self.load_batch_state()
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
-        } else {
-            self.load_batch_state_for_prepare(&updates, &reflog_renames, &case_only_renames)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
-        };
+        let mut preliminary = self
+            .load_batch_state_for_prepare(&updates, &reflog_renames, &case_only_renames)
+            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+        self.insert_create_conflict_neighbors(&mut preliminary.refs, &updates)
+            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
         verify_create_conflicts(&preliminary.refs, &updates)?;
         for rename in &reflog_renames {
             self.ensure_reflog_path_writable(&rename.to)?;
@@ -1001,7 +1077,6 @@ impl RefStore for FilesRefStore {
         }
 
         let extras: BTreeSet<String> = updates.iter().map(|u| u.name.clone()).collect();
-        let skip = HashSet::new();
         for update in &updates {
             if update.new_value.is_none() || update.flags.log_only {
                 continue;
@@ -1009,12 +1084,7 @@ impl RefStore for FilesRefStore {
             if preliminary.refs.contains_key(&update.name) {
                 continue;
             }
-            if let Err(reason) = crate::refs::verify_refname_available_for_create(
-                &self.git_dir,
-                &update.name,
-                &extras,
-                &skip,
-            ) {
+            if let Err(reason) = self.verify_create_available(&update.name, &extras) {
                 for acquired in ref_locks.values() {
                     let _ = fs::remove_file(acquired);
                 }
@@ -1319,39 +1389,40 @@ fn collect_loose_raw_refs(
     Ok(())
 }
 
-fn collect_reflog_refs(
-    dir: &Path,
-    prefix: &str,
-    store: &FilesRefStore,
-    out: &mut BTreeMap<String, Vec<ReflogEntry>>,
-) -> Result<()> {
-    let read = match fs::read_dir(dir) {
-        Ok(r) => r,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(Error::Io(e)),
+/// Add `<prefix>/<relative path>` for every file below `dir` to `out`; a missing or unreadable
+/// directory adds nothing.
+fn collect_loose_file_names(dir: &Path, prefix: &str, out: &mut BTreeSet<String>) {
+    let Ok(read) = fs::read_dir(dir) else {
+        return;
     };
-    for entry in read {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let refname = format!("{prefix}{name}");
+    for entry in read.flatten() {
+        let name = format!("{prefix}/{}", entry.file_name().to_string_lossy());
         let path = entry.path();
-        if path.is_dir() {
-            collect_reflog_refs(&path, &format!("{refname}/"), store, out)?;
-        } else if path.is_file() {
-            let logical = store.logical_name(&refname);
-            let entries = read_reflog_at_path(&path)?;
-            if !entries.is_empty() {
-                out.insert(logical, entries);
+        match fs::metadata(&path) {
+            Ok(meta) if meta.is_dir() => collect_loose_file_names(&path, &name, out),
+            Ok(meta) if meta.is_file() => {
+                out.insert(name);
             }
+            _ => {}
         }
     }
-    Ok(())
 }
 
 fn read_reflog_at_path(path: &Path) -> Result<Vec<ReflogEntry>> {
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        // A ref being created can collide with a file or directory in `logs/`; that is a
+        // missing log here, and the ref conflict check reports the collision.
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound
+                    | io::ErrorKind::NotADirectory
+                    | io::ErrorKind::IsADirectory
+            ) =>
+        {
+            return Ok(Vec::new());
+        }
         Err(e) => return Err(Error::Io(e)),
     };
     Ok(content
@@ -1539,6 +1610,91 @@ mod tests {
         for lock in ["HEAD.lock", "refs/heads/main.lock"] {
             assert!(!dir.path().join(lock).exists(), "{lock} released");
         }
+    }
+
+    #[test]
+    fn create_availability_matches_the_path_based_check() {
+        let dir = git_dir();
+        let path = dir.path();
+        let hex = oid(1).to_hex();
+        fs::write(
+            path.join("packed-refs"),
+            format!(
+                "# pack-refs with: peeled fully-peeled sorted \n\
+                 {hex} refs/heads/p\n\
+                 {hex} refs/heads/pd/x\n\
+                 {hex} refs/heads/pd-sibling\n\
+                 {hex} refs/tags/v1\n"
+            ),
+        )
+        .expect("packed-refs");
+        for loose in ["refs/heads/l", "refs/heads/ld/y/z"] {
+            let file = path.join(loose);
+            fs::create_dir_all(file.parent().expect("parent")).expect("dirs");
+            fs::write(file, format!("{hex}\n")).expect("loose");
+        }
+        let refs = store(path);
+        let extras: BTreeSet<String> = ["refs/heads/batch/one".to_owned()].into();
+        for name in [
+            "refs/heads/new",
+            "refs/heads/p/child",
+            "refs/heads/pd",
+            "refs/heads/pd-sibling/x",
+            "refs/heads/l/child",
+            "refs/heads/ld",
+            "refs/heads/ld/y",
+            "refs/heads/batch",
+            "refs/heads/batch/one/two",
+            "refs/tags/v1/x",
+            "refs/tags/v2",
+        ] {
+            assert_eq!(
+                refs.verify_create_available(name, &extras),
+                crate::refs::verify_refname_available_for_create(
+                    path,
+                    name,
+                    &extras,
+                    &HashSet::new()
+                ),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_with_reflog_next_to_a_ref_file_in_logs_reports_the_conflict() {
+        let dir = git_dir();
+        let path = dir.path();
+        let writer = store(path);
+        set(&writer, "refs/heads/a", oid(1), Expected::Missing).expect("create");
+        fs::create_dir_all(path.join("logs/refs/heads")).expect("logs");
+        fs::write(path.join("logs/refs/heads/a"), "").expect("log");
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: "refs/heads/a/b".to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Missing,
+                reflog: Some(super::super::ReflogUpdate {
+                    identity: "T <t@t>".into(),
+                    message: "create".into(),
+                    time: time::OffsetDateTime::UNIX_EPOCH,
+                    old_oid: None,
+                    new_oid: None,
+                }),
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        let err = writer.prepare(txn).map(|_| ()).expect_err("conflict");
+        assert!(
+            matches!(
+                err,
+                RefStoreError::NameUnavailable {
+                    reason: RefnameUnavailable::AncestorExists { ref blocking, .. }
+                } if blocking == "refs/heads/a"
+            ),
+            "{err:?}"
+        );
+        assert!(!path.join("refs/heads/a.lock").exists());
     }
 
     #[test]

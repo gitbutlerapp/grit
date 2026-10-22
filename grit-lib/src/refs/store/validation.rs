@@ -82,7 +82,9 @@ pub fn verify_create_conflicts(
     Ok(())
 }
 
-fn verify_name_available_for_create(
+/// Whether `refname` can be created when `existing` holds the stored ref names near it (at
+/// least its ancestors and descendants) and `extras` the names of its batch.
+pub(super) fn verify_name_available_for_create(
     refname: &str,
     existing: &BTreeSet<String>,
     extras: &BTreeSet<String>,

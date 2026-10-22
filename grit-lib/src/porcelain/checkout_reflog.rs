@@ -8,7 +8,8 @@ use crate::objects::ObjectId;
 use crate::refs::handle::ExistingRef;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
 use crate::refs::{
-    self, append_reflog_with_config, commit_ref_update_on_store, create_ref_with_reflog, delete_ref,
+    self, append_reflog_with_config, commit_ref_update_on_store, create_ref_with_reflog_on_store,
+    delete_ref,
 };
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -87,9 +88,19 @@ pub fn create_branch_ref_with_reflog(
     start_oid: ObjectId,
     source_label: &str,
 ) -> Result<()> {
-    let identity = checkout_reflog_identity(repo);
+    let config = repo.config()?;
+    let identity =
+        resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
     let message = format!("branch: Created from {source_label}");
-    create_ref_with_reflog(repo.git_dir(), branch_ref, &start_oid, &identity, &message)
+    create_ref_with_reflog_on_store(
+        repo.refs(),
+        repo.git_dir(),
+        &config,
+        branch_ref,
+        &start_oid,
+        &identity,
+        &message,
+    )
 }
 
 /// Move an existing branch ref and append `branch: Reset to …` to its reflog.
