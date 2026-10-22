@@ -31,7 +31,11 @@ fn hunks_from_git_diff(old: &[u8], new: &[u8]) -> Result<Vec<Hunk>, String> {
         .map_err(|e| format!("git diff: {e}"))?;
     let patch = String::from_utf8_lossy(&out.stdout);
     let files = parse_patch(&patch, 1, "patch", false, None).map_err(|e| format!("parse: {e}"))?;
-    Ok(files.into_iter().next().map(|f| f.hunks).unwrap_or_default())
+    Ok(files
+        .into_iter()
+        .next()
+        .map(|f| f.hunks)
+        .unwrap_or_default())
 }
 
 fn patch_text_from_hunks(hunks: &[Hunk]) -> String {
@@ -79,19 +83,34 @@ fn format_hunk_range(start: usize, count: usize) -> String {
 }
 
 fn git_apply_bytes(original: &[u8], hunks: &[Hunk]) -> Result<Vec<u8>, String> {
+    git_apply_bytes_with_reverse(original, hunks, false)
+}
+
+fn git_apply_bytes_with_reverse(
+    original: &[u8],
+    hunks: &[Hunk],
+    reverse: bool,
+) -> Result<Vec<u8>, String> {
     let patch = patch_text_from_hunks(hunks);
     let dir = tempdir()?;
     let file = dir.path().join("f");
     std::fs::write(&file, original).map_err(|e| format!("write file: {e}"))?;
     let patch_path = dir.path().join("p.patch");
     std::fs::write(&patch_path, &patch).map_err(|e| format!("write patch: {e}"))?;
-    let status = Command::new("git")
-        .current_dir(dir.path())
-        .args(["apply", patch_path.to_str().ok_or("patch path utf8")?])
+    let mut cmd = Command::new("git");
+    cmd.current_dir(dir.path()).arg("apply");
+    if reverse {
+        cmd.arg("-R");
+    }
+    let status = cmd
+        .arg(patch_path.to_str().ok_or("patch path utf8")?)
         .status()
         .map_err(|e| format!("git apply: {e}"))?;
     if !status.success() {
-        return Err(format!("git apply failed: {patch}"));
+        return Err(format!(
+            "git apply{} failed: {patch}",
+            if reverse { " -R" } else { "" }
+        ));
     }
     std::fs::read(&file).map_err(|e| format!("read result: {e}"))
 }
@@ -219,6 +238,29 @@ fn apply_empty_file_creation_and_deletion_impl() -> TestResult {
 }
 
 #[test]
+fn apply_reverse_whole_file_deletion_recreates_blob() {
+    run_test(apply_reverse_whole_file_deletion_recreates_blob_impl());
+}
+
+fn apply_reverse_whole_file_deletion_recreates_blob_impl() -> TestResult {
+    let old = b"b\n";
+    let new = b"";
+    let hunks = hunks_from_git_diff(old, new)?;
+    assert_eq!(grit_apply_bytes(old, &hunks)?, new);
+    assert_eq!(
+        apply_hunks_to_blob(new, &hunks, &ApplyOptions { reverse: true })
+            .map_err(|e| format!("grit reverse: {e}"))?,
+        old,
+    );
+    assert_eq!(
+        git_apply_bytes_with_reverse(new, &hunks, true)?,
+        old,
+        "git apply -R must recreate the deleted file",
+    );
+    Ok(())
+}
+
+#[test]
 fn apply_multi_hunk_duplicate_context_uses_new_start() {
     run_test(apply_multi_hunk_duplicate_context_uses_new_start_impl());
 }
@@ -267,10 +309,7 @@ fn apply_multi_hunk_duplicate_context_uses_new_start_impl() -> TestResult {
     assert_eq!(grit_out, git_out);
 
     let grit_text = String::from_utf8_lossy(&grit_out);
-    let first_row = grit_text
-        .lines()
-        .filter(|l| *l == "target/context")
-        .count();
+    let first_row = grit_text.lines().filter(|l| *l == "target/context").count();
     assert_eq!(first_row, 1, "first duplicate must stay intact");
     assert!(
         grit_text.contains("target/CHANGED"),

@@ -96,10 +96,14 @@ pub fn apply_hunks_to_blob(
     let mut working = WorkingBlob::decode(original);
     for (hunk_index, hunk) in hunks.iter().enumerate() {
         let edit = line_edit_from_hunk(hunk, opts.reverse);
-        let insert_only = hunk.old_count == 0;
+        let insert_only = if opts.reverse {
+            hunk.new_count == 0
+        } else {
+            hunk.old_count == 0
+        };
         let hint = scan_hint_for_hunk(hunk, &edit, opts.reverse);
-        let Some(at) =
-            locate_and_apply(&mut working, &edit, hint, hunk, hunk_index, insert_only)? else {
+        let Some(at) = locate_and_apply(&mut working, &edit, hint, hunk, hunk_index, insert_only)?
+        else {
             return Err(ApplyError::ContextMismatch {
                 hunk_index,
                 expected_line: if opts.reverse {
@@ -116,15 +120,9 @@ pub fn apply_hunks_to_blob(
 
 fn scan_hint_for_hunk(hunk: &Hunk, edit: &LineEdit, reverse: bool) -> ScanHint {
     let (header_line, only_at_front) = if reverse {
-        (
-            hunk.old_start,
-            hunk.new_start <= 1,
-        )
+        (hunk.old_start, hunk.new_start <= 1)
     } else {
-        (
-            hunk.new_start,
-            hunk.old_start <= 1,
-        )
+        (hunk.new_start, hunk.old_start <= 1)
     };
     let start_row = if header_line == 0 {
         0
@@ -238,13 +236,9 @@ fn locate_and_apply(
             if prefix == 0 && suffix == 0 {
                 return Ok(None);
             }
-        } else if let Some(row) = search_outward(
-            working,
-            &candidate.match_rows,
-            hint,
-            pin_front,
-            pin_back,
-        ) {
+        } else if let Some(row) =
+            search_outward(working, &candidate.match_rows, hint, pin_front, pin_back)
+        {
             splice_edit(working, row, &candidate);
             return Ok(Some(row));
         }
@@ -375,7 +369,10 @@ fn rows_equal_pattern(
 }
 
 fn splice_edit(working: &mut WorkingBlob, at: usize, edit: &LineEdit) {
-    let remove = edit.match_rows.len().min(working.rows.len().saturating_sub(at));
+    let remove = edit
+        .match_rows
+        .len()
+        .min(working.rows.len().saturating_sub(at));
     let new_rows: Vec<LineRecord> = edit
         .replace_rows
         .iter()
