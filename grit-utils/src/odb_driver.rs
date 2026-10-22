@@ -712,6 +712,26 @@ pub fn hash_object_stdin_write(repo: &Repository) -> Result<()> {
     Ok(())
 }
 
+/// Run [`predict_merge`](grit_lib::porcelain::merge::predict_merge) for the pick/merge
+/// hot-path fixture metadata in `repo` (matches `git merge-tree --write-tree` oids).
+pub fn merge_predict_hot_path(repo_path: &Path) -> Result<()> {
+    use grit_lib::objects::ObjectId;
+    use grit_lib::porcelain::merge::{predict_merge, MergePredictionOptions};
+
+    let meta = crate::hot_path_fixture::load_meta(repo_path)?;
+    let into: ObjectId = meta
+        .main_tip
+        .parse()
+        .context("parse main_tip from hot-path meta")?;
+    let other: ObjectId = meta
+        .pick_commit
+        .parse()
+        .context("parse pick_commit from hot-path meta")?;
+    let repo = open_repo(repo_path)?;
+    predict_merge(&repo, into, other, &MergePredictionOptions::default())?;
+    Ok(())
+}
+
 /// Open a bare or normal repo at `path` for driver subcommands.
 pub fn open_repo(path: &Path) -> Result<Repository> {
     if path.join("HEAD").is_file() {

@@ -1326,15 +1326,20 @@ pub(crate) fn merge_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
     )
 }
 
-pub(crate) fn merge_check_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
-    let git_cmd = format!(
-        "merge-tree --write-tree --merge-base={} {} {} >/dev/null",
-        meta.base_commit, meta.main_tip, meta.pick_commit
+pub(crate) fn merge_check_git_argv(meta: &HotPathMeta, git: &Path) -> Vec<String> {
+    let merge_base_flag = format!("--merge-base={}", meta.base_commit);
+    let inner = shell_command(
+        git,
+        &[
+            "merge-tree",
+            "--write-tree",
+            &merge_base_flag,
+            &meta.main_tip,
+            &meta.pick_commit,
+        ],
     );
-    (
-        vec!["merge".into(), "--check".into(), meta.topic_branch.clone()],
-        vec!["-c".into(), git_cmd],
-    )
+    let git_cmd = format!("{inner} >/dev/null");
+    vec!["-c".into(), git_cmd]
 }
 
 /// Switch, pick, merge, and pick-series scenarios at each file count.
@@ -1516,7 +1521,7 @@ pub fn run_hot_path_suite(
 pub fn run_merge_check_suite(
     hyperfine: &Path,
     git: &Path,
-    grit: &Path,
+    bench_exe: &Path,
     cfg: &RunConfig,
     sizes: &[usize],
     timestamp: time::OffsetDateTime,
@@ -1528,12 +1533,12 @@ pub fn run_merge_check_suite(
         let touch = touch_paths_for_size(size);
         setup_pick_merge_fixture(git, spec, touch)?;
         let meta = load_meta(&scratch_dir())?;
-        let (grit_argv, git_argv) = merge_check_argv(&meta);
+        let git_argv = merge_check_git_argv(&meta, git);
         let repo = scratch_dir();
         scenarios.push(run_scenario(
             hyperfine,
             git,
-            grit,
+            bench_exe,
             cfg,
             &Scenario {
                 id: if size == 10_000 {
@@ -1544,11 +1549,15 @@ pub fn run_merge_check_suite(
                 group: "merge".into(),
                 fixture: fixture.clone(),
                 description: format!(
-                    "grit merge --check vs git merge-tree --write-tree ({touch}-path topic commit)"
+                    "predict_merge (grit-bench drive) vs git merge-tree --write-tree ({touch}-path topic commit)"
                 ),
-                grit_argv,
+                grit_argv: vec![
+                    "drive".into(),
+                    "merge-predict".into(),
+                    ".".into(),
+                ],
                 git_argv,
-                driver: Driver::Cli,
+                driver: Driver::Lib,
                 prepare_kind: Some(PrepareKind::MergeReset),
                 grit_via_shell: false,
                 git_via_shell: true,
@@ -1556,7 +1565,7 @@ pub fn run_merge_check_suite(
             &repo,
         )?);
     }
-    Ok(build_report(git, grit, timestamp, scenarios))
+    Ok(build_report(git, bench_exe, timestamp, scenarios))
 }
 
 /// Merge-only hot-path scenario (isolated fixture; no prior pick/revert in the same run).

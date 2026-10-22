@@ -504,6 +504,14 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         MergeResult::UpToDate => {
             outln!(w, "Already up to date with **`{}`**.", outcome.branch);
         }
+        MergeResult::FastForward if outcome.prediction => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(
+                w,
+                "- Would fast-forward **`{}`** → `{short}`",
+                outcome.branch
+            );
+        }
         MergeResult::FastForward => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
             outln!(w, "- Fast-forwarded **`{}`** → `{short}`", outcome.branch);
@@ -528,6 +536,17 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
             );
             if let Some(id) = outcome.change_id.as_deref() {
                 outln!(w, "- change id `{short}`", short = short_change_id(id));
+            }
+        }
+        MergeResult::Conflicts if outcome.prediction => {
+            outln!(
+                w,
+                "- Merge **`{}`** would stop with conflicts (no changes made)",
+                outcome.branch
+            );
+            outln!(w);
+            if let Some(details) = &outcome.conflicts {
+                crate::operation_output::render_conflicts_markdown(details, w)?;
             }
         }
         MergeResult::Conflicts => {

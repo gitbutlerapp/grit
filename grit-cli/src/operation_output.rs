@@ -151,3 +151,8 @@ pub fn render_merge_conflict_footer_human() {
         "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."
     );
 }
+
+/// Human hint after `grit merge --check` finds conflicts (no merge started).
+pub fn render_merge_check_conflict_footer_human() {
+    eprintln!("\nMerge would fail with conflicts (no changes made).");
+}

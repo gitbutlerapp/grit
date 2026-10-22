@@ -68,6 +68,10 @@ pub struct MergeOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub alternatives: Option<Vec<String>>,
+    /// True for `grit merge --check` (prediction only; nothing was merged).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) prediction: bool,
 }
 
 /// One conflicted path in `--json` output (pull v1 `conflict_details` and merge v2 items).
@@ -110,6 +114,12 @@ pub(crate) fn merge_conflict_json(
 }
 
 impl MergeOutcome {
+    #[must_use]
+    fn with_prediction(mut self, prediction: bool) -> Self {
+        self.prediction = prediction;
+        self
+    }
+
     fn up_to_date(label: &str) -> Self {
         Self {
             result: MergeResult::UpToDate,
@@ -120,6 +130,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            prediction: false,
         }
     }
 
@@ -133,6 +144,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            prediction: false,
         }
     }
 
@@ -146,6 +158,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            prediction: false,
         }
     }
 
@@ -159,6 +172,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            prediction: false,
         }
     }
 
@@ -183,6 +197,7 @@ impl MergeOutcome {
             conflicts,
             next_steps: None,
             alternatives: None,
+            prediction: false,
         }
     }
 
@@ -204,6 +219,7 @@ impl MergeOutcome {
             conflicts: Some(block.conflicts),
             next_steps: Some(block.next_steps),
             alternatives: block.alternatives,
+            prediction: false,
         }
     }
 
@@ -217,6 +233,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            prediction: false,
         }
     }
 
@@ -237,6 +254,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            prediction: false,
         }
     }
 }
@@ -246,6 +264,9 @@ impl HumanRender for MergeOutcome {
         let short = self.oid.as_deref().map(short_hex).unwrap_or_default();
         match self.result {
             MergeResult::UpToDate => outln!(w, "Already up to date."),
+            MergeResult::FastForward if self.prediction => {
+                outln!(w, "Would fast-forward {} → {short}", self.branch);
+            }
             MergeResult::FastForward => outln!(w, "Fast-forwarded {} → {short}", self.branch),
             MergeResult::Clean => outln!(w, "Would merge {} cleanly (tree {short})", self.branch),
             MergeResult::Merged => outln!(
@@ -253,6 +274,12 @@ impl HumanRender for MergeOutcome {
                 "Merged {} into the current branch ({short})",
                 self.branch
             ),
+            MergeResult::Conflicts if self.prediction => {
+                if let Some(details) = &self.conflicts {
+                    render_conflicts_human(details, w)?;
+                }
+                crate::operation_output::render_merge_check_conflict_footer_human();
+            }
             MergeResult::Conflicts => {
                 if let Some(details) = &self.conflicts {
                     render_conflicts_human(details, w)?;
@@ -321,15 +348,18 @@ fn check_merge(
         ..MergePredictionOptions::default()
     };
     match predict_merge(repo, into_oid, other_oid, &options)? {
-        MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date(label)),
-        MergePrediction::FastForward => Ok(MergeOutcome::fast_forward(
-            label,
-            other_oid,
-            stored_change_id(repo, other_oid)?,
-        )),
-        MergePrediction::Clean { tree } => Ok(MergeOutcome::clean_check(label, tree)),
+        MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date(label).with_prediction(true)),
+        MergePrediction::FastForward => {
+            Ok(
+                MergeOutcome::fast_forward(label, other_oid, stored_change_id(repo, other_oid)?)
+                    .with_prediction(true),
+            )
+        }
+        MergePrediction::Clean { tree } => {
+            Ok(MergeOutcome::clean_check(label, tree).with_prediction(true))
+        }
         MergePrediction::Conflicts { conflicts } => {
-            Ok(MergeOutcome::conflicts_check(label, conflicts))
+            Ok(MergeOutcome::conflicts_check(label, conflicts).with_prediction(true))
         }
         MergePrediction::Unrelated => {
             bail!("'{label}' has no common history with the current branch")

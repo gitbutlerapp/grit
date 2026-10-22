@@ -339,28 +339,52 @@ pub fn predict_merge(
         ..TreeMergeConflictPresentation::default()
     };
 
-    repo.odb().enable_mem_overlay();
-    let prediction = (|| -> Result<MergePrediction> {
-        let merged = merge_trees_three_way(
-            repo,
-            base_tree,
-            into_tree,
-            other_tree,
-            options.favor,
-            options.whitespace,
-            None,
-            presentation,
-        )?;
-        if tree_merge_has_conflicts(&merged) {
-            return Ok(MergePrediction::Conflicts {
-                conflicts: conflicts_from_tree_merge(&merged),
-            });
+    let _overlay = MemOverlayGuard::enter(repo.odb());
+    let merged = merge_trees_three_way(
+        repo,
+        base_tree,
+        into_tree,
+        other_tree,
+        options.favor,
+        options.whitespace,
+        None,
+        presentation,
+    )?;
+    if tree_merge_has_conflicts(&merged) {
+        return Ok(MergePrediction::Conflicts {
+            conflicts: conflicts_from_tree_merge(&merged),
+        });
+    }
+    let tree = materialized_merge_result_tree(repo.odb(), &merged)?;
+    Ok(MergePrediction::Clean { tree })
+}
+
+/// Enable the ODB mem overlay for the scope of a [`predict_merge`] call without disturbing
+/// an overlay already active on the shared [`Repository`] handle.
+struct MemOverlayGuard<'a> {
+    odb: &'a crate::objects::odb::Odb,
+    enabled_here: bool,
+}
+
+impl<'a> MemOverlayGuard<'a> {
+    fn enter(odb: &'a crate::objects::odb::Odb) -> Self {
+        let already_active = odb.is_mem_overlay_active();
+        if !already_active {
+            odb.enable_mem_overlay();
         }
-        let tree = materialized_merge_result_tree(repo.odb(), &merged)?;
-        Ok(MergePrediction::Clean { tree })
-    })();
-    repo.odb().disable_mem_overlay();
-    prediction
+        Self {
+            odb,
+            enabled_here: !already_active,
+        }
+    }
+}
+
+impl Drop for MemOverlayGuard<'_> {
+    fn drop(&mut self) {
+        if self.enabled_here {
+            self.odb.disable_mem_overlay();
+        }
+    }
 }
 
 /// Result of integrating another branch into the current one ([`integrate_branch`]).
@@ -810,6 +834,40 @@ mod integrate_tests {
         let ff = compose_fast_forward_index(&repo, target_tree, head_tree, &index).expect("ff");
         assert!(ff.get(b"new.txt", 0).is_some());
         assert!(ff.get(b"tracked.txt", 0).is_some());
+    }
+
+    #[test]
+    fn predict_merge_mem_overlay_guard_restores_outer_scope() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        grit_test_support::git(tmp.path(), &["init", "-q", "-b", "main"]);
+        let repo =
+            Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("repo");
+        std::fs::write(tmp.path().join("f.txt"), "a\n").expect("write");
+        grit_test_support::git(tmp.path(), &["add", "f.txt"]);
+        grit_test_support::git(tmp.path(), &["commit", "-m", "one"]);
+        let head: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("head");
+        grit_test_support::git(tmp.path(), &["branch", "topic"]);
+        std::fs::write(tmp.path().join("f.txt"), "b\n").expect("write");
+        grit_test_support::git(tmp.path(), &["add", "f.txt"]);
+        grit_test_support::git(tmp.path(), &["commit", "-m", "two"]);
+        let tip: ObjectId = grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("tip");
+        grit_test_support::git(tmp.path(), &["checkout", "main"]);
+
+        repo.odb().enable_mem_overlay();
+        assert!(repo.odb().is_mem_overlay_active());
+        let _ =
+            predict_merge(&repo, head, tip, &MergePredictionOptions::default()).expect("predict");
+        assert!(
+            repo.odb().is_mem_overlay_active(),
+            "outer mem overlay must stay active after predict_merge"
+        );
+        repo.odb().disable_mem_overlay();
     }
 
     #[test]

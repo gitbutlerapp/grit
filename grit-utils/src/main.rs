@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use grit_utils::binary::{require_hyperfine, resolve_binary};
+use grit_utils::binary::{require_hyperfine, resolve_binary, tool_version};
 use grit_utils::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
 use grit_utils::campaign_suite::{run_campaign_suite, CampaignOptions};
 use grit_utils::compare::compare_files;
@@ -915,6 +915,10 @@ enum DriveCmd {
         repo: PathBuf,
         range: String,
     },
+    /// In-memory merge prediction for hot-path fixture oids (`predict_merge`).
+    MergePredict {
+        repo: PathBuf,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -1090,7 +1094,42 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
             let repo = open_repo(repo)?;
             odb_driver::rev_walk_left_right_count(&repo, range)?;
         }
+        DriveCmd::MergePredict { repo } => {
+            odb_driver::merge_predict_hot_path(repo)?;
+        }
     }
+    Ok(())
+}
+
+/// Run merge-check benchmarks via `grit-bench drive merge-predict` (no `grit` CLI required).
+fn run_merge_check_command(
+    cli: &Cli,
+    git: &std::path::Path,
+    hyperfine: &std::path::Path,
+    timestamp: time::OffsetDateTime,
+) -> Result<()> {
+    let Cmd::MergeCheck { sizes } = &cli.command else {
+        unreachable!("run_merge_check_command called for non-merge-check command");
+    };
+    let bench_exe = std::env::current_exe().context("current exe")?;
+    eprintln!(
+        "git:  {} ({})",
+        git.display(),
+        tool_version(git)
+    );
+    eprintln!(
+        "grit: {} ({}, lib driver)",
+        bench_exe.display(),
+        tool_version(&bench_exe)
+    );
+    eprintln!("hyperfine: {}", hyperfine.display());
+    eprintln!();
+    eprintln!("Running merge-check benchmarks...");
+    let cfg = run_config(cli, true);
+    let report = run_merge_check_suite(hyperfine, git, &bench_exe, &cfg, sizes, timestamp)?;
+    let rendered = render_report(&cli.format, &report)?;
+    write_output(cli, &rendered)?;
+    remove_dir_robust(&scratch_dir());
     Ok(())
 }
 
@@ -1464,9 +1503,14 @@ fn main() -> Result<()> {
     }
 
     let git = resolve_binary("git", cli.git.as_deref())?;
-    let grit = resolve_binary("grit", cli.grit.as_deref())?;
     let hyperfine = require_hyperfine()?;
     let timestamp = parse_timestamp(&cli)?;
+
+    if matches!(&cli.command, Cmd::MergeCheck { .. }) {
+        return run_merge_check_command(&cli, &git, &hyperfine, timestamp);
+    }
+
+    let grit = resolve_binary("grit", cli.grit.as_deref())?;
 
     eprintln!(
         "git:  {} ({})",
@@ -1853,11 +1897,6 @@ fn main() -> Result<()> {
             let cfg = run_config(&cli, true);
             run_merge_only_suite(&hyperfine, &git, &grit, &cfg, sizes, false, timestamp)?
         }
-        Cmd::MergeCheck { sizes } => {
-            eprintln!("Running merge-check benchmarks...");
-            let cfg = run_config(&cli, true);
-            run_merge_check_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
-        }
         Cmd::All { sizes } => {
             eprintln!("Running all benchmarks...");
             let cfg = run_config(&cli, false);
@@ -1919,7 +1958,8 @@ fn main() -> Result<()> {
         | Cmd::RefsDriver { .. }
         | Cmd::LibOp { .. }
         | Cmd::Fixture { .. }
-        | Cmd::Fixtures { .. } => unreachable!(),
+        | Cmd::Fixtures { .. }
+        | Cmd::MergeCheck { .. } => unreachable!(),
     };
 
     let ledger_wrote_markdown = matches!(cli.command, Cmd::Campaign { ledger: true, .. })

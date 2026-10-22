@@ -687,6 +687,11 @@ impl Odb {
     }
 
     /// Whether the in-memory write overlay is currently enabled.
+    #[must_use]
+    pub(crate) fn is_mem_overlay_active(&self) -> bool {
+        self.mem_overlay_active.load(Ordering::Acquire)
+    }
+
     fn overlay_active(&self) -> bool {
         self.mem_overlay
             .read()
