@@ -198,7 +198,7 @@ fn status_json_resolved_merge_next_steps_run_in_order() -> TestResult {
     let op = v.get("operation").expect("operation");
     let steps = op["next_steps"].as_array().expect("next_steps");
     assert_eq!(steps.len(), 1);
-    assert_eq!(steps[0], "grit commit \"message\"");
+    assert_eq!(steps[0], "grit merge --continue");
     let alts = op["alternatives"].as_array().expect("alternatives");
     assert_eq!(alts.len(), 1);
     assert_eq!(alts[0], "grit merge --abort");

@@ -414,11 +414,11 @@ impl StatusOutcome {
             return Ok(());
         }
         if !self.conflicts.is_empty() {
-            outln!(w, "→ resolve conflicts, then grit commit \"message\"");
+            outln!(w, "→ resolve conflicts, then grit merge --continue");
             return Ok(());
         }
         if self.merging {
-            outln!(w, "→ grit commit \"message\" to finish the merge");
+            outln!(w, "→ grit merge --continue to finish the merge");
             return Ok(());
         }
         let mut hints: Vec<String> = Vec::new();
@@ -477,11 +477,11 @@ impl StatusOutcome {
             return Ok(());
         }
         if !self.conflicts.is_empty() {
-            outln!(w, "→ resolve conflicts, then grit commit `\"message\"`");
+            outln!(w, "→ resolve conflicts, then grit merge --continue");
             return Ok(());
         }
         if self.merging {
-            outln!(w, "→ grit commit `\"message\"` to finish the merge");
+            outln!(w, "→ grit merge --continue to finish the merge");
             return Ok(());
         }
         let mut hints: Vec<String> = Vec::new();

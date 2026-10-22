@@ -523,7 +523,7 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
             outln!(w);
             outln!(
                 w,
-                "→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`"
+                "→ fix conflicts, then `grit merge --continue`, or `grit merge --abort`"
             );
         }
         MergeResult::Aborted => outln!(w, "Merge aborted."),

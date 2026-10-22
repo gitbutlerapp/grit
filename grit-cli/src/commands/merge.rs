@@ -9,14 +9,16 @@ use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
+use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{
-    abort_branch_merge, integrate_branch, IntegrateBranchOutcome, MergeConflictDetail,
-    MergeConflictKind,
+    abort_branch_merge, continue_merge, integrate_branch, ContinueMergeError, ContinueOptions,
+    IntegrateBranchOutcome, MergeConflictDetail, MergeConflictKind,
 };
+use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::{read_merge_msg, resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -216,7 +218,7 @@ impl HumanRender for MergeOutcome {
                     }
                 }
                 eprintln!(
-                    "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."
+                    "\nAutomatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`."
                 );
             }
             MergeResult::Aborted => outln!(w, "Merge aborted."),
@@ -242,7 +244,12 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
-pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
+pub fn run(
+    branch: Option<&str>,
+    abort: bool,
+    continue_merge_flag: bool,
+    message: Option<&str>,
+) -> Result<MergeOutcome> {
     let repo = context::discover()?;
 
     if abort {
@@ -250,7 +257,11 @@ pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
         return Ok(MergeOutcome::aborted());
     }
 
-    let branch = branch.context("branch name required unless using --abort")?;
+    if continue_merge_flag {
+        return run_continue(&repo, message);
+    }
+
+    let branch = branch.context("branch name required unless using --abort or --continue")?;
 
     let (refname, head_oid) = match resolve_head(repo.git_dir())? {
         HeadState::Branch {
@@ -265,6 +276,55 @@ pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
 
     let other_oid = resolve_branch(&repo, branch)?;
     integrate(&repo, &refname, head_oid, other_oid, branch)
+}
+
+fn merge_continue_label(git_dir: &std::path::Path) -> String {
+    read_merge_msg(git_dir)
+        .ok()
+        .flatten()
+        .and_then(|msg| {
+            let line = msg.lines().next()?.trim();
+            if let Some(rest) = line.strip_prefix("Merge branch '") {
+                rest.strip_suffix('\'').map(str::to_owned)
+            } else if let Some(rest) = line.strip_prefix("Merge branch \"") {
+                rest.strip_suffix('"').map(str::to_owned)
+            } else {
+                line.strip_prefix("Merge ")
+                    .map(|rest| rest.trim_end_matches('\n').to_owned())
+            }
+        })
+        .unwrap_or_else(|| "merge".to_owned())
+}
+
+fn run_continue(repo: &Repository, message: Option<&str>) -> Result<MergeOutcome> {
+    let config = repo.config().context("could not load config")?;
+    let env = repo.environment();
+    let now = context::wall_clock_now(env);
+    let author = context::identity(env, config.as_ref(), IdentRole::Author, now)?;
+    let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
+    let options = ContinueOptions {
+        message: message.map(str::to_owned),
+        author,
+        committer,
+    };
+    let mut progress = NullProgress;
+    match continue_merge(repo, &options, &mut progress) {
+        Ok(outcome) => {
+            let label = merge_continue_label(repo.git_dir());
+            Ok(MergeOutcome::merged(&label, outcome.oid, outcome.change_id))
+        }
+        Err(ContinueMergeError::UnmergedPaths { paths }) => {
+            let details = paths
+                .into_iter()
+                .map(|path| MergeConflictDetail {
+                    path,
+                    kind: MergeConflictKind::Content,
+                })
+                .collect();
+            Ok(MergeOutcome::conflicts("", details))
+        }
+        Err(err) => Err(anyhow::Error::new(err)),
+    }
 }
 
 /// Integrate `other` into the branch `into_ref` (currently at `into_oid`):

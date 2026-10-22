@@ -25,7 +25,7 @@ The status screen is your home base. It shows, from top to bottom:
 
 Each change has a label: `new`, `modified`, `deleted`, `renamed`, `copied`, `type changed` or `conflict`.
 
-During a paused merge, human output also lists **Conflicts** grouped by kind (`both modified`, `both added`, …). In `--json`, each conflict is `{ "path", "kind" }` and `operation.next_steps` lists the ordered `grit` commands while a merge is paused (for example `grit diff` then `grit add .` with conflicts, or `grit commit "message"` once conflicts are resolved). Use `operation.alternatives` for cancel paths such as `grit merge --abort` (not part of the ordered sequence). Conflict kinds match Git porcelain v2 unmerged XY codes: `both_modified` (UU), `both_added` (AA), `both_deleted` (DD), `added_by_us` (AU), `added_by_them` (UA), `deleted_by_us` (DU), `deleted_by_them` (UD).
+During a paused merge, human output also lists **Conflicts** grouped by kind (`both modified`, `both added`, …). In `--json`, each conflict is `{ "path", "kind" }` and `operation.next_steps` lists the ordered `grit` commands while a merge is paused (for example `grit diff` then `grit add .` with conflicts, or `grit merge --continue` once conflicts are resolved). Use `operation.alternatives` for cancel paths such as `grit merge --abort` (not part of the ordered sequence). Conflict kinds match Git porcelain v2 unmerged XY codes: `both_modified` (UU), `both_added` (AA), `both_deleted` (DD), `added_by_us` (AU), `added_by_them` (UA), `deleted_by_us` (DU), `deleted_by_them` (UD).
 
 Paths are shown relative to the directory you run `grit` from. Valid UTF-8 file names print as-is in human and `--markdown` output (unlike Git’s default `core.quotepath=true`, which octal-escapes non-ASCII bytes). Names that contain C0 control characters (including ESC and BEL) are still C-quoted so a malicious repository cannot inject terminal escape sequences. Set `core.quotepath=true` in config if you want Git-style octal escaping for all non-ASCII bytes. `--json` path fields are always unquoted UTF-8 strings (JSON escapes controls as `\uXXXX`).
 
@@ -83,7 +83,7 @@ Changed (not staged)
 Untracked
   ?  untracked     scratch.txt
 
-→ grit add <file> to stage  ·  grit commit "message" to commit
+→ grit add <file> to stage  ·  grit merge --continue to finish
 ```
 
 Everything committed and pushed:

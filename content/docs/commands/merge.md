@@ -9,6 +9,7 @@ order: 3
 
 ```text
 grit merge <branch>
+grit merge --continue [-m <message>]
 grit merge --abort
 ```
 
@@ -19,7 +20,8 @@ Brings the commits from `<branch>` into the current branch:
 - If the current branch already has everything, nothing changes.
 - If the current branch has no commits of its own since they diverged, it's moved forward to `<branch>` (a fast-forward). No new commit is made.
 - Otherwise both sides are merged. When there are no overlapping edits, a merge commit is recorded with the message `Merge <branch>`. That commit gets a new `change-id` header like [`grit commit`](../commit/). When `commit.gpgsign` is enabled, that merge commit is signed like [`grit commit`](../commit/).
-- When the same lines were changed on both sides, `grit merge` stops with conflicts: it updates the index and working tree, writes conflict markers around each conflicting hunk, records merge-in-progress state (`MERGE_HEAD`, `ORIG_HEAD`, `MERGE_MSG`), and leaves the branch ref unchanged. Fix the conflicts and run [`grit commit`](../commit/) to create the two-parent merge commit (staging is automatic). Run `grit merge --abort` to discard the in-progress merge and restore the pre-merge branch, index, and working tree.
+- When the same lines were changed on both sides, `grit merge` stops with conflicts: it updates the index and working tree, writes conflict markers around each conflicting hunk, records merge-in-progress state (`MERGE_HEAD`, `ORIG_HEAD`, `MERGE_MSG`), and leaves the branch ref unchanged. Fix conflicts, stage resolved paths, then run `grit merge --continue` to create the two-parent merge commit (message from `MERGE_MSG` with comment lines stripped, or `-m` to override). [`grit commit`](../commit/) can also finish a resolved merge for Git compatibility. Run `grit merge --abort` to discard the in-progress merge and restore the pre-merge branch, index, and working tree.
+- After a merge with `--no-commit` (when supported), run `grit merge --continue` to record the merge commit without re-running the three-way merge.
 
 `<branch>` can be a local branch or a remote-tracking branch such as `origin/main`. Local branches are looked up first.
 
@@ -30,6 +32,8 @@ Local edits are allowed when they only touch paths the merge does not change, or
 | Option | Description |
 | --- | --- |
 | `<branch>` | The branch to merge into the current one. |
+| `--continue` | Finish an in-progress merge after conflicts are resolved (or after `--no-commit`). Conflicts with `<branch>` and `--abort`. |
+| `-m`, `--message` | Commit message for `--continue` only (overrides `MERGE_MSG`). |
 | `--abort` | Cancel an in-progress merge and restore the state recorded in `ORIG_HEAD`. |
 
 ## Examples
@@ -48,7 +52,7 @@ When both branches change the same lines:
 $ grit merge topic
 CONFLICT (content): README.md
 
-Automatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`.
+Automatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`.
 ```
 
 When one branch deleted a file and the other modified it, grit leaves the modified side's content in the work tree (like Git) so you can run `grit add <path>` to keep it or `grit rm <path>` to accept the deletion:
@@ -57,14 +61,14 @@ When one branch deleted a file and the other modified it, grit leaves the modifi
 $ grit merge feat
 CONFLICT (modify_delete): f deleted on the current branch and modified in feat; feat's version is in the work tree
 
-Automatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`.
+Automatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`.
 ```
 
 After resolving markers and staging:
 
 ```console
-$ grit commit -m "Merge topic"
-Merged topic (2 parents)
+$ grit merge --continue
+Merged topic into the current branch (acd1d4b)
 ```
 
 To cancel:
@@ -138,7 +142,7 @@ When the merge stops on conflicts (exit code 1), stdout still carries structured
 
 - `f.txt`
 
-→ fix conflicts, then `grit commit "message"`, or `grit merge --abort`
+→ fix conflicts, then `grit merge --continue`, or `grit merge --abort`
 ```
 
 ## See also
