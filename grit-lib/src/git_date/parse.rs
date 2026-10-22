@@ -7,9 +7,10 @@ use thiserror::Error;
 #[error("invalid date string")]
 pub struct DateParseError;
 
+use super::approx::approxidate_careful_at;
 use super::compat::{self, time_t, tm};
 use super::tm::{
-    empty_tm, init_tm_unknown, is_date_known, match_string, maybeiso8601, nodate,
+    empty_tm, init_tm_unknown, is_date_known, local_tzoffset, match_string, maybeiso8601, nodate,
     parse_timestamp_prefix, process_wall_clock_sec, skip_alpha, tm_to_time_t, TIMESTAMP_MAX,
 };
 
@@ -290,8 +291,22 @@ pub fn parse_date(date: &str) -> Result<String, DateParseError> {
 
 /// Like [`parse_date`] but uses `now_sec` for relative and fuzzy fields.
 pub fn parse_date_at(date: &str, now_sec: i64) -> Result<String, DateParseError> {
-    let (ts, off) = parse_date_basic_at(date, now_sec)?;
+    if let Ok((ts, off)) = parse_date_basic_at(date, now_sec) {
+        return Ok(date_string(ts, off));
+    }
+    let mut err = 0;
+    let ts = approxidate_careful_at(date, now_sec, Some(&mut err));
+    if err != 0 {
+        return Err(DateParseError);
+    }
+    let off = tz_hhmm_to_offset_minutes(local_tzoffset(ts));
     Ok(date_string(ts, off))
+}
+
+fn tz_hhmm_to_offset_minutes(hhmm: i32) -> i32 {
+    let sign = if hhmm < 0 { -1 } else { 1 };
+    let abs = hhmm.unsigned_abs();
+    sign * ((abs / 100) * 60 + (abs % 100)) as i32
 }
 
 /// Git `parse_date_basic` — UTC seconds and timezone offset in **minutes** (signed).

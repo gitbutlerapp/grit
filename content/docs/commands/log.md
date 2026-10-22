@@ -46,7 +46,7 @@ With `--graph`, human output draws a commit graph in the left margin (ASCII by d
 | `--cursor <token>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). The cursor encodes the original revision selection, date cutoffs, and walk queue—pass `--cursor` alone (optional `-n` for page size). Revision operands, date filters, and ref-set flags are rejected with `--cursor`. Cannot be combined with path operands. |
 | `--before <date>` | Alias for `--until` (date cutoff). Values starting with `lw1.` are still accepted as a deprecated continuation cursor (with a warning); use `--cursor` instead. |
 | `--skip <N>` | Skip `N` commits after ordering (cursor walks do not support `--skip`). |
-| `--since`, `--after <date>` | Exclude commits older than this date (committer date, Git parsing rules). |
+| `--since`, `--after <date>` | Exclude commits older than this date (committer date). Accepts Git approxidate strings (for example `2024-01-01`, `1 week ago`, `yesterday`) as well as ISO/RFC forms. |
 | `--until`, `--before <date>` | Exclude commits newer than this date (unless `--before` is an `lw1.` cursor token). |
 | `--first-parent` | Follow only the first parent at merges (disables cursor paging). |
 | `--merges` | Only merge commits (conflicts with `--no-merges`; disables cursor paging). |

@@ -58,6 +58,21 @@ fn assert_cutoff_matches_git(spec: &str, now: i64) {
 }
 
 #[test]
+fn cutoff_issue_1504_date_only_relative_and_fuzzy() {
+    for spec in [
+        "2024-01-01",
+        "2020-01-01",
+        "1 week ago",
+        "2.weeks.ago",
+        "2024/01/01",
+        "Jan 1 2024",
+        "yesterday",
+    ] {
+        assert_cutoff_matches_git(spec, NOW);
+    }
+}
+
+#[test]
 fn cutoff_relative_units() {
     for spec in [
         "1.second.ago",

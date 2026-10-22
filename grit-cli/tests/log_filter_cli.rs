@@ -286,3 +286,22 @@ fn log_invalid_pattern_errors_json() -> TestResult {
     "#);
     Ok(())
 }
+
+#[test]
+fn log_since_date_only_and_relative_accepted() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-log-since-date-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir)?;
+    grit_run(&dir, &["init"]).status.success().then_some(()).expect("init");
+    fs::write(dir.join("f"), b"x")?;
+    grit_run(&dir, &["commit", "-m", "one"]).status.success().then_some(()).expect("commit");
+    for spec in ["2024-01-01", "1 week ago", "yesterday"] {
+        let out = grit_run(&dir, &["log", "--oneline", &format!("--since={spec}")]);
+        assert!(
+            out.status.success(),
+            "--since={spec}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}

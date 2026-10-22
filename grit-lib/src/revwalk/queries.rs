@@ -1,6 +1,7 @@
 //! Typed revision-range parsing and high-level rev-walk queries on [`super::RevWalk`].
 use crate::error::{Error, Result};
-use crate::git_date::parse::{parse_date_basic_at, DateParseError};
+use crate::git_date::parse::DateParseError;
+use crate::git_date::parse_date_cutoff;
 use crate::merge_base::{
     count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
     merge_bases_first_vs_rest, ReachableCountFilter,
@@ -250,12 +251,7 @@ pub fn committer_cutoff_from_date(
     date: &str,
     now_sec: i64,
 ) -> std::result::Result<i64, DateParseError> {
-    let trimmed = date.trim();
-    if !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit()) {
-        return trimmed.parse::<i64>().map_err(|_| DateParseError);
-    }
-    let (ts, _off) = parse_date_basic_at(date, now_sec)?;
-    Ok(ts as i64)
+    parse_date_cutoff(date.trim(), now_sec).map_err(|_| DateParseError)
 }
 
 /// Positive tips and hide tips for a default-order reachable walk (no path filter).
