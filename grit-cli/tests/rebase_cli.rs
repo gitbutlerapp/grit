@@ -229,7 +229,18 @@ fn rebase_onto_json_shape() -> TestResult {
         .cloned()
         .collect();
     keys.sort();
-    assert_eq!(keys, ["dry_run", "head", "operation", "refs", "rewritten"]);
+    assert_eq!(
+        keys,
+        [
+            "dry_run",
+            "head",
+            "operation",
+            "refs",
+            "result",
+            "rewritten"
+        ]
+    );
+    assert_eq!(json["result"], "completed");
     Ok(())
 }
 
@@ -267,10 +278,21 @@ fn rebase_conflict_exits_1_and_changes_nothing() -> TestResult {
     let out = gs(dir, ["rebase", "--onto", &onto, &upstream, "--json"])?;
     assert_eq!(out.status, Some(1), "conflict must exit 1");
     let json = parse_json(&out.stdout)?;
-    assert_eq!(json["kind"], "conflict");
+    assert_eq!(json["result"], "conflicts");
     assert!(json.get("commit").is_some());
     assert!(json.get("conflicts").is_some());
-    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    assert!(json.get("next_steps").is_some());
+    let orig_head = fs::read_to_string(dir.join(".git/rebase-merge/orig-head"))?
+        .trim()
+        .to_string();
+    assert_eq!(
+        orig_head, tip,
+        "orig-head must record the pre-rebase branch tip"
+    );
+    assert!(
+        dir.join(".git/rebase-merge/grit-plan").is_file(),
+        "grit rebase should leave resumable state"
+    );
     Ok(())
 }
 

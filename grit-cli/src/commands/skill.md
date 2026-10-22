@@ -96,7 +96,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 - `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
 - `grit revert [<commit>…]` undoes one or more commits (ranges OK; newest first). Merge commits need `--mainline <n>`. `-m` / `--message-file` set the message for a **single** commit only.
 - `grit revert --continue`, `--abort`, and `--skip` resume or cancel a stopped revert sequence (same conflict model as pick).
-- On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or `grit pick --continue` / `grit revert --continue`. Use `--abort` on the same command to cancel.
+- On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert/rebase state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or `grit pick --continue` / `grit revert --continue` / `grit rebase --continue`. Use `--abort` on the same command to cancel; `grit rebase --skip` skips the current commit.
 
 ## Remotes
 
@@ -110,7 +110,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Fetch and merge the remote copy of this branch | `grit pull` |
 | Pull only when a fast-forward is possible | `grit pull --ff-only` (exit **0** on success, **1** with `refused_not_ff` when diverged; branch unchanged) |
 | Fetch and replay local commits on top of upstream | `grit pull --rebase` (or `pull.rebase` in config; rebase conflicts abort atomically, exit **1**) |
-| Replay local commits onto another base | `grit rebase [<upstream>]` (default `@{upstream}`; `--onto`; conflicts abort atomically, exit **1**) |
+| Replay local commits onto another base | `grit rebase [<upstream>]` (default `@{upstream}`; `--onto`; `--continue` / `--abort` / `--skip` on conflicts, exit **1**) |
 | Publish this branch to `origin` under the same name | `grit push` |
 | Push to a different remote branch name | `grit push origin HEAD:refs/heads/<name>` |
 | Publish rewritten history safely | `grit fetch`, then `grit push --force-with-lease` (or `--force-with-lease=<rev>` for one ref); stale lease → exit **1**, `"rejected": true` |

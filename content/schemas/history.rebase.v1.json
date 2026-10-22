@@ -2,6 +2,28 @@
   "$id": "https://grit-scm.com/schemas/history.rebase/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "ConflictJson": {
+      "description": "One conflicted path in `--json` operation output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
     "HeadPair": {
       "description": "`HEAD` commit before and after rewrite.",
       "properties": {
@@ -19,6 +41,32 @@
         "old"
       ],
       "type": "object"
+    },
+    "RebaseResult": {
+      "description": "High-level result of `grit rebase`.",
+      "oneOf": [
+        {
+          "description": "Every commit was replayed (or `--dry-run` printed the plan).",
+          "enum": [
+            "completed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Replay stopped on merge conflicts.",
+          "enum": [
+            "conflicts"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`--abort` restored the pre-rebase branch tip.",
+          "enum": [
+            "aborted"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "RefPair": {
       "description": "One ref tip before and after rewrite.",
@@ -83,8 +131,35 @@
       "type": "object"
     }
   },
-  "description": "Result of `grit history drop`, `move`, `reword`, `fixup` and `squash`.",
+  "description": "Result of `grit rebase` and `grit history rebase`.",
   "properties": {
+    "alternatives": {
+      "description": "Mutually exclusive options (`--abort`, `--skip`) when paused.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "commit": {
+      "description": "Source commit that stopped the rebase, when `result` is `conflicts`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "conflicts": {
+      "description": "Conflicted paths when `result` is `conflicts`.",
+      "items": {
+        "$ref": "#/definitions/ConflictJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "dry_run": {
       "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
       "type": "boolean"
@@ -98,11 +173,24 @@
           "type": "null"
         }
       ],
-      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
+      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes."
+    },
+    "next_steps": {
+      "description": "Suggested follow-up commands when `result` is `conflicts`.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "operation": {
-      "description": "Operation name (`drop`, `move`, `reword`, `fixup` or `squash`).",
-      "type": "string"
+      "description": "Always `rebase` when present.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "refs": {
       "description": "Planned or applied ref tip updates.",
@@ -111,8 +199,11 @@
       },
       "type": "array"
     },
+    "result": {
+      "$ref": "#/definitions/RebaseResult"
+    },
     "rewritten": {
-      "description": "Original and replacement commit OIDs for every rewritten commit.",
+      "description": "Original and replacement commit OIDs for every replayed commit.",
       "items": {
         "$ref": "#/definitions/RewrittenPair"
       },
@@ -120,12 +211,9 @@
     }
   },
   "required": [
-    "dry_run",
     "head",
-    "operation",
-    "refs",
-    "rewritten"
+    "result"
   ],
-  "title": "HistoryRewriteOutcome",
+  "title": "RebaseCliOutcome",
   "type": "object"
 }

@@ -63,7 +63,7 @@ Assign **staged** hunks into the commits that last touched overlapping lines (be
 
 ### `rebase`
 
-Replay commits on the current branch onto `<upstream>` (or `--onto`), matching [`grit rebase`](rebase.md). Prefer the top-level command for everyday use; `grit history rebase` shares the same handler and JSON shape (`operation: "rebase"`).
+Replay commits on the current branch onto `<upstream>` (or `--onto`), matching [`grit rebase`](rebase.md) including `--continue`, `--abort`, and `--skip`. Prefer the top-level command for everyday use; `grit history rebase` shares the same handler and JSON shape.
 
 ### `squash`
 
@@ -160,11 +160,16 @@ Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, or `"squash"`. |
+| `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, `"squash"`, or `"rebase"`. |
+| `result` | string | `rebase` only: `completed`, `conflicts`, or `aborted`. |
 | `rewritten` | array | `{old,new,change_id,subject}` full hex OIDs, stored change id (`null` when dropped or absent), and the first line of the replacement commit message (or the original when dropped). |
 | `refs` | array | `{ref,old,new}` for each ref that would move or moved. `name` duplicates `ref` and is deprecated; it will be removed in a future release. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
 | `dry_run` | boolean | `true` when `--dry-run` was set. |
+| `commit` | string | `rebase` when `result` is `conflicts`: source commit that stopped replay (full hex). |
+| `conflicts` | array | `rebase` when `result` is `conflicts`: `{path,kind,summary?}`. |
+| `next_steps` | array | `rebase` when paused: ordered follow-up `grit` commands. |
+| `alternatives` | array | `rebase` when paused: `grit rebase --abort` and `grit rebase --skip`. |
 
 For `absorb`, the object also includes:
 
@@ -172,6 +177,8 @@ For `absorb`, the object also includes:
 | ----- | ---- | ------- |
 | `assignments` | array | `{path,hunk_range,commit}` for hunks assigned to historical commits. |
 | `unassigned` | array | `{path,hunk_range,reason}` for hunks left staged (`reason` is a stable code). |
+
+For `rebase`, use the [`grit rebase`](rebase.md) JSON table (`result`, `commit`, `conflicts`, `next_steps`, `alternatives`, plus `rewritten` / `refs` / `head` when `result` is `completed`).
 
 Example:
 
@@ -202,7 +209,7 @@ Example:
 }
 ```
 
-On replay conflicts, stdout is a single JSON object (exit code 1) with `error`, `kind` (`conflict`), and `conflicts` (sorted paths), same shape as [`grit pick`](pick.md).
+History rewrite commands other than `rebase` report planning conflicts as structured errors (`kind: "conflict"`). `grit history rebase` uses the same stop/resume JSON as [`grit rebase`](rebase.md) (`result: "conflicts"`, exit **1**).
 
 ## Markdown output
 

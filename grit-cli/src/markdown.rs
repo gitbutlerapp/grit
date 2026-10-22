@@ -705,6 +705,54 @@ pub fn print_pull_outcome(
     Ok(())
 }
 
+/// Result of `grit rebase`.
+pub fn print_rebase_outcome(
+    w: &mut dyn Write,
+    outcome: &crate::commands::history::RebaseCliOutcome,
+) -> anyhow::Result<()> {
+    use crate::commands::history::RebaseResult;
+    outln!(w, "## Rebase");
+    outln!(w);
+    match outcome.result {
+        RebaseResult::Aborted => outln!(w, "Rebase aborted."),
+        RebaseResult::Conflicts => {
+            outln!(w, "- Rebase stopped with conflicts");
+            outln!(w);
+            if let Some(details) = &outcome.conflicts {
+                crate::operation_output::render_conflicts_markdown(details, w)?;
+            }
+            if let Some(commit) = &outcome.commit {
+                outln!(
+                    w,
+                    "- Stopped at commit `{short}`",
+                    short = short_hex(commit)
+                );
+            }
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        RebaseResult::Completed => {
+            if outcome.dry_run {
+                outln!(w, "- Dry run (refs unchanged)");
+            }
+            if outcome.rewritten.is_empty() {
+                outln!(w, "- Already up to date");
+            } else {
+                print_history_rewrite_rows(
+                    w,
+                    &outcome.rewritten,
+                    &outcome.refs,
+                    outcome.head.as_ref(),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Result of `grit pick`.
 pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::Result<()> {
     use crate::commands::pick::PickResult;

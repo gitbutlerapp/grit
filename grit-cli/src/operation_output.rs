@@ -55,6 +55,14 @@ impl OperationConflictBlock {
         })
     }
 
+    /// Build conflict JSON and suggested `grit` commands for a paused rebase session.
+    #[must_use]
+    pub fn for_rebase(conflicts: &[Conflict]) -> Self {
+        Self::for_operation(InProgressOperation::Rebase, conflicts, |c| {
+            conflict_json(c, None)
+        })
+    }
+
     fn for_operation(
         kind: InProgressOperation,
         conflicts: &[Conflict],
@@ -205,5 +213,12 @@ pub fn render_revert_conflict_footer_human() {
 pub fn render_pick_conflict_footer_human() {
     eprintln!(
         "\nPick stopped on conflicts; fix them and run `grit pick --continue`, or `grit pick --abort` / `grit pick --skip`."
+    );
+}
+
+/// Human hint after a paused rebase session.
+pub fn render_rebase_conflict_footer_human() {
+    eprintln!(
+        "\nRebase stopped on conflicts; fix them and run `grit rebase --continue`, or `grit rebase --abort` / `grit rebase --skip`."
     );
 }

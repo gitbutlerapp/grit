@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"operation\":\"rebase\",\"rewritten\":[],\"refs\":[],\"head\":null,\"dry_run\":true}\n",
+    "stdout": "{\"result\":\"completed\",\"operation\":\"rebase\",\"dry_run\":true}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## History rebase\n\n- Already up to date\n",
+    "stdout": "## Rebase\n\n- Dry run (refs unchanged)\n- Already up to date\n",
     "stderr": ""
   }
 }

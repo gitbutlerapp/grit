@@ -291,6 +291,15 @@ enum HistoryAction {
         /// Replay onto this commit instead of `UPSTREAM`.
         #[arg(long = "onto", value_name = "REV")]
         onto: Option<String>,
+        /// Finish a rebase stopped on conflicts after resolving and staging paths.
+        #[arg(long = "continue", conflicts_with_all = ["abort", "skip", "upstream", "onto"])]
+        continue_rebase: bool,
+        /// Cancel an in-progress rebase and restore the branch to its pre-rebase tip.
+        #[arg(long = "abort", conflicts_with_all = ["continue_rebase", "skip", "upstream", "onto"])]
+        abort: bool,
+        /// Skip the current commit and replay the rest.
+        #[arg(long = "skip", conflicts_with_all = ["continue_rebase", "abort", "upstream", "onto"])]
+        skip: bool,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -1031,7 +1040,7 @@ enum Command {
         #[arg(long = "check", conflicts_with_all = ["autostash", "ff_only", "no_rebase", "rebase"])]
         check: bool,
     },
-    /// Replay local commits onto a new base (atomic ref update).
+    /// Replay local commits onto a new base (resumable on conflicts).
     Rebase {
         /// Commits to replay are those reachable from `HEAD` but not from this revision (defaults to `@{upstream}`).
         #[arg(value_name = "UPSTREAM")]
@@ -1039,6 +1048,15 @@ enum Command {
         /// Replay onto this commit instead of `UPSTREAM`.
         #[arg(long = "onto", value_name = "REV")]
         onto: Option<String>,
+        /// Finish a rebase stopped on conflicts after resolving and staging paths.
+        #[arg(long = "continue", conflicts_with_all = ["abort", "skip", "upstream", "onto"])]
+        continue_rebase: bool,
+        /// Cancel an in-progress rebase and restore the branch to its pre-rebase tip.
+        #[arg(long = "abort", conflicts_with_all = ["continue_rebase", "skip", "upstream", "onto"])]
+        abort: bool,
+        /// Skip the current commit and replay the rest.
+        #[arg(long = "skip", conflicts_with_all = ["continue_rebase", "abort", "upstream", "onto"])]
+        skip: bool,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -2091,12 +2109,26 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             HistoryAction::Rebase {
                 upstream,
                 onto,
+                continue_rebase,
+                abort,
+                skip,
                 shared,
-            } => emit(
-                &commands::history::run_rebase(upstream, onto, &shared)?,
-                opts,
-                ctx,
-            ),
+            } => {
+                let outcome =
+                    commands::history::run_rebase(&commands::history::RebaseRunOptions {
+                        upstream,
+                        onto,
+                        continue_rebase,
+                        abort,
+                        skip,
+                        shared,
+                    })?;
+                emit(&outcome, opts, ctx)?;
+                if outcome.result == commands::history::RebaseResult::Conflicts {
+                    std::process::exit(1);
+                }
+                Ok(())
+            }
             HistoryAction::Absorb { base, shared } => emit(
                 &commands::history::run_absorb(base.as_deref(), &shared)?,
                 opts,
@@ -2233,12 +2265,25 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Rebase {
             upstream,
             onto,
+            continue_rebase,
+            abort,
+            skip,
             shared,
-        } => emit(
-            &commands::history::run_rebase(upstream, onto, &shared)?,
-            opts,
-            ctx,
-        ),
+        } => {
+            let outcome = commands::history::run_rebase(&commands::history::RebaseRunOptions {
+                upstream,
+                onto,
+                continue_rebase,
+                abort,
+                skip,
+                shared,
+            })?;
+            emit(&outcome, opts, ctx)?;
+            if outcome.result == commands::history::RebaseResult::Conflicts {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Command::Push {
             tags,
             delete,
