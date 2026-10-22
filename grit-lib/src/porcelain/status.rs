@@ -1029,14 +1029,15 @@ fn plain_tracked_directory(
 /// Raw repository-relative path of entry `name` inside the directory stored as `rel`,
 /// precomposing the name when `core.precomposeUnicode` applies.
 fn untracked_child_path(rel: &str, name: &[u8], precompose_unicode: bool) -> Vec<u8> {
-    let name: Cow<'_, [u8]> = match std::str::from_utf8(name) {
-        Ok(raw_name) if precompose_unicode => match precompose_utf8_segment(raw_name) {
-            Cow::Borrowed(_) => Cow::Borrowed(name),
-            Cow::Owned(s) => Cow::Owned(s.into_bytes()),
-        },
-        _ => Cow::Borrowed(name),
-    };
-    crate::repo_relpath::join_rel(&crate::repo_relpath::storage_bytes(rel), &name)
+    let precomposed = precompose_unicode
+        .then(|| std::str::from_utf8(name).ok())
+        .flatten()
+        .and_then(|raw_name| match precompose_utf8_segment(raw_name) {
+            Cow::Borrowed(_) => None,
+            Cow::Owned(s) => Some(s.into_bytes()),
+        });
+    let name = precomposed.as_deref().unwrap_or(name);
+    crate::repo_relpath::join_rel(&crate::repo_relpath::storage_bytes(rel), name)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1822,13 +1823,13 @@ fn dir_entry_name_bytes(entry: &std::fs::DirEntry) -> Vec<u8> {
 /// Collect readable entries of `entries` with their raw file names, ordered by name bytes.
 ///
 /// Extracting each name once keeps sorting allocation-free; `DirEntry::file_name` allocates
-/// on every call.
+/// on every call. Names within one directory are unique, so an unstable sort is exact.
 fn named_entries_sorted(entries: ReadDir) -> Vec<(Vec<u8>, DirEntry)> {
     let mut named: Vec<(Vec<u8>, DirEntry)> = entries
         .filter_map(|e| e.ok())
         .map(|e| (dir_entry_name_bytes(&e), e))
         .collect();
-    named.sort_by(|a, b| a.0.cmp(&b.0));
+    named.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     named
 }
 

@@ -214,15 +214,15 @@ impl BlobScanPlan {
         self.indices.is_empty()
     }
 
-    fn push_entry(&mut self, dir: Vec<u8>, entry_index: usize) {
-        if self.dirs.last().is_none_or(|d| d != &dir) {
+    fn push_entry(&mut self, dir: &[u8], entry_index: usize) {
+        if self.dirs.last().is_none_or(|d| d.as_slice() != dir) {
             if !self.dirs.is_empty() {
                 let end = self.indices.len();
                 if let Some(range) = self.dir_ranges.last_mut() {
                     range.end = end;
                 }
             }
-            self.dirs.push(dir);
+            self.dirs.push(dir.to_vec());
             self.dir_ranges.push(self.indices.len()..self.indices.len());
         }
         self.indices.push(entry_index);
@@ -291,6 +291,14 @@ fn entry_file_name(index: &Index, entry_index: usize) -> Result<&[u8]> {
     Ok(crate::repo_relpath::file_name(rel))
 }
 
+/// Borrowed form of [`crate::repo_relpath::parent_dir`].
+fn parent_dir_bytes(path: &[u8]) -> &[u8] {
+    match path.iter().rposition(|&b| b == b'/') {
+        Some(pos) => &path[..pos],
+        None => &[],
+    }
+}
+
 /// Group stage-0 blob index entries by parent directory for bulk `read_dir`.
 #[must_use]
 pub(crate) fn plan_blob_entries_by_dir(index: &Index, honor_fsmonitor_valid: bool) -> BlobScanPlan {
@@ -303,9 +311,7 @@ pub(crate) fn plan_blob_entries_by_dir(index: &Index, honor_fsmonitor_valid: boo
         if !index_blob_scan_eligible(ie, index, honor_fsmonitor_valid) {
             continue;
         }
-        let rel_path = ie.path.as_slice();
-        let dir = crate::repo_relpath::parent_dir(rel_path);
-        plan.push_entry(dir, entry_index);
+        plan.push_entry(parent_dir_bytes(&ie.path), entry_index);
     }
     plan.finish()
 }
@@ -338,8 +344,7 @@ pub(crate) fn plan_blob_entries_by_dir_for_paths(
         }) else {
             continue;
         };
-        let dir = crate::repo_relpath::parent_dir(path_bytes_ref);
-        plan.push_entry(dir, entry_index);
+        plan.push_entry(parent_dir_bytes(path_bytes_ref), entry_index);
     }
     plan.finish()
 }
@@ -740,7 +745,7 @@ where
         return Ok(());
     }
 
-    let (dir_readable, on_disk) = read_directory_map(&abs_dir)?;
+    let (dir_readable, on_disk) = read_directory_map(&abs_dir, entry_indices.len())?;
     for &entry_index in entry_indices {
         let rel_path = entry_rel_path(index, entry_index)?;
         if has_symlink_ancestor(rel_path) {
@@ -1157,13 +1162,14 @@ fn lookup_blob_in_directory(
 /// One directory listing keyed by raw file name (`.git` excluded).
 type DirectoryMap = hashbrown::HashMap<Vec<u8>, fs::DirEntry>;
 
-fn read_directory_map(abs_dir: &Path) -> Result<(bool, DirectoryMap)> {
+/// `expected` sizes the map up front (the tracked entries in this directory).
+fn read_directory_map(abs_dir: &Path, expected: usize) -> Result<(bool, DirectoryMap)> {
     if probe_counts(abs_dir) {
         WORKTREE_READ_DIR_PROBE.fetch_add(1, Ordering::Relaxed);
     }
     match fs::read_dir(abs_dir) {
         Ok(rd) => {
-            let mut on_disk = DirectoryMap::new();
+            let mut on_disk = DirectoryMap::with_capacity(expected);
             for item in rd {
                 let Ok(entry) = item else { continue };
                 let name = dir_entry_key(&entry);
