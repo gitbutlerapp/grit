@@ -290,7 +290,8 @@ fn commit_message(req: &ReplayRequest, source: &CommitData) -> Result<String> {
     match req.direction {
         ReplayDirection::Pick => Ok(source.message.clone()),
         ReplayDirection::Revert => {
-            let (title, body) = merge_commit_message_for_revert(source, req.commit, false, '#');
+            let (title, body) =
+                merge_commit_message_for_revert(source, req.commit, false, '#', None);
             Ok(format!("{title}\n{body}"))
         }
     }

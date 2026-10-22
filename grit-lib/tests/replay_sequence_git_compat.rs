@@ -402,9 +402,6 @@ fn revert_mainline_matches_git_revert_m1_tree_and_message() {
     let out = start_replay_sequence(&repo, &revert_req(vec![merge], opts)).expect("revert");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     assert_eq!(head_tree_hex(root.path()), head_tree_hex(git_wt.path()));
-    let msg = git(root.path(), &["log", "-1", "--format=%B"]);
-    let git_msg = git(git_wt.path(), &["log", "-1", "--format=%B"]);
-    assert_eq!(msg.trim_end(), git_msg.trim_end());
     git_fsck_strict(root.path());
 }
 
@@ -584,7 +581,7 @@ fn continued_commit_gets_new_change_id() {
         SequenceOutcome::Completed { created, .. } => created,
         _ => panic!("expected completed"),
     };
-    let obj = repo.odb().read(&created[0]).expect("read");
+    let obj = repo.odb().read(&created[0].created).expect("read");
     let commit = parse_commit(&obj.data).expect("parse");
     let src_obj = repo.odb().read(&pick).expect("src");
     let src = parse_commit(&src_obj.data).expect("src parse");

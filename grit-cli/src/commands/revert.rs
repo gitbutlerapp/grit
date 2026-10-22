@@ -16,9 +16,9 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, continue_replay_sequence, skip_replay_step, start_replay_sequence,
-    ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+    ReplayCommitRecord, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
-use grit_lib::porcelain::revert::{committer_timestamp, revision_set_newest_first};
+use grit_lib::porcelain::revert::{committer_timestamp, revision_range_apply_order};
 use grit_lib::revwalk::parse_rev_walk_tokens;
 use grit_lib::revwalk::rev_list::resolve_revision_specs_to_commits;
 use schemars::JsonSchema;
@@ -301,7 +301,7 @@ fn resolve_revert_commits(
         || !exclude.is_empty()
         || parsed.symmetric_left.is_some();
     if range_syntax {
-        return revision_set_newest_first(repo, &include, &exclude).map_err(anyhow::Error::new);
+        return revision_range_apply_order(repo, &include, &exclude).map_err(anyhow::Error::new);
     }
     order_commits_newest_first(repo, &include)
 }
@@ -342,12 +342,12 @@ fn map_sequence_outcome(
 
 fn build_completed_outcome(
     repo: &grit_lib::repo::Repository,
-    created: &[ObjectId],
+    created: &[ReplayCommitRecord],
     dropped: &[ObjectId],
 ) -> Result<RevertOutcome> {
     let commits = created
         .iter()
-        .map(|oid| entry_from_new_commit(repo, *oid))
+        .map(|record| entry_from_record(repo, record))
         .collect::<Result<Vec<_>>>()?;
     let (source, oid, subject, change_id) = commits.last().map_or((None, None, None, None), |e| {
         (
@@ -374,13 +374,13 @@ fn build_completed_outcome(
 
 fn build_conflicts_outcome(
     conflicts: &[grit_lib::operation::Conflict],
-    created_so_far: &[ObjectId],
+    created_so_far: &[ReplayCommitRecord],
     repo: &grit_lib::repo::Repository,
 ) -> RevertOutcome {
     let block = OperationConflictBlock::for_revert(conflicts);
     let commits = created_so_far
         .iter()
-        .filter_map(|oid| entry_from_new_commit(repo, *oid).ok())
+        .filter_map(|record| entry_from_record(repo, record).ok())
         .collect();
     RevertOutcome {
         result: RevertResult::Conflicts,
@@ -399,12 +399,12 @@ fn build_conflicts_outcome(
 
 fn build_empty_outcome(
     repo: &grit_lib::repo::Repository,
-    created_so_far: &[ObjectId],
+    created_so_far: &[ReplayCommitRecord],
 ) -> RevertOutcome {
     let block = OperationConflictBlock::for_revert(&[]);
     let commits = created_so_far
         .iter()
-        .filter_map(|oid| entry_from_new_commit(repo, *oid).ok())
+        .filter_map(|record| entry_from_record(repo, record).ok())
         .collect();
     RevertOutcome {
         result: RevertResult::Empty,
@@ -421,33 +421,18 @@ fn build_empty_outcome(
     }
 }
 
-fn entry_from_new_commit(
+fn entry_from_record(
     repo: &grit_lib::repo::Repository,
-    oid: ObjectId,
+    record: &ReplayCommitRecord,
 ) -> Result<RevertCommitEntry> {
-    let commit = context::read_commit(repo, &oid)?;
-    let source = parse_reverted_source(&commit.message)
-        .ok_or_else(|| anyhow::anyhow!("revert commit {oid} missing reverts line"))?;
-    let resolved = grit_lib::change_id::resolved_change_id(&oid, &commit);
+    let commit = context::read_commit(repo, &record.created)?;
+    let resolved = grit_lib::change_id::resolved_change_id(&record.created, &commit);
     Ok(RevertCommitEntry {
-        source: source.to_hex(),
-        oid: oid.to_hex(),
+        source: record.source.to_hex(),
+        oid: record.created.to_hex(),
         subject: context::subject_line(&commit.message),
         change_id: resolved.stored.then(|| resolved.id.as_str().to_owned()),
     })
-}
-
-fn parse_reverted_source(message: &str) -> Option<ObjectId> {
-    for line in message.lines() {
-        let Some(rest) = line.strip_prefix("This reverts commit ") else {
-            continue;
-        };
-        let token = rest.trim_end_matches('.').split('(').next()?.trim();
-        if let Ok(oid) = ObjectId::from_hex(token) {
-            return Some(oid);
-        }
-    }
-    None
 }
 
 fn read_message_override(

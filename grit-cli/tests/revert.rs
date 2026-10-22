@@ -158,41 +158,6 @@ fn git_fsck_strict(root: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn snapshot_tree(root: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
-    let mut out = Vec::new();
-    for rel in ["index", "HEAD", "refs/heads/main"] {
-        let p = root.join(".git").join(rel);
-        if p.exists() {
-            out.extend_from_slice(rel.as_bytes());
-            out.push(0);
-            out.extend(fs::read(&p).unwrap_or_default());
-        }
-    }
-    fn walk(dir: &Path, prefix: &Path, out: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
-        if !dir.is_dir() {
-            return Ok(());
-        }
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.file_name().and_then(|n| n.to_str()) == Some(".git") {
-                continue;
-            }
-            let rel = prefix.join(path.file_name().unwrap());
-            if path.is_dir() {
-                walk(&path, &rel, out)?;
-            } else {
-                out.extend(rel.to_string_lossy().as_bytes());
-                out.push(0);
-                out.extend(fs::read(&path)?);
-            }
-        }
-        Ok(())
-    }
-    walk(root, Path::new(""), &mut out)?;
-    Ok(out)
-}
-
 #[test]
 fn revert_creates_inverse_commit() -> TestResult {
     let scratch = Scratch::new("inverse")?;
@@ -427,12 +392,98 @@ fn revert_message_flag() -> TestResult {
     commit_file(repo, "a.txt", "v1\n", "initial")?;
     let target = commit_file(repo, "a.txt", "v2\n", "feature title")?;
 
-    gs(
+    let out = gs(
         repo,
         ["revert", "--message", "Custom revert subject", &target],
     )?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
     let subject = git(repo, &["log", "-1", "--format=%s"])?.trim().to_owned();
     assert_eq!(subject, "Custom revert subject");
+    Ok(())
+}
+
+#[test]
+fn revert_message_file() -> TestResult {
+    let scratch = Scratch::new("message-file")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "a.txt", "v1\n", "initial")?;
+    let target = commit_file(repo, "a.txt", "v2\n", "feature title")?;
+    let msg_path = repo.join("msg.txt");
+    fs::write(&msg_path, "From file\n")?;
+
+    let out = gs(
+        repo,
+        [
+            "revert",
+            "--message-file",
+            msg_path.to_str().unwrap(),
+            &target,
+        ],
+    )?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    let subject = git(repo, &["log", "-1", "--format=%s"])?.trim().to_owned();
+    assert_eq!(subject, "From file");
+    Ok(())
+}
+
+fn commit_with_dates(
+    root: &Path,
+    path: &str,
+    contents: &str,
+    msg: &str,
+    when: &str,
+) -> Result<String, Box<dyn Error>> {
+    let full = root.join(path);
+    fs::write(&full, contents)?;
+    git(root, &["add", path])?;
+    let out = Command::new("git")
+        .args(["commit", "-qm", msg])
+        .current_dir(root)
+        .env("GIT_AUTHOR_DATE", when)
+        .env("GIT_COMMITTER_DATE", when)
+        .env("GIT_AUTHOR_NAME", "Test User")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Test User")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    if !out.status.success() {
+        return Err(format!("commit failed: {}", String::from_utf8_lossy(&out.stderr)).into());
+    }
+    Ok(git(root, &["rev-parse", "HEAD"])?.trim().to_owned())
+}
+
+#[test]
+fn revert_range_skewed_committer_dates_matches_git() -> TestResult {
+    let scratch = Scratch::new("skew-dates")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_with_dates(repo, "f.txt", "0\n", "base", "@1000 +0000")?;
+    let base = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+    commit_with_dates(repo, "f.txt", "1\n", "c1", "@1200 +0000")?;
+    commit_with_dates(repo, "f.txt", "2\n", "c2", "@1100 +0000")?;
+
+    let git_wt = tempfile::tempdir()?;
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", repo.display()),
+            &git_wt.path().to_string_lossy(),
+        ])
+        .status()?;
+    git(
+        git_wt.path(),
+        &["revert", "--no-edit", &format!("{base}..HEAD")],
+    )?;
+
+    let out = gs(repo, ["revert", &format!("{base}..HEAD")])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert_eq!(
+        fs::read_to_string(repo.join("f.txt"))?,
+        fs::read_to_string(git_wt.path().join("f.txt"))?
+    );
     Ok(())
 }
 
