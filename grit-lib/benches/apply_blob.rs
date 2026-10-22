@@ -2,7 +2,9 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::apply::{apply_hunks_to_blob, parse_patch, ApplyOptions, Hunk};
 
 fn fifty_k_line_blob() -> Vec<u8> {
@@ -10,7 +12,7 @@ fn fifty_k_line_blob() -> Vec<u8> {
     for i in 0..50_000 {
         use std::fmt::Write as _;
         let mut line = String::new();
-        let _ = write!(line, "line-{i:06}-padding\n");
+        let _ = writeln!(line, "line-{i:06}-padding");
         out.extend_from_slice(line.as_bytes());
     }
     out

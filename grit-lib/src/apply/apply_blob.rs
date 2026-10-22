@@ -10,326 +10,358 @@ pub struct ApplyOptions {
     pub reverse: bool,
 }
 
-/// One logical line in a blob, including a trailing `\n` in `bytes` when present in the file.
+/// One logical line in the working blob (bytes include `\n` when the source line had one).
 #[derive(Debug, Clone)]
-struct ImageLine {
-    bytes: Vec<u8>,
-    patched: bool,
+struct LineRecord {
+    raw: Vec<u8>,
+    /// Set when an earlier hunk replaced this row (later hunks must not match through it).
+    consumed: bool,
 }
 
-/// Line-oriented view of blob bytes (Git `apply.c` `struct image`).
+/// Mutable line-split view of blob bytes while hunks are applied in order.
 #[derive(Debug, Clone)]
-struct Image {
-    lines: Vec<ImageLine>,
+struct WorkingBlob {
+    rows: Vec<LineRecord>,
 }
 
-impl Image {
-    fn from_blob(data: &[u8]) -> Self {
+impl WorkingBlob {
+    fn decode(data: &[u8]) -> Self {
         if data.is_empty() {
-            return Self { lines: Vec::new() };
+            return Self { rows: Vec::new() };
         }
-        let mut lines = Vec::new();
+        let mut rows = Vec::new();
         let mut start = 0usize;
         for (i, &b) in data.iter().enumerate() {
             if b == b'\n' {
-                lines.push(ImageLine {
-                    bytes: data[start..=i].to_vec(),
-                    patched: false,
+                rows.push(LineRecord {
+                    raw: data[start..=i].to_vec(),
+                    consumed: false,
                 });
                 start = i + 1;
             }
         }
         if start < data.len() {
-            lines.push(ImageLine {
-                bytes: data[start..].to_vec(),
-                patched: false,
+            rows.push(LineRecord {
+                raw: data[start..].to_vec(),
+                consumed: false,
             });
         }
-        Self { lines }
+        Self { rows }
     }
 
-    fn to_blob(&self) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        for line in &self.lines {
-            out.extend_from_slice(&line.bytes);
+        for row in &self.rows {
+            out.extend_from_slice(&row.raw);
         }
         out
     }
 
-    fn line_count(&self) -> usize {
-        self.lines.len()
+    fn len(&self) -> usize {
+        self.rows.len()
     }
 }
 
-/// Pre/post images for one hunk plus Git-style leading/trailing context counts.
-#[derive(Debug)]
-struct HunkImages {
-    preimage: Image,
-    postimage: Image,
-    leading: usize,
-    trailing: usize,
+/// Lines that must match in the working blob vs lines that replace them.
+#[derive(Debug, Clone)]
+struct LineEdit {
+    match_rows: Vec<Vec<u8>>,
+    replace_rows: Vec<Vec<u8>>,
+    stable_prefix: usize,
+    stable_suffix: usize,
+}
+
+/// Where to start scanning for [`LineEdit::match_rows`].
+#[derive(Debug, Clone, Copy)]
+struct ScanHint {
+    /// 0-based row index in the current working blob.
+    start_row: usize,
+    /// Match only when the edit aligns with the first row of the blob.
+    only_at_front: bool,
+    /// Match only when the edit ends on the last row of the blob.
+    only_at_back: bool,
 }
 
 /// Apply `hunks` to `original` and return the post-image bytes.
 ///
-/// Matches `git apply` default behavior: exact line match at the hunk's old position,
-/// then search outward; context lines may be peeled when no match is found. No fuzz or
+/// Matches `git apply` default behavior: exact line match at the hunk's post-image
+/// line (`new_start` forward, `old_start` when reversing), then search outward;
+/// prefix/suffix context rows may be dropped and the search retried. No fuzz or
 /// whitespace fixing.
 pub fn apply_hunks_to_blob(
     original: &[u8],
     hunks: &[Hunk],
     opts: &ApplyOptions,
 ) -> Result<Vec<u8>, ApplyError> {
-    let mut img = Image::from_blob(original);
+    let mut working = WorkingBlob::decode(original);
     for (hunk_index, hunk) in hunks.iter().enumerate() {
-        let images = build_hunk_images(hunk, opts.reverse)?;
-        let applied = apply_one_hunk(&mut img, &images, hunk, hunk_index)?;
-        if !applied {
+        let edit = line_edit_from_hunk(hunk, opts.reverse);
+        let insert_only = hunk.old_count == 0;
+        let hint = scan_hint_for_hunk(hunk, &edit, opts.reverse);
+        let Some(at) = locate_and_apply(&mut working, &edit, hint, hunk_index, insert_only)? else {
             return Err(ApplyError::ContextMismatch {
                 hunk_index,
-                expected_line: hunk.old_start,
+                expected_line: if opts.reverse {
+                    hunk.old_start
+                } else {
+                    hunk.new_start
+                },
             });
-        }
+        };
+        let _ = at;
     }
-    Ok(img.to_blob())
+    Ok(working.encode())
 }
 
-fn build_hunk_images(hunk: &Hunk, reverse: bool) -> Result<HunkImages, ApplyError> {
-    let mut preimage_buf = Vec::new();
-    let mut postimage_buf = Vec::new();
-    let mut leading = 0usize;
-    let mut trailing = 0usize;
-    let mut saw_change = false;
+fn scan_hint_for_hunk(hunk: &Hunk, edit: &LineEdit, reverse: bool) -> ScanHint {
+    let (header_line, only_at_front) = if reverse {
+        (
+            hunk.old_start,
+            hunk.new_start <= 1,
+        )
+    } else {
+        (
+            hunk.new_start,
+            hunk.old_start <= 1,
+        )
+    };
+    let start_row = if header_line == 0 {
+        0
+    } else {
+        header_line.saturating_sub(1)
+    };
+    ScanHint {
+        start_row,
+        only_at_front,
+        only_at_back: edit.stable_suffix == 0,
+    }
+}
+
+fn line_edit_from_hunk(hunk: &Hunk, reverse: bool) -> LineEdit {
+    let mut match_rows = Vec::new();
+    let mut replace_rows = Vec::new();
+    let mut stable_prefix = 0usize;
+    let mut stable_suffix = 0usize;
+    let mut in_change = false;
 
     let mut i = 0usize;
     while i < hunk.lines.len() {
-        let (kind, text) = match &hunk.lines[i] {
-            HunkLine::Context(s) => (' ', s.as_str()),
-            HunkLine::Add(s) => ('+', s.as_str()),
-            HunkLine::Remove(s) => ('-', s.as_str()),
+        let (tag, text) = match &hunk.lines[i] {
+            HunkLine::Context(s) => ("ctx", s.as_str()),
+            HunkLine::Add(s) => ("add", s.as_str()),
+            HunkLine::Remove(s) => ("del", s.as_str()),
             HunkLine::NoNewline => {
                 i += 1;
                 continue;
             }
         };
-        let mut kind = kind;
-        if reverse {
-            kind = match kind {
-                '+' => '-',
-                '-' => '+',
+        let tag = if reverse {
+            match tag {
+                "add" => "del",
+                "del" => "add",
                 other => other,
-            };
-        }
+            }
+        } else {
+            tag
+        };
 
-        let ends_with_newline = !matches!(hunk.lines.get(i + 1), Some(HunkLine::NoNewline));
-        let line_bytes = line_bytes_from_hunk(text, ends_with_newline);
+        let with_nl = !matches!(hunk.lines.get(i + 1), Some(HunkLine::NoNewline));
+        let row = hunk_text_as_row(text, with_nl);
 
-        match kind {
-            ' ' => {
-                if !saw_change {
-                    leading += 1;
+        match tag {
+            "ctx" => {
+                if !in_change {
+                    stable_prefix += 1;
                 }
-                trailing += 1;
-                preimage_buf.extend_from_slice(&line_bytes);
-                postimage_buf.extend_from_slice(&line_bytes);
+                stable_suffix += 1;
+                match_rows.push(row.clone());
+                replace_rows.push(row);
             }
-            '-' => {
-                saw_change = true;
-                trailing = 0;
-                preimage_buf.extend_from_slice(&line_bytes);
+            "del" => {
+                in_change = true;
+                stable_suffix = 0;
+                match_rows.push(row);
             }
-            '+' => {
-                saw_change = true;
-                trailing = 0;
-                postimage_buf.extend_from_slice(&line_bytes);
+            "add" => {
+                in_change = true;
+                stable_suffix = 0;
+                replace_rows.push(row);
             }
             _ => {}
         }
         i += 1;
     }
 
-    if !saw_change {
-        trailing = leading;
+    if !in_change {
+        stable_suffix = stable_prefix;
     }
 
-    Ok(HunkImages {
-        preimage: Image::from_blob(&preimage_buf),
-        postimage: Image::from_blob(&postimage_buf),
-        leading,
-        trailing,
-    })
-}
-
-fn line_bytes_from_hunk(text: &str, ends_with_newline: bool) -> Vec<u8> {
-    let mut v = text.as_bytes().to_vec();
-    if ends_with_newline {
-        v.push(b'\n');
+    LineEdit {
+        match_rows,
+        replace_rows,
+        stable_prefix,
+        stable_suffix,
     }
-    v
 }
 
-fn apply_one_hunk(
-    img: &mut Image,
-    images: &HunkImages,
-    hunk: &Hunk,
+fn hunk_text_as_row(text: &str, with_newline: bool) -> Vec<u8> {
+    let mut row = text.as_bytes().to_vec();
+    if with_newline {
+        row.push(b'\n');
+    }
+    row
+}
+
+fn locate_and_apply(
+    working: &mut WorkingBlob,
+    edit: &LineEdit,
+    hint: ScanHint,
     hunk_index: usize,
-) -> Result<bool, ApplyError> {
-    let mut preimage = images.preimage.clone();
-    let mut postimage = images.postimage.clone();
-    let mut leading = images.leading;
-    let mut trailing = images.trailing;
-
-    let mut match_beginning = hunk.old_start <= 1;
-    let mut match_end = trailing == 0;
-
-    let mut pos = if hunk.old_start == 0 {
-        0
-    } else {
-        hunk.old_start.saturating_sub(1)
-    };
+    insert_only: bool,
+) -> Result<Option<usize>, ApplyError> {
+    let mut candidate = edit.clone();
+    let mut hint = hint;
+    let mut prefix = edit.stable_prefix;
+    let mut suffix = edit.stable_suffix;
+    let mut pin_front = hint.only_at_front;
+    let mut pin_back = hint.only_at_back;
 
     loop {
-        if let Some(applied_pos) =
-            find_match(img, &preimage, pos, match_beginning, match_end, hunk_index)?
-        {
-            update_image(img, applied_pos, &preimage, &postimage);
-            return Ok(true);
-        }
-
-        if leading == 0 && trailing == 0 {
-            break;
-        }
-        if match_beginning || match_end {
-            match_beginning = false;
-            match_end = false;
-            continue;
-        }
-        if leading >= trailing {
-            remove_first_line(&mut preimage);
-            remove_first_line(&mut postimage);
-            pos = pos.saturating_sub(1);
-            leading -= 1;
-        }
-        if trailing > leading {
-            remove_last_line(&mut preimage);
-            remove_last_line(&mut postimage);
-            trailing -= 1;
-        }
-    }
-    Ok(false)
-}
-
-fn find_match(
-    img: &Image,
-    preimage: &Image,
-    start_line: usize,
-    match_beginning: bool,
-    match_end: bool,
-    hunk_index: usize,
-) -> Result<Option<usize>, ApplyError> {
-    let pre_lines = preimage.lines.len();
-    if pre_lines == 0 {
-        return Ok(Some(start_line.min(img.line_count())));
-    }
-
-    let mut line = start_line;
-    if match_beginning {
-        line = 0;
-    } else if match_end {
-        line = img.line_count().saturating_sub(pre_lines);
-    }
-    if line > img.line_count() {
-        line = img.line_count();
-    }
-
-    let mut backwards_lno = line;
-    let mut forwards_lno = line;
-    let mut current_lno = line;
-
-    let max_tries = img.line_count().saturating_add(pre_lines).saturating_add(1);
-    for i in 0..max_tries {
-        if match_fragment(
-            img,
-            preimage,
-            current_lno,
-            match_beginning,
-            match_end,
+        if candidate.match_rows.is_empty() {
+            if insert_only && !candidate.replace_rows.is_empty() {
+                let row = hint.start_row.min(working.len());
+                splice_edit(working, row, &candidate);
+                return Ok(Some(row));
+            }
+            if prefix == 0 && suffix == 0 {
+                return Ok(None);
+            }
+        } else if let Some(row) = search_outward(
+            working,
+            &candidate.match_rows,
+            hint,
+            pin_front,
+            pin_back,
             hunk_index,
         )? {
-            return Ok(Some(current_lno));
+            splice_edit(working, row, &candidate);
+            return Ok(Some(row));
         }
 
-        let can_back = backwards_lno > 0;
-        let can_fwd =
-            forwards_lno < img.line_count() && forwards_lno + pre_lines <= img.line_count();
-        if !can_back && !can_fwd {
+        if prefix == 0 && suffix == 0 {
+            return Ok(None);
+        }
+        if pin_front || pin_back {
+            pin_front = false;
+            pin_back = false;
+            continue;
+        }
+        if prefix >= suffix {
+            trim_edit_front(&mut candidate);
+            prefix -= 1;
+            hint.start_row = hint.start_row.saturating_sub(1);
+        }
+        if suffix > prefix {
+            trim_edit_back(&mut candidate);
+            suffix -= 1;
+        }
+    }
+}
+
+fn trim_edit_front(edit: &mut LineEdit) {
+    if !edit.match_rows.is_empty() {
+        edit.match_rows.remove(0);
+    }
+    if !edit.replace_rows.is_empty() {
+        edit.replace_rows.remove(0);
+    }
+}
+
+fn trim_edit_back(edit: &mut LineEdit) {
+    if !edit.match_rows.is_empty() {
+        edit.match_rows.pop();
+    }
+    if !edit.replace_rows.is_empty() {
+        edit.replace_rows.pop();
+    }
+}
+
+fn search_outward(
+    working: &WorkingBlob,
+    pattern: &[Vec<u8>],
+    hint: ScanHint,
+    pin_front: bool,
+    pin_back: bool,
+    hunk_index: usize,
+) -> Result<Option<usize>, ApplyError> {
+    let width = pattern.len();
+    debug_assert!(!pattern.is_empty());
+    let mut anchor = hint.start_row.min(working.len());
+    if pin_front {
+        anchor = 0;
+    } else if pin_back {
+        anchor = working.len().saturating_sub(width);
+    }
+
+    let mut low = anchor;
+    let mut high = anchor;
+    let mut cursor = anchor;
+
+    let attempts = working.len().saturating_add(width).saturating_add(1);
+    for step in 0..attempts {
+        if rows_equal_pattern(working, cursor, pattern, hunk_index)? {
+            return Ok(Some(cursor));
+        }
+
+        let can_low = low > 0;
+        let can_high = high < working.len() && high + width <= working.len();
+        if !can_low && !can_high {
             break;
         }
 
-        if i & 1 == 1 {
-            if can_back {
-                backwards_lno -= 1;
-                current_lno = backwards_lno;
+        if step & 1 == 1 {
+            if can_low {
+                low -= 1;
+                cursor = low;
             }
-        } else if can_fwd {
-            forwards_lno += 1;
-            current_lno = forwards_lno;
+        } else if can_high {
+            high += 1;
+            cursor = high;
         }
     }
     Ok(None)
 }
 
-fn match_fragment(
-    img: &Image,
-    preimage: &Image,
-    at_line: usize,
-    match_beginning: bool,
-    match_end: bool,
+fn rows_equal_pattern(
+    working: &WorkingBlob,
+    at: usize,
+    pattern: &[Vec<u8>],
     hunk_index: usize,
 ) -> Result<bool, ApplyError> {
-    let pre_count = preimage.lines.len();
-    if pre_count == 0 {
-        return Ok(true);
-    }
-    if match_beginning && at_line != 0 {
-        return Ok(false);
-    }
-    if match_end && at_line + pre_count != img.line_count() {
-        return Ok(false);
-    }
-    if at_line + pre_count > img.line_count() {
+    if at + pattern.len() > working.len() {
         return Err(ApplyError::UnexpectedEof { hunk_index });
     }
-
-    for (i, pre) in preimage.lines.iter().enumerate() {
-        let img_line = &img.lines[at_line + i];
-        if img_line.patched {
+    for (offset, expected) in pattern.iter().enumerate() {
+        let row = &working.rows[at + offset];
+        if row.consumed {
             return Err(ApplyError::HunksOverlap { hunk_index });
         }
-        if img_line.bytes != pre.bytes {
+        if row.raw != *expected {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-fn update_image(img: &mut Image, at: usize, preimage: &Image, postimage: &Image) {
-    let pre_limit = preimage.lines.len().min(img.lines.len().saturating_sub(at));
-    img.lines
-        .splice(at..at + pre_limit, postimage.lines.iter().cloned());
-    for line in &mut img.lines[at..at + postimage.lines.len()] {
-        line.patched = true;
-    }
-}
-
-fn remove_first_line(image: &mut Image) {
-    if !image.lines.is_empty() {
-        image.lines.remove(0);
-    }
-}
-
-fn remove_last_line(image: &mut Image) {
-    if !image.lines.is_empty() {
-        image.lines.pop();
-    }
+fn splice_edit(working: &mut WorkingBlob, at: usize, edit: &LineEdit) {
+    let remove = edit.match_rows.len().min(working.rows.len().saturating_sub(at));
+    let new_rows: Vec<LineRecord> = edit
+        .replace_rows
+        .iter()
+        .map(|raw| LineRecord {
+            raw: raw.clone(),
+            consumed: true,
+        })
+        .collect();
+    working.rows.splice(at..at + remove, new_rows);
 }
