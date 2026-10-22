@@ -2865,6 +2865,75 @@ impl<'repo> core::marker::Unpin for grit_lib::diff::handle::Diff<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::diff::handle::Diff<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::handle::Diff<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::handle::Diff<'repo>
+pub mod grit_lib::diff::hunk_id
+pub enum grit_lib::diff::hunk_id::DiffSide
+pub grit_lib::diff::hunk_id::DiffSide::Other
+pub grit_lib::diff::hunk_id::DiffSide::Staged
+pub grit_lib::diff::hunk_id::DiffSide::Unstaged
+impl core::clone::Clone for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::hunk_id::DiffSide
+impl core::cmp::PartialEq for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::StructuralPartialEq for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Freeze for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Send for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Sync for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Unpin for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::UnsafeUnpin for grit_lib::diff::hunk_id::DiffSide
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::hunk_id::DiffSide
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::hunk_id::DiffSide
+pub enum grit_lib::diff::hunk_id::HunkIdError
+pub grit_lib::diff::hunk_id::HunkIdError::Invalid
+impl core::cmp::Eq for grit_lib::diff::hunk_id::HunkIdError
+impl core::cmp::PartialEq for grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkIdError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::diff::hunk_id::HunkIdError
+impl core::fmt::Debug for grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Freeze for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Send for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Sync for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Unpin for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::UnsafeUnpin for grit_lib::diff::hunk_id::HunkIdError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::hunk_id::HunkIdError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::hunk_id::HunkIdError
+pub struct grit_lib::diff::hunk_id::HunkId(_)
+impl grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::as_str(&self) -> alloc::string::String
+pub fn grit_lib::diff::hunk_id::HunkId::from_bytes([u8; 6]) -> Self
+impl core::clone::Clone for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::hunk_id::HunkId
+impl core::cmp::PartialEq for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for grit_lib::diff::hunk_id::HunkId
+impl core::str::traits::FromStr for grit_lib::diff::hunk_id::HunkId
+pub type grit_lib::diff::hunk_id::HunkId::Err = grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkId::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl core::marker::Freeze for grit_lib::diff::hunk_id::HunkId
+impl core::marker::Send for grit_lib::diff::hunk_id::HunkId
+impl core::marker::Sync for grit_lib::diff::hunk_id::HunkId
+impl core::marker::Unpin for grit_lib::diff::hunk_id::HunkId
+impl core::marker::UnsafeUnpin for grit_lib::diff::hunk_id::HunkId
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::hunk_id::HunkId
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::hunk_ids(grit_lib::diff::hunk_id::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>
+pub fn grit_lib::diff::hunk_id::hunk_ids_with_duplicate_peers(grit_lib::diff::hunk_id::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk], &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>
 pub mod grit_lib::diff::merge_diff
 pub fn grit_lib::diff::merge_diff::all_blob_paths_in_tree_order(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::diff::merge_diff::blob_oid_at_path(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str) -> core::option::Option<grit_lib::objects::ObjectId>
@@ -3503,6 +3572,28 @@ impl core::marker::Unpin for grit_lib::diff::DiffMerges
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffMerges
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffMerges
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffMerges
+pub enum grit_lib::diff::DiffSide
+pub grit_lib::diff::DiffSide::Other
+pub grit_lib::diff::DiffSide::Staged
+pub grit_lib::diff::DiffSide::Unstaged
+impl core::clone::Clone for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::hunk_id::DiffSide
+impl core::cmp::PartialEq for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::diff::hunk_id::DiffSide
+pub fn grit_lib::diff::hunk_id::DiffSide::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::StructuralPartialEq for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Freeze for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Send for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Sync for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::Unpin for grit_lib::diff::hunk_id::DiffSide
+impl core::marker::UnsafeUnpin for grit_lib::diff::hunk_id::DiffSide
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::hunk_id::DiffSide
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::hunk_id::DiffSide
 pub enum grit_lib::diff::DiffStatus
 pub grit_lib::diff::DiffStatus::Added
 pub grit_lib::diff::DiffStatus::Copied
@@ -3553,6 +3644,24 @@ impl core::marker::Unpin for grit_lib::diff::DiffTarget
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffTarget
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffTarget
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffTarget
+pub enum grit_lib::diff::HunkIdError
+pub grit_lib::diff::HunkIdError::Invalid
+impl core::cmp::Eq for grit_lib::diff::hunk_id::HunkIdError
+impl core::cmp::PartialEq for grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkIdError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::diff::hunk_id::HunkIdError
+impl core::fmt::Debug for grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkIdError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Freeze for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Send for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Sync for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::Unpin for grit_lib::diff::hunk_id::HunkIdError
+impl core::marker::UnsafeUnpin for grit_lib::diff::hunk_id::HunkIdError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::hunk_id::HunkIdError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::hunk_id::HunkIdError
 pub enum grit_lib::diff::InvalidDiffFilter
 pub grit_lib::diff::InvalidDiffFilter::Unknown(char)
 pub grit_lib::diff::InvalidDiffFilter::Unsupported(char)
@@ -4045,6 +4154,32 @@ impl core::marker::Unpin for grit_lib::diff::FileDiff
 impl core::marker::UnsafeUnpin for grit_lib::diff::FileDiff
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::FileDiff
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::FileDiff
+pub struct grit_lib::diff::HunkId(_)
+impl grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::as_str(&self) -> alloc::string::String
+pub fn grit_lib::diff::hunk_id::HunkId::from_bytes([u8; 6]) -> Self
+impl core::clone::Clone for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::hunk_id::HunkId
+impl core::cmp::PartialEq for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::diff::hunk_id::HunkId
+pub fn grit_lib::diff::hunk_id::HunkId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for grit_lib::diff::hunk_id::HunkId
+impl core::str::traits::FromStr for grit_lib::diff::hunk_id::HunkId
+pub type grit_lib::diff::hunk_id::HunkId::Err = grit_lib::diff::hunk_id::HunkIdError
+pub fn grit_lib::diff::hunk_id::HunkId::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl core::marker::Freeze for grit_lib::diff::hunk_id::HunkId
+impl core::marker::Send for grit_lib::diff::hunk_id::HunkId
+impl core::marker::Sync for grit_lib::diff::hunk_id::HunkId
+impl core::marker::Unpin for grit_lib::diff::hunk_id::HunkId
+impl core::marker::UnsafeUnpin for grit_lib::diff::hunk_id::HunkId
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::hunk_id::HunkId
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::hunk_id::HunkId
 pub struct grit_lib::diff::LineStat
 pub grit_lib::diff::LineStat::deletions: usize
 pub grit_lib::diff::LineStat::insertions: usize
@@ -4350,6 +4485,8 @@ pub fn grit_lib::diff::format_stat_line(&str, usize, usize, usize) -> alloc::str
 pub fn grit_lib::diff::format_stat_line_width(&str, usize, usize, usize, usize) -> alloc::string::String
 pub fn grit_lib::diff::hash_worktree_file(&grit_lib::objects::odb::Odb, &std::path::Path, &std::fs::Metadata, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &str, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::head_path_states(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, (u32, grit_lib::objects::ObjectId)>>
+pub fn grit_lib::diff::hunk_ids(grit_lib::diff::hunk_id::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>
+pub fn grit_lib::diff::hunk_ids_with_duplicate_peers(grit_lib::diff::hunk_id::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk], &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>
 pub fn grit_lib::diff::indent_heuristic_from_config(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::diff::index_mtime_for_diff(&grit_lib::index::Index, core::option::Option<(u32, u32)>) -> core::option::Option<(u32, u32)>
 pub fn grit_lib::diff::line_change_counts(&str, &str, &grit_lib::diff::DiffOptions) -> grit_lib::diff::LineStat

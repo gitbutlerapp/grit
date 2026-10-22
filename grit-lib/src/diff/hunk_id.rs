@@ -80,7 +80,11 @@ impl FromStr for HunkId {
     type Err = HunkIdError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() != HUNK_ID_HEX_LEN || !s.bytes().all(|c| c.is_ascii_hexdigit()) {
+        if s.len() != HUNK_ID_HEX_LEN
+            || !s
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
             return Err(HunkIdError::Invalid);
         }
         let mut raw = [0u8; HUNK_ID_HEX_LEN / 2];
@@ -97,20 +101,39 @@ fn hex_nibble(b: u8) -> Option<u8> {
     match b {
         b'0'..=b'9' => Some(b - b'0'),
         b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
     }
 }
 
-fn hash_hunk_id(side: DiffSide, path: &str, hunk: &StructuredHunk, occurrence: u32) -> HunkId {
+fn hash_hunk_id(
+    side: DiffSide,
+    path: &str,
+    hunk: &StructuredHunk,
+    include_line_anchor: bool,
+) -> HunkId {
     let mut hasher = HashAlgo::Sha1.checksum_hasher();
     hasher.update(&[side.tag_byte()]);
     hasher.update(path.as_bytes());
     hasher.update(&[0]);
     hash_hunk_body(&mut hasher, hunk);
-    hasher.update(&occurrence.to_le_bytes());
+    if include_line_anchor {
+        hasher.update(&(hunk.old_start as u64).to_le_bytes());
+        hasher.update(&(hunk.new_start as u64).to_le_bytes());
+    }
     let digest = hasher.finalize();
     HunkId::from_digest(&digest)
+}
+
+fn body_count_map(
+    hunks: &[StructuredHunk],
+    peer_hunks: &[StructuredHunk],
+) -> std::collections::HashMap<Vec<u8>, u32> {
+    let mut counts: std::collections::HashMap<Vec<u8>, u32> = std::collections::HashMap::new();
+    for h in hunks.iter().chain(peer_hunks.iter()) {
+        let body = hunk_body_digest(h);
+        *counts.entry(body).or_insert(0) += 1;
+    }
+    counts
 }
 
 fn hash_hunk_body(hasher: &mut ChecksumHasher, hunk: &StructuredHunk) {
@@ -141,14 +164,26 @@ fn hunk_body_digest(hunk: &StructuredHunk) -> Vec<u8> {
 /// Stable ids for `hunks` in file order (0-based index matches vector position).
 #[must_use]
 pub fn hunk_ids(side: DiffSide, path: &str, hunks: &[StructuredHunk]) -> Vec<HunkId> {
-    let mut body_counts: std::collections::HashMap<Vec<u8>, u32> = std::collections::HashMap::new();
+    hunk_ids_with_duplicate_peers(side, path, hunks, &[])
+}
+
+/// Like [`hunk_ids`], but `peer_hunks` on the same path (typically the other index/worktree
+/// side) participate in duplicate-body detection so ids stay stable when an earlier identical
+/// hunk moves to the staged side.
+#[must_use]
+pub fn hunk_ids_with_duplicate_peers(
+    side: DiffSide,
+    path: &str,
+    hunks: &[StructuredHunk],
+    peer_hunks: &[StructuredHunk],
+) -> Vec<HunkId> {
+    let body_counts = body_count_map(hunks, peer_hunks);
     hunks
         .iter()
         .map(|h| {
             let body = hunk_body_digest(h);
-            let occurrence = body_counts.get(&body).copied().unwrap_or(0);
-            body_counts.insert(body.clone(), occurrence + 1);
-            hash_hunk_id(side, path, h, occurrence)
+            let duplicate_body = body_counts.get(&body).copied().unwrap_or(0) > 1;
+            hash_hunk_id(side, path, h, duplicate_body)
         })
         .collect()
 }
@@ -220,9 +255,41 @@ mod tests {
 
     #[test]
     fn hunk_id_duplicate_hunks_disambiguated() {
-        let h = hunk(vec![line(StructuredLineKind::Add, "dup")]);
-        let ids = hunk_ids(DiffSide::Staged, "x", &[h.clone(), h]);
+        let body = vec![line(StructuredLineKind::Add, "dup")];
+        let mut a = hunk(body.clone());
+        a.old_start = 1;
+        a.new_start = 1;
+        let mut b = hunk(body);
+        b.old_start = 5;
+        b.new_start = 5;
+        let ids = hunk_ids(DiffSide::Staged, "x", &[a, b]);
         assert_ne!(ids[0], ids[1]);
+    }
+
+    #[test]
+    fn hunk_id_fromstr_rejects_uppercase() {
+        assert_eq!(HunkId::from_str("ABCDEF123456"), Err(HunkIdError::Invalid));
+    }
+
+    #[test]
+    fn hunk_id_stable_when_earlier_duplicate_on_peer_side() {
+        let body = vec![
+            line(StructuredLineKind::Context, "ctx"),
+            line(StructuredLineKind::Add, "same"),
+        ];
+        let mut first = hunk(body.clone());
+        first.old_start = 1;
+        first.new_start = 1;
+        let mut second = hunk(body);
+        second.old_start = 10;
+        second.new_start = 10;
+
+        let both = hunk_ids(DiffSide::Unstaged, "f", &[first.clone(), second.clone()]);
+        assert_ne!(both[0], both[1]);
+
+        let with_peer =
+            hunk_ids_with_duplicate_peers(DiffSide::Unstaged, "f", &[second.clone()], &[first]);
+        assert_eq!(with_peer[0], both[1]);
     }
 
     #[test]
