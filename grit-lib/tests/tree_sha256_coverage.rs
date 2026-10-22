@@ -8,7 +8,8 @@ use grit_lib::error::Error;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::tree_sha256::{
     path_matches_glob, tree_sha256, MissingSubmodule, MissingSubmoduleReason, TreeSha256,
-    TreeSha256Options, TreeSha256Report,
+    TreeSha256Claim, TreeSha256ClaimError, TreeSha256Options, TreeSha256Report,
+    TREE_SHA256_EXCLUDED_HEADER, TREE_SHA256_HEADER,
 };
 
 #[test]
@@ -17,7 +18,14 @@ fn public_tree_sha256_types() {
         TreeSha256Options::default(),
         MissingSubmoduleReason::NotCheckedOut,
         MissingSubmoduleReason::MissingCommit,
+        TREE_SHA256_HEADER,
+        TREE_SHA256_EXCLUDED_HEADER,
+        TreeSha256ClaimError::DuplicateDigestHeader,
     );
+    let _claim = TreeSha256Claim {
+        digest: TreeSha256([0; 32]),
+        excluded: Vec::new(),
+    };
     let digest = <TreeSha256 as FromStr>::from_str(
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     )

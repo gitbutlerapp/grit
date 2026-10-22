@@ -953,6 +953,10 @@ pub enum Error {
     /// One or more submodules required for [`crate::tree_sha256::tree_sha256`] are missing.
     #[error("tree-sha256: missing submodules")]
     TreeSha256MissingSubmodules(Vec<crate::tree_sha256::MissingSubmodule>),
+
+    /// Annotated tag tree-sha256 header parsing failed.
+    #[error(transparent)]
+    TreeSha256Claim(#[from] crate::tree_sha256::TreeSha256ClaimError),
 }
 
 impl Error {
