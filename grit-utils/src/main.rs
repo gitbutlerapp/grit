@@ -1112,11 +1112,7 @@ fn run_merge_check_command(
         unreachable!("run_merge_check_command called for non-merge-check command");
     };
     let bench_exe = std::env::current_exe().context("current exe")?;
-    eprintln!(
-        "git:  {} ({})",
-        git.display(),
-        tool_version(git)
-    );
+    eprintln!("git:  {} ({})", git.display(), tool_version(git));
     eprintln!(
         "grit: {} ({}, lib driver)",
         bench_exe.display(),

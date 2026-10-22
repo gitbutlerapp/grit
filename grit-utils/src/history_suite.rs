@@ -374,6 +374,7 @@ pub fn run_history_suite(
             git: tool_version(git),
             grit: tool_version(grit_cli),
             grit_commit: grit_source_commit(),
+            hyperfine: None,
         },
         fixtures: vec![],
         scenarios,

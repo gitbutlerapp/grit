@@ -590,6 +590,7 @@ pub fn run_parallel_suite(
             git: tool_version(git),
             grit: tool_version(grit),
             grit_commit: grit_source_commit(),
+            hyperfine: None,
         },
         fixtures: vec![],
         scenarios,

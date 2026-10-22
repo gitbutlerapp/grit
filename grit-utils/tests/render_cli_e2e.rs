@@ -35,6 +35,7 @@ fn minimal_report() -> BenchReport {
             git: "git".into(),
             grit: "grit".into(),
             grit_commit: None,
+            hyperfine: None,
         },
         fixtures: Vec::new(),
         scenarios: vec![ScenarioResult {

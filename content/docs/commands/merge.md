@@ -92,6 +92,7 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `result` | string | `up_to_date`, `fast_forward`, `clean` (`--check` only), `merged`, `conflicts`, `aborted`, or `set_upstream`. |
+| `check` | boolean | `true` when this outcome is from `--check` (nothing was merged). Omitted for real merges. |
 | `branch` | string | The branch that was merged in (or set as upstream). |
 | `oid` | string or null | Resulting commit after a real merge or fast-forward; for `--check` with `result: clean`, the predicted merge tree OID. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |
@@ -114,6 +115,7 @@ Dry-run prediction with `--check` (exit code 0):
 ```json
 {
   "result": "clean",
+  "check": true,
   "branch": "topic",
   "oid": "4b825dc642cb6eb9a06054e089d91b5929f0d0a"
 }

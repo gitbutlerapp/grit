@@ -68,10 +68,9 @@ pub struct MergeOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub alternatives: Option<Vec<String>>,
-    /// True for `grit merge --check` (prediction only; nothing was merged).
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub(crate) prediction: bool,
+    /// True when this outcome is from `grit merge --check` (nothing was merged).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub check: bool,
 }
 
 /// One conflicted path in `--json` output (pull v1 `conflict_details` and merge v2 items).
@@ -114,12 +113,6 @@ pub(crate) fn merge_conflict_json(
 }
 
 impl MergeOutcome {
-    #[must_use]
-    fn with_prediction(mut self, prediction: bool) -> Self {
-        self.prediction = prediction;
-        self
-    }
-
     fn up_to_date(label: &str) -> Self {
         Self {
             result: MergeResult::UpToDate,
@@ -130,8 +123,14 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
-            prediction: false,
+            check: false,
         }
+    }
+
+    fn up_to_date_check(label: &str) -> Self {
+        let mut o = Self::up_to_date(label);
+        o.check = true;
+        o
     }
 
     fn fast_forward(label: &str, oid: ObjectId, change_id: Option<ChangeId>) -> Self {
@@ -144,7 +143,21 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
-            prediction: false,
+            check: false,
+        }
+    }
+
+    fn fast_forward_check(label: &str, oid: ObjectId, change_id: Option<ChangeId>) -> Self {
+        Self {
+            result: MergeResult::FastForward,
+            branch: label.to_owned(),
+            oid: Some(oid.to_hex()),
+            change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
+            upstream: None,
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+            check: true,
         }
     }
 
@@ -158,7 +171,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
-            prediction: false,
+            check: false,
         }
     }
 
@@ -172,7 +185,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
-            prediction: false,
+            check: true,
         }
     }
 
@@ -197,7 +210,7 @@ impl MergeOutcome {
             conflicts,
             next_steps: None,
             alternatives: None,
-            prediction: false,
+            check: true,
         }
     }
 
@@ -219,7 +232,7 @@ impl MergeOutcome {
             conflicts: Some(block.conflicts),
             next_steps: Some(block.next_steps),
             alternatives: block.alternatives,
-            prediction: false,
+            check: false,
         }
     }
 
@@ -233,7 +246,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
-            prediction: false,
+            check: false,
         }
     }
 
@@ -254,7 +267,7 @@ impl MergeOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
-            prediction: false,
+            check: false,
         }
     }
 }
@@ -264,7 +277,7 @@ impl HumanRender for MergeOutcome {
         let short = self.oid.as_deref().map(short_hex).unwrap_or_default();
         match self.result {
             MergeResult::UpToDate => outln!(w, "Already up to date."),
-            MergeResult::FastForward if self.prediction => {
+            MergeResult::FastForward if self.check => {
                 outln!(w, "Would fast-forward {} → {short}", self.branch);
             }
             MergeResult::FastForward => outln!(w, "Fast-forwarded {} → {short}", self.branch),
@@ -274,11 +287,14 @@ impl HumanRender for MergeOutcome {
                 "Merged {} into the current branch ({short})",
                 self.branch
             ),
-            MergeResult::Conflicts if self.prediction => {
+            MergeResult::Conflicts if self.check => {
                 if let Some(details) = &self.conflicts {
-                    render_conflicts_human(details, w)?;
+                    crate::operation_output::render_merge_check_conflicts_human(
+                        &self.branch,
+                        details,
+                        w,
+                    )?;
                 }
-                crate::operation_output::render_merge_check_conflict_footer_human();
             }
             MergeResult::Conflicts => {
                 if let Some(details) = &self.conflicts {
@@ -348,18 +364,15 @@ fn check_merge(
         ..MergePredictionOptions::default()
     };
     match predict_merge(repo, into_oid, other_oid, &options)? {
-        MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date(label).with_prediction(true)),
-        MergePrediction::FastForward => {
-            Ok(
-                MergeOutcome::fast_forward(label, other_oid, stored_change_id(repo, other_oid)?)
-                    .with_prediction(true),
-            )
-        }
-        MergePrediction::Clean { tree } => {
-            Ok(MergeOutcome::clean_check(label, tree).with_prediction(true))
-        }
+        MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date_check(label)),
+        MergePrediction::FastForward => Ok(MergeOutcome::fast_forward_check(
+            label,
+            other_oid,
+            stored_change_id(repo, other_oid)?,
+        )),
+        MergePrediction::Clean { tree } => Ok(MergeOutcome::clean_check(label, tree)),
         MergePrediction::Conflicts { conflicts } => {
-            Ok(MergeOutcome::conflicts_check(label, conflicts).with_prediction(true))
+            Ok(MergeOutcome::conflicts_check(label, conflicts))
         }
         MergePrediction::Unrelated => {
             bail!("'{label}' has no common history with the current branch")
@@ -473,6 +486,7 @@ mod tests {
         );
         let v: serde_json::Value = serde_json::from_str(&clean.stdout).expect("json");
         assert_eq!(v["result"], "clean");
+        assert_eq!(v["check"], true);
         assert!(v["oid"].as_str().is_some_and(|s| !s.is_empty()));
         assert!(v["next_steps"].is_null() || v.get("next_steps").is_none());
 
@@ -491,6 +505,7 @@ mod tests {
         );
         let v: serde_json::Value = serde_json::from_str(&conflict.stdout).expect("json");
         assert_eq!(v["result"], "conflicts");
+        assert_eq!(v["check"], true);
         assert!(v["conflicts"].as_array().is_some_and(|a| !a.is_empty()));
         let head_after = grit_test_support::git(fixture.path(), &["rev-parse", "HEAD"])
             .trim()
@@ -499,6 +514,85 @@ mod tests {
             head_before, head_after,
             "HEAD must be unchanged after --check"
         );
+        let git_dir = fixture.path().join(".git");
+        assert!(
+            !git_dir.join("MERGE_HEAD").exists(),
+            "MERGE_HEAD must not exist after --check"
+        );
+        assert!(
+            !git_dir.join("ORIG_HEAD").exists(),
+            "ORIG_HEAD must not exist after --check"
+        );
+        let a_txt = std::fs::read_to_string(fixture.path().join("a.txt")).expect("read a.txt");
+        assert_eq!(
+            a_txt, "main edit\n",
+            "worktree must be unchanged after --check"
+        );
+    }
+
+    #[test]
+    fn merge_check_human_output_no_real_merge_wording() {
+        let fixture = CliFixture::empty();
+        std::fs::write(fixture.path().join("f.txt"), "base\n").unwrap();
+        fixture.run_ok(&["add", "f.txt"]);
+        fixture.run_ok(&["commit", "-m", "base"]);
+        fixture.run_ok(&["switch", "--create", "ahead"]);
+        std::fs::write(fixture.path().join("g.txt"), "side\n").unwrap();
+        fixture.run_ok(&["add", "g.txt"]);
+        fixture.run_ok(&["commit", "-m", "side"]);
+        fixture.run_ok(&["switch", "main"]);
+
+        let ff = fixture.run(&["merge", "--check", "ahead"]);
+        assert_eq!(ff.status, Some(0), "{}", ff.dump("ff check"));
+        let ff_human = format!("{}{}", ff.stdout, ff.stderr);
+        assert!(ff_human.contains("Would fast-forward"));
+        for forbidden in [
+            "Fast-forwarded",
+            "Merged ",
+            "merge in progress",
+            "Automatic merge failed",
+            "grit merge --abort",
+            "grit commit",
+        ] {
+            assert!(
+                !ff_human.contains(forbidden),
+                "unexpected wording {forbidden:?} in {ff_human:?}"
+            );
+        }
+
+        let conflict_fixture = CliFixture::empty();
+        std::fs::write(conflict_fixture.path().join("f.txt"), "base\n").unwrap();
+        conflict_fixture.run_ok(&["add", "f.txt"]);
+        conflict_fixture.run_ok(&["commit", "-m", "base"]);
+        conflict_fixture.run_ok(&["switch", "--create", "side"]);
+        std::fs::write(conflict_fixture.path().join("f.txt"), "side\n").unwrap();
+        conflict_fixture.run_ok(&["commit", "-m", "side"]);
+        conflict_fixture.run_ok(&["switch", "main"]);
+        std::fs::write(conflict_fixture.path().join("f.txt"), "main\n").unwrap();
+        conflict_fixture.run_ok(&["commit", "-m", "main"]);
+        let conflict = conflict_fixture.run(&["merge", "--check", "side"]);
+        assert_eq!(
+            conflict.status,
+            Some(1),
+            "{}",
+            conflict.dump("conflict check")
+        );
+        let conflict_human = format!("{}{}", conflict.stdout, conflict.stderr);
+        assert!(conflict_human.contains("Would conflict merging side"));
+        assert!(conflict_human.contains("f.txt"));
+        for forbidden in [
+            "Fast-forwarded",
+            "Merged ",
+            "merge in progress",
+            "Automatic merge failed",
+            "grit merge --abort",
+            "→",
+        ] {
+            assert!(
+                !conflict_human.contains(forbidden),
+                "unexpected wording {forbidden:?} in {conflict_human:?}"
+            );
+        }
     }
 
     #[test]

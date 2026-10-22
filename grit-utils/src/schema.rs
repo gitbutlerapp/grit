@@ -39,6 +39,21 @@ pub struct ToolVersions {
     pub git: String,
     pub grit: String,
     pub grit_commit: Option<String>,
+    /// Hyperfine version when the campaign used hyperfine (merge-check baselines).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hyperfine: Option<String>,
+}
+
+impl ToolVersions {
+    /// Standard tool versions for a benchmark report (hyperfine omitted).
+    pub fn without_hyperfine(git: String, grit: String, grit_commit: Option<String>) -> Self {
+        Self {
+            git,
+            grit,
+            grit_commit,
+            hyperfine: None,
+        }
+    }
 }
 
 /// How the scenario was measured.

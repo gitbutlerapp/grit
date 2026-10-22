@@ -1125,6 +1125,30 @@ pub(crate) fn build_report(
     build_report_with_fixtures(git, grit, timestamp, scenarios, Vec::new())
 }
 
+/// Bench report for merge-check with hyperfine version recorded in `tools`.
+pub(crate) fn build_merge_check_report(
+    git: &Path,
+    bench_exe: &Path,
+    hyperfine: &Path,
+    timestamp: time::OffsetDateTime,
+    scenarios: Vec<ScenarioResult>,
+) -> BenchReport {
+    use crate::binary::tool_version;
+    use crate::schema::ToolVersions;
+
+    let mut report = build_report_with_fixtures(git, bench_exe, timestamp, scenarios, Vec::new());
+    report.tools = ToolVersions {
+        git: tool_version(git),
+        grit: tool_version(bench_exe),
+        grit_commit: std::env::var("GRIT_BENCH_REPORT_GRIT_COMMIT")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(crate::binary::grit_source_commit),
+        hyperfine: Some(tool_version(hyperfine)),
+    };
+    report
+}
+
 pub(crate) fn build_report_with_fixtures(
     git: &Path,
     grit: &Path,
@@ -1151,14 +1175,14 @@ pub(crate) fn build_report_with_fixtures(
                 }
             })
         }),
-        tools: ToolVersions {
-            git: tool_version(git),
-            grit: tool_version(grit),
-            grit_commit: std::env::var("GRIT_BENCH_REPORT_GRIT_COMMIT")
+        tools: ToolVersions::without_hyperfine(
+            tool_version(git),
+            tool_version(grit),
+            std::env::var("GRIT_BENCH_REPORT_GRIT_COMMIT")
                 .ok()
                 .filter(|s| !s.is_empty())
                 .or_else(grit_source_commit),
-        },
+        ),
         fixtures,
         scenarios,
     }
@@ -1326,20 +1350,14 @@ pub(crate) fn merge_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
     )
 }
 
-pub(crate) fn merge_check_git_argv(meta: &HotPathMeta, git: &Path) -> Vec<String> {
-    let merge_base_flag = format!("--merge-base={}", meta.base_commit);
-    let inner = shell_command(
-        git,
-        &[
-            "merge-tree",
-            "--write-tree",
-            &merge_base_flag,
-            &meta.main_tip,
-            &meta.pick_commit,
-        ],
-    );
-    let git_cmd = format!("{inner} >/dev/null");
-    vec!["-c".into(), git_cmd]
+pub(crate) fn merge_check_git_argv(meta: &HotPathMeta) -> Vec<String> {
+    vec![
+        "merge-tree".into(),
+        "--write-tree".into(),
+        format!("--merge-base={}", meta.base_commit),
+        meta.main_tip.clone(),
+        meta.pick_commit.clone(),
+    ]
 }
 
 /// Switch, pick, merge, and pick-series scenarios at each file count.
@@ -1533,7 +1551,7 @@ pub fn run_merge_check_suite(
         let touch = touch_paths_for_size(size);
         setup_pick_merge_fixture(git, spec, touch)?;
         let meta = load_meta(&scratch_dir())?;
-        let git_argv = merge_check_git_argv(&meta, git);
+        let git_argv = merge_check_git_argv(&meta);
         let repo = scratch_dir();
         scenarios.push(run_scenario(
             hyperfine,
@@ -1560,12 +1578,14 @@ pub fn run_merge_check_suite(
                 driver: Driver::Lib,
                 prepare_kind: Some(PrepareKind::MergeReset),
                 grit_via_shell: false,
-                git_via_shell: true,
+                git_via_shell: false,
             },
             &repo,
         )?);
     }
-    Ok(build_report(git, bench_exe, timestamp, scenarios))
+    Ok(build_merge_check_report(
+        git, bench_exe, hyperfine, timestamp, scenarios,
+    ))
 }
 
 /// Merge-only hot-path scenario (isolated fixture; no prior pick/revert in the same run).

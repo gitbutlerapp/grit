@@ -57,6 +57,7 @@ pub fn merge_reports(reports: Vec<BenchReport>) -> BenchReport {
                 git: String::new(),
                 grit: String::new(),
                 grit_commit: None,
+                hyperfine: None,
             },
             fixtures: Vec::new(),
             scenarios: Vec::new(),
@@ -372,6 +373,7 @@ mod tests {
                 git: "git-test".into(),
                 grit: "grit-test".into(),
                 grit_commit: None,
+                hyperfine: None,
             },
             fixtures: Vec::new(),
             scenarios: vec![ScenarioResult {

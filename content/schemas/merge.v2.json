@@ -26,16 +26,26 @@
     },
     "MergeResult": {
       "description": "Merge / pull integration result (`--json` contract).",
-      "enum": [
-        "up_to_date",
-        "fast_forward",
-        "merged",
-        "clean",
-        "conflicts",
-        "aborted",
-        "set_upstream"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "up_to_date",
+            "fast_forward",
+            "merged",
+            "conflicts",
+            "aborted",
+            "set_upstream"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Three-way merge would succeed (`grit merge --check` only).",
+          "enum": [
+            "clean"
+          ],
+          "type": "string"
+        }
+      ]
     }
   },
   "description": "Result of `grit merge` (and the merge half of `grit pull`).",
@@ -60,6 +70,10 @@
         "string",
         "null"
       ]
+    },
+    "check": {
+      "description": "True when this outcome is from `grit merge --check` (nothing was merged).",
+      "type": "boolean"
     },
     "conflicts": {
       "description": "Structured conflicts when `result` is `conflicts`.",

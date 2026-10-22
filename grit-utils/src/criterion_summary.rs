@@ -229,6 +229,7 @@ pub fn summarize_criterion_tree(
             git: "n/a (criterion micro-benchmarks)".into(),
             grit: format!("grit-lib {}", env!("CARGO_PKG_VERSION")),
             grit_commit: crate::binary::grit_source_commit(),
+            hyperfine: None,
         },
         scenarios,
     })

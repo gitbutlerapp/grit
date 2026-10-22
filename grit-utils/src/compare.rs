@@ -151,6 +151,7 @@ mod tests {
                 git: "git".into(),
                 grit: "grit".into(),
                 grit_commit: None,
+                hyperfine: None,
             },
             fixtures: vec![],
             scenarios: vec![ScenarioResult {

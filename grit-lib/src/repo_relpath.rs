@@ -3,6 +3,11 @@
 //! Index and tree paths are byte sequences (Git slash-separated). On Unix the work tree
 //! uses the same bytes as file names. APIs that surface paths as `String` use a reversible
 //! ASCII encoding for non-UTF-8 bytes so staging and diff can round-trip without loss.
+//!
+//! ```rust
+//! use grit_lib::repo_relpath::parent_dir;
+//! assert!(parent_dir(b"src/main.rs").ends_with(b"src"));
+//! ```
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};

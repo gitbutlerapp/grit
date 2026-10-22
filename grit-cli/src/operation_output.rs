@@ -152,7 +152,28 @@ pub fn render_merge_conflict_footer_human() {
     );
 }
 
-/// Human hint after `grit merge --check` finds conflicts (no merge started).
-pub fn render_merge_check_conflict_footer_human() {
-    eprintln!("\nMerge would fail with conflicts (no changes made).");
+/// Human output for `grit merge --check` when the merge would conflict.
+pub fn render_merge_check_conflicts_human(
+    branch: &str,
+    conflicts: &[ConflictJson],
+    w: &mut dyn Write,
+) -> Result<()> {
+    outln!(w, "Would conflict merging {branch}");
+    for item in conflicts {
+        outln!(w, "  {}", item.path);
+    }
+    Ok(())
+}
+
+/// Markdown output for `grit merge --check` when the merge would conflict.
+pub fn render_merge_check_conflicts_markdown(
+    branch: &str,
+    conflicts: &[ConflictJson],
+    w: &mut dyn Write,
+) -> Result<()> {
+    outln!(w, "- Would conflict merging **`{branch}`**");
+    for item in conflicts {
+        outln!(w, "  - `{path}`", path = item.path);
+    }
+    Ok(())
 }

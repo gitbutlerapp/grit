@@ -102,6 +102,7 @@ mod tests {
                 git: "git version 2.43".into(),
                 grit: "grit 0.5.0".into(),
                 grit_commit: Some("abc123".into()),
+                hyperfine: None,
             },
             fixtures: vec![],
             scenarios: vec![ScenarioResult {
