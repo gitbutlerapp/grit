@@ -228,6 +228,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         "",
         crate::write_tree::WriteTreeFlags::silent(),
     )?;
+    repo.write_index(&mut index)?;
     let head_tree = commit_tree(repo, &head_oid)?;
     if active.opts.no_commit {
         if new_tree == head_tree {
