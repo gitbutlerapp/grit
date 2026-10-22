@@ -838,108 +838,60 @@ pub fn find_tree_entry_by_name_dir_or_file<'a>(
     find_tree_entry_by_name(entries, name, false)
 }
 
-struct TreeEntrySpan {
-    mode: u32,
-    name_off: usize,
-    name_len: usize,
-    oid_off: usize,
-}
-
-fn tree_entry_spans(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntrySpan>> {
-    let mut pos = 0usize;
-    let mut spans = Vec::new();
-    while pos < data.len() {
-        let sp = data[pos..]
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
-        let mode_bytes = &data[pos..pos + sp];
-        let mode = std::str::from_utf8(mode_bytes)
-            .ok()
-            .and_then(|s| u32::from_str_radix(s, 8).ok())
-            .ok_or_else(|| Error::CorruptObject("invalid tree mode".to_owned()))?;
-        pos += sp + 1;
-        let nul = data[pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
-        let name_off = pos;
-        let name_len = nul;
-        pos += nul + 1;
-        if pos + oid_len > data.len() {
-            return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
-        }
-        spans.push(TreeEntrySpan {
-            mode,
-            name_off,
-            name_len,
-            oid_off: pos,
-        });
-        pos += oid_len;
+/// Parse an octal tree-entry mode without going through `str`.
+fn parse_tree_mode_octal(bytes: &[u8]) -> Option<u32> {
+    if bytes.is_empty() || bytes.len() > 7 {
+        return None;
     }
-    Ok(spans)
+    bytes.iter().try_fold(0u32, |acc, &b| match b {
+        b'0'..=b'7' => Some(acc * 8 + u32::from(b - b'0')),
+        _ => None,
+    })
 }
 
 /// Find one tree entry by name without building a full [`TreeEntry`] vector.
+///
+/// Scans entries in stored order and returns the first whose name equals `name`
+/// (file or directory). Because Git sorts entries by `name` (with a `/` trailer for
+/// directories), the scan stops at the first entry that sorts after `name/`, so only
+/// the prefix of the tree up to the match is decoded; corruption after that point is
+/// not reported.
+///
+/// # Errors
+///
+/// [`Error::CorruptObject`] when an entry scanned before the stop point is malformed.
 pub(crate) fn find_tree_entry_by_name_in_data(
     data: &[u8],
     oid_len: usize,
     name: &[u8],
 ) -> Result<Option<TreeEntry>> {
-    const BINSEARCH_MIN_ENTRIES: usize = 48;
-    let spans = tree_entry_spans(data, oid_len)?;
-    if spans.is_empty() {
-        return Ok(None);
-    }
-    if spans.len() < BINSEARCH_MIN_ENTRIES {
-        for span in spans {
-            let entry_name = &data[span.name_off..span.name_off + span.name_len];
-            if entry_name == name {
-                let oid = ObjectId::from_bytes(&data[span.oid_off..span.oid_off + oid_len])?;
-                return Ok(Some(TreeEntry {
-                    mode: span.mode,
-                    name: entry_name.to_vec(),
-                    oid,
-                }));
-            }
+    let mut pos = 0usize;
+    while pos < data.len() {
+        let rest = &data[pos..];
+        let sp = memchr::memchr(b' ', rest)
+            .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
+        let mode = parse_tree_mode_octal(&rest[..sp])
+            .ok_or_else(|| Error::CorruptObject("invalid tree mode".to_owned()))?;
+        let name_start = sp + 1;
+        let nul = memchr::memchr(0, &rest[name_start..])
+            .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
+        let entry_name = &rest[name_start..name_start + nul];
+        let oid_start = name_start + nul + 1;
+        let oid_end = oid_start + oid_len;
+        if oid_end > rest.len() {
+            return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
         }
-        return Ok(None);
-    }
-    if let Some(entry) = find_tree_entry_by_name_in_spans(data, &spans, oid_len, name, true)? {
-        if entry.mode == 0o040000 {
-            return Ok(Some(entry));
-        }
-    }
-    find_tree_entry_by_name_in_spans(data, &spans, oid_len, name, false)
-}
-
-fn tree_entry_from_span(data: &[u8], span: &TreeEntrySpan, oid_len: usize) -> Result<TreeEntry> {
-    let entry_name = &data[span.name_off..span.name_off + span.name_len];
-    let oid = ObjectId::from_bytes(&data[span.oid_off..span.oid_off + oid_len])?;
-    Ok(TreeEntry {
-        mode: span.mode,
-        name: entry_name.to_vec(),
-        oid,
-    })
-}
-
-fn find_tree_entry_by_name_in_spans(
-    data: &[u8],
-    spans: &[TreeEntrySpan],
-    oid_len: usize,
-    name: &[u8],
-    name_is_tree: bool,
-) -> Result<Option<TreeEntry>> {
-    let idx = spans.binary_search_by(|span| {
-        let entry_name = &data[span.name_off..span.name_off + span.name_len];
-        tree_entry_cmp(entry_name, span.mode == 0o040000, name, name_is_tree)
-    });
-    if let Ok(i) = idx {
-        let span = &spans[i];
-        let entry_name = &data[span.name_off..span.name_off + span.name_len];
         if entry_name == name {
-            return Ok(Some(tree_entry_from_span(data, span, oid_len)?));
+            return Ok(Some(TreeEntry {
+                mode,
+                name: entry_name.to_vec(),
+                oid: ObjectId::from_bytes(&rest[oid_start..oid_end])?,
+            }));
         }
+        if tree_entry_cmp(entry_name, mode == 0o040000, name, true) == std::cmp::Ordering::Greater {
+            return Ok(None);
+        }
+        pos += oid_end;
     }
     Ok(None)
 }
@@ -1447,6 +1399,119 @@ mod commit_parse_tests {
             .expect("sub directory in wide tree");
         assert_eq!(found.mode, 0o040000);
         assert_eq!(found.name, b"sub");
+        Ok(())
+    }
+
+    fn sorted_tree_data(entries: &mut [TreeEntry]) -> Vec<u8> {
+        entries.sort_by(|a, b| {
+            tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+        });
+        serialize_tree(entries)
+    }
+
+    #[test]
+    fn find_tree_entry_by_name_in_data_matches_parse_tree_for_every_name() -> Result<()> {
+        let oid_a = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
+        let oid_b = ObjectId::from_hex("2222222222222222222222222222222222222222")?;
+        let mut entries = vec![
+            TreeEntry {
+                mode: 0o040000,
+                name: b"foo".to_vec(),
+                oid: oid_a,
+            },
+            TreeEntry {
+                mode: 0o100644,
+                name: b"foo.c".to_vec(),
+                oid: oid_b,
+            },
+            TreeEntry {
+                mode: 0o100755,
+                name: b"foo-bar".to_vec(),
+                oid: oid_b,
+            },
+            TreeEntry {
+                mode: 0o120000,
+                name: b"link".to_vec(),
+                oid: oid_a,
+            },
+            TreeEntry {
+                mode: 0o160000,
+                name: b"sub".to_vec(),
+                oid: oid_b,
+            },
+            TreeEntry {
+                mode: 0o100644,
+                name: b"README".to_vec(),
+                oid: oid_a,
+            },
+        ];
+        let data = sorted_tree_data(&mut entries);
+        for expected in parse_tree(&data)? {
+            let found =
+                find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), &expected.name)?
+                    .expect("entry present");
+            assert_eq!(found, expected);
+        }
+        for missing in [&b"fo"[..], b"foo/", b"foo.d", b"zzz", b"", b"AAA", b"lin"] {
+            assert!(
+                find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), missing)?.is_none(),
+                "unexpected match for {:?}",
+                String::from_utf8_lossy(missing)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn find_tree_entry_by_name_in_data_stops_after_sorted_position() -> Result<()> {
+        let oid = ObjectId::from_hex("3333333333333333333333333333333333333333")?;
+        let mut entries = vec![
+            TreeEntry {
+                mode: 0o100644,
+                name: b"a".to_vec(),
+                oid,
+            },
+            TreeEntry {
+                mode: 0o100644,
+                name: b"c".to_vec(),
+                oid,
+            },
+        ];
+        let mut data = sorted_tree_data(&mut entries);
+        data.extend_from_slice(b"garbage without separators");
+        let found = find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"a")?;
+        assert_eq!(found.map(|e| e.name), Some(b"a".to_vec()));
+        assert!(find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"b")?.is_none());
+        assert!(matches!(
+            find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"d"),
+            Err(Error::CorruptObject(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn find_tree_entry_by_name_in_data_rejects_bad_mode_and_truncated_oid() {
+        let bad_mode = b"10x644 a\0aaaaaaaaaaaaaaaaaaaa";
+        assert!(matches!(
+            find_tree_entry_by_name_in_data(bad_mode, HashAlgo::Sha1.len(), b"a"),
+            Err(Error::CorruptObject(_))
+        ));
+        let truncated = b"100644 a\0short";
+        assert!(matches!(
+            find_tree_entry_by_name_in_data(truncated, HashAlgo::Sha1.len(), b"a"),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+
+    #[test]
+    fn find_tree_entry_by_name_in_data_reads_sha256_width() -> Result<()> {
+        let oid = ObjectId::from_bytes(&[0x5au8; 32])?;
+        let mut raw = b"100644 file\0".to_vec();
+        raw.extend_from_slice(oid.as_bytes());
+        let found =
+            find_tree_entry_by_name_in_data(&raw, HashAlgo::Sha256.len(), b"file")?.expect("file");
+        assert_eq!(found.oid, oid);
+        assert_eq!(found.mode, 0o100644);
         Ok(())
     }
 }
