@@ -59,6 +59,7 @@ use crate::porcelain::switch::{
 use crate::porcelain::tree_merge_checkout::finalize_clean_tree_merge_index;
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::refs;
+use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::repo::Repository;
 use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
 use crate::worktree_rules::WorktreeRules;
@@ -287,7 +288,8 @@ pub enum IntegrateBranchOutcome {
 /// # Errors
 ///
 /// Propagates merge, checkout, ref, and I/O failures. Returns [`Error::Message`] when
-/// the histories are unrelated or the worktree is not clean.
+/// the histories are unrelated, the worktree is not clean, or `into_ref` no longer points
+/// at `into_oid` (checked before the worktree is touched, and again when the ref moves).
 pub fn integrate_branch(
     repo: &Repository,
     into_ref: &str,
@@ -298,6 +300,7 @@ pub fn integrate_branch(
     if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
         return Ok(IntegrateBranchOutcome::UpToDate);
     }
+    ensure_branch_tip(repo, into_ref, Some(into_oid))?;
 
     let into_tree = commit_tree(repo, &into_oid)?;
     let other_tree = commit_tree(repo, &other_oid)?;
@@ -627,12 +630,60 @@ fn move_branch(
     new: ObjectId,
     reason: &str,
 ) -> Result<()> {
-    refs::write_ref(repo.git_dir(), refname, &new)?;
-    let env = repo.environment();
-    let config = ConfigSet::load(env, Some(repo.git_dir()), true).unwrap_or_default();
-    let who = resolve_loose_committer_identity_with(env, &config, repo.identity_now());
-    let _ = refs::append_reflog(repo.git_dir(), refname, &old, &new, &who, reason, false);
-    let _ = refs::append_reflog(repo.git_dir(), "HEAD", &old, &new, &who, reason, false);
+    update_checked_out_branch(repo, refname, Some(old), new, reason)
+}
+
+/// Refuse to touch the work tree when `branch_ref` no longer points at `expected` (`None`:
+/// the branch must not exist), so a concurrent ref update is reported before anything changes.
+pub(crate) fn ensure_branch_tip(
+    repo: &Repository,
+    branch_ref: &str,
+    expected: Option<ObjectId>,
+) -> Result<()> {
+    let current = repo.refs().resolve(branch_ref).ok();
+    refs::verify_branch_commit_cas(expected, current, branch_ref)
+}
+
+/// Point the checked-out branch `branch_ref` from `expected_old` (`None`: unborn) at `new`
+/// with a compare-and-swap through the repository's ref store, then append branch and `HEAD`
+/// reflog lines (per `core.logAllRefUpdates`) stamped with the repository's committer identity.
+///
+/// The reflog lines are appended rather than written in the ref transaction, because the
+/// files store reloads and rewrites a ref's whole reflog when a transaction logs to it.
+pub(crate) fn update_checked_out_branch(
+    repo: &Repository,
+    branch_ref: &str,
+    expected_old: Option<ObjectId>,
+    new: ObjectId,
+    reason: &str,
+) -> Result<()> {
+    refs::commit_ref_update_on_store(
+        repo.refs(),
+        RefUpdate {
+            name: branch_ref.to_owned(),
+            new_value: Some(RawRef::Direct(new)),
+            expected: expected_old.map_or(Expected::Missing, Expected::Oid),
+            reflog: None,
+            flags: RefUpdateFlags::default(),
+        },
+    )?;
+    let config = repo.config()?;
+    let identity =
+        resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
+    let old = expected_old.unwrap_or_else(crate::diff::zero_oid);
+    for name in [branch_ref, "HEAD"] {
+        let autocreate = refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), name);
+        refs::append_reflog_with_config(
+            repo.git_dir(),
+            name,
+            &old,
+            &new,
+            &identity,
+            reason,
+            autocreate,
+            Some(&config),
+        )?;
+    }
     Ok(())
 }
 
@@ -739,7 +790,7 @@ mod integrate_tests {
             .trim()
             .parse()
             .expect("head");
-        grit_test_support::git(tmp.path(), &["branch", "topic"]);
+        grit_test_support::git(tmp.path(), &["checkout", "-q", "-b", "topic"]);
         std::fs::write(tmp.path().join("f.txt"), "v2\n").expect("write");
         grit_test_support::git(tmp.path(), &["add", "f.txt"]);
         grit_test_support::git(tmp.path(), &["commit", "-m", "two"]);
