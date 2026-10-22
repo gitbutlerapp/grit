@@ -533,29 +533,34 @@ fn verify_source_checksum(
     header_checksum: &[u8],
     hash_len: usize,
 ) -> Result<(), BitmapError> {
-    match source {
-        BitmapSource::Pack { index } => {
-            let pack_bytes = std::fs::read(&index.pack_path).map_err(BitmapError::io)?;
-            if pack_bytes.len() < hash_len {
-                return Err(BitmapError::PackChecksumMismatch);
-            }
-            let pack_hash = &pack_bytes[pack_bytes.len() - hash_len..];
-            if pack_hash != header_checksum {
-                return Err(BitmapError::PackChecksumMismatch);
-            }
-        }
-        BitmapSource::Midx { midx_path } => {
-            let midx_bytes = std::fs::read(midx_path).map_err(BitmapError::io)?;
-            if midx_bytes.len() < hash_len {
-                return Err(BitmapError::PackChecksumMismatch);
-            }
-            let midx_hash = &midx_bytes[midx_bytes.len() - hash_len..];
-            if midx_hash != header_checksum {
-                return Err(BitmapError::PackChecksumMismatch);
-            }
-        }
+    let path = match source {
+        BitmapSource::Pack { index } => &index.pack_path,
+        BitmapSource::Midx { midx_path } => midx_path,
+    };
+    match read_file_trailer(path, hash_len).map_err(BitmapError::io)? {
+        Some(trailer) if trailer == header_checksum => Ok(()),
+        _ => Err(BitmapError::PackChecksumMismatch),
     }
-    Ok(())
+}
+
+/// Read the last `len` bytes of `path` without loading the rest of the file.
+///
+/// Returns `None` when the file is shorter than `len`.
+fn read_file_trailer(path: &Path, len: usize) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let Ok(len_u64) = u64::try_from(len) else {
+        return Ok(None);
+    };
+    if file_len < len_u64 {
+        return Ok(None);
+    }
+    file.seek(SeekFrom::Start(file_len - len_u64))?;
+    let mut trailer = vec![0u8; len];
+    file.read_exact(&mut trailer)?;
+    Ok(Some(trailer))
 }
 
 fn skip_pseudo_merge_extension(
@@ -672,5 +677,30 @@ impl BitmapIndexCache {
 
     pub(crate) fn set(&self, value: Option<Arc<BitmapIndex>>) {
         let _ = self.inner.set(value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_file_trailer;
+
+    #[test]
+    fn read_file_trailer_returns_last_bytes_only() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("data");
+        let mut body = vec![0u8; 64 * 1024];
+        body.extend_from_slice(b"0123456789abcdefghij");
+        std::fs::write(&path, &body)?;
+        assert_eq!(
+            read_file_trailer(&path, 20)?.as_deref(),
+            Some(&b"0123456789abcdefghij"[..])
+        );
+        assert_eq!(read_file_trailer(&path, 0)?.as_deref(), Some(&b""[..]));
+
+        let short = dir.path().join("short");
+        std::fs::write(&short, b"abc")?;
+        assert_eq!(read_file_trailer(&short, 20)?, None);
+        assert_eq!(read_file_trailer(&short, 3)?.as_deref(), Some(&b"abc"[..]));
+        Ok(())
     }
 }
