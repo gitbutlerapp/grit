@@ -68,12 +68,29 @@ pub(crate) fn apply_clean_tree_merge_to_worktree(
         &mut snapshot.index,
         CheckoutApplyOptions {
             parallel_prepare_blobs: true,
+            defer_index_disk_write: true,
             ..CheckoutApplyOptions::default()
         },
         None,
     )?;
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, merged)?;
-    repo.write_index(&mut snapshot.index)?;
+    write_index_after_merge_checkout(repo, &mut snapshot.index)
+}
+
+/// Single index write for a merge checkout, with the same racy-entry policy as checkout's own
+/// write: the clean-worktree guard already verified untouched entries and checkout just stat'ed
+/// the entries it wrote, so re-hashing every same-second entry would only repeat that work.
+fn write_index_after_merge_checkout(
+    repo: &Repository,
+    index: &mut crate::index::Index,
+) -> Result<()> {
+    index.skip_racy_smudge_on_write = true;
+    let result = repo.write_index_with_post_index_change(index, true, false);
+    index.skip_racy_smudge_on_write = false;
+    result?;
+    let index_path = repo.index_path_for_env()?;
+    crate::index::advance_index_file_mtime_past_entries(index, &index_path, None)?;
+    index.source_mtime = crate::index::index_file_mtime(&index_path);
     Ok(())
 }
 

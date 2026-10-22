@@ -935,8 +935,73 @@ pub fn apply_tree_merge_output_to_worktree_index(
     index: &mut Index,
     merged: &TreeMergeOutput,
 ) -> crate::error::Result<()> {
-    apply_tree_merge_output_to_index(index, merged);
-    refresh_tree_merge_index_stat_cache(repo, index, merged)
+    if repo.work_tree().is_none() {
+        apply_tree_merge_output_to_index(index, merged);
+        return Ok(());
+    }
+    let pending = pending_tree_merge_index_rows(index, merged);
+    if pending.touched_paths.is_empty() && pending.index.entries().is_empty() {
+        return Ok(());
+    }
+    apply_tree_merge_output_to_index(index, &pending);
+    refresh_tree_merge_index_stat_cache(repo, index, &pending)
+}
+
+/// The part of `merged` that still has to be written into `index`.
+///
+/// After a worktree checkout the index usually already holds every merged row, with fresh stat
+/// data, so re-removing, re-inserting and re-stat'ing those paths only costs O(n) vector moves
+/// per path. A path is dropped from the result when `index` already has exactly the merged
+/// stage-0 regular-file row with populated stat data (the state the stat refresh would keep),
+/// or when neither side has any row for it.
+fn pending_tree_merge_index_rows(index: &Index, merged: &TreeMergeOutput) -> TreeMergeOutput {
+    let mut merged_rows: HashMap<&[u8], Vec<&IndexEntry>> = HashMap::new();
+    for entry in merged.index.entries() {
+        merged_rows
+            .entry(entry.path.as_slice())
+            .or_default()
+            .push(entry);
+    }
+    let up_to_date = |path: &[u8]| -> bool {
+        let has_unmerged = (1..=3).any(|stage| index.get(path, stage).is_some());
+        if has_unmerged {
+            return false;
+        }
+        let existing = index.get(path, 0);
+        match (merged_rows.get(path).map(Vec::as_slice), existing) {
+            (None, None) => true,
+            (Some([row]), Some(existing)) => {
+                row.stage() == 0
+                    && (row.mode == MODE_REGULAR || row.mode == crate::index::MODE_EXECUTABLE)
+                    && existing.oid == row.oid
+                    && existing.mode == row.mode
+                    && existing.flags == row.flags
+                    && existing.flags_extended == row.flags_extended
+                    && existing.size > 0
+                    && (existing.mtime_sec > 0 || existing.ctime_sec > 0)
+            }
+            _ => false,
+        }
+    };
+
+    let mut pending_index = Index::new();
+    for entry in merged.index.entries() {
+        if !up_to_date(&entry.path) {
+            pending_index.push_entry_unsorted(entry.clone());
+        }
+    }
+    pending_index.sort();
+    TreeMergeOutput {
+        index: pending_index,
+        conflict_content: BTreeMap::new(),
+        result_tree: merged.result_tree,
+        touched_paths: merged
+            .touched_paths
+            .iter()
+            .filter(|path| !up_to_date(path))
+            .cloned()
+            .collect(),
+    }
 }
 
 /// Tree OID to record in a commit after a three-way merge (applies conflict-marker policy).
