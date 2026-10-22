@@ -337,7 +337,7 @@ fn stage_inner_on_index(
             hash_blobs_without_write: opts.dry_run,
             ..DiffIndexToWorktreeOptions::default()
         };
-        if dry_run {
+        if dry_run && write_index {
             let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
                 repo.odb(),
                 index,
@@ -482,10 +482,18 @@ fn stage_inner_on_index(
                 continue;
             }
             if plan.remove {
+                if dry_run_list_only {
+                    outcome.removed.push(path);
+                    continue;
+                }
                 if index.get(path.as_bytes(), 0).is_some() {
                     index.remove(path.as_bytes());
                     outcome.removed.push(path);
                 }
+                continue;
+            }
+            if dry_run_list_only {
+                outcome.modified.push(path);
                 continue;
             }
             if !dry_run {
