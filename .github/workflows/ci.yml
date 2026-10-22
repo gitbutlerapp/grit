@@ -59,6 +59,8 @@ jobs:
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
           CARGO_BUILD_JOBS: "1"
+          # rust-lld has bus-error'd linking huge debug test binaries on ubuntu-latest.
+          RUSTFLAGS: "-C link-arg=-fuse-ld=bfd"
         run: make coverage CARGO_BUILD_JOBS=1
 
       - uses: actions/upload-artifact@v4
@@ -302,6 +304,7 @@ jobs:
           GIT_CONFIG_VALUE_3: "0"
           # Serialize crate links; parallel lld on release test binaries has bus-error'd (signal 7).
           CARGO_BUILD_JOBS: "1"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=bfd"
         run: cargo test --release --workspace -j 1
 
   miri:
@@ -367,6 +370,7 @@ jobs:
           # Many grit-lib integration tests link a full grit-lib + http-ureq stack at once;
           # parallel lld links have bus-error'd on ubuntu-latest (signal 7).
           CARGO_BUILD_JOBS: "1"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=bfd"
         run: cargo test --workspace -j 1
 
       - name: Criterion object micro-benchmarks (smoke)
