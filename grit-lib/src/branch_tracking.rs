@@ -51,6 +51,19 @@ pub fn upstream_config_for_branch_ref(upstream_full: &str) -> Option<(String, St
         .map(|branch| (".".to_owned(), format!("refs/heads/{branch}")))
 }
 
+/// Local remote-tracking ref that corresponds to `remote_ref` on `remote_name`.
+///
+/// Uses `remote.<name>.fetch` refspecs; when none are configured, branch refs map to
+/// `refs/remotes/<remote>/<branch>`.
+#[must_use]
+pub fn remote_tracking_ref_for_remote_ref(
+    config: &ConfigSet,
+    remote_name: &str,
+    remote_ref: &str,
+) -> Option<String> {
+    FetchRefspecs::load(config, remote_name).tracking_ref(remote_name, remote_ref)
+}
+
 impl FetchRefspecs {
     fn load(config: &ConfigSet, remote_name: &str) -> Self {
         let (negative, positive) = config

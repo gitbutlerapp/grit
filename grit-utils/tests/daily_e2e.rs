@@ -78,6 +78,7 @@ const ALL_HEADLINE_IDS: [&str; 18] = [
     "fetch/incremental@git-git",
     "pull/fast-forward@git-git",
     "push/incremental@git-git",
+    "push/force-with-lease@git-git",
     "clone/local@synth-10k",
 ];
 

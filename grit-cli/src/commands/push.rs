@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::remote::push_plan::{
-    configured_remote_for_push, resolve_push, PushPlanContext, PushPlanError, PushPlanKind,
-    PushRequest,
+    configured_remote_for_push, parse_force_mode, resolve_push, PushPlanContext, PushPlanError,
+    PushPlanKind, PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::PushOptions;
@@ -116,11 +116,17 @@ impl HumanRender for PushOutcome {
                     }
                 }
                 PushRefOutcomeStatus::UpToDate => outln!(w, "  {target} already up to date"),
-                PushRefOutcomeStatus::Rejected => outln!(
-                    w,
-                    "  rejected {target}: {}",
-                    result.reason.as_deref().unwrap_or("rejected")
-                ),
+                PushRefOutcomeStatus::Rejected => {
+                    let detail = result.reason.as_deref().unwrap_or("rejected");
+                    if detail == "stale" {
+                        outln!(
+                            w,
+                            "  rejected {target}: stale remote ref — run `grit fetch` and try again"
+                        );
+                    } else {
+                        outln!(w, "  rejected {target}: {detail}");
+                    }
+                }
             }
         }
         Ok(())
@@ -142,6 +148,8 @@ pub fn run(
     remote_flag: Option<String>,
     positionals: &[String],
     dry_run: bool,
+    force: bool,
+    force_with_lease: Option<Option<String>>,
 ) -> Result<PushOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
@@ -151,6 +159,8 @@ pub fn run(
 
     let plan_ctx = load_remote_ref_names(&repo, &config, remote_override.as_deref())?;
 
+    let force_mode = parse_force_mode(&repo, force, force_with_lease).map_err(plan_error)?;
+
     let plan = resolve_push(
         &repo,
         &config,
@@ -159,6 +169,7 @@ pub fn run(
             refspecs,
             tags,
             delete: delete_refs.to_vec(),
+            force: force_mode,
         },
         &plan_ctx,
     )
@@ -190,6 +201,10 @@ pub fn run(
                 PushRefStatus::RejectNonFastForward => {
                     rejected = true;
                     Some("not a fast-forward — run `grit pull` first".to_owned())
+                }
+                PushRefStatus::RejectStale => {
+                    rejected = true;
+                    Some("stale".to_owned())
                 }
                 _ => {
                     rejected = true;

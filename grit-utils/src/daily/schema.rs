@@ -278,9 +278,10 @@ mod tests {
             ("fetch/incremental@git-git", "fetch"),
             ("pull/fast-forward@git-git", "pull"),
             ("push/incremental@git-git", "push"),
+            ("push/force-with-lease@git-git", "push"),
             ("clone/local@synth-10k", "clone"),
         ];
-        assert_eq!(HEADLINE_SCENARIOS.len(), 18);
+        assert_eq!(HEADLINE_SCENARIOS.len(), 19);
         for (spec, (exp_id, exp_name)) in HEADLINE_SCENARIOS.iter().zip(expected.iter()) {
             assert_eq!(spec.id, *exp_id);
             assert_eq!(spec.name, Some(*exp_name));

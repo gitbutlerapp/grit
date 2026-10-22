@@ -7,8 +7,8 @@ use super::super::remote_fixture::{
     setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
     setup_many_refs_file_remote, setup_synth10k_file_remote, setup_synth10k_grit_http_remote,
     verify_clone_http, verify_clone_local, verify_fetch_incremental, verify_fetch_incremental_http,
-    verify_fetch_noop, verify_ls_remote_all, verify_pull_fast_forward, verify_push_incremental,
-    verify_push_incremental_http,
+    verify_fetch_noop, verify_ls_remote_all, verify_pull_fast_forward,
+    verify_push_force_with_lease, verify_push_incremental, verify_push_incremental_http,
 };
 use super::super::runner::BenchArgv;
 
@@ -22,6 +22,10 @@ fn prepare_network_fetch_noop(_: &DailyHeadlineContext) -> DailyPrepare {
 
 fn prepare_network_push(_: &DailyHeadlineContext) -> DailyPrepare {
     DailyPrepare::Network("prepare-network-push")
+}
+
+fn prepare_network_force_with_lease(_: &DailyHeadlineContext) -> DailyPrepare {
+    DailyPrepare::Network("prepare-network-force-with-lease")
 }
 
 fn prepare_network_clone(_: &DailyHeadlineContext) -> DailyPrepare {
@@ -38,6 +42,10 @@ fn correctness_pull_ff(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
 
 fn correctness_push_incr(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
     verify_push_incremental(ctx, &ctx.repo)
+}
+
+fn correctness_push_fwl(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
+    verify_push_force_with_lease(ctx, &ctx.repo)
 }
 
 fn correctness_clone_local(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
@@ -96,6 +104,22 @@ fn push_incr_git(ctx: &DailyHeadlineContext) -> BenchArgv {
 
 fn push_incr_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     sh_devnull(&ctx.grit, &["push"])
+}
+
+fn push_fwl_git(ctx: &DailyHeadlineContext) -> BenchArgv {
+    let branch = ctx
+        .remote
+        .as_ref()
+        .map(|r| r.meta.default_branch.as_str())
+        .unwrap_or("main");
+    sh_devnull(
+        &ctx.git,
+        &["push", "--force-with-lease", "-q", "origin", branch],
+    )
+}
+
+fn push_fwl_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.grit, &["push", "--force-with-lease"])
 }
 
 fn clone_local_git(ctx: &DailyHeadlineContext) -> BenchArgv {
@@ -176,6 +200,15 @@ fn headline_plans() -> Vec<DailyHeadlinePlan> {
             build_git: push_incr_git,
             build_grit: push_incr_grit,
             correctness: Some(correctness_push_incr),
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("push/force-with-lease@git-git"),
+            pending: false,
+            setup: setup_git_git_file_remote,
+            prepare: prepare_network_force_with_lease,
+            build_git: push_fwl_git,
+            build_grit: push_fwl_grit,
+            correctness: Some(correctness_push_fwl),
         },
         DailyHeadlinePlan {
             spec: headline_spec("clone/local@synth-10k"),
@@ -265,6 +298,7 @@ mod tests {
             "fetch/incremental@git-git",
             "pull/fast-forward@git-git",
             "push/incremental@git-git",
+            "push/force-with-lease@git-git",
             "clone/local@synth-10k",
         ] {
             assert!(HEADLINE_SCENARIOS.iter().any(|s| s.id == id));

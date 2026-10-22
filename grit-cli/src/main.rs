@@ -939,6 +939,19 @@ enum Command {
         /// Contact the remote but do not update refs or send objects.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Overwrite remote refs even when the update is not a fast-forward.
+        #[arg(short = 'f', long = "force", conflicts_with = "force_with_lease")]
+        force: bool,
+        /// Push only when the remote ref matches the local remote-tracking ref, or
+        /// `=<rev>` when pushing exactly one ref.
+        #[arg(
+            long = "force-with-lease",
+            value_name = "REV",
+            num_args = 0..=1,
+            require_equals = true,
+            conflicts_with = "force"
+        )]
+        force_with_lease: Option<Option<String>>,
         /// Remote name (when not using `--remote`).
         #[arg(value_name = "REMOTE")]
         remote_name: Option<String>,
@@ -1884,6 +1897,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             delete,
             remote,
             dry_run,
+            force,
+            force_with_lease,
             remote_name,
             refspecs,
         } => {
@@ -1892,7 +1907,15 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 positionals.push(r);
             }
             positionals.extend(refspecs);
-            let outcome = commands::push::run(tags, &delete, remote, &positionals, dry_run)?;
+            let outcome = commands::push::run(
+                tags,
+                &delete,
+                remote,
+                &positionals,
+                dry_run,
+                force,
+                force_with_lease,
+            )?;
             emit(&outcome, opts, ctx)?;
             // The outcome (per-ref results) is reported in both modes; a rejected
             // push is still a failure, so mirror Git and exit non-zero.
