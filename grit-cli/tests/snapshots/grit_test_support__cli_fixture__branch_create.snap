@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Created branch wip\n",
+    "stdout": "Created branch wip at 83352a6\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"create\",\"name\":\"wip\"}\n",
+    "stdout": "{\"action\":\"create\",\"name\":\"wip\",\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"short_oid\":\"83352a6\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "Created branch `wip`.\n",
+    "stdout": "Created branch `wip` at `83352a6`.\n",
     "stderr": ""
   }
 }

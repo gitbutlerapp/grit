@@ -11085,6 +11085,7 @@ pub fn grit_lib::porcelain::branch::rename_branch(&grit_lib::repo::Repository, &
 pub fn grit_lib::porcelain::branch::resolve_create_tracking(&grit_lib::repo::Repository, &str, &str, grit_lib::objects::ObjectId, grit_lib::porcelain::branch_error::TrackMode) -> grit_lib::error::Result<core::option::Option<(alloc::string::String, alloc::string::String)>>
 pub fn grit_lib::porcelain::branch::set_upstream(&grit_lib::repo::Repository, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::branch::unset_upstream(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::branch::upstream_tracking_display(&str, &str) -> alloc::string::String
 pub mod grit_lib::porcelain::branch_error
 #[non_exhaustive] pub enum grit_lib::porcelain::branch_error::BranchError
 pub grit_lib::porcelain::branch_error::BranchError::AlreadyExists

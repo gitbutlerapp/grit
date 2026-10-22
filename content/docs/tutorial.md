@@ -136,7 +136,7 @@ $ grit branch -d feature
 Deleted branch feature (was 2e409e2).
 ```
 
-`grit branch -d` refuses to delete a branch whose commits haven't been merged into the branch you're on. Use `-D` when you really mean it.
+`grit branch -d` refuses to delete a branch whose commits haven't been merged into the branch you're on. Use `--force-delete` (or `-D`) when you really mean it.
 
 ## Share it with a remote
 

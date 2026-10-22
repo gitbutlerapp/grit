@@ -199,6 +199,21 @@ pub fn resolve_create_tracking(
         .map(Some)
 }
 
+/// Human- and JSON-facing upstream label for `(remote, merge)` config, matching [`crate::refs::branch_tracking::upstream_branch`].
+#[must_use]
+pub fn upstream_tracking_display(remote: &str, merge: &str) -> String {
+    if remote == "." {
+        return merge
+            .strip_prefix("refs/heads/")
+            .unwrap_or(merge)
+            .to_owned();
+    }
+    merge
+        .strip_prefix("refs/heads/")
+        .map(|tail| format!("{remote}/{tail}"))
+        .unwrap_or_else(|| merge.to_owned())
+}
+
 /// One local branch in a [`BranchList`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalBranch {
@@ -935,6 +950,52 @@ mod tests {
             }
         );
         assert!(!branch_exists(&repo, "topic"));
+    }
+
+    #[test]
+    fn upstream_tracking_display_local_branch_uses_short_name() {
+        assert_eq!(upstream_tracking_display(".", "refs/heads/base"), "base");
+        assert_eq!(
+            upstream_tracking_display("origin", "refs/heads/main"),
+            "origin/main"
+        );
+    }
+
+    #[test]
+    fn upstream_tracking_display_matches_live_upstream_after_local_track_create() {
+        let (_tmp, repo) = init();
+        let base_tip = commit(&repo, "one");
+        create_branch(
+            &repo,
+            &CreateBranchOptions {
+                name: "base".into(),
+                start: None,
+                force: false,
+                track: TrackMode::Never,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+        commit(&repo, "two");
+        let opts = CreateBranchOptions {
+            name: "topic".into(),
+            start: Some(StartPoint {
+                oid: base_tip,
+                label: "base".into(),
+            }),
+            force: false,
+            track: TrackMode::Always,
+            dry_run: false,
+        };
+        create_branch(&repo, &opts).unwrap();
+        let predicted =
+            resolve_create_tracking(&repo, "topic", "base", base_tip, TrackMode::Always)
+                .unwrap()
+                .map(|(remote, merge)| upstream_tracking_display(&remote, &merge));
+        let live =
+            crate::refs::branch_tracking::upstream_branch(&repo, "topic").map(|base| base.name);
+        assert_eq!(predicted, live);
+        assert_eq!(predicted.as_deref(), Some("base"));
     }
 
     #[test]
