@@ -12,10 +12,10 @@
 //!   ([`list_tags`], [`TagInfo`], [`tag_ref_metadata`]) and deletion ([`delete_tag`]).
 //! - The `--contains` / `--no-contains` / `--points-at` filter predicates
 //!   ([`tag_contains`], [`tag_points_at`]).
-//! - The `--sort` comparators: numeric `version:refname` ordering
-//!   ([`compare_version`] / [`version_segments`]) and the `creatordate` /
-//!   `taggerdate` epoch extraction ([`creator_date`] / [`parse_epoch_from_ident`]).
-//! - The `-l` glob matcher ([`glob_matches`]) and the `-n<N>` annotation
+//! - Ref list sort/filter helpers live in [`crate::refs::listing`] (`compare_version_names`,
+//!   [`crate::refs::listing::pattern_matches_short_name`], [`creator_date`],
+//!   [`crate::refs::listing::epoch_from_identity`]).
+//! - The `-n<N>` annotation
 //!   extraction ([`get_tag_annotation`]).
 //! - The `-m`/`-F` message cleanup ([`strip_comments`]).
 
@@ -25,6 +25,10 @@ use crate::check_ref_format::validate_tag_short_name;
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
 use crate::refs;
+use crate::refs::listing::{
+    compare_version_names, creator_date as listing_creator_date, epoch_from_identity,
+    pattern_matches_short_name,
+};
 use crate::repo::Repository;
 use crate::signing::{should_sign_tag, sign_serialized_tag, GpgConfig};
 
@@ -321,29 +325,7 @@ pub fn tag_points_at(repo: &Repository, tag_oid: &ObjectId, target: &ObjectId) -
 /// Returns 0 if the date cannot be determined.
 #[must_use]
 pub fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
-    let obj = match repo.odb().read(oid) {
-        Ok(o) => o,
-        Err(_) => return 0,
-    };
-    match obj.kind {
-        ObjectKind::Tag => {
-            // Parse tagger line for epoch
-            if let Ok(tag) = parse_tag(&obj.data) {
-                if let Some(ref tagger) = tag.tagger {
-                    return parse_epoch_from_ident(tagger);
-                }
-            }
-            0
-        }
-        ObjectKind::Commit => {
-            if let Ok(commit) = parse_commit(&obj.data) {
-                parse_epoch_from_ident(&commit.committer)
-            } else {
-                0
-            }
-        }
-        _ => 0,
-    }
+    listing_creator_date(repo.odb(), oid).unwrap_or(0)
 }
 
 /// Extract the epoch timestamp from a Git identity string.
@@ -351,40 +333,21 @@ pub fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
 /// Format: `Name <email> <epoch> <offset>`
 #[must_use]
 pub fn parse_epoch_from_ident(ident: &str) -> i64 {
-    // The epoch is the second-to-last token
-    let parts: Vec<&str> = ident.rsplitn(3, ' ').collect();
-    if parts.len() >= 2 {
-        parts[1].parse().unwrap_or(0)
-    } else {
-        0
-    }
+    epoch_from_identity(ident)
 }
 
-/// Compare two tag names as version strings (for `version:refname`).
-///
-/// Splits each name on `.` and `-` boundaries, comparing numeric segments
-/// numerically and non-numeric segments lexicographically.  This matches
-/// the behaviour of `git tag --sort=version:refname` (strverscmp-like).
+/// Compare two ref names using Git `version:refname` ordering (no configured suffix list).
 #[must_use]
 pub fn compare_version(a: &str, b: &str) -> std::cmp::Ordering {
-    let seg_a = version_segments(a);
-    let seg_b = version_segments(b);
-    for (sa, sb) in seg_a.iter().zip(seg_b.iter()) {
-        let ord = match (sa.parse::<u64>(), sb.parse::<u64>()) {
-            (Ok(na), Ok(nb)) => na.cmp(&nb),
-            _ => sa.cmp(sb),
-        };
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
-        }
-    }
-    seg_a.len().cmp(&seg_b.len())
+    compare_version_names(a, b, &[])
 }
 
 /// Split a version string into segments at `.` and `-` boundaries.
+///
+/// Deprecated: prefer [`compare_version_names`] from [`crate::refs::listing`].
 #[must_use]
+#[deprecated(note = "use grit_lib::refs::listing::compare_version_names instead")]
 pub fn version_segments(s: &str) -> Vec<&str> {
-    // Split on `.` and `-` keeping non-empty pieces
     s.split(['.', '-']).filter(|seg| !seg.is_empty()).collect()
 }
 
@@ -427,38 +390,10 @@ pub fn strip_comments(s: &str) -> String {
     result.join("\n") + "\n"
 }
 
-/// Simple glob pattern matching for tag names.
-///
-/// Supports `*` (matches any sequence) and `?` (matches any single character).
+/// Whether `name` matches `pattern` (Git tag/branch list glob on the short name).
 #[must_use]
 pub fn glob_matches(pattern: &str, name: &str) -> bool {
-    glob_match_bytes(pattern.as_bytes(), name.as_bytes())
-}
-
-/// Recursive glob matcher.
-fn glob_match_bytes(pat: &[u8], text: &[u8]) -> bool {
-    match (pat.first(), text.first()) {
-        (None, None) => true,
-        (Some(&b'*'), _) => {
-            // Skip consecutive stars
-            let pat_rest = pat
-                .iter()
-                .position(|&b| b != b'*')
-                .map_or(&pat[pat.len()..], |i| &pat[i..]);
-            if pat_rest.is_empty() {
-                return true;
-            }
-            for i in 0..=text.len() {
-                if glob_match_bytes(pat_rest, &text[i..]) {
-                    return true;
-                }
-            }
-            false
-        }
-        (Some(&b'?'), Some(_)) => glob_match_bytes(&pat[1..], &text[1..]),
-        (Some(p), Some(t)) if p == t => glob_match_bytes(&pat[1..], &text[1..]),
-        _ => false,
-    }
+    pattern_matches_short_name(name, pattern, false)
 }
 
 #[cfg(test)]

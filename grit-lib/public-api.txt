@@ -4629,6 +4629,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::midx::CompactError
 pub fn grit_lib::objects::midx::CompactError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::refs::listing::RefQueryError
+pub fn grit_lib::refs::listing::RefQueryError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::CloneError
@@ -11982,6 +11984,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::midx::CompactError
 pub fn grit_lib::objects::midx::CompactError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::refs::listing::RefQueryError
+pub fn grit_lib::refs::listing::RefQueryError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::CloneError
@@ -13350,6 +13354,7 @@ impl<'repo> grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::handle::References<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::refs::handle::References<'repo>::pack(&self, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
+pub fn grit_lib::refs::handle::References<'repo>::query(&self, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError>
 pub fn grit_lib::refs::handle::References<'repo>::reflog(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
 pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -13370,6 +13375,178 @@ pub mod grit_lib::refs::hide_refs
 pub fn grit_lib::refs::hide_refs::hide_ref_patterns_receive(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::refs::hide_refs::hide_ref_patterns_uploadpack(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::refs::hide_refs::ref_is_hidden(&str, &str, &[alloc::string::String]) -> bool
+pub mod grit_lib::refs::listing
+pub enum grit_lib::refs::listing::RefKind
+pub grit_lib::refs::listing::RefKind::Head
+pub grit_lib::refs::listing::RefKind::Other
+pub grit_lib::refs::listing::RefKind::Remote
+pub grit_lib::refs::listing::RefKind::Tag
+impl core::clone::Clone for grit_lib::refs::listing::RefKind
+pub fn grit_lib::refs::listing::RefKind::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::listing::RefKind
+impl core::cmp::PartialEq for grit_lib::refs::listing::RefKind
+pub fn grit_lib::refs::listing::RefKind::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::refs::listing::RefKind
+pub fn grit_lib::refs::listing::RefKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::refs::listing::RefKind
+impl core::marker::StructuralPartialEq for grit_lib::refs::listing::RefKind
+impl core::marker::Freeze for grit_lib::refs::listing::RefKind
+impl core::marker::Send for grit_lib::refs::listing::RefKind
+impl core::marker::Sync for grit_lib::refs::listing::RefKind
+impl core::marker::Unpin for grit_lib::refs::listing::RefKind
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefKind
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefKind
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefKind
+pub enum grit_lib::refs::listing::RefNamespace
+pub grit_lib::refs::listing::RefNamespace::Custom(alloc::string::String)
+pub grit_lib::refs::listing::RefNamespace::Heads
+pub grit_lib::refs::listing::RefNamespace::Remotes
+pub grit_lib::refs::listing::RefNamespace::Tags
+impl core::clone::Clone for grit_lib::refs::listing::RefNamespace
+pub fn grit_lib::refs::listing::RefNamespace::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::listing::RefNamespace
+impl core::cmp::PartialEq for grit_lib::refs::listing::RefNamespace
+pub fn grit_lib::refs::listing::RefNamespace::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::refs::listing::RefNamespace
+pub fn grit_lib::refs::listing::RefNamespace::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::listing::RefNamespace
+impl core::marker::Freeze for grit_lib::refs::listing::RefNamespace
+impl core::marker::Send for grit_lib::refs::listing::RefNamespace
+impl core::marker::Sync for grit_lib::refs::listing::RefNamespace
+impl core::marker::Unpin for grit_lib::refs::listing::RefNamespace
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefNamespace
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefNamespace
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefNamespace
+pub enum grit_lib::refs::listing::RefQueryError
+pub grit_lib::refs::listing::RefQueryError::MissingObjectDatabase
+pub grit_lib::refs::listing::RefQueryError::Store(grit_lib::error::Error)
+impl core::convert::From<grit_lib::error::Error> for grit_lib::refs::listing::RefQueryError
+pub fn grit_lib::refs::listing::RefQueryError::from(grit_lib::error::Error) -> Self
+impl core::error::Error for grit_lib::refs::listing::RefQueryError
+pub fn grit_lib::refs::listing::RefQueryError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::refs::listing::RefQueryError
+pub fn grit_lib::refs::listing::RefQueryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::refs::listing::RefQueryError
+pub fn grit_lib::refs::listing::RefQueryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::refs::listing::RefQueryError
+impl core::marker::Send for grit_lib::refs::listing::RefQueryError
+impl core::marker::Sync for grit_lib::refs::listing::RefQueryError
+impl core::marker::Unpin for grit_lib::refs::listing::RefQueryError
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefQueryError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefQueryError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefQueryError
+pub enum grit_lib::refs::listing::SortKey
+pub grit_lib::refs::listing::SortKey::Date
+pub grit_lib::refs::listing::SortKey::Name
+pub grit_lib::refs::listing::SortKey::Version
+impl core::clone::Clone for grit_lib::refs::listing::SortKey
+pub fn grit_lib::refs::listing::SortKey::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::listing::SortKey
+impl core::cmp::PartialEq for grit_lib::refs::listing::SortKey
+pub fn grit_lib::refs::listing::SortKey::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::refs::listing::SortKey
+pub fn grit_lib::refs::listing::SortKey::default() -> Self
+impl core::fmt::Debug for grit_lib::refs::listing::SortKey
+pub fn grit_lib::refs::listing::SortKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::refs::listing::SortKey
+impl core::marker::StructuralPartialEq for grit_lib::refs::listing::SortKey
+impl core::marker::Freeze for grit_lib::refs::listing::SortKey
+impl core::marker::Send for grit_lib::refs::listing::SortKey
+impl core::marker::Sync for grit_lib::refs::listing::SortKey
+impl core::marker::Unpin for grit_lib::refs::listing::SortKey
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::SortKey
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::SortKey
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::SortKey
+pub struct grit_lib::refs::listing::RefListing
+pub grit_lib::refs::listing::RefListing::full_name: alloc::string::String
+pub grit_lib::refs::listing::RefListing::kind: grit_lib::refs::listing::RefKind
+pub grit_lib::refs::listing::RefListing::oid: grit_lib::objects::ObjectId
+pub grit_lib::refs::listing::RefListing::peeled: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::refs::listing::RefListing::short_name: alloc::string::String
+impl core::clone::Clone for grit_lib::refs::listing::RefListing
+pub fn grit_lib::refs::listing::RefListing::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::listing::RefListing
+impl core::cmp::PartialEq for grit_lib::refs::listing::RefListing
+pub fn grit_lib::refs::listing::RefListing::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::refs::listing::RefListing
+pub fn grit_lib::refs::listing::RefListing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::listing::RefListing
+impl core::marker::Freeze for grit_lib::refs::listing::RefListing
+impl core::marker::Send for grit_lib::refs::listing::RefListing
+impl core::marker::Sync for grit_lib::refs::listing::RefListing
+impl core::marker::Unpin for grit_lib::refs::listing::RefListing
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefListing
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefListing
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefListing
+pub struct grit_lib::refs::listing::RefQuery
+pub grit_lib::refs::listing::RefQuery::limit: core::option::Option<usize>
+pub grit_lib::refs::listing::RefQuery::namespaces: alloc::vec::Vec<grit_lib::refs::listing::RefNamespace>
+pub grit_lib::refs::listing::RefQuery::patterns: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::refs::listing::RefQuery::sort: grit_lib::refs::listing::RefSort
+impl core::clone::Clone for grit_lib::refs::listing::RefQuery
+pub fn grit_lib::refs::listing::RefQuery::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::listing::RefQuery
+impl core::cmp::PartialEq for grit_lib::refs::listing::RefQuery
+pub fn grit_lib::refs::listing::RefQuery::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::refs::listing::RefQuery
+pub fn grit_lib::refs::listing::RefQuery::default() -> Self
+impl core::fmt::Debug for grit_lib::refs::listing::RefQuery
+pub fn grit_lib::refs::listing::RefQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::listing::RefQuery
+impl core::marker::Freeze for grit_lib::refs::listing::RefQuery
+impl core::marker::Send for grit_lib::refs::listing::RefQuery
+impl core::marker::Sync for grit_lib::refs::listing::RefQuery
+impl core::marker::Unpin for grit_lib::refs::listing::RefQuery
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefQuery
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefQuery
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefQuery
+pub struct grit_lib::refs::listing::RefQueryOptions
+pub grit_lib::refs::listing::RefQueryOptions::ignore_case: bool
+pub grit_lib::refs::listing::RefQueryOptions::versionsort_suffixes: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::refs::listing::RefQueryOptions
+pub fn grit_lib::refs::listing::RefQueryOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::refs::listing::RefQueryOptions
+pub fn grit_lib::refs::listing::RefQueryOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::refs::listing::RefQueryOptions
+pub fn grit_lib::refs::listing::RefQueryOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::refs::listing::RefQueryOptions
+impl core::marker::Send for grit_lib::refs::listing::RefQueryOptions
+impl core::marker::Sync for grit_lib::refs::listing::RefQueryOptions
+impl core::marker::Unpin for grit_lib::refs::listing::RefQueryOptions
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefQueryOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefQueryOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefQueryOptions
+pub struct grit_lib::refs::listing::RefSort
+pub grit_lib::refs::listing::RefSort::key: grit_lib::refs::listing::SortKey
+pub grit_lib::refs::listing::RefSort::reverse: bool
+impl core::clone::Clone for grit_lib::refs::listing::RefSort
+pub fn grit_lib::refs::listing::RefSort::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::listing::RefSort
+impl core::cmp::PartialEq for grit_lib::refs::listing::RefSort
+pub fn grit_lib::refs::listing::RefSort::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::refs::listing::RefSort
+pub fn grit_lib::refs::listing::RefSort::default() -> Self
+impl core::fmt::Debug for grit_lib::refs::listing::RefSort
+pub fn grit_lib::refs::listing::RefSort::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::refs::listing::RefSort
+impl core::marker::StructuralPartialEq for grit_lib::refs::listing::RefSort
+impl core::marker::Freeze for grit_lib::refs::listing::RefSort
+impl core::marker::Send for grit_lib::refs::listing::RefSort
+impl core::marker::Sync for grit_lib::refs::listing::RefSort
+impl core::marker::Unpin for grit_lib::refs::listing::RefSort
+impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefSort
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefSort
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefSort
+pub fn grit_lib::refs::listing::compare_version_names(&str, &str, &[alloc::string::String]) -> core::cmp::Ordering
+pub fn grit_lib::refs::listing::creator_date(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<i64>
+pub fn grit_lib::refs::listing::creator_date_from_bytes(grit_lib::objects::ObjectKind, &[u8]) -> i64
+pub fn grit_lib::refs::listing::epoch_from_identity(&str) -> i64
+pub fn grit_lib::refs::listing::pattern_matches_short_name(&str, &str, bool) -> bool
+pub fn grit_lib::refs::listing::query_listings_from_pairs<I>(I, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions, core::option::Option<&grit_lib::objects::odb::Odb>) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError> where I: core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, grit_lib::objects::ObjectId, core::option::Option<grit_lib::objects::ObjectId>)>
+pub fn grit_lib::refs::listing::query_listings_on_store(&dyn grit_lib::refs::store::RefStore, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions, core::option::Option<&grit_lib::objects::odb::Odb>) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError>
+pub fn grit_lib::refs::listing::query_refs(&grit_lib::repo::Repository, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError>
+pub fn grit_lib::refs::listing::ref_kind_from_name(&str) -> grit_lib::refs::listing::RefKind
+pub fn grit_lib::refs::listing::short_name_in_namespace(&str, &grit_lib::refs::listing::RefNamespace) -> alloc::string::String
 pub mod grit_lib::refs::ref_exclusions
 pub struct grit_lib::refs::ref_exclusions::RefExclusions
 pub grit_lib::refs::ref_exclusions::RefExclusions::hidden_configured: bool
@@ -14238,6 +14415,8 @@ pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &str, allo
 pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::open_ref_store(&std::path::Path) -> grit_lib::error::Result<alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>>
 pub fn grit_lib::refs::store::resolve_store<S: grit_lib::refs::store::RefStore + ?core::marker::Sized>(&S, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub mod grit_lib::refs::version_sort
+pub fn grit_lib::refs::version_sort::compare_refname_versions(&str, &str, &[alloc::string::String]) -> core::cmp::Ordering
 pub enum grit_lib::refs::LogRefsConfig
 pub grit_lib::refs::LogRefsConfig::Always
 pub grit_lib::refs::LogRefsConfig::None
@@ -14404,6 +14583,7 @@ impl<'repo> grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::handle::References<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::refs::handle::References<'repo>::pack(&self, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
+pub fn grit_lib::refs::handle::References<'repo>::query(&self, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError>
 pub fn grit_lib::refs::handle::References<'repo>::reflog(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
 pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
