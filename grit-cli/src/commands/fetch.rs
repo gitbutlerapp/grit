@@ -48,6 +48,7 @@ pub struct FetchShallowDelta {
 pub struct FetchAllOutcome {
     pub remotes: Vec<FetchAllRemoteOutcome>,
     pub updated: usize,
+    pub dry_run: bool,
 }
 
 /// One remote's result inside [`FetchAllOutcome`].
@@ -94,7 +95,7 @@ impl HumanRender for FetchAllOutcome {
                 remote: remote.remote.clone(),
                 updates: remote.updates.clone(),
                 updated: remote.updated,
-                dry_run: false,
+                dry_run: self.dry_run,
                 rejected: remote
                     .updates
                     .iter()
@@ -119,8 +120,11 @@ impl MarkdownRender for FetchAllOutcome {
                 remote: remote.remote.clone(),
                 updates: remote.updates.clone(),
                 updated: remote.updated,
-                dry_run: false,
-                rejected: false,
+                dry_run: self.dry_run,
+                rejected: remote
+                    .updates
+                    .iter()
+                    .any(|u| u.status == FetchUpdateStatus::Rejected),
                 shallow: None,
             };
             one.render_markdown(w, ctx)?;
@@ -194,11 +198,21 @@ impl HumanRender for FetchOutcome {
                 );
             }
         }
+        let pending = pending_update_count(&self.updates);
+        let summary_count = if self.dry_run { pending } else { self.updated };
         if self.rejected {
             outln!(w, "Some ref updates from {} were rejected.", self.remote);
-        } else if self.updated == 0 {
+        } else if summary_count == 0 {
             outln!(w, "Already up to date with {}.", self.remote);
-        } else if self.updated > 0 {
+        } else if self.dry_run {
+            outln!(
+                w,
+                "Would fetch {} update{} from {}.",
+                summary_count,
+                plural(summary_count),
+                self.remote
+            );
+        } else {
             outln!(
                 w,
                 "Fetched {} update{} from {}.",
@@ -213,7 +227,7 @@ impl HumanRender for FetchOutcome {
 
 impl MarkdownRender for FetchOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_fetch_updates(w, &self.remote, &self.updates, self.updated)?;
+        markdown::print_fetch_updates(w, &self.remote, &self.updates, self.updated, self.dry_run)?;
         Ok(())
     }
 }
@@ -381,7 +395,16 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     Ok(FetchAllOutcome {
         remotes,
         updated: total_updated,
+        dry_run: args.dry_run,
     })
+}
+
+/// Refs that would change on a live fetch (everything except `up_to_date`).
+fn pending_update_count(updates: &[FetchUpdate]) -> usize {
+    updates
+        .iter()
+        .filter(|u| u.status != FetchUpdateStatus::UpToDate)
+        .count()
 }
 
 fn map_updates(outcome: &LibFetchOutcome, dry_run: bool) -> (Vec<FetchUpdate>, usize, bool) {
@@ -524,6 +547,31 @@ mod map_remote_error_tests {
         let payload = structured_json_payload(&err).expect("structured payload");
         assert_eq!(payload.kind, "hash_collision");
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));
+    }
+
+    #[test]
+    fn pending_update_count_ignores_up_to_date() {
+        use super::{pending_update_count, FetchUpdate, FetchUpdateStatus};
+
+        let updates = vec![
+            FetchUpdate {
+                ref_name: "refs/remotes/origin/main".into(),
+                remote_ref: "refs/heads/main".into(),
+                status: FetchUpdateStatus::UpToDate,
+                old_oid: None,
+                new_oid: None,
+                reason: None,
+            },
+            FetchUpdate {
+                ref_name: "refs/remotes/origin/x".into(),
+                remote_ref: "refs/heads/x".into(),
+                status: FetchUpdateStatus::New,
+                old_oid: None,
+                new_oid: Some("abc".into()),
+                reason: None,
+            },
+        ];
+        assert_eq!(pending_update_count(&updates), 1);
     }
 
     #[test]

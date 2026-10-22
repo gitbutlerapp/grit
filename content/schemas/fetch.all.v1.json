@@ -87,6 +87,9 @@
   },
   "description": "Result of `grit fetch --all`.",
   "properties": {
+    "dry_run": {
+      "type": "boolean"
+    },
     "remotes": {
       "items": {
         "$ref": "#/definitions/FetchAllRemoteOutcome"
@@ -100,6 +103,7 @@
     }
   },
   "required": [
+    "dry_run",
     "remotes",
     "updated"
   ],

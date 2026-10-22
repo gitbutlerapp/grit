@@ -280,6 +280,89 @@ fn fetch_dry_run_writes_nothing() -> TestResult {
 }
 
 #[test]
+fn fetch_dry_run_prune_summary_matches_pending_updates() -> TestResult {
+    let base = tempfile::tempdir()?;
+    let (origin, seed) = seed_remote(base.path())?;
+    git(&seed, &["branch", "b1"])?;
+    git(&seed, &["push", "-u", "origin", "b1"])?;
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=t@example.com",
+            "tag",
+            "t1",
+        ],
+    )?;
+    git(&seed, &["push", "origin", "t1"])?;
+
+    let client = git_clone(base.path(), &origin, "client");
+
+    git(&seed, &["checkout", "-b", "new/one"])?;
+    fs::write(seed.join("new.txt"), "n\n")?;
+    git(&seed, &["add", "new.txt"])?;
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-m",
+            "new branch",
+        ],
+    )?;
+    git(&seed, &["push", "-u", "origin", "new/one"])?;
+    git(&seed, &["push", "origin", "--delete", "b1"])?;
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=t@example.com",
+            "tag",
+            "lw1",
+        ],
+    )?;
+    git(&seed, &["push", "origin", "lw1"])?;
+
+    let out = grit(&client, &["fetch", "--dry-run", "--prune"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Would fetch"),
+        "expected dry-run summary, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Already up to date"),
+        "dry-run with pending updates must not say up to date:\n{stdout}"
+    );
+
+    let json = grit_json(&client, &["fetch", "--dry-run", "--prune"]);
+    assert_eq!(json["dry_run"], true);
+    assert_eq!(json["updated"], 0);
+    let pending = json["updates"]
+        .as_array()
+        .map(|updates| {
+            updates
+                .iter()
+                .filter(|u| u["status"] != "up_to_date")
+                .count()
+        })
+        .unwrap_or(0);
+    assert!(
+        pending > 0,
+        "expected at least one pending update, got {pending}: {}",
+        json["updates"]
+    );
+    Ok(())
+}
+
+#[test]
 fn fetch_tags_flags_match_git() -> TestResult {
     let base = tempfile::tempdir()?;
     let (origin, seed) = seed_remote(base.path())?;

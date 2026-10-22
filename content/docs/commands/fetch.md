@@ -25,7 +25,7 @@ Human output lists each local ref with its remote source and old → new oids. P
 
 Tag policy follows Git: default is follow-tags (reachable annotated tags), `--tags` fetches every remote tag, `--no-tags` disables automatic tags. `remote.<name>.tagOpt` (`--tags` / `--no-tags`) applies when the CLI does not override it.
 
-`--dry-run` negotiates and reports updates without writing refs, objects, or `FETCH_HEAD`.
+`--dry-run` negotiates and reports updates without writing refs, objects, or `FETCH_HEAD`. Human output ends with **Would fetch N update(s) from …** when anything would change, or **Already up to date with …** when nothing would.
 
 `--depth`, `--deepen`, and `--unshallow` match Git’s shallow fetch controls (mutually exclusive). `--depth` truncates history on the first shallow fetch; `--deepen` adds commits relative to an existing shallow clone; `--unshallow` fetches the rest and removes `.git/shallow`. `--unshallow` on a complete repository is a typed error.
 
@@ -63,6 +63,11 @@ Already up to date with origin.
 $ grit fetch --prune
   refs/remotes/origin/gone1  a1b2c3d → deleted
 Fetched 1 update from origin.
+
+$ grit fetch --dry-run --prune
+  refs/remotes/origin/gone1  a1b2c3d → deleted
+  refs/remotes/origin/feature  ← refs/heads/feature  new → b52cca6
+Would fetch 2 updates from origin.
 ```
 
 Fetch a pull request ref into a local branch:
@@ -87,7 +92,7 @@ Schema: [v1](/schemas/fetch/v1.json)
 | `dry_run` | boolean | True when `--dry-run` was used. |
 | `rejected` | boolean | True when any update was rejected (exit 1). |
 | `updates` | array | Per-ref results. Each object has `ref`, `remote_ref`, `status` (`new`, `fast_forward`, `forced`, `pruned`, `rejected`, or `up_to_date`), `old_oid` and `new_oid` (full hex or `null`), and `reason` when `status` is `rejected`. |
-| `updated` | number | Count of refs that actually changed. |
+| `updated` | number | Count of refs that actually changed. Always **0** when `dry_run` is true (nothing is written); count pending changes by filtering `updates` where `status` is not `up_to_date`. |
 | `shallow` | object | When present: `added` and `removed` lists of full hex oids for new/removed `.git/shallow` boundaries. |
 
 Example:
@@ -138,13 +143,15 @@ When `--all` is used, JSON has no top-level `remote` field. Each entry in `remot
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
+| `dry_run` | boolean | True when `--dry-run` was used. |
 | `remotes` | array | One object per remote attempted (skipFetchAll remotes omitted). |
-| `updated` | number | Total refs changed across all successful remotes. |
+| `updated` | number | Total refs changed across all successful remotes. Always **0** when `dry_run` is true. |
 
 Example:
 
 ```json
 {
+  "dry_run": false,
   "remotes": [
     {
       "remote": "origin",

@@ -412,8 +412,15 @@ pub fn print_fetch_updates(
     remote: &str,
     updates: &[crate::commands::fetch::FetchUpdate],
     updated: usize,
+    dry_run: bool,
 ) -> anyhow::Result<()> {
-    if updates.is_empty() && updated == 0 {
+    use crate::commands::fetch::FetchUpdateStatus;
+    let pending = updates
+        .iter()
+        .filter(|u| u.status != FetchUpdateStatus::UpToDate)
+        .count();
+    let summary_count = if dry_run { pending } else { updated };
+    if updates.is_empty() && summary_count == 0 {
         outln!(w, "Already up to date with `{remote}`.");
         return Ok(());
     }
@@ -446,6 +453,13 @@ pub fn print_fetch_updates(
     if any_rejected {
         outln!(w);
         outln!(w, "Some ref updates from `{remote}` were **rejected**.");
+    } else if dry_run && pending > 0 {
+        outln!(w);
+        outln!(
+            w,
+            "Would fetch **{pending}** update{} from `{remote}`.",
+            if pending == 1 { "" } else { "s" }
+        );
     } else if updated > 0 {
         outln!(w);
         outln!(
