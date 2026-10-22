@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use time::OffsetDateTime;
@@ -160,14 +161,41 @@ fn prepare_signed_tag(grit: &Path, worktree: &Path) -> Result<()> {
     Ok(())
 }
 
-fn git_plain_tree_sha256_script(git: &Path, rev: &str) -> Vec<String> {
-    let script =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/tree_sha256_git_digest.py");
-    sh_script_internal(format!(
-        "/usr/bin/env python3 {} {} {rev:?} >/dev/null",
+/// Git-only tree-sha256 reproduction (one `ls-tree -r -z` + one `cat-file --batch` per repo).
+const GIT_TREE_SHA256_DIGEST_PY: &str = include_str!("../scripts/tree_sha256_git_digest.py");
+
+fn materialized_git_tree_sha256_digest_script() -> Result<PathBuf> {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(path) = PATH.get() {
+        return Ok(path.clone());
+    }
+    let path = scratch_root().join("tree_sha256_git_digest.py");
+    std::fs::write(&path, GIT_TREE_SHA256_DIGEST_PY)
+        .with_context(|| format!("write {}", path.display()))?;
+    let _ = PATH.set(path.clone());
+    Ok(path)
+}
+
+fn git_tree_sha256_digest_script() -> Result<PathBuf> {
+    materialized_git_tree_sha256_digest_script()
+}
+
+/// Shell command for the git-only tree-sha256 reproduction (see `GIT_TREE_SHA256_DIGEST_PY`).
+pub fn git_plain_tree_sha256_python(git: &Path, rev: &str) -> Result<String> {
+    let script = git_tree_sha256_digest_script()?;
+    Ok(format!(
+        "/usr/bin/env python3 {} {} {rev:?}",
         shell_escape(&script),
         shell_escape(git),
     ))
+}
+
+/// Hyperfine argv: git-only digest pipeline (stdout discarded for timing).
+pub fn git_plain_tree_sha256_script(git: &Path, rev: &str) -> Result<Vec<String>> {
+    Ok(sh_script_internal(format!(
+        "{} >/dev/null",
+        git_plain_tree_sha256_python(git, rev)?
+    )))
 }
 
 fn grit_verify_digest_argv(grit: &Path, tag: &str) -> Vec<String> {
@@ -302,8 +330,9 @@ fn scenarios_for_fixture(
     git: &Path,
     grit: &Path,
     ref_bin: Option<&Path>,
-) -> Vec<Scenario> {
+) -> Result<Vec<Scenario>> {
     let id_prefix = fixture.id;
+    let git_digest_argv = git_plain_tree_sha256_script(git, "HEAD")?;
     let mut out = vec![
         Scenario {
             id: format!("{id_prefix}/tag-verify-digest-no-signature"),
@@ -312,7 +341,7 @@ fn scenarios_for_fixture(
             description: "grit tag --verify --no-signature vs git ls-tree/cat-file sha256 pipeline"
                 .into(),
             grit_argv: grit_verify_digest_argv(grit, BENCH_DIGEST_TAG),
-            git_argv: git_plain_tree_sha256_script(git, "HEAD"),
+            git_argv: git_digest_argv,
             driver: Driver::Cli,
             prepare_kind: Some(PrepareKind::TagTreeSha256Digest),
             grit_via_shell: true,
@@ -358,7 +387,7 @@ fn scenarios_for_fixture(
             git_via_shell: true,
         });
     }
-    out
+    Ok(out)
 }
 
 /// Run tree-sha256 tag benchmarks across real-shaped fixtures.
@@ -391,7 +420,7 @@ pub fn run_tag_tree_sha256_suite(
     let mut scenarios = Vec::new();
     for fixture in &fixtures {
         prepare_signed_tag(grit, &fixture.worktree)?;
-        for spec in scenarios_for_fixture(fixture, git, grit, ref_bin.as_deref()) {
+        for spec in scenarios_for_fixture(fixture, git, grit, ref_bin.as_deref())? {
             scenarios.push(run_scenario(
                 hyperfine,
                 git,
@@ -421,11 +450,11 @@ pub fn run_tag_tree_sha256_suite(
         schema_version: SCHEMA_VERSION,
         timestamp: format_timestamp(timestamp),
         machine: collect_machine_info(&scratch)?,
-        tools: ToolVersions {
-            git: tool_version(git),
-            grit: tool_version(grit),
-            grit_commit: grit_source_commit(),
-        },
+        tools: ToolVersions::without_hyperfine(
+            tool_version(git),
+            tool_version(grit),
+            grit_source_commit(),
+        ),
         fixtures: fixture_records,
         scenarios,
     })

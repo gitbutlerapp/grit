@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recompute a tree-sha256 digest: one `git ls-tree -r -z` and one `cat-file --batch` per repo."""
+"""Git tree-sha256 reproduction: one ls-tree -r -z and one cat-file --batch per repo."""
 
 from __future__ import annotations
 
@@ -7,10 +7,6 @@ import hashlib
 import os
 import subprocess
 import sys
-
-
-def git_out(git: str, cwd: str, *args: str) -> bytes:
-    return subprocess.check_output([git, *args], cwd=cwd)
 
 
 def parse_ls_tree(data: bytes):
@@ -33,12 +29,13 @@ def parse_ls_tree(data: bytes):
 
 
 class BatchBlobReader:
-    def __init__(self, git: str, cwd: str) -> None:
+    def __init__(self, git: str, repo_root: str, env: dict[str, str]) -> None:
         self._proc = subprocess.Popen(
             [git, "cat-file", "--batch"],
-            cwd=cwd,
+            cwd=repo_root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            env=env,
         )
         self._cache: dict[str, str] = {}
 
@@ -75,8 +72,34 @@ def submodule_record(hex_digest: str, path: bytes) -> bytes:
     return rec + b"\0"
 
 
-def compute_digest(git: str, cwd: str, commit: str) -> str:
-    listing = git_out(git, cwd, "ls-tree", "-r", "-z", "--full-name", commit)
+def git_objects_dir(git: str, repo_root: str) -> str:
+    git_dir = subprocess.check_output(
+        [git, "rev-parse", "--git-dir"], cwd=repo_root, text=True
+    ).strip()
+    if not os.path.isabs(git_dir):
+        git_dir = os.path.join(repo_root, git_dir)
+    return os.path.join(git_dir, "objects")
+
+
+def git_env(extra_alternate: str | None) -> dict[str, str]:
+    env = os.environ.copy()
+    if extra_alternate:
+        prev = env.get("GIT_ALTERNATE_OBJECT_DIRECTORIES", "")
+        env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = (
+            extra_alternate if not prev else prev + os.pathsep + extra_alternate
+        )
+    return env
+
+
+def compute_digest(git: str, commit: str, extra_alternate: str | None = None) -> str:
+    repo_root = os.getcwd()
+    env = git_env(extra_alternate)
+    tree = subprocess.check_output(
+        [git, "rev-parse", commit + "^{tree}"], cwd=repo_root, text=True, env=env
+    ).strip()
+    listing = subprocess.check_output(
+        [git, "ls-tree", "-r", "-z", "--full-name", tree], cwd=repo_root, env=env
+    )
     records: list[bytes] = []
     blobs: list[tuple[bytes, str]] = []
     gitlinks: list[tuple[bytes, str]] = []
@@ -85,17 +108,21 @@ def compute_digest(git: str, cwd: str, commit: str) -> str:
             blobs.append((name, oid))
         elif typ == b"commit":
             gitlinks.append((name, oid))
-
-    batch = BatchBlobReader(git, cwd)
+    batch = BatchBlobReader(git, repo_root, env)
     try:
         for path, oid in blobs:
-            hex_d = batch.sha256(oid)
-            records.append(file_record(hex_d, path))
+            records.append(file_record(batch.sha256(oid), path))
         for path, oid in gitlinks:
-            sub_wt = os.path.join(cwd, path.decode())
+            sub_wt = os.path.join(repo_root, path.decode())
             if not os.path.isdir(sub_wt):
                 raise RuntimeError(f"submodule not checked out: {path!r}")
-            sub_digest = compute_digest(git, sub_wt, oid)
+            parent_objects = git_objects_dir(git, repo_root)
+            prev = os.getcwd()
+            try:
+                os.chdir(sub_wt)
+                sub_digest = compute_digest(git, oid, parent_objects)
+            finally:
+                os.chdir(prev)
             records.append(submodule_record(sub_digest, path))
     finally:
         batch.close()
@@ -107,9 +134,7 @@ def main() -> None:
     if len(sys.argv) != 3:
         sys.exit("usage: tree_sha256_git_digest.py <git-binary> <rev>")
     git, rev = sys.argv[1], sys.argv[2]
-    cwd = os.getcwd()
-    digest = compute_digest(git, cwd, rev)
-    sys.stdout.write(digest)
+    sys.stdout.write(compute_digest(git, rev))
 
 
 if __name__ == "__main__":
