@@ -1352,6 +1352,23 @@ impl Odb {
         self.with_pack_store_for(&self.objects_dir, f)
     }
 
+    /// Open a reader over the single local pack for a long object walk.
+    ///
+    /// Returns `None` unless [`Self::with_pack_read_context`] is active for this database,
+    /// there is no custom primary store, and exactly one local pack exists (the conditions
+    /// under which the files store's [`Self::read`] path opens the same reader per call). A
+    /// reader miss is not authoritative: callers must fall back to [`Self::read`] for
+    /// objects it does not find.
+    pub(crate) fn open_session_pack_reader(&self) -> Result<Option<pack::SingleLocalPackReader>> {
+        if self.custom_primary.is_some()
+            || !PackStore::read_context_matches_objects_dir(&self.objects_dir)
+        {
+            return Ok(None);
+        }
+        self.sync_delta_base_cache_limit();
+        pack::SingleLocalPackReader::open_allow_loose(&self.objects_dir)
+    }
+
     /// Touch the loose object file or pack file containing `oid`, matching Git's
     /// `odb_freshen_object` (updates mtime so age-based prune keeps recently re-referenced objects).
     ///

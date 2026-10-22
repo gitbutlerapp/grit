@@ -982,6 +982,41 @@ pub(crate) fn parse_commit_tree_and_parents(data: &[u8]) -> Result<(ObjectId, Ve
     Ok((commit.tree(), commit.parents().to_vec()))
 }
 
+/// Parse `tree` and `parent` headers from a possibly truncated leading slice of a commit.
+///
+/// `prefix` may be cut anywhere (for example a fixed-size inflate of the object start).
+/// Returns `Some` only when the slice provably holds the complete parent list: the `tree`
+/// line, every `parent` line, and the start of a following line that cannot be another
+/// `parent` header. Returns `None` when the slice ends inside that region or the headers are
+/// not in canonical form, so the caller should parse the whole object instead.
+pub(crate) fn parse_commit_tree_and_parents_prefix(
+    prefix: &[u8],
+    hex_len: usize,
+) -> Option<(ObjectId, Vec<ObjectId>)> {
+    fn header_oid<'a>(rest: &'a [u8], key: &[u8], hex_len: usize) -> Option<(ObjectId, &'a [u8])> {
+        let line = rest.strip_prefix(key)?;
+        if line.len() <= hex_len || line[hex_len] != b'\n' {
+            return None;
+        }
+        let oid = ObjectId::from_hex(std::str::from_utf8(&line[..hex_len]).ok()?).ok()?;
+        Some((oid, &line[hex_len + 1..]))
+    }
+    const PARENT: &[u8] = b"parent ";
+    let (tree, mut rest) = header_oid(prefix, b"tree ", hex_len)?;
+    let mut parents = Vec::new();
+    loop {
+        if rest.len() < PARENT.len() && PARENT.starts_with(rest) {
+            return None;
+        }
+        if !rest.starts_with(PARENT) {
+            return Some((tree, parents));
+        }
+        let (parent, next) = header_oid(rest, PARENT, hex_len)?;
+        parents.push(parent);
+        rest = next;
+    }
+}
+
 /// Parse the raw data of a commit object.
 ///
 /// # Errors
@@ -1341,6 +1376,61 @@ mod commit_parse_tests {
         let entries = parse_tree_with_oid_len(&raw, HashAlgo::Sha256.len()).expect("tree");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].oid, oid);
+    }
+
+    #[test]
+    fn parse_commit_tree_and_parents_prefix_matches_full_parse_or_declines() -> Result<()> {
+        let tree = "1111111111111111111111111111111111111111";
+        let p1 = "2222222222222222222222222222222222222222";
+        let p2 = "3333333333333333333333333333333333333333";
+        let raw = format!(
+            "tree {tree}\nparent {p1}\nparent {p2}\nauthor A <a@x> 1 +0000\n\
+             committer C <c@x> 2 +0000\n\nmessage\n"
+        );
+        let full = parse_commit_tree_and_parents(raw.as_bytes())?;
+        assert_eq!(full.1.len(), 2);
+        let hex_len = HashAlgo::Sha1.hex_len();
+        let header_end = raw.find("author").expect("author line");
+        for cut in 0..=raw.len() {
+            let got = parse_commit_tree_and_parents_prefix(&raw.as_bytes()[..cut], hex_len);
+            if cut > header_end {
+                assert_eq!(got.as_ref(), Some(&full), "cut at {cut}");
+            } else {
+                assert_eq!(
+                    got, None,
+                    "cut at {cut} must not claim a complete parent list"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn parse_commit_tree_and_parents_prefix_handles_root_and_sha256() -> Result<()> {
+        let root = b"tree 1111111111111111111111111111111111111111\nauthor A <a@x> 1 +0000\n";
+        let (tree, parents) =
+            parse_commit_tree_and_parents_prefix(root, HashAlgo::Sha1.hex_len()).expect("root");
+        assert_eq!(tree.to_hex(), "1111111111111111111111111111111111111111");
+        assert!(parents.is_empty());
+
+        let t = "a".repeat(64);
+        let p = "b".repeat(64);
+        let raw = format!("tree {t}\nparent {p}\ncommitter C <c@x> 2 +0000\n");
+        let (tree, parents) =
+            parse_commit_tree_and_parents_prefix(raw.as_bytes(), HashAlgo::Sha256.hex_len())
+                .expect("sha256");
+        assert_eq!(tree.to_hex(), t);
+        assert_eq!(parents.len(), 1);
+        assert_eq!(parents[0].to_hex(), p);
+
+        assert!(parse_commit_tree_and_parents_prefix(raw.as_bytes(), 40).is_none());
+        assert!(parse_commit_tree_and_parents_prefix(b"parent x\n", 40).is_none());
+        assert!(parse_commit_tree_and_parents_prefix(
+            b"tree zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\nauthor\n",
+            40
+        )
+        .is_none());
+        Ok(())
     }
 
     #[test]
