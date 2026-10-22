@@ -221,6 +221,85 @@ fn large_max_count_without_paths_matches_git() {
     assert!(!result.commits.is_empty());
 }
 
+/// A merge-heavy history with many equal committer dates and some clock skew, large enough
+/// that a `--max-count` page crosses the bounded-walk cap. Returns the tip.
+fn write_tied_skewed_history(odb: &Odb, commits: usize) -> grit_lib::objects::ObjectId {
+    let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        state >> 33
+    };
+    let mut written: Vec<grit_lib::objects::ObjectId> = Vec::with_capacity(commits);
+    for i in 0..commits {
+        let mut parents = Vec::new();
+        if let Some(&prev) = written.last() {
+            parents.push(prev);
+        }
+        if written.len() > 8 && next() % 4 == 0 {
+            let back = 2 + (next() as usize % 6);
+            parents.push(written[written.len() - back]);
+        }
+        // Runs of three commits share a timestamp; every so often a commit is older than its
+        // parent.
+        let mut when = 1_000_000 + (i as i64 / 3) * 10;
+        if next() % 13 == 0 {
+            when -= 25;
+        }
+        let commit = write_commit(odb, &parents, &format!("c{i}"), when, when).expect("commit");
+        written.push(commit);
+    }
+    *written.last().expect("at least one commit")
+}
+
+#[test]
+fn large_max_count_matches_git_order_with_tied_and_skewed_dates() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let tip = write_tied_skewed_history(repo.odb(), 4_300);
+    let tip_hex = tip.to_hex();
+
+    for (max_count, skip) in [(4_200usize, 0usize), (10, 0), (4_100, 50), (10_000, 0)] {
+        // Same shape as the options `RevWalk` builds for `grit log` / `grit revs`.
+        let opts = RevListOptions {
+            max_count: Some(max_count),
+            skip,
+            path_graph_reorder: false,
+            use_commit_graph: true,
+            ..Default::default()
+        };
+        let max_arg = max_count.to_string();
+        let skip_arg = skip.to_string();
+        let expected = support::git_rev_list(
+            dir.path(),
+            &["--max-count", &max_arg, "--skip", &skip_arg, &tip_hex],
+        );
+        let actual = rev_list(&repo, std::slice::from_ref(&tip_hex), &[], &opts)
+            .expect("rev-list")
+            .commits;
+        assert_eq!(
+            actual, expected,
+            "rev-list --max-count {max_count} --skip {skip} order differs from git"
+        );
+
+        let reversed = rev_list(
+            &repo,
+            std::slice::from_ref(&tip_hex),
+            &[],
+            &RevListOptions {
+                reverse: true,
+                ..opts
+            },
+        )
+        .expect("rev-list --reverse")
+        .commits;
+        let mut expected_reversed = expected;
+        expected_reversed.reverse();
+        assert_eq!(reversed, expected_reversed);
+    }
+}
+
 #[test]
 fn bounded_path_limit_extreme_max_count_does_not_panic() {
     let repo = support::HistoryRepo::init();
