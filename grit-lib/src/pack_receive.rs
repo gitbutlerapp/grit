@@ -729,12 +729,6 @@ impl TempPackReceive {
         )))
     }
 
-    /// Whether any pack byte (including the `PACK` header) has been written.
-    #[must_use]
-    pub fn has_pack(&self) -> bool {
-        self.seen_pack
-    }
-
     /// Demux side-band from `reader` into this temp file.
     ///
     /// # Errors
@@ -786,94 +780,6 @@ impl TempPackReceive {
     #[must_use]
     pub fn path(&self) -> &Path {
         self.spool.path()
-    }
-}
-
-/// Completed HTTP pack receive: temp file on disk or in-memory bytes.
-pub enum PackReceiveOutcome {
-    /// Pack bytes held in memory (fresh clone fast path).
-    Memory(Vec<u8>),
-    /// Pack written under `objects/incoming/` (not yet installed as `objects/pack/*.pack`).
-    File(PathBuf),
-}
-
-enum PackReceiveInner {
-    File(TempPackReceive),
-    Memory(MemoryPackReceive),
-}
-
-/// In-memory side-band pack accumulator for small/medium fresh clones.
-struct MemoryPackReceive {
-    buf: Vec<u8>,
-    seen_pack: bool,
-    sideband_payload: Vec<u8>,
-}
-
-impl MemoryPackReceive {
-    fn new() -> Self {
-        Self {
-            buf: Vec::with_capacity(8 * 1024 * 1024),
-            seen_pack: false,
-            sideband_payload: Vec::with_capacity(65520),
-        }
-    }
-
-    fn finish(self) -> Result<Option<Vec<u8>>> {
-        if !self.seen_pack || self.buf.len() < 12 {
-            return Ok(None);
-        }
-        Ok(Some(self.buf))
-    }
-}
-
-/// Temp pack file receive sink for HTTP stateless-RPC fetch/clone.
-pub struct PackReceiveSink(PackReceiveInner);
-
-impl PackReceiveSink {
-    /// Create a temp pack spool file (see [`TempPackReceive::create`]).
-    pub fn create(objects_dir: &Path) -> Result<Self> {
-        Ok(Self(PackReceiveInner::File(TempPackReceive::create(
-            objects_dir,
-        )?)))
-    }
-
-    /// Accumulate the pack in memory (fresh clone over HTTP).
-    pub fn create_in_memory() -> Self {
-        Self(PackReceiveInner::Memory(MemoryPackReceive::new()))
-    }
-
-    /// Demux a side-band-64k stream from `reader` into this sink.
-    pub fn read_sideband(
-        &mut self,
-        reader: &mut dyn Read,
-        progress: &mut dyn Progress,
-    ) -> Result<()> {
-        match &mut self.0 {
-            PackReceiveInner::File(f) => f.read_sideband(reader, progress),
-            PackReceiveInner::Memory(m) => {
-                let mut pending = Vec::new();
-                let mut seen = m.seen_pack;
-                let mut target = PackReceiveTarget::Memory(&mut m.buf);
-                read_sideband_pack_tail(
-                    reader,
-                    &mut target,
-                    progress,
-                    &mut pending,
-                    &mut seen,
-                    &mut m.sideband_payload,
-                )?;
-                m.seen_pack = seen;
-                Ok(())
-            }
-        }
-    }
-
-    /// Finish receiving and return pack bytes or a temp path when non-empty.
-    pub fn finish(self) -> Result<Option<PackReceiveOutcome>> {
-        match self.0 {
-            PackReceiveInner::File(f) => Ok(f.finish()?.map(PackReceiveOutcome::File)),
-            PackReceiveInner::Memory(m) => Ok(m.finish()?.map(PackReceiveOutcome::Memory)),
-        }
     }
 }
 

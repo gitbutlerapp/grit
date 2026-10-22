@@ -770,7 +770,7 @@ fn negotiate_pack_v2(
         v2_local_haves(local_git_dir, wants)?
     };
 
-    let mut pack_receive = crate::pack_receive::PackReceiveSink::create(local_odb.objects_dir())?;
+    let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
     let mut shallow_update = ShallowUpdate::default();
     if haves.is_empty() {
         // No local history to offer: single round, wants + done, read the pack.
@@ -792,7 +792,7 @@ fn negotiate_pack_v2(
             progress,
             sideband_all,
         )?;
-        return Ok((finish_pack_sink(pack_receive)?, shallow_update));
+        return Ok((pack_receive.finish()?, shallow_update));
     }
 
     // Multi-round: round 1 sends the first batch of haves WITHOUT done.
@@ -860,28 +860,7 @@ fn negotiate_pack_v2(
             )?;
         }
     }
-    Ok((finish_pack_sink(pack_receive)?, shallow_update))
-}
-
-fn finish_pack_sink(
-    sink: crate::pack_receive::PackReceiveSink,
-) -> Result<Option<std::path::PathBuf>> {
-    use crate::pack_receive::PackReceiveOutcome;
-    match sink.finish()? {
-        None => Ok(None),
-        Some(PackReceiveOutcome::File(path)) => Ok(Some(path)),
-        Some(PackReceiveOutcome::Memory(bytes)) => {
-            let mut tmp = tempfile::Builder::new()
-                .prefix("tmp_pack_mem_")
-                .tempfile()
-                .map_err(crate::error::Error::Io)?;
-            use std::io::Write;
-            tmp.write_all(&bytes).map_err(crate::error::Error::Io)?;
-            tmp.flush().map_err(crate::error::Error::Io)?;
-            let (_file, path) = tmp.keep().map_err(|e| crate::error::Error::Io(e.error))?;
-            Ok(Some(path))
-        }
-    }
+    Ok((pack_receive.finish()?, shallow_update))
 }
 
 /// The shallow/deepen arguments for a v2 `command=fetch` request, derived from
@@ -1103,7 +1082,7 @@ fn v2_wanted_ref_ad_line(line: &str) -> bool {
 pub(crate) fn read_v2_fetch_pack_response(
     reader: &mut dyn Read,
     out: &mut Vec<u8>,
-    pack_sink: Option<&mut crate::pack_receive::PackReceiveSink>,
+    pack_sink: Option<&mut crate::pack_receive::TempPackReceive>,
     shallow_out: &mut ShallowUpdate,
     progress: &mut dyn Progress,
     sideband_all: bool,
