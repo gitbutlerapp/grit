@@ -108,6 +108,11 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | `peeled` | string | Commit oid when the tag peels to a commit. |
 | `replaced` | string | For `create` with `--force`, oid the tag ref pointed at before replacement. |
 | `dry_run` | boolean | For `create` or `delete`, whether refs were left unchanged. |
+| `tree_sha256` | string | For `create` with `--tree-sha256`, hex digest recorded on the tag. |
+| `tree_sha256_excluded` | array | Submodule paths excluded from the digest (when `--exclude-submodule` is used). |
+| `tree_sha256_files` | integer | Blob count hashed for the tree-sha256 claim. |
+| `tree_sha256_submodules` | integer | Submodule trees included in the digest walk. |
+| `tree_sha256_hash_ms` | number | Wall time spent computing the tree-sha256 digest (milliseconds). |
 | `ok` | boolean | For `verify`, whether every tag passed. |
 
 For `action: verify`, each element of `tags` includes `name`, `oid`, `target`, `ok`, `signature` (with `verdict`, optional `signer`, `key`, `trust`), optional `tree_sha256` (`claimed`, `computed`, `match_digest`, `files`, `submodules`, `excluded`, `bogus_excluded`, `cycles`), `not_verifiable_submodules` (`path`, `reason`), and `elapsed.ms`.

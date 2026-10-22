@@ -13,7 +13,9 @@ use crate::real_repo_fixture::{
     ensure_git_git_bitmaps, ensure_linux_bare, ensure_worktree_clone, linux_fixture_enabled,
     run_git, scratch_root, DEFAULT_GIT_GIT_TAG, DEFAULT_LINUX_TAG,
 };
-use crate::scenarios::{run_scenario, sh_script_internal, Driver, RunConfig, Scenario};
+use crate::scenarios::{
+    run_scenario, sh_script_internal, Driver, PrepareKind, RunConfig, Scenario,
+};
 use crate::schema::{BenchReport, FixtureRecord, ToolVersions, SCHEMA_VERSION};
 
 const BENCH_DIGEST_TAG: &str = "grit-bench-tree-sha256-digest";
@@ -159,58 +161,31 @@ fn prepare_signed_tag(grit: &Path, worktree: &Path) -> Result<()> {
 }
 
 fn git_plain_tree_sha256_script(git: &Path, rev: &str) -> Vec<String> {
-    let git_path = git.to_string_lossy();
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/tree_sha256_git_digest.py");
     sh_script_internal(format!(
-        r#"/usr/bin/env python3 - <<'PY' >/dev/null
-import hashlib, subprocess, sys
-git = {git_path:?}
-rev = {rev:?}
-listing = subprocess.check_output([git, "ls-tree", "-r", "-z", "--full-name", rev])
-records = []
-for chunk in listing.split(b"\0"):
-    if not chunk:
-        continue
-    sp = chunk.find(b" ")
-    rest = chunk[sp + 1 :]
-    sp2 = rest.find(b" ")
-    kind = rest[:sp2]
-    rest2 = rest[sp2 + 1 :]
-    sp3 = rest2.find(b"\t")
-    oid = rest2[:sp3].decode()
-    path = rest2[sp3 + 1 :].decode()
-    if kind in (b"tree", b"commit"):
-        continue
-    blob = subprocess.check_output([git, "cat-file", "blob", oid])
-    h = hashlib.sha256(blob).hexdigest().encode()
-    records.append(h + b" " + path.encode() + b"\0")
-records.sort()
-hashlib.sha256(b"".join(records)).hexdigest()
-PY"#
+        "/usr/bin/env python3 {} {} {rev:?} >/dev/null",
+        shell_escape(&script),
+        shell_escape(git),
     ))
 }
 
 fn grit_verify_digest_argv(grit: &Path, tag: &str) -> Vec<String> {
     sh_script_internal(format!(
-        "{} tag {tag} --sign --tree-sha256 -m bench -f >/dev/null && {} tag --verify {tag} --no-signature >/dev/null",
-        shell_escape(grit),
+        "{} tag --verify {tag} --no-signature >/dev/null",
         shell_escape(grit)
     ))
 }
 
 fn grit_verify_full_argv(grit: &Path, tag: &str) -> Vec<String> {
     sh_script_internal(format!(
-        "{} tag {tag} --sign --tree-sha256 -m bench -f >/dev/null && {} tag --verify {tag} >/dev/null",
-        shell_escape(grit),
+        "{} tag --verify {tag} >/dev/null",
         shell_escape(grit)
     ))
 }
 
-fn git_verify_tag_argv(git: &Path, grit: &Path, tag: &str) -> Vec<String> {
-    sh_script_internal(format!(
-        "{} tag {tag} --sign --tree-sha256 -m bench -f >/dev/null && {} verify-tag {tag} >/dev/null",
-        shell_escape(grit),
-        shell_escape(git)
-    ))
+fn git_verify_tag_argv(git: &Path, tag: &str) -> Vec<String> {
+    sh_script_internal(format!("{} verify-tag {tag} >/dev/null", shell_escape(git)))
 }
 
 fn reference_digest_argv(bin: &Path, rev: &str) -> Vec<String> {
@@ -339,7 +314,7 @@ fn scenarios_for_fixture(
             grit_argv: grit_verify_digest_argv(grit, BENCH_DIGEST_TAG),
             git_argv: git_plain_tree_sha256_script(git, "HEAD"),
             driver: Driver::Cli,
-            prepare_kind: None,
+            prepare_kind: Some(PrepareKind::TagTreeSha256Digest),
             grit_via_shell: true,
             git_via_shell: true,
         },
@@ -362,9 +337,9 @@ fn scenarios_for_fixture(
             fixture: fixture.label.clone(),
             description: "grit tag --verify vs git verify-tag on signed tree-sha256 tag".into(),
             grit_argv: grit_verify_full_argv(grit, BENCH_SIGNED_TAG),
-            git_argv: git_verify_tag_argv(git, grit, BENCH_SIGNED_TAG),
+            git_argv: git_verify_tag_argv(git, BENCH_SIGNED_TAG),
             driver: Driver::Cli,
-            prepare_kind: None,
+            prepare_kind: Some(PrepareKind::TagTreeSha256Signed),
             grit_via_shell: true,
             git_via_shell: true,
         },
@@ -378,7 +353,7 @@ fn scenarios_for_fixture(
             grit_argv: grit_verify_digest_argv(grit, BENCH_DIGEST_TAG),
             git_argv: reference_digest_argv(bin, "HEAD"),
             driver: Driver::Cli,
-            prepare_kind: None,
+            prepare_kind: Some(PrepareKind::TagTreeSha256Digest),
             grit_via_shell: true,
             git_via_shell: true,
         });
@@ -463,4 +438,16 @@ pub fn prepare_tag_tree_sha256_bench(grit: &Path, worktree: &Path, signed: bool)
     } else {
         prepare_digest_tag(grit, worktree)
     }
+}
+
+/// `grit-bench prepare-tag-tree-sha256-digest` (hyperfine prepare; uses process cwd).
+pub fn run_prepare_tag_tree_sha256_digest(grit: &Path) -> Result<()> {
+    let worktree = std::env::current_dir().context("prepare cwd")?;
+    prepare_digest_tag(grit, &worktree)
+}
+
+/// `grit-bench prepare-tag-tree-sha256-signed` (hyperfine prepare; uses process cwd).
+pub fn run_prepare_tag_tree_sha256_signed(grit: &Path) -> Result<()> {
+    let worktree = std::env::current_dir().context("prepare cwd")?;
+    prepare_signed_tag(grit, &worktree)
 }

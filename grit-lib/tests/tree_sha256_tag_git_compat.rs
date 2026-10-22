@@ -92,6 +92,8 @@ fn signed_tag_with_tree_sha256(
             sign: Some(true),
             signing_key: None,
             tree_sha256: Some(opts),
+            force: false,
+            dry_run: false,
         },
     )
     .expect("create signed tag with tree-sha256")
@@ -176,6 +178,8 @@ fn config_policy_adds_header_to_signed_tags() {
             sign: None,
             signing_key: None,
             tree_sha256: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("create tag");
@@ -205,6 +209,8 @@ fn config_policy_ignores_unsigned_tags() {
             sign: None,
             signing_key: None,
             tree_sha256: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("lightweight tag");
@@ -320,6 +326,8 @@ fn missing_submodule_fails_before_writing_tag() {
             sign: Some(true),
             signing_key: None,
             tree_sha256: Some(TreeSha256Options::default()),
+            force: false,
+            dry_run: false,
         },
     )
     .unwrap_err();
@@ -349,6 +357,8 @@ fn tree_sha256_with_no_sign_is_error() {
             sign: Some(false),
             signing_key: None,
             tree_sha256: Some(TreeSha256Options::default()),
+            force: false,
+            dry_run: false,
         },
     )
     .unwrap_err();
@@ -386,6 +396,8 @@ fn signed_tag_tree_sha256_overhead_within_bound() {
             sign: Some(true),
             signing_key: None,
             tree_sha256: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("sign only");
@@ -402,6 +414,8 @@ fn signed_tag_tree_sha256_overhead_within_bound() {
             sign: Some(true),
             signing_key: None,
             tree_sha256: Some(TreeSha256Options::default()),
+            force: false,
+            dry_run: false,
         },
     )
     .expect("sign with tree-sha256");

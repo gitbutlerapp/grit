@@ -52,7 +52,10 @@ use grit_utils::scenarios::{
 };
 use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
-use grit_utils::tag_tree_sha256_suite::run_tag_tree_sha256_suite;
+use grit_utils::tag_tree_sha256_suite::{
+    run_prepare_tag_tree_sha256_digest, run_prepare_tag_tree_sha256_signed,
+    run_tag_tree_sha256_suite,
+};
 use grit_utils::worktree_fixture::{
     prepare_add as prepare_worktree_add, prepare_clean_untracked as prepare_worktree_clean,
     prepare_commit as prepare_worktree_commit,
@@ -632,6 +635,20 @@ enum Cmd {
         git: PathBuf,
         #[arg(long)]
         repo: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareTagTreeSha256Digest {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        grit: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareTagTreeSha256Signed {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        grit: PathBuf,
     },
 }
 
@@ -1491,6 +1508,14 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_hash_object(&git, repo.as_path());
         }
+        Cmd::PrepareTagTreeSha256Digest { git: _, grit } => {
+            let grit = resolve_binary("grit", Some(grit))?;
+            return run_prepare_tag_tree_sha256_digest(&grit);
+        }
+        Cmd::PrepareTagTreeSha256Signed { git: _, grit } => {
+            let grit = resolve_binary("grit", Some(grit))?;
+            return run_prepare_tag_tree_sha256_signed(&grit);
+        }
         _ => {}
     }
 
@@ -2027,6 +2052,8 @@ fn main() -> Result<()> {
         | Cmd::PrepareParallelClone { .. }
         | Cmd::PrepareParallelIndexPack { .. }
         | Cmd::PrepareHashObject { .. }
+        | Cmd::PrepareTagTreeSha256Digest { .. }
+        | Cmd::PrepareTagTreeSha256Signed { .. }
         | Cmd::RefsDriver { .. }
         | Cmd::LibOp { .. }
         | Cmd::Fixture { .. }

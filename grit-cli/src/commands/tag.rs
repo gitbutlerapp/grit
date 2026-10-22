@@ -476,20 +476,19 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
     let config = repo.config().context("could not load config")?;
     let will_sign =
         should_sign_tag(&config, opts.sign).context("could not read tag signing config")?;
-    let needs_annotated = message.is_some() || will_sign;
+    let tree_sha256_opts = if opts.tree_sha256 || !opts.exclude_submodule.is_empty() {
+        let mut tree_opts = TreeSha256Options::default();
+        tree_opts.exclude_globs = opts.exclude_submodule.clone();
+        Some(tree_opts)
+    } else {
+        None
+    };
+    let needs_annotated = message.is_some() || will_sign || tree_sha256_opts.is_some();
     let tagger = if needs_annotated {
         Some(
             context::identity(&env, &config, IdentRole::Committer, opts.now)
                 .context("could not resolve tagger identity")?,
         )
-    } else {
-        None
-    };
-
-    let tree_sha256_opts = if opts.tree_sha256 || !opts.exclude_submodule.is_empty() {
-        let mut tree_opts = TreeSha256Options::default();
-        tree_opts.exclude_globs = opts.exclude_submodule.clone();
-        Some(tree_opts)
     } else {
         None
     };
