@@ -13,7 +13,8 @@ use grit_lib::change_id::ChangeId;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::merge::{
-    abort_branch_merge, integrate_branch, IntegrateBranchOutcome, MergeConflictDetail,
+    abort_branch_merge, integrate_branch, predict_merge, IntegrateBranchOutcome,
+    MergeConflictDetail, MergePrediction, MergePredictionOptions,
 };
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -28,6 +29,8 @@ use std::io::Write;
 pub enum MergeResult {
     UpToDate,
     FastForward,
+    /// Three-way merge would succeed (`grit merge --check` only).
+    Clean,
     Merged,
     Conflicts,
     Aborted,
@@ -146,6 +149,43 @@ impl MergeOutcome {
         }
     }
 
+    fn clean_check(label: &str, tree: ObjectId) -> Self {
+        Self {
+            result: MergeResult::Clean,
+            branch: label.to_owned(),
+            oid: Some(tree.to_hex()),
+            change_id: None,
+            upstream: None,
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+        }
+    }
+
+    fn conflicts_check(label: &str, details: Vec<MergeConflictDetail>) -> Self {
+        let conflicts = Some(
+            details
+                .iter()
+                .map(|d| merge_conflict_json(d, label))
+                .map(|j| ConflictJson {
+                    path: j.path,
+                    kind: j.kind,
+                    summary: j.summary,
+                })
+                .collect(),
+        );
+        Self {
+            result: MergeResult::Conflicts,
+            branch: label.to_owned(),
+            oid: None,
+            change_id: None,
+            upstream: None,
+            conflicts,
+            next_steps: None,
+            alternatives: None,
+        }
+    }
+
     fn conflicts(label: &str, details: Vec<MergeConflictDetail>) -> Self {
         let library_conflicts: Vec<Conflict> = details
             .iter()
@@ -207,6 +247,7 @@ impl HumanRender for MergeOutcome {
         match self.result {
             MergeResult::UpToDate => outln!(w, "Already up to date."),
             MergeResult::FastForward => outln!(w, "Fast-forwarded {} → {short}", self.branch),
+            MergeResult::Clean => outln!(w, "Would merge {} cleanly (tree {short})", self.branch),
             MergeResult::Merged => outln!(
                 w,
                 "Merged {} into the current branch ({short})",
@@ -241,7 +282,7 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
-pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
+pub fn run(branch: Option<&str>, abort: bool, check: bool) -> Result<MergeOutcome> {
     let repo = context::discover()?;
 
     if abort {
@@ -263,7 +304,44 @@ pub fn run(branch: Option<&str>, abort: bool) -> Result<MergeOutcome> {
     };
 
     let other_oid = resolve_branch(&repo, branch)?;
+    if check {
+        return check_merge(&repo, head_oid, other_oid, branch);
+    }
     integrate(&repo, &refname, head_oid, other_oid, branch)
+}
+
+fn check_merge(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+) -> Result<MergeOutcome> {
+    let options = MergePredictionOptions {
+        theirs_label: label.to_owned(),
+        ..MergePredictionOptions::default()
+    };
+    match predict_merge(repo, into_oid, other_oid, &options)? {
+        MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date(label)),
+        MergePrediction::FastForward => Ok(MergeOutcome::fast_forward(
+            label,
+            other_oid,
+            stored_change_id(repo, other_oid)?,
+        )),
+        MergePrediction::Clean { tree } => Ok(MergeOutcome::clean_check(label, tree)),
+        MergePrediction::Conflicts { conflicts } => {
+            Ok(MergeOutcome::conflicts_check(label, conflicts))
+        }
+        MergePrediction::Unrelated => {
+            bail!("'{label}' has no common history with the current branch")
+        }
+    }
+}
+
+fn stored_change_id(repo: &Repository, oid: ObjectId) -> Result<Option<ChangeId>> {
+    let obj = repo.odb().read(&oid)?;
+    Ok(grit_lib::change_id::change_id(
+        &grit_lib::objects::parse_commit(&obj.data)?,
+    ))
 }
 
 /// Integrate `other` into the branch `into_ref` (currently at `into_oid`):
@@ -340,6 +418,57 @@ mod tests {
             let value = serde_json::to_value(&outcome).expect("json");
             assert_eq!(value["result"].as_str(), Some(expected), "{value}");
         }
+    }
+
+    #[test]
+    fn merge_check_exit_code_and_json() {
+        let fixture = CliFixture::empty();
+        std::fs::write(fixture.path().join("a.txt"), "base\n").unwrap();
+        fixture.run_ok(&["add", "a.txt"]);
+        fixture.run_ok(&["commit", "-m", "base"]);
+        fixture.run_ok(&["switch", "--create", "side"]);
+        std::fs::write(fixture.path().join("a.txt"), "side\n").unwrap();
+        fixture.run_ok(&["commit", "-m", "side"]);
+        fixture.run_ok(&["switch", "main"]);
+        std::fs::write(fixture.path().join("b.txt"), "main only\n").unwrap();
+        fixture.run_ok(&["add", "b.txt"]);
+        fixture.run_ok(&["commit", "-m", "main"]);
+
+        let clean = fixture.run(&["--json", "merge", "--check", "side"]);
+        assert_eq!(
+            clean.status,
+            Some(0),
+            "{}",
+            clean.dump("merge --check clean")
+        );
+        let v: serde_json::Value = serde_json::from_str(&clean.stdout).expect("json");
+        assert_eq!(v["result"], "clean");
+        assert!(v["oid"].as_str().is_some_and(|s| !s.is_empty()));
+        assert!(v["next_steps"].is_null() || v.get("next_steps").is_none());
+
+        std::fs::write(fixture.path().join("a.txt"), "main edit\n").unwrap();
+        fixture.run_ok(&["commit", "-m", "main conflict"]);
+        let head_before = grit_test_support::git(fixture.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .to_owned();
+
+        let conflict = fixture.run(&["--json", "merge", "--check", "side"]);
+        assert_eq!(
+            conflict.status,
+            Some(1),
+            "{}",
+            conflict.dump("merge --check conflict")
+        );
+        let v: serde_json::Value = serde_json::from_str(&conflict.stdout).expect("json");
+        assert_eq!(v["result"], "conflicts");
+        assert!(v["conflicts"].as_array().is_some_and(|a| !a.is_empty()));
+        let head_after = grit_test_support::git(fixture.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .to_owned();
+        assert_eq!(
+            head_before, head_after,
+            "HEAD must be unchanged after --check"
+        );
     }
 
     #[test]

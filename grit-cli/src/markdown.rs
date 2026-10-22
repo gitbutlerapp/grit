@@ -511,6 +511,14 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
                 outln!(w, "- change id `{short}`", short = short_change_id(id));
             }
         }
+        MergeResult::Clean => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(
+                w,
+                "- Would merge **`{}`** cleanly · tree `{short}`",
+                outcome.branch
+            );
+        }
         MergeResult::Merged => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
             outln!(

@@ -246,6 +246,123 @@ impl Default for IntegrateBranchOptions {
     }
 }
 
+/// Options for [`predict_merge`].
+#[derive(Clone, Debug)]
+pub struct MergePredictionOptions {
+    /// When `false`, a fast-forward is not considered even when `other_oid` is a
+    /// descendant of `into_oid`; a three-way merge is simulated instead.
+    pub allow_fast_forward: bool,
+    /// When `false`, histories with no merge base yield [`MergePrediction::Unrelated`].
+    /// When `true`, an empty merge base is treated like Git's `--allow-unrelated-histories`
+    /// (reserved for a later step; unrelated histories still report `Unrelated` today).
+    pub allow_unrelated_histories: bool,
+    /// Merge-favor policy for the simulated three-way merge (ours/theirs/normal).
+    pub favor: MergeFavor,
+    /// Whitespace handling for the simulated three-way merge.
+    pub whitespace: WhitespaceMergeOptions,
+    /// Label for the incoming side in conflict-marker metadata (presentation only).
+    pub theirs_label: String,
+}
+
+impl Default for MergePredictionOptions {
+    fn default() -> Self {
+        Self {
+            allow_fast_forward: true,
+            allow_unrelated_histories: false,
+            favor: MergeFavor::default(),
+            whitespace: WhitespaceMergeOptions::default(),
+            theirs_label: "branch".into(),
+        }
+    }
+}
+
+/// In-memory prediction of merging `other_oid` into the commit `into_oid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergePrediction {
+    /// The current tip already contains the other side.
+    UpToDate,
+    /// The current tip could fast-forward to the other side.
+    FastForward,
+    /// A three-way merge would succeed; `tree` is the merged result tree OID.
+    Clean {
+        /// Merged tree OID (matches `git merge-tree --write-tree` on success).
+        tree: ObjectId,
+    },
+    /// A three-way merge would stop with conflicts.
+    Conflicts {
+        /// Conflicted paths and kinds (same classification as a real merge).
+        conflicts: Vec<MergeConflictDetail>,
+    },
+    /// The two commits share no common history.
+    Unrelated,
+}
+
+/// Predict merging `other_oid` into `into_oid` without touching refs, the index,
+/// merge state files, or the working tree.
+///
+/// Object writes from the merge are routed through the ODB in-memory overlay and
+/// discarded before return, so the on-disk object store is unchanged.
+///
+/// # Errors
+///
+/// Propagates object read and merge failures. Does not require a clean worktree.
+pub fn predict_merge(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    options: &MergePredictionOptions,
+) -> Result<MergePrediction> {
+    if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
+        return Ok(MergePrediction::UpToDate);
+    }
+
+    if options.allow_fast_forward && is_ancestor(repo, into_oid, other_oid)? {
+        return Ok(MergePrediction::FastForward);
+    }
+
+    let base_oid = merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?
+        .into_iter()
+        .next();
+    let Some(base_oid) = base_oid else {
+        return Ok(MergePrediction::Unrelated);
+    };
+    let _ = options.allow_unrelated_histories;
+
+    let into_tree = commit_tree(repo, &into_oid)?;
+    let other_tree = commit_tree(repo, &other_oid)?;
+    let base_tree = commit_tree(repo, &base_oid)?;
+
+    let presentation = TreeMergeConflictPresentation {
+        label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(&options.theirs_label),
+        df_directory_ours_commit: Some(into_oid),
+        df_directory_theirs_commit: Some(other_oid),
+        ..TreeMergeConflictPresentation::default()
+    };
+
+    repo.odb().enable_mem_overlay();
+    let prediction = (|| -> Result<MergePrediction> {
+        let merged = merge_trees_three_way(
+            repo,
+            base_tree,
+            into_tree,
+            other_tree,
+            options.favor,
+            options.whitespace,
+            None,
+            presentation,
+        )?;
+        if tree_merge_has_conflicts(&merged) {
+            return Ok(MergePrediction::Conflicts {
+                conflicts: conflicts_from_tree_merge(&merged),
+            });
+        }
+        let tree = materialized_merge_result_tree(repo.odb(), &merged)?;
+        Ok(MergePrediction::Clean { tree })
+    })();
+    repo.odb().disable_mem_overlay();
+    prediction
+}
+
 /// Result of integrating another branch into the current one ([`integrate_branch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntegrateBranchOutcome {

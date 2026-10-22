@@ -1326,6 +1326,17 @@ pub(crate) fn merge_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
     )
 }
 
+pub(crate) fn merge_check_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+    let git_cmd = format!(
+        "merge-tree --write-tree --merge-base={} {} {} >/dev/null",
+        meta.base_commit, meta.main_tip, meta.pick_commit
+    );
+    (
+        vec!["merge".into(), "--check".into(), meta.topic_branch.clone()],
+        vec!["-c".into(), git_cmd],
+    )
+}
+
 /// Switch, pick, merge, and pick-series scenarios at each file count.
 pub fn run_hot_path_suite(
     hyperfine: &Path,
@@ -1496,6 +1507,53 @@ pub fn run_hot_path_suite(
                 git_via_shell: false,
             },
             &repo_series,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
+}
+
+/// In-memory merge prediction vs `git merge-tree --write-tree` (medium synthetic fixture).
+pub fn run_merge_check_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    sizes: &[usize],
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let mut scenarios = Vec::new();
+    for &size in sizes {
+        let spec = hot_path_spec(size, false);
+        let fixture = format!("synthetic-{size}");
+        let touch = touch_paths_for_size(size);
+        setup_pick_merge_fixture(git, spec, touch)?;
+        let meta = load_meta(&scratch_dir())?;
+        let (grit_argv, git_argv) = merge_check_argv(&meta);
+        let repo = scratch_dir();
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: if size == 10_000 {
+                    "merge-check".into()
+                } else {
+                    format!("merge-check-{size}")
+                },
+                group: "merge".into(),
+                fixture: fixture.clone(),
+                description: format!(
+                    "grit merge --check vs git merge-tree --write-tree ({touch}-path topic commit)"
+                ),
+                grit_argv,
+                git_argv,
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::MergeReset),
+                grit_via_shell: false,
+                git_via_shell: true,
+            },
+            &repo,
         )?);
     }
     Ok(build_report(git, grit, timestamp, scenarios))

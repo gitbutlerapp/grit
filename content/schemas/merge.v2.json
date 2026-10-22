@@ -30,6 +30,7 @@
         "up_to_date",
         "fast_forward",
         "merged",
+        "clean",
         "conflicts",
         "aborted",
         "set_upstream"

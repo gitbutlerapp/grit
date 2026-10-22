@@ -7,7 +7,7 @@ Merge **orchestration** (sequencer state, hooks, editors, messages) stays in `gr
 
 - [`revwalk::merge_base`](rustdoc:grit_lib::revwalk::merge_base) — common ancestors (`merge_bases_first_vs_rest`, ancestor checks).
 - [`diff::merge_trees`](rustdoc:grit_lib::diff::merge_trees) — rename-aware three-way tree merge ([`merge_trees_three_way`](rustdoc:grit_lib::diff::merge_trees::merge_trees_three_way)), conflict-marker blobs, and [`TreeMergeOutput`](rustdoc:grit_lib::diff::merge_trees::TreeMergeOutput).
-- [`porcelain::merge`](rustdoc:grit_lib::porcelain::merge) — fast-forward/octopus index composition and checkout helpers the CLI calls.
+- [`porcelain::merge`](rustdoc:grit_lib::porcelain::merge) — fast-forward/octopus index composition, [`predict_merge`](rustdoc:grit_lib::porcelain::merge::predict_merge) (in-memory conflict check via the ODB overlay), and checkout helpers the CLI calls.
 
 Pass explicit [`MergeFavor`](rustdoc:grit_lib::diff::merge_file::MergeFavor) and [`WhitespaceMergeOptions`](rustdoc:grit_lib::diff::merge_trees::WhitespaceMergeOptions) into tree merges; pass identity and timestamps into commit-writing porcelain.
 

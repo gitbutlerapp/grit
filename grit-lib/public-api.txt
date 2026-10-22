@@ -11468,6 +11468,21 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::IntegrateBranchOptions
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::IntegrateBranchOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOptions
+pub enum grit_lib::porcelain::merge::MergePrediction
+pub grit_lib::porcelain::merge::MergePrediction::Clean
+pub grit_lib::porcelain::merge::MergePrediction::Clean::tree: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::merge::MergePrediction::Conflicts
+pub grit_lib::porcelain::merge::MergePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::porcelain::merge::MergePrediction::FastForward
+pub grit_lib::porcelain::merge::MergePrediction::Unrelated
+pub grit_lib::porcelain::merge::MergePrediction::UpToDate
+pub struct grit_lib::porcelain::merge::MergePredictionOptions
+pub grit_lib::porcelain::merge::MergePredictionOptions::allow_fast_forward: bool
+pub grit_lib::porcelain::merge::MergePredictionOptions::allow_unrelated_histories: bool
+pub grit_lib::porcelain::merge::MergePredictionOptions::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::porcelain::merge::MergePredictionOptions::theirs_label: alloc::string::String
+pub grit_lib::porcelain::merge::MergePredictionOptions::whitespace: grit_lib::diff::merge_trees::WhitespaceMergeOptions
+pub fn grit_lib::porcelain::merge::predict_merge(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergePrediction>
 pub struct grit_lib::porcelain::merge::MergeConflictDetail
 pub grit_lib::porcelain::merge::MergeConflictDetail::kind: grit_lib::operation::ConflictKind
 pub grit_lib::porcelain::merge::MergeConflictDetail::path: alloc::string::String

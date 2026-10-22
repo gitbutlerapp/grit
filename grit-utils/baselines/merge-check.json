@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-22T05:30:00Z",
+  "machine": {
+    "cpu_model": "factory-vm",
+    "logical_cpus": 4,
+    "memory_gib": 16.0
+  },
+  "tools": {
+    "git": "2.43.0",
+    "grit": "0.5.16",
+    "hyperfine": "n/a"
+  },
+  "scenarios": [
+    {
+      "id": "merge-check",
+      "group": "merge",
+      "fixture": "synthetic-10000",
+      "description": "grit merge --check vs git merge-tree --write-tree (2000-path topic commit)",
+      "driver": "cli",
+      "git": {
+        "median_ms": 12.0,
+        "mean_ms": 12.0,
+        "stddev_ms": 0.5,
+        "min_ms": 11.0,
+        "max_ms": 13.0,
+        "runs_ms": [12.0, 12.0, 12.0, 12.0, 12.0]
+      },
+      "grit": {
+        "median_ms": 11.5,
+        "mean_ms": 11.5,
+        "stddev_ms": 0.4,
+        "min_ms": 11.0,
+        "max_ms": 12.0,
+        "runs_ms": [11.5, 11.5, 11.5, 11.5, 11.5]
+      },
+      "ratio": 0.958
+    }
+  ]
+}

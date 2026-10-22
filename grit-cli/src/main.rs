@@ -837,8 +837,11 @@ enum Command {
         #[arg(required_unless_present = "abort")]
         branch: Option<String>,
         /// Cancel an in-progress merge and restore the pre-merge state.
-        #[arg(long = "abort")]
+        #[arg(long = "abort", conflicts_with = "check")]
         abort: bool,
+        /// Predict whether the merge would succeed without changing refs, index, or worktree.
+        #[arg(long = "check", conflicts_with = "abort")]
+        check: bool,
     },
     /// Cherry-pick a commit onto the current branch.
     Pick {
@@ -1687,8 +1690,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             mixed,
             hard,
         } => emit(&commands::reset::run(rev, soft, mixed, hard)?, opts, ctx),
-        Command::Merge { branch, abort } => {
-            let outcome = commands::merge::run(branch.as_deref(), abort)?;
+        Command::Merge {
+            branch,
+            abort,
+            check,
+        } => {
+            let outcome = commands::merge::run(branch.as_deref(), abort, check)?;
             emit(&outcome, opts, ctx)?;
             if outcome.result == commands::merge::MergeResult::Conflicts {
                 std::process::exit(1);
