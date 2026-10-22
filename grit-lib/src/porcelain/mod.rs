@@ -69,6 +69,7 @@ pub mod pathspec_match;
 pub mod pull;
 pub mod rebase;
 pub mod replay;
+pub mod replay_sequence;
 pub mod reset;
 pub mod restore;
 pub mod revert;

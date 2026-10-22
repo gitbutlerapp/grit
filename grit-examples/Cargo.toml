@@ -88,6 +88,10 @@ name = "guide_merge"
 path = "src/bin/guide_merge.rs"
 
 [[bin]]
+name = "guide_replay_conflicts"
+path = "src/bin/guide_replay_conflicts.rs"
+
+[[bin]]
 name = "guide_maintenance"
 path = "src/bin/guide_maintenance.rs"
 

@@ -260,19 +260,25 @@ pub fn operation_alternatives(kind: InProgressOperation) -> Vec<NextStep> {
     }
 }
 
-/// [`Operation`] guidance for [`StatusModel`](crate::porcelain::status::StatusModel): merge only.
+/// [`Operation`] guidance for [`StatusModel`](crate::porcelain::status::StatusModel).
 ///
-/// Cherry-pick, revert, rebase, and am may be detected via [`WtStatusState`], but grit does not
-/// yet expose continue/abort commands for them — omit `operation` rather than suggest `grit commit`.
+/// Merge and grit-started cherry-pick/revert sequences expose continue/abort/skip hints. Other
+/// in-progress states detected via [`WtStatusState`] omit `operation` until grit implements them.
 #[must_use]
 pub fn status_operation(state: &WtStatusState, has_unmerged_conflicts: bool) -> Option<Operation> {
-    if !state.merge_in_progress {
+    let kind = if state.merge_in_progress {
+        InProgressOperation::Merge
+    } else if state.cherry_pick_in_progress {
+        InProgressOperation::CherryPick
+    } else if state.revert_in_progress {
+        InProgressOperation::Revert
+    } else {
         return None;
-    }
+    };
     Some(Operation {
-        kind: InProgressOperation::Merge,
-        next_steps: operation_next_steps(InProgressOperation::Merge, has_unmerged_conflicts),
-        alternatives: operation_alternatives(InProgressOperation::Merge),
+        kind,
+        next_steps: operation_next_steps(kind, has_unmerged_conflicts),
+        alternatives: operation_alternatives(kind),
     })
 }
 
