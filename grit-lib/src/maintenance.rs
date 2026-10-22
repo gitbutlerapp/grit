@@ -22,7 +22,7 @@ use std::time::{Instant, SystemTime};
 
 use crate::commit_graph_file::CommitGraphChain;
 use crate::commit_graph_write::{
-    atomic_replace_commit_graph, build_commit_graph_bytes,
+    atomic_replace_commit_graph, build_commit_graph_bytes_from_oid_maps,
     collect_reachable_commit_oids_for_repository, load_commit_graph_commit_info,
     remove_commit_graph_chain_dir, BloomWriteStats,
 };
@@ -546,26 +546,17 @@ pub fn write_commit_graph(
         }
     }
 
-    let infos_map: HashMap<_, _> = infos.iter().map(|(k, v)| (*k, v.clone())).collect();
-    let existing_map: HashMap<_, _> = existing_filters
-        .iter()
-        .map(|(k, v)| (*k, v.clone()))
-        .collect();
-    let upgraded_map: HashMap<_, _> = upgraded_filters
-        .iter()
-        .map(|(k, v)| (*k, v.clone()))
-        .collect();
-    let (bytes, bloom_stats) = build_commit_graph_bytes(
+    let (bytes, bloom_stats) = build_commit_graph_bytes_from_oid_maps(
         &sorted,
-        &infos_map,
+        &infos,
         odb,
         opts.changed_paths,
         &bloom,
         None,
         &[],
         None,
-        &existing_map,
-        &upgraded_map,
+        &existing_filters,
+        &upgraded_filters,
         write_generation,
     )?;
 

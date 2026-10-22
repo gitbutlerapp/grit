@@ -256,12 +256,37 @@ pub fn build_commit_graph_bytes(
     upgraded_filters: &HashMap<ObjectId, Vec<u8>>,
     write_generation_data: bool,
 ) -> crate::error::Result<(Vec<u8>, BloomWriteStats)> {
-    let infos = oid_hash_map_from(infos);
-    let existing_filters = oid_hash_map_from(existing_filters);
-    let upgraded_filters = oid_hash_map_from(upgraded_filters);
-    let infos = &infos;
-    let existing_filters = &existing_filters;
-    let upgraded_filters = &upgraded_filters;
+    build_commit_graph_bytes_from_oid_maps(
+        sorted_oids,
+        &oid_hash_map_from(infos),
+        odb,
+        changed_paths,
+        bloom_settings,
+        base_chain,
+        base_graph_hashes,
+        max_new_filters,
+        &oid_hash_map_from(existing_filters),
+        &oid_hash_map_from(upgraded_filters),
+        write_generation_data,
+    )
+}
+
+/// [`build_commit_graph_bytes`] over the crate's OID-keyed maps, so in-crate writers that
+/// already hold them (one entry and one bloom filter per commit) do not copy them.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn build_commit_graph_bytes_from_oid_maps(
+    sorted_oids: &[ObjectId],
+    infos: &OidHashMap<CommitGraphCommitInfo>,
+    odb: &Odb,
+    changed_paths: bool,
+    bloom_settings: &BloomFilterSettings,
+    base_chain: Option<&CommitGraphChain>,
+    base_graph_hashes: &[&[u8]],
+    max_new_filters: Option<u32>,
+    existing_filters: &OidHashMap<Vec<u8>>,
+    upgraded_filters: &OidHashMap<Vec<u8>>,
+    write_generation_data: bool,
+) -> crate::error::Result<(Vec<u8>, BloomWriteStats)> {
     let base_count: u32 = base_chain.map(CommitGraphChain::total_commits).unwrap_or(0);
     let algo = odb.hash_algo();
     let hash_len = algo.len();
