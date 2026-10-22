@@ -107,22 +107,41 @@ pub fn apply_push_remote_tracking_updates(
 }
 
 /// Full ref for the configured upstream of `branch_short` (`refs/remotes/...` or `refs/heads/...`).
+///
+/// Both `branch.<name>.remote` and `branch.<name>.merge` must be set. For the local remote `.`
+/// the merge ref is itself the upstream; otherwise it is mapped through
+/// `remote.<remote>.fetch` (with no positive refspecs, `refs/heads/<branch>` maps to
+/// `refs/remotes/<remote>/<branch>`). `None` when the refspecs do not store it locally.
 #[must_use]
 pub fn upstream_tracking_full_ref(repo: &Repository, branch_short: &str) -> Option<String> {
     let config = repo.config().ok()?;
     let remote = config.get(&format!("branch.{branch_short}.remote"))?;
     let merge = config.get(&format!("branch.{branch_short}.merge"))?;
-    if remote == "." {
-        let m = merge.trim();
-        if m.starts_with("refs/") {
-            Some(m.to_owned())
-        } else {
-            Some(format!("refs/heads/{m}"))
-        }
+    upstream_ref_for_merge(&config, remote.trim(), &merge)
+}
+
+/// The local ref that holds `merge` (a `branch.<name>.merge` value) of `remote`.
+///
+/// For the local remote `.` the merge ref is itself a local ref. Otherwise the remote ref
+/// (`refs/heads/<merge>` when `merge` is a short name) is mapped through
+/// `remote.<remote>.fetch`; with no positive fetch refspecs, `refs/heads/<branch>` maps to
+/// `refs/remotes/<remote>/<branch>`. Returns `None` when the refspecs do not fetch the ref
+/// into a remote-tracking ref.
+pub(crate) fn upstream_ref_for_merge(
+    config: &ConfigSet,
+    remote: &str,
+    merge: &str,
+) -> Option<String> {
+    let merge = merge.trim();
+    let merge_ref = if merge.starts_with("refs/") {
+        merge.to_owned()
     } else {
-        let mb = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
-        Some(format!("refs/remotes/{remote}/{mb}"))
+        format!("refs/heads/{merge}")
+    };
+    if remote == "." {
+        return Some(merge_ref);
     }
+    FetchRefspecs::load(config, remote).tracking_ref(remote, &merge_ref)
 }
 
 /// Where a [`ComparisonBase`] came from.
@@ -994,5 +1013,71 @@ mod tests {
             Some("refs/remotes/origin/main")
         );
         Ok(())
+    }
+
+    #[test]
+    fn upstream_ref_for_merge_maps_through_fetch_refspecs() -> TestResult {
+        let mut config = ConfigSet::new();
+        config
+            .add_command_override("remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*")?;
+        config.add_command_override("remote.origin.fetch", "^refs/heads/wip")?;
+        assert_eq!(
+            upstream_ref_for_merge(&config, "origin", "refs/heads/main").as_deref(),
+            Some("refs/remotes/mirror/main")
+        );
+        assert_eq!(
+            upstream_ref_for_merge(&config, "origin", " main ").as_deref(),
+            Some("refs/remotes/mirror/main")
+        );
+        assert_eq!(upstream_ref_for_merge(&config, "origin", "wip"), None);
+        assert_eq!(
+            upstream_ref_for_merge(&config, "origin", "refs/tags/v1"),
+            None
+        );
+        assert_eq!(
+            upstream_ref_for_merge(&config, "unconfigured", "refs/heads/dev").as_deref(),
+            Some("refs/remotes/unconfigured/dev")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn upstream_ref_for_merge_local_remote_is_a_local_ref() {
+        let config = ConfigSet::new();
+        assert_eq!(
+            upstream_ref_for_merge(&config, ".", "main").as_deref(),
+            Some("refs/heads/main")
+        );
+        assert_eq!(
+            upstream_ref_for_merge(&config, ".", "refs/heads/dev").as_deref(),
+            Some("refs/heads/dev")
+        );
+    }
+
+    #[test]
+    fn upstream_tracking_full_ref_honours_custom_refspec() {
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path();
+        git(dir, &["init", "-q", "-b", "main"]);
+        git(dir, &["config", "remote.origin.url", "/nonexistent"]);
+        git(
+            dir,
+            &[
+                "config",
+                "remote.origin.fetch",
+                "+refs/heads/main:refs/remotes/upstream-main",
+            ],
+        );
+        git(dir, &["config", "branch.main.remote", "origin"]);
+        git(dir, &["config", "branch.main.merge", "refs/heads/main"]);
+        git(dir, &["config", "branch.dev.remote", "origin"]);
+        git(dir, &["config", "branch.dev.merge", "refs/heads/dev"]);
+        let repo = open(dir);
+        assert_eq!(
+            upstream_tracking_full_ref(&repo, "main").as_deref(),
+            Some("refs/remotes/upstream-main")
+        );
+        assert_eq!(upstream_tracking_full_ref(&repo, "dev"), None);
+        assert_eq!(upstream_tracking_full_ref(&repo, "unset"), None);
     }
 }
