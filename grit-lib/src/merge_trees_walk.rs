@@ -14,6 +14,7 @@ use crate::merge_trees::{
 use crate::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 use crate::repo::Repository;
+use crate::write_tree::is_empty_tree_oid;
 
 const MODE_DIR: u32 = 0o040000;
 
@@ -290,6 +291,9 @@ pub(crate) fn compose_merged_tree_oid(
 
         if !subtree_touched(&fp, touched) {
             if let Some(te) = o_te {
+                if te.mode == MODE_DIR && is_empty_tree_oid(odb, &te.oid) {
+                    continue;
+                }
                 out_entries.push(te.clone());
             }
             continue;
@@ -321,6 +325,9 @@ pub(crate) fn compose_merged_tree_oid(
                 stage0_by_path,
                 empty_tree,
             )?;
+            if is_empty_tree_oid(odb, &sub) {
+                continue;
+            }
             out_entries.push(TreeEntry {
                 mode: MODE_DIR,
                 name,
