@@ -1980,6 +1980,54 @@ impl<'r> CommitGraphCache<'r> {
     }
 }
 
+/// Dense bitset of ref-tip indices (for shared `--contains` walks).
+#[derive(Clone)]
+struct TipIndexBitset {
+    words: Vec<u64>,
+}
+
+impl TipIndexBitset {
+    fn with_capacity(tips: usize) -> Self {
+        Self {
+            words: vec![0; tips.div_ceil(64)],
+        }
+    }
+
+    fn set(&mut self, index: usize) {
+        self.words[index / 64] |= 1_u64 << (index % 64);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.words.iter().all(|w| *w == 0)
+    }
+
+    /// Union `other` into `self`. Returns whether any new bit was set.
+    fn or_assign(&mut self, other: &Self) -> bool {
+        let mut changed = false;
+        for (slot, &bits) in self.words.iter_mut().zip(&other.words) {
+            let merged = *slot | bits;
+            if merged != *slot {
+                *slot = merged;
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn iter_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.words.iter().enumerate().flat_map(|(word_idx, word)| {
+            let base = word_idx * 64;
+            (0..64).filter_map(move |bit| {
+                if *word & (1_u64 << bit) != 0 {
+                    Some(base + bit)
+                } else {
+                    None
+                }
+            })
+        })
+    }
+}
+
 /// Per-tip results from one shared backward walk for `--contains` / `--no-contains`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RefContainsTipState {
@@ -2038,6 +2086,8 @@ impl<'repo> RefContainsBatch<'repo> {
             return Ok(());
         }
 
+        self.graph.ensure_single_pack_reader();
+
         for state in &mut self.tip_state {
             state.contains_match = contains_targets.is_empty();
             state.no_contains_match = false;
@@ -2052,42 +2102,65 @@ impl<'repo> RefContainsBatch<'repo> {
             .copied()
             .collect();
         let min_target_gen = min_ranked_generation(&mut self.graph, &filter_targets);
+        let need_contains = !contains_targets.is_empty();
+        let need_no_contains = !no_contains_targets.is_empty();
 
-        let mut reach: OidHashMap<HashSet<usize>> = oid_hash_map();
+        let tip_count = self.tips.len();
+        let mut reach: OidHashMap<TipIndexBitset> = oid_hash_map();
         let mut stack: Vec<ObjectId> = self.tips.clone();
 
         for (i, &tip) in self.tips.iter().enumerate() {
-            reach.entry(tip).or_default().insert(i);
+            reach
+                .entry(tip)
+                .or_insert_with(|| TipIndexBitset::with_capacity(tip_count))
+                .set(i);
         }
 
+        let tip_still_active = |state: &RefContainsTipState| -> bool {
+            (need_contains && !state.contains_match)
+                || (need_no_contains && !state.no_contains_match)
+        };
+
         while let Some(oid) = stack.pop() {
-            let indices: Vec<usize> = reach
-                .get(&oid)
-                .map(|set| set.iter().copied().collect())
-                .unwrap_or_default();
-            if indices.is_empty() {
+            let Some(indices_set) = reach.remove(&oid) else {
+                continue;
+            };
+            if indices_set.is_empty() {
                 continue;
             }
 
             if contains_set.contains(&oid) {
-                for i in &indices {
-                    self.tip_state[*i].contains_match = true;
+                for i in indices_set.iter_indices() {
+                    self.tip_state[i].contains_match = true;
                 }
             }
             if no_contains_set.contains(&oid) {
-                for i in &indices {
-                    self.tip_state[*i].no_contains_match = true;
+                for i in indices_set.iter_indices() {
+                    self.tip_state[i].no_contains_match = true;
                 }
+            }
+
+            let mut active = TipIndexBitset::with_capacity(tip_count);
+            for i in indices_set.iter_indices() {
+                if tip_still_active(&self.tip_state[i]) {
+                    active.set(i);
+                }
+            }
+            if active.is_empty() {
+                if self.tip_state.iter().all(|s| !tip_still_active(s)) {
+                    break;
+                }
+                continue;
             }
 
             for parent in self.graph.parents_of(oid)? {
                 if should_prune_ref_filter_parent(&mut self.graph, parent, min_target_gen) {
                     continue;
                 }
-                let entry = reach.entry(parent).or_default();
-                let before = entry.len();
-                entry.extend(indices.iter().copied());
-                if entry.len() > before {
+                let entry = reach
+                    .entry(parent)
+                    .or_insert_with(|| TipIndexBitset::with_capacity(tip_count));
+                if entry.or_assign(&active) {
                     stack.push(parent);
                 }
             }
