@@ -438,6 +438,33 @@ pub fn verify_fetch_one_branch(ctx: &DailyHeadlineContext, cwd: &Path) -> Result
     Ok(())
 }
 
+pub fn verify_pull_check(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    configure_client_remote(&ctx.git, cwd, remote)?;
+    let branch = remote.meta.default_branch.as_str();
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_git(&ctx.git, cwd, &["fetch", "-q", "origin", branch])?;
+    let head_before = ref_oid(&ctx.git, cwd, "HEAD")?;
+    let git_status = std::process::Command::new(&ctx.git)
+        .args(["pull", "--check", "-q", "origin", branch])
+        .current_dir(cwd)
+        .status()?;
+    if !git_status.success() {
+        bail!("git pull --check should succeed when fast-forward is possible");
+    }
+    if ref_oid(&ctx.git, cwd, "HEAD")? != head_before {
+        bail!("git pull --check must not move HEAD");
+    }
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_git(&ctx.git, cwd, &["fetch", "-q", "origin", branch])?;
+    let head_before = ref_oid(&ctx.git, cwd, "HEAD")?;
+    run_grit(&ctx.grit, cwd, &["pull", "--check", "origin", branch])?;
+    if ref_oid(&ctx.git, cwd, "HEAD")? != head_before {
+        bail!("grit pull --check must not move HEAD");
+    }
+    Ok(())
+}
+
 pub fn verify_fetch_dry_run(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;

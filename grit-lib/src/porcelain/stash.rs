@@ -1703,6 +1703,65 @@ pub fn drop_stash_commit(git_dir: &Path, stash_oid: &ObjectId) -> Result<bool> {
     Ok(true)
 }
 
+/// Stash dirty worktree/index changes before `pull --autostash` / merge autostash.
+///
+/// Returns `None` when there is nothing to stash.
+///
+/// # Errors
+///
+/// Propagates stash creation and checkout failures.
+pub fn push_operation_autostash(repo: &Repository, identity: &str) -> Result<Option<ObjectId>> {
+    push_stash(
+        repo,
+        &StashCreateOptions {
+            message: Some("autostash".to_owned()),
+            include_untracked: true,
+            identity: identity.to_owned(),
+        },
+    )
+}
+
+/// Re-apply an operation autostash after a successful pull/merge/rebase integration.
+///
+/// # Returns
+///
+/// `true` when applying the autostash left conflicts (the stash entry is kept).
+///
+/// # Errors
+///
+/// Propagates stash apply failures.
+pub fn apply_operation_autostash(
+    repo: &Repository,
+    stash_oid: &ObjectId,
+    identity: &str,
+) -> Result<bool> {
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::Message("cannot apply autostash in a bare repository".into()))?;
+    let conflicts = apply_stash(repo, work_tree, stash_oid, false, identity)?;
+    if !conflicts {
+        let _ = drop_stash_commit(repo.git_dir(), stash_oid)?;
+    }
+    Ok(conflicts)
+}
+
+/// Put a stashed autostash back after an aborted pull/merge (integration did not finish).
+///
+/// # Errors
+///
+/// Propagates stash apply failures.
+pub fn restore_operation_autostash(
+    repo: &Repository,
+    stash_oid: &ObjectId,
+    identity: &str,
+) -> Result<()> {
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::Message("cannot restore autostash in a bare repository".into()))?;
+    let _ = apply_stash(repo, work_tree, stash_oid, false, identity)?;
+    Ok(())
+}
+
 /// Apply and drop the merge autostash recorded in `MERGE_AUTOSTASH`, matching `git commit` after
 /// `git merge --autostash`.
 ///

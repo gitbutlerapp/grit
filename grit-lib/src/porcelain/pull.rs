@@ -6,7 +6,7 @@
 //! atomically (no sequencer state); stop/continue rebase is a follow-up once the
 //! shared history conflict model lands.
 
-use crate::branch_tracking::pull_upstream_branch;
+use crate::branch_tracking::resolve_pull_integration_base;
 use crate::change_id::{logical_change_id_for_commit, ChangeId};
 use crate::config::environment::Environment;
 use crate::config::ident_resolve::{resolve_identity_with, IdentRole};
@@ -18,8 +18,12 @@ use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::merge::{
-    ensure_branch_tip, integrate_branch_with_options, update_checked_out_branch,
+    ensure_branch_tip, integrate_branch_with_options, predict_merge, update_checked_out_branch,
     IntegrateBranchOptions, IntegrateBranchOutcome, MergeConflictDetail, MergeConflictKind,
+    MergePrediction, MergePredictionOptions,
+};
+use crate::porcelain::stash::{
+    apply_operation_autostash, push_operation_autostash, restore_operation_autostash,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::remote::fetch::Progress;
@@ -58,12 +62,31 @@ pub enum PullMode {
 pub struct PullOptions {
     /// Remote name override; when `None`, uses `branch.<name>.remote` or [`DEFAULT_REMOTE`].
     pub remote: Option<String>,
-    /// Local branch to update; when `None`, uses the current branch.
+    /// Remote branch or refspec to integrate (`pull origin feature`); also see [`Self::fetch`].
     pub branch: Option<String>,
+    /// When true, integration uses [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) after fetch.
+    pub explicit_fetch: bool,
+    /// Stash dirty worktree/index changes around the integration (`pull --autostash`).
+    pub autostash: bool,
+    /// Fetch and report whether a fast-forward is possible without changing refs or the worktree.
+    pub check: bool,
     /// CLI override for integration mode; when `None`, [`resolve_pull_mode`] applies config.
     pub mode: Option<PullMode>,
     /// Fetch options (tags, prune, depth, environment, …).
     pub fetch: FetchOptions,
+}
+
+/// Dry-run result for [`PullOptions::check`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullCheck {
+    /// Commits on the current branch not reachable from the upstream tip.
+    pub ahead: usize,
+    /// Commits on the upstream tip not reachable from the current branch.
+    pub behind: usize,
+    /// Whether the branch could fast-forward to the upstream tip.
+    pub fast_forward_possible: bool,
+    /// Integration result if `--check` were not set.
+    pub would: PullResult,
 }
 
 /// High-level result of a successful [`pull`].
@@ -83,6 +106,8 @@ pub enum PullResult {
     SetUpstream,
     /// Local commits were replayed onto the upstream tip.
     Rebased,
+    /// Integration succeeded but re-applying `--autostash` left conflicts (stash kept).
+    AutostashConflict,
 }
 
 /// Structured outcome of [`pull`].
@@ -104,6 +129,8 @@ pub struct PullOutcome {
     pub ahead: Option<usize>,
     /// Commits on upstream not reachable from the branch when refused as not ff.
     pub behind: Option<usize>,
+    /// Populated when [`PullOptions::check`] is set; the repository is unchanged.
+    pub check: Option<PullCheck>,
 }
 
 /// Errors from [`pull`].
@@ -229,6 +256,9 @@ impl PullOptions {
         Ok(Self {
             remote: None,
             branch: None,
+            explicit_fetch: false,
+            autostash: false,
+            check: false,
             mode: cli_mode,
             fetch: FetchOptions {
                 tags: TagMode::Following,
@@ -255,6 +285,22 @@ fn pull_rebase_enabled(
         return parse_pull_rebase_config(raw.as_str());
     }
     Ok(false)
+}
+
+/// Whether `--autostash` is active for this pull (CLI flag or config).
+#[must_use]
+pub fn resolve_pull_autostash(config: &ConfigSet, mode: PullMode, cli_autostash: bool) -> bool {
+    if cli_autostash {
+        return true;
+    }
+    let key = match mode {
+        PullMode::Rebase => "rebase.autoStash",
+        PullMode::FfOnly | PullMode::Merge => "merge.autoStash",
+    };
+    config
+        .get(key)
+        .and_then(|raw| parse_git_config_maybe_bool(raw.trim()))
+        .unwrap_or(false)
 }
 
 fn parse_pull_rebase_config(raw: &str) -> std::result::Result<bool, PullError> {
@@ -296,14 +342,6 @@ where
         HeadState::Invalid => return Err(PullError::InvalidHead),
     };
 
-    if let Some(requested) = options.branch.as_deref() {
-        if requested != short_name {
-            return Err(PullError::Repository(Error::Message(format!(
-                "pull for branch '{requested}' requires checking out that branch first"
-            ))));
-        }
-    }
-
     let config = repo.config().map_err(PullError::Repository)?;
     let remote_name = options
         .remote
@@ -317,10 +355,27 @@ where
         .unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
 
     let integration = resolve_pull_integration(config.as_ref(), Some(&short_name), options.mode)?;
+    let autostash = resolve_pull_autostash(config.as_ref(), integration.mode, options.autostash)
+        && !options.check;
+
+    let identity = checkout_reflog_identity(repo);
+    let stash_oid = if autostash {
+        push_operation_autostash(repo, &identity).map_err(PullError::Repository)?
+    } else {
+        None
+    };
+
+    let finish = |outcome: std::result::Result<PullOutcome, PullError>| {
+        restore_autostash_on_failure(repo, stash_oid.as_ref(), &identity, &outcome);
+        outcome
+    };
 
     let mut fetch_opts = options.fetch.clone();
     if fetch_opts.remote_name.is_none() {
         fetch_opts.remote_name = Some(remote_name.clone());
+    }
+    if options.check {
+        fetch_opts.dry_run = false;
     }
 
     if remote_name != "." {
@@ -331,18 +386,162 @@ where
     }
 
     let upstream =
-        pull_upstream_branch(repo, &short_name, &remote_name).ok_or(PullError::NoUpstream {
-            branch: short_name.clone(),
-        })?;
+        resolve_pull_integration_base(repo, &short_name, &remote_name, options.explicit_fetch)
+            .ok_or(PullError::NoUpstream {
+                branch: short_name.clone(),
+            })?;
     let label = upstream.name.clone();
     let upstream_oid = upstream.oid;
 
-    match head_oid {
+    if options.check {
+        return finish(pull_check_outcome(
+            repo,
+            head_oid,
+            upstream_oid,
+            &label,
+            integration,
+        ));
+    }
+
+    let outcome = match head_oid {
         None => adopt_unborn_upstream(repo, &refname, &short_name, &label, upstream_oid),
         Some(head_oid) => {
             integrate_fetched_upstream(repo, &refname, head_oid, upstream_oid, &label, integration)
         }
+    };
+    finish(apply_autostash_after_pull(
+        repo,
+        stash_oid.as_ref(),
+        &identity,
+        outcome,
+    ))
+}
+
+fn restore_autostash_on_failure(
+    repo: &Repository,
+    stash_oid: Option<&ObjectId>,
+    identity: &str,
+    outcome: &std::result::Result<PullOutcome, PullError>,
+) {
+    let Some(stash_oid) = stash_oid else {
+        return;
+    };
+    let restore = match outcome {
+        Err(_) => true,
+        Ok(out) => matches!(out.result, PullResult::Conflicts | PullResult::RefusedNotFf),
+    };
+    if restore {
+        let _ = restore_operation_autostash(repo, stash_oid, identity);
     }
+}
+
+fn apply_autostash_after_pull(
+    repo: &Repository,
+    stash_oid: Option<&ObjectId>,
+    identity: &str,
+    outcome: std::result::Result<PullOutcome, PullError>,
+) -> std::result::Result<PullOutcome, PullError> {
+    let mut outcome = outcome?;
+    if stash_oid.is_none() {
+        return Ok(outcome);
+    }
+    if !matches!(
+        outcome.result,
+        PullResult::UpToDate
+            | PullResult::FastForward
+            | PullResult::Merged
+            | PullResult::Rebased
+            | PullResult::SetUpstream
+    ) {
+        return Ok(outcome);
+    }
+    if let Some(stash_oid) = stash_oid {
+        if apply_operation_autostash(repo, stash_oid, identity).map_err(PullError::Repository)? {
+            outcome.result = PullResult::AutostashConflict;
+        }
+    }
+    Ok(outcome)
+}
+
+fn pull_check_outcome(
+    repo: &Repository,
+    head_oid: Option<ObjectId>,
+    upstream_oid: ObjectId,
+    label: &str,
+    integration: PullIntegration,
+) -> std::result::Result<PullOutcome, PullError> {
+    let (ahead, behind, would, fast_forward_possible) = match head_oid {
+        None => (0, 0, PullResult::SetUpstream, true),
+        Some(head_oid) => {
+            let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)
+                .map_err(PullError::Repository)?;
+            let would = predict_pull_result(repo, head_oid, upstream_oid, integration)?;
+            let up_to_date = head_oid == upstream_oid || is_ancestor(repo, upstream_oid, head_oid)?;
+            let fast_forward = !up_to_date
+                && is_ancestor(repo, head_oid, upstream_oid).map_err(PullError::Repository)?;
+            (ahead, behind, would, up_to_date || fast_forward)
+        }
+    };
+    Ok(PullOutcome {
+        result: would,
+        label: label.to_owned(),
+        oid: head_oid,
+        change_id: head_oid
+            .and_then(|oid| logical_change_id_for_commit(repo, oid).ok())
+            .flatten(),
+        upstream: None,
+        conflicts: None,
+        ahead: Some(ahead),
+        behind: Some(behind),
+        check: Some(PullCheck {
+            ahead,
+            behind,
+            fast_forward_possible,
+            would,
+        }),
+    })
+}
+
+fn predict_pull_result(
+    repo: &Repository,
+    head_oid: ObjectId,
+    upstream_oid: ObjectId,
+    integration: PullIntegration,
+) -> std::result::Result<PullResult, PullError> {
+    if head_oid == upstream_oid || is_ancestor(repo, upstream_oid, head_oid)? {
+        return Ok(PullResult::UpToDate);
+    }
+    if integration.allow_fast_forward && is_ancestor(repo, head_oid, upstream_oid)? {
+        return Ok(PullResult::FastForward);
+    }
+    let diverged = !is_ancestor(repo, upstream_oid, head_oid)?
+        && !is_ancestor(repo, head_oid, upstream_oid)?
+        && head_oid != upstream_oid;
+    if diverged {
+        return match integration.mode {
+            PullMode::FfOnly => Ok(PullResult::RefusedNotFf),
+            PullMode::Rebase => Ok(PullResult::Rebased),
+            PullMode::Merge => match predict_merge(
+                repo,
+                head_oid,
+                upstream_oid,
+                &MergePredictionOptions {
+                    allow_fast_forward: integration.allow_fast_forward,
+                    theirs_label: "upstream".into(),
+                    ..Default::default()
+                },
+            )
+            .map_err(PullError::Repository)?
+            {
+                MergePrediction::UpToDate => Ok(PullResult::UpToDate),
+                MergePrediction::FastForward => Ok(PullResult::FastForward),
+                MergePrediction::Clean { .. } => Ok(PullResult::Merged),
+                MergePrediction::Conflicts { .. } => Ok(PullResult::Conflicts),
+                MergePrediction::Unrelated => Ok(PullResult::Conflicts),
+            },
+        };
+    }
+    Ok(PullResult::Merged)
 }
 
 fn adopt_unborn_upstream(
@@ -366,6 +565,7 @@ fn adopt_unborn_upstream(
         conflicts: None,
         ahead: None,
         behind: None,
+        check: None,
     })
 }
 
@@ -395,6 +595,7 @@ fn integrate_fetched_upstream(
                     conflicts: None,
                     ahead: Some(ahead),
                     behind: Some(behind),
+                    check: None,
                 });
             }
             PullMode::Rebase => {
@@ -472,6 +673,7 @@ fn rebase_fetched_upstream(
                 conflicts: Some(details),
                 ahead: None,
                 behind: None,
+                check: None,
             });
         }
         Err(other) => return Err(map_history_error(other)),
@@ -496,6 +698,7 @@ fn rebase_fetched_upstream(
             conflicts: None,
             ahead: None,
             behind: None,
+            check: None,
         });
     }
 
@@ -550,6 +753,7 @@ fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> PullOu
             conflicts: None,
             ahead: None,
             behind: None,
+            check: None,
         },
         IntegrateBranchOutcome::FastForward { oid, change_id } => PullOutcome {
             result: PullResult::FastForward,
@@ -560,6 +764,7 @@ fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> PullOu
             conflicts: None,
             ahead: None,
             behind: None,
+            check: None,
         },
         IntegrateBranchOutcome::Merged { oid, change_id } => PullOutcome {
             result: PullResult::Merged,
@@ -570,6 +775,7 @@ fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> PullOu
             conflicts: None,
             ahead: None,
             behind: None,
+            check: None,
         },
         IntegrateBranchOutcome::Conflicts { details, .. } => PullOutcome {
             result: PullResult::Conflicts,
@@ -580,6 +786,7 @@ fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> PullOu
             conflicts: Some(details),
             ahead: None,
             behind: None,
+            check: None,
         },
     }
 }

@@ -1,4 +1,4 @@
-//! Shared fetch flags for `grit fetch` and (later) `grit pull`.
+//! Shared fetch flags for `grit fetch` and `grit pull`.
 
 use clap::Args;
 

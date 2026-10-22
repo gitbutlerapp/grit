@@ -679,6 +679,27 @@ pub fn print_pull_outcome(
                 outln!(w, "- change id `{short}`", short = short_change_id(id));
             }
         }
+        PullResult::AutostashConflict => {
+            outln!(
+                w,
+                "- Pulled **`{}`**, but re-applying autostash left conflicts (stash kept)",
+                outcome.branch
+            );
+        }
+    }
+    if let Some(check) = &outcome.check {
+        outln!(
+            w,
+            "- Check: {ahead} ahead, {behind} behind · fast-forward {} · would `{would:?}`",
+            if check.fast_forward_possible {
+                "possible"
+            } else {
+                "not possible"
+            },
+            ahead = check.ahead,
+            behind = check.behind,
+            would = check.would
+        );
     }
     Ok(())
 }

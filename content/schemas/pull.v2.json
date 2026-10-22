@@ -24,6 +24,34 @@
       ],
       "type": "object"
     },
+    "PullCheckJson": {
+      "description": "Dry-run summary from `grit pull --check`.",
+      "properties": {
+        "ahead": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "behind": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "fast_forward_possible": {
+          "type": "boolean"
+        },
+        "would": {
+          "$ref": "#/definitions/PullResult"
+        }
+      },
+      "required": [
+        "ahead",
+        "behind",
+        "fast_forward_possible",
+        "would"
+      ],
+      "type": "object"
+    },
     "PullResult": {
       "description": "Result of `grit pull` (`--json` contract).",
       "enum": [
@@ -33,7 +61,8 @@
         "refused_not_ff",
         "conflicts",
         "set_upstream",
-        "rebased"
+        "rebased",
+        "autostash_conflict"
       ],
       "type": "string"
     }
@@ -63,6 +92,16 @@
       "type": [
         "string",
         "null"
+      ]
+    },
+    "check": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PullCheckJson"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "conflict_details": {

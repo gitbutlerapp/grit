@@ -7,7 +7,9 @@ use anyhow::Result;
 use grit_lib::change_id::ChangeId;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::MergeConflictDetail;
-use grit_lib::porcelain::pull::{PullOutcome as LibPullOutcome, PullResult as LibPullResult};
+use grit_lib::porcelain::pull::{
+    PullCheck as LibPullCheck, PullOutcome as LibPullOutcome, PullResult as LibPullResult,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -23,6 +25,16 @@ pub enum PullResult {
     Conflicts,
     SetUpstream,
     Rebased,
+    AutostashConflict,
+}
+
+/// Dry-run summary from `grit pull --check`.
+#[derive(Serialize, JsonSchema)]
+pub struct PullCheckJson {
+    pub ahead: usize,
+    pub behind: usize,
+    pub fast_forward_possible: bool,
+    pub would: PullResult,
 }
 
 /// Outcome of `grit pull`.
@@ -51,6 +63,9 @@ pub struct PullOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub behind: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub check: Option<PullCheckJson>,
 }
 
 pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
@@ -68,6 +83,7 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
             LibPullResult::Conflicts => PullResult::Conflicts,
             LibPullResult::SetUpstream => PullResult::SetUpstream,
             LibPullResult::Rebased => PullResult::Rebased,
+            LibPullResult::AutostashConflict => PullResult::AutostashConflict,
         },
         branch: outcome.label,
         oid: outcome.oid.as_ref().map(ObjectId::to_hex),
@@ -80,6 +96,25 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
         conflict_details,
         ahead: outcome.ahead,
         behind: outcome.behind,
+        check: outcome.check.map(map_check),
+    }
+}
+
+fn map_check(check: LibPullCheck) -> PullCheckJson {
+    PullCheckJson {
+        ahead: check.ahead,
+        behind: check.behind,
+        fast_forward_possible: check.fast_forward_possible,
+        would: match check.would {
+            LibPullResult::UpToDate => PullResult::UpToDate,
+            LibPullResult::FastForward => PullResult::FastForward,
+            LibPullResult::Merged => PullResult::Merged,
+            LibPullResult::RefusedNotFf => PullResult::RefusedNotFf,
+            LibPullResult::Conflicts => PullResult::Conflicts,
+            LibPullResult::SetUpstream => PullResult::SetUpstream,
+            LibPullResult::Rebased => PullResult::Rebased,
+            LibPullResult::AutostashConflict => PullResult::AutostashConflict,
+        },
     }
 }
 
@@ -149,8 +184,42 @@ impl HumanRender for PullOutcome {
                 self.upstream.as_deref().unwrap_or_default()
             ),
             PullResult::Rebased => outln!(w, "Rebased onto {} ({short})", self.branch),
+            PullResult::AutostashConflict => {
+                outln!(
+                    w,
+                    "Pulled {}, but re-applying autostash left conflicts; the stash entry was kept.",
+                    self.branch
+                );
+            }
+        }
+        if let Some(check) = &self.check {
+            outln!(
+                w,
+                "Would {} ({} ahead, {} behind). Fast-forward {}possible.",
+                check_would_phrase(check.would),
+                check.ahead,
+                check.behind,
+                if check.fast_forward_possible {
+                    ""
+                } else {
+                    "not "
+                }
+            );
         }
         Ok(())
+    }
+}
+
+fn check_would_phrase(result: PullResult) -> &'static str {
+    match result {
+        PullResult::UpToDate => "leave the branch up to date",
+        PullResult::FastForward => "fast-forward",
+        PullResult::Merged => "merge",
+        PullResult::Rebased => "rebase",
+        PullResult::SetUpstream => "set upstream",
+        PullResult::RefusedNotFf => "refuse (not fast-forward)",
+        PullResult::Conflicts => "stop with conflicts",
+        PullResult::AutostashConflict => "conflict on autostash restore",
     }
 }
 

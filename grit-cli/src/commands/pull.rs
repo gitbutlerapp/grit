@@ -6,38 +6,75 @@ mod pull_outcome;
 
 use crate::commands::auth;
 use crate::commands::fetch::map_remote_error;
+use crate::commands::fetch_args::FetchArgs;
 use crate::context;
 use crate::output::OutputMode;
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
-use grit_lib::remote::DefaultHttpClientFactory;
+use grit_lib::remote::fetch_request::resolve_fetch_invocation;
+use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
+use grit_lib::remote::{DefaultHttpClientFactory, DEFAULT_REMOTE};
 
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
-pub fn run(ff_only: bool, no_rebase: bool, rebase: bool, mode: OutputMode) -> Result<PullOutcome> {
+pub struct PullRunArgs {
+    pub fetch: FetchArgs,
+    pub ff_only: bool,
+    pub no_rebase: bool,
+    pub rebase: bool,
+    pub autostash: bool,
+    pub check: bool,
+}
+
+pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
+    if args.check && args.autostash {
+        anyhow::bail!("--check cannot be used with --autostash");
+    }
     let repo = context::discover()?;
-    let cli_mode = if ff_only {
+    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
+    let cli_mode = if args.ff_only {
         Some(PullMode::FfOnly)
-    } else if no_rebase {
+    } else if args.no_rebase {
         Some(PullMode::Merge)
-    } else if rebase {
+    } else if args.rebase {
         Some(PullMode::Rebase)
     } else {
         None
     };
-    let options = PullOptions::for_working_branch(&repo, context::environment(), cli_mode)
+    let mut options = PullOptions::for_working_branch(&repo, context::environment(), cli_mode)
         .map_err(anyhow::Error::new)?;
-    let remote_name = options
-        .fetch
-        .remote_name
-        .clone()
-        .unwrap_or_else(|| "origin".to_owned());
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let invocation = resolve_fetch_invocation(
+        &config,
+        args.fetch.remote.as_deref(),
+        &args.fetch.refspecs,
+        DEFAULT_REMOTE,
+    );
+    options.remote = Some(invocation.remote.clone());
+    options.explicit_fetch = !invocation.user_refspecs.is_empty();
+    options.autostash = args.autostash;
+    options.check = args.check;
+    options.fetch = FetchOptions {
+        refspecs: invocation.user_refspecs,
+        tags: resolve_fetch_tags(&config, &invocation.remote, args.fetch.tag_mode_override()),
+        thread_policy: repo.thread_policy(),
+        environment: context::environment(),
+        prune: resolve_fetch_prune(&config, &invocation.remote, args.fetch.prune_override())
+            .context("could not resolve fetch prune settings")?,
+        dry_run: args.fetch.dry_run,
+        remote_name: Some(invocation.remote.clone()),
+        ..Default::default()
+    };
+    let remote_name = invocation.remote;
     let factory = DefaultHttpClientFactory;
-    let mut progress = TerminalProgress::new(mode);
+    let progress = if args.fetch.quiet {
+        TerminalProgress::quiet(mode)
+    } else {
+        TerminalProgress::new(mode)
+    };
+    let mut progress = progress;
     let lib = match pull(&repo, &options, &mut progress, Some(&factory)) {
         Ok(outcome) => outcome,
         Err(PullError::Remote(remote_err)) => {
@@ -59,4 +96,19 @@ pub fn run(ff_only: bool, no_rebase: bool, rebase: bool, mode: OutputMode) -> Re
         }
     };
     Ok(map_outcome(lib))
+}
+
+/// Exit code for `grit pull --check` (0 when up-to-date or fast-forward is possible).
+#[must_use]
+pub fn pull_check_exit_code(outcome: &PullOutcome) -> i32 {
+    if let Some(check) = &outcome.check {
+        if check.fast_forward_possible {
+            return 0;
+        }
+        return 1;
+    }
+    match outcome.result {
+        PullResult::Conflicts | PullResult::RefusedNotFf | PullResult::AutostashConflict => 1,
+        _ => 0,
+    }
 }

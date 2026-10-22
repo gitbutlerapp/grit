@@ -447,3 +447,121 @@ fn pull_unborn_adoption_matches_git() {
         rev(&git_dir, "HEAD")
     );
 }
+
+#[test]
+fn pull_explicit_remote_branch_via_fetch_head() {
+    let root = unique_tmp("pull-git", "explicit-branch");
+    let origin = root.join("origin");
+    fs::create_dir_all(&origin).expect("origin");
+    git(&origin, &["init", "-q", "-b", "main"]);
+    commit(&origin, "f", "seed");
+    git(&origin, &["checkout", "-qb", "feature"]);
+    commit(&origin, "g", "feature");
+    let feature_tip = rev(&origin, "feature");
+    git(&origin, &["checkout", "-q", "main"]);
+
+    let grit_dir = root.join("grit");
+    fs::create_dir_all(&grit_dir).expect("grit");
+    git(&grit_dir, &["init", "-q", "-b", "main"]);
+    git(
+        &grit_dir,
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    grit_identity(&grit_dir);
+
+    let git_dir = root.join("git");
+    fs::create_dir_all(&git_dir).expect("git");
+    git(&git_dir, &["init", "-q", "-b", "main"]);
+    git(
+        &git_dir,
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    grit_identity(&git_dir);
+
+    let repo = open(&grit_dir);
+    let mut opts = PullOptions {
+        remote: Some("origin".into()),
+        explicit_fetch: true,
+        fetch: fetch_opts(&Environment::empty()),
+        ..PullOptions::default()
+    };
+    opts.fetch.refspecs = vec!["feature".into()];
+    opts.fetch.remote_name = Some("origin".into());
+    let outcome = pull_grit(&repo, &opts);
+    assert_eq!(outcome.result, PullResult::SetUpstream);
+    assert_eq!(rev(&grit_dir, "HEAD"), feature_tip);
+
+    git(&git_dir, &["pull", "-q", "origin", "feature"]);
+    assert_eq!(rev(&git_dir, "HEAD"), feature_tip);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+}
+
+#[test]
+fn pull_autostash_restores_dirty_worktree_after_fast_forward() {
+    let (grit_dir, git_dir) = setup_tracked_pair("autostash-ff");
+    let origin = grit_dir.parent().unwrap().join("origin");
+    commit(&origin, "f", "remote");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+    let dirty = "local-only\n";
+    write_file(&grit_dir, "dirty.txt", dirty);
+    write_file(&git_dir, "dirty.txt", dirty);
+
+    let repo = open(&grit_dir);
+    let outcome = pull_grit(
+        &repo,
+        &PullOptions {
+            autostash: true,
+            fetch: fetch_opts(&Environment::empty()),
+            ..PullOptions::default()
+        },
+    );
+    assert_eq!(outcome.result, PullResult::FastForward);
+    assert_eq!(
+        fs::read_to_string(grit_dir.join("dirty.txt")).expect("read"),
+        dirty
+    );
+
+    git(&git_dir, &["pull", "-q", "--autostash"]);
+    assert_eq!(
+        fs::read_to_string(git_dir.join("dirty.txt")).expect("git read"),
+        dirty
+    );
+    assert_repo_matches_git(&grit_dir, &git_dir);
+}
+
+#[test]
+fn pull_check_leaves_head_and_matches_git_rev_list_counts() {
+    let (grit_dir, git_dir) = setup_tracked_pair("check");
+    let origin = grit_dir.parent().unwrap().join("origin");
+    commit(&grit_dir, "local", "local");
+    commit(&git_dir, "local", "local");
+    commit(&origin, "remote", "remote");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    let head_before = rev(&grit_dir, "HEAD");
+    let repo = open(&grit_dir);
+    let outcome = pull_grit(
+        &repo,
+        &PullOptions {
+            check: true,
+            fetch: fetch_opts(&Environment::empty()),
+            ..PullOptions::default()
+        },
+    );
+    assert_eq!(rev(&grit_dir, "HEAD"), head_before);
+    let check = outcome.check.expect("check block");
+    assert!(!check.fast_forward_possible);
+    assert_eq!(check.would, PullResult::Merged);
+
+    let git_out = git(
+        &grit_dir,
+        &["rev-list", "--left-right", "--count", "HEAD...origin/main"],
+    );
+    let mut parts = git_out.split_whitespace();
+    let git_ahead: usize = parts.next().unwrap().parse().unwrap();
+    let git_behind: usize = parts.next().unwrap().parse().unwrap();
+    assert_eq!(check.ahead, git_ahead);
+    assert_eq!(check.behind, git_behind);
+}

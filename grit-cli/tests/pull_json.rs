@@ -252,3 +252,38 @@ fn pull_json_set_upstream_unborn() -> TestResult {
     assert!(json["upstream"].as_str().is_some());
     Ok(())
 }
+
+#[test]
+fn pull_json_check_shape_and_exit_codes() -> TestResult {
+    let root = unique_tmp("pull-json", "check");
+    let upstream = root.join("upstream");
+    fs::create_dir_all(&upstream)?;
+    git(&upstream, &["init", "-q", "-b", "main"]);
+    commit(&upstream, "a", "seed");
+    git(
+        &root,
+        &["clone", "-q", upstream.to_str().unwrap(), "client"],
+    );
+    let client = root.join("client");
+    commit(&upstream, "a", "remote");
+    git(&client, &["fetch", "-q"]);
+    let head_before = git(&client, &["rev-parse", "HEAD"]);
+    let ok = grit_cmd(&client, &["--json", "pull", "--check"]);
+    assert!(ok.ok, "ff check must exit 0: {}", ok.stderr);
+    let json: Value = serde_json::from_str(&ok.stdout)?;
+    let check = &json["check"];
+    assert_eq!(check["fast_forward_possible"], true);
+    assert_eq!(check["would"], "fast_forward");
+    assert_eq!(git(&client, &["rev-parse", "HEAD"]), head_before);
+
+    commit(&client, "local", "local");
+    commit(&upstream, "b", "remote2");
+    git(&client, &["fetch", "-q"]);
+    let bad = grit_cmd(&client, &["--json", "pull", "--check"]);
+    assert!(!bad.ok, "diverged check must exit 1");
+    let json: Value = serde_json::from_str(&bad.stdout)?;
+    assert_eq!(json["check"]["fast_forward_possible"], false);
+    assert!(json["check"]["ahead"].as_u64().is_some());
+    assert!(json["check"]["behind"].as_u64().is_some());
+    Ok(())
+}

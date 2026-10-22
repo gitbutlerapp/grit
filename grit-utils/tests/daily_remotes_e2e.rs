@@ -93,7 +93,11 @@ const HTTP_MATRIX_IDS: [&str; 3] = [
     "push/incremental-http@git-git",
 ];
 
-const FETCH_MATRIX_IDS: [&str; 2] = ["fetch/one-branch@git-git", "fetch/dry-run@git-git"];
+const FETCH_MATRIX_IDS: [&str; 3] = [
+    "fetch/one-branch@git-git",
+    "fetch/dry-run@git-git",
+    "pull/check@git-git",
+];
 
 #[test]
 fn network_headlines_smoke() {

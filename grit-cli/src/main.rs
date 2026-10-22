@@ -943,15 +943,23 @@ enum Command {
     },
     /// Fetch from the remote and integrate it into the current branch.
     Pull {
+        #[command(flatten)]
+        fetch: commands::fetch_args::FetchArgs,
         /// Refuse when a merge would be required (exit 1 when diverged).
-        #[arg(long = "ff-only", conflicts_with_all = ["no_rebase", "rebase"])]
+        #[arg(long = "ff-only", conflicts_with_all = ["no_rebase", "rebase", "check"])]
         ff_only: bool,
         /// Merge instead of rebasing, overriding `pull.rebase`.
-        #[arg(long = "no-rebase", conflicts_with_all = ["ff_only", "rebase"])]
+        #[arg(long = "no-rebase", conflicts_with_all = ["ff_only", "rebase", "check"])]
         no_rebase: bool,
         /// Rebase local commits onto the fetched upstream, overriding `pull.rebase=false`.
-        #[arg(long = "rebase", conflicts_with_all = ["ff_only", "no_rebase"])]
+        #[arg(long = "rebase", conflicts_with_all = ["ff_only", "no_rebase", "check"])]
         rebase: bool,
+        /// Stash dirty worktree/index changes around the pull (`merge.autoStash` / `rebase.autoStash`).
+        #[arg(long = "autostash", conflicts_with = "check")]
+        autostash: bool,
+        /// Fetch and report whether a fast-forward is possible without changing the branch.
+        #[arg(long = "check", conflicts_with_all = ["autostash", "ff_only", "no_rebase", "rebase"])]
+        check: bool,
     },
     /// Publish refs to a remote.
     Push {
@@ -2016,17 +2024,28 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             Ok(())
         }
         Command::Pull {
+            fetch,
             ff_only,
             no_rebase,
             rebase,
+            autostash,
+            check,
         } => {
-            let outcome = commands::pull::run(ff_only, no_rebase, rebase, opts.mode)?;
-            emit(&outcome, opts, ctx)?;
-            if matches!(
-                outcome.result,
-                commands::pull::PullResult::Conflicts | commands::pull::PullResult::RefusedNotFf
-            ) {
-                std::process::exit(1);
+            let args = commands::pull::PullRunArgs {
+                fetch,
+                ff_only,
+                no_rebase,
+                rebase,
+                autostash,
+                check,
+            };
+            let outcome = commands::pull::run(&args, opts.mode)?;
+            if !(args.fetch.quiet && opts.mode == OutputMode::Human) {
+                emit(&outcome, opts, ctx)?;
+            }
+            let code = commands::pull::pull_check_exit_code(&outcome);
+            if code != 0 {
+                std::process::exit(code);
             }
             Ok(())
         }

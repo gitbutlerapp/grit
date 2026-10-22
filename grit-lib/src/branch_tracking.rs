@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
 use crate::environment::Environment;
 use crate::error::Result;
+use crate::fetch_head::merge_object_ids_hex;
 use crate::merge_base::ahead_behind_of_target_commits;
 use crate::objects::ObjectId;
 use crate::push_report::{PushRefResult, PushRefStatus};
@@ -290,6 +291,57 @@ pub fn target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
 pub fn upstream_branch(repo: &Repository, branch_short: &str) -> Option<ComparisonBase> {
     let full_ref = upstream_tracking_full_ref(repo, branch_short)?;
     comparison_base_from_full_ref(repo, &full_ref, BaseSource::Upstream)
+}
+
+fn fetch_head_integration_name(content: &str, remote_name: &str) -> String {
+    for line in content.lines() {
+        if let Some(start) = line.find("branch '") {
+            let rest = &line[start + 8..];
+            if let Some(end) = rest.find('\'') {
+                let branch = &rest[..end];
+                return format!("{remote_name}/{branch}");
+            }
+        }
+    }
+    format!("{remote_name} (FETCH_HEAD)")
+}
+
+/// For-merge tip recorded in [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) after an explicit fetch.
+#[must_use]
+pub fn pull_upstream_from_fetch_head(
+    repo: &Repository,
+    remote_name: &str,
+) -> Option<ComparisonBase> {
+    let content = std::fs::read_to_string(repo.git_dir().join("FETCH_HEAD")).ok()?;
+    let hex_ids = merge_object_ids_hex(&content);
+    let first = hex_ids.first()?;
+    let oid = ObjectId::from_hex(first).ok()?;
+    let name = fetch_head_integration_name(&content, remote_name);
+    Some(ComparisonBase {
+        name,
+        full_ref: "FETCH_HEAD".to_owned(),
+        oid,
+        source: BaseSource::Upstream,
+    })
+}
+
+/// Commit [`crate::porcelain::pull::pull`] integrates after fetch.
+///
+/// Explicit command-line refspecs use [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion);
+/// otherwise the configured upstream of `branch_short` is used.
+#[must_use]
+pub fn resolve_pull_integration_base(
+    repo: &Repository,
+    branch_short: &str,
+    remote_name: &str,
+    explicit_fetch: bool,
+) -> Option<ComparisonBase> {
+    if explicit_fetch {
+        if let Some(base) = pull_upstream_from_fetch_head(repo, remote_name) {
+            return Some(base);
+        }
+    }
+    pull_upstream_branch(repo, branch_short, remote_name)
 }
 
 /// Upstream ref for [`crate::porcelain::pull::pull`].
