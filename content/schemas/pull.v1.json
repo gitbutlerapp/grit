@@ -3,7 +3,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
     "MergeConflictJson": {
-      "description": "One conflicted path in `--json` merge output.",
+      "description": "One conflicted path in `--json` pull output.",
       "properties": {
         "kind": {
           "type": "string"
@@ -24,23 +24,37 @@
       ],
       "type": "object"
     },
-    "MergeResult": {
-      "description": "Merge / pull integration result (`--json` contract).",
+    "PullResult": {
+      "description": "Integration result of `grit pull`.",
       "enum": [
         "up_to_date",
         "fast_forward",
         "merged",
+        "refused_not_ff",
         "conflicts",
-        "aborted",
         "set_upstream"
       ],
       "type": "string"
     }
   },
-  "description": "Result of `grit merge` (and the merge half of `grit pull`).",
+  "description": "Outcome of `grit pull`.",
   "properties": {
+    "ahead": {
+      "description": "Commits on the current branch not on the upstream when `result` is `refused_not_ff`.",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "behind": {
+      "description": "Commits on the upstream not on the current branch when `result` is `refused_not_ff`.",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "branch": {
-      "description": "The merge source label (for `set_upstream`, the branch being set).",
+      "description": "Remote branch integrated, or the local branch name for `set_upstream`.",
       "type": "string"
     },
     "change_id": {
@@ -78,10 +92,10 @@
       ]
     },
     "result": {
-      "$ref": "#/definitions/MergeResult"
+      "$ref": "#/definitions/PullResult"
     },
     "upstream": {
-      "description": "For `set_upstream` (unborn `grit pull`): the upstream the branch was set to.",
+      "description": "For `set_upstream`, the remote-tracking branch that was adopted.",
       "type": [
         "string",
         "null"
@@ -92,6 +106,6 @@
     "branch",
     "result"
   ],
-  "title": "MergeOutcome",
+  "title": "PullOutcome",
   "type": "object"
 }

@@ -1,112 +1,81 @@
 //! `grit pull` — fetch from the remote, then integrate the upstream into the
 //! current branch (fast-forward when possible, otherwise a merge).
 
-use anyhow::{bail, Context, Result};
-use grit_lib::change_id::{change_id, resolved_change_id, ChangeIdPolicy};
-use grit_lib::config::ConfigSet;
-use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::worktree_guard::prepare_tree_checkout;
-use grit_lib::refs;
-use grit_lib::state::{resolve_head, HeadState};
+#[path = "pull_outcome.rs"]
+mod pull_outcome;
 
+use crate::commands::auth;
 use crate::commands::fetch::map_remote_error;
-use crate::commands::merge::{self, MergeOutcome};
 use crate::context;
 use crate::output::OutputMode;
 use crate::progress::TerminalProgress;
+use anyhow::{bail, Context, Result};
+use grit_lib::config::ConfigSet;
+use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode};
-use grit_lib::remote::{DefaultHttpClientFactory, Remote, DEFAULT_REMOTE};
+use grit_lib::remote::{DefaultHttpClientFactory, DEFAULT_REMOTE};
+use grit_lib::state::{resolve_head, HeadState};
 
-fn logical_change_id_json(repo: &grit_lib::repo::Repository, oid: ObjectId) -> Option<String> {
-    let obj = repo.odb().read(&oid).ok()?;
-    let data = parse_commit(&obj.data).ok()?;
-    let config = repo.config().ok()?;
-    if ChangeIdPolicy::from_config(config.as_ref()).enabled() {
-        Some(resolved_change_id(&oid, &data).id.as_str().to_owned())
-    } else {
-        change_id(&data).map(|id| id.as_str().to_owned())
-    }
-}
+pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
-pub fn run(mode: OutputMode) -> Result<MergeOutcome> {
+pub fn run(ff_only: bool, no_rebase: bool, mode: OutputMode) -> Result<PullOutcome> {
     let repo = context::discover()?;
+    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
 
-    let (refname, short_name, head_oid) = match resolve_head(repo.git_dir())? {
-        HeadState::Branch {
-            refname,
-            short_name,
-            oid,
-        } => (refname, short_name, oid),
+    let short_name = match resolve_head(repo.git_dir())? {
+        HeadState::Branch { short_name, .. } => short_name,
         HeadState::Detached { .. } => bail!("HEAD is detached; grit pull needs a branch"),
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     };
 
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
-    let remote = config
+    let remote_name = config
         .get(&format!("branch.{short_name}.remote"))
         .filter(|r| !r.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
 
-    let prune = resolve_fetch_prune(&config, &remote, None)
+    let cli_mode = if ff_only {
+        Some(PullMode::FfOnly)
+    } else if no_rebase {
+        Some(PullMode::Merge)
+    } else {
+        None
+    };
+    let prune = resolve_fetch_prune(&config, &remote_name, None)
         .context("could not resolve fetch prune settings")?;
-
+    let options = PullOptions {
+        remote: None,
+        branch: None,
+        mode: cli_mode,
+        fetch: FetchOptions {
+            tags: TagMode::Following,
+            thread_policy: repo.thread_policy(),
+            environment: context::environment(),
+            prune,
+            ..Default::default()
+        },
+    };
     let factory = DefaultHttpClientFactory;
     let mut progress = TerminalProgress::new(mode);
-    Remote::from_config(&config, &remote)
-        .map_err(map_remote_error)?
-        .fetch(
-            &repo,
-            FetchOptions {
-                tags: TagMode::Following,
-                thread_policy: repo.thread_policy(),
-                environment: crate::context::environment(),
-                prune,
-                ..Default::default()
-            },
-            &mut progress,
-            Some(&factory),
-        )
-        .map_err(map_remote_error)?;
-
-    // Which upstream tracking ref to integrate.
-    let upstream_branch = config
-        .get(&format!("branch.{short_name}.merge"))
-        .and_then(|m| {
-            m.strip_prefix("refs/heads/")
-                .map(str::to_owned)
-                .or(Some(m.clone()))
-        })
-        .unwrap_or_else(|| short_name.clone());
-    let upstream_ref = format!("refs/remotes/{remote}/{upstream_branch}");
-    let upstream_oid = refs::resolve_ref(repo.git_dir(), &upstream_ref)
-        .with_context(|| format!("no upstream tracking ref {upstream_ref} after fetch"))?;
-
-    match head_oid {
-        Some(head_oid) => merge::integrate(
-            &repo,
-            &refname,
-            head_oid,
-            upstream_oid,
-            &format!("{remote}/{upstream_branch}"),
-        ),
-        None => {
-            // Unborn branch: adopt the upstream as the first commit.
-            let upstream_tree = context::commit_tree(&repo, &upstream_oid)?;
-            prepare_tree_checkout(&repo, None, &upstream_tree)
-                .map_err(anyhow::Error::new)
-                .context("could not verify working tree")?;
-            checkout_between_trees(&repo, None, &upstream_tree)
-                .context("could not populate the working tree")?;
-            refs::write_ref(repo.git_dir(), &refname, &upstream_oid)
-                .context("could not set branch")?;
-            Ok(MergeOutcome::set_upstream(
-                &short_name,
-                &format!("{remote}/{upstream_branch}"),
-                upstream_oid,
-                logical_change_id_json(&repo, upstream_oid),
-            ))
+    let lib = match pull(&repo, &options, &mut progress, Some(&factory)) {
+        Ok(outcome) => outcome,
+        Err(PullError::Remote(remote_err)) => {
+            let url = config
+                .get(&format!("remote.{remote_name}.url"))
+                .unwrap_or_default();
+            let mapped = map_remote_error(remote_err);
+            if auth::offer_reauth(&mapped, &url)? {
+                pull(&repo, &options, &mut progress, Some(&factory))?
+            } else {
+                return Err(mapped);
+            }
         }
-    }
+        Err(other) => {
+            return Err(match other {
+                PullError::Remote(remote) => map_remote_error(remote),
+                rest => anyhow::Error::new(rest),
+            });
+        }
+    };
+    Ok(map_outcome(lib))
 }

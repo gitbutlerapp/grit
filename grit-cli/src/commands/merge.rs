@@ -30,6 +30,7 @@ pub enum MergeResult {
     Merged,
     Conflicts,
     Aborted,
+    #[allow(dead_code)]
     SetUpstream,
 }
 
@@ -139,7 +140,8 @@ impl MergeOutcome {
         }
     }
 
-    /// `grit pull` on an unborn branch adopting the upstream as the first commit.
+    /// Reserved for historical merge JSON (`set_upstream` moved to `grit pull`).
+    #[allow(dead_code)]
     pub fn set_upstream(
         branch: &str,
         upstream: &str,
@@ -158,7 +160,10 @@ impl MergeOutcome {
     }
 }
 
-fn merge_conflict_json(detail: &MergeConflictDetail, merge_label: &str) -> MergeConflictJson {
+pub(crate) fn merge_conflict_json(
+    detail: &MergeConflictDetail,
+    merge_label: &str,
+) -> MergeConflictJson {
     let (kind, summary) = match detail.kind {
         MergeConflictKind::Content => ("content".to_owned(), None),
         MergeConflictKind::AddAdd => ("add_add".to_owned(), None),

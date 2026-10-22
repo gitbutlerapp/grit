@@ -823,7 +823,14 @@ enum Command {
         no_prune: bool,
     },
     /// Fetch from the remote and integrate it into the current branch.
-    Pull,
+    Pull {
+        /// Refuse when a merge would be required (exit 1 when diverged).
+        #[arg(long = "ff-only")]
+        ff_only: bool,
+        /// Merge instead of rebasing, overriding `pull.rebase`.
+        #[arg(long = "no-rebase")]
+        no_rebase: bool,
+    },
     /// Publish the current branch to its remote.
     Push {
         /// Push tags instead of the current branch. Pushes every local tag
@@ -1647,10 +1654,13 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             opts,
             ctx,
         ),
-        Command::Pull => {
-            let outcome = commands::pull::run(opts.mode)?;
+        Command::Pull { ff_only, no_rebase } => {
+            let outcome = commands::pull::run(ff_only, no_rebase, opts.mode)?;
             emit(&outcome, opts, ctx)?;
-            if outcome.result == commands::merge::MergeResult::Conflicts {
+            if matches!(
+                outcome.result,
+                commands::pull::PullResult::Conflicts | commands::pull::PullResult::RefusedNotFf
+            ) {
                 std::process::exit(1);
             }
             Ok(())

@@ -15,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Merge\n\n- Fast-forwarded **`origin/main`** → `d0f5bdf`\n",
+    "stdout": "## Pull\n\n- Fast-forwarded **`origin/main`** → `d0f5bdf`\n",
     "stderr": ""
   }
 }

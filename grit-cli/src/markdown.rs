@@ -540,6 +540,79 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
     Ok(())
 }
 
+/// Result of `grit pull`.
+pub fn print_pull_outcome(
+    w: &mut dyn Write,
+    outcome: &crate::commands::pull::PullOutcome,
+) -> anyhow::Result<()> {
+    use crate::commands::pull::PullResult;
+    outln!(w, "## Pull");
+    outln!(w);
+    match outcome.result {
+        PullResult::UpToDate => {
+            outln!(w, "Already up to date with **`{}`**.", outcome.branch);
+        }
+        PullResult::FastForward => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(w, "- Fast-forwarded **`{}`** → `{short}`", outcome.branch);
+            if let Some(id) = outcome.change_id.as_deref() {
+                outln!(w, "- change id `{short}`", short = short_change_id(id));
+            }
+        }
+        PullResult::Merged => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(
+                w,
+                "- Merged **`{}`** into the current branch · `{short}`",
+                outcome.branch
+            );
+            if let Some(id) = outcome.change_id.as_deref() {
+                outln!(w, "- change id `{short}`", short = short_change_id(id));
+            }
+        }
+        PullResult::RefusedNotFf => {
+            let ahead = outcome.ahead.unwrap_or(0);
+            let behind = outcome.behind.unwrap_or(0);
+            outln!(
+                w,
+                "- Not possible to fast-forward **`{}`** · {ahead} ahead, {behind} behind",
+                outcome.branch
+            );
+        }
+        PullResult::Conflicts => {
+            outln!(w, "- Pull **`{}`** stopped with conflicts", outcome.branch);
+            outln!(w);
+            if let Some(details) = &outcome.conflict_details {
+                for item in details {
+                    if let Some(summary) = &item.summary {
+                        outln!(w, "- **{}** — {summary}", item.kind);
+                    } else {
+                        outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
+                    }
+                }
+            } else {
+                for path in outcome.conflicts.as_deref().unwrap_or(&[]) {
+                    outln!(w, "- `{path}`");
+                }
+            }
+            outln!(
+                w,
+                "→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`"
+            );
+        }
+        PullResult::SetUpstream => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            let upstream = outcome.upstream.as_deref().unwrap_or("");
+            outln!(
+                w,
+                "- Set **`{}`** to `{upstream}` · `{short}`",
+                outcome.branch
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Result of `grit pick`.
 pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::Result<()> {
     outln!(w, "## Pick");

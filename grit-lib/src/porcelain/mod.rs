@@ -65,6 +65,7 @@ pub mod log;
 pub mod merge;
 pub mod paths;
 pub mod pathspec_match;
+pub mod pull;
 pub mod rebase;
 pub mod replay;
 pub mod reset;
