@@ -324,6 +324,9 @@ pub fn prepare_diff(git: &Path) -> Result<()> {
 }
 
 const PATCH_FILE_MARKER: &str = "patch-file.diff";
+const LARGE_HUNKS_FILE: &str = "large.txt";
+const HUNKS_HALF_IDS_MARKER: &str = "hunks-half.ids";
+const HUNKS_HALF_PATCH_MARKER: &str = "hunks-half.patch";
 
 /// Modify ~1% of paths and write `git diff` to the bench scratch dir for `--patch-file` scenarios.
 pub fn prepare_add_patch_file(git: &Path) -> Result<()> {
@@ -360,6 +363,163 @@ pub fn shell_grit_add_patch_file(grit: &Path) -> String {
 pub fn shell_git_apply_cached(git: &Path) -> String {
     let prog_q = shell_quote(&git.to_string_lossy());
     let patch_q = shell_quote(&scratch_dir().join(PATCH_FILE_MARKER).to_string_lossy());
+    format!("{prog_q} apply --cached {patch_q} > /dev/null 2>&1")
+}
+
+/// Ensure `large.txt` (50k lines) exists and is committed, then write 500 one-line hunks and bench artifacts.
+pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+    use grit_lib::porcelain::hunk_select::{resolve_selection, unstaged_file_diffs, HunkSelection};
+    use grit_lib::repo::Repository;
+
+    let repo = active_worktree_repo();
+    ensure_large_file_committed(git, &repo)?;
+    // Each hyperfine iteration must start from a clean index and worktree at `HEAD`, then only
+    // the 500 one-line worktree edits below (partial staging from the timed command must not
+    // carry over).
+    run_git(git, &repo, &["reset", "--hard", "HEAD"])?;
+    run_git(git, &repo, &["clean", "-fd", "-q"])?;
+    pin_worktree_bench_config(git, &repo)?;
+    modify_large_file_five_hundred_hunks(&repo)?;
+    let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
+    let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
+    let snapshots = unstaged_file_diffs(&grit_repo, &pathspec)?;
+    let (file, peer) = snapshots
+        .first()
+        .context("large.txt should appear in unstaged diff")?;
+    let ids =
+        hunk_ids_with_duplicate_peers(DiffSide::Unstaged, LARGE_HUNKS_FILE, &file.hunks, peer);
+    let half_len = ids.len() / 2;
+    let half_ids: Vec<_> = ids.iter().take(half_len).cloned().collect();
+    let id_line = half_ids
+        .iter()
+        .map(grit_lib::diff::HunkId::as_str)
+        .collect::<Vec<_>>()
+        .join(",");
+    fs::write(
+        scratch_dir().join(HUNKS_HALF_IDS_MARKER),
+        id_line.as_bytes(),
+    )
+    .context("write hunk ids")?;
+    let patches = resolve_selection(
+        &grit_repo,
+        DiffSide::Unstaged,
+        &HunkSelection { ids: half_ids },
+        &pathspec,
+    )
+    .map_err(|e| anyhow::anyhow!("resolve hunk selection: {e}"))?
+    .patches;
+    let mut patch_text = String::new();
+    for patch in &patches {
+        patch_text.push_str(&format_file_patch_for_git(patch));
+    }
+    fs::write(
+        scratch_dir().join(HUNKS_HALF_PATCH_MARKER),
+        patch_text.as_bytes(),
+    )
+    .context("write half patch")?;
+    Ok(())
+}
+
+fn ensure_large_file_committed(git: &Path, repo: &Path) -> Result<()> {
+    let path = repo.join(LARGE_HUNKS_FILE);
+    if run_git_capture(
+        git,
+        repo,
+        &["ls-files", "--error-unmatch", LARGE_HUNKS_FILE],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+    let mut contents = String::with_capacity(700_000);
+    for i in 0..50_000 {
+        use std::fmt::Write as _;
+        let _ = writeln!(contents, "line{i}");
+    }
+    fs::write(&path, contents).context("write large.txt")?;
+    run_git(git, repo, &["add", LARGE_HUNKS_FILE])?;
+    run_git(git, repo, &["commit", "-qm", "add large file"])?;
+    Ok(())
+}
+
+fn modify_large_file_five_hundred_hunks(repo: &Path) -> Result<()> {
+    let path = repo.join(LARGE_HUNKS_FILE);
+    let mut data = fs::read_to_string(&path).context("read large.txt")?;
+    let mut lines: Vec<String> = data.lines().map(String::from).collect();
+    if lines.len() < 50_000 {
+        anyhow::bail!("large.txt too short: {}", lines.len());
+    }
+    for h in 0..500 {
+        let idx = h * 100;
+        lines[idx] = format!("LINE{idx}");
+    }
+    data = lines.join("\n");
+    data.push('\n');
+    fs::write(&path, data).context("write edited large.txt")?;
+    Ok(())
+}
+
+fn format_file_patch_for_git(patch: &grit_lib::apply::FilePatch) -> String {
+    use grit_lib::apply::HunkLine;
+    let path = patch.effective_path().unwrap_or(LARGE_HUNKS_FILE);
+    let mut out = String::new();
+    out.push_str(&format!("diff --git a/{path} b/{path}\n"));
+    let old = if patch.is_new {
+        "/dev/null".to_string()
+    } else {
+        format!("a/{}", patch.old_path.as_deref().unwrap_or(path))
+    };
+    let new = if patch.is_deleted {
+        "/dev/null".to_string()
+    } else {
+        format!("b/{}", patch.new_path.as_deref().unwrap_or(path))
+    };
+    out.push_str(&format!("--- {old}\n+++ {new}\n"));
+    for h in &patch.hunks {
+        out.push_str(&format!(
+            "@@ -{},{} +{},{} @@\n",
+            h.old_start, h.old_count, h.new_start, h.new_count
+        ));
+        for line in &h.lines {
+            match line {
+                HunkLine::Context(s) => write_hunk_patch_line(&mut out, ' ', s),
+                HunkLine::Add(s) => write_hunk_patch_line(&mut out, '+', s),
+                HunkLine::Remove(s) => write_hunk_patch_line(&mut out, '-', s),
+                HunkLine::NoNewline => out.push_str("\\ No newline at end of file\n"),
+            }
+        }
+    }
+    out
+}
+
+fn write_hunk_patch_line(out: &mut String, prefix: char, text: &str) {
+    out.push(prefix);
+    if text.ends_with('\n') {
+        out.push_str(text);
+    } else {
+        out.push_str(text);
+        out.push('\n');
+    }
+}
+
+/// Shell snippet: `grit add --hunks` using prepared ids (half of 500 hunks).
+pub fn shell_grit_add_hunks(grit: &Path) -> String {
+    let prog_q = shell_quote(&grit.to_string_lossy());
+    let ids_q = shell_quote(&scratch_dir().join(HUNKS_HALF_IDS_MARKER).to_string_lossy());
+    let file_q = shell_quote(LARGE_HUNKS_FILE);
+    format!("H=$(cat {ids_q}) && {prog_q} add --hunks \"$H\" -- {file_q} > /dev/null 2>&1")
+}
+
+/// Shell snippet: `git apply --cached` for the same half-hunk patch.
+pub fn shell_git_apply_hunks_half(git: &Path) -> String {
+    let prog_q = shell_quote(&git.to_string_lossy());
+    let patch_q = shell_quote(
+        &scratch_dir()
+            .join(HUNKS_HALF_PATCH_MARKER)
+            .to_string_lossy(),
+    );
     format!("{prog_q} apply --cached {patch_q} > /dev/null 2>&1")
 }
 

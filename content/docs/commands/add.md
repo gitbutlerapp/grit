@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit add [-u | --update] [--dry-run] [--patch-file <file|->] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
+grit add [-u | --update] [--dry-run] [--hunks <id,...>] [--patch-file <file|->] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
 ```
 
 ## Description
@@ -28,7 +28,8 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 | `<path>...` | Files or directories to stage. Omit to stage every change. |
 | `-u`, `--update` | Stage tracked changes only (modified and deleted paths). Untracked files are left alone. With no paths, applies to the whole tree. |
 | `--dry-run` | List paths that would be staged without updating the index or writing objects. |
-| `--patch-file` | Apply a unified diff to the index only (like `git apply --cached`). Use `-` for stdin. Cannot be combined with paths, `-u` / `--update`, or `-N` / `--intent-to-add`. |
+| `--hunks` | Stage only the listed hunk ids from `grit diff --json` (`hunks[].id`). Comma-separated ids; pass the flag again to add more. Optional `-- paths` narrow the diff scan. Cannot be combined with `--patch-file`, `-u` / `--update`, or `-N` / `--intent-to-add`. |
+| `--patch-file` | Apply a unified diff to the index only (like `git apply --cached`). Use `-` for stdin. Cannot be combined with `--hunks`, paths, `-u` / `--update`, or `-N` / `--intent-to-add`. |
 | `-N`, `--intent-to-add` | Record intent-to-add entries (empty blob, extended flag) instead of hashing content. |
 | `-f`, `--force` | Stage ignored paths when named explicitly (instead of erroring with pathspec ignored). |
 | `--pathspec-from-file` | Read additional pathspecs from a file, or `-` for stdin (same rules as Git). |
@@ -59,6 +60,15 @@ $ grit add --patch-file changes.diff
 Staged 1 change.
 ```
 
+Stage selected hunks by stable id (from `grit diff --json`):
+
+```console
+$ grit diff --unstaged --json -- f.txt | jq -r '.files[0].hunks[0].id'
+a1b2c3d4e5f6
+$ grit add --hunks a1b2c3d4e5f6 -- f.txt
+Staged 1 change.
+```
+
 Mark a script executable when the filesystem does not track the execute bit:
 
 ```console
@@ -81,6 +91,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `intent_to_add` | string[] | Paths recorded with intent-to-add (`-N` / `--intent-to-add`). |
 | `count` | number | Total paths in `added`, `modified`, and `removed`. |
 | `staged` | number | Same as `count` (kept for older scripts). |
+| `staged_hunks` | object | When `--hunks` was used: map of path → array of staged hunk id strings. |
 
 Example:
 

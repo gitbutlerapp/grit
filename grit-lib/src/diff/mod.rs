@@ -61,12 +61,17 @@ pub fn line_diff_unified_hunk_body(
 ) -> String {
     core::unified_hunk_body_for_diff_options(old_content, new_content, options)
 }
+pub(crate) use core::{imara_unified_hunk_slices, unified_hunk_body_for_diff_options};
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
     write_diff_entry_log_patch, write_patch, write_patch_resolved, write_patch_structured,
     LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchTextOptions,
 };
 pub use pickaxe::{Pickaxe, PickaxeError, PickaxeKind};
+pub(crate) use targets::{
+    collect_files_for_target, unstaged_file_diffs_with_peer_hunks,
+    unstaged_raw_changes_with_peer_hunks, FileChange,
+};
 pub use targets::{
     resolve_diff_arguments, DiffArguments, DiffTarget, FileDiff, ResolveDiffArgumentsError,
 };

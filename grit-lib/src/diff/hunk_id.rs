@@ -9,6 +9,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 use super::structured::{StructuredHunk, StructuredLine, StructuredLineKind};
+use crate::diff::structured::structured_hunk_for_id_from_unified_slice;
 use crate::hash::ChecksumHasher;
 use crate::objects::HashAlgo;
 
@@ -231,6 +232,34 @@ pub fn hunk_ids_with_duplicate_peers(
         .zip(ranks)
         .map(|(h, rank)| hash_hunk_id(side, path, h, rank))
         .collect()
+}
+
+/// Stable ids for unified hunk slices (`@@` …) in the same order as [`super::core::imara_unified_hunk_slices`].
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn hunk_ids_for_unified_slices(
+    side: DiffSide,
+    path: &str,
+    slices: &[&str],
+    before_count: usize,
+    after_count: usize,
+    before_ends_nl: bool,
+    after_ends_nl: bool,
+    peer_hunks: &[StructuredHunk],
+) -> Vec<HunkId> {
+    let id_hunks: Vec<StructuredHunk> = slices
+        .iter()
+        .filter_map(|slice| {
+            structured_hunk_for_id_from_unified_slice(
+                slice,
+                before_count,
+                after_count,
+                before_ends_nl,
+                after_ends_nl,
+            )
+        })
+        .collect();
+    hunk_ids_with_duplicate_peers(side, path, &id_hunks, peer_hunks)
 }
 
 #[cfg(test)]
