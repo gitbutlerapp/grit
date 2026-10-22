@@ -1,0 +1,107 @@
+{
+  "$id": "https://grit-scm.com/schemas/pull/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "MergeConflictJson": {
+      "description": "One conflicted path in `--json` merge output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "PullResult": {
+      "description": "Result of `grit pull` (`--json` contract).",
+      "enum": [
+        "up_to_date",
+        "fast_forward",
+        "merged",
+        "refused_not_ff",
+        "conflicts",
+        "set_upstream"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Outcome of `grit pull`.",
+  "properties": {
+    "ahead": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "behind": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": "string"
+    },
+    "change_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "conflict_details": {
+      "items": {
+        "$ref": "#/definitions/MergeConflictJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "conflicts": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "oid": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "result": {
+      "$ref": "#/definitions/PullResult"
+    },
+    "upstream": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "branch",
+    "result"
+  ],
+  "title": "PullOutcome",
+  "type": "object"
+}

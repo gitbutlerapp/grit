@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Already up to date with origin.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"remote\":\"origin\",\"updates\":[],\"updated\":0,\"dry_run\":false,\"rejected\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Already up to date with `origin`.\n",
+    "stderr": ""
+  }
+}

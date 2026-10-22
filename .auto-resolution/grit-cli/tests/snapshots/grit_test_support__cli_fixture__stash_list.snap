@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "stash@{0} 631c92f: On main: snapshot stash\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "[{\"index\":0,\"oid\":\"631c92f84891027e83087461a183903d9b0ad0e9\",\"message\":\"On main: snapshot stash\"}]\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "- **stash@{0}** `631c92f` — On main: snapshot stash\n",
+    "stderr": ""
+  }
+}

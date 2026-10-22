@@ -1,0 +1,3 @@
+ancestorEntries = ["content/docs/commands/push.md", "grit-cli/src/commands/push.rs", "grit-cli/src/main.rs", "grit-lib/src/remote/push_plan.rs"]
+ourEntries = ["content/docs/commands/push.md", "grit-cli/src/commands/push.rs", "grit-cli/src/main.rs", "grit-lib/src/remote/push_plan.rs"]
+theirEntries = ["content/docs/commands/push.md", "grit-cli/src/commands/push.rs", "grit-cli/src/main.rs", "grit-lib/src/remote/push_plan.rs"]

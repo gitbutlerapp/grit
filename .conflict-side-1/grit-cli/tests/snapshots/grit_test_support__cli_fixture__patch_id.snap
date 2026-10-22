@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "db20cbf19404d5a762136b964e1df57a06af6104 83352a61f6715ec3f0a297c6d6150725154fb833\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"entries\":[{\"patch_id\":\"db20cbf19404d5a762136b964e1df57a06af6104\",\"commit\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Patch IDs\n\n| Patch ID | Commit |\n| --- | --- |\n| `db20cbf19404d5a762136b964e1df57a06af6104` | `83352a61f6715ec3f0a297c6d6150725154fb833` |\n",
+    "stderr": ""
+  }
+}

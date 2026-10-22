@@ -4,6 +4,7 @@ use std::fs;
 
 use crate::branch_tracking::{
     remote_tracking_ref_is_mapped, upstream_branch, upstream_config_for_branch_ref,
+    write_branch_upstream_config,
 };
 use crate::check_ref_format::validate_branch_short_name;
 use crate::config::{parse_git_config_maybe_bool, ConfigFile, ConfigScope, ConfigSet};
@@ -679,18 +680,6 @@ pub fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
     let handle = repo.config_handle();
     handle.unset_local(&remote_key)?;
     handle.unset_local(&merge_key)?;
-    Ok(())
-}
-
-pub(crate) fn write_branch_upstream_config(
-    repo: &Repository,
-    branch_short: &str,
-    remote: &str,
-    merge: &str,
-) -> Result<()> {
-    let handle = repo.config_handle();
-    handle.set_local(&format!("branch.{branch_short}.remote"), remote)?;
-    handle.set_local(&format!("branch.{branch_short}.merge"), merge)?;
     Ok(())
 }
 

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "[main 0678d03] third\n3 changes committed\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"oid\":\"0678d0320dac162a518bfd0ee738896acdcc0f6b\",\"branch\":\"main\",\"subject\":\"third\",\"changes\":3,\"amended\":false,\"dry_run\":false,\"scope\":\"auto_stage\",\"files\":[{\"path\":\"staged.txt\",\"status\":\"A\"},{\"path\":\"tracked.txt\",\"status\":\"M\"},{\"path\":\"untracked.txt\",\"status\":\"A\"}],\"change_id\":\"xpwskqqvntzxwyvprokvsuqultwlpsql\",\"parents\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"1700000000 +0000\"},\"hooks_run\":[]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Commit\n\n- **`main`** · `0678d03` — third\n- **3** changes committed\n- change id `xpwskqq`\n",
+    "stderr": ""
+  }
+}

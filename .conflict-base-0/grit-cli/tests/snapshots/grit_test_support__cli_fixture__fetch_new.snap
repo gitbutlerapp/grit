@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "  refs/remotes/origin/main  83352a6 → bf0b3b1\nFetched 1 update from origin.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"remote\":\"origin\",\"updates\":[{\"ref\":\"refs/remotes/origin/main\",\"old_oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new_oid\":\"bf0b3b124c7ef363e721b63f13a779b31d7bf2fc\"}],\"updated\":1}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Updates from `origin`\n- `refs/remotes/origin/main` · `83352a6` → `bf0b3b1`\n\nFetched **1** update.\n",
+    "stderr": ""
+  }
+}

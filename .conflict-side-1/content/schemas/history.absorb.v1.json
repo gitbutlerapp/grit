@@ -1,0 +1,225 @@
+{
+  "$id": "https://grit-scm.com/schemas/history.absorb/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "AbsorbAssignmentOut": {
+      "description": "JSON/markdown assignment row for `grit history absorb`.",
+      "properties": {
+        "commit": {
+          "description": "Target commit (full hex).",
+          "type": "string"
+        },
+        "hunk_range": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HunkRangeOut"
+            }
+          ],
+          "description": "Staged hunk range in the index↔`HEAD` diff."
+        },
+        "path": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "commit",
+        "hunk_range",
+        "path"
+      ],
+      "type": "object"
+    },
+    "HeadPair": {
+      "description": "`HEAD` commit before and after rewrite.",
+      "properties": {
+        "new": {
+          "description": "Commit OID at `HEAD` after rewrite (full hex).",
+          "type": "string"
+        },
+        "old": {
+          "description": "Commit OID at `HEAD` before rewrite (full hex).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "new",
+        "old"
+      ],
+      "type": "object"
+    },
+    "HunkRangeOut": {
+      "description": "Hunk coordinates for JSON output.",
+      "properties": {
+        "new_lines": {
+          "description": "New side line count.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "new_start": {
+          "description": "New side start line (1-based).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_lines": {
+          "description": "Old side line count.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_start": {
+          "description": "Old side start line (1-based).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "new_lines",
+        "new_start",
+        "old_lines",
+        "old_start"
+      ],
+      "type": "object"
+    },
+    "RefPair": {
+      "description": "One ref tip before and after rewrite.",
+      "properties": {
+        "name": {
+          "description": "Full ref name.",
+          "type": "string"
+        },
+        "new": {
+          "description": "New tip OID (full hex).",
+          "type": "string"
+        },
+        "old": {
+          "description": "Previous tip OID (full hex).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "new",
+        "old"
+      ],
+      "type": "object"
+    },
+    "RewrittenPair": {
+      "description": "One commit OID before and after rewrite.",
+      "properties": {
+        "change_id": {
+          "description": "Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new": {
+          "description": "Replacement commit OID (full hex), or JSON `null` when the commit was dropped.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old": {
+          "description": "Commit OID before rewrite (full hex).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "old"
+      ],
+      "type": "object"
+    },
+    "UnassignedHunkOut": {
+      "description": "JSON/markdown unassigned hunk row.",
+      "properties": {
+        "hunk_range": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HunkRangeOut"
+            }
+          ],
+          "description": "Staged hunk range."
+        },
+        "path": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Stable reason code.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hunk_range",
+        "path",
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit history absorb`.",
+  "properties": {
+    "assignments": {
+      "description": "Assigned hunks.",
+      "items": {
+        "$ref": "#/definitions/AbsorbAssignmentOut"
+      },
+      "type": "array"
+    },
+    "dry_run": {
+      "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
+      "type": "boolean"
+    },
+    "head": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HeadPair"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
+    },
+    "operation": {
+      "description": "Operation name (`absorb`).",
+      "type": "string"
+    },
+    "refs": {
+      "description": "Planned or applied ref tip updates.",
+      "items": {
+        "$ref": "#/definitions/RefPair"
+      },
+      "type": "array"
+    },
+    "rewritten": {
+      "description": "Original and replacement commit OIDs for every rewritten commit.",
+      "items": {
+        "$ref": "#/definitions/RewrittenPair"
+      },
+      "type": "array"
+    },
+    "unassigned": {
+      "description": "Hunks left staged.",
+      "items": {
+        "$ref": "#/definitions/UnassignedHunkOut"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "assignments",
+    "dry_run",
+    "head",
+    "operation",
+    "refs",
+    "rewritten",
+    "unassigned"
+  ],
+  "title": "HistoryAbsorbOutcome",
+  "type": "object"
+}

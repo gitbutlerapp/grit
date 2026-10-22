@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "9f2f900 (HEAD -> main, tag: v1) only\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"commits\":[{\"oid\":\"9f2f900eff9db95fa9f21e68a93b1363ae59754c\",\"parents\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"only\",\"message\":\"only\",\"refs\":[{\"name\":\"HEAD\",\"kind\":\"head\"},{\"name\":\"v1\",\"kind\":\"tag\"},{\"name\":\"main\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\",\"change_id\":\"sroutmrwrpoyrwwwnnzymolrxywkyqxp\",\"change_id_stored\":true}],\"next\":null,\"truncated\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "- `9f2f900 (HEAD -> main, tag: v1) only`\n",
+    "stderr": ""
+  }
+}

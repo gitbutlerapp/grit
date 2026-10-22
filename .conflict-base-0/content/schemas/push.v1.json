@@ -1,0 +1,112 @@
+{
+  "$id": "https://grit-scm.com/schemas/push/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "PushKind": {
+      "description": "JSON classification for [`PushOutcome`].",
+      "enum": [
+        "branch",
+        "tags",
+        "delete",
+        "refspecs"
+      ],
+      "type": "string"
+    },
+    "PushRefOutcomeStatus": {
+      "description": "Per-ref push status in JSON (`ok`, `up_to_date`, or `rejected`).",
+      "enum": [
+        "ok",
+        "up_to_date",
+        "rejected"
+      ],
+      "type": "string"
+    },
+    "PushRefResult": {
+      "description": "One ref's push result.",
+      "properties": {
+        "forced": {
+          "type": "boolean"
+        },
+        "new_oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old_oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": "string"
+        },
+        "src": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/PushRefOutcomeStatus"
+        }
+      },
+      "required": [
+        "forced",
+        "ref",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit push`: the per-ref outcomes for the remote.",
+  "properties": {
+    "branch": {
+      "description": "Local branch short name when [`Self::kind`] is `branch` (legacy `branch` field).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dry_run": {
+      "description": "True when `--dry-run` was used (no refs or objects written).",
+      "type": "boolean"
+    },
+    "kind": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/PushKind"
+        }
+      ],
+      "description": "High-level push kind (`branch`, `tags`, `delete`, `refspecs`)."
+    },
+    "rejected": {
+      "type": "boolean"
+    },
+    "remote": {
+      "type": "string"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/definitions/PushRefResult"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "dry_run",
+    "kind",
+    "rejected",
+    "remote",
+    "results"
+  ],
+  "title": "PushOutcome",
+  "type": "object"
+}
