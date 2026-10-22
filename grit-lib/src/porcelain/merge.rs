@@ -58,9 +58,14 @@ use crate::porcelain::switch::{
 };
 use crate::porcelain::tree_merge_checkout::finalize_clean_tree_merge_index;
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
+use crate::progress::ProgressSink;
 use crate::refs;
 use crate::repo::Repository;
-use crate::state::{clear_merge_state, read_merge_heads, read_orig_head};
+use crate::state::{clear_merge_state, read_merge_heads, read_merge_msg, read_orig_head};
+use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
+use thiserror::Error;
+
+use crate::porcelain::commit::{create_commit, CommitRequest};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
 
@@ -427,6 +432,144 @@ pub fn integrate_branch_with_options(
 fn stored_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<Option<ChangeId>> {
     let obj = repo.odb().read(&oid)?;
     Ok(change_id(&parse_commit(&obj.data)?))
+}
+
+/// Options for [`continue_merge`].
+#[derive(Debug, Clone)]
+pub struct ContinueOptions {
+    /// When set, replaces the message from `MERGE_MSG` (comment lines stripped).
+    pub message: Option<String>,
+    /// Author identity in Git header form: `Name <email> <unix-time> <tz>`.
+    pub author: String,
+    /// Committer identity in the same form as [`Self::author`].
+    pub committer: String,
+}
+
+/// Result of [`continue_merge`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinueOutcome {
+    /// New merge commit OID.
+    pub oid: ObjectId,
+    /// Stored `change-id` on the merge commit when present.
+    pub change_id: Option<ChangeId>,
+}
+
+/// Failure modes for [`continue_merge`].
+#[derive(Debug, Error)]
+pub enum ContinueMergeError {
+    /// No `MERGE_HEAD` (or other merge sentinel) is recorded.
+    #[error("there is no merge in progress")]
+    NoMergeInProgress,
+    /// Stage-1/2/3 entries remain in the index.
+    #[error("you still have unmerged paths: {paths:?}")]
+    UnmergedPaths {
+        /// Repository-relative paths still in conflict stages.
+        paths: Vec<String>,
+    },
+    /// The resolved message would be empty after cleanup.
+    #[error("empty commit message")]
+    EmptyMessage,
+    /// Underlying repository or commit failure.
+    #[error(transparent)]
+    Repository(#[from] Error),
+}
+
+/// Finish an in-progress merge after conflicts are resolved or after `--no-commit`.
+///
+/// Builds a merge commit from the current index tree with parents `HEAD` and each
+/// `MERGE_HEAD`, clears merge state (including autostash and rerere), and updates
+/// the checked-out branch.
+///
+/// # Errors
+///
+/// Returns [`ContinueMergeError::NoMergeInProgress`] when no merge is active,
+/// [`ContinueMergeError::UnmergedPaths`] when conflict stages remain, or propagates
+/// commit and I/O failures as [`ContinueMergeError::Repository`].
+pub fn continue_merge(
+    repo: &Repository,
+    options: &ContinueOptions,
+    progress: &mut dyn ProgressSink,
+) -> std::result::Result<ContinueOutcome, ContinueMergeError> {
+    let merge_heads = read_merge_heads(repo.git_dir())?;
+    if merge_heads.is_empty() {
+        return Err(ContinueMergeError::NoMergeInProgress);
+    }
+
+    let index = repo.load_index().map_err(ContinueMergeError::Repository)?;
+    if index.has_unmerged_entries() {
+        return Err(ContinueMergeError::UnmergedPaths {
+            paths: unmerged_index_paths(&index),
+        });
+    }
+
+    let message = resolve_continue_merge_message(repo.git_dir(), options.message.as_deref())?;
+    let req = CommitRequest {
+        message,
+        author: options.author.clone(),
+        committer: options.committer.clone(),
+        allow_empty: false,
+        sign_override: None,
+        amend: false,
+        assume_worktree_synced: false,
+        skip_pre_commit_tree_match: false,
+        staged_change_count: None,
+    };
+    let outcome = create_commit(repo, &req, progress).map_err(ContinueMergeError::Repository)?;
+    Ok(ContinueOutcome {
+        oid: outcome.oid,
+        change_id: outcome.change_id,
+    })
+}
+
+fn resolve_continue_merge_message(
+    git_dir: &Path,
+    override_message: Option<&str>,
+) -> std::result::Result<String, ContinueMergeError> {
+    if let Some(raw) = override_message {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(ContinueMergeError::EmptyMessage);
+        }
+        let processed = stripspace_process(trimmed.as_bytes(), &StripspaceMode::Default);
+        let message = String::from_utf8(processed).map_err(|_| ContinueMergeError::EmptyMessage)?;
+        if message.is_empty() {
+            return Err(ContinueMergeError::EmptyMessage);
+        }
+        let mut message = message;
+        if !message.ends_with('\n') {
+            message.push('\n');
+        }
+        return Ok(message);
+    }
+
+    let Some(raw) = read_merge_msg(git_dir).map_err(ContinueMergeError::Repository)? else {
+        return Err(ContinueMergeError::EmptyMessage);
+    };
+    let processed = stripspace_process(
+        raw.as_bytes(),
+        &StripspaceMode::StripComments("#".to_owned()),
+    );
+    let message = String::from_utf8(processed).map_err(|_| ContinueMergeError::EmptyMessage)?;
+    if message.trim().is_empty() {
+        return Err(ContinueMergeError::EmptyMessage);
+    }
+    let mut message = message;
+    if !message.ends_with('\n') {
+        message.push('\n');
+    }
+    Ok(message)
+}
+
+fn unmerged_index_paths(index: &Index) -> Vec<String> {
+    let mut paths: Vec<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() != 0)
+        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 /// Abort an in-progress merge, restoring index and worktree to [`read_orig_head`].

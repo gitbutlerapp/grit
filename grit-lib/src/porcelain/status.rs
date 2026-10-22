@@ -2853,7 +2853,10 @@ mod status_op_tests {
             op.next_steps,
             operation_next_steps(InProgressOperation::Merge, false)
         );
-        assert_eq!(op.next_steps, vec![NextStep::Commit]);
+        assert_eq!(
+            op.next_steps,
+            vec![NextStep::Continue(InProgressOperation::Merge)]
+        );
         assert!(!op
             .next_steps
             .iter()
