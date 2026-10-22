@@ -28,7 +28,7 @@ Positional arguments are applied **oldest first**. Each argument is either:
 - the worktree is **dirty**, `HEAD` is **detached**, or the branch has **no commits**
 - a commit is a **merge** without `--mainline` (not yet exposed on the CLI)
 
-Resolve conflicts, stage with [`grit add`](add/), then run `grit pick --continue`. Use `grit pick --skip` to drop the current step, or `grit pick --abort` to restore the branch to its pre-pick tip.
+Resolve conflicts, stage with [`grit add`](../add/), then run `grit pick --continue`. Use `grit pick --skip` to drop the current step, or `grit pick --abort` to restore the branch to its pre-pick tip.
 
 ## Options
 
@@ -104,7 +104,7 @@ Example (success):
 }
 ```
 
-On conflicts, exit code is **1** with `result: "conflicts"` and the same conflict shape as [`grit merge`](merge/).
+On conflicts, exit code is **1** with `result: "conflicts"` and the same conflict shape as [`grit merge`](../merge/).
 
 ## Markdown output
 
