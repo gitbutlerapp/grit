@@ -752,17 +752,35 @@ enum Command {
     /// Switch to another branch, remote branch, or detached commit.
     #[command(alias = "checkout", alias = "co")]
     Switch {
-        /// Branch to switch to, revision with `--detach`, or new branch name with `-c`.
-        #[arg(value_name = "NAME", required_unless_present = "detach")]
+        /// Branch to switch to, revision with `--detach`, or new branch name with `-c`/`-C`.
+        #[arg(value_name = "NAME", required_unless_present_any = ["detach", "orphan"])]
         branch: Option<String>,
-        /// With `-c`, the commit to start the branch from (defaults to `HEAD`).
+        /// With `-c`/`-C`, the commit to start the branch from (defaults to `HEAD`).
         start_point: Option<String>,
         /// Create the branch first, then switch to it.
-        #[arg(short = 'c', long = "create")]
+        #[arg(short = 'c', long = "create", conflicts_with = "force_create")]
         create: bool,
+        /// Create or reset the branch at the start point, then switch to it.
+        #[arg(short = 'C', long = "force-create", conflicts_with = "create")]
+        force_create: bool,
         /// Check out a commit in detached HEAD mode.
-        #[arg(long = "detach")]
+        #[arg(long = "detach", conflicts_with_all = ["create", "force_create", "orphan"])]
         detach: bool,
+        /// Start a new history on an unborn branch (clears the index and tracked files).
+        #[arg(long = "orphan", value_name = "NAME", conflicts_with_all = ["create", "force_create", "detach"])]
+        orphan: Option<String>,
+        /// Discard local changes on paths that differ between branches.
+        #[arg(long = "discard-changes")]
+        discard_changes: bool,
+        /// Set upstream when creating a branch from a remote-tracking start point.
+        #[arg(short = 't', long = "track", conflicts_with = "no_track")]
+        track: bool,
+        /// Do not set upstream when creating a branch from a remote-tracking start point.
+        #[arg(long = "no-track", conflicts_with = "track")]
+        no_track: bool,
+        /// Do not guess a local branch name from `origin/<name>` when `<name>` is missing locally.
+        #[arg(long = "no-guess")]
+        no_guess: bool,
     },
     /// Move the branch tip and optionally reset the index or worktree.
     Reset {
@@ -1589,9 +1607,26 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             branch,
             start_point,
             create,
+            force_create,
             detach,
+            orphan,
+            discard_changes,
+            track,
+            no_track,
+            no_guess,
         } => emit(
-            &commands::switch::run(branch, start_point, create, detach)?,
+            &commands::switch::run(
+                branch,
+                start_point,
+                create,
+                force_create,
+                detach,
+                orphan,
+                discard_changes,
+                track,
+                no_track,
+                no_guess,
+            )?,
             opts,
             ctx,
         ),

@@ -1,9 +1,9 @@
 //! `grit switch` — move to another branch, remote branch, or detached commit.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::porcelain::branch::TrackMode;
 use grit_lib::porcelain::switch::{
-    resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
-    SwitchMode, SwitchOptions,
+    resolve_orphan_branch, resolve_revision_spec, switch_repository, SwitchMode, SwitchOptions,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -51,19 +51,61 @@ impl MarkdownRender for SwitchOutcome {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     target: Option<String>,
     start_point: Option<String>,
     create: bool,
+    force_create: bool,
     detach: bool,
+    orphan: Option<String>,
+    discard_changes: bool,
+    track: bool,
+    no_track: bool,
+    no_guess: bool,
 ) -> Result<SwitchOutcome> {
     let repo = context::discover()?;
 
+    if create && force_create {
+        bail!("cannot use --create and --force-create (-C) together");
+    }
     if create && detach {
         bail!("cannot use --create and --detach together");
     }
+    if force_create && detach {
+        bail!("cannot use --force-create (-C) and --detach together");
+    }
+    if orphan.is_some() && (create || force_create || detach) {
+        bail!("cannot combine --orphan with --create, -C, or --detach");
+    }
+    if track && no_track {
+        bail!("cannot use --track and --no-track together");
+    }
 
-    let mode = if detach {
+    let track_mode = if track {
+        TrackMode::Track
+    } else if no_track {
+        TrackMode::NoTrack
+    } else {
+        TrackMode::Default
+    };
+
+    let guess = if no_guess {
+        false
+    } else {
+        match repo
+            .config()
+            .ok()
+            .and_then(|c| c.get_bool("checkout.guess"))
+        {
+            Some(Ok(v)) => v,
+            _ => true,
+        }
+    };
+
+    let mode = if let Some(branch) = orphan {
+        resolve_orphan_branch(&repo, &branch).map_err(anyhow::Error::new)?
+    } else if detach {
         let spec = target
             .as_deref()
             .or(start_point.as_deref())
@@ -72,17 +114,33 @@ pub fn run(
             commit: resolve_revision_spec(&repo, spec).map_err(anyhow::Error::new)?,
             reflog_to_label: spec.to_owned(),
         }
-    } else if create {
-        let branch = target.ok_or_else(|| anyhow::anyhow!("branch name required with --create"))?;
-        resolve_create_branch(&repo, &branch, start_point.as_deref()).map_err(anyhow::Error::new)?
+    } else if create || force_create {
+        let branch = target.ok_or_else(|| {
+            anyhow::anyhow!("branch name required with --create or --force-create (-C)")
+        })?;
+        grit_lib::porcelain::switch::resolve_create_branch_with(
+            &repo,
+            &branch,
+            start_point.as_deref(),
+            force_create,
+            track_mode,
+        )
+        .map_err(anyhow::Error::new)?
     } else {
         let spec = target.ok_or_else(|| anyhow::anyhow!("branch or revision required"))?;
-        resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
+        grit_lib::porcelain::switch::resolve_switch_target_with_guess(&repo, &spec, guess)
+            .map_err(anyhow::Error::new)?
     };
 
-    let outcome = switch_repository(&repo, &SwitchOptions { mode })
-        .map_err(anyhow::Error::new)
-        .context("could not switch")?;
+    let outcome = switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode,
+            discard_changes,
+        },
+    )
+    .map_err(anyhow::Error::new)
+    .context("could not switch")?;
 
     Ok(SwitchOutcome {
         branch: outcome.branch,

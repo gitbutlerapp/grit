@@ -2007,6 +2007,7 @@ mod tests {
         let switch_err = switch_repository(
             &repo,
             &SwitchOptions {
+                discard_changes: false,
                 mode: SwitchMode::Existing {
                     branch: "other".into(),
                     oid: tip_b,
@@ -2384,6 +2385,7 @@ mod tests {
         let switch_err = switch_repository(
             &repo,
             &SwitchOptions {
+                discard_changes: false,
                 mode: SwitchMode::Existing {
                     branch: "target".into(),
                     oid: target_co,

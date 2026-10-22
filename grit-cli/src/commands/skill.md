@@ -78,11 +78,16 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | List branches | `grit branch` |
 | Create a branch at the current commit (no switch) | `grit branch <name>` |
 | Create and switch | `grit switch -c <name>` |
-| Switch | `grit switch <name>` (also `grit checkout`, `grit co`) |
+| Create/reset and switch | `grit switch -C <name> [<start>]` |
+| New unborn branch | `grit switch --orphan <name>` |
+| Switch | `grit switch <name>` (also `grit checkout`, `grit co`; `-` / `@{-1}` for previous branch) |
+| Switch discarding local edits on differing paths | `grit switch --discard-changes <name>` |
+| Track / no-track on create | `grit switch -c <name> -t <remote/start>` / `--no-track` |
+| Disable remote DWIM | `grit switch --no-guess <name>` |
 | Delete a merged branch | `grit branch -d <name>` |
 | Delete regardless | `grit branch -D <name>` |
 
-`grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run with uncommitted changes. Commit first. They also refuse rather than overwrite an untracked file.
+`grit switch` (without `--discard-changes`), `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run with uncommitted changes on paths that differ between branches. Commit first, or pass `--discard-changes` on switch. They also refuse rather than overwrite an untracked file.
 
 ## Combining work
 

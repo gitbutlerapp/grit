@@ -113,6 +113,7 @@ fn switch_nested_gitattributes_crlf_clean_worktree_matches_git() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -188,6 +189,7 @@ fn switch_wholesale_deleted_gitattributes_does_not_apply_stale_eol() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -263,6 +265,7 @@ fn switch_preserves_untracked_in_wholesale_deleted_directory() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -336,6 +339,7 @@ fn switch_preserves_untracked_fifo_under_fast_wholesale_delete_scan() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -401,6 +405,7 @@ fn switch_preserves_ignored_file_in_wholesale_deleted_directory() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -464,6 +469,7 @@ fn switch_preserves_ignored_file_from_nested_tracked_gitignore() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -527,6 +533,7 @@ fn switch_preserves_ignored_file_from_deep_nested_tracked_gitignore() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -607,6 +614,7 @@ fn switch_preserves_populated_gitlink_under_wholesale_deleted_directory() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -725,6 +733,7 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
     let err = switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -772,6 +781,7 @@ fn switch_tree_diff_git_clean_after() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -825,6 +835,7 @@ fn switch_refuses_dirty_conflicting_path_and_leaves_file() {
     let err = switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "other".into(),
                 oid: other_oid,
@@ -924,6 +935,7 @@ fn switch_refuses_dirty_file_deleted_on_target_like_git() {
     let err = switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -990,6 +1002,7 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -1013,6 +1026,7 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim())
@@ -1128,6 +1142,7 @@ fn switch_removes_gitlink_when_parent_directory_dropped() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -1227,6 +1242,7 @@ fn switch_dirty_gitlink_on_changing_gitlink_matches_git() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -1272,6 +1288,7 @@ fn switch_scoped_worktree_diff_limits_metadata_probes() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -1360,6 +1377,7 @@ fn switch_tracked_deletes_match_git_when_wholesale_dir_removal_fails() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -1437,6 +1455,7 @@ fn issue_1160_unstaged_delete_with_staged_add_deleted_allows_switch() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,
@@ -1526,6 +1545,7 @@ fn issue_1160_dangling_symlink_with_staged_add_deleted_refuses_switch() {
     let grit_err = switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,
@@ -1600,6 +1620,7 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "target".into(),
                 oid: target_oid,
@@ -1621,6 +1642,7 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
     switch_repository(
         &grit_repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,

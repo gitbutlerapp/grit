@@ -88,6 +88,34 @@ pub fn create_branch_ref_with_reflog(
     create_ref_with_reflog(repo.git_dir(), branch_ref, &start_oid, &identity, &message)
 }
 
+/// Move an existing branch ref and append `branch: Reset to …` on its reflog.
+pub fn reset_branch_ref_with_reflog(
+    repo: &Repository,
+    branch_ref: &str,
+    new_oid: ObjectId,
+    source_label: &str,
+) -> Result<()> {
+    let old_oid = refs::resolve_ref(repo.git_dir(), branch_ref)?;
+    if old_oid == new_oid {
+        return Ok(());
+    }
+    refs::write_ref(repo.git_dir(), branch_ref, &new_oid)?;
+    let config =
+        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
+    let identity = checkout_reflog_identity(repo);
+    let message = format!("branch: Reset to {source_label}");
+    append_reflog_with_config(
+        repo.git_dir(),
+        branch_ref,
+        &old_oid,
+        &new_oid,
+        &identity,
+        &message,
+        false,
+        Some(&config),
+    )
+}
+
 fn restore_head(repo: &Repository, head_before: &HeadState) -> Result<()> {
     match head_before {
         HeadState::Branch { refname, .. } => {

@@ -15,6 +15,82 @@ use crate::worktree::ensure_branch_not_checked_out_in_any_worktree;
 
 const HEADS_PREFIX: &str = "refs/heads/";
 
+/// Whether a newly created branch should record upstream config (`branch.*.remote` / `.merge`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TrackMode {
+    /// Honor `branch.autoSetupMerge` (Git default).
+    #[default]
+    Default,
+    /// Always set upstream when the start point is a remote-tracking branch.
+    Track,
+    /// Never write upstream config.
+    NoTrack,
+}
+
+/// Resolve upstream config for a branch created from `start_label` (for example `HEAD`, `main`, or `origin/topic`).
+#[must_use]
+pub fn resolve_branch_upstream_config(
+    repo: &Repository,
+    track: TrackMode,
+    branch_short: &str,
+    start_label: &str,
+) -> Option<(String, String)> {
+    if matches!(track, TrackMode::NoTrack) {
+        return None;
+    }
+    let tracking_ref = remote_tracking_ref_for_start_label(repo, start_label)?;
+    let (remote, merge) = upstream_from_remote_tracking_ref(&tracking_ref, branch_short)?;
+    if matches!(track, TrackMode::Track) {
+        return Some((remote, merge));
+    }
+    // TrackMode::Default — branch.autoSetupMerge
+    let config = repo.config().ok()?;
+    let mode = config
+        .get("branch.autoSetupMerge")
+        .or_else(|| config.get("branch.autosetupmerge"))
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "true".to_owned());
+    match mode.as_str() {
+        "false" | "never" => None,
+        "always" => Some((remote, merge)),
+        _ => Some((remote, merge)),
+    }
+}
+
+fn remote_tracking_ref_for_start_label(repo: &Repository, start_label: &str) -> Option<String> {
+    if let Some(rest) = start_label.strip_prefix("refs/remotes/") {
+        return Some(format!("refs/remotes/{rest}"));
+    }
+    if start_label.contains('/')
+        && !start_label.starts_with("refs/")
+        && refs::resolve_ref(repo.git_dir(), &format!("refs/remotes/{start_label}")).is_ok()
+    {
+        return Some(format!("refs/remotes/{start_label}"));
+    }
+    if refs::resolve_ref(
+        repo.git_dir(),
+        &format!("refs/remotes/origin/{start_label}"),
+    )
+    .is_ok()
+    {
+        return Some(format!("refs/remotes/origin/{start_label}"));
+    }
+    None
+}
+
+fn upstream_from_remote_tracking_ref(
+    tracking_ref: &str,
+    branch_short: &str,
+) -> Option<(String, String)> {
+    let rest = tracking_ref.strip_prefix("refs/remotes/")?;
+    let suffix = format!("/{branch_short}");
+    let remote = rest.strip_suffix(&suffix)?;
+    if remote.is_empty() {
+        return None;
+    }
+    Some((remote.to_owned(), format!("refs/heads/{branch_short}")))
+}
+
 /// Outcome of [`create_branch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateBranchOutcome {

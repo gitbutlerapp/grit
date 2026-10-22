@@ -171,6 +171,7 @@ fn run_repro_sequence(repo: &Repository) {
     switch_repository(
         repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: resolve_create_branch(repo, "topic", None).unwrap(),
         },
     )
@@ -180,6 +181,7 @@ fn run_repro_sequence(repo: &Repository) {
     switch_repository(
         repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,
@@ -192,6 +194,7 @@ fn run_repro_sequence(repo: &Repository) {
     switch_repository(
         repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Detached {
                 commit: detach,
                 reflog_to_label: "HEAD~1".into(),
@@ -203,6 +206,7 @@ fn run_repro_sequence(repo: &Repository) {
     switch_repository(
         repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,
@@ -240,6 +244,7 @@ fn detach_at_annotated_tag_matches_git() {
     switch_repository(
         &repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Detached {
                 commit,
                 reflog_to_label: "v1".into(),
@@ -351,6 +356,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
     switch_repository(
         &repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: resolve_create_branch(&repo, "topic", None).unwrap(),
         },
     )
@@ -359,6 +365,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
     switch_repository(
         &repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,
@@ -373,11 +380,19 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
         other => panic!("expected existing topic, got {other:?}"),
     }
 
-    switch_repository(&repo, &SwitchOptions { mode: mode_minus }).expect("switch -");
+    switch_repository(
+        &repo,
+        &SwitchOptions {
+            discard_changes: false,
+            mode: mode_minus,
+        },
+    )
+    .expect("switch -");
 
     switch_repository(
         &repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,
@@ -420,6 +435,7 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
     switch_repository(
         &repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: resolve_create_branch(&repo, "topic", None).expect("create mode"),
         },
     )
@@ -448,6 +464,7 @@ fn same_branch_switch_appends_head_checkout_reflog() {
     switch_repository(
         &repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: main_oid,
@@ -484,7 +501,7 @@ fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
         other => panic!("expected create from remote, got {other:?}"),
     }
 
-    switch_repository(&repo, &SwitchOptions { mode }).expect("switch");
+    switch_repository(&repo, &SwitchOptions::new(mode)).expect("switch");
 
     let topic_log = read_reflog(repo.git_dir(), "refs/heads/topic").expect("topic log");
     assert_eq!(topic_log.len(), 1);
@@ -541,6 +558,7 @@ fn unborn_symbolic_head_switch_writes_zero_to_tip_checkout_reflog() {
     switch_repository(
         &repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "feature".into(),
                 oid: tip,

@@ -424,6 +424,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
     switch_repository(
         &fx.repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "bench-wide".into(),
                 oid: fx.wide_switch_tip,
@@ -434,6 +435,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
     switch_repository(
         &fx.repo,
         &SwitchOptions {
+            discard_changes: false,
             mode: SwitchMode::Existing {
                 branch: "main".into(),
                 oid: fx.main_head_oid,

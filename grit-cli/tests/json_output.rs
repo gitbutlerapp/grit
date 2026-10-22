@@ -858,6 +858,56 @@ fn switch_json() -> TestResult {
 }
 
 #[test]
+fn switch_orphan_and_force_create_json() -> TestResult {
+    let scratch = Scratch::new("switch-flags-json")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "1\n");
+    gs_ok(&repo, &["commit", "first"]);
+    gs_ok(&repo, &["branch", "topic"]);
+
+    let orphan = gs_json(&repo, &["switch", "--orphan", "fresh"]);
+    assert_eq!(orphan["branch"], "fresh");
+    assert_eq!(orphan["created"], Value::Bool(true));
+
+    gs_ok(&repo, &["switch", "main"]);
+    write_file(&repo.join("a.txt"), "2\n");
+    gs_ok(&repo, &["commit", "second"]);
+
+    let reset = gs_json(&repo, &["switch", "-C", "topic", "HEAD~1"]);
+    assert_eq!(reset["branch"], "topic");
+    assert_eq!(reset["created"], Value::Bool(false));
+    Ok(())
+}
+
+#[test]
+fn switch_no_guess_json_error() -> TestResult {
+    let scratch = Scratch::new("switch-no-guess-json")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "1\n");
+    gs_ok(&repo, &["commit", "first"]);
+    gs_ok(&repo, &["remote", "add", "origin", "."]);
+    gs_ok(&repo, &["fetch", "origin"]);
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&repo)
+        .output()?;
+    assert!(head.status.success());
+    let oid = String::from_utf8_lossy(&head.stdout).trim().to_string();
+    Command::new("git")
+        .args(["update-ref", "refs/remotes/origin/only", &oid])
+        .current_dir(&repo)
+        .status()?;
+
+    let out = gs(&repo, ["switch", "--no-guess", "only", "--json"]);
+    assert_ne!(out.status, Some(0));
+    Ok(())
+}
+
+#[test]
 fn remote_json_list_and_add() -> TestResult {
     let scratch = Scratch::new("remote")?;
     let repo = scratch.child("repo");

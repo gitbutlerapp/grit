@@ -53,7 +53,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
     index.write(&index_path).expect("write index");
 
     let mode = resolve_switch_target(&repo, "feature").expect("resolve feature");
-    switch_repository(&repo, &SwitchOptions { mode }).expect("switch despite hostile index path");
+    switch_repository(&repo, &SwitchOptions::new(mode)).expect("switch despite hostile index path");
 
     assert!(wt.join("feature.txt").exists());
     let index = Index::load(&repo.index_handle().path()).expect("index after switch");
