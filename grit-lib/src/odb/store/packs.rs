@@ -100,15 +100,6 @@ impl PackedObjects {
         })
     }
 
-    /// Whether a pack or MIDX reachability bitmap (`*.bitmap`) is present under `objects/pack/`.
-    ///
-    /// # Errors
-    ///
-    /// Propagates pack directory read failures other than a missing directory.
-    pub fn reachability_bitmap_present(&self) -> Result<bool> {
-        self.with_pack(pack_dir_has_bitmap_extension)
-    }
-
     /// Invoke `f` for each object id stored in a promisor-marked pack index.
     ///
     /// # Errors
@@ -324,19 +315,6 @@ impl ObjectStore for PackedObjects {
     fn refresh(&self) -> Result<bool> {
         self.with_pack(reprepare_pack_directory_on_miss)
     }
-}
-
-fn pack_dir_has_bitmap_extension(objects_dir: &Path) -> Result<bool> {
-    let pack_dir = objects_dir.join("pack");
-    let Ok(rd) = std::fs::read_dir(&pack_dir) else {
-        return Ok(false);
-    };
-    Ok(rd.filter_map(|e| e.ok()).any(|e| {
-        e.path()
-            .extension()
-            .and_then(|s| s.to_str())
-            .is_some_and(|ext| ext == "bitmap")
-    }))
 }
 
 fn for_each_removable_pack_object_ids(

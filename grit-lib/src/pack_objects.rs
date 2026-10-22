@@ -422,27 +422,6 @@ pub fn build_pack_with_shallow_and_filter(
     )
 }
 
-/// Same as [`build_pack_with_shallow_and_filter`] with a live [`Repository`] (for upload-pack).
-pub fn build_pack_for_upload(
-    repo: &Repository,
-    wants: &[ObjectId],
-    haves: &[ObjectId],
-    have_shallow: &HashSet<ObjectId>,
-    source_shallow: &HashSet<ObjectId>,
-    filter: Option<&ObjectFilter>,
-    opts: &PackBuildOptions,
-) -> Result<Vec<u8>> {
-    build_pack_with_shallow_and_filter(
-        repo.odb(),
-        wants,
-        haves,
-        have_shallow,
-        source_shallow,
-        filter,
-        opts,
-    )
-}
-
 /// Stream a pack for upload-pack: pack reuse when bitmaps allow, otherwise pack-objects.
 #[allow(clippy::too_many_arguments)]
 pub fn write_upload_pack_stream(

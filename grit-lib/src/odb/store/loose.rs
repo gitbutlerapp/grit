@@ -866,31 +866,6 @@ impl Read for LoosePayloadReader {
     }
 }
 
-pub(crate) fn loose_store_bytes_header_valid(raw: &[u8]) -> bool {
-    let nul = match raw.iter().position(|&b| b == 0) {
-        Some(i) => i,
-        None => return false,
-    };
-    let header = &raw[..nul];
-    let data = &raw[nul + 1..];
-    let sp = match header.iter().position(|&b| b == b' ') {
-        Some(i) => i,
-        None => return false,
-    };
-    if sp == 0 || sp > 32 {
-        return false;
-    }
-    let size_str = match std::str::from_utf8(&header[sp + 1..]) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let size: usize = match size_str.parse() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    data.len() == size
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -141,22 +141,6 @@ pub struct TierSpec {
 }
 
 impl SynthTier {
-    /// Parse a tier name (`S`, `M`, or `L`, any ASCII case).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidRef`] when `name` is not a known tier.
-    pub fn parse_name(name: &str) -> Result<Self> {
-        match name.trim().to_ascii_uppercase().as_str() {
-            "S" => Ok(Self::S),
-            "M" => Ok(Self::M),
-            "L" => Ok(Self::L),
-            _ => Err(Error::InvalidRef(format!(
-                "unknown fixture synth tier: {name}"
-            ))),
-        }
-    }
-
     /// Fixed tier parameters used by tests and the CLI.
     #[must_use]
     pub fn spec(self) -> TierSpec {

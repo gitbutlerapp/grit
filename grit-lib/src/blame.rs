@@ -63,29 +63,6 @@ pub fn parse_diff_algorithm_name(name: &str) -> Option<BlameDiffAlgorithm> {
 }
 
 /// Whether Myers blame should drop a trailing equal-line match (Git tie-break parity).
-pub fn should_drop_tail_match_for_myers(
-    diff_algorithm: BlameDiffAlgorithm,
-    parent_idx: usize,
-    current_idx: usize,
-    parent_lines: &[&str],
-) -> bool {
-    if diff_algorithm != BlameDiffAlgorithm::Myers {
-        return false;
-    }
-    if parent_lines.is_empty() || parent_idx + 1 != parent_lines.len() {
-        return false;
-    }
-    // Preserve common append-at-end behavior. We only drop matches where the
-    // final parent line got shifted to the right in the child.
-    if current_idx <= parent_idx {
-        return false;
-    }
-    // Restrict this heuristic to duplicated low-information tail lines, which
-    // are the cases where xdiff/myers tie-breaking differs from `similar`.
-    let tail = parent_lines[parent_idx];
-    parent_lines.iter().filter(|line| **line == tail).count() >= 2
-}
-
 fn should_drop_tail_match_for_myers_blob(
     diff_algorithm: BlameDiffAlgorithm,
     parent_idx: usize,
@@ -98,9 +75,13 @@ fn should_drop_tail_match_for_myers_blob(
     if parent.is_empty() || parent_idx + 1 != parent.len() {
         return false;
     }
+    // Preserve common append-at-end behavior. We only drop matches where the
+    // final parent line got shifted to the right in the child.
     if current_idx <= parent_idx {
         return false;
     }
+    // Restrict this heuristic to duplicated low-information tail lines, which
+    // are the cases where xdiff/myers tie-breaking differs from `similar`.
     let tail = parent.line(parent_idx);
     (0..parent.len())
         .filter(|&i| parent.line(i) == tail)

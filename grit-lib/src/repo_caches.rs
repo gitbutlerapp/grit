@@ -28,7 +28,7 @@ use crate::config::{
     config_cache_lookup, config_cache_store, config_file_stamps, ConfigCacheKey, ConfigSet,
     LoadConfigOptions,
 };
-use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics, Warning};
+use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics};
 use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
@@ -67,7 +67,6 @@ pub struct RepoCaches {
     pub(crate) ref_stores: Mutex<HashMap<PathBuf, Arc<dyn crate::refs::store::RefStore>>>,
     filters: FilterProcessState,
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
-    bare_worktree_warn_seen: Mutex<HashSet<String>>,
     commit_graph_warn_seen: Mutex<HashSet<String>>,
     commit_graph: Mutex<Option<Arc<CommitGraphChain>>>,
     commit_linkage: Mutex<CommitLinkageCache>,
@@ -110,7 +109,6 @@ impl RepoCaches {
             ref_stores: Mutex::new(HashMap::new()),
             filters: FilterProcessState::new(command_runner),
             promisor_hydrate: Mutex::new(None),
-            bare_worktree_warn_seen: Mutex::new(HashSet::new()),
             commit_graph_warn_seen: Mutex::new(HashSet::new()),
             commit_graph: Mutex::new(None),
             commit_linkage: Mutex::new(CommitLinkageCache::default()),
@@ -145,22 +143,6 @@ impl RepoCaches {
     /// Replace the diagnostic sink (kept in sync with [`Repository::set_diagnostics`]).
     pub(crate) fn set_diagnostics(&self, sink: DiagnosticsHandle) {
         *self.diagnostics.lock().unwrap_or_else(|e| e.into_inner()) = sink;
-    }
-
-    /// Emit `core.bare` / `core.worktree` conflict warning at most once per git dir on this repo.
-    pub fn warn_bare_worktree_conflict_once(&self, git_dir: &Path) {
-        let key = git_dir
-            .canonicalize()
-            .unwrap_or_else(|_| git_dir.to_path_buf())
-            .to_string_lossy()
-            .to_string();
-        let Ok(mut guard) = self.bare_worktree_warn_seen.lock() else {
-            return;
-        };
-        if guard.insert(key) {
-            self.diagnostics_handle()
-                .warn(Warning::CoreBareWithWorktree);
-        }
     }
 
     /// Return `true` when this warning id has not been emitted yet for this repository handle.

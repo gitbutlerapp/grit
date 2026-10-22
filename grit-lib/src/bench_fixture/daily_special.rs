@@ -637,29 +637,6 @@ fn synth_index_entry(path: &[u8], oid: ObjectId, size: usize) -> IndexEntry {
     }
 }
 
-/// Maximum path depth (directory components including the leaf file name) under `repo` HEAD.
-pub fn max_path_depth_in_head(repo: &Repository) -> Result<usize> {
-    let head = repo.resolve_ref_name("HEAD")?;
-    let head_obj = repo.odb().read(&head)?;
-    let commit = crate::objects::parse_commit(&head_obj.data)?;
-    let mut max = 0usize;
-    walk_tree_depth(repo.odb(), &commit.tree, 0, &mut max)?;
-    Ok(max)
-}
-
-fn walk_tree_depth(odb: &Odb, tree_oid: &ObjectId, prefix: usize, max: &mut usize) -> Result<()> {
-    use crate::index::MODE_TREE;
-    let tree_obj = odb.read(tree_oid)?;
-    for entry in crate::objects::parse_tree(&tree_obj.data)? {
-        let depth = prefix + 1;
-        *max = (*max).max(depth);
-        if entry.mode == MODE_TREE {
-            walk_tree_depth(odb, &entry.oid, depth, max)?;
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

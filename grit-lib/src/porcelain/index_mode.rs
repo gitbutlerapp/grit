@@ -6,7 +6,6 @@
 
 use crate::error::{Error, Result};
 use crate::index::{Index, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK, MODE_TREE};
-use crate::repo::Repository;
 
 /// Whether staging should force the executable bit for matched regular files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -82,25 +81,6 @@ pub fn set_stage0_file_mode(index: &mut Index, path: &[u8], mode: u32) -> Result
     entry.mode = mode;
     index.invalidate_cache_tree_for_path(path);
     Ok(true)
-}
-
-/// Flip the executable bit on a tracked stage-0 regular file and write the index.
-///
-/// # Errors
-///
-/// Propagates index I/O failures and [`set_stage0_file_mode`] validation errors.
-pub fn set_index_entry_executable(repo: &Repository, path: &str, executable: bool) -> Result<bool> {
-    let mut index = repo.load_index()?;
-    let target = if executable {
-        MODE_EXECUTABLE
-    } else {
-        MODE_REGULAR
-    };
-    let changed = set_stage0_file_mode(&mut index, path.as_bytes(), target)?;
-    if changed {
-        repo.write_index(&mut index)?;
-    }
-    Ok(changed)
 }
 
 /// Apply [`StageExecutableHint`] to stage-0 entries matching `matches`.

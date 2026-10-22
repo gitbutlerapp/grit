@@ -268,12 +268,6 @@ impl SkippingNegotiator {
         Ok(true)
     }
 
-    /// True when there are no `have` lines to send (empty clone / no local history to offer).
-    #[must_use]
-    pub fn have_phase_is_empty(&self) -> bool {
-        self.heap.is_empty() || self.non_common_revs == 0
-    }
-
     /// Next OID to advertise as `have`, or `None` when finished.
     pub fn next_have(&mut self) -> Result<Option<ObjectId>> {
         loop {

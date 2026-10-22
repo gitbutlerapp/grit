@@ -2455,11 +2455,6 @@ pub fn prepare_parent_dirs_for_checkout(work_tree: &Path, rel_path: &str) -> Res
 }
 
 /// Write data to a working tree file, handling symlinks and executable bits.
-pub fn write_to_worktree(work_tree: &Path, rel_path: &str, data: &[u8], mode: u32) -> Result<()> {
-    write_to_worktree_cached(work_tree, rel_path, data, mode, &mut LeadingDirCache::new())
-        .map(|_| ())
-}
-
 pub(crate) fn write_to_worktree_cached(
     work_tree: &Path,
     rel_path: &str,

@@ -332,19 +332,6 @@ pub struct AttrRule {
     attrs: Vec<(String, String)>, // (name, value) where value is "set"/"unset"/specific value
 }
 
-impl AttrRule {
-    /// Diff driver names assigned by this rule (`diff=<driver>`), excluding `set`/`unset`.
-    pub fn diff_drivers(&self) -> impl Iterator<Item = &str> + '_ {
-        self.attrs.iter().filter_map(|(name, value)| {
-            if name == "diff" && !value.is_empty() && value != "unset" && value != "set" {
-                Some(value.as_str())
-            } else {
-                None
-            }
-        })
-    }
-}
-
 /// Load .gitattributes from the worktree root.
 pub fn load_gitattributes(work_tree: &Path) -> Vec<AttrRule> {
     let mut rules = Vec::new();

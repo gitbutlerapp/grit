@@ -36,17 +36,6 @@ pub struct WriteTreeFlags {
 }
 
 impl WriteTreeFlags {
-    /// Silent refresh that reuses existing tree OIDs when bytes match.
-    #[must_use]
-    pub fn silent_repair() -> Self {
-        Self {
-            silent: true,
-            persistence: WriteTreePersistence::Repair,
-            missing_ok: false,
-            ignore_cache_tree: false,
-        }
-    }
-
     /// Like [`Self::default`], but tree writes use [`WriteOptions::silent`] so existing
     /// objects are not freshened (used when refreshing the index cache-tree after commit).
     #[must_use]

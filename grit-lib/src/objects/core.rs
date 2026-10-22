@@ -822,39 +822,6 @@ pub fn tree_entry_cmp(
     ac.cmp(&bc)
 }
 
-/// Find a tree entry by name using Git's tree sort order (`O(log n)`).
-#[must_use]
-pub fn find_tree_entry_by_name<'a>(
-    entries: &'a [TreeEntry],
-    name: &[u8],
-    name_is_tree: bool,
-) -> Option<&'a TreeEntry> {
-    let idx = entries
-        .binary_search_by(|e| tree_entry_cmp(&e.name, e.mode == 0o040000, name, name_is_tree));
-    idx.ok().and_then(|i| {
-        let entry = &entries[i];
-        if entry.name.as_slice() == name {
-            Some(entry)
-        } else {
-            None
-        }
-    })
-}
-
-/// Like [`find_tree_entry_by_name`], trying directory ordering first then file.
-#[must_use]
-pub fn find_tree_entry_by_name_dir_or_file<'a>(
-    entries: &'a [TreeEntry],
-    name: &[u8],
-) -> Option<&'a TreeEntry> {
-    if let Some(entry) = find_tree_entry_by_name(entries, name, true) {
-        if entry.mode == 0o040000 {
-            return Some(entry);
-        }
-    }
-    find_tree_entry_by_name(entries, name, false)
-}
-
 /// Parse an octal tree-entry mode without going through `str`.
 fn parse_tree_mode_octal(bytes: &[u8]) -> Option<u32> {
     if bytes.is_empty() || bytes.len() > 7 {

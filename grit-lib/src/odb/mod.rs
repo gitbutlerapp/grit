@@ -29,9 +29,8 @@ pub mod store;
 pub use builder::OdbBuilder;
 
 pub(crate) use store::loose::{
-    build_store_bytes, decompress_zlib_loose_bytes, for_each_loose_object_id,
-    loose_store_bytes_header_valid, parse_object_bytes, read_loose_object_info,
-    read_zlib_loose_payload, zlib_compress_store_bytes,
+    build_store_bytes, decompress_zlib_loose_bytes, for_each_loose_object_id, parse_object_bytes,
+    read_loose_object_info, zlib_compress_store_bytes,
 };
 #[doc(inline)]
 pub use store::LooseStore;
@@ -2317,23 +2316,6 @@ impl Odb {
 
         self.local_loose()?
             .write_store_prehashed(&oid, store_bytes, WriteOptions::default())
-    }
-
-    /// Returns true when a loose object exists at `oid`'s path and zlib-decompresses to a
-    /// structurally valid `<type> <size>\0<payload>` object (type may be non-standard).
-    ///
-    /// Used for `git cat-file -e`, which succeeds for hand-crafted loose objects that
-    /// [`Self::read`] rejects due to [`Error::UnknownObjectType`].
-    #[must_use]
-    pub fn loose_object_plumbing_ok(&self, oid: &ObjectId) -> bool {
-        let path = self.object_path(oid);
-        let Ok(file) = fs::File::open(&path) else {
-            return false;
-        };
-        let Ok(raw) = read_zlib_loose_payload(file) else {
-            return false;
-        };
-        loose_store_bytes_header_valid(&raw)
     }
 
     /// Update `path`'s mtime to "now" (Git `utime(path, NULL)`), returning whether it succeeded.

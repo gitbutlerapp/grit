@@ -87,12 +87,6 @@ impl LogWalkCursor {
         &self.query
     }
 
-    /// Query embedded in this cursor (same as [`Self::query`]).
-    #[must_use]
-    pub fn resume_query(&self) -> &LogWalkQuery {
-        &self.query
-    }
-
     /// Start or resume a date-order walk for `query`, emitting up to `limit` commits.
     ///
     /// Pass `cursor` from a previous page's [`LogWalkPage::next`]. When `cursor` is

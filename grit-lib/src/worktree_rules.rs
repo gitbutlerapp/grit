@@ -58,12 +58,6 @@ pub mod file_load_counters {
         MAP.with(|m| m.borrow().values().copied().max().unwrap_or(0))
     }
 
-    /// Total distinct files read since the last [`reset`].
-    #[must_use]
-    pub fn distinct_files_read() -> usize {
-        MAP.with(|m| m.borrow().len())
-    }
-
     /// Read count for `path` since the last [`reset`] (canonicalized when possible).
     #[must_use]
     pub fn reads_for(path: &Path) -> u32 {
@@ -241,14 +235,6 @@ impl WorktreeRules {
     pub fn file_attrs(&self, rel_path: &str, is_dir: bool) -> FileAttrs {
         let rules = self.attribute_rules_for_path(rel_path);
         crlf::get_file_attrs(&rules, rel_path, is_dir, &self.config)
-    }
-
-    /// Global, root, and info attribute rules (no nested directories).
-    #[must_use]
-    pub fn root_attribute_rules(&self) -> Vec<AttrRule> {
-        let mut rules = self.attrs.stack_prefix.clone();
-        rules.extend_from_slice(&self.attrs.info_rules);
-        rules
     }
 }
 

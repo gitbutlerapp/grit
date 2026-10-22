@@ -1779,15 +1779,6 @@ fn directory_pathspec_matches_self(rel_dir: &str, pathspecs: &[String]) -> bool 
 
 use crate::diff::DiffStatus;
 
-/// Collect repository-relative paths that have unmerged index stages (1–3).
-#[must_use]
-pub fn conflict_paths_from_index(index: &Index) -> Vec<String> {
-    conflicts_from_index(index)
-        .into_iter()
-        .map(|c| c.path)
-        .collect()
-}
-
 /// Collect unmerged paths and their [`ConflictKind`] from the index.
 #[must_use]
 pub fn conflicts_from_index(index: &Index) -> Vec<Conflict> {

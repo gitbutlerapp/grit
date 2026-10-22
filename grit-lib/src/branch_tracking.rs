@@ -555,12 +555,6 @@ impl StatusHeader {
             .or_else(|| standing.upstream.as_ref().map(|u| u.name.as_str()))
     }
 
-    /// Configured upstream comparison when it differs from target, or the sole comparison ref.
-    #[must_use]
-    pub fn upstream_line(standing: &BranchStanding) -> Option<&TrackedComparison> {
-        standing.upstream.as_ref()
-    }
-
     /// Ref name for a `grit pull` hint: upstream when configured, otherwise target.
     #[must_use]
     pub fn pull_integration_ref(standing: &BranchStanding) -> Option<&str> {

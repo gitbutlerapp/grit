@@ -3381,39 +3381,8 @@ thread_local! {
         RefCell::new(ZlibInflateScratch::default());
 }
 
-/// Read and inflate undeltified pack entries without delta-chain bookkeeping.
 /// Max uncompressed bytes to inflate when only commit headers (e.g. author) are needed.
 pub(crate) const COMMIT_HEADER_READ_PREFIX: usize = 512;
-
-fn read_whole_pack_entry_data_prefix_fast(
-    offset: u64,
-    pack_bytes: &[u8],
-    max_out: usize,
-) -> Option<Vec<u8>> {
-    let mut pos = offset as usize;
-    if pos >= pack_bytes.len() {
-        return None;
-    }
-    let (packed_type, _size) = parse_pack_object_header(pack_bytes, &mut pos).ok()?;
-    if !matches!(packed_type, PackedType::Commit) {
-        return None;
-    }
-    WHOLE_OBJECT_ZLIB.with(|slot| {
-        let mut inflate = slot.borrow_mut();
-        decompress_pack_data_prefix(pack_bytes, &mut pos, max_out, &mut inflate).ok()
-    })
-}
-
-fn decompress_pack_data_prefix(
-    bytes: &[u8],
-    pos: &mut usize,
-    max_out: usize,
-    scratch: &mut ZlibInflateScratch,
-) -> Result<Vec<u8>> {
-    let (prefix, consumed) = scratch.inflate_prefix(&bytes[*pos..], max_out)?;
-    *pos += consumed;
-    Ok(prefix)
-}
 
 fn read_whole_pack_entry_object_fast(
     idx: &PackIndex,
@@ -4030,31 +3999,6 @@ impl SingleLocalPackReader {
             return Ok(kind);
         }
         read_object_at_depth_into(&self.idx, offset, 0, false, out)
-    }
-
-    /// Inflate the start of a whole (non-delta) commit object, if present in this pack.
-    ///
-    /// Returns `None` when the OID is missing, not a commit, or stored as a delta.
-    ///
-    /// # Errors
-    ///
-    /// Propagates pack index and zlib errors.
-    pub fn try_read_commit_header_prefix(
-        &mut self,
-        oid: &ObjectId,
-        max_out: usize,
-    ) -> Result<Option<Vec<u8>>> {
-        if max_out != COMMIT_HEADER_READ_PREFIX {
-            let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-                return Ok(None);
-            };
-            return Ok(read_whole_pack_entry_data_prefix_fast(
-                offset,
-                self.pack_bytes.as_ref(),
-                max_out,
-            ));
-        }
-        Ok(self.read_commit_author_prefix(oid)?.map(|p| p.to_vec()))
     }
 
     /// Pack file offset for `oid` in this reader's index, if present.

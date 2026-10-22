@@ -314,11 +314,6 @@ fn commit_count_from_result(result: RevListResult) -> Result<usize> {
 }
 
 impl<'repo> RevWalk<'repo> {
-    /// Parse range tokens the same way [`Self::commits`] and [`Self::count`] do.
-    pub fn parse_tokens(&self, tokens: &[&str]) -> Result<RevWalkParsedSpecs> {
-        parse_rev_walk_tokens(self.repository(), tokens)
-    }
-
     /// List commit object ids reachable from `tokens` in default `rev-list` order.
     ///
     /// # Errors

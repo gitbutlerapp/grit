@@ -24,42 +24,6 @@ pub const WS_TAB_WIDTH_MASK: u32 = (1 << 6) - 1;
 /// Default `core.whitespace` when unset: trailing + space-before-tab, tab width 8.
 pub const WS_DEFAULT_RULE: u32 = WS_TRAILING_SPACE | WS_SPACE_BEFORE_TAB | 8;
 
-/// Parsed `whitespace` gitattribute value for a path.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum WhitespaceGitAttr {
-    /// No `whitespace` gitattribute applies (use `core.whitespace` / default).
-    #[default]
-    Unspecified,
-    /// `-whitespace` (`ATTR_FALSE`).
-    False,
-    /// Bare `whitespace` (`ATTR_TRUE`).
-    True,
-    /// `whitespace=<rules>`.
-    String(String),
-}
-
-impl WhitespaceGitAttr {
-    /// Combine with `core.whitespace` the same way Git's `whitespace_rule()` does.
-    pub fn merge_with_config(self, cfg_rule: u32) -> Result<u32, WhitespaceRuleError> {
-        match self {
-            WhitespaceGitAttr::Unspecified => Ok(cfg_rule),
-            WhitespaceGitAttr::False => Ok(tab_width_only(cfg_rule)),
-            WhitespaceGitAttr::True => {
-                let mut all = tab_width_only(cfg_rule);
-                for entry in WS_RULE_ENTRIES {
-                    if !entry.loosens_error && !entry.exclude_default {
-                        all |= entry.bits;
-                    }
-                }
-                Ok(all)
-            }
-            // Git `whitespace_rule()`: a string attribute replaces the rule entirely via
-            // `parse_whitespace_rule(value)` — it does not merge with `core.whitespace`.
-            WhitespaceGitAttr::String(s) => parse_whitespace_rule(&s),
-        }
-    }
-}
-
 /// Invalid combination of whitespace rule tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WhitespaceRuleError {
@@ -70,58 +34,40 @@ pub enum WhitespaceRuleError {
 struct WsRuleEntry {
     name: &'static str,
     bits: u32,
-    loosens_error: bool,
-    exclude_default: bool,
 }
 
 const WS_RULE_ENTRIES: &[WsRuleEntry] = &[
     WsRuleEntry {
         name: "trailing-space",
         bits: WS_TRAILING_SPACE,
-        loosens_error: false,
-        exclude_default: false,
     },
     WsRuleEntry {
         name: "space-before-tab",
         bits: WS_SPACE_BEFORE_TAB,
-        loosens_error: false,
-        exclude_default: false,
     },
     WsRuleEntry {
         name: "indent-with-non-tab",
         bits: WS_INDENT_WITH_NON_TAB,
-        loosens_error: false,
-        exclude_default: false,
     },
     WsRuleEntry {
         name: "cr-at-eol",
         bits: WS_CR_AT_EOL,
-        loosens_error: true,
-        exclude_default: false,
     },
     WsRuleEntry {
         name: "blank-at-eol",
         bits: WS_BLANK_AT_EOL,
-        loosens_error: false,
-        exclude_default: false,
     },
     WsRuleEntry {
         name: "blank-at-eof",
         bits: WS_BLANK_AT_EOF,
-        loosens_error: false,
-        exclude_default: false,
     },
     WsRuleEntry {
         name: "tab-in-indent",
         bits: WS_TAB_IN_INDENT,
-        loosens_error: false,
-        exclude_default: true,
     },
     WsRuleEntry {
         name: "incomplete-line",
         bits: WS_INCOMPLETE_LINE,
-        loosens_error: false,
-        exclude_default: false,
     },
 ];
 
@@ -129,10 +75,6 @@ const WS_RULE_ENTRIES: &[WsRuleEntry] = &[
 #[must_use]
 pub fn ws_tab_width(rule: u32) -> usize {
     (rule & WS_TAB_WIDTH_MASK) as usize
-}
-
-fn tab_width_only(rule: u32) -> u32 {
-    rule & WS_TAB_WIDTH_MASK
 }
 
 /// Parse a `core.whitespace` / `whitespace=` attribute value into rule bits.
