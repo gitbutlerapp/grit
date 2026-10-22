@@ -324,6 +324,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Delete one branch vs git branch -D",
     },
     ScenarioSpec {
+        id: "branch/rename@many-refs",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Rename one branch vs git branch -m",
+    },
+    ScenarioSpec {
         id: "branch/list@many-refs-loose",
         area: Area::Branching,
         headline: false,

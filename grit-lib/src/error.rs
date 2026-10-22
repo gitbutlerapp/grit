@@ -834,6 +834,10 @@ pub enum Error {
         tag: String,
     },
 
+    /// Branch create/rename/delete validation failure ([`crate::porcelain::branch::BranchError`]).
+    #[error(transparent)]
+    Branch(#[from] crate::porcelain::branch::BranchError),
+
     /// Tag create/delete validation failure ([`crate::porcelain::tag::TagError`]).
     #[error(transparent)]
     Tag(#[from] crate::porcelain::tag::TagError),

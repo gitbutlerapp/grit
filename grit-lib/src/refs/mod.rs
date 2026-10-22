@@ -193,8 +193,20 @@ pub fn commit_ref_store_batch(git_dir: &Path, updates: &[RefUpdate]) -> Result<(
     if updates.is_empty() {
         return Ok(());
     }
-    let label = updates.first().map(|u| u.name.as_str()).unwrap_or("refs");
     let store = open_ref_store(git_dir)?;
+    commit_ref_updates_on_store(store.as_ref(), updates)
+}
+
+/// Apply several ref updates atomically through an existing [`RefStore`].
+///
+/// # Errors
+///
+/// Propagates validation, compare-and-swap, and backend errors from [`RefStore::prepare`].
+pub fn commit_ref_updates_on_store(store: &dyn RefStore, updates: &[RefUpdate]) -> Result<()> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    let label = updates.first().map(|u| u.name.as_str()).unwrap_or("refs");
     let mut txn = RefTransaction::new();
     for update in updates {
         let name = update.name.clone();

@@ -127,6 +127,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | --- | --- |
 | `branch/create@many-refs` | Create one branch vs git branch |
 | `branch/delete@many-refs` | Delete one branch vs git branch -D |
+| `branch/rename@many-refs` | Rename one branch vs git branch -m |
 | `branch/list@many-refs` | List branches vs git branch |
 | `branch/list@many-refs-loose` | List branches on loose many-refs fixture vs git branch |
 | `history/reword@synth-10k` | History reword vs git history reword or scripted rebase |

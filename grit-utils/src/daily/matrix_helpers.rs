@@ -27,6 +27,7 @@ use crate::worktree_fixture::{
 };
 
 pub const BRANCH_BENCH_NAME: &str = "daily-bench-branch";
+pub const BRANCH_RENAME_TARGET: &str = "daily-bench-branch-renamed";
 pub const TAG_BENCH_NAME: &str = "daily-bench-tag";
 pub const BUNDLE_FILE: &str = "daily-bench.bundle";
 pub const LINKED_WT_DIR: &str = "daily-linked-wt";
@@ -187,6 +188,10 @@ pub fn setup_branch_delete(setup: &DailySetup<'_>) -> Result<DailyHeadlineContex
     ctx.branch_bench_name = Some(BRANCH_BENCH_NAME.into());
     run_git(setup.git, &ctx.repo, &["branch", BRANCH_BENCH_NAME, "HEAD"])?;
     Ok(ctx)
+}
+
+pub fn setup_branch_rename(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    setup_branch_delete(setup)
 }
 
 pub fn setup_tag_create(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
@@ -410,6 +415,30 @@ pub fn branch_delete_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv)
     (
         sh_devnull(&ctx.grit, &["branch", "-D", name]),
         sh_devnull(&ctx.git, &["branch", "-D", name]),
+    )
+}
+
+pub fn branch_rename_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let old = ctx
+        .branch_bench_name
+        .as_deref()
+        .unwrap_or(BRANCH_BENCH_NAME);
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("grit-bench"));
+    let repo = ctx.repo.to_string_lossy().into_owned();
+    (
+        BenchArgv::new(
+            &exe,
+            [
+                "rename-branch-lib",
+                "--repo",
+                repo.as_str(),
+                "--old",
+                old,
+                "--new",
+                BRANCH_RENAME_TARGET,
+            ],
+        ),
+        sh_devnull(&ctx.git, &["branch", "-m", old, BRANCH_RENAME_TARGET]),
     )
 }
 
@@ -847,6 +876,26 @@ pub fn prepare_branch_delete(ctx: &DailyHeadlineContext) -> DailyPrepare {
             .as_deref()
             .unwrap_or(BRANCH_BENCH_NAME),
     ))
+}
+
+pub fn prepare_branch_rename(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    DailyPrepare::Shell(prepare_reset_branch_rename(
+        &ctx.git,
+        ctx.branch_bench_name
+            .as_deref()
+            .unwrap_or(BRANCH_BENCH_NAME),
+        BRANCH_RENAME_TARGET,
+    ))
+}
+
+pub fn prepare_reset_branch_rename(git: &Path, old: &str, new: &str) -> BenchArgv {
+    let reset = prepare_daily_reset_script(git);
+    let script = format!(
+        "{reset}\n{} 2>/dev/null || true\n{}",
+        shell_command(git, &["branch", "-D", new]),
+        shell_command(git, &["branch", old, "HEAD"])
+    );
+    BenchArgv::new("/bin/sh", ["-c", script.as_str()])
 }
 
 pub fn prepare_tag_create(ctx: &DailyHeadlineContext) -> DailyPrepare {

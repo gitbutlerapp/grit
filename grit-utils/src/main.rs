@@ -559,6 +559,18 @@ enum Cmd {
         #[arg(long)]
         git: PathBuf,
     },
+    #[command(
+        hide = true,
+        about = "Call grit-lib rename_branch for daily benchmarks"
+    )]
+    RenameBranchLib {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        old: String,
+        #[arg(long)]
+        new: String,
+    },
     #[command(hide = true)]
     PrepareParallelCheckout {
         #[arg(long)]
@@ -1375,6 +1387,22 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return grit_utils::daily::matrix_helpers::run_prepare_daily_gc_seed(&git);
         }
+        Cmd::RenameBranchLib { repo, old, new } => {
+            use grit_lib::config::environment::RepositoryOptions;
+            use grit_lib::porcelain::branch::{rename_branch, RenameBranchOptions};
+            use grit_lib::repo::Repository;
+            let repo = Repository::discover(Some(repo.as_path()), &RepositoryOptions::empty())?;
+            rename_branch(
+                &repo,
+                &RenameBranchOptions {
+                    old: old.clone(),
+                    new: new.clone(),
+                    force: false,
+                    dry_run: false,
+                },
+            )?;
+            return Ok(());
+        }
         Cmd::PrepareParallelCheckout { git, url, dest } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_parallel_checkout(&git, url, dest.as_path());
@@ -1899,6 +1927,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareWorktreeInitEmpty { .. }
         | Cmd::PrepareDailyReset { .. }
         | Cmd::PrepareDailyGcSeed { .. }
+        | Cmd::RenameBranchLib { .. }
         | Cmd::Render { .. }
         | Cmd::CriterionSummary { .. }
         | Cmd::PrepareParallelCheckout { .. }
