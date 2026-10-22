@@ -16423,6 +16423,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::fetch_request::FetchInvocat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::fetch_request::FetchInvocation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::fetch_request::FetchInvocation
 pub struct grit_lib::remote::fetch_request::FetchRefspecInput
+pub grit_lib::remote::fetch_request::FetchRefspecInput::allow_missing_explicit_for_prune: bool
 pub grit_lib::remote::fetch_request::FetchRefspecInput::configured_refspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::fetch_request::FetchRefspecInput::remote_name: core::option::Option<alloc::string::String>
 pub grit_lib::remote::fetch_request::FetchRefspecInput::user_refspecs: alloc::vec::Vec<alloc::string::String>
