@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[path = "merge_tree_cache.rs"]
 mod merge_tree_cache;
+pub(crate) use merge_tree_cache::MergeTreeCache;
 #[path = "merge_trees_walk.rs"]
 mod merge_trees_walk;
 
@@ -117,13 +118,38 @@ pub fn merge_trees_three_way(
     diff_algorithm: Option<&str>,
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<TreeMergeOutput> {
+    merge_trees_three_way_cached(
+        repo,
+        &mut merge_tree_cache::MergeTreeCache::default(),
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        favor,
+        ws,
+        diff_algorithm,
+        presentation,
+    )
+}
+
+/// Like [`merge_trees_three_way`], reusing parsed-tree cache across calls (e.g. replay sequences).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn merge_trees_three_way_cached(
+    repo: &Repository,
+    cache: &mut merge_tree_cache::MergeTreeCache,
+    base_tree: ObjectId,
+    ours_tree: ObjectId,
+    theirs_tree: ObjectId,
+    favor: MergeFavor,
+    ws: WhitespaceMergeOptions,
+    diff_algorithm: Option<&str>,
+    presentation: TreeMergeConflictPresentation<'_>,
+) -> crate::error::Result<TreeMergeOutput> {
     let odb = &repo.odb();
-    let mut cache = merge_tree_cache::MergeTreeCache::default();
     let mut touched =
         merge_trees_walk::collect_touched_merge_paths(odb, &base_tree, &ours_tree, &theirs_tree)?;
 
     let (mut base, mut ours, mut theirs) = merge_trees_walk::build_sparse_maps(
-        &mut cache,
+        cache,
         repo,
         base_tree,
         ours_tree,
@@ -148,7 +174,7 @@ pub fn merge_trees_three_way(
         presentation.df_directory_theirs_commit,
     ) {
         df_escapes = apply_df_file_directory_conflicts_trees(
-            &mut cache,
+            cache,
             repo,
             &base_tree,
             &ours_tree,
@@ -203,7 +229,7 @@ pub fn merge_trees_three_way(
     }
 
     let mut output = merge_trees_walk::three_way_on_touched_paths(
-        &mut cache,
+        cache,
         repo,
         base_tree,
         ours_tree,
@@ -245,7 +271,7 @@ pub fn merge_trees_three_way(
         }
     }
     output.result_tree = merge_trees_walk::finish_merge_result_tree(
-        &mut cache,
+        cache,
         odb,
         &output,
         base_tree,
@@ -303,8 +329,8 @@ fn apply_df_file_directory_conflicts_trees(
 
     let odb = repo.odb();
     let mut out = DfEscapes::default();
-    let theirs_sparse = merge_trees_walk::PathPrefixIndex::new(theirs.keys());
-    let ours_sparse = merge_trees_walk::PathPrefixIndex::new(ours.keys());
+    let theirs_sparse: HashSet<Vec<u8>> = theirs.keys().cloned().collect();
+    let ours_sparse: HashSet<Vec<u8>> = ours.keys().cloned().collect();
     let ours_paths: Vec<Vec<u8>> = ours.keys().cloned().collect();
     for path in ours_paths {
         let Some(entry) = ours.get(&path) else {
@@ -935,73 +961,8 @@ pub fn apply_tree_merge_output_to_worktree_index(
     index: &mut Index,
     merged: &TreeMergeOutput,
 ) -> crate::error::Result<()> {
-    if repo.work_tree().is_none() {
-        apply_tree_merge_output_to_index(index, merged);
-        return Ok(());
-    }
-    let pending = pending_tree_merge_index_rows(index, merged);
-    if pending.touched_paths.is_empty() && pending.index.entries().is_empty() {
-        return Ok(());
-    }
-    apply_tree_merge_output_to_index(index, &pending);
-    refresh_tree_merge_index_stat_cache(repo, index, &pending)
-}
-
-/// The part of `merged` that still has to be written into `index`.
-///
-/// After a worktree checkout the index usually already holds every merged row, with fresh stat
-/// data, so re-removing, re-inserting and re-stat'ing those paths only costs O(n) vector moves
-/// per path. A path is dropped from the result when `index` already has exactly the merged
-/// stage-0 regular-file row with populated stat data (the state the stat refresh would keep),
-/// or when neither side has any row for it.
-fn pending_tree_merge_index_rows(index: &Index, merged: &TreeMergeOutput) -> TreeMergeOutput {
-    let mut merged_rows: HashMap<&[u8], Vec<&IndexEntry>> = HashMap::new();
-    for entry in merged.index.entries() {
-        merged_rows
-            .entry(entry.path.as_slice())
-            .or_default()
-            .push(entry);
-    }
-    let up_to_date = |path: &[u8]| -> bool {
-        let has_unmerged = (1..=3).any(|stage| index.get(path, stage).is_some());
-        if has_unmerged {
-            return false;
-        }
-        let existing = index.get(path, 0);
-        match (merged_rows.get(path).map(Vec::as_slice), existing) {
-            (None, None) => true,
-            (Some([row]), Some(existing)) => {
-                row.stage() == 0
-                    && (row.mode == MODE_REGULAR || row.mode == crate::index::MODE_EXECUTABLE)
-                    && existing.oid == row.oid
-                    && existing.mode == row.mode
-                    && existing.flags == row.flags
-                    && existing.flags_extended == row.flags_extended
-                    && existing.size > 0
-                    && (existing.mtime_sec > 0 || existing.ctime_sec > 0)
-            }
-            _ => false,
-        }
-    };
-
-    let mut pending_index = Index::new();
-    for entry in merged.index.entries() {
-        if !up_to_date(&entry.path) {
-            pending_index.push_entry_unsorted(entry.clone());
-        }
-    }
-    pending_index.sort();
-    TreeMergeOutput {
-        index: pending_index,
-        conflict_content: BTreeMap::new(),
-        result_tree: merged.result_tree,
-        touched_paths: merged
-            .touched_paths
-            .iter()
-            .filter(|path| !up_to_date(path))
-            .cloned()
-            .collect(),
-    }
+    apply_tree_merge_output_to_index(index, merged);
+    refresh_tree_merge_index_stat_cache(repo, index, merged)
 }
 
 /// Tree OID to record in a commit after a three-way merge (applies conflict-marker policy).

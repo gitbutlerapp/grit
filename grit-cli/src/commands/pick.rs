@@ -67,7 +67,6 @@ pub struct PickOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub alternatives: Option<Vec<String>>,
-    /// True when `--dry-run` listed commits without changing the repository.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
@@ -364,25 +363,6 @@ fn map_sequence_outcome(
             }
         }
     }
-}
-
-fn records_before_stop(
-    repo: &grit_lib::repo::Repository,
-    sources: &[ObjectId],
-    stop_at: ObjectId,
-    created: &[ObjectId],
-) -> Vec<PickCommitRecord> {
-    let mut commits = Vec::new();
-    let mut created_iter = created.iter();
-    for &source in sources {
-        if source == stop_at {
-            break;
-        }
-        if let Some(&oid) = created_iter.next() {
-            commits.push(source_record(repo, source, Some(oid)));
-        }
-    }
-    commits
 }
 
 fn records_for_completed_from_replay(
