@@ -2715,14 +2715,6 @@ thread_local! {
     static DIFF_TREE_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
 }
 
-#[cfg(test)]
-fn note_diff_entry_scan(odb: &Odb) {
-    odb.hot_path_metrics().record_diff_entry_scan();
-}
-
-#[cfg(not(test))]
-fn note_diff_entry_scan(_odb: &Odb) {}
-
 /// Install a per-thread tree read counter for unit tests (cleared when `hook` is `None`).
 #[cfg(test)]
 pub(crate) fn set_diff_tree_read_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
@@ -3153,7 +3145,6 @@ pub fn diff_index_to_tree(
     tree_oid: Option<&ObjectId>,
     ignore_submodules: bool,
 ) -> Result<Vec<DiffEntry>> {
-    note_diff_entry_scan(odb);
     match index_cache_tree_walk(index, tree_oid) {
         CacheTreeWalk::Fast {
             head_tree,
@@ -4629,7 +4620,6 @@ fn diff_index_to_worktree_inner(
     bool,
     std::collections::BTreeMap<String, crate::index::IndexStatFields>,
 )> {
-    note_diff_entry_scan(odb);
     use crate::config::ConfigSet;
     use crate::crlf;
     use std::collections::BTreeMap;

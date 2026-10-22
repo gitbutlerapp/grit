@@ -15,10 +15,8 @@ pub struct HotPathTestMetrics {
     midx_stamp_stats: AtomicUsize,
     loose_path_open_attempts: AtomicUsize,
     commit_parse_calls: AtomicUsize,
-    diff_entry_scans: AtomicUsize,
     freshen_counting: AtomicBool,
     blob_counting: AtomicBool,
-    diff_entry_scan_counting: AtomicBool,
     stamp_counting: AtomicBool,
     loose_open_counting: AtomicBool,
     commit_parse_counting: AtomicBool,
@@ -107,26 +105,6 @@ impl HotPathTestMetrics {
         self.commit_parse_calls.store(0, Ordering::SeqCst);
     }
 
-    pub fn reset_diff_entry_scans(&self) {
-        self.diff_entry_scans.store(0, Ordering::SeqCst);
-    }
-
-    pub fn set_diff_entry_scan_counting(&self, enabled: bool) {
-        self.diff_entry_scan_counting
-            .store(enabled, Ordering::Relaxed);
-    }
-
-    #[must_use]
-    pub fn diff_entry_scans(&self) -> usize {
-        self.diff_entry_scans.load(Ordering::SeqCst)
-    }
-
-    pub(crate) fn record_diff_entry_scan(&self) {
-        if self.diff_entry_scan_counting.load(Ordering::Relaxed) {
-            self.diff_entry_scans.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
     pub fn set_commit_parse_counting(&self, enabled: bool) {
         self.commit_parse_counting.store(enabled, Ordering::Relaxed);
     }
@@ -187,7 +165,6 @@ impl HotPathTestMetrics {
         self.set_stamp_counting(false);
         self.set_loose_open_counting(false);
         self.set_commit_parse_counting(false);
-        self.set_diff_entry_scan_counting(false);
     }
 }
 
