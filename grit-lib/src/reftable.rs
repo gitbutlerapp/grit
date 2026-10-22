@@ -260,12 +260,22 @@ impl std::fmt::Display for ReftableField {
     }
 }
 
+#[cold]
+#[inline(never)]
 fn truncated(field: ReftableField) -> Error {
     ReftableError::Truncated { field }.into()
 }
 
+#[cold]
+#[inline(never)]
 fn invalid_utf8(field: ReftableField) -> Error {
     ReftableError::InvalidUtf8 { field }.into()
+}
+
+#[cold]
+#[inline(never)]
+fn corrupt(err: ReftableError) -> Error {
+    err.into()
 }
 
 // ---------------------------------------------------------------------------
@@ -1525,7 +1535,7 @@ impl ReftableReader {
             block_pos + block_len
         };
         if records_end > self.data.len() || records_end < 2 {
-            return Err(ReftableError::InvalidBlockLength.into());
+            return Err(corrupt(ReftableError::InvalidBlockLength));
         }
         let records_data_start = block_pos + 4;
         let restart_table_start =
@@ -1654,10 +1664,9 @@ fn decode_index_record(data: &[u8], pos: usize, prev_key: &[u8]) -> Result<(Vec<
     let mut key = Vec::with_capacity(prefix_len as usize + suffix_len);
     if prefix_len > 0 {
         if (prefix_len as usize) > prev_key.len() {
-            return Err(ReftableError::PrefixTooLong {
+            return Err(corrupt(ReftableError::PrefixTooLong {
                 field: ReftableField::IndexKey,
-            }
-            .into());
+            }));
         }
         key.extend_from_slice(&prev_key[..prefix_len as usize]);
     }
@@ -1687,10 +1696,9 @@ fn decode_ref_record(
     let mut name = Vec::with_capacity(prefix_len as usize + suffix_len);
     if prefix_len > 0 {
         if (prefix_len as usize) > prev_name.len() {
-            return Err(ReftableError::PrefixTooLong {
+            return Err(corrupt(ReftableError::PrefixTooLong {
                 field: ReftableField::RefName,
-            }
-            .into());
+            }));
         }
         name.extend_from_slice(&prev_name[..prefix_len as usize]);
     }
@@ -1738,7 +1746,7 @@ fn decode_ref_record(
             RefValue::Symref(target)
         }
         _ => {
-            return Err(ReftableError::UnknownValueType { value_type }.into());
+            return Err(corrupt(ReftableError::UnknownValueType { value_type }));
         }
     };
 
@@ -1767,10 +1775,9 @@ fn decode_log_record(
     let mut key = Vec::with_capacity(prefix_len as usize + suffix_len);
     if prefix_len > 0 {
         if (prefix_len as usize) > prev_key.len() {
-            return Err(ReftableError::PrefixTooLong {
+            return Err(corrupt(ReftableError::PrefixTooLong {
                 field: ReftableField::LogKey,
-            }
-            .into());
+            }));
         }
         key.extend_from_slice(&prev_key[..prefix_len as usize]);
     }
@@ -1784,16 +1791,16 @@ fn decode_log_record(
     let null_pos = key
         .iter()
         .position(|&b| b == 0)
-        .ok_or(ReftableError::InvalidLogKey)?;
+        .ok_or_else(|| corrupt(ReftableError::InvalidLogKey))?;
     let refname = String::from_utf8(key[..null_pos].to_vec())
         .map_err(|_| invalid_utf8(ReftableField::RefName))?;
     if null_pos + 9 > key.len() {
-        return Err(ReftableError::InvalidLogKey.into());
+        return Err(corrupt(ReftableError::InvalidLogKey));
     }
     let reversed_idx = u64::from_be_bytes(
         key[null_pos + 1..null_pos + 9]
             .try_into()
-            .map_err(|_| ReftableError::InvalidLogKey)?,
+            .map_err(|_| corrupt(ReftableError::InvalidLogKey))?,
     );
     let update_index = 0xffffffffffffffffu64 - reversed_idx;
 
@@ -4006,21 +4013,21 @@ fn restart_table_start_for_block(
     records_data_start: usize,
 ) -> Result<usize> {
     if records_end < 2 || records_end > data.len() {
-        return Err(ReftableError::InvalidBlockLength.into());
+        return Err(corrupt(ReftableError::InvalidBlockLength));
     }
     let rc = read_u16(data, records_end - 2);
     if rc > MAX_RESTARTS {
-        return Err(ReftableError::InvalidRestartTable.into());
+        return Err(corrupt(ReftableError::InvalidRestartTable));
     }
     let restart_bytes = rc * 3;
     let Some(restart_table_start) = records_end
         .checked_sub(2)
         .and_then(|without_count| without_count.checked_sub(restart_bytes))
     else {
-        return Err(ReftableError::InvalidRestartTable.into());
+        return Err(corrupt(ReftableError::InvalidRestartTable));
     };
     if restart_table_start < records_data_start {
-        return Err(ReftableError::InvalidRestartTable.into());
+        return Err(corrupt(ReftableError::InvalidRestartTable));
     }
     Ok(restart_table_start)
 }
