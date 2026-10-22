@@ -97,6 +97,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `dry_run` | boolean | `true` when `--dry-run` was used (no refs or objects written). |
 | `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
+| `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
 
 Example:
 

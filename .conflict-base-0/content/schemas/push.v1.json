@@ -98,6 +98,16 @@
         "$ref": "#/definitions/PushRefResult"
       },
       "type": "array"
+    },
+    "upstream_set": {
+      "description": "Branch short names whose upstream was configured (`-u` / `--set-upstream`).",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     }
   },
   "required": [

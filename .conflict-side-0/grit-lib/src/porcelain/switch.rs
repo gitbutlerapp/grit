@@ -2,12 +2,13 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::branch_tracking::write_branch_upstream_config;
 use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, OverwriteReason, Result};
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId};
-use crate::porcelain::branch::{resolve_create_tracking, write_branch_upstream_config};
+use crate::porcelain::branch::resolve_create_tracking;
 use crate::porcelain::branch_error::TrackMode;
 use crate::porcelain::checkout::{
     checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,

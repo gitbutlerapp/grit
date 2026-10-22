@@ -88,6 +88,8 @@ pub enum PushPlanKind {
 pub struct PushPlanContext {
     /// Advertised ref names on the remote (for delete mapping and dst guessing).
     pub remote_ref_names: HashSet<String>,
+    /// Tips of `refs/heads/*` on the remote (follow-tags walk boundary).
+    pub remote_branch_tips: HashSet<ObjectId>,
 }
 
 /// Errors while planning a push (typed; no stringly matching in callers).
@@ -197,10 +199,23 @@ pub fn resolve_push(
         apply_force_mode(repo, config, &remote, &mut resolved.specs, &request.force)?;
         return Ok(resolved);
     }
+    Ok(out)
+}
 
-    let mut specs = Vec::new();
-    for spec in &request.refspecs {
-        specs.extend(resolve_cli_refspec(repo, config, &remote, spec, ctx)?);
+/// After a successful push, apply `-u` / `--set-upstream` when [`PushRequest::set_upstream`] was set.
+///
+/// Returns the short names of branches whose upstream config was written. No-op when `set_upstream`
+/// is false or `dry_run` is true.
+pub fn apply_set_upstream_after_push(
+    repo: &Repository,
+    remote: &str,
+    set_upstream: bool,
+    dry_run: bool,
+    specs: &[PushRefSpec],
+    results: &[PushRefResult],
+) -> Result<Vec<String>, crate::error::Error> {
+    if !set_upstream || dry_run {
+        return Ok(Vec::new());
     }
     let branch_label = branch_label_from_specs(repo, &specs);
     let mut resolved = ResolvedPush {

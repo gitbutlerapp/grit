@@ -1793,6 +1793,9 @@ pub fn push_local(
     refs: &[PushRefSpec],
     opts: &PushOptions,
 ) -> Result<PushOutcome> {
+    if !opts.push_options.is_empty() {
+        return Err(Error::PushOptionsUnsupported);
+    }
     if !remote_git_dir.join("objects").is_dir() {
         return Err(Error::Message(format!(
             "could not find repository at '{}'",

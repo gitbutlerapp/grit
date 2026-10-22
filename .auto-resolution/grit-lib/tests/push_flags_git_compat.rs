@@ -144,10 +144,7 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
     git(&local, &["add", "c"]);
     git(&local, &["commit", "-q", "-m", "m3"]);
     git(&bare, &["init", "-q", "--bare", "-b", "main", "."]);
-    git(
-        &local,
-        &["remote", "add", "origin", bare.to_str().unwrap()],
-    );
+    git(&local, &["remote", "add", "origin", bare.to_str().unwrap()]);
     git(&local, &["push", "-q", "origin", "main"]);
 
     let side_oid = git_cmd(&["rev-parse", "side"])
@@ -156,13 +153,6 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
         .stdout
         .trim()
         .to_owned();
-    let main_oid = git_cmd(&["rev-parse", "main"])
-        .in_dir(&local)
-        .exec()
-        .stdout
-        .trim()
-        .to_owned();
-
     fn spec(src: &str, dst: &str) -> PushRefSpec {
         PushRefSpec {
             src: Some(ObjectId::from_hex(src).unwrap()),
@@ -205,12 +195,10 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
         &PushOptions::default(),
     )
     .expect("non-atomic");
-    assert!(
-        git_cmd(&["show-ref", "--verify", "refs/heads/atomic-ok"])
-            .in_dir(&bare)
-            .exec()
-            .ok()
-    );
+    assert!(git_cmd(&["show-ref", "--verify", "refs/heads/atomic-ok"])
+        .in_dir(&bare)
+        .exec()
+        .ok());
 }
 
 #[test]
@@ -268,4 +256,98 @@ fn follow_tags_matches_git_push_follow_tags() {
     assert!(git_tags.contains("refs/tags/ann-reach"));
     assert!(!git_tags.contains("refs/tags/light"));
     assert!(!git_tags.contains("refs/tags/ann-unreach"));
+}
+
+#[test]
+fn follow_tags_on_up_to_date_branch_includes_older_annotated_tag() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = tmp.path().join("local");
+    let bare = tmp.path().join("remote.git");
+    std::fs::create_dir_all(&local).unwrap();
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&local, &["init", "-q", "-b", "main"]);
+    std::fs::write(local.join("f"), "1\n").unwrap();
+    git(&local, &["add", "f"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    git(&local, &["tag", "-a", "-m", "old", "old-tag"]);
+    std::fs::write(local.join("f"), "2\n").unwrap();
+    git(&local, &["commit", "-am", "c2"]);
+    git(&bare, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(&local, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&local, &["push", "-q", "origin", "main"]);
+
+    let repo = open_repo(&local);
+    let config = load_config(&repo);
+    let ctx = ctx_from_bare(&bare);
+    let branch_specs = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            remote: Some("origin".into()),
+            refspecs: vec!["main".into()],
+            ..Default::default()
+        },
+        &ctx,
+    )
+    .expect("plan")
+    .specs;
+
+    let grit_tags: HashSet<String> = follow_tag_push_specs(&repo, &branch_specs, &ctx)
+        .expect("follow")
+        .into_iter()
+        .map(|s| s.dst)
+        .collect();
+
+    git(&local, &["push", "--follow-tags", "origin", "main"]);
+    let git_out = git_cmd(&["for-each-ref", "--format=%(refname)", "refs/tags/"])
+        .in_dir(&bare)
+        .exec();
+    let git_tags: HashSet<String> = git_out.stdout.lines().map(str::to_owned).collect();
+
+    assert_eq!(grit_tags, git_tags);
+    assert!(git_tags.contains("refs/tags/old-tag"));
+}
+
+#[test]
+fn push_local_rejects_push_options() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = tmp.path().join("local");
+    let bare = tmp.path().join("remote.git");
+    std::fs::create_dir_all(&local).unwrap();
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&local, &["init", "-q", "-b", "main"]);
+    std::fs::write(local.join("f"), "1\n").unwrap();
+    git(&local, &["add", "f"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    git(&bare, &["init", "-q", "--bare", "-b", "main", "."]);
+
+    let main_oid = git_cmd(&["rev-parse", "HEAD"]).in_dir(&local).exec().stdout;
+    let main_oid = ObjectId::from_hex(main_oid.trim()).unwrap();
+    let spec = PushRefSpec {
+        src: Some(main_oid),
+        src_ref: Some("refs/heads/main".into()),
+        dst: "refs/heads/main".into(),
+        ..Default::default()
+    };
+    let err = push_local(
+        local.join(".git").as_path(),
+        &bare,
+        &[spec],
+        &PushOptions {
+            push_options: vec!["ci.skip".into()],
+            ..Default::default()
+        },
+    )
+    .expect_err("local push must reject push options");
+    assert!(
+        matches!(err, grit_lib::error::Error::PushOptionsUnsupported),
+        "expected PushOptionsUnsupported, got {err:?}"
+    );
+    assert!(
+        !git_cmd(&["show-ref", "--verify", "refs/heads/main"])
+            .in_dir(&bare)
+            .exec()
+            .ok(),
+        "bare ref must not be created"
+    );
 }

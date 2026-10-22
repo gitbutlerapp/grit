@@ -6,6 +6,7 @@
 use grit_lib::config::environment::Environment;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
+use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_plan::{resolve_push, PushPlanContext, PushRequest};
 use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
 use grit_lib::repo::Repository;
@@ -119,9 +120,7 @@ fn short_dst_matches_remote_tag() {
     git(&fx.local, &["checkout", "-q", "main"]);
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let ctx = PushPlanContext {
-        remote_ref_names: list_remote_refs(&fx.bare),
-    };
+    let ctx = push_plan_context(&fx.bare);
     let specs = plan_specs(
         &repo,
         &config,
@@ -195,9 +194,7 @@ fn configured_wildcard_push_excludes_negative_refspec_both_config_orders() {
         let fx = setup_main_and_private_with_negative_push_config(negative_first);
         let repo = open_repo(&fx.local);
         let config = load_config(&repo);
-        let ctx = PushPlanContext {
-            remote_ref_names: list_remote_refs(&fx.bare),
-        };
+        let ctx = push_plan_context(&fx.bare);
         let specs = plan_specs(&repo, &config, PushRequest::default(), &ctx);
         assert_eq!(
             specs.len(),
@@ -224,9 +221,7 @@ fn push_default_matching_pushes_all_same_named_remote_heads() {
     git(&fx.local, &["checkout", "-q", "main"]);
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let ctx = PushPlanContext {
-        remote_ref_names: list_remote_refs(&fx.bare),
-    };
+    let ctx = push_plan_context(&fx.bare);
     let specs = plan_specs(&repo, &config, PushRequest::default(), &ctx);
     assert!(specs.iter().any(|s| s.dst == "refs/heads/main"));
     assert!(specs.iter().any(|s| s.dst == "refs/heads/shared"));
@@ -245,9 +240,7 @@ fn matching_push_config_only_existing_remote_heads() {
     git(&fx.local, &["checkout", "-q", "main"]);
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let ctx = PushPlanContext {
-        remote_ref_names: list_remote_refs(&fx.bare),
-    };
+    let ctx = push_plan_context(&fx.bare);
     let specs = plan_specs(&repo, &config, PushRequest::default(), &ctx);
     assert_eq!(specs.len(), 1);
     assert_eq!(specs[0].dst, "refs/heads/main");
@@ -483,6 +476,30 @@ fn dry_run_leaves_bare_refs_unchanged() {
 }
 
 fn list_remote_refs(bare: &Path) -> HashSet<String> {
-    let out = git(bare, &["for-each-ref", "--format=%(refname)"]);
-    out.lines().map(str::to_owned).collect()
+    push_plan_context(bare).remote_ref_names
+}
+
+fn push_plan_context(bare: &Path) -> PushPlanContext {
+    let out = git_cmd(&["for-each-ref", "--format=%(refname) %(objectname)"])
+        .in_dir(bare)
+        .exec();
+    assert!(out.ok(), "for-each-ref: {}", out.stderr);
+    let mut remote_ref_names = HashSet::new();
+    let mut remote_branch_tips = HashSet::new();
+    for line in out.stdout.lines() {
+        let Some((name, hex)) = line.split_once(' ') else {
+            continue;
+        };
+        if name.ends_with("^{}") {
+            continue;
+        }
+        remote_ref_names.insert(name.to_owned());
+        if name.starts_with("refs/heads/") {
+            remote_branch_tips.insert(ObjectId::from_hex(hex).expect("oid"));
+        }
+    }
+    PushPlanContext {
+        remote_ref_names,
+        remote_branch_tips,
+    }
 }

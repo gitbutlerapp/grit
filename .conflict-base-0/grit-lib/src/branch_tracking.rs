@@ -15,6 +15,7 @@ use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;
 use crate::state::{HeadState, InProgressOperation};
+use crate::transfer::PushRefSpec;
 use crate::transfer::{match_positive, ref_excluded};
 
 /// The `remote.<name>.fetch` refspecs of one remote, split by polarity.
@@ -76,6 +77,57 @@ impl FetchRefspecs {
             None => None,
         }
     }
+}
+
+/// Write `branch.<branch>.remote` and `branch.<branch>.merge` in the repository config.
+///
+/// Used by `git push -u`, branch creation with tracking, and [`apply_push_set_upstream`].
+pub fn write_branch_upstream_config(
+    repo: &Repository,
+    branch_short: &str,
+    remote: &str,
+    merge_ref: &str,
+) -> Result<()> {
+    let handle = repo.config_handle();
+    handle.set_local(&format!("branch.{branch_short}.remote"), remote)?;
+    handle.set_local(&format!("branch.{branch_short}.merge"), merge_ref)?;
+    Ok(())
+}
+
+/// Configure upstream for each local branch that was pushed successfully (`-u` / `--set-upstream`).
+///
+/// Only branch updates (`refs/heads/*` → `refs/heads/*`) with status [`PushRefStatus::Ok`] or
+/// [`PushRefStatus::UpToDate`] are considered. Returns the short names of branches whose upstream
+/// config was written.
+pub fn apply_push_set_upstream(
+    repo: &Repository,
+    remote: &str,
+    specs: &[PushRefSpec],
+    results: &[PushRefResult],
+) -> Result<Vec<String>> {
+    let spec_by_dst: std::collections::HashMap<&str, &PushRefSpec> =
+        specs.iter().map(|s| (s.dst.as_str(), s)).collect();
+    let mut updated = Vec::new();
+    for result in results {
+        if !matches!(result.status, PushRefStatus::Ok | PushRefStatus::UpToDate) {
+            continue;
+        }
+        let Some(spec) = spec_by_dst.get(result.remote_ref.as_str()) else {
+            continue;
+        };
+        let Some(src_ref) = spec.src_ref.as_deref() else {
+            continue;
+        };
+        let Some(branch_short) = src_ref.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        if !result.remote_ref.starts_with("refs/heads/") {
+            continue;
+        }
+        write_branch_upstream_config(repo, branch_short, remote, &result.remote_ref)?;
+        updated.push(branch_short.to_owned());
+    }
+    Ok(updated)
 }
 
 /// Apply remote-tracking ref updates for every successfully pushed ref in `results`.

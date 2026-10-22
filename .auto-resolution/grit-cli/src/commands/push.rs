@@ -262,7 +262,7 @@ pub fn run(
         results,
         rejected,
         dry_run,
-        upstream_set: upstream_set.is_empty().then_some(upstream_set),
+        upstream_set: (!upstream_set.is_empty()).then_some(upstream_set),
     })
 }
 

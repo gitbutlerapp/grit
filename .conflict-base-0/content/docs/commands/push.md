@@ -12,6 +12,7 @@ grit push [<remote>] [<refspec>...]
 grit push --tags
 grit push --delete <ref>
 grit push --dry-run
+grit push -u [--atomic] [-o <option>]... [--follow-tags]
 grit push --remote <name>   # hidden alias for one release
 ```
 
@@ -27,6 +28,14 @@ With `--tags`, pushes every local tag under `refs/tags/`.
 
 With `--delete`, deletes remote branches or tags (short names map like Git).
 
+`-u` / `--set-upstream` writes `branch.<name>.remote` and `branch.<name>.merge` for each successfully pushed local branch (same keys as `git push -u`). Dry-run does not touch config.
+
+`--atomic` applies every ref update in one batch on the remote: if any ref is rejected, none of the updates in that push land.
+
+`-o` / `--push-option` sends server-side push options (exposed to hooks as `GIT_PUSH_OPTION_*`). The remote must advertise the `push-options` capability; otherwise grit exits with a typed error.
+
+`--follow-tags` adds annotated tags reachable from the commits being pushed and not already on the remote (lightweight tags are skipped). When `push.followTags` is true in config, the same tag selection runs even without the flag.
+
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
 ## Options
@@ -38,6 +47,10 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `-t`, `--tags` | Push all local tags instead of the current branch. |
 | `--delete` | Delete a remote ref (repeatable). |
 | `--dry-run` | Contact the remote but do not update refs or send objects. |
+| `-u`, `--set-upstream` | Configure upstream for each pushed branch after a successful push. |
+| `--atomic` | All ref updates succeed or none are applied on the remote. |
+| `-o`, `--push-option` | Server-side push option (repeatable). |
+| `--follow-tags` | Also push reachable annotated tags missing on the remote. |
 | `--remote` | Hidden alias for the remote name (prefer the positional `<remote>`). |
 
 ## Examples
@@ -83,6 +96,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `dry_run` | boolean | `true` when `--dry-run` was used (no refs or objects written). |
 | `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason`, `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
+| `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
 
 Example:
 
