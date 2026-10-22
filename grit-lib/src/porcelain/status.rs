@@ -724,7 +724,11 @@ enum UntrackedWalkStep {
     Stop,
 }
 
-/// Parallel untracked scan for an empty index (bulk `git add .`), preserving path order loosely.
+/// Parallel untracked scan without pathspecs, preserving path order loosely.
+///
+/// Work is split per top-level entry; on larger indexes, directories that only recurse are
+/// split further (see [`split_tracked_untracked_tasks`]) so a work tree with a single
+/// top-level directory still spreads across workers.
 ///
 /// Only used without pathspecs, so the walk never needs attribute rules (`rules = None`); the
 /// per-operation [`crate::worktree_rules::WorktreeRules`] is not shareable across workers.
@@ -839,43 +843,200 @@ fn collect_untracked_parallel_top_level(
         return Ok((untracked, ignored));
     }
 
-    let dir_count = root_dirs.len();
-    let est_bytes = dir_count.saturating_mul(4096);
-    let per_dir = try_par_hash_with(&root_dirs, threads, est_bytes, |(name, entry)| {
-        let mut matcher = matcher_template.clone();
-        let mut local_untracked = Vec::new();
-        let mut local_ignored = Vec::new();
-        let _ = visit_untracked_dir_entry(
+    let root: Arc<str> = Arc::from("");
+    let mut tasks: Vec<UntrackedEntryTask> = root_dirs
+        .into_iter()
+        .map(|(name, entry)| UntrackedEntryTask {
+            parent: Arc::clone(&root),
+            name,
+            entry,
+        })
+        .collect();
+    let mut matcher_template = matcher_template.clone();
+    if pathspecs.is_empty()
+        && threads.get() > 1
+        && index.entries.len() >= crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES
+    {
+        tasks = split_tracked_untracked_tasks(
+            tasks,
+            threads
+                .get()
+                .saturating_mul(UNTRACKED_SPLIT_DIRS_PER_THREAD),
             repo,
             index,
-            work_tree,
             gitlinks,
-            &mut matcher,
-            ignored_mode,
-            show_all,
-            false,
-            None::<&Cell<bool>>,
             precompose_unicode,
             tracked_paths,
-            "",
-            entry,
-            name,
-            pathspecs,
-            None,
-            &mut local_untracked,
-            &mut local_ignored,
-        )?;
-        Ok((local_untracked, local_ignored))
-    })
+            &mut matcher_template,
+        );
+    }
+
+    let dir_count = tasks
+        .iter()
+        .filter(|t| crate::read_dir_kind::entry_is_dir(&t.entry).unwrap_or(false))
+        .count();
+    let options = crate::parallel::ParallelOptions {
+        threads,
+        min_items: crate::hash::PAR_HASH_MIN_ITEMS,
+        min_total_bytes: Some(crate::hash::PAR_HASH_MIN_TOTAL_BYTES),
+        signed_entry_threshold: None,
+    };
+    let per_task = crate::parallel::try_par_map_with_local(
+        &tasks,
+        options,
+        dir_count.saturating_mul(4096),
+        || matcher_template.clone(),
+        |matcher, task| {
+            let mut local_untracked = Vec::new();
+            let mut local_ignored = Vec::new();
+            let _ = visit_untracked_dir_entry(
+                repo,
+                index,
+                work_tree,
+                gitlinks,
+                matcher,
+                ignored_mode,
+                show_all,
+                false,
+                None::<&Cell<bool>>,
+                precompose_unicode,
+                tracked_paths,
+                &task.parent,
+                &task.entry,
+                &task.name,
+                pathspecs,
+                None,
+                &mut local_untracked,
+                &mut local_ignored,
+            )?;
+            Ok((local_untracked, local_ignored))
+        },
+    )
     .map_err(|e: ParallelHashError<crate::error::Error>| match e {
         ParallelHashError::Task(err) => err,
     })?;
 
-    for (mut local_u, mut local_i) in per_dir {
+    for (mut local_u, mut local_i) in per_task {
         untracked.append(&mut local_u);
         ignored.append(&mut local_i);
     }
     Ok((untracked, ignored))
+}
+
+/// Directories per worker the parallel untracked walk aims for before it stops splitting.
+const UNTRACKED_SPLIT_DIRS_PER_THREAD: usize = 8;
+
+/// One directory entry queued for the parallel untracked walk.
+struct UntrackedEntryTask {
+    /// Stored repository-relative path of the containing directory (empty at the root).
+    parent: Arc<str>,
+    /// Raw file name as read from the directory.
+    name: Vec<u8>,
+    entry: DirEntry,
+}
+
+/// Replace directories whose walk is a plain recursion with their children until at least
+/// `target_dirs` directories are queued (or nothing more can be split).
+///
+/// A directory qualifies when it holds tracked files and is neither tracked itself, a gitlink,
+/// nor a nested submodule work tree: [`visit_untracked_directory`] then visits its children
+/// in name order with no collapsing, so splitting it preserves the concatenated output. The
+/// per-directory ignore rules of every split directory are loaded into `matcher`, which seeds
+/// the workers.
+#[allow(clippy::too_many_arguments)]
+fn split_tracked_untracked_tasks(
+    mut tasks: Vec<UntrackedEntryTask>,
+    target_dirs: usize,
+    repo: &Repository,
+    index: &Index,
+    gitlinks: &HashSet<String>,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+    matcher: &mut IgnoreMatcher,
+) -> Vec<UntrackedEntryTask> {
+    loop {
+        let dirs = tasks
+            .iter()
+            .filter(|t| crate::read_dir_kind::entry_is_dir(&t.entry).unwrap_or(false))
+            .count();
+        if dirs >= target_dirs {
+            return tasks;
+        }
+        let mut split_any = false;
+        let mut next = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            let Some(rel) = plain_tracked_directory(
+                &task,
+                repo,
+                index,
+                gitlinks,
+                precompose_unicode,
+                tracked_paths,
+            ) else {
+                next.push(task);
+                continue;
+            };
+            split_any = true;
+            let _ = matcher.note_directory_entered(repo, Some(index), &rel);
+            let Ok(entries) = fs::read_dir(task.entry.path()) else {
+                continue;
+            };
+            let parent: Arc<str> = Arc::from(rel);
+            next.extend(
+                named_entries_sorted(entries)
+                    .into_iter()
+                    .map(|(name, entry)| UntrackedEntryTask {
+                        parent: Arc::clone(&parent),
+                        name,
+                        entry,
+                    }),
+            );
+        }
+        tasks = next;
+        if !split_any {
+            return tasks;
+        }
+    }
+}
+
+/// The stored path of `task` when it is a directory whose untracked walk only recurses into
+/// its children (see [`split_tracked_untracked_tasks`]).
+fn plain_tracked_directory(
+    task: &UntrackedEntryTask,
+    repo: &Repository,
+    index: &Index,
+    gitlinks: &HashSet<String>,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+) -> Option<String> {
+    if task.name == b".git" || !crate::read_dir_kind::entry_is_dir(&task.entry).unwrap_or(false) {
+        return None;
+    }
+    let child_bytes = untracked_child_path(&task.parent, &task.name, precompose_unicode);
+    if tracked_paths.contains_bytes(&child_bytes) {
+        return None;
+    }
+    let rel = crate::repo_relpath::storage_string(&child_bytes);
+    if gitlinks.contains(&rel)
+        || !has_tracked_under(index, gitlinks, &rel)
+        || dir_is_nested_submodule_worktree(repo.git_dir(), &task.entry.path())
+    {
+        return None;
+    }
+    Some(rel)
+}
+
+/// Raw repository-relative path of entry `name` inside the directory stored as `rel`,
+/// precomposing the name when `core.precomposeUnicode` applies.
+fn untracked_child_path(rel: &str, name: &[u8], precompose_unicode: bool) -> Vec<u8> {
+    let name: Cow<'_, [u8]> = match std::str::from_utf8(name) {
+        Ok(raw_name) if precompose_unicode => match precompose_utf8_segment(raw_name) {
+            Cow::Borrowed(_) => Cow::Borrowed(name),
+            Cow::Owned(s) => Cow::Owned(s.into_bytes()),
+        },
+        _ => Cow::Borrowed(name),
+    };
+    crate::repo_relpath::join_rel(&crate::repo_relpath::storage_bytes(rel), &name)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -902,24 +1063,19 @@ fn visit_untracked_dir_entry(
     if name == b".git" {
         return Ok(UntrackedWalkStep::Continue);
     }
-    let name_bytes: Cow<'_, [u8]> = match std::str::from_utf8(name) {
-        Ok(raw_name) if precompose_unicode => match precompose_utf8_segment(raw_name) {
-            Cow::Borrowed(_) => Cow::Borrowed(name),
-            Cow::Owned(s) => Cow::Owned(s.into_bytes()),
-        },
-        _ => Cow::Borrowed(name),
-    };
-    let parent = crate::repo_relpath::storage_bytes(rel);
-    let child_bytes = crate::repo_relpath::join_rel(&parent, &name_bytes);
+    let child_bytes = untracked_child_path(rel, name, precompose_unicode);
     let is_dir = crate::read_dir_kind::entry_is_dir(entry).unwrap_or(false);
 
     // Most entries in a typical work tree are tracked; settle those before building the
     // stored path string or the absolute path.
     if tracked_paths.contains_bytes(&child_bytes) {
-        let index_is_tree = index
-            .get(&child_bytes, 0)
-            .is_some_and(|e| e.mode == MODE_TREE || e.mode == MODE_GITLINK);
-        if !(is_dir && !index_is_tree) {
+        // A tracked non-directory is settled; a directory still needs walking unless the
+        // index records it as a tree or gitlink.
+        let skip = !is_dir
+            || index
+                .get(&child_bytes, 0)
+                .is_some_and(|e| e.mode == MODE_TREE || e.mode == MODE_GITLINK);
+        if skip {
             return Ok(UntrackedWalkStep::Continue);
         }
     }
