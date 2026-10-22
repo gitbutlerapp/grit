@@ -2,10 +2,12 @@
 
 mod support;
 
+use grit_lib::objects::ObjectId;
 use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::log::{
-    collect_decorations, collect_decorations_inner, current_branch_decoration_index,
-    normalize_glob_ref, peel_to_commit_hex, DecorationFilter, DecorationKind,
+    collect_decorations, collect_decorations_for_commits, collect_decorations_inner,
+    current_branch_decoration_index, normalize_glob_ref, peel_to_commit_hex, DecorationFilter,
+    DecorationKind,
 };
 use grit_lib::state::HeadState;
 use std::fs;
@@ -35,6 +37,7 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     let map_short = collect_decorations(&repo, false)?;
     assert!(!map_full.is_empty());
     assert!(!map_short.is_empty());
+    assert_targeted_matches_full(&repo, wt);
 
     let filter = DecorationFilter {
         include: vec!["refs/heads/*".into()],
@@ -112,6 +115,27 @@ fn decoration_rows(
     rows
 }
 
+/// `collect_decorations_for_commits` must equal the full map restricted to its commits.
+fn assert_targeted_matches_full(repo: &grit_lib::repo::Repository, wt: &std::path::Path) {
+    let all: Vec<ObjectId> = git(wt, &["rev-list", "--all"])
+        .lines()
+        .map(|l| l.parse().expect("oid"))
+        .collect();
+    for full in [false, true] {
+        let whole = collect_decorations(repo, full).expect("full map");
+        for chunk in all.chunks(1).chain(std::iter::once(&all[..])) {
+            let targeted = collect_decorations_for_commits(repo, full, chunk).expect("targeted");
+            let mut expected = whole.clone();
+            expected.retain(|hex, _| chunk.iter().any(|oid| &oid.to_hex() == hex));
+            assert_eq!(
+                decoration_rows(&targeted),
+                decoration_rows(&expected),
+                "full={full} commits={chunk:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<()> {
     let hist = HistoryRepo::init();
@@ -136,6 +160,7 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
             .any(|(hex, items)| hex == &first && items.iter().any(|(_, d)| d == "v1-nested")),
         "nested annotated tag decorates its commit: {loose:?}"
     );
+    assert_targeted_matches_full(&repo, wt);
 
     git(wt, &["pack-refs", "--all"]);
     let packed_refs = fs::read_to_string(repo.git_dir().join("packed-refs")).expect("packed-refs");
@@ -160,6 +185,7 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
             .collect::<Vec<_>>()
     };
     assert_eq!(decorated_with_moving(&moved), vec![head]);
+    assert_targeted_matches_full(&repo, wt);
     assert_eq!(decorated_with_moving(&loose), vec![first]);
 
     Ok(())

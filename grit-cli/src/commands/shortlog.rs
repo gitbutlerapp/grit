@@ -100,7 +100,7 @@ pub fn run() -> Result<ShortlogOutcome> {
     let (ahead_count, newest) =
         ahead_of_target_commits(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let loader = CommitJsonLoader::new(&repo)?;
+    let loader = CommitJsonLoader::for_listed_commits();
     let (commits, commit_rows) = loader.load_with_summaries(&repo, &newest, now)?;
     let truncated = ahead_count > commits.len();
     Ok(ShortlogOutcome {

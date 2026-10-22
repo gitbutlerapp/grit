@@ -299,7 +299,7 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
     let commit_oid = peel_to_commit(&repo, resolved)?;
 
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let commit_json = CommitJsonLoader::new(&repo)?.load_one(&repo, &commit_oid, now)?;
+    let commit_json = CommitJsonLoader::for_listed_commits().load_one(&repo, &commit_oid, now)?;
     let commit = CommitInfo {
         oid: commit_json.oid,
         parents: commit_json.parents,

@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 use crate::change_id::{resolved_change_id, ChangeId};
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, ObjectId, ObjectKind, OidHashSet};
 use crate::odb::Odb;
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
@@ -244,6 +244,37 @@ pub fn load_commits_with_decorations(
     Ok(out)
 }
 
+/// Like [`collect_decorations`], but only for the given commits.
+///
+/// The result equals [`collect_decorations`] restricted to the keys of `commits`. Refs
+/// whose `packed-refs` peel line names one of them need no object reads, and refs
+/// pointing elsewhere are skipped instead of peeled, so a command that shows a few
+/// commits does not pay for every tag in the repository.
+///
+/// # Parameters
+///
+/// - `full`: show full ref names (`refs/heads/main`) instead of short ones.
+/// - `commits`: commit ids whose decorations are wanted.
+///
+/// # Errors
+///
+/// Returns ref listing, `HEAD` resolution, and object read errors, like
+/// [`collect_decorations`].
+pub fn collect_decorations_for_commits(
+    repo: &Repository,
+    full: bool,
+    commits: &[ObjectId],
+) -> Result<DecorationMap> {
+    let targets: OidHashSet = commits.iter().copied().collect();
+    collect_decorations_impl(
+        repo,
+        full,
+        false,
+        &DecorationFilter::default(),
+        Some(&targets),
+    )
+}
+
 /// Like [`collect_decorations`], but `clear_decorations` removes the default ref
 /// filter so refs that are normally hidden (e.g. `refs/notes/*`) also get
 /// decorated (matches `git log --clear-decorations`).
@@ -252,6 +283,17 @@ pub fn collect_decorations_inner(
     full: bool,
     clear_decorations: bool,
     filter: &DecorationFilter,
+) -> Result<DecorationMap> {
+    collect_decorations_impl(repo, full, clear_decorations, filter, None)
+}
+
+/// Shared body of the decoration collectors; `targets` limits the result to those commits.
+fn collect_decorations_impl(
+    repo: &Repository,
+    full: bool,
+    clear_decorations: bool,
+    filter: &DecorationFilter,
+    targets: Option<&OidHashSet>,
 ) -> Result<DecorationMap> {
     let mut map: DecorationMap = HashMap::new();
     let git_dir = &repo.git_dir();
@@ -268,7 +310,7 @@ pub fn collect_decorations_inner(
 
     let mut all_refs = crate::refs::list_refs(git_dir, "refs/")?;
     all_refs.sort_by(|a, b| a.0.cmp(&b.0));
-    let peeler = RefTipPeeler::new(repo);
+    let peeler = RefTipPeeler::new(repo, targets);
 
     for (refname, oid) in all_refs {
         // Apply `--decorate-refs` / `--decorate-refs-exclude` / `log.excludeDecoration`.
@@ -280,7 +322,13 @@ pub fn collect_decorations_inner(
                 continue;
             };
             let rest = rest.trim();
-            if rest.len() != 40 || rest.parse::<ObjectId>().is_err() {
+            if rest.len() != 40 {
+                continue;
+            }
+            let Ok(replaced) = rest.parse::<ObjectId>() else {
+                continue;
+            };
+            if targets.is_some_and(|t| !t.contains(&replaced)) {
                 continue;
             }
             prepend_decoration(
@@ -295,7 +343,9 @@ pub fn collect_decorations_inner(
         }
 
         if refname == "refs/stash" || refname.starts_with("refs/stash/") {
-            let hex = peeler.commit_hex(&refname, &oid);
+            let Some(hex) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             prepend_decoration(
                 map.entry(hex).or_default(),
                 DecorationItem {
@@ -313,7 +363,9 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let hex = peeler.commit_hex(&refname, &oid);
+            let Some(hex) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             prepend_decoration(
                 map.entry(hex).or_default(),
                 DecorationItem {
@@ -331,7 +383,9 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let peeled = peeler.commit_hex(&refname, &oid);
+            let Some(peeled) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -349,7 +403,9 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let peeled = peeler.commit_hex(&refname, &oid);
+            let Some(peeled) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -369,7 +425,9 @@ pub fn collect_decorations_inner(
         // list is dropped and every ref that passes the filter is decorated with its full
         // name and `DECORATION_NONE` (reset) color (log-tree.c `add_ref_decoration`).
         if clear_decorations || !filter.is_empty() {
-            let peeled = peeler.commit_hex(&refname, &oid);
+            let Some(peeled) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -381,7 +439,10 @@ pub fn collect_decorations_inner(
         }
     }
 
-    if let Some(oid) = head.oid() {
+    if let Some(oid) = head
+        .oid()
+        .filter(|oid| targets.is_none_or(|t| t.contains(*oid)))
+    {
         if filter.is_empty() || filter.matches("HEAD") {
             let hex = oid.to_hex();
             prepend_decoration(
@@ -449,20 +510,26 @@ pub fn peel_to_commit_hex(odb: &Odb, hex: &str) -> Option<String> {
 /// When `packed-refs` records a ref's peeled value the tag objects are not read. The
 /// peeled object is confirmed to be a commit through the commit-graph when it lists the
 /// object, and otherwise from the object header.
+///
+/// With `targets`, only keys among those commits are wanted: a tip whose recorded peel
+/// is a target is a commit by definition, and other tips are skipped without reads
+/// whenever that already decides the answer.
 struct RefTipPeeler<'a> {
     repo: &'a Repository,
     packed: Option<PackedRefPeels>,
     graph: std::cell::OnceCell<Option<std::sync::Arc<crate::commit_graph_file::CommitGraphChain>>>,
+    targets: Option<&'a OidHashSet>,
 }
 
 impl<'a> RefTipPeeler<'a> {
-    fn new(repo: &'a Repository) -> Self {
+    fn new(repo: &'a Repository, targets: Option<&'a OidHashSet>) -> Self {
         // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
         let packed = PackedRefPeels::load(repo.git_dir(), repo.refs().format()).ok();
         Self {
             repo,
             packed,
             graph: std::cell::OnceCell::new(),
+            targets,
         }
     }
 
@@ -481,26 +548,42 @@ impl<'a> RefTipPeeler<'a> {
             .is_ok_and(|info| info.kind == ObjectKind::Commit)
     }
 
-    fn commit_hex(&self, refname: &str, oid: &ObjectId) -> String {
+    /// Decoration key for the tip `oid` of `refname`, or `None` when it is not a target.
+    fn commit_hex(&self, refname: &str, oid: &ObjectId) -> Option<String> {
+        let key = self.key(refname, oid)?;
+        if self.targets.is_some_and(|t| !t.contains(&key)) {
+            return None;
+        }
+        Some(key.to_hex())
+    }
+
+    fn key(&self, refname: &str, oid: &ObjectId) -> Option<ObjectId> {
         match self.packed.as_ref().and_then(|p| p.peeled(refname, oid)) {
             Some(Some(peeled)) => {
-                return if self.is_commit(&peeled) {
+                if let Some(targets) = self.targets {
+                    // Otherwise the key is `peeled` (not a target) or the tag itself.
+                    return targets.contains(&peeled).then_some(peeled);
+                }
+                return Some(if self.is_commit(&peeled) {
                     peeled
                 } else {
                     *oid
-                }
-                .to_hex();
+                });
             }
-            Some(None) => return oid.to_hex(),
+            Some(None) => return Some(*oid),
             None => {}
         }
-        self.repo
-            .odb()
-            .peel_to_commit(*oid)
-            .ok()
-            .flatten()
-            .unwrap_or(*oid)
-            .to_hex()
+        if self.targets.is_some_and(|t| t.contains(oid)) {
+            return Some(*oid);
+        }
+        Some(
+            self.repo
+                .odb()
+                .peel_to_commit(*oid)
+                .ok()
+                .flatten()
+                .unwrap_or(*oid),
+        )
     }
 }
 

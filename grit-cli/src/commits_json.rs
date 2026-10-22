@@ -3,7 +3,8 @@
 use anyhow::Result;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::{
-    collect_decorations, load_commits_with_decorations, DecorationMap, LoadedCommit,
+    collect_decorations, collect_decorations_for_commits, load_commits_with_decorations,
+    DecorationMap, LoadedCommit,
 };
 use grit_lib::repo::Repository;
 
@@ -12,15 +13,23 @@ use crate::output::{CommitJson, CommitRefJson};
 
 /// Decoration map plus helpers to build [`CommitJson`] rows without re-walking refs per commit.
 pub struct CommitJsonLoader {
-    decorations: DecorationMap,
+    /// Decorations for every commit, or `None` to collect them per call for just its rows.
+    decorations: Option<DecorationMap>,
 }
 
 impl CommitJsonLoader {
-    /// Collect ref decorations once for the repository.
+    /// Collect ref decorations once for the repository, for commands that load many
+    /// batches of rows.
     pub fn new(repo: &Repository) -> Result<Self> {
         Ok(Self {
-            decorations: collect_decorations(repo, false)?,
+            decorations: Some(collect_decorations(repo, false)?),
         })
+    }
+
+    /// Collect decorations per call for only the commits being loaded, for commands that
+    /// load their rows in one batch.
+    pub fn for_listed_commits() -> Self {
+        Self { decorations: None }
     }
 
     /// Build human [`CommitSummary`] rows without loading ref decorations (no extra config I/O).
@@ -56,7 +65,15 @@ impl CommitJsonLoader {
         oids: &[ObjectId],
         now: i64,
     ) -> Result<(Vec<CommitJson>, Vec<CommitSummary>)> {
-        let loaded = load_commits_with_decorations(repo, oids, &self.decorations)?;
+        let listed;
+        let decorations = match &self.decorations {
+            Some(all) => all,
+            None => {
+                listed = collect_decorations_for_commits(repo, false, oids)?;
+                &listed
+            }
+        };
+        let loaded = load_commits_with_decorations(repo, oids, decorations)?;
         let mut json = Vec::with_capacity(loaded.len());
         let mut summaries = Vec::with_capacity(loaded.len());
         for row in &loaded {

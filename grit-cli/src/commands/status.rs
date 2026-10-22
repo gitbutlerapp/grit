@@ -769,7 +769,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     let commits = if ahead_oids.is_empty() {
         Vec::new()
     } else {
-        crate::commits_json::CommitJsonLoader::new(&repo)?.load(&repo, &ahead_oids, now)?
+        crate::commits_json::CommitJsonLoader::for_listed_commits().load(&repo, &ahead_oids, now)?
     };
 
     let staged: Vec<ChangeJson> = model.staged.iter().map(change_json).collect();
