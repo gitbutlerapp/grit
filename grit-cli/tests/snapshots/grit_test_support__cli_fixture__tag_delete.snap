@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"delete\",\"name\":\"drop-me\"}\n",
+    "stdout": "{\"action\":\"delete\",\"name\":\"drop-me\",\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {

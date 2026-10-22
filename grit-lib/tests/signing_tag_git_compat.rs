@@ -101,6 +101,8 @@ fn create_tag_ssh_signed_verifies_with_git_verify_tag() {
             tagger: Some(tagger),
             sign: Some(true),
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("create signed tag");
@@ -144,6 +146,8 @@ fn create_tag_honors_tag_gpgsign_config() {
             tagger: Some("T <t@example.com> 1700000000 +0000".to_owned()),
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("create tag with tag.gpgSign");
@@ -173,6 +177,8 @@ fn signed_tag_passes_git_fsck_strict() {
             tagger: Some("T <t@example.com> 1700000000 +0000".to_owned()),
             sign: Some(true),
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("signed tag");
@@ -305,6 +311,8 @@ fn create_tag_openpgp_signed_verifies_with_git() {
             tagger: Some("T <t@example.com> 1700000000 +0000".to_owned()),
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("signed openpgp tag");

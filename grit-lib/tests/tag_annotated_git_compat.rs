@@ -44,6 +44,8 @@ fn grit_annotated_tag_round_trips_with_git() {
             tagger: Some(tagger.to_owned()),
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("create annotated tag");

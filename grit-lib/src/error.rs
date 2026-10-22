@@ -787,6 +787,10 @@ pub enum Error {
         tag: String,
     },
 
+    /// Tag create/delete validation failure ([`crate::porcelain::tag::TagError`]).
+    #[error(transparent)]
+    Tag(#[from] crate::porcelain::tag::TagError),
+
     /// A linked worktree path is already registered under `.git/worktrees/`.
     #[error(
         "'{path}' is a missing but already registered worktree; use add with --force to override, or prune or remove to clear"

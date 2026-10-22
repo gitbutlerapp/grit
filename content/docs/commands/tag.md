@@ -10,15 +10,22 @@ order: 5
 ```text
 grit tag
 grit tag <name>
+grit tag <name> [<target>]
 grit tag <name> -m <message>
+grit tag <name> -F <path|->
 grit tag <name> -s -m <message>
-grit tag <name> --object <rev>
+grit tag <name> -f
+grit tag <name> --dry-run
 grit tag -d <name>
 ```
 
 ## Description
 
-With no arguments, lists your tags. With a name and no `-m`, creates a **lightweight** tag pointing at `HEAD` (or `--object`). With `-m`, creates an **annotated** tag object with that message. Use `-s` / `--sign` (or `tag.gpgSign=true`) to cryptographically sign an annotated tag; signed tags verify with `git verify-tag` and system `git tag -v`.
+With no arguments, lists your tags. With a name and no `-m`/`-F`, creates a **lightweight** tag pointing at `HEAD` or the optional `<target>` revision. With `-m` or `-F`, creates an **annotated** tag object with that message (comment lines starting with `#` are stripped, matching Git's default cleanup). Use `-s` / `--sign` (or `tag.gpgSign=true`) to cryptographically sign an annotated tag; signed tags verify with `git verify-tag` and system `git tag -v`.
+
+Use `-f` / `--force` to replace an existing tag (lightweight or annotated). The previous ref target is reported in `--json` as `replaced`.
+
+Use `--dry-run` on create or delete to preview the outcome without changing refs.
 
 Tag names must be valid as `refs/tags/<name>` under Git's ref-name rules (same checks as `git check-ref-format refs/tags/<name>`). Invalid names are rejected before writing under `.git/refs`.
 
@@ -29,12 +36,16 @@ Tags are local until you publish them with [`grit push --tags`](../push/). Delet
 | Option | Description |
 | --- | --- |
 | `<name>` | The tag to create or delete. Omit to list tags. |
+| `<target>` | Revision to tag (default `HEAD`). |
 | `-d`, `--delete` | Delete the tag locally. |
 | `-m`, `--message` | Annotated tag message. |
+| `-F`, `--file` | Read the annotated tag message from a file (`-` reads stdin). |
+| `-f`, `--force` | Replace an existing tag with the same name. |
+| `--dry-run` | Preview create or delete without updating refs. |
 | `-s`, `--sign` | Sign the tag object (implies annotated; honors `tag.gpgSign` when omitted). |
 | `--no-sign` | Do not sign, even when `tag.gpgSign` is true. |
 | `--signing-key` | Signing key id or path for this tag (overrides `user.signingkey`). |
-| `--object` | Revision to tag (default `HEAD`). |
+| `--object` | Hidden alias for `<target>` (one release). |
 
 ## Examples
 
@@ -44,6 +55,9 @@ Created tag v0.1
 
 $ grit tag v0.2 -s -m 'Signed release'
 Created tag v0.2
+
+$ grit tag v0.1 main -f -m 'Repointed release'
+Created tag v0.1
 
 $ grit tag
   v0.1
@@ -73,6 +87,8 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | `kind` | string | For `create` or list entries: `lightweight` or `annotated`. |
 | `signed` | boolean | For `create`, whether the tag object was signed. |
 | `peeled` | string | Commit oid when the tag peels to a commit. |
+| `replaced` | string | For `create` with `--force`, oid the tag ref pointed at before replacement. |
+| `dry_run` | boolean | For `create` or `delete`, whether refs were left unchanged. |
 
 Listing tags:
 
@@ -99,6 +115,7 @@ Creating an annotated tag:
   "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
   "kind": "annotated",
   "signed": false,
+  "dry_run": false,
   "peeled": "abc1234567890abcdef1234567890abcdef123456"
 }
 ```

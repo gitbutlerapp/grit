@@ -4577,6 +4577,8 @@ pub grit_lib::error::Error::StashNotFound::n: usize
 pub grit_lib::error::Error::StashSymlinkNotUtf8
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
+pub grit_lib::error::Error::Tag
+pub grit_lib::error::Error::Tag::0: grit_lib::porcelain::tag::TagError
 pub grit_lib::error::Error::TagNotFound
 pub grit_lib::error::Error::TagNotFound::tag: alloc::string::String
 pub grit_lib::error::Error::TreeSha256InvalidHex
@@ -11657,6 +11659,14 @@ pub fn grit_lib::porcelain::switch::resolve_revision_spec(&grit_lib::repo::Repos
 pub fn grit_lib::porcelain::switch::resolve_switch_target(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
 pub fn grit_lib::porcelain::switch::switch_repository(&grit_lib::repo::Repository, &grit_lib::porcelain::switch::SwitchOptions) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchOutcome>
 pub mod grit_lib::porcelain::tag
+pub enum grit_lib::porcelain::tag::TagError
+pub grit_lib::porcelain::tag::TagError::AlreadyExists
+pub grit_lib::porcelain::tag::TagError::AlreadyExists::name: alloc::string::String
+pub grit_lib::porcelain::tag::TagError::EmptyMessage
+pub grit_lib::porcelain::tag::TagError::InvalidName
+pub grit_lib::porcelain::tag::TagError::InvalidName::detail: alloc::string::String
+pub grit_lib::porcelain::tag::TagError::NotFound
+pub grit_lib::porcelain::tag::TagError::NotFound::name: alloc::string::String
 pub enum grit_lib::porcelain::tag::TagKind
 pub grit_lib::porcelain::tag::TagKind::Annotated
 pub grit_lib::porcelain::tag::TagKind::Lightweight
@@ -11682,6 +11692,8 @@ pub grit_lib::porcelain::tag::CreateTagOutcome::name: alloc::string::String
 pub grit_lib::porcelain::tag::CreateTagOutcome::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::tag::CreateTagOutcome::peeled: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::tag::CreateTagOutcome::signed: bool
+pub grit_lib::porcelain::tag::CreateTagOutcome::replaced: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::tag::CreateTagOutcome::dry_run: bool
 impl core::clone::Clone for grit_lib::porcelain::tag::CreateTagOutcome
 pub fn grit_lib::porcelain::tag::CreateTagOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::tag::CreateTagOutcome
@@ -11704,6 +11716,8 @@ pub grit_lib::porcelain::tag::CreateTagRequest::sign: core::option::Option<bool>
 pub grit_lib::porcelain::tag::CreateTagRequest::signing_key: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::tag::CreateTagRequest::tagger: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::tag::CreateTagRequest::target: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::tag::CreateTagRequest::force: bool
+pub grit_lib::porcelain::tag::CreateTagRequest::dry_run: bool
 impl core::clone::Clone for grit_lib::porcelain::tag::CreateTagRequest
 pub fn grit_lib::porcelain::tag::CreateTagRequest::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::porcelain::tag::CreateTagRequest
@@ -11738,7 +11752,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::TagInfo
 pub fn grit_lib::porcelain::tag::compare_version(&str, &str) -> core::cmp::Ordering
 pub fn grit_lib::porcelain::tag::create_tag(&grit_lib::repo::Repository, &grit_lib::porcelain::tag::CreateTagRequest) -> grit_lib::error::Result<grit_lib::porcelain::tag::CreateTagOutcome>
 pub fn grit_lib::porcelain::tag::creator_date(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> i64
-pub fn grit_lib::porcelain::tag::delete_tag(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::porcelain::tag::delete_tag(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::porcelain::tag::get_tag_annotation(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, u32) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::porcelain::tag::glob_matches(&str, &str) -> bool
 pub fn grit_lib::porcelain::tag::list_tags(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::tag::TagInfo>>
@@ -11898,6 +11912,8 @@ pub grit_lib::prelude::Error::StashNotFound::n: usize
 pub grit_lib::prelude::Error::StashSymlinkNotUtf8
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
+pub grit_lib::prelude::Error::Tag
+pub grit_lib::prelude::Error::Tag::0: grit_lib::porcelain::tag::TagError
 pub grit_lib::prelude::Error::TagNotFound
 pub grit_lib::prelude::Error::TagNotFound::tag: alloc::string::String
 pub grit_lib::prelude::Error::TreeSha256InvalidHex

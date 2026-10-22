@@ -71,6 +71,9 @@
           ],
           "type": "string"
         },
+        "dry_run": {
+          "type": "boolean"
+        },
         "kind": {
           "$ref": "#/definitions/TagRefKind"
         },
@@ -87,6 +90,12 @@
             "null"
           ]
         },
+        "replaced": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "signed": {
           "description": "Whether the tag object carries a cryptographic signature.",
           "type": "boolean"
@@ -94,6 +103,7 @@
       },
       "required": [
         "action",
+        "dry_run",
         "kind",
         "name",
         "oid",
@@ -110,12 +120,16 @@
           ],
           "type": "string"
         },
+        "dry_run": {
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         }
       },
       "required": [
         "action",
+        "dry_run",
         "name"
       ],
       "type": "object"

@@ -104,7 +104,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## Tags and config
 
-- `grit tag` lists tags, `grit tag <name>` creates a lightweight tag at the current commit, `grit tag -d <name>` deletes one.
+- `grit tag` lists tags. `grit tag <name> [<target>]` creates a lightweight tag at `HEAD` or `<target>`. `-m` / `-F` create an annotated tag; `-f` replaces an existing tag; `--dry-run` previews create/delete. `grit tag -d <name>` deletes one.
 - `grit config <key>` reads, `grit config <key> <value>` sets, `grit config --unset <key>` removes, `grit config --list` lists. Add `--global` for the per-user file.
 
 ## Staying non-interactive
@@ -116,7 +116,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## What grit doesn't do
 
-grit has no equivalent of `rebase`, `reset`, partial staging, interactive commands, annotated or signed tags, or conflict resolution. Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
+grit has no equivalent of `rebase`, `reset`, partial staging, interactive commands, or conflict resolution. Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
 
 ## More
 
