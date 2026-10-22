@@ -827,6 +827,9 @@ fn branch_json_list_create_delete() -> TestResult {
     assert_eq!(names, ["main", "topic"]);
     let main = &listed["branches"][0];
     assert_eq!(main["current"], Value::Bool(true));
+    assert_eq!(main["is_remote"], Value::Bool(false));
+    assert!(main["oid"].as_str().unwrap().len() >= 40);
+    assert_eq!(main["short_oid"].as_str().unwrap().len(), 7);
 
     let deleted = gs_json(&repo, &["branch", "-d", "topic"]);
     assert_eq!(deleted["action"], "delete");

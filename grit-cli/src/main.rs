@@ -39,6 +39,20 @@ use clap_complete::Shell;
 
 use output::{emit, OutputMode, OutputOptions, RenderContext};
 
+/// List-only flags for `grit branch`.
+#[derive(Debug, clap::Args, Default, Clone)]
+struct BranchListCliArgs {
+    /// List remote-tracking branches only (`refs/remotes/*`).
+    #[arg(long = "remote")]
+    remote: bool,
+    /// List local and remote-tracking branches.
+    #[arg(long = "all", id = "branch_list_all")]
+    all: bool,
+    /// Return at most this many branches when listing (after sorting by name).
+    #[arg(short = 'n', long = "limit", value_name = "N")]
+    limit: Option<usize>,
+}
+
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum LogGroupByArg {
     Author,
@@ -854,6 +868,8 @@ enum Command {
         /// Delete even when the branch is not fully merged into the current branch.
         #[arg(short = 'D', long = "force-delete")]
         force_delete: bool,
+        #[command(flatten)]
+        list: BranchListCliArgs,
         /// Preview the operation without updating refs, config, or reflogs.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -1843,6 +1859,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             force_rename,
             delete,
             force_delete,
+            list,
             dry_run,
         } => emit(
             &commands::branch::run(commands::branch::BranchRunOptions {
@@ -1857,6 +1874,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 force_rename,
                 delete,
                 force_delete,
+                remote: list.remote,
+                all: list.all,
+                limit: list.limit,
+                list_full_detail: opts.mode != OutputMode::Human,
                 dry_run,
             })?,
             opts,
@@ -2805,8 +2826,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     /// Every command (including hidden plumbing) has a man page in
     /// `content/docs/commands/`, and that page mentions each of its flags and
     /// subcommands. Positional arguments are named freely in the synopsis. Run `python3 scripts/docs.py` after editing the pages.
-    #[test]
-    fn every_command_is_documented() {
+    fn every_command_is_documented_impl() {
         let pages = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands");
         let mut problems = Vec::new();
         for command in Cli::command().get_subcommands() {
@@ -2843,6 +2863,18 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
             }
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn every_command_is_documented() {
+        // `grit branch` carries enough clap metadata that building the full command
+        // tree can overflow the default test thread stack on some platforms.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(every_command_is_documented_impl)
+            .expect("spawn doc check thread")
+            .join()
+            .expect("doc check thread");
     }
 
     fn snapshot_dir() -> PathBuf {

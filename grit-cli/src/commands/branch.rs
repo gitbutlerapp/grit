@@ -3,11 +3,14 @@
 use anyhow::{bail, Context, Error as AnyhowError, Result};
 use grit_lib::error::Error;
 use grit_lib::porcelain::branch::{
-    create_branch, delete_branch, list_branches, preview_unset_upstream, rename_branch,
-    set_upstream, unset_upstream, validate_set_upstream, CreateBranchOptions, DeleteMode,
-    RenameBranchOptions, StartPoint, TrackMode,
+    create_branch, delete_branch, preview_unset_upstream, rename_branch, set_upstream,
+    unset_upstream, validate_set_upstream, CreateBranchOptions, DeleteMode, RenameBranchOptions,
+    StartPoint, TrackMode,
 };
-use grit_lib::refs::branch_tracking::upstream_branch;
+use grit_lib::refs::branch_tracking::{
+    list_branches, upstream_branch, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
+};
+use grit_lib::refs::listing::RefQuery;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, resolve_head_for_repository, HeadState};
@@ -48,6 +51,10 @@ pub struct BranchRunOptions {
     pub force_rename: Option<Vec<String>>,
     pub delete: bool,
     pub force_delete: bool,
+    pub remote: bool,
+    pub all: bool,
+    pub limit: Option<usize>,
+    pub list_full_detail: bool,
     pub dry_run: bool,
 }
 
@@ -110,11 +117,36 @@ pub enum BranchOutcome {
     },
 }
 
+/// Configured upstream for a local branch in a `list` outcome.
+#[derive(Serialize, JsonSchema)]
+pub struct BranchUpstreamEntry {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub behind: Option<usize>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schemars(default)]
+    pub gone: bool,
+}
+
 /// One branch in a `list` outcome.
 #[derive(Serialize, JsonSchema)]
 pub struct BranchEntry {
     pub name: String,
     pub current: bool,
+    pub is_remote: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub oid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub short_oid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<BranchUpstreamEntry>,
 }
 
 impl HumanRender for BranchOutcome {
@@ -317,6 +349,16 @@ pub fn run(opts: BranchRunOptions) -> Result<BranchOutcome> {
             "cannot combine branch delete, rename, upstream, and create in one invocation",
         ));
     }
+    if opts.remote && opts.all {
+        return Err(branch_usage("cannot combine `--remote` with `--all`"));
+    }
+    if list_scope_flags(&opts)
+        && (opts.name.is_some() || opts.start.is_some() || branch_mutation_count(&opts) > 0)
+    {
+        return Err(branch_usage(
+            "`--remote`, `--all`, and `-n` apply only when listing branches",
+        ));
+    }
 
     let repo = context::discover()?;
 
@@ -341,10 +383,14 @@ pub fn run(opts: BranchRunOptions) -> Result<BranchOutcome> {
         return remove(&repo, &name, opts.force_delete, opts.dry_run);
     }
     match (&opts.name, &opts.start) {
-        (None, None) => list(&repo),
+        (None, None) => list(&repo, &opts),
         (Some(name), start) => create(&repo, name, start.as_deref(), &opts),
         (None, Some(_)) => Err(branch_usage("branch name required before the start commit")),
     }
+}
+
+fn list_scope_flags(opts: &BranchRunOptions) -> bool {
+    opts.remote || opts.all || opts.limit.is_some()
 }
 
 /// Count mutually exclusive branch mutations requested in one invocation.
@@ -415,19 +461,52 @@ fn resolve_rename(
     }))
 }
 
-fn list(repo: &Repository) -> Result<BranchOutcome> {
-    let listing = list_branches(repo).context("could not list branches")?;
+fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
+    let scope = if opts.all {
+        BranchScope::All
+    } else if opts.remote {
+        BranchScope::Remote
+    } else {
+        BranchScope::Local
+    };
+    let query = BranchListQuery {
+        scope,
+        refs: RefQuery {
+            limit: opts.limit,
+            ..RefQuery::default()
+        },
+    };
+    let detail = if opts.list_full_detail {
+        BranchDetail::Full
+    } else {
+        BranchDetail::Names
+    };
+    let rows = list_branches(repo, &query, detail).context("could not list branches")?;
+    let current = match resolve_head_for_repository(repo)? {
+        HeadState::Branch { short_name, .. } => Some(short_name),
+        HeadState::Detached { .. } | HeadState::Invalid => None,
+    };
     Ok(BranchOutcome::List {
-        current: listing.current,
-        branches: listing
-            .branches
-            .into_iter()
-            .map(|branch| BranchEntry {
-                name: branch.name,
-                current: branch.current,
-            })
-            .collect(),
+        current,
+        branches: rows.into_iter().map(summary_to_entry).collect(),
     })
+}
+
+fn summary_to_entry(row: BranchSummary) -> BranchEntry {
+    let oid_hex = row.oid.to_hex();
+    BranchEntry {
+        name: row.name,
+        current: row.current,
+        is_remote: row.is_remote,
+        oid: Some(oid_hex.clone()),
+        short_oid: Some(short_hex(&oid_hex)),
+        upstream: row.upstream.map(|up| BranchUpstreamEntry {
+            name: up.short,
+            ahead: up.ahead,
+            behind: up.behind,
+            gone: up.gone,
+        }),
+    }
 }
 
 fn track_mode(opts: &BranchRunOptions) -> TrackMode {

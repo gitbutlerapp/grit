@@ -2,10 +2,16 @@
   "$id": "https://grit-scm.com/schemas/branch/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
-    "BranchEntry": {
-      "description": "One branch in a `list` outcome.",
+    "BranchUpstreamEntry": {
+      "description": "Configured upstream for a local branch in a `list` outcome.",
       "properties": {
-        "current": {
+        "ahead": {
+          "type": "integer"
+        },
+        "behind": {
+          "type": "integer"
+        },
+        "gone": {
           "type": "boolean"
         },
         "name": {
@@ -13,7 +19,35 @@
         }
       },
       "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "BranchEntry": {
+      "description": "One branch in a `list` outcome.",
+      "properties": {
+        "current": {
+          "type": "boolean"
+        },
+        "is_remote": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "short_oid": {
+          "type": "string"
+        },
+        "upstream": {
+          "$ref": "#/definitions/BranchUpstreamEntry"
+        }
+      },
+      "required": [
         "current",
+        "is_remote",
         "name"
       ],
       "type": "object"

@@ -16,12 +16,15 @@ grit branch -m [<old>] <new>
 grit branch -M <new>
 grit branch -u <upstream> [<name>]
 grit branch --unset-upstream [<name>]
+grit branch [--remote | --all] [-n <N>]
 grit branch [--dry-run] …
 ```
 
 ## Description
 
-With no arguments, lists your local branches and marks the current one with `*`. Upstream markers appear only in `--json` / `--markdown` when an upstream is configured (plain list stays cheap).
+With no arguments, lists your local branches and marks the current one with `*`. Use `--remote` for remote-tracking branches (`origin/main`, …) and `--all` for both. `-n` / `--limit` caps how many names are returned after sorting by name.
+
+Upstream and ahead/behind counts appear only in `--json` / `--markdown` when an upstream is configured (plain list stays cheap). JSON list entries also include `oid`, `short_oid`, and `is_remote`.
 
 With a name, creates `refs/heads/<name>` at `<start>` or at `HEAD`. It does not switch to the new branch; use [`grit switch -c`](../switch/) to create and switch in one step.
 
@@ -60,6 +63,9 @@ On failure with `--json`, stdout includes `error` and a stable `kind` (for examp
 | `-M` | Force rename: `-M <new>` (current branch) or `-M <old> <new>`. |
 | `-d`, `--delete` | Delete the branch when it is fully merged. |
 | `-D`, `--force-delete` | Delete even when not fully merged. |
+| `--remote` | List remote-tracking branches only (list mode). |
+| `--all` | List local and remote-tracking branches (list mode). |
+| `-n`, `--limit` | Return at most this many branches when listing. |
 | `--dry-run` | Preview without writing refs, config, or reflogs. |
 
 `--force` does not delete branches. Use `--force-delete` (or `-D`) instead; passing `--force` with `--delete` is a usage error.
@@ -108,7 +114,13 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | ----- | ---- | ------- |
 | `action` | string | `list`, `create`, `delete`, `rename`, `set_upstream`, or `unset_upstream`. |
 | `current` | string or null | For `list`, the current branch, or `null` when detached. |
-| `branches` | array | For `list`, each branch with `name` and `current`. |
+| `branches` | array | For `list`, each branch (see below). |
+| `branches[].name` | string | Short name (`main`, `origin/main`, …). |
+| `branches[].current` | boolean | Whether this is the checked-out local branch. |
+| `branches[].is_remote` | boolean | True for remote-tracking refs. |
+| `branches[].oid` | string | Tip object id (full hex). |
+| `branches[].short_oid` | string | Abbreviated tip id (seven hex digits when possible). |
+| `branches[].upstream` | object or omitted | For local branches with upstream config: `name`, optional `ahead` / `behind`, and `gone` when the upstream ref is missing. |
 | `name` | string | For `create` or `delete`, the branch name. |
 | `oid` | string | For `create` or `delete`, full tip id. For `rename`, tip before rename when present. |
 | `short_oid` | string | Abbreviated tip id (seven hex digits when possible). |
@@ -126,8 +138,38 @@ Listing branches:
   "action": "list",
   "current": "main",
   "branches": [
-    { "name": "feature", "current": false },
-    { "name": "main", "current": true }
+    {
+      "name": "feature",
+      "current": false,
+      "is_remote": false,
+      "oid": "a1b2c3d4e5f6789012345678901234567890abcd",
+      "short_oid": "a1b2c3d"
+    },
+    {
+      "name": "main",
+      "current": true,
+      "is_remote": false,
+      "oid": "b2c3d4e5f6789012345678901234567890abcde1",
+      "short_oid": "b2c3d4e"
+    }
+  ]
+}
+```
+
+Remote-tracking list:
+
+```json
+{
+  "action": "list",
+  "current": "main",
+  "branches": [
+    {
+      "name": "origin/main",
+      "current": false,
+      "is_remote": true,
+      "oid": "b2c3d4e5f6789012345678901234567890abcde1",
+      "short_oid": "b2c3d4e"
+    }
   ]
 }
 ```
