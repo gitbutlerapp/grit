@@ -598,10 +598,12 @@ pub fn bundle_verify_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv)
     )
 }
 
+/// Both sides check out `HEAD` detached. Without a revision, `grit worktree add` creates a
+/// branch named after the directory, which the per-run reset does not remove.
 pub fn worktree_add_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let path = default_linked_worktree_path(ctx).display().to_string();
     (
-        sh_devnull(&ctx.grit, &["worktree", "add", &path]),
+        sh_devnull(&ctx.grit, &["worktree", "add", &path, "HEAD"]),
         sh_devnull(&ctx.git, &["worktree", "add", &path, "HEAD"]),
     )
 }
@@ -972,4 +974,27 @@ pub fn setup_remote_list(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext>
         &["remote", "add", "origin", "file:///dev/null"],
     )?;
     Ok(ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worktree_add_bench_detaches_head_on_both_sides() {
+        let ctx = DailyHeadlineContext::new(
+            PathBuf::from("/tmp/sample/repo"),
+            Path::new("/usr/bin/git"),
+            Path::new("/usr/bin/grit"),
+            false,
+        );
+        let (grit, git) = worktree_add_bench(&ctx);
+        for side in [&grit, &git] {
+            let script = side.args.last().expect("shell script");
+            assert!(
+                script.contains("'worktree' 'add'") && script.contains("'HEAD'"),
+                "{script}"
+            );
+        }
+    }
 }
