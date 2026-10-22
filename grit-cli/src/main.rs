@@ -834,8 +834,17 @@ enum Command {
         #[arg(long = "delete", value_name = "REF")]
         delete: Vec<String>,
         /// Remote to push to (defaults to the current branch's remote or `origin`).
-        #[arg(long)]
+        #[arg(long, hide = true)]
         remote: Option<String>,
+        /// Contact the remote but do not update refs or send objects.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+        /// Remote name (when not using `--remote`).
+        #[arg(value_name = "REMOTE")]
+        push_remote: Option<String>,
+        /// Refspec (`src`, `src:dst`, `:dst`, …).
+        #[arg(value_name = "REFSPEC")]
+        refspecs: Vec<String>,
     },
     /// Create, verify, or list git bundle files.
     Bundle {
@@ -1659,8 +1668,16 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             tags,
             delete,
             remote,
+            dry_run,
+            push_remote,
+            refspecs,
         } => {
-            let outcome = commands::push::run(tags, &delete, remote)?;
+            let mut positionals = Vec::new();
+            if let Some(r) = push_remote {
+                positionals.push(r);
+            }
+            positionals.extend(refspecs);
+            let outcome = commands::push::run(tags, &delete, remote, &positionals, dry_run)?;
             emit(&outcome, opts, ctx)?;
             // The outcome (per-ref results) is reported in both modes; a rejected
             // push is still a failure, so mirror Git and exit non-zero.

@@ -8,7 +8,7 @@ use super::super::remote_fixture::{
     setup_many_refs_file_remote, setup_synth10k_file_remote, setup_synth10k_grit_http_remote,
     verify_clone_http, verify_clone_local, verify_fetch_incremental, verify_fetch_incremental_http,
     verify_fetch_noop, verify_ls_remote_all, verify_pull_fast_forward, verify_push_incremental,
-    verify_push_incremental_http,
+    verify_push_incremental_http, verify_push_refspec,
 };
 use super::super::runner::BenchArgv;
 
@@ -38,6 +38,10 @@ fn correctness_pull_ff(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
 
 fn correctness_push_incr(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
     verify_push_incremental(ctx, &ctx.repo)
+}
+
+fn correctness_push_refspec(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
+    verify_push_refspec(ctx, &ctx.repo)
 }
 
 fn correctness_clone_local(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
@@ -96,6 +100,17 @@ fn push_incr_git(ctx: &DailyHeadlineContext) -> BenchArgv {
 
 fn push_incr_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     sh_devnull(&ctx.grit, &["push"])
+}
+
+fn push_refspec_git(_ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(
+        &_ctx.git,
+        &["push", "-q", "origin", "HEAD:refs/heads/bench"],
+    )
+}
+
+fn push_refspec_grit(_ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&_ctx.grit, &["push", "origin", "HEAD:refs/heads/bench"])
 }
 
 fn clone_local_git(ctx: &DailyHeadlineContext) -> BenchArgv {
@@ -235,6 +250,15 @@ fn matrix_plans() -> Vec<DailyHeadlinePlan> {
             build_git: push_incr_git,
             build_grit: push_incr_grit,
             correctness: Some(correctness_push_incr_http),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("push/refspec@git-git"),
+            pending: false,
+            setup: setup_git_git_file_remote,
+            prepare: prepare_network_push,
+            build_git: push_refspec_git,
+            build_grit: push_refspec_grit,
+            correctness: Some(correctness_push_refspec),
         },
     ]
 }

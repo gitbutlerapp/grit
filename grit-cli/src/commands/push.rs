@@ -1,17 +1,17 @@
-//! `grit push` — publish the current branch to its remote.
-//!
-//! No upstream ceremony: `grit push` sends the current branch to `origin` (or the
-//! configured `branch.<name>.remote`) under the same name, creating it on the
-//! remote if needed.
+//! `grit push` — publish refs to a remote.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::refs;
+use grit_lib::remote::push_plan::{
+    configured_remote_for_push, resolve_push, PushPlanContext, PushPlanError, PushPlanKind,
+    PushRequest,
+};
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::PushRefSpec;
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::remote::transfer::PushOptions;
+use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote};
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::io::Write;
 
 use crate::commands::auth;
@@ -19,26 +19,43 @@ use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use grit_lib::remote::fetch::NoProgress;
-use grit_lib::remote::transfer::{resolve_push_delete_ref, PushOptions};
-use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
-use std::collections::HashSet;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
 #[derive(Serialize, JsonSchema)]
 pub struct PushOutcome {
     pub remote: String,
-    /// Local branch (short name) that was pushed, when there is a single
-    /// unambiguous branch. Omitted for `--tags`, multi-ref `--delete`, and
-    /// similar pushes that do not map to one branch name.
+    /// High-level push kind (`branch`, `tags`, `delete`, `refspecs`).
+    pub kind: PushKind,
+    /// Local branch short name when [`Self::kind`] is `branch` (legacy `branch` field).
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     pub results: Vec<PushRefResult>,
-    /// True when any ref was rejected (dispatch exits non-zero on this).
     pub rejected: bool,
-    /// Human/markdown label for what was pushed (branch name, `--tags`, or `--delete`).
-    #[serde(skip)]
-    display_label: String,
+    /// True when `--dry-run` was used (no refs or objects written).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
+}
+
+/// JSON classification for [`PushOutcome`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PushKind {
+    Branch,
+    Tags,
+    Delete,
+    Refspecs,
+}
+
+impl From<PushPlanKind> for PushKind {
+    fn from(k: PushPlanKind) -> Self {
+        match k {
+            PushPlanKind::Branch => Self::Branch,
+            PushPlanKind::Tags => Self::Tags,
+            PushPlanKind::Delete => Self::Delete,
+            PushPlanKind::Refspecs => Self::Refspecs,
+        }
+    }
 }
 
 /// Per-ref push status in JSON (`ok`, `up_to_date`, or `rejected`).
@@ -66,19 +83,39 @@ pub struct PushRefResult {
     #[serde(rename = "ref")]
     pub ref_name: String,
     pub status: PushRefOutcomeStatus,
-    /// Rejection detail, present only when `status == "rejected"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub old_oid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub new_oid: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub forced: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub src: Option<String>,
 }
 
 impl HumanRender for PushOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        let label = match (self.branch.as_deref(), self.kind) {
+            (Some(b), _) => b,
+            (_, PushKind::Tags) => "--tags",
+            (_, PushKind::Delete) => "--delete",
+            _ => "refs",
+        };
         for result in &self.results {
             let target = format!("{} {}", self.remote, result.ref_name);
             match result.status {
                 PushRefOutcomeStatus::Ok => {
-                    outln!(w, "  pushed {} → {target}", self.display_label)
+                    if self.dry_run {
+                        outln!(w, "  would push {label} → {target}");
+                    } else {
+                        outln!(w, "  pushed {label} → {target}");
+                    }
                 }
                 PushRefOutcomeStatus::UpToDate => outln!(w, "  {target} already up to date"),
                 PushRefOutcomeStatus::Rejected => outln!(
@@ -94,111 +131,50 @@ impl HumanRender for PushOutcome {
 
 impl MarkdownRender for PushOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_push_results(w, &self.remote, &self.display_label, &self.results)?;
+        let label = self.branch.as_deref().unwrap_or("refs");
+        markdown::print_push_results(w, &self.remote, label, &self.results)?;
         Ok(())
     }
 }
 
+/// Positional `[<remote>] [<refspec>...]` plus flags.
 pub fn run(
     tags: bool,
     delete_refs: &[String],
-    remote_override: Option<String>,
+    remote_flag: Option<String>,
+    positionals: &[String],
+    dry_run: bool,
 ) -> Result<PushOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
 
-    let (branch, display_label, remote, specs) = if !delete_refs.is_empty() {
-        let remote = configured_remote_for_push(&repo, &config, remote_override);
-        let remote_handle =
-            Remote::from_config(&config, &remote).map_err(|e| anyhow::Error::msg(e.to_string()))?;
-        let factory = DefaultHttpClientFactory;
-        let advertised = remote_handle
-            .list_refs(Some(&repo), &ListRefsOptions::default(), Some(&factory))
-            .map_err(|e| anyhow::Error::msg(e.to_string()))?;
-        let remote_names: HashSet<String> = advertised
-            .into_iter()
-            .map(|r| r.name)
-            .filter(|n| !n.ends_with("^{}"))
-            .collect();
-        let specs = delete_refs
-            .iter()
-            .map(|name| map_delete_ref(repo.git_dir(), name, &remote_names))
-            .collect::<Result<Vec<_>>>()?;
-        let branch = if specs.len() == 1 {
-            branch_json_name_for_delete_dst(&specs[0].dst)
-        } else {
-            None
-        };
-        (branch, "--delete".to_owned(), remote, specs)
-    } else if tags {
-        let entries =
-            refs::list_refs(repo.git_dir(), "refs/tags/").context("could not list tags")?;
-        if entries.is_empty() {
-            bail!("no tags to push");
-        }
-        let specs = entries
-            .into_iter()
-            .map(|(refname, oid)| PushRefSpec {
-                src: Some(oid),
-                dst: refname,
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-            })
-            .collect::<Vec<_>>();
-        (
-            None,
-            "--tags".to_owned(),
-            configured_remote_for_push(&repo, &config, remote_override),
-            specs,
-        )
-    } else {
-        let (short_name, oid) = match resolve_head(repo.git_dir())? {
-            HeadState::Branch {
-                short_name,
-                oid: Some(oid),
-                ..
-            } => (short_name, oid),
-            HeadState::Branch { .. } => bail!("no commits yet to push"),
-            HeadState::Detached { .. } => bail!("HEAD is detached; grit push needs a branch"),
-            HeadState::Invalid => bail!("HEAD is in an unknown state"),
-        };
+    let (remote_override, refspecs) = split_positionals(&config, &repo, remote_flag, positionals)?;
 
-        let remote = remote_override
-            .or_else(|| {
-                config
-                    .get(&format!("branch.{short_name}.remote"))
-                    .filter(|r| !r.trim().is_empty())
-            })
-            .unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
-        let dst = config
-            .get(&format!("branch.{short_name}.merge"))
-            .filter(|m| m.starts_with("refs/"))
-            .unwrap_or_else(|| format!("refs/heads/{short_name}"));
+    let plan_ctx = load_remote_ref_names(&repo, &config, remote_override.as_deref(), delete_refs)?;
 
-        let spec = PushRefSpec {
-            src: Some(oid),
-            dst,
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-        };
-        (Some(short_name.clone()), short_name, remote, vec![spec])
-    };
+    let plan = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            remote: remote_override,
+            refspecs,
+            tags,
+            delete: delete_refs.to_vec(),
+        },
+        &plan_ctx,
+    )
+    .map_err(plan_error)?;
 
-    // On an HTTPS auth failure, `grit auth` can refresh the token and we retry once.
     let factory = DefaultHttpClientFactory;
-    let report = match push_once(&repo, &config, &remote, &specs, &factory) {
+    let report = match push_once(&repo, &config, &plan.remote, &plan.specs, dry_run, &factory) {
         Ok(report) => report,
         Err(err) => {
             let url = config
-                .get(&format!("remote.{remote}.url"))
+                .get(&format!("remote.{}.url", plan.remote))
                 .unwrap_or_default();
             if auth::offer_reauth(&err, &url)? {
-                push_once(&repo, &config, &remote, &specs, &factory)?
+                push_once(&repo, &config, &plan.remote, &plan.specs, dry_run, &factory)?
             } else {
                 return Err(err);
             }
@@ -231,64 +207,95 @@ pub fn run(
                 ref_name: result.remote_ref.clone(),
                 status,
                 reason,
+                old_oid: result.old_oid.map(|o| o.to_hex()),
+                new_oid: result.new_oid.map(|o| o.to_hex()),
+                forced: result.forced,
+                src: result.local_ref.clone(),
             }
         })
         .collect();
 
     Ok(PushOutcome {
-        remote,
-        branch,
+        remote: plan.remote,
+        kind: plan.kind.into(),
+        branch: plan.branch_label,
         results,
         rejected,
-        display_label,
+        dry_run,
     })
 }
 
-fn configured_remote_for_push(
+fn plan_error(err: PushPlanError) -> anyhow::Error {
+    anyhow::Error::msg(err.to_string())
+}
+
+fn split_positionals(
+    config: &ConfigSet,
+    repo: &grit_lib::repo::Repository,
+    remote_flag: Option<String>,
+    positionals: &[String],
+) -> Result<(Option<String>, Vec<String>)> {
+    if let Some(remote) = remote_flag {
+        return Ok((Some(remote), positionals.to_vec()));
+    }
+    if positionals.is_empty() {
+        return Ok((None, Vec::new()));
+    }
+    if is_configured_remote(config, &positionals[0]) {
+        let remote = positionals[0].clone();
+        let specs = positionals[1..].to_vec();
+        return Ok((Some(remote), specs));
+    }
+    if positionals.len() == 1 && looks_like_remote_name(&positionals[0]) {
+        // Single token that is not a configured remote: treat as refspec.
+        return Ok((None, positionals.to_vec()));
+    }
+    let _ = repo;
+    Ok((None, positionals.to_vec()))
+}
+
+fn is_configured_remote(config: &ConfigSet, name: &str) -> bool {
+    config
+        .get(&format!("remote.{name}.url"))
+        .filter(|u| !u.trim().is_empty())
+        .is_some()
+}
+
+fn looks_like_remote_name(name: &str) -> bool {
+    name.contains("://") || name.ends_with(".git") || name.starts_with('/')
+}
+
+fn load_remote_ref_names(
     repo: &grit_lib::repo::Repository,
     config: &ConfigSet,
-    remote_override: Option<String>,
-) -> String {
-    if let Some(remote) = remote_override {
-        return remote;
+    remote_override: Option<&str>,
+    delete_refs: &[String],
+) -> Result<PushPlanContext> {
+    let need_remote_refs = !delete_refs.is_empty();
+    if !need_remote_refs {
+        return Ok(PushPlanContext::default());
     }
-    if let Ok(HeadState::Branch { short_name, .. }) = resolve_head(repo.git_dir()) {
-        if let Some(remote) = config
-            .get(&format!("branch.{short_name}.remote"))
-            .filter(|r| !r.trim().is_empty())
-        {
-            return remote;
-        }
-    }
-    DEFAULT_REMOTE.to_owned()
-}
-
-/// Short branch name for JSON when a single delete targets `refs/heads/…`.
-fn branch_json_name_for_delete_dst(resolved_dst: &str) -> Option<String> {
-    resolved_dst.strip_prefix("refs/heads/").map(str::to_owned)
-}
-
-fn map_delete_ref(
-    git_dir: &std::path::Path,
-    name: &str,
-    remote_ref_names: &HashSet<String>,
-) -> Result<PushRefSpec> {
-    let dst = resolve_push_delete_ref(git_dir, remote_ref_names, name);
-    Ok(PushRefSpec {
-        src: None,
-        dst,
-        force: false,
-        delete: true,
-        expected_old: None,
-        expect_absent: false,
-    })
+    let remote = configured_remote_for_push(repo, config, remote_override).map_err(plan_error)?;
+    let remote_handle =
+        Remote::from_config(config, &remote).map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let factory = DefaultHttpClientFactory;
+    let advertised = remote_handle
+        .list_refs(Some(repo), &ListRefsOptions::default(), Some(&factory))
+        .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let remote_ref_names: HashSet<String> = advertised
+        .into_iter()
+        .map(|r| r.name)
+        .filter(|n| !n.ends_with("^{}"))
+        .collect();
+    Ok(PushPlanContext { remote_ref_names })
 }
 
 fn push_once(
     repo: &grit_lib::repo::Repository,
     config: &ConfigSet,
     remote_name: &str,
-    specs: &[PushRefSpec],
+    specs: &[grit_lib::remote::transfer::PushRefSpec],
+    dry_run: bool,
     factory: &DefaultHttpClientFactory,
 ) -> Result<grit_lib::remote::transfer::PushOutcome> {
     Remote::from_config(config, remote_name)
@@ -297,6 +304,7 @@ fn push_once(
             repo,
             specs,
             PushOptions {
+                dry_run,
                 tracking_remote: Some(remote_name.to_owned()),
                 ..Default::default()
             },
@@ -311,15 +319,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn branch_json_name_strips_refs_heads_prefix() {
-        assert_eq!(
-            branch_json_name_for_delete_dst("refs/heads/topic").as_deref(),
-            Some("topic")
-        );
-        assert_eq!(branch_json_name_for_delete_dst("refs/tags/v0.1"), None);
-    }
-
-    #[test]
     fn push_status_serializes_snake_case() {
         for (status, expected) in [
             (PushRefOutcomeStatus::Ok, "ok"),
@@ -330,6 +329,10 @@ mod tests {
                 ref_name: "refs/heads/main".to_owned(),
                 status,
                 reason: None,
+                old_oid: None,
+                new_oid: None,
+                forced: false,
+                src: None,
             };
             let value = serde_json::to_value(&result).expect("json");
             assert_eq!(value["status"].as_str(), Some(expected));
