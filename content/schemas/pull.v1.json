@@ -32,7 +32,8 @@
         "merged",
         "refused_not_ff",
         "conflicts",
-        "set_upstream"
+        "set_upstream",
+        "rebased"
       ],
       "type": "string"
     }

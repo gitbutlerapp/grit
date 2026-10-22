@@ -18,7 +18,8 @@ use crate::network_fixture::{
 use crate::network_http::GritHttpServer;
 use crate::network_suite::{
     configure_remote, ensure_network_client_repo, network_http_root, prepare_network_clone,
-    prepare_network_fetch_incr, prepare_network_fetch_noop, prepare_network_push,
+    prepare_network_fetch_incr, prepare_network_fetch_noop, prepare_network_pull_rebase,
+    prepare_network_push,
 };
 use crate::network_verify::{verify_client_fetch_tip, verify_clone_against_bare};
 use crate::shell::shell_quote;
@@ -201,6 +202,33 @@ fn ensure_client(git: &Path, remote: &DailyRemoteState) -> Result<PathBuf> {
 
 fn configure_client_remote(git: &Path, client: &Path, remote: &DailyRemoteState) -> Result<()> {
     configure_remote(git, client, &remote.remote_url, &remote.meta.default_branch)
+}
+
+pub fn setup_synth10k_pull_rebase_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    with_remote_scratch("synth10k-pull-rebase", |scratch| {
+        let kind = if setup.smoke {
+            FixtureKind::Synth10kSmoke
+        } else {
+            FixtureKind::Synth10k
+        };
+        let (worktree, _) = fixture_registry::ensure_cached(setup.git, kind, setup.offline)?;
+        let bare = scratch.join("remote.git");
+        worktree_to_bare(setup.git, &worktree, &bare)?;
+        let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
+        clear_network_sidecars(&meta);
+        let remote_url = file_url(&bare)?;
+        std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
+        let remote = DailyRemoteState {
+            bare: bare.clone(),
+            meta: meta.clone(),
+            remote_url: remote_url.clone(),
+            grit_http: None,
+            git_http: None,
+        };
+        let client = ensure_client(setup.git, &remote)?;
+        configure_remote(setup.git, &client, &remote_url, &meta.default_branch)?;
+        Ok(ctx_with_remote(client, setup, remote))
+    })
 }
 
 pub fn setup_git_git_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
@@ -396,6 +424,42 @@ pub fn verify_fetch_noop(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     )?;
     if git_tip != grit_tip {
         bail!("fetch noop tip mismatch git {git_tip} vs grit {grit_tip}");
+    }
+    Ok(())
+}
+
+pub fn verify_pull_rebase(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    configure_client_remote(&ctx.git, cwd, remote)?;
+    prepare_network_pull_rebase(&ctx.git, &remote.bare)?;
+    run_git(
+        &ctx.git,
+        cwd,
+        &[
+            "pull",
+            "-q",
+            "--rebase",
+            "origin",
+            &remote.meta.default_branch,
+        ],
+    )?;
+    let git_head = ref_oid(&ctx.git, cwd, "HEAD")?;
+    prepare_network_pull_rebase(&ctx.git, &remote.bare)?;
+    run_grit(&ctx.grit, cwd, &["pull", "--rebase"])?;
+    let grit_head = ref_oid(&ctx.git, cwd, "HEAD")?;
+    let bare_tip = ref_oid(
+        &ctx.git,
+        &remote.bare,
+        &format!("refs/heads/{}", remote.meta.default_branch),
+    )?;
+    if git_head != bare_tip {
+        bail!("git pull --rebase HEAD {git_head} != bare {bare_tip}");
+    }
+    if grit_head != bare_tip {
+        bail!("grit pull --rebase HEAD {grit_head} != bare {bare_tip}");
+    }
+    if grit_head != git_head {
+        bail!("pull rebase tip mismatch git {git_head} vs grit {grit_head}");
     }
     Ok(())
 }

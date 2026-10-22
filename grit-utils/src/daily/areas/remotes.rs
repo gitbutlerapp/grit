@@ -6,8 +6,9 @@ use super::super::remote_fixture::{
     clone_bench_script, clone_bench_script_grit, setup_git_git_file_remote,
     setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
     setup_many_refs_file_remote, setup_synth10k_file_remote, setup_synth10k_grit_http_remote,
-    verify_clone_http, verify_clone_local, verify_fetch_incremental, verify_fetch_incremental_http,
-    verify_fetch_noop, verify_ls_remote_all, verify_pull_fast_forward, verify_push_incremental,
+    setup_synth10k_pull_rebase_remote, verify_clone_http, verify_clone_local,
+    verify_fetch_incremental, verify_fetch_incremental_http, verify_fetch_noop,
+    verify_ls_remote_all, verify_pull_fast_forward, verify_pull_rebase, verify_push_incremental,
     verify_push_incremental_http,
 };
 use super::super::runner::BenchArgv;
@@ -28,12 +29,20 @@ fn prepare_network_clone(_: &DailyHeadlineContext) -> DailyPrepare {
     DailyPrepare::Network("prepare-network-clone")
 }
 
+fn prepare_network_pull_rebase(_: &DailyHeadlineContext) -> DailyPrepare {
+    DailyPrepare::Network("prepare-network-pull-rebase")
+}
+
 fn correctness_fetch_incr(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
     verify_fetch_incremental(ctx, &ctx.repo)
 }
 
 fn correctness_pull_ff(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
     verify_pull_fast_forward(ctx, &ctx.repo)
+}
+
+fn correctness_pull_rebase(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
+    verify_pull_rebase(ctx, &ctx.repo)
 }
 
 fn correctness_push_incr(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
@@ -83,6 +92,19 @@ fn pull_ff_git(ctx: &DailyHeadlineContext) -> BenchArgv {
 
 fn pull_ff_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     sh_devnull(&ctx.grit, &["pull"])
+}
+
+fn pull_rebase_git(ctx: &DailyHeadlineContext) -> BenchArgv {
+    let branch = ctx
+        .remote
+        .as_ref()
+        .map(|r| r.meta.default_branch.as_str())
+        .unwrap_or("main");
+    sh_devnull(&ctx.git, &["pull", "--rebase", "-q", "origin", branch])
+}
+
+fn pull_rebase_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.grit, &["pull", "--rebase"])
 }
 
 fn push_incr_git(ctx: &DailyHeadlineContext) -> BenchArgv {
@@ -167,6 +189,15 @@ fn headline_plans() -> Vec<DailyHeadlinePlan> {
             build_git: pull_ff_git,
             build_grit: pull_ff_grit,
             correctness: Some(correctness_pull_ff),
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("pull/rebase@synth-10k"),
+            pending: false,
+            setup: setup_synth10k_pull_rebase_remote,
+            prepare: prepare_network_pull_rebase,
+            build_git: pull_rebase_git,
+            build_grit: pull_rebase_grit,
+            correctness: Some(correctness_pull_rebase),
         },
         DailyHeadlinePlan {
             spec: headline_spec("push/incremental@git-git"),
@@ -264,6 +295,7 @@ mod tests {
         for id in [
             "fetch/incremental@git-git",
             "pull/fast-forward@git-git",
+            "pull/rebase@synth-10k",
             "push/incremental@git-git",
             "clone/local@synth-10k",
         ] {

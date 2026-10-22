@@ -22,6 +22,7 @@ pub enum PullResult {
     RefusedNotFf,
     Conflicts,
     SetUpstream,
+    Rebased,
 }
 
 /// Outcome of `grit pull`.
@@ -66,6 +67,7 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
             LibPullResult::RefusedNotFf => PullResult::RefusedNotFf,
             LibPullResult::Conflicts => PullResult::Conflicts,
             LibPullResult::SetUpstream => PullResult::SetUpstream,
+            LibPullResult::Rebased => PullResult::Rebased,
         },
         branch: outcome.label,
         oid: outcome.oid.as_ref().map(ObjectId::to_hex),
@@ -125,14 +127,20 @@ impl HumanRender for PullOutcome {
                         }
                     }
                 } else if let Some(paths) = &self.conflicts {
-                    eprintln!("Merge has conflicts in:");
+                    eprintln!("Conflicts in:");
                     for path in paths {
                         eprintln!("  {path}");
                     }
                 }
-                eprintln!(
-                    "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."
-                );
+                if self.oid.is_some() {
+                    eprintln!(
+                        "\nRebase stopped with conflicts; the branch, index, and worktree are unchanged."
+                    );
+                } else {
+                    eprintln!(
+                        "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."
+                    );
+                }
             }
             PullResult::SetUpstream => outln!(
                 w,
@@ -140,6 +148,7 @@ impl HumanRender for PullOutcome {
                 self.branch,
                 self.upstream.as_deref().unwrap_or_default()
             ),
+            PullResult::Rebased => outln!(w, "Rebased onto {} ({short})", self.branch),
         }
         Ok(())
     }

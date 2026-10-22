@@ -21,7 +21,7 @@ use grit_utils::maintenance_suite::run_maintenance_suite;
 use grit_utils::network_fixture::NetworkProfile;
 use grit_utils::network_suite::{
     prepare_network_clone, prepare_network_fetch_incr, prepare_network_fetch_noop,
-    prepare_network_push, run_network_suite,
+    prepare_network_pull_rebase, prepare_network_push, run_network_suite,
 };
 use grit_utils::odb_driver::{self, open_repo};
 use grit_utils::odb_suite::{run_odb_backend_suite, run_odb_suite, OdbRunConfig};
@@ -462,6 +462,13 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareNetworkPush {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        bare: PathBuf,
+    },
+    #[command(hide = true, name = "prepare-network-pull-rebase")]
+    PrepareNetworkPullRebase {
         #[arg(long)]
         git: PathBuf,
         #[arg(long)]
@@ -1300,6 +1307,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_network_push(&git, bare.as_path());
         }
+        Cmd::PrepareNetworkPullRebase { git, bare } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_network_pull_rebase(&git, bare.as_path());
+        }
         Cmd::PrepareRestore => {
             return run_prepare_restore(&PathBuf::from("git"));
         }
@@ -1879,6 +1890,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareNetworkFetchIncr { .. }
         | Cmd::PrepareNetworkFetchNoop { .. }
         | Cmd::PrepareNetworkPush { .. }
+        | Cmd::PrepareNetworkPullRebase { .. }
         | Cmd::ServeGitHttp { .. }
         | Cmd::PrepareRestore
         | Cmd::PrepareStash { .. }

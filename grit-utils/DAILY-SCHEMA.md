@@ -107,6 +107,7 @@ export type RepoShapeId =
 | `stash/push-pop@synth-10k` | stash |
 | `fetch/incremental@git-git` | fetch |
 | `pull/fast-forward@git-git` | pull |
+| `pull/rebase@synth-10k` | pull |
 | `push/incremental@git-git` | push |
 | `clone/local@synth-10k` | clone |
 

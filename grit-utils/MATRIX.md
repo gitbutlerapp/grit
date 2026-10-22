@@ -154,6 +154,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `fetch/noop@git-git` | No-op fetch when client already matches remote (file:// git-git) |
 | `ls-remote/all@many-refs` | List all refs on many-refs bare remote vs git ls-remote |
 | `pull/fast-forward@git-git` | Fast-forward pull vs git pull --ff-only |
+| `pull/rebase@synth-10k` | Rebase pull (3 local onto 5 upstream) vs git pull --rebase |
 | `push/incremental-http@git-git` | Incremental push over grit smart HTTP (git-git bare remote) |
 | `push/incremental@git-git` | Incremental push vs git push |
 | `remote/list@small` | List remotes vs git remote |

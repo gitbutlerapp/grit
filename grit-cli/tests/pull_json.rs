@@ -210,6 +210,27 @@ fn pull_json_merged() -> TestResult {
 }
 
 #[test]
+fn pull_json_rebased() -> TestResult {
+    let root = unique_tmp("pull-json", "rebased");
+    let upstream = root.join("upstream");
+    fs::create_dir_all(&upstream)?;
+    git(&upstream, &["init", "-q", "-b", "main"]);
+    commit(&upstream, "a", "seed");
+    git(
+        &root,
+        &["clone", "-q", upstream.to_str().unwrap(), "client"],
+    );
+    let client = root.join("client");
+    commit(&client, "local", "local");
+    commit(&upstream, "remote", "remote");
+    git(&client, &["fetch", "-q"]);
+    let json = gs_json(&client, &["pull", "--rebase"]);
+    assert_eq!(json["result"], "rebased");
+    assert!(json["oid"].as_str().is_some());
+    Ok(())
+}
+
+#[test]
 fn pull_json_set_upstream_unborn() -> TestResult {
     let root = unique_tmp("pull-json", "set-upstream");
     let upstream = root.join("upstream");

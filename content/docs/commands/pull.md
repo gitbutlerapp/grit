@@ -8,7 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
-grit pull [--ff-only] [--no-rebase]
+grit pull [--ff-only] [--rebase] [--no-rebase]
 ```
 
 ## Description
@@ -21,14 +21,15 @@ Like [`grit merge`](../merge/), `grit pull` won't run with a detached HEAD. Conf
 
 The fetch step uses the same terminal progress as [`grit fetch`](../fetch/) and [`grit clone`](../clone/): live stderr progress on a TTY in human mode, silent when stderr is piped or when you pass `--json` or `--markdown`.
 
-Integration mode follows Git's `pull.ff` and `pull.rebase` config unless overridden on the command line. Rebase pulls (`pull.rebase`) are not supported yet; use `--no-rebase` to merge when `pull.rebase` is set.
+Integration mode follows Git's `pull.ff`, `pull.rebase`, and `branch.<name>.rebase` unless overridden on the command line. With rebase, local commits replay onto the fetched upstream tip via the history engine (no sequencer files). Rebase conflicts abort atomically: nothing changes and exit is **1** (stop/continue rebase is planned once the shared conflict model lands). `pull.rebase=interactive` is rejected.
 
 ## Options
 
 | Flag | Description |
 | ---- | ----------- |
-| `--ff-only` | Refuse when a merge commit would be required. Exit **1** when diverged; the branch, index, and worktree are unchanged. JSON includes `ahead` and `behind` counts. |
-| `--no-rebase` | Merge instead of rebasing, overriding `pull.rebase`. |
+| `--ff-only` | Refuse when a merge commit would be required. Exit **1** when diverged; the branch, index, and worktree are unchanged. JSON includes `ahead` and `behind` counts. Conflicts with `--rebase` and `--no-rebase`. |
+| `--rebase` | Rebase local commits onto the upstream tip, overriding `pull.rebase=false`. Conflicts with `--ff-only` and `--no-rebase`. |
+| `--no-rebase` | Merge instead of rebasing, overriding `pull.rebase`. Conflicts with `--ff-only` and `--rebase`. |
 
 See also [global options](../global-options/).
 
@@ -52,11 +53,11 @@ Schema: [v1](/schemas/pull/v1.json)
 
 Pass `--json` for stable, scripting-friendly output.
 
-Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, or `set_upstream`); **1** when `--ff-only` refuses diverged history (`refused_not_ff`, branch/index/worktree unchanged) or when the merge stops with conflicts (`conflicts`).
+Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, or `set_upstream`); **1** when `--ff-only` refuses diverged history (`refused_not_ff`, branch/index/worktree unchanged) or when integration stops with conflicts (`conflicts`; rebase conflicts leave the repository unchanged).
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `merged`, `refused_not_ff`, `conflicts`, or `set_upstream`. |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, or `set_upstream`. |
 | `branch` | string | Remote branch integrated, or local branch name for `set_upstream`. |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present. |

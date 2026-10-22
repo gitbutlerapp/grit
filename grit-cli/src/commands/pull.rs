@@ -16,12 +16,14 @@ use grit_lib::remote::DefaultHttpClientFactory;
 
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
-pub fn run(ff_only: bool, no_rebase: bool, mode: OutputMode) -> Result<PullOutcome> {
+pub fn run(ff_only: bool, no_rebase: bool, rebase: bool, mode: OutputMode) -> Result<PullOutcome> {
     let repo = context::discover()?;
     let cli_mode = if ff_only {
         Some(PullMode::FfOnly)
     } else if no_rebase {
         Some(PullMode::Merge)
+    } else if rebase {
+        Some(PullMode::Rebase)
     } else {
         None
     };

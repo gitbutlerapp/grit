@@ -770,6 +770,45 @@ pub fn prepare_network_fetch_noop(git: &Path, bare: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Diverged pull --rebase: bare is 5 commits ahead of fork, client has 3 local commits.
+pub fn prepare_network_pull_rebase(git: &Path, bare: &Path) -> Result<()> {
+    let meta = load_meta(bare)?;
+    ensure_client_repo(git, bare, &meta)?;
+    let branch_ref = format!("refs/heads/{}", meta.default_branch);
+    run_git_cmd(
+        git,
+        Some(bare),
+        &["update-ref", &branch_ref, &meta.fetch_base_oid],
+    )?;
+    run_git_cmd(
+        git,
+        Some(&meta.client_repo),
+        &["reset", "--hard", &meta.fetch_base_oid],
+    )?;
+    for i in 0..5 {
+        append_empty_commit_on_bare(
+            git,
+            bare,
+            &meta.default_branch,
+            &format!("bench-pull-rebase-up-{i}"),
+        )?;
+    }
+    for i in 0..3 {
+        run_git_cmd(
+            git,
+            Some(&meta.client_repo),
+            &[
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                &format!("bench-pull-rebase-local-{i}"),
+            ],
+        )?;
+    }
+    refresh_http_mirror(git, bare)
+}
+
 /// Reset push scenario: client ahead of bare by `push_commits`.
 pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
     let meta = load_meta(bare)?;

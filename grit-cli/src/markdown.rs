@@ -609,6 +609,13 @@ pub fn print_pull_outcome(
                 outcome.branch
             );
         }
+        PullResult::Rebased => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(w, "- Rebased onto **`{}`** · `{short}`", outcome.branch);
+            if let Some(id) = outcome.change_id.as_deref() {
+                outln!(w, "- change id `{short}`", short = short_change_id(id));
+            }
+        }
     }
     Ok(())
 }

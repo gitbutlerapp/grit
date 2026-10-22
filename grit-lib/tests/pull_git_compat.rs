@@ -353,7 +353,7 @@ fn pull_ff_only_from_config_matches_git() {
 
     let repo = open(&grit_dir);
     assert_eq!(
-        resolve_pull_mode(&repo.config().expect("config"), None),
+        resolve_pull_mode(&repo.config().expect("config"), Some("main"), None).expect("mode"),
         PullMode::FfOnly
     );
     let outcome = pull_grit(

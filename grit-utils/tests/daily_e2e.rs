@@ -60,7 +60,7 @@ fn run_daily_smoke(git: &Path, grit: &Path, output: &Path, extra: &[&str]) -> st
     cmd.output().expect("spawn grit-bench daily")
 }
 
-const ALL_HEADLINE_IDS: [&str; 18] = [
+const ALL_HEADLINE_IDS: [&str; 19] = [
     "status/clean@synth-10k",
     "status/dirty@synth-10k",
     "add/modified@synth-10k",
@@ -77,6 +77,7 @@ const ALL_HEADLINE_IDS: [&str; 18] = [
     "stash/push-pop@synth-10k",
     "fetch/incremental@git-git",
     "pull/fast-forward@git-git",
+    "pull/rebase@synth-10k",
     "push/incremental@git-git",
     "clone/local@synth-10k",
 ];

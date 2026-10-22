@@ -79,9 +79,10 @@ fn run_daily(git: &Path, grit: &Path, output: &Path, extra: &[&str]) -> std::pro
     cmd.output().expect("spawn grit-bench daily")
 }
 
-const REMOTE_HEADLINE_IDS: [&str; 4] = [
+const REMOTE_HEADLINE_IDS: [&str; 5] = [
     "fetch/incremental@git-git",
     "pull/fast-forward@git-git",
+    "pull/rebase@synth-10k",
     "push/incremental@git-git",
     "clone/local@synth-10k",
 ];

@@ -76,7 +76,7 @@ pub struct ScenarioSpec {
 pub type HeadlineScenario = ScenarioSpec;
 
 /// The 18 headline scenarios: ids and short names fixed by the performance census roadmap.
-pub const HEADLINE_SCENARIOS: [HeadlineScenario; 18] = [
+pub const HEADLINE_SCENARIOS: [HeadlineScenario; 19] = [
     ScenarioSpec {
         id: "status/clean@synth-10k",
         area: Area::Worktree,
@@ -188,6 +188,13 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 18] = [
         headline: true,
         name: Some("pull"),
         description: "Fast-forward pull vs git pull --ff-only",
+    },
+    ScenarioSpec {
+        id: "pull/rebase@synth-10k",
+        area: Area::Remotes,
+        headline: true,
+        name: Some("pull"),
+        description: "Rebase pull (3 local onto 5 upstream) vs git pull --rebase",
     },
     ScenarioSpec {
         id: "push/incremental@git-git",

@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn headline_ids_match_roadmap() {
-        let expected: [(&str, &str); 18] = [
+        let expected: [(&str, &str); 19] = [
             ("status/clean@synth-10k", "status-clean"),
             ("status/dirty@synth-10k", "status-dirty"),
             ("add/modified@synth-10k", "add"),
@@ -277,10 +277,11 @@ mod tests {
             ("stash/push-pop@synth-10k", "stash"),
             ("fetch/incremental@git-git", "fetch"),
             ("pull/fast-forward@git-git", "pull"),
+            ("pull/rebase@synth-10k", "pull"),
             ("push/incremental@git-git", "push"),
             ("clone/local@synth-10k", "clone"),
         ];
-        assert_eq!(HEADLINE_SCENARIOS.len(), 18);
+        assert_eq!(HEADLINE_SCENARIOS.len(), 19);
         for (spec, (exp_id, exp_name)) in HEADLINE_SCENARIOS.iter().zip(expected.iter()) {
             assert_eq!(spec.id, *exp_id);
             assert_eq!(spec.name, Some(*exp_name));
