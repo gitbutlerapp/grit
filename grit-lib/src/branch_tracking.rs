@@ -1,5 +1,13 @@
-//! Comparison bases for a branch (its upstream or the repository's target branch) and
-//! remote-tracking ref updates after a push.
+//! Comparison bases for a branch (its upstream or the repository's target branch),
+//! branch inventory listing, and remote-tracking ref updates after a push.
+
+#[path = "branch_inventory.rs"]
+mod branch_inventory;
+
+pub use branch_inventory::{
+    list_branches, upstream_status, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
+    UpstreamStatus,
+};
 
 use std::path::Path;
 

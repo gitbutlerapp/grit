@@ -58,9 +58,11 @@ use grit_lib::porcelain::tag::{
 use grit_lib::porcelain::terminal::{ansi_supported, stderr_supports_color, stdout_supports_color};
 use grit_lib::progress::ProgressPhase;
 use grit_lib::refs::branch_tracking::{
-    apply_push_remote_tracking_updates, upstream_tracking_full_ref,
+    apply_push_remote_tracking_updates, list_branches, upstream_status, upstream_tracking_full_ref,
+    BranchDetail, BranchListQuery, BranchScope,
 };
 use grit_lib::refs::hide_refs::{hide_ref_patterns_receive, hide_ref_patterns_uploadpack};
+use grit_lib::refs::listing::RefQuery;
 use grit_lib::refs::ref_namespace::{
     logical_ref_name_from_storage, logical_ref_name_from_storage_env, strip_namespace_prefix,
     strip_namespace_prefix_env,
@@ -382,4 +384,10 @@ fn porcelain_checkout_glob_and_branch_tracking() {
         grit_lib::refs::resolve_ref(git_dir.as_path(), "refs/remotes/origin/main").ok(),
         Some(head)
     );
+    let query = BranchListQuery {
+        scope: BranchScope::Local,
+        refs: RefQuery::default(),
+    };
+    let _ = list_branches(&repo, &query, BranchDetail::Names).expect("list branches");
+    let _ = upstream_status(&repo, "main").expect("upstream status");
 }

@@ -210,6 +210,10 @@ name = "ref_query_sort_version_100k"
 harness = false
 
 [[bench]]
+name = "list_branches_full_10k"
+harness = false
+
+[[bench]]
 name = "tree_sha256"
 harness = false
 
