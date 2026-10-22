@@ -205,7 +205,8 @@ pub fn setup_stash_repo(setup: &DailySetup<'_>) -> Result<PathBuf> {
 }
 
 pub fn sh_devnull(program: &Path, args: &[&str]) -> BenchArgv {
-    BenchArgv::new("/bin/sh", ["-c", &shell_redirect_devnull(program, args)])
+    let inner = shell_redirect_devnull(program, args);
+    BenchArgv::new("/bin/sh", ["-c", &format!("set -e; {inner}")])
 }
 
 pub fn sh_script(script: String) -> BenchArgv {

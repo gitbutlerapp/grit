@@ -438,6 +438,78 @@ pub fn verify_pull_fast_forward(ctx: &DailyHeadlineContext, cwd: &Path) -> Resul
     Ok(())
 }
 
+fn client_has_object(git: &Path, client: &Path, oid: &str) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(["cat-file", "-e", oid]).current_dir(client);
+    git_env(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("git cat-file -e {oid}"))?;
+    if !out.status.success() {
+        bail!("client missing object {oid} after network command");
+    }
+    Ok(())
+}
+
+pub fn post_verify_fetch_incremental(ctx: &DailyHeadlineContext, _is_git: bool) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    verify_client_fetch_tip(
+        &ctx.git,
+        &remote.bare,
+        &ctx.repo,
+        &remote.meta.default_branch,
+    )?;
+    let bare_tip = ref_oid(
+        &ctx.git,
+        &remote.bare,
+        &format!("refs/heads/{}", remote.meta.default_branch),
+    )?;
+    client_has_object(&ctx.git, &ctx.repo, &bare_tip)?;
+    Ok(())
+}
+
+pub fn post_verify_pull_fast_forward(ctx: &DailyHeadlineContext, _is_git: bool) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    let bare_tip = ref_oid(
+        &ctx.git,
+        &remote.bare,
+        &format!("refs/heads/{}", remote.meta.default_branch),
+    )?;
+    let head = ref_oid(&ctx.git, &ctx.repo, "HEAD")?;
+    if head != bare_tip {
+        bail!("post pull: HEAD {head} != bare {bare_tip}");
+    }
+    Ok(())
+}
+
+pub fn post_verify_push_incremental(ctx: &DailyHeadlineContext, _is_git: bool) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    let branch_ref = format!("refs/heads/{}", remote.meta.default_branch);
+    let bare_tip = ref_oid(&ctx.git, &remote.bare, &branch_ref)?;
+    let client_tip = ref_oid(&ctx.git, &ctx.repo, &branch_ref)?;
+    if bare_tip != client_tip {
+        bail!("post push: bare {bare_tip} != client {client_tip}");
+    }
+    if bare_tip == remote.meta.fetch_base_oid {
+        bail!("post push: bare still at fetch base (no transfer)");
+    }
+    Ok(())
+}
+
+/// Post-timed verification for remote scenarios (keyed by daily scenario id).
+pub fn post_timed_for(id: &str) -> Option<fn(&DailyHeadlineContext, bool) -> Result<()>> {
+    match id {
+        "fetch/incremental@git-git" | "fetch/incremental-http@git-git" | "fetch/noop@git-git" => {
+            Some(post_verify_fetch_incremental)
+        }
+        "pull/fast-forward@git-git" => Some(post_verify_pull_fast_forward),
+        "push/incremental@git-git" | "push/incremental-http@git-git" => {
+            Some(post_verify_push_incremental)
+        }
+        _ => None,
+    }
+}
+
 pub fn verify_push_incremental(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;

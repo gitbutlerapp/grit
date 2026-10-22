@@ -48,6 +48,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Dirty worktree on small synth: grit status vs git status -s",
     },
     ScenarioSpec {
+        id: "status/paths@synth-100k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Path-limited status: grit status -- data/d0000 vs git status -s -- data/d0000",
+    },
+    ScenarioSpec {
+        id: "status/renamed@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Status after rename: grit status vs git status -s",
+    },
+    ScenarioSpec {
         id: "add/all@synth-100k",
         area: Area::Worktree,
         headline: false,

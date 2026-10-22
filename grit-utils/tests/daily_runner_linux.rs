@@ -91,6 +91,7 @@ fn prepare_runs_before_every_iteration() {
         limits: &RunLimits::default(),
         measure_helper: Path::new(bench_exe()),
         correctness: None,
+        post_timed: None,
     })
     .expect("ab bench");
     let count: u32 = fs::read_to_string(&counter)
@@ -136,6 +137,7 @@ fn interleaves_git_and_grit() {
         limits: &RunLimits::default(),
         measure_helper: Path::new(bench_exe()),
         correctness: None,
+        post_timed: None,
     })
     .expect("ab bench");
     let order = fs::read_to_string(&log).expect("read order");
@@ -198,6 +200,7 @@ fn ab_bench_fails_when_timed_command_fails() {
         limits: &RunLimits::default(),
         measure_helper: Path::new(bench_exe()),
         correctness: None,
+        post_timed: None,
     })
     .expect_err("failed grit timed run must fail the scenario");
     assert!(err.to_string().contains("grit timed run"), "{err}");

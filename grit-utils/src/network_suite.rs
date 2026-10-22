@@ -726,6 +726,17 @@ pub fn prepare_network_clone(bare: &Path) -> Result<()> {
     Ok(())
 }
 
+fn reset_client_branch_and_tracking(git: &Path, meta: &NetworkBenchMeta, oid: &str) -> Result<()> {
+    run_git_cmd(git, Some(&meta.client_repo), &["reset", "--hard", oid])?;
+    let tracking = format!("refs/remotes/origin/{}", meta.default_branch);
+    run_git_cmd(
+        git,
+        Some(&meta.client_repo),
+        &["update-ref", tracking.as_str(), oid],
+    )?;
+    Ok(())
+}
+
 /// Reset server ahead of client, then add incremental commits on the bare remote.
 pub fn prepare_network_fetch_incr(git: &Path, bare: &Path) -> Result<()> {
     let meta = load_meta(bare)?;
@@ -736,11 +747,7 @@ pub fn prepare_network_fetch_incr(git: &Path, bare: &Path) -> Result<()> {
         Some(bare),
         &["update-ref", &branch_ref, &meta.fetch_base_oid],
     )?;
-    run_git_cmd(
-        git,
-        Some(&meta.client_repo),
-        &["reset", "--hard", &meta.fetch_base_oid],
-    )?;
+    reset_client_branch_and_tracking(git, &meta, &meta.fetch_base_oid)?;
     for i in 0..meta.incremental_fetch_commits {
         append_empty_commit_on_bare(
             git,
@@ -780,11 +787,7 @@ pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
         Some(bare),
         &["update-ref", &branch_ref, &meta.fetch_base_oid],
     )?;
-    run_git_cmd(
-        git,
-        Some(&meta.client_repo),
-        &["reset", "--hard", &meta.fetch_base_oid],
-    )?;
+    reset_client_branch_and_tracking(git, &meta, &meta.fetch_base_oid)?;
     for i in 0..meta.push_commits {
         run_git_cmd_with_bench_commit_dates(
             git,
