@@ -57,7 +57,7 @@ use grit_lib::porcelain::checkout::apply_index_file_mode;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::stash::worktree_bytes_for_index_mode;
 use grit_lib::porcelain::status::{expand_untracked_for_staging, status_path_matches_worktree};
-use grit_lib::porcelain::tag::{creator_date, get_tag_annotation};
+use grit_lib::porcelain::tag::creator_date;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
@@ -342,7 +342,14 @@ fn porcelain_stash_tag_status_and_worktree() {
         .odb()
         .write(ObjectKind::Blob, b"not tag")
         .expect("blob");
-    let _ = get_tag_annotation(&repo, &tag_oid, 1);
+    let _ = grit_lib::porcelain::tag::list_tags(
+        &repo,
+        &RefQuery {
+            namespaces: vec![RefNamespace::Tags],
+            ..RefQuery::default()
+        },
+    )
+    .ok();
     let _ = creator_date(&repo, &tag_oid);
     let _ = resolve_commit_filter_target(&repo, tag_oid).ok();
     let _ = ref_points_at(repo.odb(), tag_oid, &tag_oid).ok();

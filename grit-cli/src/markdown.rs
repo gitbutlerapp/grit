@@ -401,7 +401,17 @@ pub fn print_tag_list(
             .as_ref()
             .map(|p| format!(" → `{}`", p.get(..7).unwrap_or(p.as_str())))
             .unwrap_or_default();
-        outln!(w, "- `{}` · {} `{short}`{peel}", tag.name, tag.kind);
+        let subject = tag
+            .annotation
+            .as_ref()
+            .map(|a| format!(" — {}", a.subject))
+            .unwrap_or_default();
+        outln!(
+            w,
+            "- `{}` · {} `{short}`{peel}{subject}",
+            tag.name,
+            tag.kind
+        );
     }
     Ok(())
 }

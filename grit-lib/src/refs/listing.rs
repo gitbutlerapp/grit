@@ -638,6 +638,24 @@ fn find_header_value<'a>(header: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
     None
 }
 
+/// Build [`RefQueryOptions`] from repository config (`versionsort.suffix`, `core.ignorecase`).
+///
+/// # Errors
+///
+/// Propagates config load failures from [`Repository::config`](crate::repo::Repository::config).
+pub fn ref_query_options_for_repo(repo: &Repository) -> crate::error::Result<RefQueryOptions> {
+    let config = repo.config()?;
+    let versionsort_suffixes = config.get_all("versionsort.suffix");
+    let ignore_case = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    Ok(RefQueryOptions {
+        versionsort_suffixes,
+        ignore_case,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

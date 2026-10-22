@@ -886,6 +886,24 @@ enum Command {
     Tag {
         /// Name of the tag to create. Omit to list tags.
         name: Option<String>,
+        /// List tags matching `PATTERN` (repeatable). Omit `PATTERN` to list all tags.
+        #[arg(short = 'l', long = "list", value_name = "PATTERN")]
+        list: Vec<String>,
+        /// Sort listed tags by version, date, or name.
+        #[arg(long = "sort", value_enum, default_value_t = commands::tag::TagListSort::Version)]
+        sort: commands::tag::TagListSort,
+        /// Reverse the sort order.
+        #[arg(long = "reverse")]
+        reverse: bool,
+        /// Only tags whose peeled commit contains this revision (`HEAD` when omitted).
+        #[arg(long = "contains", value_name = "REV", default_missing_value = "HEAD", num_args = 0..=1)]
+        contains: Option<String>,
+        /// Only tags pointing at this object (repeatable).
+        #[arg(long = "points-at", value_name = "REV")]
+        points_at: Vec<String>,
+        /// Maximum number of tags to list.
+        #[arg(short = 'n', long = "limit", value_name = "N")]
+        limit: Option<usize>,
         /// Delete the named tag instead of creating it.
         #[arg(short = 'd', long = "delete")]
         delete: bool,
@@ -1487,6 +1505,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         }
         Command::Tag {
             name,
+            list,
+            sort,
+            reverse,
+            contains,
+            points_at,
+            limit,
             delete,
             message,
             object,
@@ -1509,6 +1533,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     object,
                     sign_override,
                     signing_key,
+                    list,
+                    sort,
+                    reverse,
+                    contains,
+                    points_at,
+                    limit,
                     ctx.now,
                 )?,
                 opts,

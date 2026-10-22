@@ -6,6 +6,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::list_branches;
 use grit_lib::porcelain::tag::list_tags;
+use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::{self, Ref};
 use grit_lib::repo::Repository;
@@ -64,7 +65,15 @@ fn main() -> Result<(), grit_lib::error::Error> {
         let marker = if branch.current { "*" } else { " " };
         println!("branch {marker} {} {}", branch.name, branch.oid.to_hex());
     }
-    for tag in list_tags(&repo)? {
+    let tag_query = RefQuery {
+        namespaces: vec![RefNamespace::Tags],
+        sort: RefSort {
+            key: SortKey::Name,
+            reverse: false,
+        },
+        ..RefQuery::default()
+    };
+    for tag in list_tags(&repo, &tag_query)? {
         println!("tag {} {} {:?}", tag.name, tag.oid.to_hex(), tag.kind);
     }
 

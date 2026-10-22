@@ -9,22 +9,25 @@
 //! # What this module owns
 //!
 //! - Tag creation ([`create_tag`], [`CreateTagRequest`], [`TagKind`]), listing
-//!   ([`list_tags`], [`TagInfo`], [`tag_ref_metadata`]) and deletion ([`delete_tag`]).
+//!   ([`list_tags`], [`TagSummary`], [`tag_ref_metadata`]) and deletion ([`delete_tag`]).
 //! - Ref list reachability filters (`--contains`, `--merged`, `--points-at`) live in [`crate::refs::listing`].
 //! - Ref list sort/filter helpers live in [`crate::refs::listing`] (`compare_version_names`,
 //!   [`crate::refs::listing::pattern_matches_short_name`], [`creator_date`],
-//!   [`crate::refs::listing::epoch_from_identity`]).
-//! - The `-n<N>` annotation
-//!   extraction ([`get_tag_annotation`]).
+//!   [`crate::refs::listing::epoch_from_identity`], [`crate::refs::listing::ref_query_options_for_repo`]).
 //! - The `-m`/`-F` message cleanup ([`strip_comments`]).
 
 use crate::check_ref_format::validate_tag_short_name;
+use crate::commit_pretty::message_subject;
+use crate::diff_rename_parallel::parallel_map_indices;
 use crate::error::{Error, Result};
+use crate::ident::signature_timestamp_for_pretty;
 use crate::objects::{parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
+use crate::parallel::ParallelOp;
 use crate::refs;
 use crate::refs::listing::{
     compare_version_names, creator_date as listing_creator_date, epoch_from_identity,
-    pattern_matches_short_name,
+    pattern_matches_short_name, query_refs, ref_query_options_for_repo, RefListing, RefNamespace,
+    RefQuery, RefQueryError,
 };
 use crate::repo::Repository;
 use crate::signing::{should_sign_tag, sign_serialized_tag, GpgConfig};
@@ -39,6 +42,49 @@ pub enum TagKind {
     /// The ref points at a tag object with message and tagger.
     Annotated,
 }
+
+/// Parsed name and email from a Git identity line (without timestamp).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ident {
+    /// Display name before `<`.
+    pub name: String,
+    /// Email inside angle brackets.
+    pub email: String,
+}
+
+/// Annotated tag message and tagger metadata for list output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagAnnotation {
+    /// First-line subject (`format_subject` / `contents:subject`).
+    pub subject: String,
+    /// Full tag message body.
+    pub message: String,
+    /// Tagger identity (name and email).
+    pub tagger: Ident,
+    /// Tagger date as Unix seconds (`taggerdate:unix`).
+    pub date: i64,
+}
+
+/// One tag in the result of [`list_tags`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagSummary {
+    /// Short tag name (without `refs/tags/`).
+    pub name: String,
+    /// Object id stored at `refs/tags/<name>` (a tag object for annotated tags).
+    pub oid: ObjectId,
+    /// Whether the tag is lightweight or annotated.
+    pub kind: TagKind,
+    /// Commit the tag ultimately references, when it peels to one.
+    pub peeled: Option<ObjectId>,
+    /// Kind of object the tag ref points at (or the tag object's `object` header).
+    pub target_kind: ObjectKind,
+    /// Present for annotated tags after reading the tag object.
+    pub annotation: Option<TagAnnotation>,
+}
+
+/// Deprecated alias for [`TagSummary`].
+#[deprecated(note = "use TagSummary instead")]
+pub type TagInfo = TagSummary;
 
 /// Inputs for [`create_tag`].
 #[derive(Debug, Clone)]
@@ -152,46 +198,129 @@ pub fn tag_ref_metadata(repo: &Repository, ref_oid: &ObjectId) -> (TagKind, Opti
     }
 }
 
-/// One tag in the result of [`list_tags`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TagInfo {
-    /// Short tag name (without `refs/tags/`).
-    pub name: String,
-    /// Object id stored at `refs/tags/<name>` (a tag object for annotated tags).
-    pub oid: ObjectId,
-    /// Whether the tag is lightweight or annotated.
-    pub kind: TagKind,
-    /// Commit the tag ultimately references, when it peels to one.
-    pub peeled: Option<ObjectId>,
-}
-
-/// List the tags (`refs/tags/*`) of `repo`, sorted by name and classified with
-/// [`tag_ref_metadata`].
+/// List tags matching `query` (always scoped to [`RefNamespace::Tags`]).
 ///
-/// Reads through the repository's ref store, so the reftable backend is honoured.
+/// Annotated tag objects are read in parallel when the thread policy allows.
+/// Default CLI sort is `version`; pass [`RefQuery::sort`] explicitly in library callers.
 ///
 /// # Errors
 ///
-/// Returns an error when the ref store cannot be read. Unreadable tag targets are
-/// reported as lightweight with no peeled commit rather than failing the listing.
-pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>> {
-    Ok(repo
-        .references()
-        .list(TAGS_PREFIX)?
-        .into_iter()
-        .map(|(refname, oid)| {
+/// Propagates ref-query, config, and object read failures.
+pub fn list_tags(repo: &Repository, query: &RefQuery) -> Result<Vec<TagSummary>> {
+    let mut query = query.clone();
+    query.namespaces = vec![RefNamespace::Tags];
+    let options = ref_query_options_for_repo(repo)?;
+    let listings = query_refs(repo, &query, &options).map_err(ref_query_to_error)?;
+    if listings.is_empty() {
+        return Ok(Vec::new());
+    }
+    let config = repo.config()?;
+    let par = repo
+        .thread_policy()
+        .resolve(ParallelOp::DiffContent, config.as_ref());
+    let odb = repo.odb();
+    odb.with_pack_read_context(|| {
+        parallel_map_indices(odb, listings.len(), par, listings.len() * 512, |i| {
+            summarize_listing(repo, &listings[i])
+        })
+    })
+}
+
+fn ref_query_to_error(err: RefQueryError) -> Error {
+    match err {
+        RefQueryError::Store(e) => e,
+        RefQueryError::MissingObjectDatabase => {
+            Error::Message("ref query requires an object database".into())
+        }
+        RefQueryError::MissingObject(oid) => Error::Message(format!("object {oid} not found")),
+        RefQueryError::NotCommit(oid) => Error::Message(format!("object {oid} is not a commit")),
+    }
+}
+
+fn summarize_listing(repo: &Repository, listing: &RefListing) -> Result<TagSummary> {
+    let name = listing.short_name.clone();
+    let oid = listing.oid;
+    let peeled = listing.peeled.or_else(|| {
+        repo.odb().peel_to_commit(oid).ok().flatten().or_else(|| {
+            match repo.odb().read_info(&oid).ok()?.kind {
+                ObjectKind::Commit => Some(oid),
+                _ => None,
+            }
+        })
+    });
+    let Ok(info) = repo.odb().read_info(&oid) else {
+        return Ok(TagSummary {
+            name,
+            oid,
+            kind: TagKind::Lightweight,
+            peeled,
+            target_kind: ObjectKind::Blob,
+            annotation: None,
+        });
+    };
+    match info.kind {
+        ObjectKind::Tag => {
+            let obj = repo.odb().read(&oid)?;
+            let tag = parse_tag(&obj.data)?;
+            let annotation = tag_annotation_from_data(&tag);
+            let target_kind = object_kind_from_type_name(&tag.object_type);
+            Ok(TagSummary {
+                name,
+                oid,
+                kind: TagKind::Annotated,
+                peeled,
+                target_kind,
+                annotation,
+            })
+        }
+        other => {
             let (kind, peeled) = tag_ref_metadata(repo, &oid);
-            TagInfo {
-                name: refname
-                    .strip_prefix(TAGS_PREFIX)
-                    .unwrap_or(&refname)
-                    .to_owned(),
+            Ok(TagSummary {
+                name,
                 oid,
                 kind,
                 peeled,
-            }
-        })
-        .collect())
+                target_kind: other,
+                annotation: None,
+            })
+        }
+    }
+}
+
+fn tag_annotation_from_data(tag: &TagData) -> Option<TagAnnotation> {
+    let tagger_line = tag.tagger.as_deref()?;
+    let tagger = ident_from_line(tagger_line);
+    let date = match signature_timestamp_for_pretty(tagger_line) {
+        crate::ident::SignatureTimestamp::Valid(ts) => ts,
+        crate::ident::SignatureTimestamp::Sentinel => epoch_from_identity(tagger_line),
+    };
+    Some(TagAnnotation {
+        subject: message_subject(&tag.message),
+        message: tag.message.clone(),
+        tagger,
+        date,
+    })
+}
+
+fn ident_from_line(line: &str) -> Ident {
+    let (name, rest) = line.split_once(" <").unwrap_or((line, ""));
+    let email = rest
+        .split_once('>')
+        .map_or(rest.trim_end_matches('>').trim(), |(e, _)| e.trim());
+    Ident {
+        name: name.trim().to_owned(),
+        email: email.to_owned(),
+    }
+}
+
+fn object_kind_from_type_name(s: &str) -> ObjectKind {
+    match s {
+        "commit" => ObjectKind::Commit,
+        "tree" => ObjectKind::Tree,
+        "blob" => ObjectKind::Blob,
+        "tag" => ObjectKind::Tag,
+        _ => ObjectKind::Blob,
+    }
 }
 
 /// Delete `refs/tags/<name>` through the repository's ref store.
@@ -217,31 +346,6 @@ pub fn delete_tag(repo: &Repository, name: &str) -> Result<ObjectId> {
     let oid = existing.oid;
     repo.references().delete_verified(&tag_ref, &existing)?;
     Ok(oid)
-}
-
-/// Get annotation text for a tag (up to `n` lines).
-///
-/// Returns `None` if the tag has no annotation (lightweight) or `n == 0`.
-#[must_use]
-pub fn get_tag_annotation(repo: &Repository, oid: &ObjectId, n: u32) -> Option<String> {
-    if n == 0 {
-        return None;
-    }
-    let obj = repo.odb().read(oid).ok()?;
-    let tag = parse_tag(&obj.data).ok()?;
-    if tag.message.trim().is_empty() {
-        return None;
-    }
-    let lines: Vec<&str> = tag
-        .message
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .take(n as usize)
-        .collect();
-    if lines.is_empty() {
-        return None;
-    }
-    Some(lines.join(" "))
 }
 
 /// Extract the "creator date" for a tag object.
@@ -291,24 +395,21 @@ pub fn strip_comments(s: &str) -> String {
         }
         lines.push(line.trim_end().to_string());
     }
-    // Remove leading blank lines
     while lines.first().map(|l| l.is_empty()).unwrap_or(false) {
         lines.remove(0);
     }
-    // Remove trailing blank lines
     while lines.last().map(|l| l.is_empty()).unwrap_or(false) {
         lines.pop();
     }
     if lines.is_empty() {
         return String::new();
     }
-    // Collapse multiple consecutive blank lines to at most one
     let mut result = Vec::new();
     let mut last_blank = false;
     for line in &lines {
         let is_blank = line.is_empty();
         if is_blank && last_blank {
-            continue; // skip extra blank lines
+            continue;
         }
         result.push(line.clone());
         last_blank = is_blank;
@@ -329,6 +430,7 @@ mod tests {
     use super::*;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::NullProgress;
+    use crate::refs::listing::{RefQuery, RefSort, SortKey};
     use crate::repo::InitOptions;
 
     fn repo_with_commit() -> (tempfile::TempDir, Repository, ObjectId) {
@@ -367,10 +469,21 @@ mod tests {
         .oid
     }
 
+    fn name_sorted_query() -> RefQuery {
+        RefQuery {
+            namespaces: vec![RefNamespace::Tags],
+            sort: RefSort {
+                key: SortKey::Name,
+                reverse: false,
+            },
+            ..RefQuery::default()
+        }
+    }
+
     #[test]
     fn list_tags_is_empty_without_tags() {
         let (_tmp, repo, _) = repo_with_commit();
-        assert!(list_tags(&repo).unwrap().is_empty());
+        assert!(list_tags(&repo, &name_sorted_query()).unwrap().is_empty());
     }
 
     #[test]
@@ -379,23 +492,16 @@ mod tests {
         let annotated = tag(&repo, "v2", commit, Some("release"));
         tag(&repo, "v1", commit, None);
 
-        assert_eq!(
-            list_tags(&repo).unwrap(),
-            vec![
-                TagInfo {
-                    name: "v1".into(),
-                    oid: commit,
-                    kind: TagKind::Lightweight,
-                    peeled: Some(commit),
-                },
-                TagInfo {
-                    name: "v2".into(),
-                    oid: annotated,
-                    kind: TagKind::Annotated,
-                    peeled: Some(commit),
-                },
-            ]
-        );
+        let tags = list_tags(&repo, &name_sorted_query()).unwrap();
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].name, "v1");
+        assert_eq!(tags[0].oid, commit);
+        assert_eq!(tags[0].kind, TagKind::Lightweight);
+        assert_eq!(tags[0].target_kind, ObjectKind::Commit);
+        assert_eq!(tags[1].name, "v2");
+        assert_eq!(tags[1].oid, annotated);
+        assert_eq!(tags[1].kind, TagKind::Annotated);
+        assert!(tags[1].annotation.is_some());
     }
 
     #[test]
@@ -404,7 +510,7 @@ mod tests {
         let annotated = tag(&repo, "v1", commit, Some("release"));
 
         assert_eq!(delete_tag(&repo, "v1").unwrap(), annotated);
-        assert!(list_tags(&repo).unwrap().is_empty());
+        assert!(list_tags(&repo, &name_sorted_query()).unwrap().is_empty());
         assert!(repo.odb().exists(&annotated));
     }
 

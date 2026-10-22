@@ -416,7 +416,35 @@ pub fn branch_delete_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv)
 pub fn tag_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["tag"]),
-        sh_devnull(&ctx.git, &["tag", "-l"]),
+        sh_devnull(&ctx.git, &["tag", "-l", "--sort=version:refname"]),
+    )
+}
+
+pub fn tag_list_sort_version_git_git_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["tag", "--sort=version"]),
+        sh_devnull(&ctx.git, &["tag", "-l", "--sort=version:refname"]),
+    )
+}
+
+pub fn tag_contains_git_git_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    use super::helpers::GIT_GIT_SHORTLOG_TARGET;
+    let rev = format!("{GIT_GIT_SHORTLOG_TARGET}^{{commit}}");
+    (
+        sh_devnull(
+            &ctx.grit,
+            &["tag", "--contains", rev.as_str(), "--sort=version"],
+        ),
+        sh_devnull(
+            &ctx.git,
+            &[
+                "tag",
+                "-l",
+                "--contains",
+                rev.as_str(),
+                "--sort=version:refname",
+            ],
+        ),
     )
 }
 

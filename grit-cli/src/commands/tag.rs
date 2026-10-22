@@ -7,8 +7,11 @@ use crate::ref_name_messages::tag_short_name_error_message;
 use anyhow::{bail, Context, Result};
 use grit_lib::commit::signing::should_sign_tag;
 use grit_lib::config::ident_resolve::IdentRole;
-use grit_lib::porcelain::tag::{create_tag, delete_tag, list_tags, CreateTagRequest, TagKind};
+use grit_lib::porcelain::tag::{
+    create_tag, delete_tag, list_tags, CreateTagRequest, TagAnnotation, TagKind, TagSummary,
+};
 use grit_lib::refs::check_ref_format::validate_tag_short_name;
+use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
@@ -17,11 +20,33 @@ use serde::Serialize;
 use std::io::Write;
 use time::OffsetDateTime;
 
+/// Sort order for `grit tag` list mode.
+#[derive(Clone, Copy, Debug, Default, clap::ValueEnum, PartialEq, Eq)]
+pub enum TagListSort {
+    /// `version:refname` (default).
+    #[default]
+    Version,
+    /// Creator date (tagger or committer).
+    Date,
+    /// Ref name.
+    Name,
+}
+
+impl TagListSort {
+    fn sort_key(self) -> SortKey {
+        match self {
+            Self::Version => SortKey::Version,
+            Self::Date => SortKey::Date,
+            Self::Name => SortKey::Name,
+        }
+    }
+}
+
 /// Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum TagOutcome {
-    /// All tags in the repository, sorted by name.
+    /// Tags matching the list query.
     List { tags: Vec<TagEntry> },
     /// A new tag was created.
     Create {
@@ -71,6 +96,23 @@ impl std::fmt::Display for TagRefKind {
     }
 }
 
+/// Identity fields in JSON tag annotations.
+#[derive(Serialize, JsonSchema)]
+pub struct TagIdentEntry {
+    pub name: String,
+    pub email: String,
+}
+
+/// Annotated tag metadata in list JSON.
+#[derive(Serialize, JsonSchema)]
+pub struct TagAnnotationEntry {
+    pub subject: String,
+    pub message: String,
+    pub tagger: TagIdentEntry,
+    /// Tagger Unix timestamp.
+    pub date: i64,
+}
+
 /// One tag in a `list` outcome.
 #[derive(Serialize, JsonSchema)]
 pub struct TagEntry {
@@ -81,6 +123,10 @@ pub struct TagEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub peeled: Option<String>,
+    pub target_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<TagAnnotationEntry>,
 }
 
 impl HumanRender for TagOutcome {
@@ -92,7 +138,16 @@ impl HumanRender for TagOutcome {
                     return Ok(());
                 }
                 for tag in tags {
-                    outln!(w, "  {}", tag.name);
+                    if let Some(subject) = tag
+                        .annotation
+                        .as_ref()
+                        .map(|a| a.subject.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
+                        outln!(w, "  {}  {}", tag.name, subject);
+                    } else {
+                        outln!(w, "  {}", tag.name);
+                    }
                 }
             }
             TagOutcome::Create { name, .. } => outln!(w, "Created tag {name}"),
@@ -132,6 +187,7 @@ impl MarkdownRender for TagOutcome {
 }
 
 /// Run `grit tag` with the parsed CLI arguments.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     name: Option<String>,
     delete: bool,
@@ -139,28 +195,110 @@ pub fn run(
     object: Option<String>,
     sign: Option<bool>,
     signing_key: Option<String>,
+    list_patterns: Vec<String>,
+    sort: TagListSort,
+    reverse: bool,
+    contains: Option<String>,
+    points_at: Vec<String>,
+    limit: Option<usize>,
     now: OffsetDateTime,
 ) -> Result<TagOutcome> {
     let repo = context::discover()?;
     match name {
-        None => list(&repo),
         Some(name) if delete => remove(&repo, &name),
         Some(name) => create(&repo, &name, message, object, sign, signing_key, now),
+        None => list(
+            &repo,
+            list_patterns,
+            sort,
+            reverse,
+            contains,
+            points_at,
+            limit,
+        ),
     }
 }
 
-fn list(repo: &Repository) -> Result<TagOutcome> {
-    let tags = list_tags(repo)
+fn list(
+    repo: &Repository,
+    patterns: Vec<String>,
+    sort: TagListSort,
+    reverse: bool,
+    contains: Option<String>,
+    points_at: Vec<String>,
+    limit: Option<usize>,
+) -> Result<TagOutcome> {
+    let mut contains_ids = Vec::new();
+    if let Some(rev) = contains {
+        let oid = if rev == "HEAD" {
+            match resolve_head(repo.git_dir()).context("could not resolve HEAD for --contains")? {
+                HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
+                HeadState::Branch { .. } => bail!("HEAD has no commit for --contains"),
+                HeadState::Invalid => bail!("HEAD is in an unknown state"),
+            }
+        } else {
+            resolve_revision(repo, &rev).context("could not resolve --contains")?
+        };
+        contains_ids.push(oid);
+    }
+    list_with_query(
+        repo,
+        RefQuery {
+            patterns,
+            sort: RefSort {
+                key: sort.sort_key(),
+                reverse,
+            },
+            limit,
+            contains: contains_ids,
+            points_at: resolve_points_at(repo, &points_at)?,
+            ..RefQuery::default()
+        },
+    )
+}
+
+fn resolve_points_at(
+    repo: &Repository,
+    revs: &[String],
+) -> Result<Vec<grit_lib::objects::ObjectId>> {
+    revs.iter()
+        .map(|rev| {
+            resolve_revision(repo, rev)
+                .with_context(|| format!("could not resolve --points-at {rev}"))
+        })
+        .collect()
+}
+
+fn list_with_query(repo: &Repository, query: RefQuery) -> Result<TagOutcome> {
+    let tags = list_tags(repo, &query)
         .context("could not list tags")?
         .into_iter()
-        .map(|tag| TagEntry {
-            name: tag.name,
-            oid: tag.oid.to_hex(),
-            kind: tag.kind.into(),
-            peeled: tag.peeled.map(|p| p.to_hex()),
-        })
+        .map(tag_entry_from_summary)
         .collect();
     Ok(TagOutcome::List { tags })
+}
+
+fn tag_entry_from_summary(tag: TagSummary) -> TagEntry {
+    TagEntry {
+        name: tag.name,
+        oid: tag.oid.to_hex(),
+        kind: tag.kind.into(),
+        peeled: tag.peeled.map(|p| p.to_hex()),
+        target_kind: tag.target_kind.as_str().to_owned(),
+        annotation: tag.annotation.map(annotation_entry),
+    }
+}
+
+fn annotation_entry(a: TagAnnotation) -> TagAnnotationEntry {
+    TagAnnotationEntry {
+        subject: a.subject,
+        message: a.message,
+        tagger: TagIdentEntry {
+            name: a.tagger.name,
+            email: a.tagger.email,
+        },
+        date: a.date,
+    }
 }
 
 fn create(

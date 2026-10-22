@@ -117,7 +117,8 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## Tags and config
 
-- `grit tag` lists tags, `grit tag <name>` creates a lightweight tag at the current commit, `grit tag -d <name>` deletes one.
+- `grit tag` lists tags (default `--sort=version`). Filters: `-l/--list <pattern>` (repeatable), `--sort version|date|name`, `--reverse`, `--contains [REV]`, `--points-at <REV>`, `-n` / `--limit`. List `--json` includes `target_kind` and `annotation` (subject, message, tagger, date) on annotated tags; human output shows the subject beside the name.
+- `grit tag <name>` creates a lightweight tag at the current commit; `-m` makes an annotated tag; `-d` deletes one.
 - `grit config <key>` reads, `grit config <key> <value>` sets, `grit config --unset <key>` removes, `grit config --list` lists. Add `--global` for the per-user file.
 
 ## Staying non-interactive

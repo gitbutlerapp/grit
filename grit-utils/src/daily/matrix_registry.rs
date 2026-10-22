@@ -349,7 +349,14 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         area: Area::Branching,
         headline: false,
         name: None,
-        description: "Tag --contains ref query vs git for-each-ref on git.git",
+        description: "Tag --contains ref query vs git tag -l on git.git (commit-graph)",
+    },
+    ScenarioSpec {
+        id: "tag/list-sort-version@git-git",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Tag list --sort=version vs git tag -l --sort=version:refname on git.git",
     },
     ScenarioSpec {
         id: "branch/merged@many-refs",

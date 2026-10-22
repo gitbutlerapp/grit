@@ -11911,9 +11911,8 @@ pub fn grit_lib::porcelain::tag::compare_version(&str, &str) -> core::cmp::Order
 pub fn grit_lib::porcelain::tag::create_tag(&grit_lib::repo::Repository, &grit_lib::porcelain::tag::CreateTagRequest) -> grit_lib::error::Result<grit_lib::porcelain::tag::CreateTagOutcome>
 pub fn grit_lib::porcelain::tag::creator_date(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> i64
 pub fn grit_lib::porcelain::tag::delete_tag(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::porcelain::tag::get_tag_annotation(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, u32) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::porcelain::tag::glob_matches(&str, &str) -> bool
-pub fn grit_lib::porcelain::tag::list_tags(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::tag::TagInfo>>
+pub fn grit_lib::porcelain::tag::list_tags(&grit_lib::repo::Repository, &grit_lib::refs::listing::RefQuery) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::tag::TagSummary>>
 pub fn grit_lib::porcelain::tag::parse_epoch_from_ident(&str) -> i64
 pub fn grit_lib::porcelain::tag::strip_comments(&str) -> alloc::string::String
 pub fn grit_lib::refs::query_reachability::ref_points_at(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
@@ -13692,6 +13691,7 @@ pub fn grit_lib::refs::listing::pattern_matches_short_name(&str, &str, bool) -> 
 pub fn grit_lib::refs::listing::query_listings_from_pairs<I>(I, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions, core::option::Option<&grit_lib::objects::odb::Odb>) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError> where I: core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, grit_lib::objects::ObjectId, core::option::Option<grit_lib::objects::ObjectId>)>
 pub fn grit_lib::refs::listing::query_listings_on_store(&dyn grit_lib::refs::store::RefStore, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions, core::option::Option<&grit_lib::objects::odb::Odb>) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError>
 pub fn grit_lib::refs::listing::query_refs(&grit_lib::repo::Repository, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError>
+pub fn grit_lib::refs::listing::ref_query_options_for_repo(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::refs::listing::RefQueryOptions>
 pub fn grit_lib::refs::listing::ref_kind_from_name(&str) -> grit_lib::refs::listing::RefKind
 pub fn grit_lib::refs::listing::short_name_in_namespace(&str, &grit_lib::refs::listing::RefNamespace) -> alloc::string::String
 pub mod grit_lib::refs::ref_exclusions

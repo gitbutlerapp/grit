@@ -2,9 +2,44 @@
   "$id": "https://grit-scm.com/schemas/tag/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "TagAnnotationEntry": {
+      "description": "Annotated tag metadata in list JSON.",
+      "properties": {
+        "date": {
+          "description": "Tagger Unix timestamp.",
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "tagger": {
+          "$ref": "#/definitions/TagIdentEntry"
+        }
+      },
+      "required": [
+        "date",
+        "message",
+        "subject",
+        "tagger"
+      ],
+      "type": "object"
+    },
     "TagEntry": {
       "description": "One tag in a `list` outcome.",
       "properties": {
+        "annotation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TagAnnotationEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "kind": {
           "$ref": "#/definitions/TagRefKind"
         },
@@ -20,12 +55,32 @@
             "string",
             "null"
           ]
+        },
+        "target_kind": {
+          "description": "Object kind the tag points at (`commit`, `tag`, `tree`, `blob`).",
+          "type": "string"
         }
       },
       "required": [
         "kind",
         "name",
-        "oid"
+        "oid",
+        "target_kind"
+      ],
+      "type": "object"
+    },
+    "TagIdentEntry": {
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "email",
+        "name"
       ],
       "type": "object"
     },
@@ -41,7 +96,7 @@
   "description": "Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).",
   "oneOf": [
     {
-      "description": "All tags in the repository, sorted by name.",
+      "description": "Tags matching the list query (default sort: version).",
       "properties": {
         "action": {
           "enum": [
