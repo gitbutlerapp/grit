@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recompute a tree-sha256 digest using git ls-tree and a single cat-file --batch session per repo."""
+"""Recompute a tree-sha256 digest: one `git ls-tree -r -z` and one `cat-file --batch` per repo."""
 
 from __future__ import annotations
 
@@ -30,7 +30,6 @@ def parse_ls_tree(data: bytes):
         oid = rest2[:tab].decode()
         name = rest2[tab + 1 :]
         yield typ, oid, name
-    return
 
 
 class BatchBlobReader:
@@ -77,29 +76,27 @@ def submodule_record(hex_digest: str, path: bytes) -> bytes:
 
 
 def compute_digest(git: str, cwd: str, commit: str) -> str:
-    tree = git_out(git, cwd, "rev-parse", f"{commit}^{{tree}}").decode().strip()
+    listing = git_out(git, cwd, "ls-tree", "-r", "-z", "--full-name", commit)
     records: list[bytes] = []
+    blobs: list[tuple[bytes, str]] = []
+    gitlinks: list[tuple[bytes, str]] = []
+    for typ, oid, name in parse_ls_tree(listing):
+        if typ == b"blob":
+            blobs.append((name, oid))
+        elif typ == b"commit":
+            gitlinks.append((name, oid))
+
     batch = BatchBlobReader(git, cwd)
     try:
-
-        def walk(tree_oid: str, prefix: bytes) -> None:
-            listing = git_out(git, cwd, "ls-tree", "-z", tree_oid)
-            for typ, oid, name in parse_ls_tree(listing):
-                path = prefix + name
-                if typ == b"tree":
-                    walk(oid, path + b"/")
-                elif typ == b"blob":
-                    hex_d = batch.sha256(oid)
-                    records.append(file_record(hex_d, path))
-                elif typ == b"commit":
-                    sub_wt = os.path.join(cwd, name.decode())
-                    if os.path.isdir(sub_wt):
-                        sub_digest = compute_digest(git, sub_wt, oid)
-                        records.append(submodule_record(sub_digest, path))
-                    else:
-                        raise RuntimeError(f"submodule not checked out: {path!r}")
-
-        walk(tree, b"")
+        for path, oid in blobs:
+            hex_d = batch.sha256(oid)
+            records.append(file_record(hex_d, path))
+        for path, oid in gitlinks:
+            sub_wt = os.path.join(cwd, path.decode())
+            if not os.path.isdir(sub_wt):
+                raise RuntimeError(f"submodule not checked out: {path!r}")
+            sub_digest = compute_digest(git, sub_wt, oid)
+            records.append(submodule_record(sub_digest, path))
     finally:
         batch.close()
     records.sort()

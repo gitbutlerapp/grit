@@ -32,3 +32,6 @@ toml.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["resource", "signal"] }
+
+[dev-dependencies]
+grit-lib = { path = "../grit-lib" }
