@@ -34,11 +34,11 @@ enum Storage {
     Owned(Vec<u8>),
 }
 
-/// Immutable bytes of a `.pack`, pack index, commit-graph, or MIDX file.
+/// Immutable bytes of a `.pack`, pack index, commit-graph, MIDX, or `packed-refs` file.
 ///
 /// # Safety (memory-mapped storage)
 ///
-/// Pack, index, and MIDX files are append-only/immutable at a stable path: grit
+/// Pack, index, MIDX, and `packed-refs` files are immutable at a stable path: grit
 /// and Git publish updates by writing a temporary file and renaming it into place,
 /// so active readers never map a file that is being truncated in place. If a pack
 /// were truncated while mapped, reads could fault or return stale bytes — the same

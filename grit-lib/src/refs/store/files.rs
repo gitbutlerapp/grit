@@ -1662,6 +1662,36 @@ mod tests {
     }
 
     #[test]
+    fn mapped_packed_refs_are_reread_after_replacement() {
+        let dir = git_dir();
+        let path = dir.path();
+        let records = |value: ObjectId| -> Vec<crate::refs::PackedRefRecord> {
+            (0..500)
+                .map(|i| crate::refs::PackedRefRecord {
+                    refname: format!("refs/tags/t{i:04}"),
+                    oid: value,
+                    peeled: None,
+                })
+                .collect()
+        };
+        crate::refs::write_packed_refs_file(path, &records(oid(1))).expect("pack");
+        assert!(fs::metadata(path.join("packed-refs")).expect("meta").len() > 8192);
+        let refs = store(path);
+        assert_eq!(
+            refs.read_raw("refs/tags/t0499").expect("read"),
+            Some(RawRef::Direct(oid(1)))
+        );
+        let mut replaced = records(oid(2));
+        replaced.truncate(10);
+        crate::refs::write_packed_refs_file(path, &replaced).expect("repack");
+        assert_eq!(refs.read_raw("refs/tags/t0499").expect("read"), None);
+        assert_eq!(
+            refs.read_raw("refs/tags/t0009").expect("read"),
+            Some(RawRef::Direct(oid(2)))
+        );
+    }
+
+    #[test]
     fn create_with_reflog_next_to_a_ref_file_in_logs_reports_the_conflict() {
         let dir = git_dir();
         let path = dir.path();

@@ -918,7 +918,7 @@ fn parse_packed_ref_data_line_borrowed<'a>(
 /// In-memory view of a `packed-refs` file for indexed lookup without a full parse.
 #[derive(Debug, Clone)]
 pub(crate) struct PackedRefsFileView {
-    data: Vec<u8>,
+    data: std::sync::Arc<crate::pack_map::PackData>,
     /// Records are indexed in nondecreasing name order, so binary search over them is exact.
     sorted: bool,
     /// Hex length of the repository's object ids; the refname starts one byte after it.
@@ -928,13 +928,24 @@ pub(crate) struct PackedRefsFileView {
 }
 
 impl PackedRefsFileView {
-    /// Index `data` (the bytes of `path`) for a repository using `hash_algo`.
+    /// [`Self::from_data`] over an owned buffer.
+    #[cfg(test)]
+    fn from_bytes(path: &Path, data: Vec<u8>, hash_algo: crate::objects::HashAlgo) -> Result<Self> {
+        Self::from_data(path, crate::pack_map::PackData::from_owned(data), hash_algo)
+    }
+
+    /// Index `data`, the (possibly memory-mapped) bytes of `path`, for a repository using
+    /// `hash_algo`.
     ///
     /// Rejects what Git rejects before any lookup: carriage returns, a missing final newline,
     /// and a last line (after the header) too short to hold an object id. Only records with
     /// an id-sized prefix and a space are indexed; a file that declares `sorted` but whose
     /// indexed names are out of order is treated as unsorted.
-    fn from_bytes(path: &Path, data: Vec<u8>, hash_algo: crate::objects::HashAlgo) -> Result<Self> {
+    fn from_data(
+        path: &Path,
+        data: std::sync::Arc<crate::pack_map::PackData>,
+        hash_algo: crate::objects::HashAlgo,
+    ) -> Result<Self> {
         let hex_len = hash_algo.hex_len();
         if data.is_empty() {
             return Ok(Self {
@@ -1146,15 +1157,17 @@ fn parse_packed_refs_region(
 
 fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>> {
     let packed_path = store::paths::packed_refs_path(store);
-    let data = match fs::read(&packed_path) {
+    // Writers publish `packed-refs` by renaming a new file over it, never by rewriting it in
+    // place, so a large file can be mapped like a pack instead of copied.
+    let data = match crate::pack_map::PackData::open_with_min_len(&packed_path, 0) {
         Ok(d) => d,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(Error::Io(e)),
+        Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
     };
     let hash_algo = crate::repo::read_repository_format_from_git_dir(store)
         .map(|format| format.hash_algo())
         .unwrap_or(crate::objects::HashAlgo::Sha1);
-    Ok(Some(PackedRefsFileView::from_bytes(
+    Ok(Some(PackedRefsFileView::from_data(
         &packed_path,
         data,
         hash_algo,
