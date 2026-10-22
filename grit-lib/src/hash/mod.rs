@@ -387,6 +387,10 @@ pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
 
 /// Like [`hash_object`], but surfaces SHA-1 collision detection.
 ///
+/// Detection runs over the bytes that form the object id (header and payload), as in
+/// Git. A payload that only collides when hashed on its own, such as the SHAttered
+/// PDFs stored as blobs in Git's own history, is an ordinary object.
+///
 /// # Errors
 ///
 /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
@@ -394,21 +398,7 @@ pub fn try_hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Result<
     let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
     let mut hasher = ObjectHasher::for_object(algo, kind, len);
     hasher.update(data);
-    let oid = hasher.try_finalize()?;
-    if algo == HashAlgo::Sha1 {
-        detect_standalone_sha1_collision(data)?;
-    }
-    Ok(oid)
-}
-
-/// Detect chosen-prefix collisions on `payload` alone (SHAttered block prefixes).
-fn detect_standalone_sha1_collision(payload: &[u8]) -> Result<()> {
-    let mut hasher = Sha1dcHasher::new();
-    hasher.update(payload);
-    if let Err(collision) = hasher.finalize() {
-        return Err(collision_to_error(collision));
-    }
-    Ok(())
+    hasher.try_finalize()
 }
 
 fn object_id_from_sha1_digest(digest: &sha1dc::Digest) -> ObjectId {
@@ -1012,9 +1002,18 @@ mod tests {
                 .expect_err("SHAttered block must collide");
             assert!(matches!(err, Error::HashCollision { .. }));
             assert!(matches!(
-                try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &bytes),
+                HashAlgo::Sha1.try_digest(&bytes),
                 Err(Error::HashCollision { .. })
             ));
+
+            // As a blob, the header shifts the colliding blocks: the object id is an
+            // ordinary SHA-1, exactly what Git computes for these files.
+            let mut plain = Sha1::new();
+            plain.update(format!("blob {}\0", bytes.len()).as_bytes());
+            plain.update(&bytes);
+            let oid = try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &bytes)
+                .expect("blob holding a SHAttered prefix is not a collision");
+            assert_eq!(oid.as_bytes(), plain.finalize().as_slice());
         }
     }
 

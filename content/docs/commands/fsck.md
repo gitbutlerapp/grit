@@ -104,7 +104,7 @@ Example with a problem:
 }
 ```
 
-SHA-1 chosen-prefix collision on a loose object (grit is stricter than stock Git here):
+SHA-1 chosen-prefix collision detected while hashing a loose object (as with Git, detection covers the object header and payload together, so a blob that merely contains colliding bytes, such as the SHAttered PDFs in Git's own test suite, is an ordinary object):
 
 ```json
 {

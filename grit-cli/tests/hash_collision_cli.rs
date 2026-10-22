@@ -1,4 +1,4 @@
-//! CLI JSON for SHA-1 collision detection (sha1dc) on add and fsck.
+//! CLI add, fsck and fetch of blobs whose raw bytes are a SHA-1 collision prefix.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -6,7 +6,6 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::error::Error as LibError;
 use grit_lib::objects::hash::{hash_object, try_hash_object};
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::repo::Repository;
@@ -46,8 +45,25 @@ fn git_in(dir: &std::path::Path, args: &[&str]) {
     assert!(status.success(), "git {:?} in {}", args, dir.display());
 }
 
+fn git_output(dir: &std::path::Path, args: &[&str]) -> String {
+    let null = null_config();
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", &null)
+        .env("GIT_CONFIG_SYSTEM", &null)
+        .output()
+        .expect("git");
+    assert!(out.status.success(), "git {args:?} in {}", dir.display());
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+// Git's own history stores the SHAttered PDFs as blobs (`t/t0013/shattered-*.pdf`).
+// Only their raw SHA-1 collides; as blobs they are ordinary objects for Git, so grit
+// must add, check and fetch them the same way.
+
 #[test]
-fn grit_add_shattered_file_fails_with_hash_collision_json() {
+fn grit_add_shattered_prefix_file_stages_git_blob_id() {
     let grit = env!("CARGO_BIN_EXE_grit");
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
@@ -63,13 +79,8 @@ fn grit_add_shattered_file_fails_with_hash_collision_json() {
         .success());
 
     let data = shattered_prefix(1);
-    let oid = match try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data).expect_err("collision")
-    {
-        LibError::HashCollision { oid } => oid,
-        other => panic!("expected HashCollision, got {other:?}"),
-    };
-    let path = root.join("collision.bin");
-    fs::write(&path, &data).expect("write");
+    let oid = try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data).expect("blob id");
+    fs::write(root.join("collision.bin"), &data).expect("write");
 
     let out = Command::new(grit)
         .current_dir(root)
@@ -78,28 +89,29 @@ fn grit_add_shattered_file_fails_with_hash_collision_json() {
         .env("GIT_CONFIG_SYSTEM", &null)
         .output()
         .expect("add");
-
     assert_eq!(
         out.status.code(),
-        Some(1),
+        Some(0),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json stdout");
-    assert_eq!(
-        parsed.get("kind"),
-        Some(&serde_json::json!("hash_collision"))
-    );
-    assert_eq!(
-        parsed.get("oid"),
-        Some(&serde_json::Value::String(oid.to_hex()))
-    );
-    assert!(parsed.get("error").and_then(|v| v.as_str()).is_some());
+    let git_oid = git_output(root, &["hash-object", "collision.bin"]);
+    assert_eq!(git_oid.trim(), oid.to_hex());
+    let staged = git_output(root, &["ls-files", "-s", "collision.bin"]);
+    assert!(staged.contains(&oid.to_hex()), "staged: {staged}");
+    let fsck = Command::new("git")
+        .current_dir(root)
+        .args(["fsck", "--strict"])
+        .env("GIT_CONFIG_GLOBAL", &null)
+        .env("GIT_CONFIG_SYSTEM", &null)
+        .status()
+        .expect("git fsck");
+    assert!(fsck.success());
 }
 
 #[test]
-fn grit_fsck_json_reports_hash_collision() {
+fn grit_fsck_accepts_shattered_prefix_blob() {
     let fix = CliFixture::empty();
     let data = shattered_prefix(2);
     let oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
@@ -109,57 +121,24 @@ fn grit_fsck_json_reports_hash_collision() {
         .expect("write loose");
 
     let out = fix.run(&["fsck", "--json"]);
-    assert_eq!(out.status, Some(1), "fsck should fail on sha1 collision");
-
+    assert_eq!(out.status, Some(0), "fsck: {}", out.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&out.stdout).expect("json");
-    assert_eq!(parsed.get("ok"), Some(&serde_json::Value::Bool(false)));
-
+    assert_eq!(parsed.get("ok"), Some(&serde_json::Value::Bool(true)));
     let issues = parsed
         .get("issues")
         .and_then(|v| v.as_array())
         .expect("issues array");
-    let collision = issues
-        .iter()
-        .find(|issue| issue.get("kind") == Some(&serde_json::json!("sha1Collision")))
-        .expect("sha1Collision issue");
-    assert_eq!(collision.get("severity"), Some(&serde_json::json!("error")));
-    assert_eq!(
-        collision.get("oid"),
-        Some(&serde_json::Value::String(oid.to_hex()))
-    );
     assert!(
-        collision
-            .get("detail")
-            .and_then(|d| d.as_str())
-            .is_some_and(|d| d.contains("collision")),
-        "detail: {:?}",
-        collision.get("detail")
-    );
-
-    let human = fix.run(&["fsck"]);
-    assert_eq!(human.status, Some(1));
-    assert!(
-        human.stdout.contains("sha1Collision"),
-        "human fsck output: {}",
-        human.stdout
-    );
-    assert!(
-        human.stdout.contains("SHA-1 chosen-prefix collision"),
-        "human fsck output: {}",
-        human.stdout
-    );
-
-    let md = fix.run(&["fsck", "--markdown"]);
-    assert_eq!(md.status, Some(1));
-    assert!(
-        md.stdout.contains("sha1Collision"),
-        "markdown fsck output: {}",
-        md.stdout
+        !issues.iter().any(|issue| {
+            issue.get("kind") == Some(&serde_json::json!("sha1Collision"))
+                || issue.get("oid") == Some(&serde_json::Value::String(oid.to_hex()))
+        }),
+        "issues: {issues:?}"
     );
 }
 
 #[test]
-fn grit_fetch_shattered_pack_fails_with_hash_collision_json() {
+fn grit_fetch_shattered_prefix_blob_from_git_remote() {
     let grit = env!("CARGO_BIN_EXE_grit");
     let null = null_config();
     let base = tempfile::tempdir().expect("tempdir");
@@ -174,11 +153,7 @@ fn grit_fetch_shattered_pack_fails_with_hash_collision_json() {
     fs::create_dir(&upstream).expect("upstream dir");
     git_in(&upstream, &["init", "-b", "main"]);
     let data = shattered_prefix(1);
-    let oid = match try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data).expect_err("collision")
-    {
-        LibError::HashCollision { oid } => oid,
-        other => panic!("expected HashCollision, got {other:?}"),
-    };
+    let oid = try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data).expect("blob id");
     fs::write(upstream.join("collision.bin"), &data).expect("write");
     git_in(&upstream, &["add", "collision.bin"]);
     git_in(&upstream, &["commit", "-m", "collision"]);
@@ -213,20 +188,21 @@ fn grit_fetch_shattered_pack_fails_with_hash_collision_json() {
         .env("GIT_CONFIG_SYSTEM", &null)
         .output()
         .expect("fetch");
-
     assert_eq!(
         out.status.code(),
-        Some(1),
+        Some(0),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json stdout");
-    assert_eq!(
-        parsed.get("kind"),
-        Some(&serde_json::json!("hash_collision"))
-    );
-    assert_eq!(
-        parsed.get("oid"),
-        Some(&serde_json::Value::String(oid.to_hex()))
-    );
+
+    let repo = Repository::discover(Some(&client), &RepositoryOptions::default()).expect("client");
+    assert_eq!(repo.odb().read(&oid).expect("fetched blob").data, data);
+    let fsck = Command::new("git")
+        .current_dir(&client)
+        .args(["fsck", "--strict"])
+        .env("GIT_CONFIG_GLOBAL", &null)
+        .env("GIT_CONFIG_SYSTEM", &null)
+        .status()
+        .expect("git fsck");
+    assert!(fsck.success());
 }
