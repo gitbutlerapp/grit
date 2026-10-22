@@ -136,7 +136,7 @@ $ grit branch -d feature
 Deleted branch feature (was 2e409e2).
 ```
 
-`grit branch -d` refuses to delete a branch whose commits haven't been merged into the branch you're on. Use `-D` when you really mean it.
+`grit branch -d` refuses to delete a branch whose commits haven't been merged into the branch you're on. Use `--force-delete` (or `-D`) when you really mean it.
 
 ## Share it with a remote
 
@@ -149,20 +149,41 @@ $ grit push
   pushed main → origin refs/heads/main
 ```
 
-`grit push` sends the current branch to a branch with the same name on `origin`, creating it if needed. There are no upstream flags to set. For GitHub over HTTPS, [`grit auth`](../auth/) signs you in, and `grit` offers to run it if a push fails for lack of credentials.
+`grit push` sends the current branch to a branch with the same name on `origin`, creating it if needed. To publish under another name, pass a refspec: `grit push origin HEAD:refs/heads/experiment`. Set upstream tracking with [`grit branch -u`](../branch/) when you want `grit pull` to know which remote branch to follow. For GitHub over HTTPS, [`grit auth`](../auth/) signs you in, and `grit` offers to run it if a push fails for lack of credentials.
 
-To get other people's work, run [`grit pull`](../pull/). It fetches from the remote and brings your branch up to date, fast-forwarding when it can and recording a merge commit when both sides have new commits:
+To download updates without moving your branch, [`grit fetch`](../fetch/) is enough. Fetch a single branch when you do not need every remote-tracking ref:
+
+```console
+$ grit fetch origin main
+  refs/remotes/origin/main  ← refs/heads/main  a8e620a → b52cca6
+Fetched 1 update from origin.
+```
+
+To get other people's work into your branch, run [`grit pull`](../pull/). It fetches and integrates: fast-forward when you have no local commits, a merge commit when both sides moved, or a rebase when you pass `--rebase` (or set `pull.rebase`):
 
 ```console
 $ grit pull
 Merged origin/main into the current branch (91275a2)
+
+$ grit pull --rebase
+Rebased onto origin/main (c4f1a9b)
 ```
 
-If someone pushed before you, `grit push` is rejected and tells you what to do:
+Use [`grit pull --ff-only`](../pull/) in scripts that must refuse merge commits (exit **1** with `refused_not_ff` when histories diverged).
+
+If someone pushed before you, a normal `grit push` is rejected:
 
 ```console
 $ grit push
   rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
+```
+
+After rewriting commits with [`grit history`](../history/) (reword, drop, fixup, or squash), fetch so your remote-tracking refs are current, then push with a lease:
+
+```console
+$ grit fetch origin
+$ grit push --force-with-lease
+  pushed main → origin refs/heads/main
 ```
 
 ## Tag a release

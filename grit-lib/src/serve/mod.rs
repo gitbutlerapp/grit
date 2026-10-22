@@ -16,7 +16,9 @@ mod shallow_upload;
 mod upload_pack;
 mod upload_pack_policy;
 
-pub(crate) use shallow_upload::{compute_shallow_response, ShallowRequest};
+pub(crate) use shallow_upload::{
+    compute_shallow_response, relative_deepen_depth_for_request, ShallowRequest,
+};
 
 pub use receive_pack::{
     receive_pack, HookRunRecord, ReceiveOutcome, ReceivePolicy, RefUpdateResult,

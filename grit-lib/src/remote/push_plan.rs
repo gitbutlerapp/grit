@@ -1,4 +1,4 @@
-//! Resolve remotes and refspecs for [`crate::remote::transfer::push`].
+//! Resolve remotes and refspecs for [`Remote::push`](crate::remote::Remote::push).
 //!
 //! [`resolve_push`] turns a [`PushRequest`] (CLI flags and positional refspecs)
 //! into a [`ResolvedPush`] of concrete [`PushRefSpec`] entries, matching Git's
@@ -9,6 +9,7 @@ use std::path::Path;
 
 use thiserror::Error;
 
+use crate::branch_tracking::remote_tracking_ref_for_remote_ref;
 use crate::config::ConfigSet;
 use crate::objects::ObjectId;
 use crate::refs;
@@ -19,6 +20,27 @@ use crate::state::{resolve_head, HeadState};
 use crate::transfer::{resolve_push_delete_ref, PushRefSpec};
 
 pub use crate::remote::DEFAULT_REMOTE;
+
+/// How non-fast-forward updates are allowed during a push.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ForceMode {
+    /// Reject non-fast-forward updates (default).
+    #[default]
+    None,
+    /// Unconditional force (`--force`).
+    Force,
+    /// Guarded force (`--force-with-lease`).
+    Lease(LeaseExpectation),
+}
+
+/// What a force-with-lease push compares the remote ref against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeaseExpectation {
+    /// Use the local remote-tracking ref mapped from the push destination.
+    Tracking,
+    /// Use an explicit object id (`--force-with-lease=<rev>`); only valid for a single ref.
+    Value(ObjectId),
+}
 
 /// What the caller wants to push (remote override, refspecs, tags, deletions).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -31,6 +53,8 @@ pub struct PushRequest {
     pub tags: bool,
     /// Remote refs to delete (`--delete`).
     pub delete: Vec<String>,
+    /// Force or force-with-lease mode from CLI flags.
+    pub force: ForceMode,
 }
 
 /// A fully resolved push target.
@@ -116,12 +140,37 @@ pub enum PushPlanError {
         /// Revision expression.
         spec: String,
     },
+    /// `--force-with-lease=<rev>` with more than one ref update.
+    #[error("--force-with-lease=<rev> requires pushing exactly one ref")]
+    LeaseValueRequiresSingleRef,
     /// Other planning failure.
     #[error("{0}")]
     Message(String),
 }
 
 type PlanResult<T> = std::result::Result<T, PushPlanError>;
+
+/// Parse `--force` / `--force-with-lease[=<rev>]` into [`ForceMode`].
+pub fn parse_force_mode(
+    repo: &Repository,
+    force: bool,
+    force_with_lease: Option<Option<String>>,
+) -> PlanResult<ForceMode> {
+    if force {
+        return Ok(ForceMode::Force);
+    }
+    let Some(flag) = force_with_lease else {
+        return Ok(ForceMode::None);
+    };
+    match flag {
+        None => Ok(ForceMode::Lease(LeaseExpectation::Tracking)),
+        Some(rev) => {
+            let oid = crate::rev_parse::resolve_revision_for_verify(repo, &rev)
+                .map_err(|_| PushPlanError::UnknownRevision { spec: rev.clone() })?;
+            Ok(ForceMode::Lease(LeaseExpectation::Value(oid)))
+        }
+    }
+}
 
 /// Resolve `request` into a remote name and [`PushRefSpec`] list.
 ///
@@ -144,7 +193,9 @@ pub fn resolve_push(
     validate_remote(config, &remote)?;
 
     if request.refspecs.is_empty() {
-        return resolve_default_push(repo, config, &remote, ctx);
+        let mut resolved = resolve_default_push(repo, config, &remote, ctx)?;
+        apply_force_mode(repo, config, &remote, &mut resolved.specs, &request.force)?;
+        return Ok(resolved);
     }
 
     let mut specs = Vec::new();
@@ -152,12 +203,20 @@ pub fn resolve_push(
         specs.extend(resolve_cli_refspec(repo, config, &remote, spec, ctx)?);
     }
     let branch_label = branch_label_from_specs(repo, &specs);
-    Ok(ResolvedPush {
+    let mut resolved = ResolvedPush {
         remote,
         specs,
         branch_label,
         kind: PushPlanKind::Refspecs,
-    })
+    };
+    apply_force_mode(
+        repo,
+        config,
+        &resolved.remote,
+        &mut resolved.specs,
+        &request.force,
+    )?;
+    Ok(resolved)
 }
 
 fn resolve_delete_push(
@@ -177,12 +236,20 @@ fn resolve_delete_push(
         })
         .collect::<PlanResult<Vec<_>>>()?;
     let branch_label = delete_branch_label(&specs);
-    Ok(ResolvedPush {
+    let mut resolved = ResolvedPush {
         remote,
         specs,
         branch_label,
         kind: PushPlanKind::Delete,
-    })
+    };
+    apply_force_mode(
+        repo,
+        config,
+        &resolved.remote,
+        &mut resolved.specs,
+        &request.force,
+    )?;
+    Ok(resolved)
 }
 
 fn resolve_tags_push(
@@ -201,12 +268,20 @@ fn resolve_tags_push(
         .into_iter()
         .map(|(refname, oid)| push_spec(Some(oid), Some(refname.clone()), refname, false, false))
         .collect();
-    Ok(ResolvedPush {
+    let mut resolved = ResolvedPush {
         remote,
         specs,
         branch_label: None,
         kind: PushPlanKind::Tags,
-    })
+    };
+    apply_force_mode(
+        repo,
+        config,
+        &resolved.remote,
+        &mut resolved.specs,
+        &request.force,
+    )?;
+    Ok(resolved)
 }
 
 fn resolve_default_push(
@@ -743,6 +818,61 @@ fn guess_qualified_dst(src_full: &str, short_dst: &str) -> Option<String> {
     }
 }
 
+/// Fill `force`, `expected_old`, and `expect_absent` on planned specs from [`ForceMode`].
+fn apply_force_mode(
+    repo: &Repository,
+    config: &ConfigSet,
+    remote: &str,
+    specs: &mut [PushRefSpec],
+    mode: &ForceMode,
+) -> PlanResult<()> {
+    match mode {
+        ForceMode::None => {}
+        ForceMode::Force => {
+            for spec in specs.iter_mut() {
+                spec.force = true;
+                spec.expected_old = None;
+                spec.expect_absent = false;
+            }
+        }
+        ForceMode::Lease(LeaseExpectation::Tracking) => {
+            for spec in specs.iter_mut() {
+                apply_tracking_lease(repo, config, remote, spec);
+            }
+        }
+        ForceMode::Lease(LeaseExpectation::Value(expected)) => {
+            if specs.len() != 1 {
+                return Err(PushPlanError::LeaseValueRequiresSingleRef);
+            }
+            for spec in specs.iter_mut() {
+                spec.force = true;
+                spec.expected_old = Some(*expected);
+                spec.expect_absent = false;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_tracking_lease(
+    repo: &Repository,
+    config: &ConfigSet,
+    remote: &str,
+    spec: &mut PushRefSpec,
+) {
+    spec.force = true;
+    spec.expected_old = None;
+    spec.expect_absent = false;
+    if let Some(tracking) = remote_tracking_ref_for_remote_ref(config, remote, &spec.dst) {
+        match refs::resolve_ref(repo.git_dir(), &tracking) {
+            Ok(oid) => spec.expected_old = Some(oid),
+            Err(_) => spec.expect_absent = true,
+        }
+    } else {
+        spec.expect_absent = true;
+    }
+}
+
 fn push_spec(
     src: Option<ObjectId>,
     src_ref: Option<String>,
@@ -986,6 +1116,52 @@ mod tests {
             mapped.as_deref(),
             Some("refs/heads/main:refs/remotes/origin/main")
         );
+    }
+
+    #[test]
+    fn force_with_lease_tracking_sets_expected_old() {
+        let (_tmp, repo) = init_repo();
+        let git_dir = repo.git_dir();
+        std::fs::write(
+            git_dir.join("config"),
+            r#"[remote "origin"]
+	url = /tmp/o.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+"#,
+        )
+        .expect("config");
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+        let oid = ObjectId::from_hex("a".repeat(40).as_str()).expect("oid");
+        std::fs::create_dir_all(git_dir.join("refs/heads")).expect("heads dir");
+        std::fs::write(
+            git_dir.join("refs/heads/main"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("main");
+        std::fs::create_dir_all(git_dir.join("refs/remotes/origin")).expect("rt dir");
+        std::fs::write(
+            git_dir.join("refs/remotes/origin/main"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("tracking");
+        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let ctx = PushPlanContext::default();
+        let resolved = resolve_push(
+            &repo,
+            &config,
+            &PushRequest {
+                force: ForceMode::Lease(LeaseExpectation::Tracking),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("resolve");
+        assert_eq!(resolved.specs.len(), 1);
+        assert_eq!(resolved.specs[0].expected_old, Some(oid));
+        assert!(resolved.specs[0].force);
     }
 
     #[test]

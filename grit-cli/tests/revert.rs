@@ -158,41 +158,6 @@ fn git_fsck_strict(root: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn snapshot_tree(root: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
-    let mut out = Vec::new();
-    for rel in ["index", "HEAD", "refs/heads/main"] {
-        let p = root.join(".git").join(rel);
-        if p.exists() {
-            out.extend_from_slice(rel.as_bytes());
-            out.push(0);
-            out.extend(fs::read(&p).unwrap_or_default());
-        }
-    }
-    fn walk(dir: &Path, prefix: &Path, out: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
-        if !dir.is_dir() {
-            return Ok(());
-        }
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.file_name().and_then(|n| n.to_str()) == Some(".git") {
-                continue;
-            }
-            let rel = prefix.join(path.file_name().unwrap());
-            if path.is_dir() {
-                walk(&path, &rel, out)?;
-            } else {
-                out.extend(rel.to_string_lossy().as_bytes());
-                out.push(0);
-                out.extend(fs::read(&path)?);
-            }
-        }
-        Ok(())
-    }
-    walk(root, Path::new(""), &mut out)?;
-    Ok(out)
-}
-
 #[test]
 fn revert_creates_inverse_commit() -> TestResult {
     let scratch = Scratch::new("inverse")?;
@@ -226,7 +191,7 @@ fn revert_creates_inverse_commit() -> TestResult {
 }
 
 #[test]
-fn revert_conflict_changes_nothing() -> TestResult {
+fn revert_conflict_leaves_markers() -> TestResult {
     let scratch = Scratch::new("conflict")?;
     let repo = scratch.path();
     init_repo(repo)?;
@@ -235,20 +200,11 @@ fn revert_conflict_changes_nothing() -> TestResult {
     git(repo, &["reset", "--hard", "HEAD~1"])?;
     commit_file(repo, "a.txt", "manual\n", "manual")?;
 
-    let before = snapshot_tree(repo)?;
     let out = gs(repo, ["revert", &target])?;
-    assert_ne!(out.status, Some(0), "{}", out.dump());
-    assert!(
-        out.stderr.contains("conflicts") || out.stdout.contains("conflicts"),
-        "{}",
-        out.dump()
-    );
-    assert!(
-        out.stderr.contains("Nothing was changed") || out.stdout.contains("Nothing was changed"),
-        "{}",
-        out.dump()
-    );
-    assert_eq!(before, snapshot_tree(repo)?);
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    assert!(repo.join(".git/REVERT_HEAD").is_file());
+    let wt = fs::read_to_string(repo.join("a.txt"))?;
+    assert!(wt.contains("<<<<<<<"), "expected conflict markers: {wt}");
     Ok(())
 }
 
@@ -263,9 +219,289 @@ fn revert_json_fields() -> TestResult {
     let out = gs(repo, ["--json", "revert", &target])?;
     assert_eq!(out.status, Some(0), "{}", out.dump());
     let v: Value = serde_json::from_str(out.stdout.trim())?;
+    assert_eq!(v["result"], "completed");
     assert_eq!(v["source"].as_str(), Some(target.as_str()));
     let oid = v["oid"].as_str().expect("oid");
     assert_eq!(oid.len(), 40);
     assert_eq!(v["subject"].as_str(), Some("Revert \"feature title\""));
+    let commits = v["commits"].as_array().expect("commits");
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0]["source"].as_str(), Some(target.as_str()));
+    assert_eq!(v["dropped"].as_array().map(|a| a.len()), Some(0));
+    Ok(())
+}
+
+#[test]
+fn revert_range_newest_first() -> TestResult {
+    let scratch = Scratch::new("range")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "a.txt", "v1\n", "c1")?;
+    commit_file(repo, "a.txt", "v2\n", "c2")?;
+    commit_file(repo, "a.txt", "v3\n", "c3")?;
+    let base = git(repo, &["rev-parse", "HEAD~2"])?.trim().to_owned();
+
+    let git_wt = tempfile::tempdir()?;
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", repo.display()),
+            &git_wt.path().to_string_lossy(),
+        ])
+        .status()?;
+    git(
+        git_wt.path(),
+        &["revert", "--no-edit", &format!("{base}..HEAD")],
+    )?;
+
+    gs(repo, ["revert", &format!("{base}..HEAD")])?;
+    assert_eq!(
+        git(repo, &["rev-parse", "HEAD^{tree}"])?.trim(),
+        git(git_wt.path(), &["rev-parse", "HEAD^{tree}"])?.trim()
+    );
+    Ok(())
+}
+
+#[test]
+fn revert_merge_mainline_1_matches_git() -> TestResult {
+    let scratch = Scratch::new("merge")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "f.txt", "a\n", "c1")?;
+    git(repo, &["switch", "-c", "topic"])?;
+    fs::write(repo.join("f.txt"), "t\n")?;
+    git(repo, &["commit", "-qam", "topic"])?;
+    git(repo, &["switch", "main"])?;
+    commit_file(repo, "g.txt", "g\n", "prep")?;
+    git(repo, &["merge", "--no-ff", "-qm", "Merge topic", "topic"])?;
+    let merge = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+    commit_file(repo, "after.txt", "after\n", "after")?;
+
+    let git_wt = tempfile::tempdir()?;
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", repo.display()),
+            &git_wt.path().to_string_lossy(),
+        ])
+        .status()?;
+    git(git_wt.path(), &["revert", "-m", "1", "--no-edit", &merge])?;
+
+    gs(repo, ["revert", "--mainline", "1", &merge])?;
+    assert_eq!(
+        git(repo, &["rev-parse", "HEAD^{tree}"])?.trim(),
+        git(git_wt.path(), &["rev-parse", "HEAD^{tree}"])?.trim()
+    );
+    Ok(())
+}
+
+#[test]
+fn revert_merge_without_mainline_errors_with_hint() -> TestResult {
+    let scratch = Scratch::new("merge-hint")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "f.txt", "a\n", "c1")?;
+    git(repo, &["switch", "-c", "topic"])?;
+    fs::write(repo.join("f.txt"), "t\n")?;
+    git(repo, &["commit", "-qam", "topic"])?;
+    git(repo, &["switch", "main"])?;
+    commit_file(repo, "g.txt", "g\n", "prep")?;
+    git(repo, &["merge", "--no-ff", "-qm", "Merge topic", "topic"])?;
+    let merge = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+
+    let out = gs(repo, ["revert", &merge])?;
+    assert_ne!(out.status, Some(0), "{}", out.dump());
+    let msg = format!("{}{}", out.stderr, out.stdout);
+    assert!(msg.contains("--mainline"), "{}", out.dump());
+    Ok(())
+}
+
+#[test]
+fn revert_conflict_continue() -> TestResult {
+    let scratch = Scratch::new("continue")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "f.txt", "base\n", "base")?;
+    git(repo, &["switch", "-c", "side"])?;
+    fs::write(repo.join("f.txt"), "side\n")?;
+    git(repo, &["commit", "-qam", "side"])?;
+    let rev = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+    git(repo, &["switch", "main"])?;
+    fs::write(repo.join("f.txt"), "main\n")?;
+    git(repo, &["commit", "-qam", "main"])?;
+
+    let out = gs(repo, ["revert", &rev])?;
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    fs::write(repo.join("f.txt"), "base\n")?;
+    git(repo, &["add", "f.txt"])?;
+    let out = gs(repo, ["revert", "--continue"])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert_eq!(fs::read_to_string(repo.join("f.txt"))?, "base\n");
+    Ok(())
+}
+
+#[test]
+fn revert_abort() -> TestResult {
+    let scratch = Scratch::new("abort")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "f.txt", "base\n", "base")?;
+    git(repo, &["switch", "-c", "side"])?;
+    fs::write(repo.join("f.txt"), "side\n")?;
+    git(repo, &["commit", "-qam", "side"])?;
+    let rev = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+    git(repo, &["switch", "main"])?;
+    fs::write(repo.join("f.txt"), "main\n")?;
+    git(repo, &["commit", "-qam", "main"])?;
+    let before = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+
+    gs(repo, ["revert", &rev])?;
+    let out = gs(repo, ["revert", "--abort"])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert_eq!(git(repo, &["rev-parse", "HEAD"])?.trim(), before);
+    assert_eq!(fs::read_to_string(repo.join("f.txt"))?, "main\n");
+    Ok(())
+}
+
+#[test]
+fn revert_skip() -> TestResult {
+    let scratch = Scratch::new("skip")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "f.txt", "base\n", "base")?;
+    git(repo, &["switch", "-c", "topic"])?;
+    fs::write(repo.join("f.txt"), "topic\n")?;
+    git(repo, &["commit", "-qam", "topic-f"])?;
+    let c1 = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+    git(repo, &["switch", "main"])?;
+    fs::write(repo.join("f.txt"), "main\n")?;
+    git(repo, &["commit", "-qam", "main"])?;
+
+    gs(repo, ["revert", &c1])?;
+    let out = gs(repo, ["revert", "--skip"])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert_eq!(fs::read_to_string(repo.join("f.txt"))?, "main\n");
+    Ok(())
+}
+
+#[test]
+fn revert_message_flag() -> TestResult {
+    let scratch = Scratch::new("message")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "a.txt", "v1\n", "initial")?;
+    let target = commit_file(repo, "a.txt", "v2\n", "feature title")?;
+
+    let out = gs(
+        repo,
+        ["revert", "--message", "Custom revert subject", &target],
+    )?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    let subject = git(repo, &["log", "-1", "--format=%s"])?.trim().to_owned();
+    assert_eq!(subject, "Custom revert subject");
+    Ok(())
+}
+
+#[test]
+fn revert_message_file() -> TestResult {
+    let scratch = Scratch::new("message-file")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "a.txt", "v1\n", "initial")?;
+    let target = commit_file(repo, "a.txt", "v2\n", "feature title")?;
+    let msg_path = repo.join("msg.txt");
+    fs::write(&msg_path, "From file\n")?;
+
+    let out = gs(
+        repo,
+        [
+            "revert",
+            "--message-file",
+            msg_path.to_str().unwrap(),
+            &target,
+        ],
+    )?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    let subject = git(repo, &["log", "-1", "--format=%s"])?.trim().to_owned();
+    assert_eq!(subject, "From file");
+    Ok(())
+}
+
+fn commit_with_dates(
+    root: &Path,
+    path: &str,
+    contents: &str,
+    msg: &str,
+    when: &str,
+) -> Result<String, Box<dyn Error>> {
+    let full = root.join(path);
+    fs::write(&full, contents)?;
+    git(root, &["add", path])?;
+    let out = Command::new("git")
+        .args(["commit", "-qm", msg])
+        .current_dir(root)
+        .env("GIT_AUTHOR_DATE", when)
+        .env("GIT_COMMITTER_DATE", when)
+        .env("GIT_AUTHOR_NAME", "Test User")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Test User")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    if !out.status.success() {
+        return Err(format!("commit failed: {}", String::from_utf8_lossy(&out.stderr)).into());
+    }
+    Ok(git(root, &["rev-parse", "HEAD"])?.trim().to_owned())
+}
+
+#[test]
+fn revert_range_skewed_committer_dates_matches_git() -> TestResult {
+    let scratch = Scratch::new("skew-dates")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_with_dates(repo, "f.txt", "0\n", "base", "@1000 +0000")?;
+    let base = git(repo, &["rev-parse", "HEAD"])?.trim().to_owned();
+    commit_with_dates(repo, "f.txt", "1\n", "c1", "@1200 +0000")?;
+    commit_with_dates(repo, "f.txt", "2\n", "c2", "@1100 +0000")?;
+
+    let git_wt = tempfile::tempdir()?;
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", repo.display()),
+            &git_wt.path().to_string_lossy(),
+        ])
+        .status()?;
+    git(
+        git_wt.path(),
+        &["revert", "--no-edit", &format!("{base}..HEAD")],
+    )?;
+
+    let out = gs(repo, ["revert", &format!("{base}..HEAD")])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert_eq!(
+        fs::read_to_string(repo.join("f.txt"))?,
+        fs::read_to_string(git_wt.path().join("f.txt"))?
+    );
+    Ok(())
+}
+
+#[test]
+fn revert_json_schema() -> TestResult {
+    let scratch = Scratch::new("schema")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "a.txt", "v1\n", "initial")?;
+    let target = commit_file(repo, "a.txt", "v2\n", "feature title")?;
+
+    let out = gs(repo, ["--json", "revert", &target])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    let v: Value = serde_json::from_str(out.stdout.trim())?;
+    assert!(v.get("result").is_some());
+    assert!(v.get("commits").is_some());
+    assert!(v.get("dropped").is_some());
+    assert!(v.get("source").is_some());
+    assert!(v.get("oid").is_some());
     Ok(())
 }

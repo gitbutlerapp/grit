@@ -54,7 +54,7 @@ use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::push::{push_http, push_remote};
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
+use grit_lib::remote::transfer::{FetchDepth, FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport::http::{http_client_arc, HttpClient};
 use grit_lib::remote::transport::{
     read_advertisement, ConnectOptions, Connection, GitDaemonTransport, Service, SshTransport,
@@ -855,7 +855,7 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
     let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::All,
-        depth: Some(1),
+        fetch_depth: FetchDepth::depth(1),
         ..Default::default()
     };
     let outcome = fetch_remote(&local_git, &mut *conn, &opts, &mut NoProgress)

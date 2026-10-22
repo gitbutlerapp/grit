@@ -337,24 +337,14 @@ fn stage_inner_on_index(
             hash_blobs_without_write: opts.dry_run,
             ..DiffIndexToWorktreeOptions::default()
         };
-        if dry_run {
-            let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
-                repo.odb(),
-                index,
-                work_tree,
-                diff_opts,
-            )?;
-            (unstaged, std::collections::BTreeMap::new())
-        } else {
-            let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
-                repo.odb(),
-                repo.git_dir(),
-                index,
-                work_tree,
-                diff_opts,
-            )?;
-            (unstaged, staging_stats)
-        }
+        let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
+            repo.odb(),
+            repo.git_dir(),
+            index,
+            work_tree,
+            diff_opts,
+        )?;
+        (unstaged, staging_stats)
     };
 
     let rules = lock_rules(&rules_arc)?;
@@ -482,26 +472,30 @@ fn stage_inner_on_index(
                 continue;
             }
             if plan.remove {
-                if index.get(path.as_bytes(), 0).is_some() {
+                if !dry_run_list_only && index.get(path.as_bytes(), 0).is_some() {
                     index.remove(path.as_bytes());
+                    outcome.removed.push(path);
+                } else if dry_run_list_only {
                     outcome.removed.push(path);
                 }
                 continue;
             }
-            if !dry_run {
-                icase_map.remove_alias_of(index, path.as_bytes());
+            if !dry_run_list_only {
+                if !dry_run {
+                    icase_map.remove_alias_of(index, path.as_bytes());
+                }
+                apply_tracked_stage_plan(
+                    repo,
+                    work_tree,
+                    &path,
+                    &plan,
+                    staging_stats.get(&path),
+                    index,
+                    has_unmerged,
+                    opts.executable_hint,
+                    &matches,
+                )?;
             }
-            apply_tracked_stage_plan(
-                repo,
-                work_tree,
-                &path,
-                &plan,
-                staging_stats.get(&path),
-                index,
-                has_unmerged,
-                opts.executable_hint,
-                &matches,
-            )?;
             outcome.modified.push(path);
         }
     }

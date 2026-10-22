@@ -12,6 +12,8 @@ grit push [<remote>] [<refspec>...]
 grit push --tags
 grit push --delete <ref>
 grit push --dry-run
+grit push --force-with-lease[=<rev>]
+grit push --force
 grit push --remote <name>   # hidden alias for one release
 ```
 
@@ -27,6 +29,8 @@ With `--tags`, pushes every local tag under `refs/tags/`.
 
 With `--delete`, deletes remote branches or tags (short names map like Git).
 
+`--force-with-lease` updates a remote ref only when it still matches the local remote-tracking ref mapped from the push destination (or when the ref is absent if there is no tracking ref). Use `--force-with-lease=<rev>` when pushing exactly one ref to compare against a specific commit. `--force` overwrites the remote ref unconditionally. The two flags cannot be combined.
+
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
 ## Options
@@ -38,6 +42,9 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `-t`, `--tags` | Push all local tags instead of the current branch. |
 | `--delete` | Delete a remote ref (repeatable). |
 | `--dry-run` | Contact the remote but do not update refs or send objects. |
+| `-f`, `--force` | Overwrite remote refs when the update is not a fast-forward. |
+| `--force-with-lease` | Push only if the remote ref matches the local remote-tracking ref (or is absent when there is no tracking ref). |
+| `--force-with-lease=<rev>` | Same check against `<rev>` (exactly one ref must be pushed). |
 | `--remote` | Hidden alias for the remote name (prefer the positional `<remote>`). |
 
 ## Examples
@@ -69,6 +76,13 @@ $ grit push
   rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
 ```
 
+When the remote moved since your last fetch:
+
+```console
+$ grit push --force-with-lease
+  rejected origin refs/heads/main: stale remote ref — run `grit fetch` and try again
+```
+
 ## JSON output
 
 Schema: [v1](/schemas/push/v1.json)
@@ -81,7 +95,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `kind` | string | `branch`, `tags`, `delete`, or `refspecs`. |
 | `branch` | string or null | Short branch name when `kind` is `branch`. |
 | `dry_run` | boolean | `true` when `--dry-run` was used (no refs or objects written). |
-| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason`, `old_oid`, `new_oid`, `src`, and `forced`. |
+| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 
 Example:

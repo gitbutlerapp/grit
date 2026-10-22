@@ -234,6 +234,9 @@ pub fn parse_author_arg(raw: &str) -> Result<AuthorContact, AuthorArgError> {
     if s.is_empty() {
         return Err(AuthorArgError::InvalidFormat);
     }
+    if s.contains('\n') || s.contains('\r') {
+        return Err(AuthorArgError::InvalidFormat);
+    }
     if let Some(lt) = s.find('<') {
         let rest = &s[lt + 1..];
         let gt = rest.find('>').ok_or(AuthorArgError::InvalidFormat)?;

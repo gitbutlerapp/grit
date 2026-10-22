@@ -93,6 +93,12 @@ const HTTP_MATRIX_IDS: [&str; 3] = [
     "push/incremental-http@git-git",
 ];
 
+const FETCH_MATRIX_IDS: [&str; 3] = [
+    "fetch/one-branch@git-git",
+    "fetch/dry-run@git-git",
+    "fetch/deepen@git-git",
+];
+
 #[test]
 fn network_headlines_smoke() {
     let _guard = lock_e2e();
@@ -125,6 +131,38 @@ fn network_headlines_smoke() {
             .find(|s| s.id == id)
             .expect("registry");
         assert_eq!(row.name.as_deref(), spec.name);
+        assert!(!row.pending, "{id} pending");
+        assert!(row.git.peak_rss_bytes > 0, "{id} git rss");
+        assert!(row.grit.peak_rss_bytes > 0, "{id} grit rss");
+    }
+}
+
+#[test]
+fn fetch_refspec_matrix_smoke() {
+    let _guard = lock_e2e();
+    let git = resolve_git();
+    let (grit, _http, _bench) = build_binaries();
+    let cache = TempDir::new().expect("cache");
+    std::env::set_var("GRIT_BENCH_CACHE", cache.path());
+    prepare_fixtures(&git, &[FixtureKind::GitGit]);
+
+    for id in FETCH_MATRIX_IDS {
+        let daily_root = cache.path().join(id.replace('/', "_"));
+        std::env::set_var("GRIT_BENCH_DAILY_ROOT", &daily_root);
+        let out_path = cache.path().join(format!("daily-fetch-matrix-{id}.json"));
+        let out = run_daily(&git, &grit, &out_path, &["--only", id]);
+        assert!(
+            out.status.success(),
+            "daily fetch matrix {id} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let report = grit_utils::validate_daily_report(&out_path).expect("validate");
+        assert_eq!(report.scenarios.len(), 1);
+        let row = &report.scenarios[0];
+        assert_eq!(row.id, id);
+        assert!(!row.headline, "{id} not headline");
+        assert!(REMOTE_MATRIX_SCENARIOS.iter().any(|s| s.id == id));
         assert!(!row.pending, "{id} pending");
         assert!(row.git.peak_rss_bytes > 0, "{id} git rss");
         assert!(row.grit.peak_rss_bytes > 0, "{id} grit rss");

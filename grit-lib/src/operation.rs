@@ -5,8 +5,12 @@
 //! [`ConflictKind`](crate::porcelain::status::ConflictKind) for `--porcelain=v2` XY codes.
 //!
 //! ```rust
-//! use grit_lib::operation::ConflictKind;
-//! assert!(matches!(ConflictKind::Content, ConflictKind::Content));
+//! use grit_lib::operation::{conflict_kind_from_stages, ConflictKind};
+//!
+//! assert_eq!(
+//!     conflict_kind_from_stages(false, true, true),
+//!     ConflictKind::AddAdd
+//! );
 //! ```
 
 use crate::diff::merge_trees::TreeMergeOutput;

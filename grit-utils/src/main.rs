@@ -21,7 +21,8 @@ use grit_utils::maintenance_suite::run_maintenance_suite;
 use grit_utils::network_fixture::NetworkProfile;
 use grit_utils::network_suite::{
     prepare_network_clone, prepare_network_fetch_incr, prepare_network_fetch_noop,
-    prepare_network_pull_rebase, prepare_network_push, run_network_suite,
+    prepare_network_force_with_lease, prepare_network_pull_rebase, prepare_network_push,
+    run_network_suite,
 };
 use grit_utils::odb_driver::{self, open_repo};
 use grit_utils::odb_suite::{run_odb_backend_suite, run_odb_suite, OdbRunConfig};
@@ -475,6 +476,13 @@ enum Cmd {
     },
     #[command(hide = true, name = "prepare-network-pull-rebase")]
     PrepareNetworkPullRebase {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        bare: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareNetworkForceWithLease {
         #[arg(long)]
         git: PathBuf,
         #[arg(long)]
@@ -1360,6 +1368,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_network_push(&git, bare.as_path());
         }
+        Cmd::PrepareNetworkForceWithLease { git, bare } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_network_force_with_lease(&git, bare.as_path());
+        }
         Cmd::PrepareNetworkPullRebase { git, bare } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_network_pull_rebase(&git, bare.as_path());
@@ -1964,6 +1976,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareNetworkFetchIncr { .. }
         | Cmd::PrepareNetworkFetchNoop { .. }
         | Cmd::PrepareNetworkPush { .. }
+        | Cmd::PrepareNetworkForceWithLease { .. }
         | Cmd::PrepareNetworkPullRebase { .. }
         | Cmd::ServeGitHttp { .. }
         | Cmd::PrepareRestore

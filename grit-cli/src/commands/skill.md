@@ -77,11 +77,16 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | --- | --- |
 | List branches | `grit branch` |
 | Create a branch at the current commit (no switch) | `grit branch <name>` |
+| Create at a specific commit | `grit branch <name> <start>` |
+| Create with upstream tracking | `grit branch -t <name> <remote>/<branch>` or rely on `branch.autoSetupMerge` |
+| Rename a branch | `grit branch -m [<old>] <new>` or `grit branch -M <new>` (force) |
+| Set / clear upstream | `grit branch -u <upstream> [<name>]`, `grit branch --unset-upstream [<name>]` |
+| Preview any branch mutation | add `--dry-run --json` (no ref, config, or reflog changes) |
 | Create and switch | `grit switch -c <name>` |
 | Switch | `grit switch <name>` (also `grit checkout`, `grit co`) |
 | Delete a merged branch | `grit branch -d <name>` |
+| Delete regardless of merge | `grit branch --force-delete <name>` (short `-D`) |
 | Predict merge conflicts (no repo changes) | `grit merge --check <branch>` (exit 0 = clean/ff/up to date, 1 = would conflict; `--json` → `result: clean\|conflicts\|…`) |
-| Delete regardless | `grit branch -D <name>` |
 
 `grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run when checkout would overwrite local edits or untracked files. Preflight with `grit switch <branch> --dry-run --json` (checks only; reports `changed_paths`) before switching. On refusal, `--json` emits `kind: would_overwrite` with `reason` (`local_changes` or `untracked`) and sorted `paths`.
 
@@ -89,8 +94,9 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 
 - `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`). Use `grit merge --check <branch>` to predict conflicts in memory without touching refs, the index, or the worktree.
 - `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
-- `grit revert <commit>` undoes one non-merge commit with a new inverse commit (`Revert "…"` message).
-- On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or the matching `--continue` command when pick/revert support lands. Use `--abort` on the same command to cancel.
+- `grit revert [<commit>…]` undoes one or more commits (ranges OK; newest first). Merge commits need `--mainline <n>`. `-m` / `--message-file` set the message for a **single** commit only.
+- `grit revert --continue`, `--abort`, and `--skip` resume or cancel a stopped revert sequence (same conflict model as pick).
+- On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or `grit pick --continue` / `grit revert --continue`. Use `--abort` on the same command to cancel.
 
 ## Remotes
 
@@ -99,12 +105,17 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Copy a repository | `grit clone <url> [<dir>]` |
 | List or add remotes | `grit remote`, `grit remote add <name> <url>` |
 | Download without changing your branch | `grit fetch [<remote>]` |
+| Fetch one branch or ref | `grit fetch origin main` (or `grit fetch origin pull/123/head:pr-123` for a PR) |
+| Shallow fetch controls | `grit fetch --depth N`, `--deepen N`, or `--unshallow` (same semantics as Git; mutually exclusive) |
 | Fetch and merge the remote copy of this branch | `grit pull` |
-| Fetch and replay local commits on top of upstream | `grit pull --rebase` (or `pull.rebase` in config) |
+| Pull only when a fast-forward is possible | `grit pull --ff-only` (exit **0** on success, **1** with `refused_not_ff` when diverged; branch unchanged) |
+| Fetch and replay local commits on top of upstream | `grit pull --rebase` (or `pull.rebase` in config; rebase conflicts abort atomically, exit **1**) |
 | Publish this branch to `origin` under the same name | `grit push` |
+| Push to a different remote branch name | `grit push origin HEAD:refs/heads/<name>` |
+| Publish rewritten history safely | `grit fetch`, then `grit push --force-with-lease` (or `--force-with-lease=<rev>` for one ref); stale lease → exit **1**, `"rejected": true` |
 | Publish all local tags | `grit push --tags` |
 
-`grit push` never force-pushes. If the remote has commits you don't, the push is rejected (exit 1, `"rejected": true`); run `grit pull`, then push again.
+Ordinary pushes must fast-forward the remote. If the remote has commits you don't, grit rejects the push (exit **1**, `"rejected": true`); run `grit pull`, then push again. After `grit history` edits (reword, drop, fixup, squash), fetch and use `--force-with-lease` instead of `--force` so you don't overwrite someone else's work. `--force` overwrites unconditionally when you really need it.
 
 URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a local path.
 

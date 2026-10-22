@@ -358,3 +358,113 @@ fn large_index_stat_refresh_parallel_matches_serial() {
     assert_models_equal(&serial, &parallel);
     assert_eq!(serial_index, parallel_index);
 }
+
+/// Untracked (`??`) and ignored (`!!`) paths from system `git status --porcelain`.
+fn git_untracked_and_ignored(root: &Path, untracked_files: &str) -> (Vec<String>, Vec<String>) {
+    let out = git(
+        root,
+        &[
+            "status",
+            "--porcelain=v1",
+            "--ignored",
+            &format!("--untracked-files={untracked_files}"),
+        ],
+    );
+    let mut untracked = Vec::new();
+    let mut ignored = Vec::new();
+    for line in out.lines() {
+        if let Some(path) = line.strip_prefix("?? ") {
+            untracked.push(path.to_owned());
+        } else if let Some(path) = line.strip_prefix("!! ") {
+            ignored.push(path.to_owned());
+        }
+    }
+    untracked.sort();
+    ignored.sort();
+    (untracked, ignored)
+}
+
+/// Every tracked file sits under one top-level directory, so the parallel untracked walk has
+/// to split below the top level; its result must match the serial walk and system `git`.
+#[test]
+fn single_top_level_directory_split_walk_matches_serial_and_git() {
+    use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+
+    let dirs = 72;
+    let files_per_dir = PARALLEL_STAT_MIN_ENTRIES.div_ceil(dirs) + 2;
+    for d in 0..dirs {
+        let dir = root.join(format!("pkg/d{d:03}"));
+        fs::create_dir_all(&dir).expect("mkdir");
+        for f in 0..files_per_dir {
+            fs::write(dir.join(format!("f{f:03}.txt")), format!("{d} {f}\n")).expect("write");
+        }
+    }
+    fs::write(root.join("pkg/d020/.gitignore"), "*.log\n").expect("write ignore");
+    fs::write(root.join("pkg/README"), "top of pkg\n").expect("write");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "seed"]);
+
+    let emb = root.join("pkg/d040/emb");
+    fs::create_dir_all(&emb).expect("mkdir");
+    git(&emb, &["init", "-q", "-b", "main", "."]);
+    git(&emb, &["config", "user.email", "t@example.com"]);
+    git(&emb, &["config", "user.name", "Test"]);
+    fs::write(emb.join("e.txt"), b"e\n").expect("write");
+    git(&emb, &["add", "."]);
+    git(&emb, &["commit", "-qm", "emb"]);
+
+    fs::write(root.join("top.txt"), b"top\n").expect("write");
+    fs::write(root.join("pkg/d005/new.txt"), b"new\n").expect("write");
+    fs::create_dir_all(root.join("pkg/d010/fresh/deeper")).expect("mkdir");
+    fs::write(root.join("pkg/d010/fresh/deeper/x.txt"), b"x\n").expect("write");
+    fs::create_dir_all(root.join("pkg/brand")).expect("mkdir");
+    fs::write(root.join("pkg/brand/y.txt"), b"y\n").expect("write");
+    fs::write(root.join("pkg/d020/a.log"), b"log\n").expect("write");
+    fs::create_dir_all(root.join("pkg/d020/logs")).expect("mkdir");
+    fs::write(root.join("pkg/d020/logs/z.log"), b"z\n").expect("write");
+    fs::write(root.join("pkg/d030/f000.txt"), b"modified\n").expect("modify");
+    fs::remove_file(root.join("pkg/d031/f001.txt")).expect("delete");
+
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open");
+    let baseline = fs::read(repo.index_handle().path()).expect("index");
+
+    for (untracked, git_mode) in [
+        (UntrackedMode::Normal, "normal"),
+        (UntrackedMode::All, "all"),
+    ] {
+        let opts = StatusOptions {
+            untracked,
+            ignored: IgnoredMode::Traditional,
+            ahead_behind: false,
+            ..StatusOptions::default()
+        };
+        let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
+        assert_models_equal(&serial, &parallel);
+
+        let (_, _, grit_untracked, grit_ignored) = normalize_model(&parallel);
+        let (git_untracked, git_ignored) = git_untracked_and_ignored(root, git_mode);
+        assert_eq!(
+            grit_untracked, git_untracked,
+            "untracked ({git_mode}) vs git"
+        );
+        assert_eq!(grit_ignored, git_ignored, "ignored ({git_mode}) vs git");
+        assert_eq!(
+            normalize_model(&parallel).1,
+            vec![
+                "pkg/d030/f000.txt".to_owned(),
+                "pkg/d031/f001.txt".to_owned()
+            ],
+            "unstaged ({git_mode})"
+        );
+    }
+}

@@ -771,6 +771,42 @@ pub fn prepare_network_fetch_noop(git: &Path, bare: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Reset force-with-lease scenario: client amended after a fetch-aligned push.
+pub fn prepare_network_force_with_lease(git: &Path, bare: &Path) -> Result<()> {
+    let meta = load_meta(bare)?;
+    prepare_network_fetch_noop(git, bare)?;
+    let branch_ref = format!("refs/heads/{}", meta.default_branch);
+    run_git_cmd(
+        git,
+        Some(bare),
+        &["update-ref", &branch_ref, &meta.fetch_base_oid],
+    )?;
+    run_git_cmd(
+        git,
+        Some(&meta.client_repo),
+        &["reset", "--hard", &meta.fetch_base_oid],
+    )?;
+    run_git_cmd_with_bench_commit_dates(
+        git,
+        Some(&meta.client_repo),
+        &["commit", "--allow-empty", "-q", "-m", "bench-fwl-base"],
+        0,
+    )?;
+    run_git_cmd(
+        git,
+        Some(&meta.client_repo),
+        &["push", "-q", "origin", &meta.default_branch],
+    )?;
+    run_git_cmd(git, Some(&meta.client_repo), &["fetch", "-q", "origin"])?;
+    run_git_cmd_with_bench_commit_dates(
+        git,
+        Some(&meta.client_repo),
+        &["commit", "--amend", "--allow-empty", "-q", "--no-edit"],
+        1,
+    )?;
+    refresh_http_mirror(git, bare)
+}
+
 /// Diverged pull --rebase: bare is 5 commits ahead of fork, client has 3 local commits.
 pub fn prepare_network_pull_rebase(git: &Path, bare: &Path) -> Result<()> {
     let meta = load_meta(bare)?;

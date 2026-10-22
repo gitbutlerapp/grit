@@ -583,8 +583,20 @@ fn rename_branch_config_section(
     Ok(())
 }
 
-/// Configure `branch.<branch>.remote` and `branch.<branch>.merge` from a resolved upstream ref.
-pub fn set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<()> {
+/// Display name for configured upstream (`origin/main` from remote + merge ref).
+#[must_use]
+pub fn upstream_tracking_display(remote: &str, merge: &str) -> String {
+    merge
+        .strip_prefix("refs/heads/")
+        .map(|tail| format!("{remote}/{tail}"))
+        .unwrap_or_else(|| merge.to_owned())
+}
+
+fn resolve_set_upstream(
+    repo: &Repository,
+    branch: &str,
+    upstream: &str,
+) -> Result<(String, String, String)> {
     validate_branch_short_name(branch).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
             name: branch.to_owned(),
@@ -607,17 +619,36 @@ pub fn set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<(
             upstream: upstream.to_owned(),
         })
     })?;
+    let display = upstream_tracking_display(&remote, &merge);
+    Ok((remote, merge, display))
+}
+
+/// Validate [`set_upstream`] inputs and return the canonical upstream display name.
+///
+/// Performs the same checks as [`set_upstream`] without writing config.
+pub fn validate_set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<String> {
+    resolve_set_upstream(repo, branch, upstream).map(|(_, _, display)| display)
+}
+
+/// Configure `branch.<branch>.remote` and `branch.<branch>.merge` from a resolved upstream ref.
+pub fn set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<()> {
+    let (remote, merge, _) = resolve_set_upstream(repo, branch, upstream)?;
     write_branch_upstream_config(repo, branch, &remote, &merge)
 }
 
-/// Clear upstream configuration for `branch`.
-pub fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
+fn validate_unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
     validate_branch_short_name(branch).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
             name: branch.to_owned(),
             reason: reason.to_string(),
         })
     })?;
+    let branch_ref = format!("{HEADS_PREFIX}{branch}");
+    if repo.references().read_existing(&branch_ref)?.is_none() {
+        return Err(Error::Branch(BranchError::NotFound {
+            name: branch.to_owned(),
+        }));
+    }
     let config = repo.config()?;
     let remote_key = format!("branch.{branch}.remote");
     let merge_key = format!("branch.{branch}.merge");
@@ -626,6 +657,19 @@ pub fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
             name: branch.to_owned(),
         }));
     }
+    Ok(())
+}
+
+/// Validate [`unset_upstream`] inputs without clearing config.
+pub fn preview_unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
+    validate_unset_upstream(repo, branch)
+}
+
+/// Clear upstream configuration for `branch`.
+pub fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
+    validate_unset_upstream(repo, branch)?;
+    let remote_key = format!("branch.{branch}.remote");
+    let merge_key = format!("branch.{branch}.merge");
     let handle = repo.config_handle();
     handle.unset_local(&remote_key)?;
     handle.unset_local(&merge_key)?;

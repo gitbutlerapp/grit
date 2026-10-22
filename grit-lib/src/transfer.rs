@@ -29,6 +29,7 @@ use crate::odb::Odb;
 use crate::progress::{ProgressPhase, ProgressSink};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
+use std::num::NonZeroU32;
 
 /// How a single reference resolved during a fetch (or would resolve in a push).
 ///
@@ -106,6 +107,33 @@ pub enum TagMode {
     All,
 }
 
+/// Shallow-history control for fetch and clone (`--depth`, `--deepen`, `--unshallow`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FetchDepth {
+    /// Truncate or establish history at the given absolute depth from each tip
+    /// (`git fetch --depth N`).
+    Depth(NonZeroU32),
+    /// Deepen an existing shallow repository by the given number of commits
+    /// (`git fetch --deepen N`, wire `deepen N` + `deepen-relative`).
+    Deepen(NonZeroU32),
+    /// Convert a shallow repository into a complete one (`git fetch --unshallow`).
+    Unshallow,
+}
+
+impl FetchDepth {
+    /// Build a [`FetchDepth::Depth`] when `n > 0`.
+    #[must_use]
+    pub fn depth(n: u32) -> Option<Self> {
+        NonZeroU32::new(n).map(Self::Depth)
+    }
+
+    /// Build a [`FetchDepth::Deepen`] when `n > 0`.
+    #[must_use]
+    pub fn deepen(n: u32) -> Option<Self> {
+        NonZeroU32::new(n).map(Self::Deepen)
+    }
+}
+
 /// Options controlling a fetch.
 pub struct FetchOptions {
     /// Positive refspecs selecting what to fetch.
@@ -118,11 +146,9 @@ pub struct FetchOptions {
     pub prune: bool,
     /// Compute and report updates without writing any refs or objects.
     pub dry_run: bool,
-    /// Truncate history to the given number of commits per tip
-    /// (`git fetch --depth N`). Drives the wire `deepen N` / v2 `deepen` arg and,
-    /// for a previously shallow repo, deepens the existing boundary. `None`
-    /// requests full history.
-    pub depth: Option<u32>,
+    /// Shallow fetch control (`--depth`, `--deepen`, `--unshallow`). `None` leaves
+    /// history depth unchanged (aside from an existing on-disk `shallow` file).
+    pub fetch_depth: Option<FetchDepth>,
     /// Deepen history to include commits no older than this cutoff
     /// (`git fetch --shallow-since <date>`). The value is sent verbatim as the
     /// wire `deepen-since <value>`; callers should pass the Unix timestamp Git's
@@ -132,10 +158,6 @@ pub struct FetchOptions {
     /// (`git fetch --shallow-exclude <ref>`). Each entry is sent as a wire
     /// `deepen-not <ref>`.
     pub deepen_not: Vec<String>,
-    /// Convert a shallow repository back into a complete one
-    /// (`git fetch --unshallow`). Drives the wire `deepen 0x7fffffff` request and
-    /// removes the local `shallow` boundaries that get reported as `unshallow`.
-    pub unshallow: bool,
     /// First fetch populating a remote-tracking namespace (clone): write `packed-refs`
     /// and `refs/remotes/{remote}/HEAD`.
     pub initial_remote_fetch: bool,
@@ -176,10 +198,9 @@ impl Default for FetchOptions {
             tags: TagMode::Following,
             prune: false,
             dry_run: false,
-            depth: None,
+            fetch_depth: None,
             deepen_since: None,
             deepen_not: Vec::new(),
-            unshallow: false,
             initial_remote_fetch: false,
             remote_name: None,
             fetch_source: None,
@@ -214,10 +235,9 @@ impl Clone for FetchOptions {
             tags: self.tags,
             prune: self.prune,
             dry_run: self.dry_run,
-            depth: self.depth,
+            fetch_depth: self.fetch_depth,
             deepen_since: self.deepen_since.clone(),
             deepen_not: self.deepen_not.clone(),
-            unshallow: self.unshallow,
             initial_remote_fetch: self.initial_remote_fetch,
             remote_name: self.remote_name.clone(),
             fetch_source: self.fetch_source.clone(),
@@ -237,20 +257,86 @@ impl Clone for FetchOptions {
 
 impl FetchOptions {
     /// Whether this fetch carries any shallow/deepen request (an explicit
-    /// `depth`/`deepen-since`/`deepen-not`/`unshallow`). Note this does NOT cover
-    /// the "already shallow, fetching more of the same boundary" case — that is
+    /// `fetch_depth`/`deepen-since`/`deepen-not`). Note this does NOT cover the
+    /// "already shallow, fetching more of the same boundary" case — that is
     /// driven by the on-disk `shallow` file, checked separately by the fetch
     /// paths via [`crate::shallow::load_shallow_oids`].
     #[must_use]
     pub fn has_deepen_request(&self) -> bool {
-        self.depth.is_some()
+        self.fetch_depth.is_some()
             || self
                 .deepen_since
                 .as_deref()
                 .is_some_and(|v| !v.trim().is_empty())
             || self.deepen_not.iter().any(|v| !v.trim().is_empty())
-            || self.unshallow
     }
+
+    /// Wire `deepen N` value and whether `deepen-relative` must follow.
+    #[must_use]
+    pub(crate) fn wire_deepen(&self) -> Option<(u32, bool)> {
+        match self.fetch_depth {
+            Some(FetchDepth::Depth(n)) => Some((n.get(), false)),
+            Some(FetchDepth::Deepen(n)) => Some((n.get(), true)),
+            Some(FetchDepth::Unshallow) => Some((crate::shallow::INFINITE_DEPTH, false)),
+            None => None,
+        }
+    }
+
+    /// Absolute depth hint for tag-following on a shallow fetch (`--depth` only).
+    #[must_use]
+    pub(crate) fn absolute_depth_for_tags(&self) -> Option<u32> {
+        match self.fetch_depth {
+            Some(FetchDepth::Depth(n)) => Some(n.get()),
+            Some(FetchDepth::Deepen(_)) | Some(FetchDepth::Unshallow) | None => None,
+        }
+    }
+}
+
+/// Validate shallow fetch options against the local repository before negotiation.
+///
+/// # Errors
+///
+/// Returns [`Error::FetchUnshallowNotShallow`] when [`FetchDepth::Unshallow`] is
+/// requested but the repository has no shallow boundaries.
+pub fn validate_fetch_depth_local(local_git_dir: &Path, opts: &FetchOptions) -> Result<()> {
+    if matches!(opts.fetch_depth, Some(FetchDepth::Unshallow)) {
+        let local = crate::shallow::load_shallow_oids(local_git_dir)?;
+        if local.is_empty() {
+            return Err(Error::FetchUnshallowNotShallow);
+        }
+    }
+    Ok(())
+}
+
+/// Require server shallow/deepen capabilities for the requested fetch options.
+pub(crate) fn validate_fetch_depth_server(
+    opts: &FetchOptions,
+    v0_caps: Option<&str>,
+    v2_caps: Option<&[String]>,
+) -> Result<()> {
+    let needs_shallow = opts.has_deepen_request()
+        || opts.wire_deepen().is_some()
+        || opts
+            .deepen_since
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+        || opts.deepen_not.iter().any(|s| !s.trim().is_empty());
+    if !needs_shallow {
+        return Ok(());
+    }
+    if let Some(caps) = v0_caps {
+        if !caps.contains("shallow") {
+            return Err(Error::FetchShallowUnsupported);
+        }
+        if opts.wire_deepen().is_some_and(|(_, rel)| rel) && !caps.contains("deepen-relative") {
+            return Err(Error::FetchDeepenRelativeUnsupported);
+        }
+    } else if let Some(caps) = v2_caps {
+        if !crate::protocol_v2::fetch_supports_feature(caps, "shallow") {
+            return Err(Error::FetchShallowUnsupported);
+        }
+    }
+    Ok(())
 }
 
 /// Resolve whether a fetch should prune stale remote-tracking refs.
@@ -278,6 +364,29 @@ pub fn resolve_fetch_prune(
         return Ok(value);
     }
     Ok(false)
+}
+
+/// Resolve tag-following policy for a fetch.
+///
+/// When `cli_tags` is [`Some`], `true` maps to [`TagMode::All`] (`--tags`) and
+/// `false` to [`TagMode::None`] (`--no-tags`). Otherwise reads
+/// `remote.<remote>.tagOpt` (`--tags` / `--no-tags`, Git-compatible) and defaults
+/// to [`TagMode::Following`].
+#[must_use]
+pub fn resolve_fetch_tags(
+    config: &crate::config::ConfigSet,
+    remote: &str,
+    cli_tags: Option<bool>,
+) -> TagMode {
+    if let Some(all) = cli_tags {
+        return if all { TagMode::All } else { TagMode::None };
+    }
+    let key = format!("remote.{remote}.tagOpt");
+    match config.get(&key).as_deref().map(str::trim) {
+        Some("--tags") | Some("tags") | Some("all") => TagMode::All,
+        Some("--no-tags") | Some("no-tags") | Some("no") | Some("never") => TagMode::None,
+        _ => TagMode::Following,
+    }
 }
 
 fn optional_config_bool(config: &crate::config::ConfigSet, key: &str) -> Result<Option<bool>> {
@@ -1322,11 +1431,7 @@ pub(crate) fn enforce_fetch_ref_update(
             }
         }
     }
-    if mode == UpdateMode::NonFastForwardRejected && explicit_refspec_fetch {
-        return Err(Error::FetchNonFastForward {
-            local_ref: local_ref.to_owned(),
-        });
-    }
+    let _ = explicit_refspec_fetch;
     Ok(())
 }
 
@@ -1346,6 +1451,7 @@ pub fn fetch_local_with_progress(
             remote_git_dir.display()
         )));
     }
+    validate_fetch_depth_local(local_git_dir, opts)?;
 
     let local_odb = open_odb(local_git_dir);
     let remote_odb = open_odb(remote_git_dir);
@@ -1430,7 +1536,7 @@ pub fn fetch_local_with_progress(
         let peel_set = crate::fetch::following_peel_commit_set_for_shallow(
             &remote_odb,
             &fetch_commit_oids,
-            opts.depth,
+            opts.absolute_depth_for_tags(),
             &tag_shallow,
         );
         following_tag_wants.extend(
@@ -1485,26 +1591,48 @@ pub fn fetch_local_with_progress(
     if opts.has_deepen_request() {
         let remote_repo =
             crate::repo::Repository::open(remote_git_dir, &RepositoryOptions::empty())?;
+        let (wire_depth, deepen_relative) = opts
+            .wire_deepen()
+            .map(|(d, r)| (Some(d), r))
+            .unwrap_or((None, false));
         let req = crate::serve::ShallowRequest {
             client_shallow: local_shallow.iter().copied().collect(),
-            depth: if opts.unshallow {
-                Some(crate::shallow::INFINITE_DEPTH)
-            } else {
-                opts.depth
-            },
+            depth: wire_depth,
             deepen_since: opts
                 .deepen_since
                 .as_deref()
                 .and_then(|s| s.parse::<i64>().ok()),
             deepen_not: Vec::new(),
-            deepen_relative: false,
+            deepen_relative,
         };
         let resp = crate::serve::compute_shallow_response(&remote_repo, &shallow_wants, &req)?;
         shallow_new = resp.shallow;
         shallow_unshallow = resp.unshallow;
         copy_source_shallow = resp.pack_shallow_grafts;
+        for oid in resp.extra_wants.iter().chain(shallow_new.iter()).copied() {
+            if !wants.contains(&oid) {
+                wants.push(oid);
+            }
+        }
         if opts.tags == TagMode::Following {
-            if let Some(depth) = opts.depth.filter(|d| *d > 0) {
+            let tag_depth = opts.absolute_depth_for_tags().or_else(|| {
+                opts.wire_deepen().and_then(|(d, relative)| {
+                    if !relative {
+                        return Some(d);
+                    }
+                    let deepen = usize::try_from(d).ok()?;
+                    crate::serve::relative_deepen_depth_for_request(
+                        &remote_repo,
+                        &shallow_wants,
+                        &req.client_shallow,
+                        deepen,
+                    )
+                    .and_then(|d| u32::try_from(d).ok())
+                })
+            });
+            if let Some(depth) =
+                tag_depth.filter(|d| *d > 0 && *d != crate::shallow::INFINITE_DEPTH)
+            {
                 let mut effective_shallow = tag_shallow.clone();
                 effective_shallow.extend(shallow_new.iter().copied());
                 for oid in &shallow_unshallow {
@@ -1575,10 +1703,10 @@ pub fn fetch_local_with_progress(
         crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &boundaries)?;
     }
 
-    // 4. Classify and apply ref updates. Ancestry checks use the local repo,
-    //    which now contains the fetched objects.
-    let local_repo = if opts.dry_run {
-        None
+    // 4. Classify and apply ref updates. Ancestry checks use the local repo
+    //    (or the bare remote during `--dry-run`, when objects are not copied).
+    let classify_repo = if opts.dry_run {
+        crate::repo::Repository::open(remote_git_dir, &RepositoryOptions::empty()).ok()
     } else {
         crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty()).ok()
     };
@@ -1628,7 +1756,14 @@ pub fn fetch_local_with_progress(
         let old = crate::refs::resolve_ref_cached(local_git_dir, local_ref, &packed)
             .ok()
             .flatten();
-        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
+        let mode = classify_update(
+            old.as_ref(),
+            &m.oid,
+            m.force,
+            m.dest_is_tag,
+            classify_repo.as_ref(),
+            None,
+        );
 
         let write = matches!(
             mode,
@@ -1641,7 +1776,7 @@ pub fn fetch_local_with_progress(
             mode,
             opts,
             explicit_refspec_fetch,
-            local_repo.as_ref(),
+            classify_repo.as_ref(),
         )?;
         if write && !opts.dry_run {
             if !crate::refs::is_valid_storable_ref_name(local_ref) {
@@ -1655,7 +1790,7 @@ pub fn fetch_local_with_progress(
                 });
                 continue;
             }
-            if m.is_tag && !ref_target_exists(&local_odb, &remote_odb, m.oid) {
+            if m.dest_is_tag && !ref_target_exists(&local_odb, &remote_odb, m.oid) {
                 updates.push(RefUpdate {
                     remote_ref: m.remote_ref.clone(),
                     local_ref: Some(local_ref.clone()),
@@ -2245,6 +2380,8 @@ pub(crate) struct MatchedRef {
     pub(crate) oid: ObjectId,
     pub(crate) force: bool,
     pub(crate) is_tag: bool,
+    /// Local destination is under `refs/tags/` (tag clobber rules apply).
+    pub(crate) dest_is_tag: bool,
     /// Peeled target from ls-refs `peeled:` (annotated tags), when known.
     pub(crate) advertised_peel: Option<ObjectId>,
     /// How this ref appears in [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion).
@@ -2282,7 +2419,14 @@ pub(crate) fn finish_anonymous_url_fetch(
     if !write_fetch_head {
         return Ok(());
     }
-    let Some(source) = opts.fetch_source.as_deref() else {
+    let source = opts.fetch_source.clone().or_else(|| {
+        let name = opts.remote_name.as_deref()?;
+        let config = config_for_git_dir(git_dir)?;
+        config
+            .get(&format!("remote.{name}.url"))
+            .filter(|url| !url.trim().is_empty())
+    });
+    let Some(source) = source.as_deref() else {
         return Ok(());
     };
     let lines = fetch_head_lines_for_ad_hoc_fetch(
@@ -2531,6 +2675,7 @@ pub(crate) fn apply_tag_mode(
                 oid,
                 force: false,
                 is_tag: true,
+                dest_is_tag: true,
                 advertised_peel: peeled,
                 fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
             });
@@ -2553,12 +2698,17 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> bo
 }
 
 /// Classify a single ref update into an [`UpdateMode`].
+///
+/// When `classify_odb` is set (network fetch `--dry-run` after quarantined pack
+/// ingest), ancestry uses that store with its configured alternates instead of
+/// opening a [`crate::repo::Repository`].
 pub(crate) fn classify_update(
     old: Option<&ObjectId>,
     new: &ObjectId,
     force: bool,
     is_tag: bool,
     repo: Option<&crate::repo::Repository>,
+    classify_odb: Option<&crate::odb::Odb>,
 ) -> UpdateMode {
     let Some(old) = old else {
         return UpdateMode::New;
@@ -2567,9 +2717,13 @@ pub(crate) fn classify_update(
         return UpdateMode::UpToDate;
     }
     // Fast-forward when old is an ancestor of new (commit history only).
-    let ff = repo
-        .map(|r| crate::merge_base::is_ancestor(r, *old, *new).unwrap_or(false))
-        .unwrap_or(false);
+    let ff = if let Some(r) = repo {
+        crate::merge_base::is_ancestor(r, *old, *new).unwrap_or(false)
+    } else if let Some(odb) = classify_odb {
+        crate::merge_base::is_ancestor_odb_walk(odb, *old, *new).unwrap_or(false)
+    } else {
+        false
+    };
     if ff && !is_tag {
         return UpdateMode::FastForward;
     }

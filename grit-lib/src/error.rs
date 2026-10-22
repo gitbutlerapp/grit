@@ -687,6 +687,20 @@ pub enum Error {
     #[error("the receiving end does not support push options")]
     PushOptionsUnsupported,
 
+    /// `git fetch --unshallow` on a repository that is not shallow.
+    #[error("repository is not shallow")]
+    FetchUnshallowNotShallow,
+
+    /// A deepen/shallow fetch was requested but the remote did not advertise the
+    /// `shallow` capability.
+    #[error("the remote does not support shallow fetches")]
+    FetchShallowUnsupported,
+
+    /// A `--deepen` fetch was requested but the remote did not advertise
+    /// `deepen-relative`.
+    #[error("the remote does not support deepen-relative")]
+    FetchDeepenRelativeUnsupported,
+
     /// A bundle fetch or verify found prerequisite commits missing from history.
     #[error("repository lacks these prerequisite commits")]
     BundleMissingPrerequisites,
@@ -827,6 +841,25 @@ pub enum Error {
     /// Cherry-pick source is already checked out as `HEAD`.
     #[error("commit already at HEAD")]
     ReplaySourceAtHead,
+
+    /// Sequencer todo lists a command grit does not implement yet.
+    #[error("unknown sequencer command '{command}'")]
+    SequencerUnknownCommand {
+        /// Verb read from `.git/sequencer/todo`.
+        command: String,
+    },
+
+    /// [`abort_replay_sequence`](crate::porcelain::replay_sequence::abort_replay_sequence) refuses when `HEAD` moved since the replay started.
+    #[error("cannot abort replay: HEAD moved since replay started")]
+    ReplayAbortHeadMoved,
+
+    /// [`continue_replay_sequence`](crate::porcelain::replay_sequence::continue_replay_sequence) refuses while unmerged index entries remain.
+    #[error("cannot continue replay: unmerged index entries remain")]
+    ReplayContinueUnmerged,
+
+    /// No cherry-pick or revert sequence is in progress.
+    #[error("no cherry-pick or revert in progress")]
+    NoReplayInProgress,
 
     /// A local branch is checked out as `HEAD` in a linked or main worktree.
     #[error("branch '{branch}' is already checked out in '{worktree_path}'")]

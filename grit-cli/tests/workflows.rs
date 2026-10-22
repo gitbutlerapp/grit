@@ -1538,18 +1538,26 @@ fn fetch_moved_tag_reports_no_phantom_update() -> TestResult {
         .trim()
         .to_owned();
 
-    let moved = gs_ok(&f2, ["fetch", "--json"])?;
+    let moved = gs(&f2, ["fetch", "--json"])?;
+    assert_eq!(
+        moved.status,
+        Some(1),
+        "tag rejection is reported as a failed fetch: {}",
+        moved.dump()
+    );
     let parsed: serde_json::Value = serde_json::from_str(&moved.stdout)?;
+    assert_eq!(parsed.get("rejected").and_then(|v| v.as_bool()), Some(true));
     let updates = parsed
         .get("updates")
         .and_then(|v| v.as_array())
         .expect("updates array");
-    assert!(
-        !updates
-            .iter()
-            .any(|u| u.get("ref").and_then(|r| r.as_str()) == Some("refs/tags/newtag")),
-        "fetch after remote tag move must not list a phantom tag update: {}",
-        moved.stdout
+    let tag_row = updates
+        .iter()
+        .find(|u| u.get("ref").and_then(|r| r.as_str()) == Some("refs/tags/newtag"))
+        .expect("tag fetch attempt is listed");
+    assert_eq!(
+        tag_row.get("status").and_then(|s| s.as_str()),
+        Some("rejected")
     );
 
     let tag_after = git_in(&f2, &["rev-parse", "newtag"])?
@@ -1561,12 +1569,18 @@ fn fetch_moved_tag_reports_no_phantom_update() -> TestResult {
         "local tag must stay on the pre-move commit"
     );
 
-    let repeat = gs_ok(&f2, ["fetch", "--json"])?;
+    let repeat = gs(&f2, ["fetch", "--json"])?;
+    assert_eq!(
+        repeat.status,
+        Some(1),
+        "repeat fetch still reports the unmoved tag as rejected: {}",
+        repeat.dump()
+    );
     let parsed: serde_json::Value = serde_json::from_str(&repeat.stdout)?;
     assert_eq!(
         parsed.get("updated").and_then(|v| v.as_u64()),
         Some(0),
-        "repeat fetch must stay up to date: {}",
+        "repeat fetch must not apply ref updates: {}",
         repeat.stdout
     );
     Ok(())

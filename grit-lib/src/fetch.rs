@@ -26,8 +26,8 @@ type LsRefsAdvertised = (
 );
 use crate::progress::ProgressSink;
 use crate::transfer::{
-    classify_update, open_odb, prune_tracking_refs, ref_excluded, FetchOptions, FetchOutcome,
-    RefUpdate, UpdateMode,
+    classify_update, open_odb, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
+    validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
 };
 use crate::transport::Connection;
 
@@ -173,12 +173,23 @@ fn append_shallow_request_v0(
     local_shallow: &[ObjectId],
     opts: &FetchOptions,
 ) -> Result<()> {
+    let sends_shallow = !local_shallow.is_empty()
+        || opts.wire_deepen().is_some()
+        || opts
+            .deepen_since
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+        || opts.deepen_not.iter().any(|s| !s.trim().is_empty());
+    if sends_shallow && !server_caps.contains("shallow") {
+        return Err(Error::FetchShallowUnsupported);
+    }
     for oid in local_shallow {
         pkt_line::write_line_to_vec(req, &format!("shallow {}", oid.to_hex()))?;
     }
-    if opts.unshallow {
-        pkt_line::write_line_to_vec(req, &format!("deepen {}", crate::shallow::INFINITE_DEPTH))?;
-    } else if let Some(depth) = opts.depth.filter(|d| *d > 0) {
+    if let Some((depth, relative)) = opts.wire_deepen() {
+        if relative && !server_caps.contains("deepen-relative") {
+            return Err(Error::FetchDeepenRelativeUnsupported);
+        }
         pkt_line::write_line_to_vec(req, &format!("deepen {depth}"))?;
     }
     if let Some(since) = opts
@@ -237,19 +248,28 @@ fn negotiate_pack(
     // offering `have`s. Mirrors `fetch-pack.c`'s shallow handling.
     let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
 
-    // Capability set matching `git fetch-pack`'s first `want` line for v0/v1.
-    let caps = if opts.remote_progress {
-        " multi_ack_detailed side-band-64k thin-pack include-tag ofs-delta agent=grit"
-    } else {
-        " multi_ack_detailed side-band-64k thin-pack no-progress include-tag ofs-delta agent=grit"
-    };
-
     // Capture the advertised refs before borrowing the writer (avoids aliasing
     // the connection's reader/writer with its accessors). v0/v1 shallow servers
     // append `shallow <oid>` trailer lines to the advertisement; the capability
     // string we read from the advertisement drives `deepen-since`/`deepen-not`.
     let advertised: Vec<(String, ObjectId)> = conn.advertised_refs().to_vec();
     let server_caps: String = conn.capabilities().join(" ");
+    validate_fetch_depth_server(opts, Some(&server_caps), None)?;
+
+    // Capability set matching `git fetch-pack`'s first `want` line for v0/v1.
+    let mut caps = if opts.remote_progress {
+        String::from(" multi_ack_detailed side-band-64k thin-pack include-tag ofs-delta agent=grit")
+    } else {
+        String::from(
+            " multi_ack_detailed side-band-64k thin-pack no-progress include-tag ofs-delta agent=grit",
+        )
+    };
+    if opts.wire_deepen().is_some_and(|(_, relative)| relative) {
+        if !server_caps.contains("deepen-relative") {
+            return Err(Error::FetchDeepenRelativeUnsupported);
+        }
+        caps.push_str(" deepen-relative");
+    }
 
     let mut req: Vec<u8> = Vec::new();
     let w0 = format!("want {}{}", first_want.to_hex(), caps);
@@ -874,6 +894,8 @@ pub(crate) struct V2DeepenArgs {
     pub(crate) local_shallow: Vec<ObjectId>,
     /// `deepen <n>` (absolute depth, or `INFINITE_DEPTH` for `--unshallow`).
     pub(crate) depth: Option<u32>,
+    /// When true, send v0/v1/v2 `deepen-relative` after `deepen`.
+    pub(crate) deepen_relative: bool,
     /// `deepen-since <unix-ts>`.
     pub(crate) deepen_since: Option<String>,
     /// `deepen-not <ref>` exclusions.
@@ -886,14 +908,14 @@ impl V2DeepenArgs {
     /// Build the v2 deepen args from the fetch options and the local shallow file,
     /// translating `--unshallow` into the `INFINITE_DEPTH` deepen Git uses.
     pub(crate) fn from_opts(opts: &FetchOptions, local_shallow: &[ObjectId]) -> Self {
-        let depth = if opts.unshallow {
-            Some(crate::shallow::INFINITE_DEPTH)
-        } else {
-            opts.depth.filter(|d| *d > 0)
-        };
+        let (depth, deepen_relative) = opts
+            .wire_deepen()
+            .map(|(d, r)| (Some(d), r))
+            .unwrap_or((None, false));
         Self {
             local_shallow: local_shallow.to_vec(),
             depth,
+            deepen_relative,
             deepen_since: opts
                 .deepen_since
                 .as_deref()
@@ -913,6 +935,7 @@ impl V2DeepenArgs {
     /// handling and the "skip offering haves" decision).
     pub(crate) fn is_shallow_request(&self) -> bool {
         self.depth.is_some()
+            || self.deepen_relative
             || self.deepen_since.is_some()
             || !self.deepen_not.is_empty()
             || !self.local_shallow.is_empty()
@@ -966,6 +989,9 @@ pub(crate) fn write_v2_fetch_request(
     }
     if let Some(depth) = deepen.depth {
         pkt_line::write_line(&mut req, &format!("deepen {depth}"))?;
+    }
+    if deepen.deepen_relative {
+        pkt_line::write_line(&mut req, "deepen-relative")?;
     }
     if let Some(since) = &deepen.deepen_since {
         pkt_line::write_line(&mut req, &format!("deepen-since {since}"))?;
@@ -1192,8 +1218,9 @@ pub fn fetch_remote(
         conn.protocol_version(),
         opts.refspecs.len(),
         opts.tags,
-        opts.depth
+        opts.fetch_depth
     );
+    validate_fetch_depth_local(local_git_dir, opts)?;
     let local_odb = open_odb(local_git_dir);
 
     // 1. Remote refs + default branch.
@@ -1308,7 +1335,7 @@ pub fn fetch_remote(
         let peel_set = following_peel_commit_set_for_shallow(
             &local_odb,
             &fetch_commit_oids,
-            opts.depth,
+            opts.absolute_depth_for_tags(),
             &local_shallow_set,
         );
         following_tag_wants.extend(following_tag_wants_peel_among_fetched_commits(
@@ -1361,15 +1388,18 @@ pub fn fetch_remote(
         t_begin.elapsed()
     );
 
+    let mut dry_run_quarantine: Option<crate::receive_quarantine::ReceiveQuarantine> = None;
+
     if wants.is_empty() {
         crate::transport::send_client_flush(conn)?;
-    } else if !opts.dry_run {
+    } else {
         net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
             "fetch_remote: negotiating + fetching pack…"
         );
         let (pack_path, su) = if let Some(caps) = v2_caps.as_ref() {
+            validate_fetch_depth_server(opts, None, Some(caps))?;
             let deepen = V2DeepenArgs::from_opts(opts, &local_shallow);
             negotiate_pack_v2(
                 local_git_dir,
@@ -1412,18 +1442,40 @@ pub fn fetch_remote(
                 &pack_config,
                 opts.index_pack_threads,
             )?;
-            let ingested = crate::index_pack::ingest_received_pack_path_with_progress(
-                path,
-                &local_odb,
-                &crate::index_pack::IngestPackOptions {
-                    fix_thin: true,
-                    skip_post_index_verify: true,
-                    threads: index_threads,
-                    merged_config: Some(pack_config),
-                    environment: opts.environment.clone(),
-                },
-                Some(progress),
-            )?;
+            if opts.dry_run && dry_run_quarantine.is_none() {
+                dry_run_quarantine = Some(crate::receive_quarantine::ReceiveQuarantine::create(
+                    &local_odb,
+                    local_git_dir,
+                )?);
+            }
+            let ingested = if let Some(q) = dry_run_quarantine.as_ref() {
+                let q_odb = q.odb();
+                crate::index_pack::ingest_received_pack_path_with_progress(
+                    path,
+                    &q_odb,
+                    &crate::index_pack::IngestPackOptions {
+                        fix_thin: true,
+                        skip_post_index_verify: true,
+                        threads: index_threads,
+                        merged_config: Some(pack_config),
+                        environment: opts.environment.clone(),
+                    },
+                    Some(progress),
+                )?
+            } else {
+                crate::index_pack::ingest_received_pack_path_with_progress(
+                    path,
+                    &local_odb,
+                    &crate::index_pack::IngestPackOptions {
+                        fix_thin: true,
+                        skip_post_index_verify: true,
+                        threads: index_threads,
+                        merged_config: Some(pack_config),
+                        environment: opts.environment.clone(),
+                    },
+                    Some(progress),
+                )?
+            };
             pack_oids = ingested.object_ids;
             let bytes = std::fs::metadata(&ingested.pack_path)
                 .map_err(crate::error::Error::Io)?
@@ -1460,8 +1512,12 @@ pub fn fetch_remote(
     // objects). All/None already handled; Following kept only when reachable.
     if opts.tags == crate::transfer::TagMode::Following {
         let t = std::time::Instant::now();
+        let tag_odb = dry_run_quarantine
+            .as_ref()
+            .map(|q| q.odb())
+            .unwrap_or_else(|| local_odb.clone());
         retain_following_tags(
-            &local_odb,
+            &tag_odb,
             &mut matched,
             &pack_oids,
             &crate::shallow::load_shallow_boundaries(local_git_dir),
@@ -1476,7 +1532,8 @@ pub fn fetch_remote(
 
     // 5. Classify + apply ref updates (ancestry via the now-populated local repo).
     let t_apply = std::time::Instant::now();
-    let local_repo = if opts.dry_run {
+    let classify_odb = dry_run_quarantine.as_ref().map(|q| q.odb());
+    let classify_repo = if opts.dry_run {
         None
     } else {
         crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty()).ok()
@@ -1549,7 +1606,14 @@ pub fn fetch_remote(
         }
 
         let t = std::time::Instant::now();
-        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
+        let mode = classify_update(
+            old.as_ref(),
+            &m.oid,
+            m.force,
+            m.dest_is_tag,
+            classify_repo.as_ref(),
+            classify_odb.as_ref(),
+        );
         d_classify += t.elapsed();
 
         let write = matches!(
@@ -1563,7 +1627,7 @@ pub fn fetch_remote(
             mode,
             opts,
             explicit_refspec_fetch,
-            local_repo.as_ref(),
+            classify_repo.as_ref(),
         )?;
         if write && !opts.dry_run {
             if !crate::refs::is_valid_storable_ref_name(local_ref) {
@@ -1785,6 +1849,7 @@ pub(crate) fn add_wire_tags(
             oid: *oid,
             force: false,
             is_tag: true,
+            dest_is_tag: true,
             advertised_peel: advertised_peel.get(name).copied(),
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         });
@@ -2222,6 +2287,7 @@ mod fetch_advertised_ref_tests {
             oid: shared,
             force: false,
             is_tag: false,
+            dest_is_tag: false,
             advertised_peel: None,
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         });
@@ -2270,6 +2336,7 @@ mod fetch_advertised_ref_tests {
             oid: tag_obj,
             force: false,
             is_tag: true,
+            dest_is_tag: true,
             advertised_peel: Some(commit),
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         }];
@@ -2291,6 +2358,7 @@ mod fetch_advertised_ref_tests {
             oid: tag_obj,
             force: false,
             is_tag: true,
+            dest_is_tag: true,
             advertised_peel: Some(tip),
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         }];

@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
-use grit_lib::remote::transfer::FetchOptions;
+use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -198,7 +198,7 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
 
     let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        depth: Some(1),
+        fetch_depth: FetchDepth::depth(1),
         ..Default::default()
     };
     let outcome = fetch_remote(&local_git, &mut *conn, &opts, &mut NoProgress)
@@ -370,7 +370,7 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
     };
     let mut shallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        depth: Some(1),
+        fetch_depth: FetchDepth::depth(1),
         ..Default::default()
     };
     fetch_remote(&local_git, &mut *conn, &shallow_opts, &mut NoProgress)
@@ -399,7 +399,7 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
     };
     let mut unshallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        unshallow: true,
+        fetch_depth: Some(FetchDepth::Unshallow),
         ..Default::default()
     };
     let outcome = fetch_remote(&local_git, &mut *conn, &unshallow_opts, &mut NoProgress)

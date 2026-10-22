@@ -20,6 +20,7 @@
 //! in-progress operation [`state`](crate::state::WtStatusState), the loaded and
 //! sparse-expanded index, and the stash count.
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, DirEntry, ReadDir};
@@ -723,7 +724,11 @@ enum UntrackedWalkStep {
     Stop,
 }
 
-/// Parallel untracked scan for an empty index (bulk `git add .`), preserving path order loosely.
+/// Parallel untracked scan without pathspecs, preserving path order loosely.
+///
+/// Work is split per top-level entry; on larger indexes, directories that only recurse are
+/// split further (see [`split_tracked_untracked_tasks`]) so a work tree with a single
+/// top-level directory still spreads across workers.
 ///
 /// Only used without pathspecs, so the walk never needs attribute rules (`rules = None`); the
 /// per-operation [`crate::worktree_rules::WorktreeRules`] is not shareable across workers.
@@ -740,25 +745,20 @@ fn collect_untracked_parallel_top_level(
     matcher_template: &IgnoreMatcher,
     pathspecs: &[String],
 ) -> Result<(Vec<String>, Vec<String>)> {
-    let entries: Vec<DirEntry> = fs::read_dir(work_tree)
-        .map_err(crate::error::Error::Io)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let entries = named_entries_sorted(fs::read_dir(work_tree).map_err(crate::error::Error::Io)?);
 
     let mut root_files = Vec::new();
     let mut root_dirs = Vec::new();
-    for entry in entries {
-        if entry.file_name() == ".git" {
+    for named in entries {
+        if named.0 == b".git" {
             continue;
         }
-        if crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false) {
-            root_dirs.push(entry);
-        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
-            root_files.push(entry);
+        if crate::read_dir_kind::entry_is_dir(&named.1).unwrap_or(false) {
+            root_dirs.push(named);
+        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&named.1).unwrap_or(true) {
+            root_files.push(named);
         }
     }
-    root_files.sort_by_key(|e| e.file_name());
-    root_dirs.sort_by_key(|e| e.file_name());
 
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();
@@ -771,7 +771,7 @@ fn collect_untracked_parallel_top_level(
     let threads = parallelism.threads();
 
     if !root_files.is_empty() {
-        let scan_root_file = |entry: &DirEntry,
+        let scan_root_file = |(name, entry): &(Vec<u8>, DirEntry),
                               local_untracked: &mut Vec<String>,
                               local_ignored: &mut Vec<String>| {
             let mut matcher = matcher_template.clone();
@@ -789,6 +789,7 @@ fn collect_untracked_parallel_top_level(
                 tracked_paths,
                 "",
                 entry,
+                name,
                 pathspecs,
                 None,
                 local_untracked,
@@ -813,7 +814,7 @@ fn collect_untracked_parallel_top_level(
             }
         } else {
             let mut matcher = matcher_template.clone();
-            for entry in root_files {
+            for (name, entry) in &root_files {
                 let _ = visit_untracked_dir_entry(
                     repo,
                     index,
@@ -827,7 +828,8 @@ fn collect_untracked_parallel_top_level(
                     precompose_unicode,
                     tracked_paths,
                     "",
-                    &entry,
+                    entry,
+                    name,
                     pathspecs,
                     None,
                     &mut untracked,
@@ -841,42 +843,206 @@ fn collect_untracked_parallel_top_level(
         return Ok((untracked, ignored));
     }
 
-    let dir_count = root_dirs.len();
-    let est_bytes = dir_count.saturating_mul(4096);
-    let per_dir = try_par_hash_with(&root_dirs, threads, est_bytes, |entry| {
-        let mut matcher = matcher_template.clone();
-        let mut local_untracked = Vec::new();
-        let mut local_ignored = Vec::new();
-        let _ = visit_untracked_dir_entry(
+    let root: Arc<str> = Arc::from("");
+    let mut tasks: Vec<UntrackedEntryTask> = root_dirs
+        .into_iter()
+        .map(|(name, entry)| UntrackedEntryTask {
+            parent: Arc::clone(&root),
+            name,
+            entry,
+        })
+        .collect();
+    let mut matcher_template = matcher_template.clone();
+    if pathspecs.is_empty()
+        && threads.get() > 1
+        && index.entries.len() >= crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES
+    {
+        tasks = split_tracked_untracked_tasks(
+            tasks,
+            threads
+                .get()
+                .saturating_mul(UNTRACKED_SPLIT_DIRS_PER_THREAD),
             repo,
             index,
-            work_tree,
             gitlinks,
-            &mut matcher,
-            ignored_mode,
-            show_all,
-            false,
-            None::<&Cell<bool>>,
             precompose_unicode,
             tracked_paths,
-            "",
-            entry,
-            pathspecs,
-            None,
-            &mut local_untracked,
-            &mut local_ignored,
-        )?;
-        Ok((local_untracked, local_ignored))
-    })
+            &mut matcher_template,
+        );
+    }
+
+    let dir_count = tasks
+        .iter()
+        .filter(|t| crate::read_dir_kind::entry_is_dir(&t.entry).unwrap_or(false))
+        .count();
+    let options = crate::parallel::ParallelOptions {
+        threads,
+        min_items: crate::hash::PAR_HASH_MIN_ITEMS,
+        min_total_bytes: Some(crate::hash::PAR_HASH_MIN_TOTAL_BYTES),
+        signed_entry_threshold: None,
+    };
+    let per_task = crate::parallel::try_par_map_with_local(
+        &tasks,
+        options,
+        dir_count.saturating_mul(4096),
+        || matcher_template.clone(),
+        |matcher, task| {
+            // The matcher caches rules per directory it enters; starting each subtree from
+            // the template keeps that cache bounded by one subtree instead of a worker's share.
+            if crate::read_dir_kind::entry_is_dir(&task.entry).unwrap_or(false) {
+                matcher.clone_from(&matcher_template);
+            }
+            let mut local_untracked = Vec::new();
+            let mut local_ignored = Vec::new();
+            let _ = visit_untracked_dir_entry(
+                repo,
+                index,
+                work_tree,
+                gitlinks,
+                matcher,
+                ignored_mode,
+                show_all,
+                false,
+                None::<&Cell<bool>>,
+                precompose_unicode,
+                tracked_paths,
+                &task.parent,
+                &task.entry,
+                &task.name,
+                pathspecs,
+                None,
+                &mut local_untracked,
+                &mut local_ignored,
+            )?;
+            Ok((local_untracked, local_ignored))
+        },
+    )
     .map_err(|e: ParallelHashError<crate::error::Error>| match e {
         ParallelHashError::Task(err) => err,
     })?;
 
-    for (mut local_u, mut local_i) in per_dir {
+    for (mut local_u, mut local_i) in per_task {
         untracked.append(&mut local_u);
         ignored.append(&mut local_i);
     }
     Ok((untracked, ignored))
+}
+
+/// Directories per worker the parallel untracked walk aims for before it stops splitting.
+const UNTRACKED_SPLIT_DIRS_PER_THREAD: usize = 8;
+
+/// One directory entry queued for the parallel untracked walk.
+struct UntrackedEntryTask {
+    /// Stored repository-relative path of the containing directory (empty at the root).
+    parent: Arc<str>,
+    /// Raw file name as read from the directory.
+    name: Vec<u8>,
+    entry: DirEntry,
+}
+
+/// Replace directories whose walk is a plain recursion with their children until at least
+/// `target_dirs` directories are queued (or nothing more can be split).
+///
+/// A directory qualifies when it holds tracked files and is neither tracked itself, a gitlink,
+/// nor a nested submodule work tree: [`visit_untracked_directory`] then visits its children
+/// in name order with no collapsing, so splitting it preserves the concatenated output. The
+/// per-directory ignore rules of every split directory are loaded into `matcher`, which seeds
+/// the workers.
+#[allow(clippy::too_many_arguments)]
+fn split_tracked_untracked_tasks(
+    mut tasks: Vec<UntrackedEntryTask>,
+    target_dirs: usize,
+    repo: &Repository,
+    index: &Index,
+    gitlinks: &HashSet<String>,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+    matcher: &mut IgnoreMatcher,
+) -> Vec<UntrackedEntryTask> {
+    loop {
+        let dirs = tasks
+            .iter()
+            .filter(|t| crate::read_dir_kind::entry_is_dir(&t.entry).unwrap_or(false))
+            .count();
+        if dirs >= target_dirs {
+            return tasks;
+        }
+        let mut split_any = false;
+        let mut next = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            let Some(rel) = plain_tracked_directory(
+                &task,
+                repo,
+                index,
+                gitlinks,
+                precompose_unicode,
+                tracked_paths,
+            ) else {
+                next.push(task);
+                continue;
+            };
+            split_any = true;
+            let _ = matcher.note_directory_entered(repo, Some(index), &rel);
+            let Ok(entries) = fs::read_dir(task.entry.path()) else {
+                continue;
+            };
+            let parent: Arc<str> = Arc::from(rel);
+            next.extend(
+                named_entries_sorted(entries)
+                    .into_iter()
+                    .map(|(name, entry)| UntrackedEntryTask {
+                        parent: Arc::clone(&parent),
+                        name,
+                        entry,
+                    }),
+            );
+        }
+        tasks = next;
+        if !split_any {
+            return tasks;
+        }
+    }
+}
+
+/// The stored path of `task` when it is a directory whose untracked walk only recurses into
+/// its children (see [`split_tracked_untracked_tasks`]).
+fn plain_tracked_directory(
+    task: &UntrackedEntryTask,
+    repo: &Repository,
+    index: &Index,
+    gitlinks: &HashSet<String>,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+) -> Option<String> {
+    if task.name == b".git" || !crate::read_dir_kind::entry_is_dir(&task.entry).unwrap_or(false) {
+        return None;
+    }
+    let child_bytes = untracked_child_path(&task.parent, &task.name, precompose_unicode);
+    if tracked_paths.contains_bytes(&child_bytes) {
+        return None;
+    }
+    let rel = crate::repo_relpath::storage_string(&child_bytes);
+    if gitlinks.contains(&rel)
+        || !has_tracked_under(index, gitlinks, &rel)
+        || dir_is_nested_submodule_worktree(repo.git_dir(), &task.entry.path())
+    {
+        return None;
+    }
+    Some(rel)
+}
+
+/// Raw repository-relative path of entry `name` inside the directory stored as `rel`,
+/// precomposing the name when `core.precomposeUnicode` applies.
+fn untracked_child_path(rel: &str, name: &[u8], precompose_unicode: bool) -> Vec<u8> {
+    let precomposed = precompose_unicode
+        .then(|| std::str::from_utf8(name).ok())
+        .flatten()
+        .and_then(|raw_name| match precompose_utf8_segment(raw_name) {
+            Cow::Borrowed(_) => None,
+            Cow::Owned(s) => Some(s.into_bytes()),
+        });
+    let name = precomposed.as_deref().unwrap_or(name);
+    crate::repo_relpath::join_rel(&crate::repo_relpath::storage_bytes(rel), name)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -894,48 +1060,43 @@ fn visit_untracked_dir_entry(
     tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     rel: &str,
     entry: &DirEntry,
+    name: &[u8],
     pathspecs: &[String],
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
 ) -> Result<UntrackedWalkStep> {
-    let name_bytes = dir_entry_name_bytes(entry);
-    if name_bytes == b".git"[..] {
+    if name == b".git" {
         return Ok(UntrackedWalkStep::Continue);
     }
-    let name_bytes: Vec<u8> = if precompose_unicode {
-        if let Ok(raw_name) = std::str::from_utf8(&name_bytes) {
-            precompose_utf8_segment(raw_name).into_owned().into_bytes()
-        } else {
-            name_bytes
-        }
-    } else {
-        name_bytes
-    };
-    let path = entry.path();
-    let parent = crate::repo_relpath::storage_bytes(rel);
-    let child_bytes = crate::repo_relpath::join_rel(&parent, &name_bytes);
-    let child_rel = crate::repo_relpath::storage_string(&child_bytes);
-    let child_rel_match = crate::repo_relpath::as_utf8_for_matching(&child_rel);
+    let child_bytes = untracked_child_path(rel, name, precompose_unicode);
     let is_dir = crate::read_dir_kind::entry_is_dir(entry).unwrap_or(false);
 
-    if is_dir && gitlinks.contains(&child_rel) {
-        return Ok(UntrackedWalkStep::Continue);
-    }
-
+    // Most entries in a typical work tree are tracked; settle those before building the
+    // stored path string or the absolute path.
     if tracked_paths.contains_bytes(&child_bytes) {
-        let index_is_tree = index
-            .get(&child_bytes, 0)
-            .is_some_and(|e| e.mode == MODE_TREE || e.mode == MODE_GITLINK);
-        if !(is_dir && !index_is_tree) {
+        // A tracked non-directory is settled; a directory still needs walking unless the
+        // index records it as a tree or gitlink.
+        let skip = !is_dir
+            || index
+                .get(&child_bytes, 0)
+                .is_some_and(|e| e.mode == MODE_TREE || e.mode == MODE_GITLINK);
+        if skip {
             return Ok(UntrackedWalkStep::Continue);
         }
     }
+
+    let child_rel = crate::repo_relpath::storage_string(&child_bytes);
+    if is_dir && gitlinks.contains(&child_rel) {
+        return Ok(UntrackedWalkStep::Continue);
+    }
+    let child_rel_match = crate::repo_relpath::as_utf8_for_matching(&child_rel);
 
     if is_dir {
         if !pathspec_may_match_directory(&child_rel, pathspecs) {
             return Ok(UntrackedWalkStep::Continue);
         }
+        let path = entry.path();
         visit_untracked_directory(
             repo,
             index,
@@ -1012,6 +1173,7 @@ fn visit_untracked_read_dir_lazy(
         };
         #[cfg(test)]
         untracked_walk_probe::record_entry();
+        let name = dir_entry_name_bytes(&entry);
         if matches!(
             visit_untracked_dir_entry(
                 repo,
@@ -1027,6 +1189,7 @@ fn visit_untracked_read_dir_lazy(
                 tracked_paths,
                 rel,
                 &entry,
+                &name,
                 pathspecs,
                 rules,
                 untracked_out,
@@ -1098,10 +1261,7 @@ fn visit_untracked_node(
         );
     }
 
-    let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    sorted.sort_by_key(|e| e.file_name());
-
-    for entry in &sorted {
+    for (name, entry) in &named_entries_sorted(entries) {
         if matches!(
             visit_untracked_dir_entry(
                 repo,
@@ -1117,6 +1277,7 @@ fn visit_untracked_node(
                 tracked_paths,
                 rel,
                 entry,
+                name,
                 pathspecs,
                 rules,
                 untracked_out,
@@ -1651,8 +1812,8 @@ fn index_relpath_to_string(path: &[u8]) -> String {
 
 #[cfg(unix)]
 fn dir_entry_name_bytes(entry: &std::fs::DirEntry) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-    entry.file_name().as_os_str().as_bytes().to_vec()
+    use std::os::unix::ffi::OsStringExt;
+    entry.file_name().into_vec()
 }
 
 #[cfg(not(unix))]
@@ -1662,6 +1823,19 @@ fn dir_entry_name_bytes(entry: &std::fs::DirEntry) -> Vec<u8> {
         .to_string_lossy()
         .into_owned()
         .into_bytes()
+}
+
+/// Collect readable entries of `entries` with their raw file names, ordered by name bytes.
+///
+/// Extracting each name once keeps sorting allocation-free; `DirEntry::file_name` allocates
+/// on every call. Names within one directory are unique, so an unstable sort is exact.
+fn named_entries_sorted(entries: ReadDir) -> Vec<(Vec<u8>, DirEntry)> {
+    let mut named: Vec<(Vec<u8>, DirEntry)> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| (dir_entry_name_bytes(&e), e))
+        .collect();
+    named.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    named
 }
 
 fn conflict_paths_from_index_raw(index: &Index) -> Vec<Vec<u8>> {
@@ -2869,8 +3043,6 @@ mod status_op_tests {
 
     #[test]
     fn status_operation_omitted_for_git_cherry_pick_conflict() {
-        use crate::state::NextStep;
-
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         grit_test_support::git(root, &["init", "-q", "-b", "main"]);
@@ -2894,16 +3066,11 @@ mod status_op_tests {
         let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
         let model = status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
         assert!(model.state.cherry_pick_in_progress);
+        assert!(!model.conflict_details.is_empty());
         assert!(
             model.operation.is_none(),
-            "must not emit operation for cherry-pick: {:?}",
-            model.operation
+            "git-started cherry-pick must not expose grit operation hints"
         );
-        assert!(!model.conflict_details.is_empty());
-        assert!(model
-            .operation
-            .as_ref()
-            .is_none_or(|op| !op.next_steps.contains(&NextStep::Commit)));
     }
 
     #[test]
@@ -3409,6 +3576,117 @@ mod status_op_tests {
         assert_eq!(
             grit_ignored, git_ignored,
             "ignored paths must match git status --ignored --porcelain (!! lines)"
+        );
+    }
+
+    #[test]
+    fn split_tracked_untracked_tasks_only_splits_plain_recursions() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .output()
+                .expect("spawn git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+        fs::create_dir_all(root.join("pkg/a/inner")).unwrap();
+        fs::write(root.join("pkg/a/f1"), b"1\n").unwrap();
+        fs::write(root.join("pkg/a/inner/f2"), b"2\n").unwrap();
+        git(&["add", "pkg"]);
+        git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,pkg/gl",
+        ]);
+        fs::create_dir_all(root.join("pkg/gl")).unwrap();
+        fs::write(root.join("pkg/gl/in-sub"), b"s\n").unwrap();
+        fs::create_dir_all(root.join("pkg/u")).unwrap();
+        fs::write(root.join("pkg/u/new"), b"n\n").unwrap();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let index = repo.load_index().unwrap();
+        let rules = crate::worktree_rules::WorktreeRules::from_repository(&repo, &index).unwrap();
+        let mut matcher = rules.ignore().clone();
+        let tracked =
+            crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(&index, false);
+        let gitlinks: HashSet<String> = ["pkg/gl".to_owned()].into_iter().collect();
+        let root_tasks: Vec<UntrackedEntryTask> = named_entries_sorted(fs::read_dir(root).unwrap())
+            .into_iter()
+            .filter(|(name, _)| name.as_slice() == b"pkg")
+            .map(|(name, entry)| UntrackedEntryTask {
+                parent: Arc::from(""),
+                name,
+                entry,
+            })
+            .collect();
+
+        let tasks = split_tracked_untracked_tasks(
+            root_tasks,
+            usize::MAX,
+            &repo,
+            &index,
+            &gitlinks,
+            false,
+            &tracked,
+            &mut matcher,
+        );
+        let queued: Vec<(String, String)> = tasks
+            .iter()
+            .map(|t| {
+                (
+                    t.parent.to_string(),
+                    String::from_utf8_lossy(&t.name).into_owned(),
+                )
+            })
+            .collect();
+        let expected: Vec<(String, String)> = [
+            ("pkg/a", "f1"),
+            ("pkg/a/inner", "f2"),
+            ("pkg", "gl"),
+            ("pkg", "u"),
+        ]
+        .into_iter()
+        .map(|(p, n)| (p.to_owned(), n.to_owned()))
+        .collect();
+        assert_eq!(
+            queued, expected,
+            "tracked directories split in order; the gitlink and the untracked directory stay whole"
+        );
+
+        let one_round = split_tracked_untracked_tasks(
+            named_entries_sorted(fs::read_dir(root).unwrap())
+                .into_iter()
+                .filter(|(name, _)| name.as_slice() == b"pkg")
+                .map(|(name, entry)| UntrackedEntryTask {
+                    parent: Arc::from(""),
+                    name,
+                    entry,
+                })
+                .collect(),
+            2,
+            &repo,
+            &index,
+            &gitlinks,
+            false,
+            &tracked,
+            &mut matcher,
+        );
+        assert_eq!(
+            one_round.len(),
+            3,
+            "splitting stops once enough directories are queued"
         );
     }
 }

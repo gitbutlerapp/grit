@@ -75,8 +75,8 @@ pub struct ScenarioSpec {
 /// Headline scenario on the cooking page (roadmap item 2347).
 pub type HeadlineScenario = ScenarioSpec;
 
-/// The 18 headline scenarios: ids and short names fixed by the performance census roadmap.
-pub const HEADLINE_SCENARIOS: [HeadlineScenario; 19] = [
+/// Headline scenarios: ids and short names fixed by the performance census roadmap.
+pub const HEADLINE_SCENARIOS: [HeadlineScenario; 20] = [
     ScenarioSpec {
         id: "status/clean@synth-10k",
         area: Area::Worktree,
@@ -204,6 +204,13 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 19] = [
         description: "Incremental push vs git push",
     },
     ScenarioSpec {
+        id: "push/force-with-lease@git-git",
+        area: Area::Remotes,
+        headline: true,
+        name: Some("push"),
+        description: "Amended commit force-with-lease push vs git push --force-with-lease",
+    },
+    ScenarioSpec {
         id: "clone/local@synth-10k",
         area: Area::Remotes,
         headline: true,
@@ -213,7 +220,7 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 19] = [
 ];
 
 /// Remote matrix scenarios (non-headline) for the daily census.
-pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 6] = [
+pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 9] = [
     ScenarioSpec {
         id: "fetch/noop@git-git",
         area: Area::Remotes,
@@ -255,5 +262,26 @@ pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 6] = [
         headline: false,
         name: None,
         description: "Explicit refspec push HEAD:refs/heads/bench vs git push",
+    },
+    ScenarioSpec {
+        id: "fetch/one-branch@git-git",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Fetch one branch refspec vs git fetch origin main",
+    },
+    ScenarioSpec {
+        id: "fetch/dry-run@git-git",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Fetch dry-run reports updates without writing refs or objects",
+    },
+    ScenarioSpec {
+        id: "fetch/deepen@git-git",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Deepen a depth-1 client by 50 commits vs git fetch --deepen 50",
     },
 ];

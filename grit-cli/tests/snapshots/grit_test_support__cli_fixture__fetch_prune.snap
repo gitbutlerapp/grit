@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"remote\":\"origin\",\"updates\":[{\"ref\":\"refs/remotes/origin/prune-me\",\"old_oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new_oid\":null}],\"updated\":1}\n",
+    "stdout": "{\"remote\":\"origin\",\"updates\":[{\"ref\":\"refs/remotes/origin/prune-me\",\"remote_ref\":\"refs/remotes/origin/prune-me\",\"status\":\"pruned\",\"old_oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new_oid\":null,\"reason\":\"pruned (gone on remote)\"}],\"updated\":1,\"dry_run\":false,\"rejected\":false}\n",
     "stderr": ""
   },
   "markdown": {

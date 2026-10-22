@@ -6,7 +6,8 @@
 //!
 //! ```rust
 //! use grit_lib::repo_relpath::parent_dir;
-//! assert!(parent_dir(b"src/main.rs").ends_with(b"src"));
+//!
+//! assert_eq!(parent_dir(b"src/lib.rs"), b"src");
 //! ```
 
 use std::borrow::Cow;

@@ -54,6 +54,8 @@ Unset or `0` selects auto (all logical CPUs). Positive integers cap worker count
 
 Stat preload during status/diff uses Git's **~500 entries per thread** rule with a **20**-thread cap ([`ThreadPolicy::index_stat_preload_threads`](https://docs.rs/grit-lib/latest/grit_lib/parallel/struct.ThreadPolicy.html#method.index_stat_preload_threads)), still honoring `core.preloadIndex`, `index.threads`, and the global thread override.
 
+The untracked walk in status (no pathspecs) uses the `IndexRefresh` worker count and runs one task per directory entry. With at least 1000 index entries it first splits directories that only recurse (they hold tracked files and are not a gitlink or nested submodule) into their children, until each worker has about eight directories, so a work tree whose files sit under a single top-level directory still walks in parallel. Splitting changes neither the reported paths nor their order.
+
 Optional `pack.windowMemory` caps sliding-window retention during delta search (Git `pack.windowMemory`, default unlimited).
 
 ## Global `--threads` (CLI)

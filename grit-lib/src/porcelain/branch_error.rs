@@ -27,7 +27,7 @@ pub enum BranchError {
     InvalidName {
         /// User-supplied short name.
         name: String,
-        /// Validation detail from ref-format checking.
+        /// Human-readable ref-format validation detail.
         reason: String,
     },
 

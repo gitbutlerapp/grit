@@ -574,3 +574,118 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
         "remote must store annotated tag object"
     );
 }
+
+#[test]
+fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(work.join("a.txt"), "one\n").unwrap();
+    git(&work, &["add", "a.txt"]);
+    git(&work, &["commit", "-q", "-m", "c1"]);
+    let c1_oid = rev_parse(&work, "HEAD");
+    std::fs::write(work.join("b.txt"), "two\n").unwrap();
+    git(&work, &["add", "b.txt"]);
+    git(&work, &["commit", "-q", "-m", "c2"]);
+
+    let base = tmp.path().join("srv");
+    std::fs::create_dir_all(&base).unwrap();
+    let bare = base.join("repo.git");
+    git(
+        &work,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            bare.to_str().expect("utf8 path"),
+        ],
+    );
+    git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_daemon(&base, port) else {
+        eprintln!("SKIP: `git daemon` is unavailable");
+        return;
+    };
+    let _guard = DaemonGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: git daemon did not become ready on port {port}");
+        return;
+    }
+
+    let url = format!("git://127.0.0.1:{port}/repo.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+
+    let transport = GitDaemonTransport::new();
+    let mut conn = match transport.connect(&url, Service::UploadPack, &ConnectOptions::default()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("SKIP: could not connect to git daemon: {e}");
+            return;
+        }
+    };
+    fetch_remote(
+        &local_git,
+        &mut *conn,
+        &FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            tags: TagMode::None,
+            ..Default::default()
+        },
+        &mut NoProgress,
+    )
+    .expect("seed fetch");
+
+    git(&local, &["branch", "probe", &c1_oid.to_hex()]);
+    let probe_before = resolve_ref(&local_git, "refs/heads/probe").expect("probe");
+
+    std::fs::write(work.join("c.txt"), "three\n").unwrap();
+    git(&work, &["add", "c.txt"]);
+    git(&work, &["commit", "-q", "-m", "c3"]);
+    git(
+        &work,
+        &["push", "-q", bare.to_str().expect("utf8 path"), "HEAD:main"],
+    );
+
+    let mut conn = transport
+        .connect(&url, Service::UploadPack, &ConnectOptions::default())
+        .expect("reconnect");
+    let outcome = fetch_remote(
+        &local_git,
+        &mut *conn,
+        &FetchOptions {
+            refspecs: vec!["refs/heads/main:refs/heads/probe".to_owned()],
+            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            remote_name: Some("origin".to_owned()),
+            dry_run: true,
+            tags: TagMode::None,
+            ..Default::default()
+        },
+        &mut NoProgress,
+    )
+    .expect("dry-run fetch");
+
+    let probe_update = outcome
+        .updates
+        .iter()
+        .find(|u| u.local_ref.as_deref() == Some("refs/heads/probe"))
+        .expect("probe update");
+    assert_eq!(
+        probe_update.mode,
+        UpdateMode::FastForward,
+        "probe update: {:?}",
+        outcome.updates
+    );
+    assert_eq!(
+        resolve_ref(&local_git, "refs/heads/probe").expect("probe after dry-run"),
+        probe_before
+    );
+}

@@ -313,7 +313,14 @@ fn complete_bundle_fetch(
         };
 
         let old = crate::refs::resolve_ref(local_git_dir, local_ref).ok();
-        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
+        let mode = classify_update(
+            old.as_ref(),
+            &m.oid,
+            m.force,
+            m.dest_is_tag,
+            local_repo.as_ref(),
+            None,
+        );
 
         let write = matches!(
             mode,

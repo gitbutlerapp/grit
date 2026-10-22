@@ -58,7 +58,7 @@ fn canonical_layout_script_covers_workspace_imports() {
 /// Raise only when adding a new top-level domain module. The canonical layout on
 /// `origin/main` currently declares **24** root `pub mod` lines; this budget leaves
 /// headroom without reintroducing flat compatibility roots.
-const ROOT_PUB_MOD_BUDGET: usize = 32;
+const ROOT_PUB_MOD_BUDGET: usize = 33;
 
 #[test]
 fn root_public_module_count_within_budget() {

@@ -5,11 +5,14 @@
 //! remote-tracking refs (without duplicating [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) lines).
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use thiserror::Error;
 
+use crate::config::ConfigSet;
 use crate::objects::ObjectId;
 use crate::refspec::{parse_fetch_refspec, RefspecError, RefspecItem};
+use crate::repo_handles::configured_remote_names;
 use crate::transfer::{match_positive, ref_excluded, MatchedRef};
 
 /// How an explicit fetch refspec source side was resolved against advertised refs.
@@ -125,6 +128,97 @@ pub struct FetchRemoteAdvertisement<'a> {
     pub refs: &'a [(String, ObjectId)],
     /// Tip oid of the remote `HEAD` ref when advertised (even if omitted from `refs`).
     pub head_oid: Option<ObjectId>,
+}
+
+/// Remote name and explicit refspec strings after parsing `grit fetch` positionals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchInvocation {
+    /// Configured remote name, URL, or filesystem path to fetch from.
+    pub remote: String,
+    /// Command-line refspecs (`main`, `refs/heads/x:refs/heads/y`, …). Empty uses configured refspecs.
+    pub user_refspecs: Vec<String>,
+}
+
+/// Classify `grit fetch [<remote>] [<refspec>…]` positionals (no refspec parsing).
+///
+/// When the CLI supplies a first positional (`remote`), it is always the
+/// repository (configured name, URL, scp-style `host:path`, or path) — matching
+/// Git. Remaining positionals are refspecs. With no first positional, an initial
+/// token that looks like a repository is consumed as the remote; otherwise the
+/// default remote is used and every token is a refspec.
+#[must_use]
+pub fn resolve_fetch_invocation(
+    config: &ConfigSet,
+    remote: Option<&str>,
+    refspecs: &[String],
+    default_remote: &str,
+) -> FetchInvocation {
+    if let Some(name) = remote.filter(|s| !s.is_empty()) {
+        return FetchInvocation {
+            remote: name.to_owned(),
+            user_refspecs: refspecs.to_vec(),
+        };
+    }
+
+    if refspecs.is_empty() {
+        return FetchInvocation {
+            remote: default_remote.to_owned(),
+            user_refspecs: Vec::new(),
+        };
+    }
+
+    if is_fetch_remote_token(config, &refspecs[0]) {
+        FetchInvocation {
+            remote: refspecs[0].clone(),
+            user_refspecs: refspecs[1..].to_vec(),
+        }
+    } else {
+        FetchInvocation {
+            remote: default_remote.to_owned(),
+            user_refspecs: refspecs.to_vec(),
+        }
+    }
+}
+
+fn is_fetch_remote_token(config: &ConfigSet, token: &str) -> bool {
+    if configured_remote_names(config).iter().any(|n| n == token) {
+        return true;
+    }
+    if Path::new(token).exists() {
+        return true;
+    }
+    token.contains("://")
+        || token.starts_with('/')
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.ends_with(".git")
+        || token.ends_with(".bundle")
+        || (token.contains(':') && !token.contains(' ') && !looks_like_fetch_refspec(token))
+}
+
+/// True when `token` is an explicit `src:dst` fetch refspec, not an scp-style remote URL.
+fn looks_like_fetch_refspec(token: &str) -> bool {
+    if token.contains('@') {
+        return false;
+    }
+    let Ok(item) = parse_fetch_refspec(token) else {
+        return false;
+    };
+    if item.negative || item.pattern || item.matching {
+        return false;
+    }
+    if !token.contains(':') || item.src.is_none() {
+        return false;
+    }
+    let src = item.src.as_deref().unwrap_or("");
+    let dst = item.dst.as_deref().unwrap_or("");
+    if src.contains('.') && !src.starts_with("refs/") {
+        return false;
+    }
+    if dst.contains('/') && !dst.starts_with("refs/") {
+        return false;
+    }
+    true
 }
 
 /// Inputs for [`FetchRefspecPlan::resolve`].
@@ -301,6 +395,7 @@ pub(crate) fn matched_refs_from_plan(
                     oid,
                     force: entry.force,
                     is_tag: entry.remote_ref.starts_with("refs/tags/"),
+                    dest_is_tag: ref_update_uses_tag_rules(entry.local_ref.as_deref()),
                     advertised_peel: None,
                     fetch_head: entry.fetch_head,
                 });
@@ -326,10 +421,11 @@ fn pattern_matched_refs(
             if seen.insert(key) {
                 matched.push(MatchedRef {
                     remote_ref: name.clone(),
-                    local_ref,
+                    local_ref: local_ref.clone(),
                     oid: *oid,
                     force: crate::transfer::refspecs_force(name, positive),
                     is_tag: name.starts_with("refs/tags/"),
+                    dest_is_tag: ref_update_uses_tag_rules(local_ref.as_deref()),
                     advertised_peel: None,
                     fetch_head: FetchHeadPolicy::ForMerge,
                 });
@@ -483,6 +579,12 @@ fn resolve_explicit_source(
             }
         }
     }
+}
+
+/// Whether ref-update rules treat the destination as a tag (no overwrite without `+`).
+#[must_use]
+pub(crate) fn ref_update_uses_tag_rules(local_ref: Option<&str>) -> bool {
+    local_ref.is_some_and(|r| r.starts_with("refs/tags/"))
 }
 
 fn resolve_explicit_destination(dst: Option<&str>, _remote_ref: &str) -> Option<String> {
@@ -702,6 +804,104 @@ mod tests {
         assert!(
             refname_match_fetch_dwim("main", "refs/heads/main")
                 > refname_match_fetch_dwim("main", "refs/tags/main")
+        );
+    }
+
+    #[test]
+    fn colon_refspec_is_not_treated_as_remote() {
+        use super::{resolve_fetch_invocation, FetchInvocation};
+        use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+
+        let file = ConfigFile::parse(
+            std::path::Path::new("cfg"),
+            "[remote \"origin\"]\n\turl = /tmp/x.git\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        let mut config = ConfigSet::new();
+        config.merge(&file);
+
+        assert_eq!(
+            resolve_fetch_invocation(&config, None, &["main:refs/heads/feature".into()], "origin"),
+            FetchInvocation {
+                remote: "origin".into(),
+                user_refspecs: vec!["main:refs/heads/feature".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_remote_positional_includes_scp_style_urls() {
+        use super::{resolve_fetch_invocation, FetchInvocation};
+        use crate::config::ConfigSet;
+
+        let config = ConfigSet::new();
+        assert_eq!(
+            resolve_fetch_invocation(&config, Some("example.com:repo"), &[], "origin"),
+            FetchInvocation {
+                remote: "example.com:repo".into(),
+                user_refspecs: vec![],
+            }
+        );
+        assert_eq!(
+            resolve_fetch_invocation(&config, Some("git@host:org/repo"), &[], "origin"),
+            FetchInvocation {
+                remote: "git@host:org/repo".into(),
+                user_refspecs: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn configured_remote_with_colon_refspec() {
+        use super::{resolve_fetch_invocation, FetchInvocation};
+        use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+
+        let file = ConfigFile::parse(
+            std::path::Path::new("cfg"),
+            "[remote \"origin\"]\n\turl = /tmp/x.git\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        let mut config = ConfigSet::new();
+        config.merge(&file);
+
+        assert_eq!(
+            resolve_fetch_invocation(&config, Some("origin"), &["a:b".into()], "origin"),
+            FetchInvocation {
+                remote: "origin".into(),
+                user_refspecs: vec!["a:b".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_fetch_invocation_remote_vs_refspec() {
+        use super::{resolve_fetch_invocation, FetchInvocation};
+        use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+
+        let file = ConfigFile::parse(
+            std::path::Path::new("cfg"),
+            "[remote \"origin\"]\n\turl = /tmp/x.git\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        let mut config = ConfigSet::new();
+        config.merge(&file);
+
+        assert_eq!(
+            resolve_fetch_invocation(&config, Some("origin"), &["main".into()], "origin"),
+            FetchInvocation {
+                remote: "origin".into(),
+                user_refspecs: vec!["main".into()],
+            }
+        );
+        assert_eq!(
+            resolve_fetch_invocation(&config, None, &["main".into()], "origin"),
+            FetchInvocation {
+                remote: "origin".into(),
+                user_refspecs: vec!["main".into()],
+            }
         );
     }
 }

@@ -109,6 +109,7 @@ export type RepoShapeId =
 | `pull/fast-forward@git-git` | pull |
 | `pull/rebase@synth-10k` | pull |
 | `push/incremental@git-git` | push |
+| `push/force-with-lease@git-git` | push |
 | `clone/local@synth-10k` | clone |
 
 ## Validation

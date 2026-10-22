@@ -8,43 +8,50 @@ order: 2
 ## Synopsis
 
 ```text
-grit fetch [<remote>] [--prune] [--no-prune]
+grit fetch [<remote>] [<refspec>…] [--depth N] [--deepen N] [--unshallow] [--tags] [--no-tags] [--prune] [--no-prune] [--dry-run] [-q]
 ```
 
 ## Description
 
-Downloads everything new from a remote and updates your remote-tracking branches, such as `origin/main`, along with any new tags. Your own branches and working tree are left alone; to bring the new commits into your branch, use [`grit merge`](../merge/) or [`grit pull`](../pull/).
+Downloads objects and updates refs from a remote. Your working tree and current branch are unchanged; use [`grit merge`](../merge/) or [`grit pull`](../pull/) to integrate fetched commits.
 
-`<remote>` may be a configured remote name or a path to a [git bundle](https://git-scm.com/docs/git-bundle) file (detected by the bundle signature, not the file extension). Bundle fetches verify that prerequisite commits are already in your repository before applying the pack.
+`<remote>` defaults to `origin`. It may be a configured remote name, a URL, a filesystem path, or a [git bundle](https://git-scm.com/docs/git-bundle) file.
 
-When the argument is a **literal path or URL** (not a configured remote name), grit downloads objects for advertised heads but does **not** update `refs/remotes/origin/*` or any other configured remote-tracking namespace. Only [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) is updated (with the remote’s default branch tip), matching Git. Pass an explicit refspec on the command line when you need to store tracking refs from an ad-hoc source.
+Each `<refspec>` selects what to fetch (`main`, `refs/heads/x:refs/heads/y`, `+refs/…` to force). When no refspecs are given, configured `remote.<name>.fetch` refspecs apply (usually all heads into `refs/remotes/<remote>/…`).
 
-Each ref that actually changed locally is listed with its old and new commit. Removed remote-tracking refs (after `--prune`) show `deleted` on the human line and `new_oid: null` in JSON.
+When the source is a **literal path or URL** (not a configured remote), grit does not update `refs/remotes/origin/*` unless you pass refspecs with destinations. [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) is updated for explicit refspecs.
 
-Existing tags are not overwritten when the same tag name moves on the remote (Git-compatible behavior). A fetch in that situation downloads any new objects but leaves `refs/tags/*` alone; the command reports no tag update, and a repeat fetch stays up to date.
+Human output lists each local ref with its remote source and old → new oids. Pruned refs show `deleted`; rejected updates are listed and exit **1** (same as [`grit push`](../push/) rejections).
 
-When `fetch.prune` or `remote.<name>.prune` is true, stale remote-tracking refs under `refs/remotes/<remote>/` are removed automatically. Per-remote `remote.<name>.prune` overrides the global `fetch.prune` value. `--prune` and `--no-prune` override config for this invocation.
+Tag policy follows Git: default is follow-tags (reachable annotated tags), `--tags` fetches every remote tag, `--no-tags` disables automatic tags. `remote.<name>.tagOpt` (`--tags` / `--no-tags`) applies when the CLI does not override it.
 
-Repositories created as shallow clones with Git (for example `git clone --depth 1`) are supported: `grit fetch` respects the existing shallow boundary, does not create tag refs to missing commits, and leaves a clean repository when there is nothing new to download.
+`--dry-run` negotiates and reports updates without writing refs, objects, or `FETCH_HEAD`.
 
-Pack indexing uses plain SHA-1 object ids compatible with Git (including SHAttered blobs in upstream histories).
+`--depth`, `--deepen`, and `--unshallow` match Git’s shallow fetch controls (mutually exclusive). `--depth` truncates history on the first shallow fetch; `--deepen` adds commits relative to an existing shallow clone; `--unshallow` fetches the rest and removes `.git/shallow`. `--unshallow` on a complete repository is a typed error.
 
-On an interactive terminal (human output, not `--json` or `--markdown`), grit prints live progress on stderr while objects are received and indexed, using the same style as [`grit clone`](../clone/). When stderr is not a TTY, no progress lines are shown.
+`-q` / `--quiet` suppresses progress and human output (JSON and markdown are unchanged).
 
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `<remote>` | Configured remote name, or a path/URL to a repository or bundle file. Defaults to `origin`. |
-| `--prune` | Remove remote-tracking refs that no longer exist on the remote. |
-| `--no-prune` | Do not prune, even when `fetch.prune` or `remote.<name>.prune` is enabled. |
+| `<remote>` | Remote name, URL, path, or bundle. Defaults to `origin`. |
+| `<refspec>…` | What to fetch; short names expand like Git (`main` → `refs/heads/main`). |
+| `--tags` | Fetch all tags from the remote. |
+| `--no-tags` | Do not fetch tags automatically. |
+| `--prune` | Remove stale remote-tracking refs. |
+| `--no-prune` | Do not prune, even when config enables it. |
+| `--dry-run` | Report updates without writing. |
+| `--depth N` | Shallow fetch: keep at most N commits from each tip. |
+| `--deepen N` | Deepen a shallow clone by N commits (relative). |
+| `--unshallow` | Fetch full history and drop shallow boundaries. |
+| `-q`, `--quiet` | Suppress progress and human stdout/stderr. |
 
 ## Examples
 
 ```console
-$ grit fetch
-Receiving objects: 4.00 KiB, 8.00 KiB/s, done.
-  refs/remotes/origin/main  a8e620a → b52cca6
+$ grit fetch origin main
+  refs/remotes/origin/main  ← refs/heads/main  a8e620a → b52cca6
 Fetched 1 update from origin.
 
 $ grit fetch
@@ -55,10 +62,12 @@ $ grit fetch --prune
 Fetched 1 update from origin.
 ```
 
-Fetch from another remote:
+Fetch a pull request ref into a local branch:
 
 ```console
-$ grit fetch upstream
+$ grit fetch origin pull/123/head:pr-123
+  refs/heads/pr-123  ← refs/pull/123/head  … → …
+Fetched 1 update from origin.
 ```
 
 ## JSON output
@@ -70,17 +79,48 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `remote` | string | Remote that was fetched. |
-| `updates` | array | Ref updates, each with `ref`, `old_oid`, and `new_oid`. |
-| `updated` | number | Count of refs that changed. |
-
-`old_oid` is `null` for a ref that is new, and `new_oid` is `null` for one that was removed.
+| `dry_run` | boolean | True when `--dry-run` was used. |
+| `rejected` | boolean | True when any update was rejected (exit 1). |
+| `updates` | array | Per-ref results. Each object has `ref`, `remote_ref`, `status` (`new`, `fast_forward`, `forced`, `pruned`, `rejected`, or `up_to_date`), `old_oid` and `new_oid` (full hex or `null`), and `reason` when `status` is `rejected`. |
+| `updated` | number | Count of refs that actually changed. |
+| `shallow` | object | When present: `added` and `removed` lists of full hex oids for new/removed `.git/shallow` boundaries. |
 
 Example:
 
 ```json
 {
   "remote": "origin",
-  "updates": [],
+  "dry_run": false,
+  "rejected": false,
+  "updates": [
+    {
+      "ref": "refs/remotes/origin/main",
+      "remote_ref": "refs/heads/main",
+      "status": "fast_forward",
+      "old_oid": "a8e620a111111111111111111111111111111111",
+      "new_oid": "b52cca6222222222222222222222222222222222"
+    }
+  ],
+  "updated": 1
+}
+```
+
+Dry run:
+
+```json
+{
+  "remote": "origin",
+  "dry_run": true,
+  "rejected": false,
+  "updates": [
+    {
+      "ref": "refs/remotes/origin/main",
+      "remote_ref": "refs/heads/main",
+      "status": "fast_forward",
+      "old_oid": "a8e620a111111111111111111111111111111111",
+      "new_oid": "b52cca6222222222222222222222222222222222"
+    }
+  ],
   "updated": 0
 }
 ```

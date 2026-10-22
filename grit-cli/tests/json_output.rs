@@ -2040,7 +2040,10 @@ fn merge_conflict_json_is_structured() -> TestResult {
     assert_eq!(out.status, Some(1), "{}", out.dump());
     let v: Value = serde_json::from_str(&out.stdout)?;
     assert_eq!(v["result"], "conflicts");
-    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    assert_eq!(
+        v["conflicts"],
+        serde_json::json!([{"path": "f", "kind": "content"}])
+    );
     assert!(
         repo.join(".git/MERGE_HEAD").exists(),
         "merge should leave MERGE_HEAD"
@@ -2278,10 +2281,15 @@ fn schema_top_level_keys_are_stable() -> TestResult {
         keys(&committed),
         [
             "amended",
+            "author",
             "branch",
             "change_id",
             "changes",
+            "dry_run",
+            "files",
+            "hooks_run",
             "oid",
+            "parents",
             "scope",
             "subject"
         ]
@@ -2339,7 +2347,10 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     assert!(!result_keys.iter().any(|k| k == "reason"));
 
     let fetch = gs_json(&seed, &["fetch"]);
-    assert_eq!(keys(&fetch), ["remote", "updated", "updates"]);
+    assert_eq!(
+        keys(&fetch),
+        ["dry_run", "rejected", "remote", "updated", "updates"]
+    );
 
     write_file(&seed.join("a.txt"), "dirty\n");
     let restored = gs_json(&seed, &["restore", "a.txt"]);

@@ -55,7 +55,7 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
-use grit_lib::remote::transfer::{FetchOptions, FetchOutcome, TagMode, UpdateMode};
+use grit_lib::remote::transfer::{FetchDepth, FetchOptions, FetchOutcome, TagMode, UpdateMode};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
 use grit_lib::remote::transport::{
@@ -1445,7 +1445,7 @@ fn fetch_outcome_identical_git_daemon_and_smart_http() {
             "shallow-v1",
             FetchOptions {
                 refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-                depth: Some(1),
+                fetch_depth: FetchDepth::depth(1),
                 tags: TagMode::Following,
                 ..Default::default()
             },
