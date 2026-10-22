@@ -54,6 +54,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
         apply: grit_lib::revwalk::history::ApplyOptions {
             identity: IDENT.into(),
             reflog_message: "rebase".into(),
+            record_operation: None,
         },
     }
 }
@@ -383,7 +384,7 @@ fn finish_conflict_rebase_with_grit(
 
 #[test]
 fn continue_after_resolution_matches_git_rebase_continue() {
-    let (repo_g, upstream_g, onto_g, tip_g, _) = conflict_rebase_fixture();
+    let (repo_g, upstream_g, onto_g, _tip_g, _) = conflict_rebase_fixture();
     let wt_g = repo_g.worktree();
     git(wt_g, &["switch", "topic"]);
     finish_conflict_rebase_with_git(wt_g, upstream_g, onto_g);
@@ -615,6 +616,7 @@ fn stacked_branches_move_atomically_after_continue() {
         apply: grit_lib::revwalk::history::ApplyOptions {
             identity: IDENT.into(),
             reflog_message: "rebase".into(),
+            record_operation: None,
         },
     };
     let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").unwrap();
