@@ -79,22 +79,17 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `remote` | string | Remote that was pushed to. |
 | `kind` | string | `branch`, `tags`, `delete`, or `refspecs`. |
-| `branch` | string? | Short branch name when `kind` is `branch` (omitted otherwise). |
-| `dry_run` | boolean | Present and `true` when `--dry-run` was used. |
-| `results` | array | Per-ref outcomes (see below). |
+| `branch` | string or null | Short branch name when `kind` is `branch`. |
+| `dry_run` | boolean | `true` when `--dry-run` was used. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
-
-Each element of `results`:
-
-| Field | Type | Meaning |
-| ----- | ---- | ------- |
-| `ref` | string | Remote ref updated. |
-| `status` | string | `ok`, `up_to_date`, or `rejected`. |
-| `reason` | string? | Rejection detail when `status` is `rejected`. |
-| `old_oid` | string? | Previous remote tip (full hex). |
-| `new_oid` | string? | New tip after a successful update. |
-| `forced` | boolean | `true` for a non-fast-forward update with force. |
-| `src` | string? | Local source ref when known. |
+| `results` | array | Per-ref outcomes. |
+| `results[].ref` | string | Remote ref updated. |
+| `results[].status` | string | `ok`, `up_to_date`, or `rejected`. |
+| `results[].reason` | string or null | Rejection detail when `status` is `rejected`. |
+| `results[].old_oid` | string or null | Previous remote tip (full hex). |
+| `results[].new_oid` | string or null | New tip after a successful update. |
+| `results[].forced` | boolean | `true` for a forced non-fast-forward update. |
+| `results[].src` | string or null | Local source ref when known. |
 
 Example:
 
