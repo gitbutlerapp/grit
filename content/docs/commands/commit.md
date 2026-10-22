@@ -157,6 +157,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `scope` | string | `auto_stage`, `staged`, or `paths` — how the index was prepared |
 | `dry_run` | boolean | `true` when `--dry-run` was passed |
 | `files` | array | Path-level changes (`path`, `status`, optional `old_path` for renames) |
+| `change_id` | string or null | Stored `change-id` header on the new commit, or null when absent or dry-run |
 | `parents` | array of strings | Parent commit OIDs that would be stored |
 | `author` | object | `name`, `email`, and `date` recorded on the commit |
 | `hooks_run` | array of strings | Hook names that ran (`pre-commit`, `commit-msg`); empty on dry-run |
