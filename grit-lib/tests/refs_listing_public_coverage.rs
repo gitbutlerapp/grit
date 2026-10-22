@@ -110,6 +110,8 @@ fn references_query_peels_annotated_tags() {
             tagger: Some("T <t@example.com> 1700000000 +0000".into()),
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .unwrap();
@@ -144,6 +146,8 @@ fn references_query_peels_annotated_tag_to_non_commit() {
             tagger: Some("T <t@example.com> 1700000000 +0000".into()),
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .unwrap();
@@ -194,6 +198,8 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
             tagger: None,
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .unwrap();
@@ -244,6 +250,8 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
             tagger: None,
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .unwrap();
