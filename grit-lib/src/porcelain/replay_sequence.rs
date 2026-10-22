@@ -537,6 +537,7 @@ fn run_sequence(
                         dropped,
                     });
                 }
+                write_sequencer_abort_safety(repo.git_dir(), head)?;
             }
             StepResult::AppliedNoCommit => {
                 todo.remove(0);
@@ -549,6 +550,7 @@ fn run_sequence(
                         dropped,
                     });
                 }
+                write_sequencer_abort_safety(repo.git_dir(), head)?;
             }
             StepResult::DroppedEmpty => {
                 todo.remove(0);
@@ -1147,6 +1149,15 @@ fn read_sequencer_head(git_dir: &Path) -> Option<ObjectId> {
 
 fn read_sequencer_abort_safety(git_dir: &Path) -> Option<ObjectId> {
     read_oid_file(&git_dir.join("sequencer").join("abort-safety"))
+}
+
+fn write_sequencer_abort_safety(git_dir: &Path, oid: ObjectId) -> Result<()> {
+    fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
+    fs::write(
+        git_dir.join("sequencer").join("abort-safety"),
+        format!("{}\n", oid.to_hex()),
+    )
+    .map_err(Error::Io)
 }
 
 fn read_oid_file(path: &Path) -> Option<ObjectId> {
