@@ -28,6 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space (workspace tests link many binaries)
+        run: ./scripts/ci-free-disk-space.sh
+
       - name: Install reftable-capable Git (>= 2.45)
         run: ./scripts/ci-install-git.sh
 
@@ -260,6 +263,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space (release workspace tests link many binaries)
+        run: ./scripts/ci-free-disk-space.sh
+
       - name: Install reftable-capable Git (>= 2.45)
         run: ./scripts/ci-install-git.sh
 
@@ -329,6 +335,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space (workspace tests link many binaries)
+        run: ./scripts/ci-free-disk-space.sh
 
       - name: Install reftable-capable Git (>= 2.45)
         run: ./scripts/ci-install-git.sh
