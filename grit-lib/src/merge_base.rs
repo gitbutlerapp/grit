@@ -548,6 +548,11 @@ impl ReachableWalkState {
     pub fn new(repo: &Repository, tips: &[ObjectId], hide: &[ObjectId]) -> Result<Self> {
         let hide_vec: Vec<ObjectId> = hide.to_vec();
         let mut cache = CommitGraphCache::new(repo);
+        let mut hide_set = oid_hash_set();
+        for &hide_tip in hide {
+            hide_set.insert(hide_tip);
+            hide_set.extend(cache.ancestor_closure(hide_tip)?);
+        }
         let mut state = Self {
             heap: BinaryHeap::new(),
             done: oid_hash_set(),
@@ -556,10 +561,10 @@ impl ReachableWalkState {
             seeded: oid_hash_set(),
             seq: 0,
             hide: hide_vec,
-            hide_set: oid_hash_set(),
+            hide_set,
         };
         for &tip in tips {
-            if state.hide.contains(&tip) {
+            if state.hide_set.contains(&tip) {
                 continue;
             }
             if state.queued.insert(tip) {
@@ -627,17 +632,20 @@ impl ReachableWalkState {
         !self.heap.is_empty()
     }
 
-    fn is_hidden(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<bool> {
-        if self.hide.contains(&oid) || self.hide_set.contains(&oid) {
-            return Ok(true);
+    fn ensure_hide_set(&mut self, cache: &mut CommitGraphCache<'_>) -> Result<()> {
+        if self.hide.is_empty() || !self.hide_set.is_empty() {
+            return Ok(());
         }
         for &hide_tip in &self.hide {
-            if cache.is_ancestor(oid, hide_tip)? {
-                self.hide_set.insert(oid);
-                return Ok(true);
-            }
+            self.hide_set.insert(hide_tip);
+            self.hide_set.extend(cache.ancestor_closure(hide_tip)?);
         }
-        Ok(false)
+        Ok(())
+    }
+
+    fn is_hidden(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<bool> {
+        self.ensure_hide_set(cache)?;
+        Ok(self.hide_set.contains(&oid))
     }
 
     fn push_on_heap(
@@ -2197,6 +2205,31 @@ mod tests {
         assert_eq!(
             count_commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old], since)?,
             100
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ahead_behind_one_commit_on_deep_chain_is_linear_not_quadratic() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let chain = write_chain(&repo, 3000, |i| 100 + i as i64)?;
+        let tip = chain[2999];
+        let upstream = chain[2998];
+
+        clear_commit_linkage(&repo);
+        reset_commit_parent_lookups();
+        let (ahead, behind, retained) = ahead_behind_of_target_commits(&repo, tip, upstream, 1)?;
+        assert_eq!((ahead, behind), (1, 0));
+        assert_eq!(retained, vec![tip]);
+        let lookups = commit_parent_lookups();
+        assert!(
+            lookups <= 6500,
+            "one-commit-ahead status must not re-check ancestry per walked commit ({lookups})"
         );
         Ok(())
     }
