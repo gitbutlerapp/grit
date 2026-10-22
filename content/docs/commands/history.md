@@ -12,8 +12,8 @@ grit history drop <commit>
 grit history move <commit> (--before <anchor> | --after <anchor>)
 grit history reword <commit> -m <message>
 grit history reword <commit> --message-file <path|->
-grit history drop|move|reword|fixup|squash|absorb … [--dry-run] [--update-refs=(branches|head)]
-grit history fixup <commit> [--empty=(drop|keep|abort)] [-m|--message-file]
+grit history drop|move|reword|fixup|squash|absorb … [--dry-run] [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer]
+grit history fixup <commit> [-m|--message-file]
 grit history squash <range>… [-m|--message-file|--combine]
 grit history absorb [--base <rev>]
 ```
@@ -50,7 +50,7 @@ Descendant **merge** commits are replayed the same way as for [`drop`](#drop): p
 
 ### `fixup`
 
-Fold **staged** changes into an earlier commit on the first-parent chain of `HEAD`, then replay descendants onto the rewritten history. Grit three-way merges staged edits into the target commit’s tree; descendant commits are replayed like other history rewrites. If the merge would make the target empty, grit aborts unless `--empty` is set.
+Fold **staged** changes into an earlier commit on the first-parent chain of `HEAD`, then replay descendants onto the rewritten history. Grit three-way merges staged edits into the target commit’s tree; descendant commits are replayed like other history rewrites. If the merge would make the target empty, grit aborts unless `--empty keep` or `--empty drop` is set (same shared `--empty` flag as other history subcommands).
 
 Provide exactly one of `-m` / `--message` or `--message-file` when you want an explicit fixup message; otherwise grit uses the staged diff to build the amended commit.
 
@@ -77,6 +77,8 @@ The range uses the same revision syntax as `git rev-list` (for example `HEAD~3..
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |
+| `--empty` | When a replayed commit would not change the tree: `drop` (default), `keep`, or `abort`. |
+| `--keep-committer` | Keep each replayed commit’s original committer line instead of your configured committer. |
 
 ## Examples
 

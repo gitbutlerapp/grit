@@ -98,6 +98,10 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 - `grit revert --continue`, `--abort`, and `--skip` resume or cancel a stopped revert sequence (same conflict model as pick).
 - On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or `grit pick --continue` / `grit revert --continue`. Use `--abort` on the same command to cancel.
 
+## History rewrites
+
+- `grit history drop`, `move`, `reword`, `fixup`, `squash`, and `absorb` share `--dry-run`, `--update-refs`, `--empty=(drop|keep|abort)` (empty replayed commits), and `--keep-committer` (preserve each replayed commit’s committer line).
+
 ## Remotes
 
 | Task | Command |

@@ -362,8 +362,13 @@ pub(crate) fn plan_rewrite_with_order(
                 };
                 let author = author.as_deref().unwrap_or(&old.author);
                 let message = message.as_deref().unwrap_or(&old.message);
+                let committer = if opts.preserve_committer {
+                    old.committer.as_str()
+                } else {
+                    opts.committer.as_str()
+                };
                 let oid = if let Some(explicit_tree) = *tree {
-                    write_rewritten_commit(
+                    write_replacement_commit(
                         repo,
                         opts,
                         &change_ids,
@@ -372,7 +377,7 @@ pub(crate) fn plan_rewrite_with_order(
                         explicit_tree,
                         &parent_list,
                         author,
-                        &opts.committer,
+                        committer,
                         message,
                     )?
                 } else {
@@ -383,7 +388,7 @@ pub(crate) fn plan_rewrite_with_order(
                         old_oid,
                         &parent_list,
                         author,
-                        &opts.committer,
+                        committer,
                         message,
                         opts,
                     )?
@@ -981,6 +986,67 @@ fn replay_merge_tree(
     Ok(result_tree)
 }
 
+/// Write a replacement commit for `old_oid`, honoring [`RewriteOptions::empty`].
+#[allow(clippy::too_many_arguments)]
+fn write_replacement_commit(
+    repo: &Repository,
+    opts: &RewriteOptions,
+    change_ids: &ChangeIdWriteContext,
+    old: &CommitData,
+    old_oid: ObjectId,
+    result_tree: ObjectId,
+    parent_list: &[ObjectId],
+    author: &str,
+    committer: &str,
+    message: &str,
+) -> Result<ObjectId, HistoryError> {
+    let empty = empty_tree_oid(repo)?;
+    let old_parent = old.parents.first().copied().unwrap_or(empty);
+    let new_parent = parent_list.first().copied().unwrap_or(empty);
+    let old_parent_tree = if old.parents.is_empty() {
+        empty
+    } else {
+        commit_tree(repo, old_parent)?
+    };
+    let new_parent_tree = if parent_list.is_empty() {
+        empty
+    } else {
+        commit_tree(repo, new_parent)?
+    };
+
+    if old.tree != old_parent_tree && result_tree == new_parent_tree {
+        return match opts.empty {
+            EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
+            EmptyPolicy::Drop => Ok(new_parent),
+            EmptyPolicy::Keep => write_rewritten_commit(
+                repo,
+                opts,
+                change_ids,
+                old,
+                old_oid,
+                result_tree,
+                parent_list,
+                author,
+                committer,
+                message,
+            ),
+        };
+    }
+
+    write_rewritten_commit(
+        repo,
+        opts,
+        change_ids,
+        old,
+        old_oid,
+        result_tree,
+        parent_list,
+        author,
+        committer,
+        message,
+    )
+}
+
 /// Replay with author/message overrides and an explicit parent list (implicit tree).
 #[allow(clippy::too_many_arguments)]
 fn replay_edited_commit(
@@ -1014,27 +1080,7 @@ fn replay_edited_commit(
     };
 
     let result_tree = compute_replayed_tree(repo, old, old_oid, old_parent_tree, new_parent_tree)?;
-
-    if old.tree != old_parent_tree && result_tree == new_parent_tree {
-        return match opts.empty {
-            EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
-            EmptyPolicy::Drop => Ok(new_parent),
-            EmptyPolicy::Keep => write_rewritten_commit(
-                repo,
-                opts,
-                change_ids,
-                old,
-                old_oid,
-                result_tree,
-                parent_list,
-                author,
-                committer,
-                message,
-            ),
-        };
-    }
-
-    write_rewritten_commit(
+    write_replacement_commit(
         repo,
         opts,
         change_ids,
@@ -1178,6 +1224,7 @@ fn write_rewritten_commit(
     message: &str,
 ) -> Result<ObjectId, HistoryError> {
     let author_unchanged = author == template.author;
+    let committer_unchanged = committer == template.committer;
     let message_unchanged = message == template.message;
     let encoding = if message_unchanged {
         template.encoding.clone()
@@ -1189,11 +1236,16 @@ fn write_rewritten_commit(
     } else {
         None
     };
-    let (author_raw, committer_raw) = if author_unchanged && !template.author_raw.is_empty() {
-        let (_, committer_raw) = identity_raw_for_serialized_commit(&encoding, author, committer);
-        (template.author_raw.clone(), committer_raw)
+    let generated = identity_raw_for_serialized_commit(&encoding, author, committer);
+    let author_raw = if author_unchanged && !template.author_raw.is_empty() {
+        template.author_raw.clone()
     } else {
-        identity_raw_for_serialized_commit(&encoding, author, committer)
+        generated.0
+    };
+    let committer_raw = if committer_unchanged && !template.committer_raw.is_empty() {
+        template.committer_raw.clone()
+    } else {
+        generated.1
     };
     let extra_headers = extra_headers_without_commit_signatures(&template.extra_headers);
     let mut data = CommitData {

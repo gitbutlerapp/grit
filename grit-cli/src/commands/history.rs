@@ -73,6 +73,12 @@ pub struct HistoryRewriteArgs {
     /// Which refs to rewrite: all descendant branches (default) or only `HEAD`.
     #[arg(long = "update-refs", value_enum, default_value_t = UpdateRefs::Branches)]
     pub update_refs: UpdateRefs,
+    /// When a replayed commit would not change the tree: drop (default), keep an empty commit, or abort.
+    #[arg(long = "empty", value_enum, default_value_t = EmptyPolicyArg::Drop)]
+    pub empty: EmptyPolicyArg,
+    /// Keep each replayed commit's original committer line instead of the configured committer.
+    #[arg(long = "keep-committer")]
+    pub keep_committer: bool,
 }
 
 /// Result of `grit history drop`, `move`, `reword`, `fixup` and `squash`.
@@ -238,9 +244,9 @@ impl Rewrite {
             config,
             options: RewriteOptions {
                 scope: shared.update_refs.into(),
-                empty: EmptyPolicy::Drop,
+                empty: shared.empty.into(),
                 committer,
-                preserve_committer: false,
+                preserve_committer: shared.keep_committer,
                 sign: !shared.dry_run,
             },
         })
@@ -341,7 +347,6 @@ pub fn run_fixup(
     commit: &str,
     message: Option<String>,
     message_file: Option<String>,
-    empty: EmptyPolicyArg,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
     let message = read_message(message, message_file)?;
@@ -350,16 +355,14 @@ pub fn run_fixup(
     let commit_oid = resolve_commit(&repo, commit, "commit")?;
     let staged_paths = staged_fixup_paths(&repo).map_err(on_err)?;
     let rewrite = Rewrite::new(repo, shared)?;
+    let empty = rewrite.options.empty;
     let plan = fixup(
         &rewrite.repo,
         commit_oid,
         &FixupOptions {
             message,
-            empty: empty.into(),
-            rewrite: RewriteOptions {
-                empty: empty.into(),
-                ..rewrite.options.clone()
-            },
+            empty,
+            rewrite: rewrite.options.clone(),
         },
     )
     .map_err(on_err)?;

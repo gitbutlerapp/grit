@@ -272,9 +272,6 @@ enum HistoryAction {
             conflicts_with = "message"
         )]
         message_file: Option<String>,
-        /// When a commit would become empty after the fixup.
-        #[arg(long = "empty", value_enum, default_value_t = commands::history::EmptyPolicyArg::Drop)]
-        empty: commands::history::EmptyPolicyArg,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -2063,10 +2060,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 commit,
                 message,
                 message_file,
-                empty,
                 shared,
             } => emit(
-                &commands::history::run_fixup(&commit, message, message_file, empty, &shared)?,
+                &commands::history::run_fixup(&commit, message, message_file, &shared)?,
                 opts,
                 ctx,
             ),

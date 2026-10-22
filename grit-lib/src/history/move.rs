@@ -7,7 +7,7 @@ use crate::state::resolve_head;
 
 use super::error::HistoryError;
 use super::plan::plan_replay_linear_segment;
-use super::types::{EmptyPolicy, RewriteOptions, RewritePlan};
+use super::types::{RewriteOptions, RewritePlan};
 
 fn library_err(err: Error) -> HistoryError {
     if let Error::History(inner) = err {
@@ -96,9 +96,7 @@ pub fn move_commit(
     let oldest = original[segment_start];
     let replay_order: Vec<ObjectId> = chain[segment_start..].to_vec();
 
-    let mut opts = opts.clone();
-    opts.empty = EmptyPolicy::Keep;
-    plan_replay_linear_segment(repo, oldest, &replay_order, &opts)
+    plan_replay_linear_segment(repo, oldest, &replay_order, opts)
 }
 
 fn head_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
