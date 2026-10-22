@@ -1,11 +1,8 @@
-//! Unified/`git`-diff patch parsing for `grit apply`.
+//! Unified/`git`-diff patch parsing and blob-level hunk application.
 //!
-//! This is the self-contained *parse* core extracted from `grit apply`: it turns
-//! patch text into structured [`FilePatch`]/[`Hunk`] data with no I/O, no
-//! environment access, and no CLI dependencies. The worktree/index application
-//! engine and all CLI output still live in the `grit` crate; only the
-//! text-to-structured-data layer lives here so it can be unit-tested and reused
-//! as a library.
+//! Parses patch text into structured [`FilePatch`]/[`Hunk`] data with no I/O or
+//! environment access. [`apply_hunks_to_blob`] applies hunks to a single blob
+//! in memory (worktree/index application is built on this in later layers).
 //!
 //! Library guide: [apply](https://grit-scm.com/docs/library/embedding)
 //!
@@ -17,6 +14,10 @@
 //! # Ok(())
 //! # }
 //! ```
+
+mod apply_blob;
+
+pub use apply_blob::{apply_hunks_to_blob, ApplyOptions};
 
 use crate::error::{ApplyError, Error, Result};
 use regex::Regex;

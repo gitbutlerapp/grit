@@ -352,6 +352,31 @@ pub enum ApplyError {
         line: usize,
     },
 
+    /// Preimage context could not be located in the blob at any search offset.
+    #[error(
+        "patch failed: context mismatch at hunk {hunk_index} (expected near line {expected_line})"
+    )]
+    ContextMismatch {
+        /// Zero-based index of the hunk in the input slice.
+        hunk_index: usize,
+        /// One-based line number from the hunk header (`old_start`).
+        expected_line: usize,
+    },
+
+    /// A later hunk would modify lines already changed by an earlier hunk.
+    #[error("patch failed: overlapping hunks at hunk {hunk_index}")]
+    HunksOverlap {
+        /// Zero-based index of the hunk that overlaps prior applied changes.
+        hunk_index: usize,
+    },
+
+    /// The patch removes more lines than exist in the blob (without a valid EOF match).
+    #[error("patch failed: unexpected end of file at hunk {hunk_index}")]
+    UnexpectedEof {
+        /// Zero-based index of the offending hunk.
+        hunk_index: usize,
+    },
+
     /// Other apply parse failures.
     #[error("{0}")]
     Other(String),

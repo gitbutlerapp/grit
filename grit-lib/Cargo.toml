@@ -137,6 +137,10 @@ name = "hot_paths"
 harness = false
 
 [[bench]]
+name = "apply_blob"
+harness = false
+
+[[bench]]
 name = "midx"
 harness = false
 
