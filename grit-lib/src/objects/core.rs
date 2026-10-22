@@ -299,10 +299,7 @@ impl ObjectId {
     ///
     /// Returns [`Error::InvalidObjectId`] if the string is not a valid hex OID.
     pub fn from_hex(s: &str) -> Result<Self> {
-        if s.len() == HashAlgo::Sha1.hex_len() {
-            return Self::from_hex_ascii(s.as_bytes());
-        }
-        s.parse()
+        Self::decode_hex(s.as_bytes()).ok_or_else(|| Error::InvalidObjectId(s.to_owned()))
     }
 
     /// Parse a fixed-width lowercase/uppercase ASCII hex OID (40 chars for SHA-1).
@@ -316,17 +313,31 @@ impl ObjectId {
                 String::from_utf8_lossy(bytes).into_owned(),
             ));
         }
-        let mut out = [0u8; 20];
-        let (pairs, remainder) = bytes.as_chunks::<2>();
-        for (i, chunk) in pairs.iter().enumerate() {
-            out[i] = (hex_nibble(chunk[0])? << 4) | hex_nibble(chunk[1])?;
+        Self::decode_hex(bytes)
+            .ok_or_else(|| Error::InvalidObjectId(String::from_utf8_lossy(bytes).into_owned()))
+    }
+
+    /// Decode 40 or 64 ASCII hex digits (either case); `None` for any other input.
+    ///
+    /// Ref listings and tree walks parse ids in bulk, so this avoids per-digit
+    /// branching and allocation: invalid digits are folded into one check at the end.
+    fn decode_hex(hex: &[u8]) -> Option<Self> {
+        let len = hex.len() / 2;
+        if !Self::is_hex_len(hex.len()) {
+            return None;
         }
-        if !remainder.is_empty() {
-            return Err(Error::InvalidObjectId(
-                String::from_utf8_lossy(bytes).into_owned(),
-            ));
+        let mut bytes = [0u8; MAX_OID_LEN];
+        let mut invalid = 0u8;
+        for (out, pair) in bytes.iter_mut().zip(hex.as_chunks::<2>().0) {
+            let hi = HEX_DECODE[usize::from(pair[0])];
+            let lo = HEX_DECODE[usize::from(pair[1])];
+            invalid |= hi | lo;
+            *out = (hi << 4) | lo;
         }
-        Self::from_bytes(&out)
+        (invalid & HEX_INVALID == 0).then_some(Self {
+            bytes,
+            len: len as u8,
+        })
     }
 
     /// The suffix used as the filename inside the loose prefix dir (the digest
@@ -376,25 +387,31 @@ impl fmt::Debug for ObjectId {
     }
 }
 
-#[inline]
-fn hex_nibble(b: u8) -> Result<u8> {
-    match b {
-        b'0'..=b'9' => Ok(b - b'0'),
-        b'a'..=b'f' => Ok(b - b'a' + 10),
-        b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(Error::InvalidObjectId(format!("invalid hex nibble: {b}"))),
+/// Marker bit in [`HEX_DECODE`] for bytes that are not hex digits.
+const HEX_INVALID: u8 = 0x10;
+
+/// Nibble value of each ASCII hex digit; every other byte maps to [`HEX_INVALID`].
+const HEX_DECODE: [u8; 256] = {
+    let mut table = [HEX_INVALID; 256];
+    let mut i = 0u8;
+    while i < 10 {
+        table[(b'0' + i) as usize] = i;
+        i += 1;
     }
-}
+    let mut i = 0u8;
+    while i < 6 {
+        table[(b'a' + i) as usize] = 10 + i;
+        table[(b'A' + i) as usize] = 10 + i;
+        i += 1;
+    }
+    table
+};
 
 impl FromStr for ObjectId {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        if s.len() != HashAlgo::Sha1.hex_len() && s.len() != HashAlgo::Sha256.hex_len() {
-            return Err(Error::InvalidObjectId(s.to_owned()));
-        }
-        let bytes = hex::decode(s).map_err(|_| Error::InvalidObjectId(s.to_owned()))?;
-        Self::from_bytes(&bytes)
+        Self::from_hex(s)
     }
 }
 
@@ -1314,6 +1331,44 @@ mod commit_parse_tests {
         assert_eq!(c.tree.to_hex(), "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
         assert_eq!(c.message, "msg\n");
         assert_eq!(serialize_commit(&c), raw.as_bytes());
+    }
+
+    #[test]
+    fn hex_parsing_accepts_both_cases_and_lengths_and_rejects_the_rest() {
+        let sha1 = "0123456789abcdefABCDEF0123456789abcdef01";
+        let oid = ObjectId::from_hex(sha1).unwrap();
+        assert_eq!(oid.algo(), HashAlgo::Sha1);
+        assert_eq!(oid.to_hex(), sha1.to_ascii_lowercase());
+        assert_eq!(ObjectId::from_hex_ascii(sha1.as_bytes()).unwrap(), oid);
+        assert_eq!(sha1.parse::<ObjectId>().unwrap(), oid);
+
+        let sha256 = "f".repeat(64);
+        let oid = sha256.parse::<ObjectId>().unwrap();
+        assert_eq!(oid.algo(), HashAlgo::Sha256);
+        assert_eq!(oid.as_bytes(), [0xff; 32]);
+        assert!(ObjectId::from_hex_ascii(sha256.as_bytes()).is_err());
+
+        for bad in [
+            "",
+            &sha1[..39],
+            &format!("{sha1}0"),
+            "g123456789abcdef0123456789abcdef01234567",
+            "0123456789abcdef0123456789abcdef0123456 ",
+            "0123456789abcdef0123456789abcdef012345/7",
+            "0123456789abcdef0123456789abcdef012345:7",
+            "0123456789abcdef0123456789abcdef012345`7",
+            "0123456789abcdef0123456789abcdef012345G7",
+        ] {
+            assert!(
+                matches!(ObjectId::from_hex(bad), Err(Error::InvalidObjectId(s)) if s == bad),
+                "{bad:?}"
+            );
+            assert!(bad.parse::<ObjectId>().is_err(), "{bad:?}");
+            assert!(ObjectId::from_hex_ascii(bad.as_bytes()).is_err(), "{bad:?}");
+        }
+        let mut non_ascii = sha1.as_bytes().to_vec();
+        non_ascii[3] = 0xb0;
+        assert!(ObjectId::from_hex_ascii(&non_ascii).is_err());
     }
 
     #[test]
