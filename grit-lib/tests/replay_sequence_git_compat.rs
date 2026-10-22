@@ -498,25 +498,83 @@ fn abort_after_clean_step_then_conflict_restores_original_head() {
     commit_file(root.path(), "shared.txt", "base\n", "base");
     git(root.path(), &["switch", "-c", "topic"]);
     commit_file(root.path(), "only-topic.txt", "one\n", "t1");
+    commit_file(root.path(), "extra.txt", "extra\n", "t-extra");
     fs::write(root.path().join("shared.txt"), "topic\n").unwrap();
     git(root.path(), &["add", "shared.txt"]);
     git(root.path(), &["commit", "-qm", "t2"]);
-    let c1 = oid_from_rev(root.path(), "topic~1");
-    let c2 = oid_from_rev(root.path(), "topic");
+    let c1 = oid_from_rev(root.path(), "topic~2");
+    let c2 = oid_from_rev(root.path(), "topic~1");
+    let c3 = oid_from_rev(root.path(), "topic");
     git(root.path(), &["switch", "main"]);
     fs::write(root.path().join("shared.txt"), "main\n").unwrap();
     git(root.path(), &["add", "shared.txt"]);
     git(root.path(), &["commit", "-qm", "main"]);
     let start = oid_from_rev(root.path(), "HEAD");
+    let start_tree = head_tree_hex(root.path());
+    fs::write(root.path().join("shared.txt"), "main\n").unwrap();
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default()))
-        .expect("pick");
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(vec![c1, c2, c3], ReplayOptions::default()),
+    )
+    .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     assert!(root.path().join(".git/sequencer/todo").is_file());
+    assert!(root.path().join("only-topic.txt").exists());
     abort_replay_sequence(&repo).expect("abort");
     assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
+    assert_eq!(head_tree_hex(root.path()), start_tree);
+    assert!(!root.path().join("only-topic.txt").exists());
     assert!(!root.path().join(".git/CHERRY_PICK_HEAD").exists());
+    let shared = fs::read_to_string(root.path().join("shared.txt")).unwrap();
+    assert_eq!(shared, "main\n");
+    git_fsck_strict(root.path());
+}
+
+#[test]
+fn no_commit_empty_stop_compares_accumulated_index() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f.txt", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    commit_file(root.path(), "a.txt", "first\n", "a");
+    fs::write(root.path().join("f.txt"), "first\n").unwrap();
+    git(root.path(), &["add", "f.txt"]);
+    git(root.path(), &["commit", "-qm", "b"]);
+    let c1 = oid_from_rev(root.path(), "topic~1");
+    let c2 = oid_from_rev(root.path(), "topic");
+    git(root.path(), &["switch", "main"]);
+    let start = oid_from_rev(root.path(), "HEAD");
+
+    let git_wt = tempfile::tempdir().expect("git copy");
+    fs::create_dir_all(git_wt.path()).unwrap();
+    Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", root.path().display()),
+            &git_wt.path().to_string_lossy(),
+        ])
+        .status()
+        .unwrap();
+    git(git_wt.path(), &["cherry-pick", "-n", &c1.to_hex()]);
+    git(git_wt.path(), &["cherry-pick", "-n", &c2.to_hex()]);
+
+    let repo = open_repo(root.path());
+    let mut opts = ReplayOptions::default();
+    opts.no_commit = true;
+    opts.empty = ReplayEmptyPolicy::Stop;
+    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], opts)).expect("pick");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
+    assert_eq!(
+        git(root.path(), &["show", ":a.txt"]),
+        git(git_wt.path(), &["show", ":a.txt"])
+    );
+    assert_eq!(
+        git(root.path(), &["show", ":f.txt"]),
+        git(git_wt.path(), &["show", ":f.txt"])
+    );
     git_fsck_strict(root.path());
 }
 

@@ -268,9 +268,9 @@ pub fn operation_alternatives(kind: InProgressOperation) -> Vec<NextStep> {
 pub fn status_operation(state: &WtStatusState, has_unmerged_conflicts: bool) -> Option<Operation> {
     let kind = if state.merge_in_progress {
         InProgressOperation::Merge
-    } else if state.cherry_pick_in_progress {
+    } else if state.cherry_pick_in_progress && state.grit_replay_sequencer {
         InProgressOperation::CherryPick
-    } else if state.revert_in_progress {
+    } else if state.revert_in_progress && state.grit_replay_sequencer {
         InProgressOperation::Revert
     } else {
         return None;
@@ -491,6 +491,8 @@ pub struct WtStatusState {
     pub detached_from: Option<String>,
     /// True when `HEAD` OID equals the detached tip OID.
     pub detached_at: bool,
+    /// Grit wrote `.git/sequencer/grit-opts` for this replay (show pick/revert operation hints).
+    pub grit_replay_sequencer: bool,
 }
 
 fn abbrev_oid(oid: &ObjectId) -> String {
@@ -712,6 +714,8 @@ pub fn wt_status_get_state(
             }
         }
     }
+
+    state.grit_replay_sequencer = git_dir.join("sequencer").join("grit-opts").is_file();
 
     Ok(state)
 }
