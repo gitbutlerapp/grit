@@ -35,7 +35,7 @@ use crate::state::{
     read_cherry_pick_head, read_merge_msg, read_orig_head, read_revert_head, resolve_head,
     HeadState,
 };
-use crate::write_tree::write_tree_update_index;
+use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 /// How to handle a replay step whose merged tree matches `HEAD` (empty patch).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -151,10 +151,16 @@ pub fn start_replay_sequence(
             dropped: Vec::new(),
         });
     }
+    if req.commits.len() > 1 && req.options.message_override.is_some() {
+        return Err(Error::Message(
+            "message_override is only valid when replaying a single commit".into(),
+        ));
+    }
     let mut todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
     run_sequence(
         repo,
         &refname,
+        head_oid,
         head_oid,
         head_oid,
         req.direction,
@@ -218,11 +224,13 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
             dropped: Vec::new(),
         });
     }
+    let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
     run_sequence(
         repo,
         &refname,
         new_oid,
-        active.abort_safety,
+        head_oid,
+        sequence_start,
         active.direction,
         identity,
         &active.opts,
@@ -259,11 +267,13 @@ pub fn skip_replay_step(repo: &Repository, identity: &str) -> Result<SequenceOut
         });
     }
     let dropped: Vec<ObjectId> = dropped.into_iter().collect();
+    let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
     match run_sequence(
         repo,
         &refname,
         head_oid,
-        active.abort_safety,
+        head_oid,
+        sequence_start,
         active.direction,
         identity,
         &active.opts,
@@ -381,6 +391,7 @@ fn run_sequence(
     refname: &str,
     head_oid: ObjectId,
     abort_safety: ObjectId,
+    sequence_start: ObjectId,
     direction: ReplayDirection,
     committer: &str,
     opts: &ReplayOptions,
@@ -390,12 +401,13 @@ fn run_sequence(
 ) -> Result<SequenceOutcome> {
     let mut head = head_oid;
     let mut created_this_call = Vec::new();
+    let _ = abort_safety;
     while let Some(entry) = todo.first().cloned() {
         match apply_one_step(
             repo,
             refname,
             &mut head,
-            abort_safety,
+            sequence_start,
             direction,
             committer,
             opts,
@@ -433,10 +445,16 @@ fn run_sequence(
             }
             StepResult::Conflicts { conflicts } => {
                 let remaining: Vec<ObjectId> = todo.iter().map(|t| t.oid).collect();
-                if todo.len() > 1 {
-                    write_sequencer_state(repo, abort_safety, todo, opts, direction, committer)?;
-                }
-                record_replay_stop(repo, direction, head, entry.oid, &entry, opts, committer)?;
+                write_sequencer_state(repo, sequence_start, head, todo, opts, direction, committer)?;
+                record_replay_stop(
+                    repo,
+                    direction,
+                    sequence_start,
+                    entry.oid,
+                    &entry,
+                    opts,
+                    committer,
+                )?;
                 return Ok(SequenceOutcome::Conflicts {
                     current: entry.oid,
                     conflicts,
@@ -446,10 +464,16 @@ fn run_sequence(
             }
             StepResult::EmptyStop => {
                 let remaining: Vec<ObjectId> = todo.iter().map(|t| t.oid).collect();
-                if todo.len() > 1 {
-                    write_sequencer_state(repo, abort_safety, todo, opts, direction, committer)?;
-                }
-                record_replay_stop(repo, direction, head, entry.oid, &entry, opts, committer)?;
+                write_sequencer_state(repo, sequence_start, head, todo, opts, direction, committer)?;
+                record_replay_stop(
+                    repo,
+                    direction,
+                    sequence_start,
+                    entry.oid,
+                    &entry,
+                    opts,
+                    committer,
+                )?;
                 return Ok(SequenceOutcome::Empty {
                     current: entry.oid,
                     created_so_far,
@@ -478,7 +502,7 @@ fn apply_one_step(
     repo: &Repository,
     refname: &str,
     head: &mut ObjectId,
-    _abort_safety: ObjectId,
+    _sequence_start: ObjectId,
     direction: ReplayDirection,
     committer: &str,
     opts: &ReplayOptions,
@@ -491,11 +515,16 @@ fn apply_one_step(
     let source_obj = repo.odb().read(&source_oid)?;
     let source = parse_commit(&source_obj.data)?;
     let head_tree = commit_tree(repo, head)?;
+    let ours_tree = if opts.no_commit {
+        index_stage0_tree(repo)?
+    } else {
+        head_tree
+    };
     let (base_tree, ours_tree, theirs_tree) = merge_trees_for_replay(
         repo,
         direction,
         &source,
-        head_tree,
+        ours_tree,
         opts.mainline,
         source_oid,
     )?;
@@ -543,7 +572,7 @@ fn apply_one_step(
     )?;
 
     if crate::operation::tree_merge_has_conflicts(&merged) {
-        apply_conflict_merge_worktree(repo, &head_tree, &merged)?;
+        apply_conflict_merge_worktree(repo, &ours_tree, &merged)?;
         return Ok(StepResult::Conflicts {
             conflicts: crate::operation::conflicts_from_tree_merge(&merged),
         });
@@ -576,11 +605,12 @@ fn apply_one_step(
     }
 
     if opts.no_commit {
-        apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged)?;
+        apply_clean_tree_merge_to_worktree(repo, &ours_tree, &merged)?;
         return Ok(StepResult::AppliedNoCommit);
     }
 
     let message = replay_message(repo, opts, direction, &source, source_oid, committer)?;
+    apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged)?;
     let new_oid = write_replay_commit(
         repo,
         refname,
@@ -592,7 +622,6 @@ fn apply_one_step(
         new_tree,
         false,
     )?;
-    apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged)?;
     *head = new_oid;
     Ok(StepResult::Committed { oid: new_oid })
 }
@@ -795,7 +824,8 @@ fn record_replay_stop(
 
 fn write_sequencer_state(
     repo: &Repository,
-    abort_safety: ObjectId,
+    sequence_start: ObjectId,
+    current_head: ObjectId,
     todo: &[TodoEntry],
     opts: &ReplayOptions,
     direction: ReplayDirection,
@@ -805,12 +835,12 @@ fn write_sequencer_state(
     fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
     fs::write(
         git_dir.join("sequencer").join("head"),
-        format!("{}\n", abort_safety.to_hex()),
+        format!("{}\n", sequence_start.to_hex()),
     )
     .map_err(Error::Io)?;
     fs::write(
         git_dir.join("sequencer").join("abort-safety"),
-        format!("{}\n", abort_safety.to_hex()),
+        format!("{}\n", current_head.to_hex()),
     )
     .map_err(Error::Io)?;
     write_sequencer_todo(git_dir, todo)?;
@@ -849,12 +879,11 @@ fn abbrev_oid(oid: ObjectId) -> String {
 
 fn write_persisted_options(git_dir: &Path, req: &ReplaySequenceRequest) -> Result<()> {
     fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
-    // Git-compatible stub; grit-specific options live in `grit-opts`.
-    fs::write(
-        git_dir.join("sequencer").join("opts"),
-        "[options]\n\tgpg-sign = \n",
-    )
-    .map_err(Error::Io)?;
+    let mut git_opts = String::new();
+    if req.options.record_origin {
+        git_opts.push_str("[options]\n\trecord-origin = true\n");
+        fs::write(git_dir.join("sequencer").join("opts"), git_opts).map_err(Error::Io)?;
+    }
     let empty = match req.options.empty {
         ReplayEmptyPolicy::Stop => "stop",
         ReplayEmptyPolicy::Drop => "drop",
@@ -1012,6 +1041,7 @@ fn load_persisted_options(
     } else if read_revert_head(git_dir)?.is_some() {
         direction = ReplayDirection::Revert;
     }
+    apply_git_sequencer_opts(git_dir, &mut opts);
     if !path.is_file() {
         return Ok((direction, opts));
     }
@@ -1122,6 +1152,37 @@ fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Resu
     )?;
     let _ = short;
     Ok(())
+}
+
+fn index_stage0_tree(repo: &Repository) -> Result<ObjectId> {
+    let mut index = repo.load_index()?;
+    write_tree_update_index(
+        repo.odb(),
+        &mut index,
+        "",
+        WriteTreeFlags::silent(),
+    )
+}
+
+fn apply_git_sequencer_opts(git_dir: &Path, opts: &mut ReplayOptions) {
+    let path = git_dir.join("sequencer").join("opts");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return;
+    };
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if key == "record-origin" && value == "true" {
+            opts.record_origin = true;
+        }
+    }
 }
 
 fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
