@@ -219,6 +219,14 @@ fn resolve_default_push(
     if !push_specs.is_empty() {
         let mut specs = Vec::new();
         for spec in push_specs {
+            let item = parse_push_refspec(&spec).map_err(|e| PushPlanError::InvalidRefspec {
+                spec: spec.clone(),
+                reason: e.to_string(),
+            })?;
+            if item.negative {
+                specs.retain(|s| !push_spec_excluded_by_negative(&item, s));
+                continue;
+            }
             specs.extend(expand_configured_push_refspec(repo, spec, ctx)?);
         }
         let branch_label = branch_label_from_specs(repo, &specs);
@@ -806,6 +814,28 @@ fn refspec_map_src(item: &RefspecItem, src_ref: &str) -> Option<String> {
     match_refname_with_pattern(src_pat, src_ref, dst_pat)
 }
 
+/// Whether a planned push ref should be dropped by a configured `^` refspec.
+fn push_spec_excluded_by_negative(item: &RefspecItem, spec: &PushRefSpec) -> bool {
+    if !item.negative {
+        return false;
+    }
+    let Some(pat) = item.src.as_deref() else {
+        return false;
+    };
+    let local = spec.src_ref.as_deref().or_else(|| {
+        spec.dst
+            .starts_with("refs/heads/")
+            .then_some(spec.dst.as_str())
+    });
+    let Some(local) = local else {
+        return false;
+    };
+    if item.pattern {
+        return match_refname_with_pattern(pat, local, pat).is_some();
+    }
+    pat == local || refname_match_one(pat, local)
+}
+
 fn match_refname_with_pattern(pattern: &str, refname: &str, replacement: &str) -> Option<String> {
     match (pattern.find('*'), replacement.find('*')) {
         (Some(pstar), Some(vstar)) => {
@@ -884,5 +914,26 @@ mod tests {
         let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
         let remote = configured_remote_for_push(&repo, &config, None).expect("remote");
         assert_eq!(remote, "upstream");
+    }
+
+    #[test]
+    fn negative_push_refspec_filters_planned_spec() {
+        let item = parse_push_refspec("^refs/heads/private").expect("parse");
+        let kept = push_spec(
+            Some(ObjectId::from_hex("0".repeat(40).as_str()).expect("oid")),
+            Some("refs/heads/main".into()),
+            "refs/heads/main".into(),
+            false,
+            false,
+        );
+        let dropped = push_spec(
+            Some(ObjectId::from_hex("1".repeat(40).as_str()).expect("oid")),
+            Some("refs/heads/private".into()),
+            "refs/heads/private".into(),
+            false,
+            false,
+        );
+        assert!(!push_spec_excluded_by_negative(&item, &kept));
+        assert!(push_spec_excluded_by_negative(&item, &dropped));
     }
 }

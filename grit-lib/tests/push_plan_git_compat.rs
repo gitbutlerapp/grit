@@ -135,6 +135,51 @@ fn short_dst_matches_remote_tag() {
 }
 
 #[test]
+#[test]
+fn configured_wildcard_push_excludes_negative_refspec() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = tmp.path().join("local");
+    let bare = tmp.path().join("remote.git");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main"]);
+    std::fs::write(local.join("f"), "1\n").unwrap();
+    git(&local, &["add", "f"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    git(&local, &["branch", "private"]);
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(&local, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&local, &["push", "-q", "origin", "main"]);
+    git(
+        &local,
+        &["config", "remote.origin.push", "refs/heads/*:refs/heads/*"],
+    );
+    git(
+        &local,
+        &[
+            "config",
+            "--add",
+            "remote.origin.push",
+            "^refs/heads/private",
+        ],
+    );
+    let fx = Fixture {
+        _tmp: tmp,
+        local_git: local.join(".git"),
+        local: local.clone(),
+        bare,
+    };
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let mut ctx = PushPlanContext::default();
+    ctx.remote_ref_names = list_remote_refs(&fx.bare);
+    let specs = plan_specs(&repo, &config, PushRequest::default(), &ctx);
+    assert_eq!(specs.len(), 1, "negative refspec must drop private");
+    assert_eq!(specs[0].dst, "refs/heads/main");
+    compare_with_git(&fx.local, &["origin"], &specs, &fx.bare);
+}
+
+#[test]
 fn matching_push_config_only_existing_remote_heads() {
     let fx = setup_feature_and_main();
     git(&fx.local, &["push", "-q", "origin", "main"]);
