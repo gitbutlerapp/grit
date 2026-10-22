@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
+use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
@@ -14,7 +15,8 @@ use grit_lib::revwalk::history::{
     abort_rebase, absorb, apply_absorb_rewrite, apply_fixup_hunk_selection, apply_fixup_rewrite,
     apply_rewrite, continue_rebase, drop as history_drop, fixup, format_hunk_range_header,
     move_commit, plan_rebase, plan_rebase_check, reword_with, skip_rebase, split, squash,
-    staged_fixup_paths, start_rebase, undo_last_rewrite, verify_rewrite_plan, AbsorbOptions,
+    staged_fixup_paths, start_rebase, undo_last_rewrite, verify_rebase_with_exec,
+    verify_rewrite_plan, AbsorbOptions, ExecRunRecord, ExecSpec,
     ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
     RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
     RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan, SplitOptions,
@@ -81,11 +83,14 @@ impl From<EmptyPolicyArg> for EmptyPolicy {
 #[derive(Debug, clap::Args)]
 pub struct RebaseRunFlags {
     /// Predict whether the rebase would succeed without changing refs, index, or worktree.
-    #[arg(long = "check", conflicts_with = "dry_run")]
+    #[arg(long = "check", conflicts_with_all = ["dry_run", "exec"])]
     pub check: bool,
     /// Auto-resolve replay conflicts: `ours` keeps the onto side, `theirs` keeps replayed commits.
     #[arg(short = 'X', value_enum, value_name = "OURS|THEIRS")]
     pub strategy: Option<MergeStrategyArg>,
+    /// Run a shell command after each replayed commit is checked out (repeatable; incompatible with `--dry-run` and `--check`).
+    #[arg(long = "exec", value_name = "CMD", conflicts_with = "dry_run")]
+    pub exec: Vec<String>,
 }
 
 /// Result of `grit rebase --check`.
@@ -214,6 +219,20 @@ pub struct HistoryRewriteOutcome {
     pub head: Option<HeadPair>,
     /// Whether refs were left unchanged (`true` for `--dry-run`).
     pub dry_run: bool,
+    /// `--exec` subprocess results when `--exec` was used (success only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exec: Vec<ExecResultJson>,
+}
+
+/// One `rebase --exec` command result in `--json` output.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ExecResultJson {
+    /// Commit OID (full hex) checked out when the command ran.
+    pub commit: String,
+    /// Shell command string.
+    pub command: String,
+    /// Subprocess exit code.
+    pub exit_code: i32,
 }
 
 impl HistoryRewriteOutcome {
@@ -225,6 +244,7 @@ impl HistoryRewriteOutcome {
             refs: Vec::new(),
             head: None,
             dry_run,
+            exec: Vec::new(),
         }
     }
 
@@ -256,7 +276,13 @@ impl HistoryRewriteOutcome {
                 new: new.to_hex(),
             }),
             dry_run,
+            exec: Vec::new(),
         }
+    }
+
+    fn with_exec(mut self, exec: Vec<ExecResultJson>) -> Self {
+        self.exec = exec;
+        self
     }
 }
 
@@ -333,6 +359,9 @@ pub struct RebaseCliOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub alternatives: Option<Vec<String>>,
+    /// `--exec` subprocess results when `--exec` was used (success only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exec: Vec<ExecResultJson>,
 }
 
 impl RebaseCliOutcome {
@@ -348,6 +377,7 @@ impl RebaseCliOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            exec: Vec::new(),
         }
     }
 
@@ -363,6 +393,7 @@ impl RebaseCliOutcome {
             conflicts: None,
             next_steps: None,
             alternatives: None,
+            exec: outcome.exec,
         }
     }
 
@@ -379,6 +410,7 @@ impl RebaseCliOutcome {
             conflicts: Some(block.conflicts),
             next_steps: Some(block.next_steps),
             alternatives: block.alternatives,
+            exec: Vec::new(),
         }
     }
 }
@@ -400,6 +432,7 @@ impl HumanRender for RebaseCliOutcome {
                     refs: self.refs.clone(),
                     head: self.head.clone(),
                     dry_run: self.dry_run,
+                    exec: self.exec.clone(),
                 }
                 .render_human(w, ctx)?;
             }
@@ -982,10 +1015,101 @@ impl MarkdownRender for HistoryAbsorbOutcome {
     }
 }
 
+/// Non-zero exit from `rebase --exec` (refs were not updated).
+#[derive(Debug)]
+pub struct RebaseExecExit {
+    /// Subprocess exit code to return to the shell.
+    pub code: i32,
+}
+
+impl std::fmt::Display for RebaseExecExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "rebase --exec command failed (exit {})", self.code)
+    }
+}
+
+impl std::error::Error for RebaseExecExit {}
+
+fn write_exec_streams_to_stderr(row: &ExecRunRecord) {
+    let _ = io::stderr().write_all(&row.stdout);
+    let _ = io::stderr().write_all(&row.stderr);
+}
+
+fn run_rebase_with_exec(
+    rewrite: &Rewrite,
+    request: &RebaseRequest,
+    rebase_opts: RebaseOntoOptions,
+    upstream_oid: ObjectId,
+    onto_oid: Option<ObjectId>,
+    exec: &[String],
+    on_err: impl Fn(HistoryError) -> anyhow::Error + Copy,
+) -> Result<RebaseRunOutcome> {
+    let plan = plan_rebase(&rewrite.repo, request, &rebase_opts).map_err(on_err)?;
+    match plan {
+        RebasePlan::UpToDate => Ok(RebaseRunOutcome::Rebase(RebaseCliOutcome::from_rewrite(
+            HistoryRewriteOutcome::up_to_date("rebase", false),
+        ))),
+        RebasePlan::Conflict { commit, paths } => Err(json_error::operation_conflict(
+            "rebase",
+            paths,
+            Some(commit),
+        )),
+        RebasePlan::Plan(plan) => {
+            verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
+            let spec = ExecSpec {
+                commands: exec.to_vec(),
+            };
+            let runner = system_command_runner();
+            let mut exec_json = Vec::new();
+            match verify_rebase_with_exec(&rewrite.repo, &plan, &spec, runner.as_ref()) {
+                Ok(report) => {
+                    for row in &report.runs {
+                        write_exec_streams_to_stderr(row);
+                        exec_json.push(ExecResultJson {
+                            commit: row.commit.to_hex(),
+                            command: row.command.clone(),
+                            exit_code: row.exit_code,
+                        });
+                    }
+                }
+                Err(HistoryError::ExecFailed {
+                    exit_code,
+                    stdout,
+                    stderr,
+                    completed_runs,
+                    ..
+                }) => {
+                    for row in &completed_runs {
+                        write_exec_streams_to_stderr(row);
+                    }
+                    let _ = io::stderr().write_all(&stdout);
+                    let _ = io::stderr().write_all(&stderr);
+                    return Err(RebaseExecExit { code: exit_code }.into());
+                }
+                Err(other) => return Err(on_err(other)),
+            }
+            let effective_onto = onto_oid.unwrap_or(upstream_oid);
+            let message = format!("rebase: onto {}", short(&effective_onto.to_hex()));
+            apply_rewrite(
+                &rewrite.repo,
+                &plan,
+                &rewrite.apply_options("rebase", message)?,
+            )
+            .map_err(on_err)?;
+            Ok(RebaseRunOutcome::Rebase(RebaseCliOutcome::from_rewrite(
+                HistoryRewriteOutcome::new("rebase", &plan, false).with_exec(exec_json),
+            )))
+        }
+    }
+}
+
 /// Replay local commits onto a new base (`grit rebase` / `grit history rebase`).
 pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     let shared = opts.shared;
     let flags = opts.flags;
+    if !flags.exec.is_empty() && (opts.continue_rebase || opts.skip || opts.abort) {
+        bail!("--exec cannot be used with --continue, --skip, or --abort");
+    }
     let on_err = history_error("rebase");
     let repo = context::discover()?;
     if opts.abort {
@@ -1036,6 +1160,24 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     }
     if flags.check {
         return run_rebase_check(&rewrite.repo, &request, &rebase_opts, on_err);
+    }
+
+    if !flags.exec.is_empty() {
+        if shared.dry_run {
+            bail!("--exec cannot be used with --dry-run");
+        }
+        if flags.strategy.is_some() {
+            bail!("--exec cannot be used with -X");
+        }
+        return run_rebase_with_exec(
+            &rewrite,
+            &request,
+            rebase_opts,
+            upstream_oid,
+            onto_oid,
+            &flags.exec,
+            on_err,
+        );
     }
 
     if flags.strategy.is_some() {
@@ -1197,6 +1339,7 @@ pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryRewriteOutcome> {
             new: new.to_hex(),
         }),
         dry_run: outcome.dry_run,
+        exec: Vec::new(),
     })
 }
 

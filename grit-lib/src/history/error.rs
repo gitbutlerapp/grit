@@ -150,6 +150,25 @@ pub enum HistoryError {
         paths: Vec<String>,
     },
 
+    /// The index or worktree differs from `HEAD` before `rebase --exec` runs.
+    #[error("you have uncommitted changes — commit them before rebasing with --exec")]
+    UncommittedChanges,
+
+    /// A `rebase --exec` command exited non-zero; repository state was restored.
+    #[error("rebase --exec command failed at commit {commit} (exit {exit_code})")]
+    ExecFailed {
+        /// Replacement commit that was checked out when the command failed.
+        commit: ObjectId,
+        /// Subprocess exit code.
+        exit_code: i32,
+        /// Subprocess stdout from the failing command.
+        stdout: Vec<u8>,
+        /// Subprocess stderr from the failing command.
+        stderr: Vec<u8>,
+        /// Successful `--exec` runs before the failure (stdout/stderr captured).
+        completed_runs: Vec<super::ExecRunRecord>,
+    },
+
     /// Selected commits do not form one connected component with allowed parents.
     #[error("the selected commits are not a connected revision range")]
     RangeNotConnected,

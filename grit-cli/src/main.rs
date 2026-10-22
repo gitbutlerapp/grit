@@ -9,6 +9,8 @@ mod branch_list_args;
 mod clap_value_args;
 mod cli_messages;
 #[cfg(test)]
+mod cli_command;
+#[cfg(test)]
 mod cli_test_stack;
 mod commands;
 mod commits_json;
@@ -1680,6 +1682,8 @@ fn main() {
                 .is_some_and(|payload| payload.kind == "usage")
         {
             2
+        } else if let Some(exec) = err.downcast_ref::<commands::history::RebaseExecExit>() {
+            exec.code
         } else {
             1
         };

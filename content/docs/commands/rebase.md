@@ -12,7 +12,7 @@ grit rebase [<upstream>]
 grit rebase [--onto <rev>] [<upstream>]
 grit rebase --continue | --abort | --skip
 grit history rebase [<upstream>]
-grit rebase|history rebase … [--check] [-X ours|theirs] [--dry-run] [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer]
+grit rebase|history rebase … [--check] [-X ours|theirs] [--dry-run] [--exec <cmd>]… [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer]
 ```
 
 ## Description
@@ -53,7 +53,9 @@ Shared rewrite flags match [`grit history`](history.md): `--dry-run`, `--update-
 | `--dry-run` | List ref updates without moving refs (no session). |
 | `--update-refs` | `branches` (default) or `head`. |
 | `--empty` | `drop` (default), `keep`, or `abort` when a replay would become empty. |
-| `--keep-committer` | Preserve committer ident and timestamp on replayed commits. |
+| `--keep-committer` |
+| `--exec` | After each replayed commit is checked out, run `CMD` via `sh -c` in the worktree (repeatable; runs in order at every commit). Requires a clean index and worktree. Incompatible with `--dry-run`, `--check`, and `-X`. Command output goes to stderr. On failure grit restores `HEAD`, the index, and the worktree without moving refs; exit code is the command's exit code. |
+ Preserve committer ident and timestamp on replayed commits. |
 | `--check` | Predict success or conflicts without changing refs, index, or worktree (conflicts with `--dry-run`). |
 | `-X ours\|theirs` | Auto-resolve replay conflicts in favor of the onto side (`ours`) or replayed commits (`theirs`). |
 
@@ -90,6 +92,7 @@ Pass `--json` on `grit rebase` or `grit history rebase`:
 | `refs` | array | `{ref,old,new}` for each ref that moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes. |
 | `dry_run` | boolean | Whether refs were left unchanged. |
+| `exec` | array | When `--exec` was used and the rebase succeeded: `{commit, command, exit_code}` per invocation (full hex `commit`). |
 | `commit` | string | Source commit that stopped replay when `result` is `conflicts`. |
 | `conflicts` | array | `{path,kind,summary?}` when `result` is `conflicts`. |
 | `next_steps` | array | Ordered `grit` commands after a stop. |

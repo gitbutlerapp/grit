@@ -2,25 +2,27 @@
   "$id": "https://grit-scm.com/schemas/history.rebase/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
-    "ConflictJson": {
-      "description": "One conflicted path in `--json` operation output.",
+    "ExecResultJson": {
+      "description": "One `rebase --exec` command result in `--json` output.",
       "properties": {
-        "kind": {
+        "command": {
+          "description": "Shell command string.",
           "type": "string"
         },
-        "path": {
+        "commit": {
+          "description": "Commit OID (full hex) checked out when the command ran.",
           "type": "string"
         },
-        "summary": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "exit_code": {
+          "description": "Subprocess exit code.",
+          "format": "int32",
+          "type": "integer"
         }
       },
       "required": [
-        "kind",
-        "path"
+        "command",
+        "commit",
+        "exit_code"
       ],
       "type": "object"
     },
@@ -41,15 +43,6 @@
         "old"
       ],
       "type": "object"
-    },
-    "RebaseResult": {
-      "description": "High-level result of `grit rebase`.",
-      "enum": [
-        "completed",
-        "conflicts",
-        "aborted"
-      ],
-      "type": "string"
     },
     "RefPair": {
       "description": "One ref tip before and after rewrite.",
@@ -114,34 +107,18 @@
       "type": "object"
     }
   },
-  "description": "Result of `grit rebase` and `grit history rebase`.",
+  "description": "Result of `grit history drop`, `move`, `reword`, `fixup`, `squash`, or `grit rebase` / `grit history rebase`.",
   "properties": {
-    "alternatives": {
-      "items": {
-        "type": "string"
-      },
-      "type": [
-        "array",
-        "null"
-      ]
-    },
-    "commit": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "conflicts": {
-      "items": {
-        "$ref": "#/definitions/ConflictJson"
-      },
-      "type": [
-        "array",
-        "null"
-      ]
-    },
     "dry_run": {
+      "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
       "type": "boolean"
+    },
+    "exec": {
+      "description": "`--exec` subprocess results when `--exec` was used (success only).",
+      "items": {
+        "$ref": "#/definitions/ExecResultJson"
+      },
+      "type": "array"
     },
     "head": {
       "anyOf": [
@@ -152,34 +129,21 @@
           "type": "null"
         }
       ],
-      "default": null,
-      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes."
-    },
-    "next_steps": {
-      "items": {
-        "type": "string"
-      },
-      "type": [
-        "array",
-        "null"
-      ]
+      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
     },
     "operation": {
-      "type": [
-        "string",
-        "null"
-      ]
+      "description": "Operation name (`drop`, `move`, `reword`, `fixup`, `squash`, or `rebase`).",
+      "type": "string"
     },
     "refs": {
+      "description": "Planned or applied ref tip updates.",
       "items": {
         "$ref": "#/definitions/RefPair"
       },
       "type": "array"
     },
-    "result": {
-      "$ref": "#/definitions/RebaseResult"
-    },
     "rewritten": {
+      "description": "Original and replacement commit OIDs for every rewritten commit.",
       "items": {
         "$ref": "#/definitions/RewrittenPair"
       },
@@ -187,9 +151,12 @@
     }
   },
   "required": [
+    "dry_run",
     "head",
-    "result"
+    "operation",
+    "refs",
+    "rewritten"
   ],
-  "title": "RebaseCliOutcome",
+  "title": "HistoryRewriteOutcome",
   "type": "object"
 }

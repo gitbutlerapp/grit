@@ -48,6 +48,7 @@ mod absorb;
 mod apply;
 mod drop;
 mod error;
+mod exec;
 mod fixup;
 mod last;
 mod r#move;
@@ -69,6 +70,7 @@ pub use absorb::{
 pub use apply::{apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, verify_rewrite_plan};
 pub use drop::drop;
 pub use error::HistoryError;
+pub use exec::{verify_rebase_with_exec, ExecReport, ExecRunRecord, ExecSpec};
 pub use fixup::{
     apply_fixup_hunk_selection, fixup, fixup_selection_paths, staged_fixup_paths, FixupOptions,
 };

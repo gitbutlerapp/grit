@@ -242,6 +242,12 @@ Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`
 | `next_steps` | array | `rebase` when paused: ordered follow-up `grit` commands. |
 | `alternatives` | array | `rebase` when paused: `grit rebase --abort` and `grit rebase --skip`. |
 
+For `rebase` with `--exec`, the object also includes:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `exec` | array | `{commit,command,exit_code}` per successful `--exec` invocation (full hex `commit`). |
+
 For `absorb`, the object also includes:
 
 | Field | Type | Meaning |

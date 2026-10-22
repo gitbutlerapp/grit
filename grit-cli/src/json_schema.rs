@@ -52,7 +52,7 @@ pub fn schema_id_v2(command: &str) -> String {
 }
 
 /// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
-const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick"];
+const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull"];
 
 /// File name for a command schema under [`schemas_dir`].
 pub fn schema_file_name(command: &str) -> String {
@@ -83,9 +83,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         fetch::{FetchAllOutcome, FetchOutcome},
         fsck::FsckOutcome,
         gc::GcOutcome,
-        history::{
-            HistoryAbsorbOutcome, HistoryRewriteOutcome, RebaseCheckOutcome, RebaseCliOutcome,
-        },
+        history::{HistoryAbsorbOutcome, HistoryRewriteOutcome},
         hooks::HooksOutcome,
         ignore::IgnoreCheckOutcome,
         init::InitOutcome,
@@ -173,12 +171,9 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<HistoryRewriteOutcome>("history.move"),
         entry::<HistoryRewriteOutcome>("history.fixup"),
         entry::<HistoryRewriteOutcome>("history.squash"),
-        entry::<RebaseCliOutcome>("history.rebase"),
-        entry::<RebaseCliOutcome>("rebase"),
-        entry::<HistoryRewriteOutcome>("history.split"),
-        entry::<RebaseCheckOutcome>("rebase.check"),
+        entry::<HistoryRewriteOutcome>("history.rebase"),
+        entry::<HistoryRewriteOutcome>("rebase"),
         entry::<HistoryAbsorbOutcome>("history.absorb"),
-        entry::<HistoryRewriteOutcome>("history.undo"),
         entry::<RevertOutcome>("revert"),
         entry::<StashPushOutcome>("stash"),
         entry::<StashPushOutcome>("stash.push"),
@@ -309,10 +304,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("move") => "history.move",
             Some("fixup") => "history.fixup",
             Some("squash") => "history.squash",
-            Some("split") => "history.split",
             Some("absorb") => "history.absorb",
             Some("rebase") => "history.rebase",
-            Some("undo") => "history.undo",
             _ => return None,
         },
         "rebase" => "rebase",
@@ -391,11 +384,9 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
         || command == "history.move"
         || command == "history.fixup"
         || command == "history.squash"
-        || command == "history.split"
         || command == "history.absorb"
         || command == "history.rebase"
         || command == "rebase"
-        || command == "history.undo"
     {
         ensure_required_nullable_head(&mut value);
     }
@@ -447,18 +438,16 @@ fn canonicalize_json(value: &mut serde_json::Value) {
 
 /// Enumerate every non-plumbing command path that must appear in [`schema_registry`].
 pub fn expected_json_command_paths() -> Vec<String> {
-    crate::cli_test_stack::run(|| {
-        use clap::CommandFactory;
+    use clap::CommandFactory;
 
-        let mut paths = vec!["status".to_owned()];
-        let root = crate::Cli::command();
-        for sub in root.get_subcommands().filter(|c| c.get_name() != "help") {
-            collect_json_commands(sub, None, &mut paths);
-        }
-        paths.sort();
-        paths.dedup();
-        paths
-    })
+    let mut paths = vec!["status".to_owned()];
+    let root = crate::cli_command::build_cli_command();
+    for sub in root.get_subcommands().filter(|c| c.get_name() != "help") {
+        collect_json_commands(sub, None, &mut paths);
+    }
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 fn collect_json_commands(cmd: &clap::Command, prefix: Option<&str>, out: &mut Vec<String>) {
@@ -791,30 +780,22 @@ mod tests {
 
     #[test]
     fn schema_registry_covers_all_commands() {
-        const STACK: usize = 16 * 1024 * 1024;
-        std::thread::Builder::new()
-            .stack_size(STACK)
-            .spawn(|| {
-                let expected = expected_json_command_paths();
-                let registered: std::collections::BTreeSet<_> =
-                    schema_registry().iter().map(|e| e.command).collect();
-                let mut missing = Vec::new();
-                for cmd in expected {
-                    if cmd == "error" {
-                        continue;
-                    }
-                    if !registered.contains(cmd.as_str()) {
-                        missing.push(cmd);
-                    }
-                }
-                assert!(
-                    missing.is_empty(),
-                    "schema_registry missing commands: {missing:?}"
-                );
-            })
-            .expect("spawn schema registry audit")
-            .join()
-            .expect("schema registry audit thread");
+        let expected = expected_json_command_paths();
+        let registered: std::collections::BTreeSet<_> =
+            schema_registry().iter().map(|e| e.command).collect();
+        let mut missing = Vec::new();
+        for cmd in expected {
+            if cmd == "error" {
+                continue;
+            }
+            if !registered.contains(cmd.as_str()) {
+                missing.push(cmd);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "schema_registry missing commands: {missing:?}"
+        );
     }
 
     fn validate_json_against_schema(name: &str, schema_key: &str, instance: &Value) {

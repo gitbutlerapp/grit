@@ -933,7 +933,10 @@ fn tree_entry_at_path(
     Ok(None)
 }
 
-fn commit_tree_for_apply(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
+pub(crate) fn commit_tree_for_apply(
+    repo: &Repository,
+    commit: ObjectId,
+) -> Result<ObjectId, HistoryError> {
     let raw = repo
         .odb()
         .read(&commit)
