@@ -24,9 +24,10 @@
       "fixture": "git-git",
       "description": "Tag --contains ref query vs git for-each-ref (no commit-graph)",
       "driver": "lib",
-      "git": { "median_ms": 7113.0 },
-      "grit": { "median_ms": 3030.0 },
-      "ratio": 0.426
+      "git": { "median_ms": 6407.0 },
+      "grit": { "median_ms": 208000.0 },
+      "ratio": 32.46,
+      "grit_failure": "Exact shared walk without commit-graph is dominated by packed commit parent reads on git-git (~208s vs git ~6.4s). Prior baseline used unsound date pruning. Bitset/active-tip optimizations applied; commit-graph path meets target."
     },
     {
       "id": "ref-query-contains-tags@git-git-with-graph",
@@ -34,9 +35,9 @@
       "fixture": "git-git",
       "description": "Tag --contains ref query vs git for-each-ref (commit-graph)",
       "driver": "lib",
-      "git": { "median_ms": 7113.0 },
-      "grit": { "median_ms": 3410.0 },
-      "ratio": 0.479
+      "git": { "median_ms": 6407.0 },
+      "grit": { "median_ms": 301.0 },
+      "ratio": 0.047
     },
     {
       "id": "ref-query-merged-branches@refs-100k-packed",
