@@ -502,17 +502,6 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
                     })?;
                 }
             }
-            #[cfg(not(unix))]
-            WorktreePathBackup::File { rel, bytes } => {
-                let abs = work_tree.join(rel);
-                if let Some(parent) = abs.parent() {
-                    fs::create_dir_all(parent).map_err(|e| {
-                        Error::PathError(format!("creating parent for '{rel}': {e}"))
-                    })?;
-                }
-                fs::write(&abs, bytes)
-                    .map_err(|e| Error::PathError(format!("restoring '{rel}': {e}")))?;
-            }
             WorktreePathBackup::Symlink { rel, target } => {
                 let abs = work_tree.join(rel);
                 if let Some(parent) = abs.parent() {
@@ -528,6 +517,7 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
                 }
                 #[cfg(not(unix))]
                 {
+                    let _ = target;
                     return Err(Error::Message(format!(
                         "cannot restore symlink '{rel}' on this platform"
                     )));

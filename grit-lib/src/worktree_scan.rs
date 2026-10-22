@@ -809,7 +809,7 @@ where
 #[cfg(windows)]
 fn lookup_lone_blob_in_directory(
     abs_dir: &Path,
-    index_file_name: &str,
+    index_file_name: &[u8],
     target_abs: &Path,
 ) -> BlobDiskLookup {
     if probe_counts(abs_dir) {
@@ -832,7 +832,7 @@ fn lookup_lone_blob_in_directory(
         if name == ".git" {
             continue;
         }
-        if name == index_file_name || dir_entry_name_matches(index_file_name, &entry) {
+        if dir_entry_name_matches(index_file_name, &entry) {
             return match dir_entry_metadata(&entry) {
                 Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
                 Err(e) => BlobDiskLookup::Io(e),

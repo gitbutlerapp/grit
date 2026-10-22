@@ -18,10 +18,10 @@ use grit_lib::revwalk::history::{
 };
 
 use support::{
-    assert_fixup_tip_matches_git_oracle, assert_fixup_tip_structure_matches, commit_file, git,
-    git_fsck_strict, git_history_fixup_legacy_oracle, git_history_fixup_or_legacy,
-    git_history_subcommand_available, git_rev_parse, harness_committer_line,
-    reset_harness_commit_clock, HistoryRepo,
+    assert_fixup_tip_matches_git_oracle, assert_fixup_tip_structure_matches, commit_file,
+    disable_grit_change_ids_for_git_oracle, git, git_fsck_strict, git_history_fixup_legacy_oracle,
+    git_history_fixup_or_legacy, git_history_subcommand_available, git_rev_parse,
+    harness_committer_line, reset_harness_commit_clock, HistoryRepo,
 };
 
 fn open_grit(wt: &std::path::Path) -> Repository {
@@ -294,6 +294,7 @@ fn fixup_preserves_unstaged_deletion_matches_git_fixup_autosquash() {
     fs::write(wt.join("file.txt"), "staged\n").expect("write");
     git(wt, &["add", "file.txt"]);
     fs::remove_file(wt.join("file.txt")).expect("remove");
+    disable_grit_change_ids_for_git_oracle(wt);
     let grit = open_grit(wt);
     plan_and_apply(
         &grit,
@@ -463,6 +464,7 @@ fn history_fixup_matches_git_fixup_oracle() {
     let target = commit_file(wt, "second.t", "2\n", "second");
     fs::write(wt.join("second.t"), "2\npatched\n").expect("write");
     git(wt, &["add", "second.t"]);
+    disable_grit_change_ids_for_git_oracle(wt);
     let grit = open_grit(wt);
     plan_and_apply(
         &grit,
@@ -525,6 +527,7 @@ fn history_fixup_matches_git_history_when_available() {
     let target = git_rev_parse(wt, "HEAD").expect("target");
     fs::write(wt.join("file.txt"), "base\nfix\n").expect("write");
     git(wt, &["add", "file.txt"]);
+    disable_grit_change_ids_for_git_oracle(wt);
     let grit = open_grit(wt);
     plan_and_apply(
         &grit,

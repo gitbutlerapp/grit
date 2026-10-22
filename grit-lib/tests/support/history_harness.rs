@@ -59,6 +59,14 @@ fn git_command_advances_harness_clock(args: &[&str]) -> bool {
                         | "help"
                         | "merge-base"
                         | "symbolic-ref"
+                        | "config"
+                        | "init"
+                        | "add"
+                        | "branch"
+                        | "clone"
+                        | "update-ref"
+                        | "mktree"
+                        | "commit-tree"
                 );
             }
         }
@@ -264,6 +272,11 @@ pub fn assert_fixup_tip_structure_matches(grit_dir: &Path, git_dir: &Path) {
         git(git_dir, &["log", "-1", "--format=%P"]).trim(),
         "fixup HEAD parents"
     );
+}
+
+/// Disable grit change ids so rewritten commits can match system `git history fixup` byte-for-byte.
+pub fn disable_grit_change_ids_for_git_oracle(dir: &Path) {
+    git(dir, &["config", "grit.changeIds", "false"]);
 }
 
 /// Assert grit and git fixup results match; full commit OID only when `git history fixup` exists.
