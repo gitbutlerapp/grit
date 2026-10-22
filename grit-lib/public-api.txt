@@ -12621,6 +12621,9 @@ pub grit_lib::prelude::Error::PathspecIgnored
 pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::prelude::Error::FetchDeepenRelativeUnsupported
+pub grit_lib::prelude::Error::FetchShallowUnsupported
+pub grit_lib::prelude::Error::FetchUnshallowNotShallow
 pub grit_lib::prelude::Error::PushOptionsUnsupported
 pub grit_lib::prelude::Error::ReceivedPackTempMissing
 pub grit_lib::prelude::Error::ReceivedPackTempMissing::path: std::path::PathBuf
