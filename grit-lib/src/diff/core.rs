@@ -5022,6 +5022,20 @@ fn diff_index_to_worktree_inner(
                         });
                     }
                 } else {
+                    // The scan's lstat already proves an unchanged, non-racy entry clean; only
+                    // re-stat paths that `push_index_blob_worktree_diff` has to inspect.
+                    if !stat.is_dir
+                        && stat_matches_blob_stat(ie, &stat, stat_policy)
+                        && (!trust_filemode || stat.git_mode == ie.mode)
+                        && index_entry_skips_worktree_content_hash_after_stat_match(
+                            ie,
+                            index_mtime,
+                            stat_policy,
+                            trust_filemode,
+                        )
+                    {
+                        return Ok(());
+                    }
                     let file_path = index_entry_worktree_abs_bytes(
                         work_tree,
                         &index.entries[entry_index].path,
