@@ -65,6 +65,16 @@ def file_record(hex_digest: str, path: bytes) -> bytes:
     return hex_digest.encode() + b" " + path + b"\0"
 
 
+def record_sort_key(rec: bytes) -> bytes:
+    sp = rec.find(b" ")
+    if sp == -1:
+        return rec
+    end = rec.rfind(b"\0")
+    if end == -1:
+        end = len(rec)
+    return rec[sp + 1 : end]
+
+
 def submodule_record(hex_digest: str, path: bytes) -> bytes:
     rec = hex_digest.encode() + b" " + path
     if not path.endswith(b"/"):
@@ -126,7 +136,7 @@ def compute_digest(git: str, commit: str, extra_alternate: str | None = None) ->
             records.append(submodule_record(sub_digest, path))
     finally:
         batch.close()
-    records.sort()
+    records.sort(key=record_sort_key)
     return hashlib.sha256(b"".join(records)).hexdigest()
 
 
