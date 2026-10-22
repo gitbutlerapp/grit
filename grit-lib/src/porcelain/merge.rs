@@ -472,6 +472,17 @@ pub fn integrate_branch_with(
         return Ok(IntegrateBranchOutcome::Conflicts { paths, details });
     }
 
+    let commit_preflight = if matches!(options.commit, MergeCommitMode::Commit) {
+        let config = repo.config()?;
+        Some(MergeCommitPreflight {
+            author: strict_commit_identity(repo, config.as_ref(), IdentRole::Author)?,
+            committer: strict_commit_identity(repo, config.as_ref(), IdentRole::Committer)?,
+            config,
+        })
+    } else {
+        None
+    };
+
     merge_checkout_tree_transition(repo, Some(&into_tree), &merged.result_tree)?;
     let mut snapshot = crate::porcelain::worktree_guard::load_worktree_snapshot(repo)?;
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, &merged)?;
@@ -496,14 +507,14 @@ pub fn integrate_branch_with(
             Ok(IntegrateBranchOutcome::Stopped)
         }
         MergeCommitMode::Commit => {
-            let config = repo.config()?;
-            let author = strict_commit_identity(repo, config.as_ref(), IdentRole::Author)?;
-            let committer = strict_commit_identity(repo, config.as_ref(), IdentRole::Committer)?;
+            let preflight = commit_preflight
+                .ok_or_else(|| Error::Message("merge commit preflight missing".into()))?;
+            let config = preflight.config;
             let mut commit = CommitData {
                 tree: merged.result_tree,
                 parents: vec![into_oid, other_oid],
-                author,
-                committer,
+                author: preflight.author,
+                committer: preflight.committer,
                 author_raw: Vec::new(),
                 committer_raw: Vec::new(),
                 encoding: None,
@@ -537,6 +548,12 @@ pub fn integrate_branch_with_options(
     options: IntegrateBranchOptions,
 ) -> Result<IntegrateBranchOutcome> {
     integrate_branch_with(repo, into_ref, into_oid, other_oid, label, &options.into())
+}
+
+struct MergeCommitPreflight {
+    author: String,
+    committer: String,
+    config: std::sync::Arc<ConfigSet>,
 }
 
 fn should_take_fast_forward(options: &MergeOptions, ff_possible: bool) -> bool {
