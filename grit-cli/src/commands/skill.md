@@ -87,9 +87,9 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 ## Combining work
 
 - `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`).
-- `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
+- `grit pick [<commit> | <range>]…` cherry-picks onto the current branch (oldest first). Use `grit pick --continue`, `--abort`, or `--skip` to resume a stopped sequence.
 - `grit revert <commit>` undoes one non-merge commit with a new inverse commit (`Revert "…"` message).
-- On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or the matching `--continue` command when pick/revert support lands. Use `--abort` on the same command to cancel.
+- On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or `grit pick --continue` / `grit revert --continue` for replay operations. Use `--abort` or `--skip` on the same command to cancel or bypass a step.
 
 ## Remotes
 

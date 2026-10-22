@@ -39,6 +39,14 @@ impl OperationConflictBlock {
         })
     }
 
+    /// Build conflict JSON and suggested `grit` commands for a paused cherry-pick.
+    #[must_use]
+    pub fn for_pick(conflicts: &[Conflict]) -> Self {
+        Self::for_operation(InProgressOperation::CherryPick, conflicts, |c| {
+            conflict_json(c, None)
+        })
+    }
+
     fn for_operation(
         kind: InProgressOperation,
         conflicts: &[Conflict],

@@ -1,6 +1,6 @@
 ---
 title: grit pick
-summary: Copy a single commit onto the current branch.
+summary: Cherry-pick one or more commits onto the current branch.
 group: Branches and tags
 order: 4
 ---
@@ -8,85 +8,110 @@ order: 4
 ## Synopsis
 
 ```text
-grit pick <commit>
+grit pick [<commit> | <range>]...
+grit pick --continue | --abort | --skip
 ```
 
 ## Description
 
-Takes the change `<commit>` made and applies it to the current branch as a new commit (a cherry-pick). The new commit keeps the original author and message and gets a new `change-id`; the source commit's id is not copied. When `commit.gpgsign` is enabled, the new commit is signed like [`grit commit`](../commit/).
+Replays commits from another branch (or arbitrary revisions) onto the current branch, like `git cherry-pick`. Each new commit keeps the original **author** and message (unless you pass `--message` / `--message-file` for a single commit), gets a fresh **`change-id`**, and records a normal reflog entry.
 
-`<commit>` can be a full or short commit id, a branch name (to pick the commit at its tip) or an expression like `feature~2`.
+Positional arguments are applied **oldest first**. Each argument is either:
 
-`grit pick` works on one commit at a time and keeps it simple. It refuses, and changes nothing, when:
+- a single commit (`feature`, `abc1234`, `HEAD~2`), or
+- a two-dot range `A..B` (commits reachable from `B` but not from `A`, same as `git log A..B`).
 
-- you have uncommitted changes, or the current branch has no commits, or HEAD is detached
-- `<commit>` is a merge commit
-- `<commit>` doesn't change anything, or its change is already on the current branch
-- the change conflicts with the current branch; the conflicting files are listed
-- an untracked file would be replaced by a path the pick would check out (same rule as [`grit switch`](../switch/))
+`grit pick` stops — leaving Git-compatible sequencer state — when:
+
+- a step has **merge conflicts** (conflict markers in the worktree, `CHERRY_PICK_HEAD`, `MERGE_MSG`, `.git/sequencer/`)
+- a step would be **empty** and `--empty stop` (default)
+- the worktree is **dirty**, `HEAD` is **detached**, or the branch has **no commits**
+- a commit is a **merge** without `--mainline` (not yet exposed on the CLI)
+
+Resolve conflicts, stage with [`grit add`](add/), then run `grit pick --continue`. Use `grit pick --skip` to drop the current step, or `grit pick --abort` to restore the branch to its pre-pick tip.
 
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `<commit>` | The commit to copy onto the current branch. |
+| `<commit>`… | Commits or ranges to replay (oldest first). |
+| `--continue` | Finish the paused pick after conflicts are resolved and staged. |
+| `--abort` | Cancel the in-progress pick and restore the saved branch tip. |
+| `--skip` | Skip the current todo step and continue with the rest. |
+| `-x`, `--record-origin` | Append `(cherry picked from commit …)` to each new message. |
+| `--no-commit` | Apply the patch to the index and worktree without committing. |
+| `--empty` | When a step would not change the tree: `stop` (default), `keep` (empty commit), or `drop`. |
+| `-m`, `--message` | Replace the message (only with exactly one commit). |
+| `--message-file` | Read the message from a file (only with exactly one commit). |
 
 ## Examples
 
-Pick the latest commit from another branch:
+Pick the latest commit on a topic branch:
 
 ```console
 $ grit pick feature
 Picked cf18394 → 4be20a1 Say hi
 ```
 
-Pick a commit by id:
+Pick a range of commits:
 
 ```console
-$ grit pick 9a1c2e0
+$ grit pick main..feature
+Picked a1b2c3d → d4e5f6a First change
+Picked b2c3d4e → e5f6a7b Second change
 ```
 
-When an untracked file would be overwritten:
+Conflict, then continue:
 
 ```console
-$ grit pick feature
-error: untracked file 'notes.txt' would be overwritten — move or remove it first
+$ grit pick topic~1..topic
+CONFLICT (content): shared.txt
+→ grit restore --ours shared.txt (or edit markers)
+→ grit add shared.txt
+→ grit pick --continue
+Picked … → … Resolved topic change
 ```
 
 ## JSON output
 
-Schema: [v1](/schemas/pick/v1.json)
+Schema: [v2](/schemas/pick/v2.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `source` | string | Full id of the commit that was picked. |
-| `oid` | string | Full id of the new commit on the current branch. |
-| `subject` | string | Subject line of the picked commit. |
-| `change_id` | string or null | Stored `change-id` on the new pick commit, or `null` when absent. |
+| `result` | string | `picked`, `conflicts`, `empty`, `aborted`, or `skipped`. |
+| `commits` | array | Each picked or attempted step: `source`, `oid`, `change_id`, `subject`. |
+| `dropped` | array | Source commit oids skipped as empty (`--empty drop`). |
+| `conflicts` | array or null | Conflicted paths when `result` is `conflicts`. |
+| `next_steps` | array or null | Suggested commands when stopped (`conflicts` or `empty`). |
+| `alternatives` | array or null | `grit pick --abort` / `--skip` when a sequence is paused. |
 
-Example:
+Example (success):
 
 ```json
 {
-  "source": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
-  "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
-  "subject": "two"
+  "result": "picked",
+  "commits": [
+    {
+      "source": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+      "oid": "a1b2c3d4e5f6789012345678901234567890abcd",
+      "change_id": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "subject": "Say hi"
+    }
+  ],
+  "dropped": []
 }
 ```
 
-On failure because of conflicts, stdout is a single JSON object (exit code 1) with `error`, `kind` (`conflict`), and `conflicts` (sorted paths), same shape as [`grit merge`](../merge/).
+On conflicts, exit code is **1** with `result: "conflicts"` and the same conflict shape as [`grit merge`](merge/).
 
 ## Markdown output
 
-Schema: [v1](/schemas/pick/v1.json)
-Pass [`--markdown`](../global-options/) for a `Pick` heading and a single line with source and new commit oids:
+Schema: [v2](/schemas/pick/v2.json)
 
-```text
-- `b84beb4` → `b84beb4` — pick me
-```
+Pass [`--markdown`](../global-options/) for a `Pick` heading, one bullet per replayed commit, and conflict next steps when stopped.
 
 ## See also
 
-[grit merge](../merge/), [grit log](../log/)
+[grit merge](../merge/), [grit revert](../revert/), [grit log](../log/)

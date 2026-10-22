@@ -11862,6 +11862,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayS
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
 pub fn grit_lib::porcelain::replay_sequence::abort_replay_sequence(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::replay_sequence::commits_to_replay(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::replay_sequence::continue_replay_sequence(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub fn grit_lib::porcelain::replay_sequence::skip_replay_step(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub fn grit_lib::porcelain::replay_sequence::start_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>

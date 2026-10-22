@@ -837,10 +837,35 @@ enum Command {
         #[arg(long = "abort")]
         abort: bool,
     },
-    /// Cherry-pick a commit onto the current branch.
+    /// Cherry-pick commits onto the current branch.
     Pick {
-        /// Commit to pick (any revision spec — full / short oid, branch, HEAD~2, …).
-        commit: String,
+        /// Commits or ranges to pick (`A..B`, branch tips, oids). Omit with `--continue`, `--abort`, or `--skip`.
+        #[arg(value_name = "COMMIT", required_unless_present_any = ["continue_pick", "abort", "skip"])]
+        commits: Vec<String>,
+        /// Finish the current cherry-pick after resolving conflicts.
+        #[arg(long = "continue", conflicts_with_all = ["abort", "skip"])]
+        continue_pick: bool,
+        /// Cancel the in-progress cherry-pick and restore the pre-pick state.
+        #[arg(long = "abort", conflicts_with_all = ["continue_pick", "skip"])]
+        abort: bool,
+        /// Skip the current cherry-pick step and continue with the rest.
+        #[arg(long = "skip", conflicts_with_all = ["continue_pick", "abort"])]
+        skip: bool,
+        /// Append `(cherry picked from commit …)` to each new commit message.
+        #[arg(short = 'x', long = "record-origin")]
+        record_origin: bool,
+        /// Apply changes to the index and worktree without creating a commit.
+        #[arg(long = "no-commit")]
+        no_commit: bool,
+        /// When a step would not change the tree: stop (default), record an empty commit, or drop it.
+        #[arg(long = "empty", value_enum, default_value_t = commands::pick::PickEmptyArg::Stop)]
+        empty: commands::pick::PickEmptyArg,
+        /// Replace the commit message (only when picking exactly one commit).
+        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        message: Option<String>,
+        /// Read the commit message from a file (only when picking exactly one commit).
+        #[arg(long = "message-file", conflicts_with = "message")]
+        message_file: Option<String>,
     },
     /// Undo a commit with a new inverse commit.
     Revert {
@@ -1691,7 +1716,37 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             }
             Ok(())
         }
-        Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts, ctx),
+        Command::Pick {
+            commits,
+            continue_pick,
+            abort,
+            skip,
+            record_origin,
+            no_commit,
+            empty,
+            message,
+            message_file,
+        } => {
+            let outcome = commands::pick::run(commands::pick::PickRunOptions {
+                commits,
+                continue_pick,
+                abort,
+                skip,
+                record_origin,
+                no_commit,
+                empty,
+                message,
+                message_file,
+            })?;
+            emit(&outcome, opts, ctx)?;
+            if matches!(
+                outcome.result,
+                commands::pick::PickResult::Conflicts | commands::pick::PickResult::Empty
+            ) {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts, ctx),
         Command::History { action } => match action {
             HistoryAction::Drop { commit, shared } => {

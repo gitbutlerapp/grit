@@ -31,6 +31,8 @@ use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
+use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
+use crate::rev_parse::{resolve_revision_as_commit, try_parse_double_dot_log_range};
 use crate::state::{
     read_cherry_pick_head, read_merge_msg, read_orig_head, read_revert_head, resolve_head,
     HeadState,
@@ -125,6 +127,44 @@ pub enum SequenceOutcome {
         /// Remaining todo oids (including `current`).
         remaining: Vec<ObjectId>,
     },
+}
+
+/// Expand revision arguments for a pick/revert sequence into commit OIDs, oldest first.
+///
+/// Each entry in `specs` is either a single commit-ish (`branch`, `HEAD~2`, full oid) or a
+/// two-dot range `A..B` / `..B` / `A..` (commits reachable from the right tip but not the left,
+/// in topological order from oldest to newest). Symmetric `A...B` is not supported here.
+///
+/// # Errors
+///
+/// Propagates rev-parse and rev-list errors. Merge commits are not rejected here; replay stops
+/// with [`Error::MergeCommit`] when a step is applied without `mainline`.
+pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
+    let mut out = Vec::new();
+    for spec in specs {
+        if let Some((exclude, include)) = try_parse_double_dot_log_range(repo, spec)? {
+            let positive = vec![include.to_hex()];
+            let negative = vec![exclude.to_hex()];
+            let walk_opts = RevListOptions {
+                ordering: OrderingMode::Topo,
+                reverse: false,
+                use_commit_graph: true,
+                full_history: true,
+                ..RevListOptions::default()
+            };
+            let walk = rev_list(repo, &positive, &negative, &walk_opts)?;
+            let mut commits = walk.commits;
+            commits.retain(|oid| *oid != exclude);
+            if include != exclude && !commits.contains(&include) {
+                commits.push(include);
+            }
+            commits.reverse();
+            out.extend(commits);
+        } else {
+            out.push(resolve_revision_as_commit(repo, spec)?);
+        }
+    }
+    Ok(out)
 }
 
 /// Apply `req.commits` onto the current branch, stopping on conflict or empty per `req.options`.
@@ -445,7 +485,15 @@ fn run_sequence(
             }
             StepResult::Conflicts { conflicts } => {
                 let remaining: Vec<ObjectId> = todo.iter().map(|t| t.oid).collect();
-                write_sequencer_state(repo, sequence_start, head, todo, opts, direction, committer)?;
+                write_sequencer_state(
+                    repo,
+                    sequence_start,
+                    head,
+                    todo,
+                    opts,
+                    direction,
+                    committer,
+                )?;
                 record_replay_stop(
                     repo,
                     direction,
@@ -464,7 +512,15 @@ fn run_sequence(
             }
             StepResult::EmptyStop => {
                 let remaining: Vec<ObjectId> = todo.iter().map(|t| t.oid).collect();
-                write_sequencer_state(repo, sequence_start, head, todo, opts, direction, committer)?;
+                write_sequencer_state(
+                    repo,
+                    sequence_start,
+                    head,
+                    todo,
+                    opts,
+                    direction,
+                    committer,
+                )?;
                 record_replay_stop(
                     repo,
                     direction,
@@ -1156,12 +1212,7 @@ fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Resu
 
 fn index_stage0_tree(repo: &Repository) -> Result<ObjectId> {
     let mut index = repo.load_index()?;
-    write_tree_update_index(
-        repo.odb(),
-        &mut index,
-        "",
-        WriteTreeFlags::silent(),
-    )
+    write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
 }
 
 fn apply_git_sequencer_opts(git_dir: &Path, opts: &mut ReplayOptions) {

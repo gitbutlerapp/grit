@@ -1,36 +1,151 @@
-//! `grit pick` — cherry-pick a single commit onto the current branch.
+//! `grit pick` — cherry-pick one or more commits onto the current branch.
 
 use crate::context;
 use crate::markdown;
+use crate::operation_output::{render_conflicts_human, ConflictJson, OperationConflictBlock};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
+use clap::ValueEnum;
+use grit_lib::change_id::resolved_change_id;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
-use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
+use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::replay::ReplayDirection;
+use grit_lib::porcelain::replay_sequence::{
+    abort_replay_sequence, commits_to_replay, continue_replay_sequence, skip_replay_step,
+    start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
+    SequenceOutcome,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
+/// Integration result for `grit pick` (`--json` contract).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PickResult {
+    Picked,
+    Conflicts,
+    Empty,
+    Aborted,
+    Skipped,
+}
+
+/// One commit recorded in pick `--json` output.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct PickCommitRecord {
+    /// Source commit that was replayed (full hex oid).
+    pub source: String,
+    /// New commit on the current branch, or JSON `null` when `--no-commit` or stopped early.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub oid: Option<String>,
+    /// Stored `change-id` on `oid` when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub change_id: Option<String>,
+    /// Subject line from the source commit (or the new commit when available).
+    pub subject: String,
+}
+
 /// Result of `grit pick`.
 #[derive(Serialize, JsonSchema)]
 pub struct PickOutcome {
-    /// The original commit that was picked (full hex oid).
-    pub source: String,
-    /// The new commit created on the current branch (full hex oid).
-    pub oid: String,
-    /// Subject line of the picked commit.
-    pub subject: String,
-    /// Stored `change-id` on the new commit, or JSON `null` when absent.
-    pub change_id: Option<String>,
+    pub result: PickResult,
+    /// Commits picked or attempted in this invocation.
+    pub commits: Vec<PickCommitRecord>,
+    /// Source commits skipped as empty/redundant (`--empty drop` or already applied).
+    pub dropped: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub conflicts: Option<Vec<ConflictJson>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub next_steps: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub alternatives: Option<Vec<String>>,
+}
+
+/// How to handle an empty replay step (`--empty`).
+#[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
+pub enum PickEmptyArg {
+    #[default]
+    Stop,
+    Keep,
+    Drop,
+}
+
+impl From<PickEmptyArg> for ReplayEmptyPolicy {
+    fn from(value: PickEmptyArg) -> Self {
+        match value {
+            PickEmptyArg::Stop => ReplayEmptyPolicy::Stop,
+            PickEmptyArg::Keep => ReplayEmptyPolicy::Keep,
+            PickEmptyArg::Drop => ReplayEmptyPolicy::Drop,
+        }
+    }
+}
+
+/// Options for [`run`].
+pub struct PickRunOptions {
+    pub commits: Vec<String>,
+    pub continue_pick: bool,
+    pub abort: bool,
+    pub skip: bool,
+    pub record_origin: bool,
+    pub no_commit: bool,
+    pub empty: PickEmptyArg,
+    pub message: Option<String>,
+    pub message_file: Option<String>,
 }
 
 impl HumanRender for PickOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let new_short = self.oid.get(..7).unwrap_or(&self.oid);
-        let src_short = self.source.get(..7).unwrap_or(&self.source);
-        outln!(w, "Picked {src_short} → {new_short} {}", self.subject);
+        match self.result {
+            PickResult::Picked | PickResult::Skipped => {
+                for row in &self.commits {
+                    if let Some(oid) = &row.oid {
+                        let src = row.source.get(..7).unwrap_or(&row.source);
+                        let new = oid.get(..7).unwrap_or(oid.as_str());
+                        outln!(w, "Picked {src} → {new} {}", row.subject);
+                    } else {
+                        let src = row.source.get(..7).unwrap_or(&row.source);
+                        outln!(w, "Applied {src} {} (no commit)", row.subject);
+                    }
+                }
+                if !self.dropped.is_empty() {
+                    outln!(w, "Dropped {} empty commit(s)", self.dropped.len());
+                }
+            }
+            PickResult::Conflicts => {
+                if let Some(conflicts) = &self.conflicts {
+                    render_conflicts_human(conflicts, w)?;
+                }
+                if let Some(steps) = &self.next_steps {
+                    eprintln!();
+                    for step in steps {
+                        eprintln!("→ {step}");
+                    }
+                }
+                if let Some(alt) = &self.alternatives {
+                    let joined = alt.join(" or ");
+                    eprintln!("→ or {joined}");
+                }
+            }
+            PickResult::Empty => {
+                if let Some(row) = self.commits.last() {
+                    let src = row.source.get(..7).unwrap_or(&row.source);
+                    outln!(w, "Stopped on empty commit {src} — {}", row.subject);
+                }
+                if let Some(steps) = &self.next_steps {
+                    for step in steps {
+                        eprintln!("→ {step}");
+                    }
+                }
+            }
+            PickResult::Aborted => outln!(w, "Pick aborted."),
+        }
         Ok(())
     }
 }
@@ -42,12 +157,9 @@ impl MarkdownRender for PickOutcome {
     }
 }
 
-/// Cherry-pick `commit` onto the current branch.
-pub fn run(commit: &str) -> Result<PickOutcome> {
+/// Cherry-pick commits onto the current branch, or resume/cancel an in-progress pick.
+pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     let repo = context::discover()?;
-    let source_oid = resolve_revision_as_commit(&repo, commit)
-        .map_err(|err| map_pick_committish_error(err, commit))?;
-    let source = context::read_commit(&repo, &source_oid)?;
     let env = repo.environment();
     let config =
         ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
@@ -57,47 +169,252 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         IdentRole::Committer,
         context::wall_clock_now(env),
     )?;
-    let outcome = replay_commit(
+
+    if opts.abort {
+        abort_replay_sequence(&repo).map_err(map_replay_error)?;
+        return Ok(PickOutcome {
+            result: PickResult::Aborted,
+            commits: Vec::new(),
+            dropped: Vec::new(),
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+        });
+    }
+
+    if opts.continue_pick {
+        let outcome = continue_replay_sequence(&repo, &committer).map_err(map_replay_error)?;
+        return Ok(map_sequence_outcome(
+            &repo,
+            &[],
+            outcome,
+            PickResult::Picked,
+        ));
+    }
+
+    if opts.skip {
+        let outcome = skip_replay_step(&repo, &committer).map_err(map_replay_error)?;
+        return Ok(map_sequence_outcome(
+            &repo,
+            &[],
+            outcome,
+            PickResult::Skipped,
+        ));
+    }
+
+    if opts.commits.is_empty() {
+        bail!("at least one commit or `--continue` / `--abort` / `--skip` is required");
+    }
+
+    let message_override = read_optional_message(opts.message, opts.message_file)?;
+    if message_override.is_some() && opts.commits.len() != 1 {
+        bail!("--message and --message-file are only allowed when picking exactly one commit");
+    }
+
+    let sources = commits_to_replay(&repo, &opts.commits).map_err(map_pick_committish_error)?;
+    let replay_opts = ReplayOptions {
+        record_origin: opts.record_origin,
+        no_commit: opts.no_commit,
+        empty: opts.empty.into(),
+        message_override,
+        ..ReplayOptions::default()
+    };
+    let req = ReplaySequenceRequest {
+        commits: sources.clone(),
+        direction: ReplayDirection::Pick,
+        committer,
+        options: replay_opts,
+    };
+    let outcome = start_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+    Ok(map_sequence_outcome(
         &repo,
-        &ReplayRequest {
-            commit: source_oid,
-            direction: ReplayDirection::Pick,
-            committer,
-            message_override: None,
-        },
-    )
-    .map_err(map_replay_error)?;
-    let short = &source_oid.to_hex()[..7];
+        &sources,
+        outcome,
+        PickResult::Picked,
+    ))
+}
+
+fn read_optional_message(
+    message: Option<String>,
+    message_file: Option<String>,
+) -> Result<Option<String>> {
+    match (message, message_file) {
+        (Some(m), None) => Ok(if m.trim().is_empty() { None } else { Some(m) }),
+        (None, Some(path)) => {
+            let contents = std::fs::read_to_string(&path)
+                .with_context(|| format!("could not read message file '{path}'"))?;
+            Ok(if contents.trim().is_empty() {
+                None
+            } else {
+                Some(contents)
+            })
+        }
+        (Some(_), Some(_)) => unreachable!("clap conflicts message and message_file"),
+        (None, None) => Ok(None),
+    }
+}
+
+fn map_sequence_outcome(
+    repo: &grit_lib::repo::Repository,
+    sources: &[ObjectId],
+    outcome: SequenceOutcome,
+    ok_result: PickResult,
+) -> PickOutcome {
     match outcome {
-        ReplayOutcome::Committed { oid, change_id, .. } => Ok(PickOutcome {
-            source: source_oid.to_hex(),
-            oid: oid.to_hex(),
-            subject: context::subject_line(&source.message),
-            change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
-        }),
-        ReplayOutcome::Conflicts { mut paths } => {
-            paths.sort();
-            paths.dedup();
-            Err(crate::json_error::operation_conflict("pick", paths))
+        SequenceOutcome::Completed { created, dropped } => {
+            let (commits, dropped_hex) = if sources.is_empty() {
+                (
+                    created
+                        .iter()
+                        .map(|oid| record_from_new_pick(repo, *oid))
+                        .collect(),
+                    dropped.iter().map(ObjectId::to_hex).collect(),
+                )
+            } else {
+                records_for_completed(repo, sources, &created, &dropped)
+            };
+            PickOutcome {
+                result: ok_result,
+                commits,
+                dropped: dropped_hex,
+                conflicts: None,
+                next_steps: None,
+                alternatives: None,
+            }
         }
-        ReplayOutcome::Empty => {
-            bail!("{short} is empty (its tree matches its parent) — nothing to pick")
+        SequenceOutcome::Conflicts {
+            current,
+            conflicts,
+            created_so_far,
+            remaining: _,
+        } => {
+            let commits = records_before_stop(repo, sources, current, &created_so_far);
+            let block = OperationConflictBlock::for_pick(&conflicts);
+            PickOutcome {
+                result: PickResult::Conflicts,
+                commits,
+                dropped: Vec::new(),
+                conflicts: Some(block.conflicts),
+                next_steps: Some(block.next_steps),
+                alternatives: block.alternatives,
+            }
         }
-        ReplayOutcome::AlreadyApplied => {
-            bail!("{short} is already applied on this branch — nothing to pick")
+        SequenceOutcome::Empty {
+            current,
+            created_so_far,
+            remaining: _,
+        } => {
+            let mut commits = records_before_stop(repo, sources, current, &created_so_far);
+            commits.push(source_record(repo, current, None));
+            let block = OperationConflictBlock::for_pick(&[]);
+            PickOutcome {
+                result: PickResult::Empty,
+                commits,
+                dropped: Vec::new(),
+                conflicts: None,
+                next_steps: Some(block.next_steps),
+                alternatives: block.alternatives,
+            }
         }
     }
 }
 
-fn map_pick_committish_error(err: Error, spec: &str) -> anyhow::Error {
+fn records_before_stop(
+    repo: &grit_lib::repo::Repository,
+    sources: &[ObjectId],
+    stop_at: ObjectId,
+    created: &[ObjectId],
+) -> Vec<PickCommitRecord> {
+    let mut commits = Vec::new();
+    let mut created_iter = created.iter();
+    for &source in sources {
+        if source == stop_at {
+            break;
+        }
+        if let Some(&oid) = created_iter.next() {
+            commits.push(source_record(repo, source, Some(oid)));
+        }
+    }
+    commits
+}
+
+fn records_for_completed(
+    repo: &grit_lib::repo::Repository,
+    sources: &[ObjectId],
+    created: &[ObjectId],
+    dropped: &[ObjectId],
+) -> (Vec<PickCommitRecord>, Vec<String>) {
+    let dropped_set: std::collections::HashSet<_> = dropped.iter().copied().collect();
+    let mut created_iter = created.iter();
+    let mut commits = Vec::new();
+    for &source in sources {
+        if dropped_set.contains(&source) {
+            continue;
+        }
+        let oid = created_iter.next().copied();
+        commits.push(source_record(repo, source, oid));
+    }
+    (commits, dropped.iter().map(ObjectId::to_hex).collect())
+}
+
+fn record_from_new_pick(repo: &grit_lib::repo::Repository, new_oid: ObjectId) -> PickCommitRecord {
+    let source = context::read_commit(repo, &new_oid)
+        .ok()
+        .and_then(|c| source_from_pick_message(&c.message))
+        .unwrap_or(new_oid);
+    source_record(repo, source, Some(new_oid))
+}
+
+fn source_from_pick_message(message: &str) -> Option<ObjectId> {
+    for line in message.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("(cherry picked from commit ") {
+            let hex = rest.trim_end_matches(')').trim();
+            return ObjectId::from_hex(hex).ok();
+        }
+    }
+    None
+}
+
+fn source_record(
+    repo: &grit_lib::repo::Repository,
+    source: ObjectId,
+    new_oid: Option<ObjectId>,
+) -> PickCommitRecord {
+    let source_commit = context::read_commit(repo, &source).ok();
+    let subject = source_commit
+        .as_ref()
+        .map(|c| context::subject_line(&c.message))
+        .unwrap_or_default();
+    let (oid, change_id, subject) = if let Some(new_oid) = new_oid {
+        let new_commit = context::read_commit(repo, &new_oid).ok();
+        let subject = new_commit
+            .as_ref()
+            .map(|c| context::subject_line(&c.message))
+            .unwrap_or(subject);
+        let change_id = new_commit.and_then(|c| {
+            let resolved = resolved_change_id(&new_oid, &c);
+            resolved.stored.then(|| resolved.id.as_str().to_owned())
+        });
+        (Some(new_oid.to_hex()), change_id, subject)
+    } else {
+        (None, None, subject)
+    };
+    PickCommitRecord {
+        source: source.to_hex(),
+        oid,
+        change_id,
+        subject,
+    }
+}
+
+fn map_pick_committish_error(err: Error) -> anyhow::Error {
     if let Some(msg) = crate::revision_errors::map_lib_revision_error(&err) {
         return anyhow::anyhow!(msg);
     }
     match err {
         Error::InvalidRef(msg) => anyhow::anyhow!(msg),
-        Error::ObjectNotFound(msg) => {
-            anyhow::anyhow!("could not resolve commit '{spec}': {msg}")
-        }
+        Error::ObjectNotFound(msg) => anyhow::anyhow!("could not resolve commit: {msg}"),
         other => anyhow::Error::new(other),
     }
 }
@@ -109,12 +426,22 @@ fn map_replay_error(err: Error) -> anyhow::Error {
         Error::MergeCommit { oid } => {
             let s = &oid.to_hex()[..7];
             anyhow::anyhow!(
-                "{s} is a merge commit — grit pick only handles regular commits; use `git cherry-pick -m 1 {s}`"
+                "{s} is a merge commit — pass `--mainline <n>` to pick a merge commit (not yet supported on the CLI)"
             )
         }
         Error::ReplaySourceAtHead => {
             anyhow::anyhow!("nothing to pick — that commit is already the current HEAD")
         }
+        Error::NoReplayInProgress => {
+            anyhow::anyhow!("no cherry-pick in progress")
+        }
+        Error::ReplayContinueUnmerged => anyhow::anyhow!(
+            "cannot continue: resolve conflicts and stage the result (`grit add`), then run `grit pick --continue`"
+        ),
+        Error::ReplayAbortHeadMoved => {
+            anyhow::anyhow!("cannot abort: branch tip moved since the pick started")
+        }
+        Error::Message(msg) => anyhow::anyhow!(msg),
         other => anyhow::Error::new(other),
     }
 }

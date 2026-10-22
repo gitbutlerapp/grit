@@ -602,11 +602,49 @@ pub fn print_pull_outcome(
 
 /// Result of `grit pick`.
 pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::Result<()> {
+    use crate::commands::pick::PickResult;
     outln!(w, "## Pick");
     outln!(w);
-    let src = short_hex(&outcome.source);
-    let new = short_hex(&outcome.oid);
-    outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
+    match outcome.result {
+        PickResult::Picked | PickResult::Skipped => {
+            for row in &outcome.commits {
+                let src = short_hex(&row.source);
+                if let Some(oid) = &row.oid {
+                    let new = short_hex(oid);
+                    outln!(w, "- `{src}` → `{new}` — {}", row.subject);
+                } else {
+                    outln!(w, "- `{src}` — {} (no commit)", row.subject);
+                }
+            }
+            if !outcome.dropped.is_empty() {
+                outln!(w, "- Dropped **{}** empty commit(s)", outcome.dropped.len());
+            }
+        }
+        PickResult::Conflicts => {
+            outln!(w, "- Cherry-pick stopped with conflicts");
+            outln!(w);
+            if let Some(details) = &outcome.conflicts {
+                crate::operation_output::render_conflicts_markdown(details, w)?;
+            }
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        PickResult::Empty => {
+            if let Some(row) = outcome.commits.last() {
+                let src = short_hex(&row.source);
+                outln!(w, "- Stopped on empty commit `{src}` — {}", row.subject);
+            }
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        PickResult::Aborted => outln!(w, "Pick aborted."),
+    }
     Ok(())
 }
 

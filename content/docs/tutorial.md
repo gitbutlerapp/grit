@@ -178,7 +178,7 @@ $ grit push --tags
 
 ## When things conflict
 
-`grit merge`, `grit pull` and `grit pick` never leave a half-finished merge behind. If the two sides change the same lines, `grit` lists the conflicting files and leaves your branch and working tree as they were. To resolve the conflict, run the merge with `git`, fix the files and commit. Conflict resolution in `grit` itself is on the roadmap.
+When `grit merge`, `grit pull`, or `grit pick` hits conflicting changes, grit stops with conflict markers in the worktree and records in-progress state (for pick/revert, Git-compatible `CHERRY_PICK_HEAD` and `.git/sequencer/`). Fix the files, `grit add` the resolved paths, then run `grit merge` with a normal commit for merges, or `grit pick --continue` / `grit revert --continue` for cherry-picks and reverts. Use `--abort` on the same command to cancel.
 
 `grit` refuses to switch branches, merge, or pull when your local edits would be overwritten by files that differ on the other side. Unrelated uncommitted edits are kept, like Git. Use [`grit reset --soft HEAD~1`](../reset/) to uncommit while keeping changes staged.
 

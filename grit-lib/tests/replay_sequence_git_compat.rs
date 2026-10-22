@@ -11,8 +11,9 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
-    abort_replay_sequence, continue_replay_sequence, skip_replay_step, start_replay_sequence,
-    ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+    abort_replay_sequence, commits_to_replay, continue_replay_sequence, skip_replay_step,
+    start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
+    SequenceOutcome,
 };
 use grit_lib::repo::Repository;
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
@@ -105,6 +106,26 @@ fn revert_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceRequ
         committer: IDENT.to_owned(),
         options: opts,
     }
+}
+
+#[test]
+fn commits_to_replay_expands_range_oldest_first() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "a.txt", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    commit_file(root.path(), "b.txt", "one\n", "one");
+    commit_file(root.path(), "c.txt", "two\n", "two");
+    let c1 = oid_from_rev(root.path(), "topic~1");
+    let c2 = oid_from_rev(root.path(), "topic");
+    git(root.path(), &["switch", "main"]);
+    commit_file(root.path(), "d.txt", "main\n", "main");
+    let base = oid_from_rev(root.path(), "main");
+
+    let repo = open_repo(root.path());
+    let expanded =
+        commits_to_replay(&repo, &[format!("{}..{}", base.to_hex(), c2.to_hex())]).expect("expand");
+    assert_eq!(expanded, vec![c1, c2]);
 }
 
 #[test]
