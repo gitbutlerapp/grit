@@ -23,8 +23,8 @@ use super::error::HistoryError;
 use super::plan::{plan_rewrite_with_order_resumable_seeded, ResumablePlanOutcome};
 use super::rebase::{plan_rebase_resumable, RebaseOntoOptions, RebasePlan, RebaseRequest};
 use super::types::{
-    AppliedRewrite, ApplyOptions, CommitEdit, HistoryEdits, RefScope, RewriteOptions, RewritePlan,
-    RewrittenCommit,
+    AppliedRewrite, ApplyOptions, CommitEdit, HistoryEdits, PlannedRefUpdate, RefScope,
+    RewriteOptions, RewritePlan, RewrittenCommit,
 };
 use crate::operation::Conflict;
 
@@ -188,7 +188,7 @@ pub fn continue_rebase(
             tree: Some(new_tree),
             message: None,
             author: None,
-            parents: None,
+            parents: Some(vec![state.onto]),
         },
     );
 
@@ -594,9 +594,19 @@ fn advance_after_plan(
     edits: HistoryEdits,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     match outcome {
-        ResumablePlanOutcome::Complete(plan) => {
+        ResumablePlanOutcome::Complete(mut plan) => {
             clear_rebase_state(repo.git_dir())?;
+            if let Some(new_tip) = plan.mapped_tip(prev.orig_head) {
+                if !plan.ref_updates.iter().any(|u| u.name == prev.head_ref) {
+                    plan.ref_updates.push(PlannedRefUpdate {
+                        name: prev.head_ref.clone(),
+                        old: prev.orig_head,
+                        new: new_tip,
+                    });
+                }
+            }
             let applied = apply_rewrite(repo, &plan, apply)?;
+            refs::write_symbolic_ref(repo.git_dir(), "HEAD", &prev.head_ref).map_err(map_lib)?;
             Ok(RebaseOutcome::Done { applied, plan })
         }
         ResumablePlanOutcome::Partial(partial) => {

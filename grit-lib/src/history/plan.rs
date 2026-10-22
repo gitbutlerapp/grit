@@ -203,16 +203,18 @@ fn finish_plan_rewrite_on_replay_error(
 ) -> Result<ResumablePlanOutcome, HistoryError> {
     if matches!(err, HistoryError::Conflict { .. }) {
         if let Some(conflict) = take_resumable_conflict() {
-            return Ok(ResumablePlanOutcome::Partial(Box::new(PartialRewritePlan {
-                mapping,
-                rewritten,
-                conflict,
-                commits_to_replay,
-                scoped_refs,
-                edits: edits.clone(),
-                opts: opts.clone(),
-                flatten_leaf_merges,
-            })));
+            return Ok(ResumablePlanOutcome::Partial(Box::new(
+                PartialRewritePlan {
+                    mapping,
+                    rewritten,
+                    conflict,
+                    commits_to_replay,
+                    scoped_refs,
+                    edits: edits.clone(),
+                    opts: opts.clone(),
+                    flatten_leaf_merges,
+                },
+            )));
         }
     }
     Err(err)
