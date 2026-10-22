@@ -1,7 +1,10 @@
 //! Reachability filters for [`super::listing::RefQuery`] (`--contains`, `--merged`, …).
 
+use std::collections::HashSet;
+
 use crate::error::Error;
-use crate::merge_base::{branch_tips_merged_into, commit_tip_contains_all, RefContainsCache};
+use crate::merge_base::{branch_tips_merged_into, RefContainsProbe};
+use crate::objects::{oid_hash_set, OidHashSet};
 use crate::objects::{parse_tag, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -35,7 +38,8 @@ pub fn resolve_commit_filter_target(
 ///
 /// # Errors
 ///
-/// Propagates object read and parse failures (except missing objects, which return `false`).
+/// Propagates object read and parse failures (except missing intermediate objects, which
+/// return `false`). Returns [`Error::CorruptObject`] when a tag peel cycle is detected.
 pub fn ref_points_at(
     odb: &Odb,
     ref_oid: ObjectId,
@@ -45,7 +49,13 @@ pub fn ref_points_at(
         return Ok(true);
     }
     let mut current = ref_oid;
-    for _ in 0..32 {
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(current) {
+            return Err(Error::CorruptObject(format!(
+                "annotated tag peel cycle at {current}"
+            )));
+        }
         let obj = match odb.read(&current) {
             Ok(o) => o,
             Err(Error::ObjectNotFound(_)) => return Ok(false),
@@ -60,7 +70,6 @@ pub fn ref_points_at(
         }
         current = tag.object;
     }
-    Ok(false)
 }
 
 /// Whether `ref_oid` matches any oid in `points_at` ([`ref_points_at`]).
@@ -90,15 +99,76 @@ fn peel_ref_tip_commit(
     repo: &Repository,
     ref_oid: ObjectId,
     peeled: Option<ObjectId>,
-) -> Option<ObjectId> {
+) -> std::result::Result<Option<ObjectId>, RefQueryError> {
     if let Some(p) = peeled {
-        return Some(p);
+        return Ok(Some(p));
     }
-    repo.odb()
-        .peel_to_commit(ref_oid)
-        .ok()
-        .flatten()
-        .or_else(|| peel_to_commit_for_merge_base(repo, ref_oid).ok())
+    match repo.odb().peel_to_commit(ref_oid) {
+        Ok(opt) => {
+            if opt.is_some() {
+                return Ok(opt);
+            }
+        }
+        Err(e) => return Err(RefQueryError::Store(e)),
+    }
+    Ok(peel_to_commit_for_merge_base(repo, ref_oid).ok())
+}
+
+struct ReachabilityFilterCtx<'a> {
+    contains: &'a [ObjectId],
+    no_contains: &'a [ObjectId],
+    merged: &'a [ObjectId],
+    no_merged: &'a [ObjectId],
+    merged_tips: &'a OidHashSet,
+    no_merged_tips: &'a OidHashSet,
+}
+
+fn row_passes_reachability<'repo>(
+    repo: &'repo Repository,
+    query: &RefQuery,
+    odb: &Odb,
+    row: &(String, ObjectId, Option<ObjectId>),
+    ctx: &ReachabilityFilterCtx<'_>,
+    probe: &mut RefContainsProbe<'repo>,
+) -> std::result::Result<bool, RefQueryError> {
+    let (_, ref_oid, peeled) = row;
+    let needs_commit = !ctx.contains.is_empty()
+        || !ctx.no_contains.is_empty()
+        || !ctx.merged.is_empty()
+        || !ctx.no_merged.is_empty();
+
+    if !needs_commit {
+        return ref_points_at_any(odb, *ref_oid, &query.points_at).map_err(RefQueryError::Store);
+    }
+
+    let tip = match peel_ref_tip_commit(repo, *ref_oid, *peeled)? {
+        Some(t) => t,
+        None => return Ok(false),
+    };
+
+    if !ctx.contains.is_empty() && !probe.tip_contains_any(repo, tip, ctx.contains)? {
+        return Ok(false);
+    }
+    for &target in ctx.no_contains {
+        if probe.tip_reaches_target(repo, tip, target)? {
+            return Ok(false);
+        }
+    }
+
+    if !ctx.merged.is_empty() && !ctx.merged_tips.contains(&tip) {
+        return Ok(false);
+    }
+    if !ctx.no_merged.is_empty() && ctx.no_merged_tips.contains(&tip) {
+        return Ok(false);
+    }
+
+    if !query.points_at.is_empty()
+        && !ref_points_at_any(odb, *ref_oid, &query.points_at).map_err(RefQueryError::Store)?
+    {
+        return Ok(false);
+    }
+
+    Ok(true)
 }
 
 /// Drop refs that fail reachability filters in `query`.
@@ -121,58 +191,49 @@ pub(super) fn filter_listings_by_reachability(
     let no_merged = resolve_targets(repo, &query.no_merged)?;
     let odb = repo.odb();
 
-    if needs_commit {
-        rows.retain(|(_, oid, peeled)| peel_ref_tip_commit(repo, *oid, *peeled).is_some());
-    }
-
-    if !contains.is_empty() || !no_contains.is_empty() {
-        let mut cache = RefContainsCache::default();
-        rows.retain(|(_, oid, peeled)| {
-            let Some(tip) = peel_ref_tip_commit(repo, *oid, *peeled) else {
-                return false;
-            };
-            commit_tip_contains_all(repo, tip, &contains, &mut cache).unwrap_or(false)
-        });
-        rows.retain(|(_, oid, peeled)| {
-            let Some(tip) = peel_ref_tip_commit(repo, *oid, *peeled) else {
-                return false;
-            };
-            for &target in &no_contains {
-                if commit_tip_contains_all(repo, tip, &[target], &mut cache).unwrap_or(false) {
-                    return false;
-                }
-            }
-            true
-        });
-    }
-
+    let mut tips_for_merged: Vec<ObjectId> = Vec::new();
     if !merged.is_empty() || !no_merged.is_empty() {
-        let tips: Vec<ObjectId> = rows
-            .iter()
-            .filter_map(|(_, oid, peeled)| peel_ref_tip_commit(repo, *oid, *peeled))
-            .collect();
-        let merged_tips =
-            branch_tips_merged_into(repo, &merged, &tips).map_err(RefQueryError::Store)?;
-        let no_merged_tips =
-            branch_tips_merged_into(repo, &no_merged, &tips).map_err(RefQueryError::Store)?;
-
-        rows.retain(|(_, oid, peeled)| {
-            let Some(tip) = peel_ref_tip_commit(repo, *oid, *peeled) else {
-                return false;
-            };
-            if !merged.is_empty() && !merged_tips.contains(&tip) {
-                return false;
+        for (_, oid, peeled) in rows.iter() {
+            if let Some(t) = peel_ref_tip_commit(repo, *oid, *peeled)? {
+                tips_for_merged.push(t);
             }
-            if !no_merged.is_empty() && no_merged_tips.contains(&tip) {
-                return false;
-            }
-            true
-        });
+        }
     }
+    let empty_merged = oid_hash_set();
+    let merged_owned = if merged.is_empty() {
+        None
+    } else {
+        Some(
+            branch_tips_merged_into(repo, &merged, &tips_for_merged)
+                .map_err(RefQueryError::Store)?,
+        )
+    };
+    let no_merged_owned = if no_merged.is_empty() {
+        None
+    } else {
+        Some(
+            branch_tips_merged_into(repo, &no_merged, &tips_for_merged)
+                .map_err(RefQueryError::Store)?,
+        )
+    };
+    let merged_tips = merged_owned.as_ref().unwrap_or(&empty_merged);
+    let no_merged_tips = no_merged_owned.as_ref().unwrap_or(&empty_merged);
+    let ctx = ReachabilityFilterCtx {
+        contains: &contains,
+        no_contains: &no_contains,
+        merged: &merged,
+        no_merged: &no_merged,
+        merged_tips,
+        no_merged_tips,
+    };
 
-    if !query.points_at.is_empty() {
-        rows.retain(|(_, oid, _)| ref_points_at_any(odb, *oid, &query.points_at).unwrap_or(false));
+    let mut probe = RefContainsProbe::new(repo);
+    let mut kept = Vec::with_capacity(rows.len());
+    for row in rows.drain(..) {
+        if row_passes_reachability(repo, query, odb, &row, &ctx, &mut probe)? {
+            kept.push(row);
+        }
     }
-
+    *rows = kept;
     Ok(())
 }

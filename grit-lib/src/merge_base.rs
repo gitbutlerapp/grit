@@ -1918,6 +1918,41 @@ impl<'r> CommitGraphCache<'r> {
         Ok(false)
     }
 
+    /// Exact ancestor test for ref `--contains` / `--no-contains` (no commit-date slop).
+    fn is_ancestor_for_ref_filter(
+        &mut self,
+        ancestor: ObjectId,
+        descendant: ObjectId,
+    ) -> Result<bool> {
+        let ancestor = peel_to_commit_for_merge_base(self.repo, ancestor).unwrap_or(ancestor);
+        let descendant = peel_to_commit_for_merge_base(self.repo, descendant).unwrap_or(descendant);
+        if ancestor == descendant {
+            return Ok(true);
+        }
+
+        let anc_gen = commit_rank_for_walk(self, ancestor);
+        let mut seen = oid_hash_set();
+        let mut stack = vec![descendant];
+        while let Some(oid) = stack.pop() {
+            if !seen.insert(oid) {
+                continue;
+            }
+            if oid == ancestor {
+                return Ok(true);
+            }
+            if anc_gen != UNRANKED_COMMIT {
+                let gen = commit_rank_for_walk(self, oid);
+                if gen != UNRANKED_COMMIT && gen < anc_gen {
+                    continue;
+                }
+            }
+            for parent in self.parents_of(oid)? {
+                stack.push(parent);
+            }
+        }
+        Ok(false)
+    }
+
     /// Mark branch tips that are ancestors of (merged into) any commit in `bases`.
     ///
     /// Uses commit-graph generations to stop the walk below the minimum generation among
@@ -1980,26 +2015,80 @@ impl<'r> CommitGraphCache<'r> {
     }
 }
 
-/// Memoized `--contains` / `--no-contains` probes for ref listing.
+/// Memoized `(tip, target)` reachability for ref `--contains` / `--no-contains` probes.
 #[derive(Debug, Default)]
 pub(crate) struct RefContainsCache {
-    states: OidHashMap<u8>,
+    probe: std::collections::HashMap<(ObjectId, ObjectId), bool>,
 }
 
-const CONTAINS_YES: u8 = 1;
-const CONTAINS_NO: u8 = 2;
+/// Shared commit walk state for one ref-listing reachability pass.
+pub(crate) struct RefContainsProbe<'repo> {
+    graph: CommitGraphCache<'repo>,
+    cache: RefContainsCache,
+}
 
-/// Whether every commit in `targets` is an ancestor of (or equal to) `tip`.
+impl<'repo> RefContainsProbe<'repo> {
+    /// Start a new probe session on `repo`.
+    pub(crate) fn new(repo: &'repo Repository) -> Self {
+        Self {
+            graph: CommitGraphCache::new(repo),
+            cache: RefContainsCache::default(),
+        }
+    }
+
+    /// Whether `target` is reachable from `tip` (see [`tip_reaches_target`]).
+    pub(crate) fn tip_reaches_target(
+        &mut self,
+        repo: &'repo Repository,
+        tip: ObjectId,
+        target: ObjectId,
+    ) -> Result<bool> {
+        tip_reaches_target(repo, &mut self.graph, tip, target, &mut self.cache)
+    }
+
+    /// Whether `tip` contains any of `targets` (OR semantics).
+    pub(crate) fn tip_contains_any(
+        &mut self,
+        repo: &'repo Repository,
+        tip: ObjectId,
+        targets: &[ObjectId],
+    ) -> Result<bool> {
+        tip_contains_any(repo, &mut self.graph, tip, targets, &mut self.cache)
+    }
+}
+
+/// Whether `target` is an ancestor of (or equal to) `tip`, with per-pair memoization.
 ///
-/// Memoizes the result per `tip` in `cache` so listing many refs reuses work when tips
-/// repeat. Uses [`CommitGraphCache::is_ancestor`] (generation-bounded when a commit-graph
-/// is present).
+/// Uses an exact ancestry walk (no commit-date slop). When both commits are ranked in the
+/// commit-graph, parent expansion stops below the target's generation.
 ///
 /// # Errors
 ///
 /// Propagates object read failures during parent walks.
-pub(crate) fn commit_tip_contains_all(
+fn tip_reaches_target(
     repo: &Repository,
+    graph: &mut CommitGraphCache<'_>,
+    tip: ObjectId,
+    target: ObjectId,
+    cache: &mut RefContainsCache,
+) -> Result<bool> {
+    let tip = peel_to_commit_for_merge_base(repo, tip).unwrap_or(tip);
+    let target = peel_to_commit_for_merge_base(repo, target).unwrap_or(target);
+    if tip == target {
+        return Ok(true);
+    }
+    if let Some(&hit) = cache.probe.get(&(tip, target)) {
+        return Ok(hit);
+    }
+    let hit = graph.is_ancestor_for_ref_filter(target, tip)?;
+    cache.probe.insert((tip, target), hit);
+    Ok(hit)
+}
+
+/// Whether `tip` contains any commit in `targets` (Git OR semantics for repeated `--contains`).
+fn tip_contains_any(
+    repo: &Repository,
+    graph: &mut CommitGraphCache<'_>,
     tip: ObjectId,
     targets: &[ObjectId],
     cache: &mut RefContainsCache,
@@ -2007,20 +2096,12 @@ pub(crate) fn commit_tip_contains_all(
     if targets.is_empty() {
         return Ok(true);
     }
-    let tip = peel_to_commit_for_merge_base(repo, tip).unwrap_or(tip);
-    if let Some(&state) = cache.states.get(&tip) {
-        return Ok(state == CONTAINS_YES);
-    }
-    let mut graph = CommitGraphCache::new(repo);
     for &target in targets {
-        let target = peel_to_commit_for_merge_base(repo, target).unwrap_or(target);
-        if target != tip && !graph.is_ancestor(target, tip)? {
-            cache.states.insert(tip, CONTAINS_NO);
-            return Ok(false);
+        if tip_reaches_target(repo, graph, tip, target, cache)? {
+            return Ok(true);
         }
     }
-    cache.states.insert(tip, CONTAINS_YES);
-    Ok(true)
+    Ok(false)
 }
 
 /// Branch tips that are merged into any of `bases` (ancestors of a base commit).
