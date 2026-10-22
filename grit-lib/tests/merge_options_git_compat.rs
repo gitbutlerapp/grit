@@ -346,3 +346,74 @@ fn squash_commit_clears_squash_msg() {
     assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
     git(tmp.path(), &["fsck", "--strict"]);
 }
+
+#[test]
+fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
+    let (tmp, main, topic) = linear_ff_repo();
+    let repo = grit_repo(&tmp);
+    integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions {
+            commit: MergeCommitMode::Squash,
+            ..MergeOptions::default()
+        },
+    )
+    .expect("squash");
+    let squash_msg =
+        std::fs::read_to_string(tmp.path().join(".git/SQUASH_MSG")).expect("squash msg");
+    create_commit(&repo, &empty_commit_req(), &mut NullProgress).expect("squash commit");
+    assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
+
+    std::fs::write(tmp.path().join("follow.txt"), "next\n").expect("write");
+    git(tmp.path(), &["add", "follow.txt"]);
+    let err = create_commit(&repo, &empty_commit_req(), &mut NullProgress).expect_err("no msg");
+    assert!(
+        matches!(err, Error::Message(ref m) if m.contains("empty commit message")),
+        "unexpected: {err:?}"
+    );
+    assert_ne!(squash_msg.trim(), "");
+}
+
+#[test]
+fn squash_conflict_resolves_with_git_commit_no_edit() {
+    let tmp = conflict_repo();
+    let main: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .expect("main");
+    let topic: ObjectId = git(tmp.path(), &["rev-parse", "topic"])
+        .trim()
+        .parse()
+        .expect("topic");
+    let repo = grit_repo(&tmp);
+    integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions {
+            commit: MergeCommitMode::Squash,
+            ..MergeOptions::default()
+        },
+    )
+    .expect("squash with conflicts");
+    assert!(!tmp.path().join(".git/MERGE_HEAD").exists());
+    assert!(tmp.path().join(".git/SQUASH_MSG").exists());
+
+    std::fs::write(tmp.path().join("f"), "resolved\n").expect("resolve");
+    git(tmp.path(), &["add", "f"]);
+    let status = git(tmp.path(), &["status", "--porcelain"]);
+    assert!(
+        !status.contains("UU"),
+        "conflicts should be cleared: {status}"
+    );
+
+    git(tmp.path(), &["commit", "--no-edit"]);
+    assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
+    git(tmp.path(), &["fsck", "--strict"]);
+}

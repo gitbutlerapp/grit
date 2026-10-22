@@ -87,14 +87,7 @@ pub fn run(
     let scope = resolve_commit_scope(&repo, all, staged, &paths)?;
     let scope_json = scope_json(&scope);
 
-    let message = match message {
-        Some(m) if !m.trim().is_empty() => Some(m),
-        None if amend => None,
-        None => pending_commit_message(&repo)
-            .context("could not read pending commit message")?
-            .filter(|m| !m.trim().is_empty()),
-        Some(_) => None,
-    };
+    let message = resolve_commit_message(&repo, message, amend)?;
     if message.is_none() && !amend {
         if matches!(scope, CommitScope::AutoStage) {
             stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -146,6 +139,24 @@ pub fn run(
         amended: amend,
         change_id: outcome.change_id.as_ref().map(|id| id.as_str().to_owned()),
         scope: scope_json,
+    })
+}
+
+/// Resolve the commit message from CLI input, pending merge/squash state, or amend reuse.
+fn resolve_commit_message(
+    repo: &grit_lib::repo::Repository,
+    message: Option<String>,
+    amend: bool,
+) -> Result<Option<String>> {
+    if amend {
+        return Ok(message.filter(|m| !m.trim().is_empty()));
+    }
+    Ok(match message {
+        Some(m) if !m.trim().is_empty() => Some(m),
+        None => pending_commit_message(repo)
+            .context("could not read pending commit message")?
+            .filter(|m| !m.trim().is_empty()),
+        Some(_) => None,
     })
 }
 

@@ -568,9 +568,8 @@ fn create_commit_with_index(
 
     if concluding_merge {
         let _ = finish_merge_state(repo)?;
-    } else if repo.git_dir().join("SQUASH_MSG").is_file() {
-        clear_squash_commit_state(repo.git_dir())?;
     }
+    clear_squash_commit_state(repo.git_dir())?;
 
     if let Some(persist) = persist_index {
         if !req.assume_worktree_synced {
