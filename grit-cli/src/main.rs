@@ -884,10 +884,41 @@ enum Command {
         #[arg(long = "check", conflicts_with_all = ["abort", "continue_merge"])]
         check: bool,
     },
-    /// Cherry-pick a commit onto the current branch.
+    /// Cherry-pick commits onto the current branch.
     Pick {
-        /// Commit to pick (any revision spec — full / short oid, branch, HEAD~2, …).
-        commit: String,
+        /// Commits to pick (any revision spec — full / short oid, branch, HEAD~2, …).
+        #[arg(
+            required_unless_present_any = ["continue_pick", "abort", "skip"],
+            value_name = "COMMIT"
+        )]
+        commits: Vec<String>,
+        /// Parent number when picking a merge commit (1-based, long only).
+        #[arg(long = "mainline", value_name = "N")]
+        mainline: Option<u32>,
+        /// Finish a pick stopped on conflicts or an empty commit.
+        #[arg(long = "continue", conflicts_with_all = ["abort", "skip"])]
+        continue_pick: bool,
+        /// Cancel an in-progress pick and restore the pre-pick state.
+        #[arg(long = "abort", conflicts_with_all = ["continue_pick", "skip"])]
+        abort: bool,
+        /// Skip the current pick step and continue with the next commit.
+        #[arg(long = "skip", conflicts_with_all = ["continue_pick", "abort"])]
+        skip: bool,
+        /// Apply the pick to the index only; do not create a commit yet.
+        #[arg(long = "no-commit")]
+        no_commit: bool,
+        /// When a pick step would not change the tree: stop (default), keep an empty commit, or drop the step.
+        #[arg(long = "empty", value_enum, default_value_t = commands::pick::ReplayEmptyPolicyArg::Stop)]
+        empty: commands::pick::ReplayEmptyPolicyArg,
+        /// Replace the pick message (single commit only).
+        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        message: Option<String>,
+        /// Read the pick message from a file (single commit only).
+        #[arg(long = "message-file", conflicts_with = "message")]
+        message_file: Option<String>,
+        /// List commits that would be picked without changing refs or the worktree.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Undo commits with new inverse commits.
     Revert {
@@ -1918,7 +1949,39 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             }
             Ok(())
         }
-        Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts, ctx),
+        Command::Pick {
+            commits,
+            mainline,
+            continue_pick,
+            abort,
+            skip,
+            no_commit,
+            empty,
+            message,
+            message_file,
+            dry_run,
+        } => {
+            let outcome = commands::pick::run(&commands::pick::PickRunOptions {
+                commits,
+                mainline,
+                continue_pick,
+                abort,
+                skip,
+                no_commit,
+                empty,
+                message,
+                message_file,
+                dry_run,
+            })?;
+            if matches!(
+                outcome.result,
+                commands::pick::PickResult::Conflicts | commands::pick::PickResult::Empty
+            ) {
+                emit(&outcome, opts, ctx)?;
+                std::process::exit(1);
+            }
+            emit(&outcome, opts, ctx)
+        }
         Command::Revert {
             commits,
             mainline,

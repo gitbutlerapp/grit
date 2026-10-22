@@ -47,6 +47,14 @@ impl OperationConflictBlock {
         })
     }
 
+    /// Build conflict JSON and suggested `grit` commands for a paused pick sequence.
+    #[must_use]
+    pub fn for_pick(conflicts: &[Conflict]) -> Self {
+        Self::for_operation(InProgressOperation::CherryPick, conflicts, |c| {
+            conflict_json(c, None)
+        })
+    }
+
     fn for_operation(
         kind: InProgressOperation,
         conflicts: &[Conflict],
@@ -190,5 +198,12 @@ pub fn render_merge_check_conflicts_markdown(
 pub fn render_revert_conflict_footer_human() {
     eprintln!(
         "\nRevert stopped on conflicts; fix them and run `grit revert --continue`, or `grit revert --abort` / `grit revert --skip`."
+    );
+}
+
+/// Human hint after a paused pick sequence.
+pub fn render_pick_conflict_footer_human() {
+    eprintln!(
+        "\nPick stopped on conflicts; fix them and run `grit pick --continue`, or `grit pick --abort` / `grit pick --skip`."
     );
 }

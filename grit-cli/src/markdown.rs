@@ -685,13 +685,46 @@ pub fn print_pull_outcome(
 
 /// Result of `grit pick`.
 pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::Result<()> {
+    use crate::commands::pick::PickResult;
     outln!(w, "## Pick");
     outln!(w);
-    let src = short_hex(&outcome.source);
-    let new = short_hex(&outcome.oid);
-    outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
-    if let Some(id) = outcome.change_id.as_deref() {
-        outln!(w, "- change id `{short}`", short = short_change_id(id));
+    match outcome.result {
+        PickResult::Aborted => outln!(w, "Pick aborted."),
+        PickResult::Conflicts => {
+            outln!(w, "- Pick stopped with conflicts");
+            outln!(w);
+            if let Some(details) = &outcome.conflicts {
+                crate::operation_output::render_conflicts_markdown(details, w)?;
+            }
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        PickResult::Empty => {
+            outln!(w, "- Pick stopped on an empty commit");
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        PickResult::Completed => {
+            if outcome.dry_run == Some(true) {
+                outln!(w, "- Would pick {} commit(s)", outcome.commits.len());
+                for entry in &outcome.commits {
+                    let src = short_hex(&entry.source);
+                    outln!(w, "  - `{src}`");
+                }
+            } else {
+                for entry in &outcome.commits {
+                    let src = short_hex(&entry.source);
+                    let new = short_hex(&entry.oid);
+                    outln!(w, "- `{src}` → `{new}` — {}", entry.subject);
+                }
+            }
+        }
     }
     Ok(())
 }

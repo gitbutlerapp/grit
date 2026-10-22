@@ -120,6 +120,47 @@ fn status_json_conflicts_and_operation_shape() -> TestResult {
 }
 
 #[test]
+fn status_json_pick_operation_commands_parse() -> TestResult {
+    let tmp = tempfile::TempDir::new()?;
+    let repo = tmp.path();
+    system_git_ok(repo, &["init", "-q", "-b", "main"]);
+    system_git_ok(repo, &["config", "user.name", "T"]);
+    system_git_ok(repo, &["config", "user.email", "t@e.com"]);
+    fs::write(repo.join("f"), "base\n")?;
+    system_git_ok(repo, &["add", "f"]);
+    system_git_ok(repo, &["commit", "-qm", "base"]);
+    system_git_ok(repo, &["checkout", "-qb", "topic"]);
+    fs::write(repo.join("f"), "topic\n")?;
+    system_git_ok(repo, &["commit", "-qam", "topic"]);
+    let pick_oid = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo)
+        .output()?
+        .stdout;
+    let pick_oid = String::from_utf8(pick_oid)?.trim().to_owned();
+    system_git_ok(repo, &["checkout", "-q", "main"]);
+    fs::write(repo.join("f"), "main\n")?;
+    system_git_ok(repo, &["commit", "-qam", "main"]);
+
+    let (code, _, stderr) = run_grit(repo, &["pick", &pick_oid]);
+    assert_ne!(code, 0, "expected pick conflict: {stderr}");
+
+    let v = gs_json(repo, &["status"]);
+    let op = v.get("operation").expect("operation during grit pick");
+    assert_eq!(op["kind"], "cherry-pick");
+    for step in op["next_steps"].as_array().expect("next_steps") {
+        assert_grit_command_parses(step.as_str().expect("step"));
+    }
+    for step in op["alternatives"].as_array().expect("alternatives") {
+        assert_grit_command_parses(step.as_str().expect("alt"));
+    }
+
+    let (abort_code, _, abort_stderr) = run_grit(repo, &["pick", "--abort"]);
+    assert_eq!(abort_code, 0, "pick --abort failed: {abort_stderr}");
+    Ok(())
+}
+
+#[test]
 fn status_json_cherry_pick_conflict_operation_shape() -> TestResult {
     let tmp = tempfile::TempDir::new()?;
     let repo = tmp.path();

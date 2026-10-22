@@ -228,29 +228,55 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         "",
         crate::write_tree::WriteTreeFlags::silent(),
     )?;
+    let head_tree = commit_tree(repo, &head_oid)?;
     if active.opts.no_commit {
-        let head_tree = commit_tree(repo, &head_oid)?;
         if new_tree == head_tree {
             return Err(Error::NothingToCommit);
         }
-    } else {
-        let allow_empty = active.opts.empty == ReplayEmptyPolicy::Keep;
-        if !allow_empty {
-            let head_tree = commit_tree(repo, &head_oid)?;
-            if new_tree == head_tree {
-                return Err(Error::NothingToCommit);
+    } else if new_tree == head_tree {
+        match active.opts.empty {
+            ReplayEmptyPolicy::Keep => {}
+            ReplayEmptyPolicy::Stop => return Err(Error::NothingToCommit),
+            ReplayEmptyPolicy::Drop => {
+                clear_step_heads(repo.git_dir(), active.direction)?;
+                let mut todo = active.todo;
+                if !todo.is_empty() {
+                    todo.remove(0);
+                }
+                write_sequencer_todo(repo.git_dir(), &todo)?;
+                if todo.is_empty() {
+                    clear_replay_state(repo.git_dir())?;
+                    return Ok(SequenceOutcome::Completed {
+                        created: Vec::new(),
+                        dropped: vec![source],
+                    });
+                }
+                let sequence_start =
+                    read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
+                return run_sequence(
+                    repo,
+                    &refname,
+                    head_oid,
+                    head_oid,
+                    sequence_start,
+                    active.direction,
+                    identity,
+                    &active.opts,
+                    &mut todo,
+                    Vec::new(),
+                    vec![source],
+                );
             }
         }
     }
 
-    clear_step_heads(repo.git_dir(), active.direction)?;
-    let mut todo = active.todo;
-    if !todo.is_empty() {
-        todo.remove(0);
-    }
-    write_sequencer_todo(repo.git_dir(), &todo)?;
-
     if active.opts.no_commit {
+        clear_step_heads(repo.git_dir(), active.direction)?;
+        let mut todo = active.todo;
+        if !todo.is_empty() {
+            todo.remove(0);
+        }
+        write_sequencer_todo(repo.git_dir(), &todo)?;
         write_sequencer_abort_safety(repo.git_dir(), head_oid)?;
         if todo.is_empty() {
             clear_replay_state(repo.git_dir())?;
@@ -286,6 +312,12 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         new_tree,
         allow_empty,
     )?;
+    clear_step_heads(repo.git_dir(), active.direction)?;
+    let mut todo = active.todo;
+    if !todo.is_empty() {
+        todo.remove(0);
+    }
+    write_sequencer_todo(repo.git_dir(), &todo)?;
     write_sequencer_abort_safety(repo.git_dir(), new_oid)?;
     if todo.is_empty() {
         clear_replay_state(repo.git_dir())?;
@@ -508,6 +540,7 @@ fn run_sequence(
             StepResult::AppliedNoCommit => {
                 todo.remove(0);
                 write_sequencer_todo(repo.git_dir(), todo)?;
+                write_sequencer_abort_safety(repo.git_dir(), head)?;
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
                     return Ok(SequenceOutcome::Completed {
@@ -809,10 +842,14 @@ fn replay_message(
             ))
         }
         ReplayDirection::Revert => {
-            let mainline_parent = opts.mainline.and_then(|m| {
-                let idx = m.get() as usize - 1;
-                source.parents.get(idx).copied()
-            });
+            let mainline_parent = (source.parents.len() > 1)
+                .then(|| {
+                    opts.mainline.and_then(|m| {
+                        let idx = m.get() as usize - 1;
+                        source.parents.get(idx).copied()
+                    })
+                })
+                .flatten();
             let (title, body) =
                 merge_commit_message_for_revert(source, source_oid, false, '#', mainline_parent);
             Ok(format!("{title}\n{body}"))
