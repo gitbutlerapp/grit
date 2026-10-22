@@ -66,12 +66,14 @@ pub fn prune_loose_unreachable(
     keep_newer_than: Option<SystemTime>,
 ) -> Result<PruneStats> {
     odb.require_files_primary("gc")?;
-    // 1. Full reachability closure from the roots.
+    let mut stats = PruneStats::default();
+    let loose = odb.enumerate_local_loose_objects()?;
+    if loose.is_empty() {
+        return Ok(stats);
+    }
     let reachable = reachable_closure(odb, reachable_roots)?;
 
-    // 2. Enumerate loose objects and delete the unreachable, sufficiently-old ones.
-    let mut stats = PruneStats::default();
-    for (oid, path) in odb.enumerate_local_loose_objects()? {
+    for (oid, path) in loose {
         if reachable.contains(&oid) {
             stats.kept += 1;
             continue;
@@ -167,7 +169,8 @@ fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<HashSet<ObjectId>>
                     if entry.mode == 0o160000 {
                         continue;
                     }
-                    if seen.insert(entry.oid) {
+                    // Blobs have no outgoing links, so only subtrees need reading.
+                    if seen.insert(entry.oid) && entry.mode == 0o040000 {
                         queue.push_back(entry.oid);
                     }
                 }

@@ -819,11 +819,14 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         } else {
             UnreachablePackRetention::DropAll
         };
-        let reachable = oid_hash_set_from(&reachability_closure_for_roots(odb, &roots)?);
         let _ = odb.loosen_unreachable_from_superseded_packs(
             &pack_dir,
             &ingested.pack_path,
-            &reachable,
+            || {
+                Ok(oid_hash_set_from(&reachability_closure_for_roots(
+                    odb, &roots,
+                )?))
+            },
             retention,
         )?;
 
