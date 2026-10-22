@@ -166,7 +166,7 @@ fn duplicate_ranks(hunks: &[StructuredHunk], peer_hunks: &[StructuredHunk]) -> V
             let rank = keys
                 .iter()
                 .position(|k| !k.is_peer && k.index == i)
-                .expect("hunk present in duplicate sort list") as u32;
+                .map(|pos| pos as u32)?;
             Some(rank)
         })
         .collect()
