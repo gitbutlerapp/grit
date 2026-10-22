@@ -406,14 +406,10 @@ fn signed_tag_tree_sha256_overhead_within_bound() {
     )
     .expect("sign with tree-sha256");
     let with_ts_elapsed = with_ts.elapsed();
-    let hash_ms = outcome
-        .tree_sha256
-        .expect("ts")
-        .hash_elapsed
-        .as_secs_f64()
-        * 1000.0;
+    let hash_ms = outcome.tree_sha256.expect("ts").hash_elapsed.as_secs_f64() * 1000.0;
 
-    let overhead_ms = with_ts_elapsed.as_secs_f64() * 1000.0 - sign_only_elapsed.as_secs_f64() * 1000.0;
+    let overhead_ms =
+        with_ts_elapsed.as_secs_f64() * 1000.0 - sign_only_elapsed.as_secs_f64() * 1000.0;
     assert!(
         overhead_ms <= hash_ms + 10.0,
         "tree-sha256 tag overhead {overhead_ms:.2}ms exceeds hash time {hash_ms:.2}ms + 10ms (sign-only {sign_only_elapsed:?}, with-ts {with_ts_elapsed:?})"
