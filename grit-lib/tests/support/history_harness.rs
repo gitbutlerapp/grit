@@ -330,6 +330,15 @@ impl HistoryRepo {
             worktree,
         }
     }
+
+    /// Wrap an existing initialized repository directory.
+    pub fn adopt_temp(tmp: tempfile::TempDir) -> Self {
+        let worktree = tmp.path().to_path_buf();
+        Self {
+            _root: tmp,
+            worktree,
+        }
+    }
 }
 
 /// Write `content` at `path`, stage, and commit with `msg`; returns the new commit oid.

@@ -22,6 +22,7 @@ mod json_filter;
 mod json_schema;
 mod log_display;
 mod markdown;
+mod merge_strategy_args;
 mod message_input;
 mod output;
 mod pathspec_args;
@@ -796,6 +797,11 @@ enum Command {
         /// Squash merged commits into staged changes and write `SQUASH_MSG`.
         #[arg(long = "squash", conflicts_with = "no_commit")]
         squash: bool,
+        /// Merge histories that share no commits (uses the empty tree as merge base).
+        #[arg(long = "allow-unrelated-histories")]
+        allow_unrelated_histories: bool,
+        #[command(flatten)]
+        strategy: merge_strategy_args::MergeStrategyArgs,
         #[command(flatten)]
         message: message_input::MessageInputArgs,
     },
@@ -1587,6 +1593,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             no_ff,
             no_commit,
             squash,
+            allow_unrelated_histories,
+            strategy,
             message,
         } => {
             let outcome = commands::merge::run(
@@ -1597,6 +1605,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     no_ff,
                     no_commit,
                     squash,
+                    allow_unrelated_histories,
+                    strategy,
                     message,
                 },
             )?;

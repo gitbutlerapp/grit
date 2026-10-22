@@ -137,3 +137,54 @@ fn merge_no_commit_json() -> TestResult {
     assert!(json["next_steps"].is_array());
     Ok(())
 }
+
+fn setup_content_conflict(root: &Path) -> TestResult {
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("f.txt"), "line1\nline2\nline3\n")?;
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["branch", "side"]);
+    git(root, &["switch", "side"]);
+    fs::write(root.join("f.txt"), "line1\nside\nline3\n")?;
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-qm", "side"]);
+    git(root, &["switch", "main"]);
+    fs::write(root.join("f.txt"), "line1\nmaster\nline3\n")?;
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-qm", "master"]);
+    Ok(())
+}
+
+#[test]
+fn merge_x_and_conflict_flags() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    setup_content_conflict(dir.path())?;
+
+    let ours = grit_cmd(dir.path(), &["--json", "merge", "-X", "ours", "side"]);
+    assert!(ours.ok, "merge -X ours failed: {}", ours.stdout);
+    let json: Value = serde_json::from_str(&ours.stdout)?;
+    assert_eq!(json["result"], "merged");
+
+    git(dir.path(), &["reset", "--hard", "HEAD~1"]);
+
+    let diff3 = grit_cmd(
+        dir.path(),
+        &[
+            "--json",
+            "merge",
+            "--no-commit",
+            "--conflict",
+            "diff3",
+            "side",
+        ],
+    );
+    assert!(!diff3.ok, "expected conflicts");
+    assert_eq!(diff3.code, 1);
+    let conflict_json: Value = serde_json::from_str(&diff3.stdout)?;
+    assert_eq!(conflict_json["result"], "conflicts");
+    let body = fs::read_to_string(dir.path().join("f.txt"))?;
+    assert!(body.contains("|||||||"), "expected diff3 base marker");
+    Ok(())
+}

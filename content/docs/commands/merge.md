@@ -10,7 +10,7 @@ order: 3
 ```text
 grit merge <branch>
 grit merge --abort
-grit merge [--ff-only | --no-ff] [--squash | --no-commit] [-m <message> | --message-file <path|->] <branch>
+grit merge [--ff-only | --no-ff] [--squash | --no-commit] [-X ours|theirs] [--conflict diff3|zdiff3|merge] [--allow-unrelated-histories] [-m <message> | --message-file <path|->] <branch>
 ```
 
 ## Description
@@ -35,6 +35,12 @@ Local edits are allowed when they only touch paths the merge does not change, or
 
 `-m` / `--message-file` override the default merge commit message and the text stored in `MERGE_MSG` on conflicts or `--no-commit`.
 
+**`-X ours|theirs`** — When both sides edited the same region, prefer the current branch (`ours`) or the branch being merged (`theirs`) instead of leaving conflict markers. Matches Git's merge strategy options (union is not exposed).
+
+**`--conflict diff3|zdiff3|merge`** — Conflict marker style in the worktree. When omitted, grit reads `merge.conflictStyle` (default `merge`).
+
+**`--allow-unrelated-histories`** — Merge branches that share no commits, using the empty tree as the merge base (Git-compatible). Without this flag, grit refuses unrelated histories.
+
 ## Options
 
 | Option | Description |
@@ -47,6 +53,9 @@ Local edits are allowed when they only touch paths the merge does not change, or
 | `--no-commit` | Apply the merge but do not commit yet (Git-compatible merge state). Mutually exclusive with `--squash`. |
 | `-m`, `--message` | Merge commit / `MERGE_MSG` message (conflicts with `--message-file`). |
 | `--message-file` | Read the message from a path, or `-` for stdin (conflicts with `-m`). |
+| `-X ours\|theirs` | Prefer one side on overlapping edits (same as Git `-X`). |
+| `--conflict` | Marker style: `merge`, `diff3`, or `zdiff3`. |
+| `--allow-unrelated-histories` | Merge with no common ancestor (empty-tree base). |
 
 ## Examples
 

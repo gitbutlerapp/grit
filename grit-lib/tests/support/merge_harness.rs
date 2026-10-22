@@ -37,22 +37,45 @@ pub struct GitMergeTreeOracle {
     pub stdout: String,
 }
 
-/// Run `git merge-tree --write-tree --merge-base=…` for three commits.
+/// Run `git merge-tree --write-tree` for two commits (optional merge-base commit and `-X`).
 pub fn git_merge_tree_oracle(
     worktree: &Path,
-    merge_base: &ObjectId,
+    merge_base: Option<&ObjectId>,
     ours: &ObjectId,
     theirs: &ObjectId,
+    favor: MergeFavor,
 ) -> GitMergeTreeOracle {
-    let out = Command::new("git")
-        .current_dir(worktree)
-        .args([
-            "merge-tree",
-            "--write-tree",
-            &format!("--merge-base={}", merge_base.to_hex()),
-            &ours.to_hex(),
-            &theirs.to_hex(),
-        ])
+    git_merge_tree_oracle_with_options(worktree, merge_base, ours, theirs, favor, false)
+}
+
+pub fn git_merge_tree_oracle_with_options(
+    worktree: &Path,
+    merge_base: Option<&ObjectId>,
+    ours: &ObjectId,
+    theirs: &ObjectId,
+    favor: MergeFavor,
+    allow_unrelated: bool,
+) -> GitMergeTreeOracle {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(worktree)
+        .args(["merge-tree", "--write-tree"]);
+    if allow_unrelated {
+        cmd.arg("--allow-unrelated-histories");
+    }
+    match favor {
+        MergeFavor::Ours => {
+            cmd.arg("-Xours");
+        }
+        MergeFavor::Theirs => {
+            cmd.arg("-Xtheirs");
+        }
+        MergeFavor::None | MergeFavor::Union => {}
+    }
+    if let Some(base) = merge_base {
+        cmd.arg(format!("--merge-base={}", base.to_hex()));
+    }
+    cmd.args([&ours.to_hex(), &theirs.to_hex()]);
+    let out = cmd
         .env("GIT_CONFIG_GLOBAL", null_device_for_tests())
         .env("GIT_CONFIG_SYSTEM", null_device_for_tests())
         .output()
@@ -215,7 +238,7 @@ pub fn assert_merge_commits_match_git_with_favor(
         eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38 ({context})");
         return;
     }
-    let oracle = git_merge_tree_oracle(history.worktree(), merge_base, ours, theirs);
+    let oracle = git_merge_tree_oracle(history.worktree(), Some(merge_base), ours, theirs, favor);
     let base_tree = commit_tree(grit_repo, merge_base).expect("base tree");
     let ours_tree = commit_tree(grit_repo, ours).expect("ours tree");
     let theirs_tree = commit_tree(grit_repo, theirs).expect("theirs tree");

@@ -43,7 +43,7 @@ use crate::merge_base::{
     is_ancestor, merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of,
     ReachableWalkLimit,
 };
-use crate::merge_file::MergeFavor;
+use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{
     apply_tree_merge_output_to_index, materialized_merge_result_tree, merge_trees_three_way,
     TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
@@ -56,6 +56,7 @@ use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_objec
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
 };
+use crate::porcelain::restore::conflict_style_from_config;
 use crate::porcelain::switch::{
     checkout_prepared_tree_transition_for_merge, prepare_tree_transition_allow_local,
     verify_tree_transition_allow_local, TreeTransitionPrepareError, TreeTransitionVerifyError,
@@ -287,6 +288,21 @@ pub struct MergeOptions {
     pub commit: MergeCommitMode,
     /// Overrides the default merge commit / `MERGE_MSG` text when set.
     pub message: Option<String>,
+    /// Prefer ours or theirs when both sides changed the same region (`-X ours|theirs`).
+    pub favor: MergeFavor,
+    /// Conflict marker style; when unset, [`resolve_merge_conflict_style`] reads config.
+    pub conflict_style: Option<ConflictStyle>,
+    /// When histories share no commits, use the empty tree as merge base (Git `--allow-unrelated-histories`).
+    pub allow_unrelated: bool,
+}
+
+/// Resolve conflict marker style: explicit option, then `merge.conflictStyle`, then `merge`.
+#[must_use]
+pub fn resolve_merge_conflict_style(
+    repo: &Repository,
+    override_style: Option<ConflictStyle>,
+) -> ConflictStyle {
+    override_style.unwrap_or_else(|| conflict_style_from_config(repo))
 }
 
 /// Options for [`integrate_branch_with_options`] (pull fast-forward toggle).
@@ -429,20 +445,29 @@ pub fn integrate_branch_with(
         });
     }
 
-    let base_oid = merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            Error::Message(format!(
-                "'{label}' has no common history with the current branch"
-            ))
-        })?;
-    let base_tree = commit_tree(repo, &base_oid)?;
+    let merge_base = merge_bases_first_vs_rest(repo, into_oid, &[other_oid])?;
+    let label_base = if let Some(base_oid) = merge_base.first().copied() {
+        crate::commit_pretty::abbrev_hex(&base_oid, 7)
+    } else if options.allow_unrelated {
+        "empty tree".to_owned()
+    } else {
+        return Err(Error::Message(format!(
+            "'{label}' has no common history with the current branch"
+        )));
+    };
+    let base_tree = if let Some(base_oid) = merge_base.into_iter().next() {
+        commit_tree(repo, &base_oid)?
+    } else {
+        empty_tree_oid(repo)?
+    };
 
+    let style = resolve_merge_conflict_style(repo, options.conflict_style);
     let presentation = TreeMergeConflictPresentation {
         label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(label),
+        label_base: &label_base,
         df_directory_ours_commit: Some(into_oid),
         df_directory_theirs_commit: Some(other_oid),
+        style,
         ..TreeMergeConflictPresentation::default()
     };
     let merged = merge_trees_three_way(
@@ -450,7 +475,7 @@ pub fn integrate_branch_with(
         base_tree,
         into_tree,
         other_tree,
-        MergeFavor::default(),
+        options.favor,
         WhitespaceMergeOptions::default(),
         None,
         presentation,
@@ -784,6 +809,10 @@ fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
         )));
     }
     Ok(parse_commit(&obj.data)?.tree)
+}
+
+fn empty_tree_oid(repo: &Repository) -> Result<ObjectId> {
+    repo.odb().write(ObjectKind::Tree, &[])
 }
 
 fn has_tree_merge_conflicts(merged: &TreeMergeOutput) -> bool {

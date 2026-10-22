@@ -87,7 +87,14 @@ fn merge_trees_rename_on_theirs_edit_on_ours_matches_git() {
     )
     .expect("merge_trees_three_way");
 
-    let git_tree = git_merge_tree_oracle(root, &base, &ours, &theirs).result_tree;
+    let git_tree = git_merge_tree_oracle(
+        root,
+        Some(&base),
+        &ours,
+        &theirs,
+        grit_lib::diff::merge_file::MergeFavor::None,
+    )
+    .result_tree;
     assert_eq!(
         merged.result_tree, git_tree,
         "merge result tree must match git merge-tree"
@@ -190,7 +197,13 @@ fn merge_trees_rename_on_theirs_delete_on_ours_matches_git() {
     )
     .expect("merge_trees_three_way");
 
-    let oracle = git_merge_tree_oracle(root, &base, &ours, &theirs);
+    let oracle = git_merge_tree_oracle(
+        root,
+        Some(&base),
+        &ours,
+        &theirs,
+        grit_lib::diff::merge_file::MergeFavor::None,
+    );
     assert_eq!(
         merged.result_tree, oracle.result_tree,
         "merge result tree must match git merge-tree"
