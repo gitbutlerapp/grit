@@ -57,7 +57,11 @@ fn wide_fixture(root: &Path) -> String {
     git(root, &["commit", "-qam", "topic rewrite"]);
     let topic = rev(root, "HEAD");
     git(root, &["checkout", "-q", "main"]);
-    fs::write(root.join(rel(DIRS - 1, FILES_PER_DIR - 1)), "main diverge\n").expect("write");
+    fs::write(
+        root.join(rel(DIRS - 1, FILES_PER_DIR - 1)),
+        "main diverge\n",
+    )
+    .expect("write");
     git(root, &["commit", "-qam", "main diverge"]);
     topic
 }
@@ -147,7 +151,11 @@ fn wide_pick_index_rows_carry_worktree_stat_and_index_is_newer_than_entries() {
         {
             use std::os::unix::fs::MetadataExt;
             assert_eq!(i64::from(entry.mtime_sec), meta.mtime(), "{path}: mtime");
-            assert_eq!(u64::from(entry.ino), meta.ino() & 0xFFFF_FFFF, "{path}: ino");
+            assert_eq!(
+                u64::from(entry.ino),
+                meta.ino() & 0xFFFF_FFFF,
+                "{path}: ino"
+            );
         }
         assert!(
             meta.modified().expect("mtime") < index_mtime,
