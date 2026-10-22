@@ -21,8 +21,9 @@ use std::collections::{HashMap, HashSet};
 use crate::change_id::{resolved_change_id, ChangeId};
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 
@@ -254,7 +255,6 @@ pub fn collect_decorations_inner(
 ) -> Result<DecorationMap> {
     let mut map: DecorationMap = HashMap::new();
     let git_dir = &repo.git_dir();
-    let odb = &repo.odb();
 
     let head = resolve_head(git_dir)?;
     let hide_remote_update_noise = repo
@@ -268,6 +268,7 @@ pub fn collect_decorations_inner(
 
     let mut all_refs = crate::refs::list_refs(git_dir, "refs/")?;
     all_refs.sort_by(|a, b| a.0.cmp(&b.0));
+    let peeler = RefTipPeeler::new(repo);
 
     for (refname, oid) in all_refs {
         // Apply `--decorate-refs` / `--decorate-refs-exclude` / `log.excludeDecoration`.
@@ -294,7 +295,7 @@ pub fn collect_decorations_inner(
         }
 
         if refname == "refs/stash" || refname.starts_with("refs/stash/") {
-            let hex = peeled_commit_hex(odb, &oid);
+            let hex = peeler.commit_hex(&refname, &oid);
             prepend_decoration(
                 map.entry(hex).or_default(),
                 DecorationItem {
@@ -312,7 +313,7 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let hex = peeled_commit_hex(odb, &oid);
+            let hex = peeler.commit_hex(&refname, &oid);
             prepend_decoration(
                 map.entry(hex).or_default(),
                 DecorationItem {
@@ -330,7 +331,7 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let peeled = peeled_commit_hex(odb, &oid);
+            let peeled = peeler.commit_hex(&refname, &oid);
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -348,7 +349,7 @@ pub fn collect_decorations_inner(
             } else {
                 rest.to_owned()
             };
-            let peeled = peeled_commit_hex(odb, &oid);
+            let peeled = peeler.commit_hex(&refname, &oid);
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -368,7 +369,7 @@ pub fn collect_decorations_inner(
         // list is dropped and every ref that passes the filter is decorated with its full
         // name and `DECORATION_NONE` (reset) color (log-tree.c `add_ref_decoration`).
         if clear_decorations || !filter.is_empty() {
-            let peeled = peeled_commit_hex(odb, &oid);
+            let peeled = peeler.commit_hex(&refname, &oid);
             prepend_decoration(
                 map.entry(peeled).or_default(),
                 DecorationItem {
@@ -442,14 +443,65 @@ pub fn peel_to_commit_hex(odb: &Odb, hex: &str) -> Option<String> {
         .map(|commit| commit.to_hex())
 }
 
-/// Decoration key for a ref tip: the commit it peels to, or the tip itself when it does not
-/// peel to a commit.
-fn peeled_commit_hex(odb: &Odb, oid: &ObjectId) -> String {
-    odb.peel_to_commit(*oid)
-        .ok()
-        .flatten()
-        .unwrap_or(*oid)
-        .to_hex()
+/// Computes decoration keys for ref tips: the commit a tip peels to, or the tip itself
+/// when it does not peel to a commit.
+///
+/// When `packed-refs` records a ref's peeled value the tag objects are not read. The
+/// peeled object is confirmed to be a commit through the commit-graph when it lists the
+/// object, and otherwise from the object header.
+struct RefTipPeeler<'a> {
+    repo: &'a Repository,
+    packed: Option<PackedRefPeels>,
+    graph: std::cell::OnceCell<Option<std::sync::Arc<crate::commit_graph_file::CommitGraphChain>>>,
+}
+
+impl<'a> RefTipPeeler<'a> {
+    fn new(repo: &'a Repository) -> Self {
+        // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
+        let packed = PackedRefPeels::load(repo.git_dir(), repo.refs().format()).ok();
+        Self {
+            repo,
+            packed,
+            graph: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn is_commit(&self, oid: &ObjectId) -> bool {
+        let graph = self.graph.get_or_init(|| {
+            self.repo
+                .caches()
+                .commit_graph_chain(self.repo.odb().objects_dir())
+        });
+        if graph.as_ref().is_some_and(|g| g.find_commit(oid).is_some()) {
+            return true;
+        }
+        self.repo
+            .odb()
+            .read_info(oid)
+            .is_ok_and(|info| info.kind == ObjectKind::Commit)
+    }
+
+    fn commit_hex(&self, refname: &str, oid: &ObjectId) -> String {
+        match self.packed.as_ref().and_then(|p| p.peeled(refname, oid)) {
+            Some(Some(peeled)) => {
+                return if self.is_commit(&peeled) {
+                    peeled
+                } else {
+                    *oid
+                }
+                .to_hex();
+            }
+            Some(None) => return oid.to_hex(),
+            None => {}
+        }
+        self.repo
+            .odb()
+            .peel_to_commit(*oid)
+            .ok()
+            .flatten()
+            .unwrap_or(*oid)
+            .to_hex()
+    }
 }
 
 /// Index of the branch decoration that should fold into `HEAD -> branch`, if any.

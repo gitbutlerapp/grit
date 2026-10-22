@@ -93,3 +93,74 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
 
     Ok(())
 }
+
+/// Sorted `(commit hex, decorations)` pairs, for comparing two decoration maps.
+fn decoration_rows(
+    map: &grit_lib::porcelain::log::DecorationMap,
+) -> Vec<(String, Vec<(Option<String>, String)>)> {
+    let mut rows: Vec<_> = map
+        .iter()
+        .map(|(hex, items)| {
+            let items = items
+                .iter()
+                .map(|it| (it.refname.clone(), it.display.clone()))
+                .collect();
+            (hex.clone(), items)
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+#[test]
+fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<()> {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    commit_file(wt, "a.txt", "a\n", "first");
+    let first = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
+    git(wt, &["tag", "-a", "-m", "annotated", "v1"]);
+    git(wt, &["tag", "-a", "-m", "nested", "v1-nested", "v1"]);
+    git(wt, &["tag", "light"]);
+    let tree = git(wt, &["rev-parse", "HEAD^{tree}"]).trim().to_string();
+    git(wt, &["tag", "-a", "-m", "tree tag", "tree-tag", &tree]);
+    commit_file(wt, "b.txt", "b\n", "second");
+    git(wt, &["tag", "-a", "-m", "moves later", "moving", &first]);
+    git(wt, &["branch", "topic", &first]);
+
+    let repo = open_grit_repo(wt);
+    let loose = decoration_rows(&collect_decorations(&repo, false)?);
+    let loose_full = decoration_rows(&collect_decorations(&repo, true)?);
+    assert!(
+        loose
+            .iter()
+            .any(|(hex, items)| hex == &first && items.iter().any(|(_, d)| d == "v1-nested")),
+        "nested annotated tag decorates its commit: {loose:?}"
+    );
+
+    git(wt, &["pack-refs", "--all"]);
+    let packed_refs = fs::read_to_string(repo.git_dir().join("packed-refs")).expect("packed-refs");
+    assert!(packed_refs.contains("fully-peeled"), "{packed_refs}");
+    assert!(packed_refs.lines().any(|l| l.starts_with('^')));
+    let repo = open_grit_repo(wt);
+    assert_eq!(decoration_rows(&collect_decorations(&repo, false)?), loose);
+    assert_eq!(
+        decoration_rows(&collect_decorations(&repo, true)?),
+        loose_full
+    );
+
+    // A loose ref now overrides the packed `moving` tag (and its stale peel line).
+    git(wt, &["tag", "-f", "-a", "-m", "moved", "moving", "HEAD"]);
+    let repo = open_grit_repo(wt);
+    let moved = decoration_rows(&collect_decorations(&repo, false)?);
+    let head = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
+    let decorated_with_moving = |rows: &[(String, Vec<(Option<String>, String)>)]| {
+        rows.iter()
+            .filter(|(_, items)| items.iter().any(|(_, d)| d == "moving"))
+            .map(|(hex, _)| hex.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(decorated_with_moving(&moved), vec![head]);
+    assert_eq!(decorated_with_moving(&loose), vec![first]);
+
+    Ok(())
+}

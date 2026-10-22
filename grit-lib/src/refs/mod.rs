@@ -1283,6 +1283,129 @@ pub(crate) fn read_packed_refs_map_for_prefix(
     view.map_for_prefix(&packed_path, filter)
 }
 
+/// What a `packed-refs` header promises about its `^` peel lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackedPeelTrait {
+    /// No `peeled` trait: peel lines may be missing for any ref.
+    None,
+    /// `peeled`: every annotated tag under `refs/tags/` has a peel line.
+    Tags,
+    /// `fully-peeled`: every ref that names an annotated tag has a peel line.
+    All,
+}
+
+/// Read-only snapshot of the peel lines recorded in `packed-refs`.
+///
+/// Lets callers that peel many refs (log decorations, for example) skip reading tag
+/// objects when `packed-refs` already records the peeled value, the same shortcut
+/// Git takes when iterating packed refs.
+///
+/// Lookups trust the record shape indexed by [`PackedRefsFileView`] and skip the strict
+/// per-line validation: callers pair this with a ref listing that already parsed the
+/// file strictly.
+pub(crate) struct PackedRefPeels {
+    view: Option<PackedRefsFileView>,
+    /// Record start by name for unsorted files, where binary search is not exact.
+    unsorted: Option<HashMap<Box<[u8]>, usize>>,
+    peel_trait: PackedPeelTrait,
+}
+
+impl PackedRefPeels {
+    /// Load the peel snapshot for the files ref store backing `git_dir`.
+    ///
+    /// A missing `packed-refs`, or a ref store that is not the files backend, yields a
+    /// snapshot that knows nothing (every [`Self::peeled`] call returns `None`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] when `packed-refs` exists but cannot be read, or
+    /// [`Error::PackedRefsUnexpectedLine`] when it is malformed.
+    pub(crate) fn load(git_dir: &Path, format: RefStorageFormat) -> Result<Self> {
+        let empty = Self {
+            view: None,
+            unsorted: None,
+            peel_trait: PackedPeelTrait::None,
+        };
+        if format != RefStorageFormat::Files {
+            return Ok(empty);
+        }
+        let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
+        let Some(view) = read_packed_refs_file_view(&store)? else {
+            return Ok(empty);
+        };
+        let peel_trait =
+            std::str::from_utf8(&view.data).map_or(PackedPeelTrait::None, packed_refs_peel_trait);
+        if peel_trait == PackedPeelTrait::None {
+            return Ok(empty);
+        }
+        let unsorted = (!view.sorted).then(|| {
+            view.data_line_starts
+                .iter()
+                .map(|&start| (Box::<[u8]>::from(view.record_name(start)), start))
+                .collect()
+        });
+        Ok(Self {
+            view: Some(view),
+            unsorted,
+            peel_trait,
+        })
+    }
+
+    /// Peeled value of `refname` when `packed-refs` vouches for it.
+    ///
+    /// `oid` is the ref's current value; packed data is only trusted when it records the
+    /// same value (a loose ref overriding the packed one is not covered).
+    ///
+    /// # Returns
+    ///
+    /// - `Some(Some(peeled))`: the ref names an annotated tag that peels to `peeled`
+    ///   (the innermost non-tag object).
+    /// - `Some(None)`: the ref is known not to name an annotated tag.
+    /// - `None`: `packed-refs` does not say; the caller must peel the object itself.
+    pub(crate) fn peeled(&self, refname: &str, oid: &ObjectId) -> Option<Option<ObjectId>> {
+        let covered = match self.peel_trait {
+            PackedPeelTrait::None => false,
+            PackedPeelTrait::Tags => refname.starts_with("refs/tags/"),
+            PackedPeelTrait::All => true,
+        };
+        if !covered {
+            return None;
+        }
+        let view = self.view.as_ref()?;
+        let start = match &self.unsorted {
+            Some(map) => *map.get(refname.as_bytes())?,
+            None => view
+                .data_line_starts
+                .get(view.lower_bound(refname))
+                .copied()
+                .filter(|&start| view.record_cmp(start, refname).is_eq())?,
+        };
+        let hex = std::str::from_utf8(&view.data[start..start + view.hex_len]).ok()?;
+        let packed_oid = ObjectId::from_hex(hex).ok()?;
+        (packed_oid == *oid).then(|| peel_oid_following_line(&view.data, start))
+    }
+}
+
+/// The peel guarantee declared by the `# pack-refs with:` header of `text`.
+fn packed_refs_peel_trait(text: &str) -> PackedPeelTrait {
+    let Some(header) = text.strip_prefix('#') else {
+        return PackedPeelTrait::None;
+    };
+    let header = header.split('\n').next().unwrap_or_default().trim();
+    let Some(traits) = header.strip_prefix("pack-refs with:") else {
+        return PackedPeelTrait::None;
+    };
+    let mut peel_trait = PackedPeelTrait::None;
+    for t in traits.split_whitespace() {
+        match t {
+            "fully-peeled" => return PackedPeelTrait::All,
+            "peeled" => peel_trait = PackedPeelTrait::Tags,
+            _ => {}
+        }
+    }
+    peel_trait
+}
+
 fn acquire_packed_refs_lock(
     git_dir: &Path,
     lock: &Path,
@@ -4919,5 +5042,93 @@ mod pack_refs_tests {
             fs::read_to_string(store::paths::packed_refs_path(git_dir)).expect("packed-refs");
         assert!(body.contains("refs/heads/a-first"));
         assert!(body.find("a-first").expect("a-first") < body.find("z-last").expect("z-last"));
+    }
+}
+
+#[cfg(test)]
+mod packed_ref_peels_tests {
+    use super::*;
+
+    fn oid(n: u8) -> ObjectId {
+        ObjectId::from_bytes(&[n; 20]).expect("oid")
+    }
+
+    fn peels_for(body: &str) -> (tempfile::TempDir, PackedRefPeels) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(store::paths::packed_refs_path(dir.path()), body).expect("packed-refs");
+        let peels = PackedRefPeels::load(dir.path(), RefStorageFormat::Files).expect("load");
+        (dir, peels)
+    }
+
+    fn body(header: &str, records: &[(&str, ObjectId, Option<ObjectId>)]) -> String {
+        let mut out = String::from(header);
+        for (name, oid, peel) in records {
+            out.push_str(&format!("{oid} {name}\n"));
+            if let Some(peel) = peel {
+                out.push_str(&format!("^{peel}\n"));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn fully_peeled_file_answers_for_every_ref() {
+        for header in [
+            "# pack-refs with: peeled fully-peeled sorted \n",
+            "# pack-refs with: peeled fully-peeled \n",
+        ] {
+            let records = [
+                ("refs/heads/main", oid(1), None),
+                ("refs/remotes/origin/tag-ish", oid(2), Some(oid(3))),
+                ("refs/tags/v1", oid(4), Some(oid(1))),
+                ("refs/tags/light", oid(1), None),
+            ];
+            let mut unsorted = records;
+            unsorted.reverse();
+            let (_dir, peels) = peels_for(&body(header, &unsorted));
+            assert_eq!(peels.peeled("refs/heads/main", &oid(1)), Some(None));
+            assert_eq!(
+                peels.peeled("refs/remotes/origin/tag-ish", &oid(2)),
+                Some(Some(oid(3)))
+            );
+            assert_eq!(peels.peeled("refs/tags/v1", &oid(4)), Some(Some(oid(1))));
+            assert_eq!(peels.peeled("refs/tags/light", &oid(1)), Some(None));
+            // A loose ref that overrides the packed value is not vouched for.
+            assert_eq!(peels.peeled("refs/tags/v1", &oid(9)), None);
+            assert_eq!(peels.peeled("refs/tags/missing", &oid(1)), None);
+        }
+    }
+
+    #[test]
+    fn peeled_trait_only_covers_tags_and_no_trait_covers_nothing() {
+        let records = [
+            ("refs/heads/main", oid(1), None),
+            ("refs/tags/v1", oid(4), Some(oid(1))),
+        ];
+        let (_dir, peels) = peels_for(&body("# pack-refs with: peeled sorted\n", &records));
+        assert_eq!(peels.peeled("refs/heads/main", &oid(1)), None);
+        assert_eq!(peels.peeled("refs/tags/v1", &oid(4)), Some(Some(oid(1))));
+
+        for header in ["", "# pack-refs with: sorted\n", "# some comment\n"] {
+            let (_dir, peels) = peels_for(&body(header, &records));
+            assert_eq!(peels.peeled("refs/heads/main", &oid(1)), None, "{header:?}");
+            assert_eq!(peels.peeled("refs/tags/v1", &oid(4)), None, "{header:?}");
+        }
+    }
+
+    #[test]
+    fn missing_file_and_other_backends_know_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let peels = PackedRefPeels::load(dir.path(), RefStorageFormat::Files).expect("load");
+        assert_eq!(peels.peeled("refs/heads/main", &oid(1)), None);
+
+        let records = [("refs/heads/main", oid(1), None)];
+        fs::write(
+            store::paths::packed_refs_path(dir.path()),
+            body("# pack-refs with: peeled fully-peeled sorted\n", &records),
+        )
+        .expect("packed-refs");
+        let peels = PackedRefPeels::load(dir.path(), RefStorageFormat::Reftable).expect("load");
+        assert_eq!(peels.peeled("refs/heads/main", &oid(1)), None);
     }
 }
