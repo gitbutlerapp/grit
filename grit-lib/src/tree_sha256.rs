@@ -9,6 +9,13 @@
 //! # }
 //! ```
 
+mod tag_verify;
+
+pub use tag_verify::{
+    parse_tree_sha256_tag_headers, verify_tag, SignatureVerdict, TagVerification, TagVerifyOptions,
+    TreeSha256TagHeaders, TreeSha256Verdict, TREE_SHA256_EXCLUDED_HEADER, TREE_SHA256_HEADER,
+};
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;

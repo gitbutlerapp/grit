@@ -960,6 +960,23 @@ pub enum Error {
     /// One or more submodules required for [`crate::tree_sha256::tree_sha256`] are missing.
     #[error("tree-sha256: missing submodules")]
     TreeSha256MissingSubmodules(Vec<crate::tree_sha256::MissingSubmodule>),
+
+    /// [`crate::tree_sha256::verify_tag`] was given an object that is not an annotated tag.
+    #[error("verify-tag: object {oid} is a {found:?}, not an annotated tag")]
+    TagVerifyNotTag {
+        /// Object id passed to verification.
+        oid: crate::objects::ObjectId,
+        /// Kind stored in the ODB.
+        found: crate::objects::ObjectKind,
+    },
+
+    /// Annotated tag header block has no `object` line.
+    #[error("verify-tag: tag has no object header")]
+    TagVerifyMissingObjectHeader,
+
+    /// Annotated tag carries more than one `tree-sha256` header line.
+    #[error("verify-tag: tag has more than one tree-sha256 header")]
+    TagVerifyDuplicateTreeSha256Header,
 }
 
 impl Error {
