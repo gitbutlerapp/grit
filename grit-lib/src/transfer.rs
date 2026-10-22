@@ -1645,6 +1645,7 @@ pub fn fetch_local_with_progress(
             m.force,
             m.dest_is_tag,
             classify_repo.as_ref(),
+            None,
         );
 
         let write = matches!(
@@ -2580,12 +2581,17 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> bo
 }
 
 /// Classify a single ref update into an [`UpdateMode`].
+///
+/// When `classify_odb` is set (network fetch `--dry-run` after quarantined pack
+/// ingest), ancestry uses that store with its configured alternates instead of
+/// opening a [`crate::repo::Repository`].
 pub(crate) fn classify_update(
     old: Option<&ObjectId>,
     new: &ObjectId,
     force: bool,
     is_tag: bool,
     repo: Option<&crate::repo::Repository>,
+    classify_odb: Option<&crate::odb::Odb>,
 ) -> UpdateMode {
     let Some(old) = old else {
         return UpdateMode::New;
@@ -2594,9 +2600,13 @@ pub(crate) fn classify_update(
         return UpdateMode::UpToDate;
     }
     // Fast-forward when old is an ancestor of new (commit history only).
-    let ff = repo
-        .map(|r| crate::merge_base::is_ancestor(r, *old, *new).unwrap_or(false))
-        .unwrap_or(false);
+    let ff = if let Some(r) = repo {
+        crate::merge_base::is_ancestor(r, *old, *new).unwrap_or(false)
+    } else if let Some(odb) = classify_odb {
+        crate::merge_base::is_ancestor_odb_walk(odb, *old, *new).unwrap_or(false)
+    } else {
+        false
+    };
     if ff && !is_tag {
         return UpdateMode::FastForward;
     }

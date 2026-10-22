@@ -31,23 +31,6 @@ use crate::transfer::{
 };
 use crate::transport::Connection;
 
-struct HookEnvGuard(Vec<(String, String)>);
-
-fn set_hook_env(pairs: Vec<(String, String)>) -> HookEnvGuard {
-    for (k, v) in &pairs {
-        std::env::set_var(k, v);
-    }
-    HookEnvGuard(pairs)
-}
-
-impl Drop for HookEnvGuard {
-    fn drop(&mut self) {
-        for (k, _) in &self.0 {
-            std::env::remove_var(k);
-        }
-    }
-}
-
 /// Sink for wire transport progress: typed phases via [`ProgressSink`] plus
 /// raw side-band channel 2 bytes from the remote.
 ///
@@ -1517,12 +1500,8 @@ pub fn fetch_remote(
 
     // 5. Classify + apply ref updates (ancestry via the now-populated local repo).
     let t_apply = std::time::Instant::now();
-    let quarantine_env: Option<Vec<(String, String)>> =
-        dry_run_quarantine.as_ref().map(|q| q.hook_env());
-    let _quarantine_env_guard = quarantine_env
-        .as_ref()
-        .map(|pairs| set_hook_env(pairs.clone()));
-    let classify_repo = if opts.dry_run && dry_run_quarantine.is_none() {
+    let classify_odb = dry_run_quarantine.as_ref().map(|q| q.odb());
+    let classify_repo = if opts.dry_run {
         None
     } else {
         crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty()).ok()
@@ -1601,6 +1580,7 @@ pub fn fetch_remote(
             m.force,
             m.dest_is_tag,
             classify_repo.as_ref(),
+            classify_odb.as_ref(),
         );
         d_classify += t.elapsed();
 

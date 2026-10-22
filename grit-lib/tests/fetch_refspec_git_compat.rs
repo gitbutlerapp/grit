@@ -503,6 +503,7 @@ fn dry_run_classifies_fast_forward_without_writing() {
         &["+refs/heads/*:refs/remotes/origin/*"],
     );
     run_git(&grit_c, &["branch", "probe", "main"]);
+    let probe_before = tracking_tip(&grit_c.join(".git"), "refs/heads/probe");
     remote.commit_empty("r2");
 
     let outcome = fetch_local(
@@ -529,7 +530,7 @@ fn dry_run_classifies_fast_forward_without_writing() {
     );
     assert_eq!(
         tracking_tip(&grit_c.join(".git"), "refs/heads/probe"),
-        tracking_tip(&grit_c.join(".git"), "refs/heads/probe")
+        probe_before
     );
 }
 
