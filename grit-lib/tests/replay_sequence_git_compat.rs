@@ -514,11 +514,8 @@ fn abort_after_clean_step_then_conflict_restores_original_head() {
     fs::write(root.path().join("shared.txt"), "main\n").unwrap();
 
     let repo = open_repo(root.path());
-    let out = start_replay_sequence(
-        &repo,
-        &pick_req(vec![c1, c2, c3], ReplayOptions::default()),
-    )
-    .expect("pick");
+    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2, c3], ReplayOptions::default()))
+        .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
     assert!(root.path().join(".git/sequencer/todo").is_file());
     assert!(root.path().join("only-topic.txt").exists());

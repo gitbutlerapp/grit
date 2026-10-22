@@ -554,11 +554,7 @@ fn apply_one_step(
     } else {
         head_tree
     };
-    let empty_compare_tree = if opts.no_commit {
-        ours_tree
-    } else {
-        head_tree
-    };
+    let empty_compare_tree = if opts.no_commit { ours_tree } else { head_tree };
     let (base_tree, ours_tree, theirs_tree) = merge_trees_for_replay(
         repo,
         direction,
@@ -875,7 +871,11 @@ fn record_replay_stop(
     Ok(())
 }
 
-fn write_replay_sequence_start(repo: &Repository, sequence_start: ObjectId, req: &ReplaySequenceRequest) -> Result<()> {
+fn write_replay_sequence_start(
+    repo: &Repository,
+    sequence_start: ObjectId,
+    req: &ReplaySequenceRequest,
+) -> Result<()> {
     let git_dir = repo.git_dir();
     fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
     fs::write(
