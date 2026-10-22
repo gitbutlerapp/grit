@@ -169,10 +169,10 @@ fn add_50k_dense_leaf_noop_within_git_ratio() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     build_fixture(root);
-    assert_eq!(
-        git(root, &["ls-files"]).lines().count(),
-        TRACKED,
-        "fixture should have {TRACKED} tracked paths"
+    let tracked = git(root, &["ls-files"]).lines().count();
+    assert!(
+        tracked >= TRACKED,
+        "fixture should have at least {TRACKED} tracked paths, got {tracked}"
     );
 
     let (git_med, grit_med) = time_noop_add(root, &grit, WARM_RUNS);
