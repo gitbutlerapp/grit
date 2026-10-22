@@ -234,6 +234,9 @@ pub fn parse_author_arg(raw: &str) -> Result<AuthorContact, AuthorArgError> {
     if s.is_empty() {
         return Err(AuthorArgError::InvalidFormat);
     }
+    if s.contains('\n') || s.contains('\r') {
+        return Err(AuthorArgError::InvalidFormat);
+    }
     if let Some(lt) = s.find('<') {
         let rest = &s[lt + 1..];
         let gt = rest.find('>').ok_or(AuthorArgError::InvalidFormat)?;
@@ -316,6 +319,14 @@ mod tests {
         assert_eq!(
             parse_author_arg("A <a@b.com> extra"),
             Err(AuthorArgError::TrailingText)
+        );
+    }
+
+    #[test]
+    fn parse_author_arg_rejects_embedded_newline() {
+        assert_eq!(
+            parse_author_arg("Bad\nInjected <x@y.example>"),
+            Err(AuthorArgError::InvalidFormat)
         );
     }
 }
