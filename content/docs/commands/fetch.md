@@ -15,7 +15,7 @@ grit fetch [<remote>] [<refspec>…] [--all] [--depth N] [--deepen N] [--unshall
 
 Downloads objects and updates refs from a remote. Your working tree and current branch are unchanged; use [`grit merge`](../merge/) or [`grit pull`](../pull/) to integrate fetched commits.
 
-`<remote>` defaults to `origin`. It may be a configured remote name, a URL, a filesystem path, or a [git bundle](https://git-scm.com/docs/git-bundle) file.
+`<remote>` defaults to `origin`. It may be a configured remote name, a URL, an scp-style `host:path`, a filesystem path, or a [git bundle](https://git-scm.com/docs/git-bundle) file. Anything else fails with `unknown remote`.
 
 Each `<refspec>` selects what to fetch (`main`, `refs/heads/x:refs/heads/y`, `+refs/…` to force). When no refspecs are given, configured `remote.<name>.fetch` refspecs apply (usually all heads into `refs/remotes/<remote>/…`).
 

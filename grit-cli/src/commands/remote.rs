@@ -1,15 +1,16 @@
 //! `grit remote` — list remotes, add one, or list refs on a remote.
 
-use anyhow::{bail, Context, Result};
-use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
+use anyhow::{Context, Result};
+use grit_lib::config::ConfigSet;
 use grit_lib::refs::listing::{RefSort, SortKey};
-use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, RemoteRef};
+use grit_lib::remote::fetch_request::resolve_remote_argument;
+use grit_lib::remote::{fold_peeled_refs, DefaultHttpClientFactory, ListRefsOptions, RemoteRef};
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+
+use crate::commands::fetch::map_remote_error;
 
 use crate::context;
 use crate::markdown;
@@ -191,7 +192,7 @@ pub fn run_refs(
         protocol_version: Some(0),
         ..Default::default()
     };
-    let remote = resolve_remote_or_url(Some(&config), remote_or_url)?;
+    let remote = resolve_remote_argument(&config, remote_or_url).map_err(map_remote_error)?;
     let raw = remote
         .list_refs(repo.as_ref(), &opts, Some(&factory))
         .map_err(|e| anyhow::Error::msg(e.to_string()))?;
@@ -200,47 +201,6 @@ pub fn run_refs(
         _ => map_remote_refs(&raw),
     };
     Ok(RemoteOutcome::Refs { refs, lines })
-}
-
-pub(crate) fn resolve_remote_or_url(
-    config: Option<&ConfigSet>,
-    remote_or_url: &str,
-) -> Result<Remote> {
-    if let Some(config) = config {
-        if remote_names(config).iter().any(|n| n == remote_or_url) {
-            return Remote::from_config(config, remote_or_url)
-                .map_err(|e| anyhow::Error::msg(e.to_string()));
-        }
-    }
-    if looks_like_url_or_path(remote_or_url) {
-        return Remote::from_url(remote_or_url).map_err(|e| anyhow::Error::msg(e.to_string()));
-    }
-    if local_path_argument(remote_or_url).is_some() {
-        return Remote::from_url(remote_or_url).map_err(|e| anyhow::Error::msg(e.to_string()));
-    }
-    bail!(
-        "unknown remote '{remote_or_url}' (not configured — pass a URL or path, or use `grit remote add`)"
-    );
-}
-
-/// True when `s` is an existing filesystem path (relative or absolute).
-fn local_path_argument(s: &str) -> Option<PathBuf> {
-    let path = Path::new(s);
-    if path.exists() {
-        Some(path.to_path_buf())
-    } else {
-        None
-    }
-}
-
-fn looks_like_url_or_path(s: &str) -> bool {
-    s.contains("://")
-        || s.starts_with('/')
-        || s.starts_with("./")
-        || s.starts_with("../")
-        || s.contains(':')
-        || s.ends_with(".git")
-        || s.ends_with(".bundle")
 }
 
 fn remote_ref_lines(raw: &[RemoteRef]) -> Vec<RemoteRefLine> {
@@ -267,80 +227,36 @@ fn remote_ref_lines(raw: &[RemoteRef]) -> Vec<RemoteRefLine> {
 }
 
 fn map_remote_refs(raw: &[RemoteRef]) -> (Vec<RemoteRefEntry>, Vec<RemoteRefLine>) {
-    let mut peel_by_tag: HashMap<String, String> = HashMap::new();
-    peel_by_tag.reserve(raw.len() / 8);
-    for entry in raw {
-        if let Some(base) = entry.name.strip_suffix("^{}") {
-            peel_by_tag.insert(base.to_owned(), entry.oid.to_hex());
-        }
-    }
-
-    let lines = remote_ref_lines(raw);
-
-    let refs: Vec<RemoteRefEntry> = raw
-        .iter()
-        .filter(|e| !e.name.ends_with("^{}"))
+    let refs = fold_peeled_refs(raw)
+        .into_iter()
         .map(|entry| RemoteRefEntry {
-            name: entry.name.clone(),
+            name: entry.name,
             oid: entry.oid.to_hex(),
-            peeled: peel_by_tag.get(&entry.name).cloned(),
-            symref_target: entry.symref_target.clone(),
+            peeled: entry.peeled.map(|oid| oid.to_hex()),
+            symref_target: entry.symref_target,
         })
         .collect();
-
-    (refs, lines)
+    (refs, remote_ref_lines(raw))
 }
 
 fn list(repo: &Repository) -> Result<RemoteOutcome> {
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
-    let remotes = remote_names(&config)
+    let remotes = repo
+        .remotes()
+        .configured()
+        .context("could not load config")?
         .into_iter()
-        .map(|name| {
-            let url = config
-                .get(&format!("remote.{name}.url"))
-                .unwrap_or_else(|| "(no url)".to_owned());
-            RemoteEntry { name, url }
+        .map(|remote| RemoteEntry {
+            name: remote.name,
+            url: remote.url.unwrap_or_else(|| "(no url)".to_owned()),
         })
         .collect();
     Ok(RemoteOutcome::List { remotes })
 }
 
 fn add_remote(repo: &Repository, name: &str, url: &str) -> Result<RemoteOutcome> {
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
-    if remote_names(&config).iter().any(|n| n == name) {
-        bail!("remote '{name}' already exists");
-    }
-
-    let path = repo.git_dir().join("config");
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut cfg = ConfigFile::parse(&path, &content, ConfigScope::Local)
-        .context("could not parse repository config")?;
-    cfg.set(&format!("remote.{name}.url"), url)?;
-    cfg.set(
-        &format!("remote.{name}.fetch"),
-        &format!("+refs/heads/*:refs/remotes/{name}/*"),
-    )?;
-    cfg.write().context("could not write repository config")?;
-
+    repo.remotes().add(name, url).map_err(map_remote_error)?;
     Ok(RemoteOutcome::Add {
         name: name.to_owned(),
         url: url.to_owned(),
     })
-}
-
-/// Distinct, sorted remote names from any `remote.<name>.*` config entry.
-fn remote_names(config: &ConfigSet) -> Vec<String> {
-    let mut names: Vec<String> = config
-        .entries()
-        .iter()
-        .filter_map(|entry| {
-            let rest = entry.key.strip_prefix("remote.")?;
-            rest.rsplit_once('.').map(|(name, _)| name.to_owned())
-        })
-        .collect();
-    names.sort();
-    names.dedup();
-    names
 }

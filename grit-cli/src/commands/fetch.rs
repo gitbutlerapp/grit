@@ -5,10 +5,10 @@ use crate::output::OutputMode;
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::remote::fetch_request::resolve_fetch_invocation;
+use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::transfer::{
-    resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions, RefUpdate, TagMode,
-    UpdateMode,
+    resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions,
+    FetchOutcome as LibFetchOutcome, TagMode, UpdateMode,
 };
 use grit_lib::remote::{DefaultHttpClientFactory, RemoteError, DEFAULT_REMOTE};
 use schemars::JsonSchema;
@@ -298,7 +298,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         }
     };
 
-    let (updates, updated, rejected) = map_updates(&result.updates, args.dry_run);
+    let (updates, updated, rejected) = map_updates(&result, args.dry_run);
     let shallow = shallow_json(&result, fetch_depth.is_some());
 
     Ok(FetchOutcome {
@@ -359,7 +359,7 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     for (name, result) in raw {
         match result {
             Ok(outcome) => {
-                let (updates, updated, _rejected) = map_updates(&outcome.updates, args.dry_run);
+                let (updates, updated, _rejected) = map_updates(&outcome, args.dry_run);
                 total_updated += updated;
                 remotes.push(FetchAllRemoteOutcome {
                     remote: name,
@@ -384,53 +384,35 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     })
 }
 
-fn map_updates(raw: &[RefUpdate], dry_run: bool) -> (Vec<FetchUpdate>, usize, bool) {
-    let mut updates = Vec::new();
-    let mut updated = 0usize;
-    let mut rejected = false;
-    for update in raw {
-        if !include_in_report(update.mode) {
-            continue;
-        }
-        let status = FetchUpdateStatus::from(update.mode);
-        if update.mode.modified_repo() && !dry_run {
-            updated += 1;
-        }
-        if status == FetchUpdateStatus::Rejected {
-            rejected = true;
-        }
-        let ref_name = update
-            .local_ref
-            .clone()
-            .unwrap_or_else(|| update.remote_ref.clone());
-        let remote_ref = if update.remote_ref.is_empty() {
-            ref_name.clone()
-        } else {
-            update.remote_ref.clone()
-        };
-        updates.push(FetchUpdate {
-            ref_name,
-            remote_ref,
-            status,
-            old_oid: update.old_oid.as_ref().map(|o| o.to_hex()),
-            new_oid: update.new_oid.as_ref().map(|o| o.to_hex()),
-            reason: rejection_reason(update.mode, &update.note),
-        });
-    }
-    (updates, updated, rejected)
-}
-
-fn include_in_report(mode: UpdateMode) -> bool {
-    matches!(
-        mode,
-        UpdateMode::New
-            | UpdateMode::FastForward
-            | UpdateMode::Forced
-            | UpdateMode::DeletedMissing
-            | UpdateMode::NonFastForwardRejected
-            | UpdateMode::TagUpdateRejected
-            | UpdateMode::SourceObjectNotFound
-    )
+fn map_updates(outcome: &LibFetchOutcome, dry_run: bool) -> (Vec<FetchUpdate>, usize, bool) {
+    let updates = outcome
+        .reported_updates()
+        .map(|update| {
+            let ref_name = update
+                .local_ref
+                .clone()
+                .unwrap_or_else(|| update.remote_ref.clone());
+            let remote_ref = if update.remote_ref.is_empty() {
+                ref_name.clone()
+            } else {
+                update.remote_ref.clone()
+            };
+            FetchUpdate {
+                ref_name,
+                remote_ref,
+                status: FetchUpdateStatus::from(update.mode),
+                old_oid: update.old_oid.as_ref().map(|o| o.to_hex()),
+                new_oid: update.new_oid.as_ref().map(|o| o.to_hex()),
+                reason: rejection_reason(update.mode, &update.note),
+            }
+        })
+        .collect();
+    let updated = if dry_run {
+        0
+    } else {
+        outcome.changed_ref_count()
+    };
+    (updates, updated, outcome.has_rejections())
 }
 
 fn rejection_reason(mode: UpdateMode, note: &Option<String>) -> Option<String> {
@@ -461,7 +443,7 @@ fn fetch_once(
     factory: &DefaultHttpClientFactory,
     progress: &mut TerminalProgress,
 ) -> Result<grit_lib::remote::transfer::FetchOutcome> {
-    let remote = crate::commands::remote::resolve_remote_or_url(Some(config), &invocation.remote)?;
+    let remote = resolve_remote_argument(config, &invocation.remote).map_err(map_remote_error)?;
     remote
         .fetch(
             repo,
@@ -492,6 +474,9 @@ pub(crate) fn map_remote_error(err: RemoteError) -> anyhow::Error {
             crate::json_error::map_lib_error(grit_lib::error::Error::HashCollision { oid })
         }
         RemoteError::Library(lib) => anyhow::Error::msg(RemoteError::Library(lib).to_string()),
+        RemoteError::UnknownRemote(name) => anyhow::anyhow!(
+            "unknown remote '{name}' (not configured — pass a URL or path, or use `grit remote add`)"
+        ),
         other => anyhow::Error::msg(other.to_string()),
     }
 }
@@ -547,14 +532,17 @@ mod map_remote_error_tests {
         use grit_lib::remote::transfer::{RefUpdate, UpdateMode};
 
         let oid = ObjectId::from_hex("a8e620a111111111111111111111111111111111").expect("oid");
-        let raw = vec![RefUpdate {
-            remote_ref: "refs/heads/main".into(),
-            local_ref: Some("refs/remotes/origin/main".into()),
-            old_oid: None,
-            new_oid: Some(oid),
-            mode: UpdateMode::New,
-            note: None,
-        }];
+        let raw = grit_lib::remote::transfer::FetchOutcome {
+            updates: vec![RefUpdate {
+                remote_ref: "refs/heads/main".into(),
+                local_ref: Some("refs/remotes/origin/main".into()),
+                old_oid: None,
+                new_oid: Some(oid),
+                mode: UpdateMode::New,
+                note: None,
+            }],
+            ..Default::default()
+        };
         let (_, updated, _) = super::map_updates(&raw, true);
         assert_eq!(updated, 0);
         let (_, updated, _) = super::map_updates(&raw, false);

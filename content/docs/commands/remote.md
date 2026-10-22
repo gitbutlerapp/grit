@@ -15,17 +15,17 @@ grit remote refs <remote-or-url> [--heads] [--tags] [--sort name|version] [--rev
 
 ## Description
 
-A remote is another copy of the repository that you fetch from and push to, usually on a server. With no arguments, `grit remote` lists your remotes and their URLs.
+A remote is another copy of the repository that you fetch from and push to, usually on a server. With no arguments, `grit remote` lists your remotes and their URLs, sorted by name. Like `git remote`, the list includes a remote that has config but no URL, shown as `(no url)`.
 
-`grit remote add` adds a remote. [`grit fetch`](../fetch/) then stores the remote's branches as remote-tracking branches named `<name>/<branch>`, such as `origin/main`. [`grit clone`](../clone/) adds a remote called `origin` for you.
+`grit remote add` adds a remote. It writes `remote.<name>.url` and the fetch refspec `+refs/heads/*:refs/remotes/<name>/*` to the repository's shared config, also when run from a linked worktree. It fails if a remote with that name is already configured, or if the name could not be used in a ref such as `refs/remotes/<name>/main` (for example names with spaces, `..` or `:`). [`grit fetch`](../fetch/) then stores the remote's branches as remote-tracking branches named `<name>/<branch>`, such as `origin/main`. [`grit clone`](../clone/) adds a remote called `origin` for you.
 
-`grit remote refs` lists references on a configured remote name or a literal URL/path (same transports as [`grit clone`](../clone/)), matching `git ls-remote` ordering. SSH URLs use the same `GIT_SSH_COMMAND`, `GIT_SSH`, and `core.sshCommand` resolution as [`grit clone`](../clone/) and [`grit fetch`](../fetch/).
+`grit remote refs` lists references on a configured remote name or a literal URL, scp-style `host:path` or path (same transports as [`grit clone`](../clone/)), matching `git ls-remote` ordering. An argument that is none of these fails with `unknown remote`. SSH URLs use the same `GIT_SSH_COMMAND`, `GIT_SSH`, and `core.sshCommand` resolution as [`grit clone`](../clone/) and [`grit fetch`](../fetch/).
 
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `add <name> <url>` | Add a remote called `<name>` at `<url>`. Fails if a remote with that name exists. |
+| `add <name> <url>` | Add a remote called `<name>` at `<url>`. Fails if a remote with that name exists or the name is not valid in a ref. |
 | `refs <remote-or-url>` | List refs on the remote (or URL). |
 | `--heads` | With `refs`, only `refs/heads/`. |
 | `--tags` | With `refs`, only `refs/tags/`. |

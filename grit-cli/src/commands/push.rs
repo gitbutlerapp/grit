@@ -333,13 +333,13 @@ fn load_remote_ref_names(
         .unwrap_or_default();
     let remote_branch_tips: HashSet<_> = advertised
         .iter()
-        .filter(|r| r.name.starts_with("refs/heads/") && !r.name.ends_with("^{}"))
+        .filter(|r| r.name.starts_with("refs/heads/") && r.peeled_tag().is_none())
         .map(|r| r.oid)
         .collect();
     let remote_ref_names: HashSet<String> = advertised
         .into_iter()
+        .filter(|r| r.peeled_tag().is_none())
         .map(|r| r.name)
-        .filter(|n| !n.ends_with("^{}"))
         .collect();
     Ok(PushPlanContext {
         remote_ref_names,
