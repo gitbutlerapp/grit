@@ -437,6 +437,7 @@ fn history_change_ids_survive_every_rewrite() {
             rewrite: rewrite_opts(8),
             skip_applied: true,
             flatten_leaf_merges: false,
+            favor: grit_lib::diff::merge_file::MergeFavor::default(),
         },
     )
     .expect("rebase");

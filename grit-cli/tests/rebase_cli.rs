@@ -336,3 +336,68 @@ fn rebase_updates_stacked_branches() -> TestResult {
     git_fsck_strict(dir)?;
     Ok(())
 }
+
+fn init_rebase_conflict_fixture(dir: &Path) -> Result<(String, String), Box<dyn Error>> {
+    init_repo(dir)?;
+    git(dir, &["checkout", "-b", "topic"])?;
+    fs::write(dir.join("conflict.txt"), "topic\n")?;
+    git(dir, &["add", "conflict.txt"])?;
+    git(dir, &["commit", "-m", "topic"])?;
+    git(dir, &["checkout", "main"])?;
+    fs::write(dir.join("conflict.txt"), "main\n")?;
+    git(dir, &["add", "conflict.txt"])?;
+    git(dir, &["commit", "-m", "main"])?;
+    let onto = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
+    git(dir, &["checkout", "topic"])?;
+    let upstream = git(dir, &["rev-parse", "HEAD~1"])?.trim().to_string();
+    Ok((upstream, onto))
+}
+
+#[test]
+fn rebase_check_exit_codes() -> TestResult {
+    let scratch = Scratch::new("check")?;
+    let dir = scratch.path();
+    let (upstream, onto) = init_rebase_conflict_fixture(dir)?;
+    gs(dir, ["config", "grit.changeIds", "false"])?;
+    let head_before = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
+    let conflict = gs(
+        dir,
+        ["rebase", "--check", "--onto", &onto, &upstream, "--json"],
+    )?;
+    assert_eq!(conflict.status, Some(1));
+    let json = parse_json(&conflict.stdout)?;
+    assert_eq!(json["result"], "conflicts");
+    assert_eq!(json["check"], true);
+    assert!(json["conflicts"].as_array().is_some_and(|a| !a.is_empty()));
+    let head_after = git(dir, &["rev-parse", "HEAD"])?.trim().to_string();
+    assert_eq!(head_before, head_after);
+
+    let base = upstream.clone();
+    let clean = gs(dir, ["rebase", "--check", &base, "--json"])?;
+    assert_eq!(clean.status, Some(0), "{}\n{}", clean.stdout, clean.stderr);
+    let clean_json = parse_json(&clean.stdout)?;
+    assert_eq!(clean_json["result"], "up_to_date");
+    Ok(())
+}
+
+#[test]
+fn rebase_x_theirs_json() -> TestResult {
+    let scratch = Scratch::new("x-theirs")?;
+    let dir = scratch.path();
+    let (upstream, onto) = init_rebase_conflict_fixture(dir)?;
+    gs(dir, ["config", "grit.changeIds", "false"])?;
+    let out = gs(
+        dir,
+        [
+            "rebase", "-X", "theirs", "--onto", &onto, &upstream, "--json",
+        ],
+    )?;
+    assert!(out.success(), "{}\n{}", out.stdout, out.stderr);
+    let json = parse_json(&out.stdout)?;
+    assert_eq!(json["operation"], "rebase");
+    assert!(json["rewritten"].as_array().is_some_and(|a| !a.is_empty()));
+    let content = git(dir, &["show", "HEAD:conflict.txt"])?.trim().to_string();
+    assert_eq!(content, "topic");
+    git_fsck_strict(dir)?;
+    Ok(())
+}

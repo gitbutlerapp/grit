@@ -107,18 +107,22 @@ pub fn plan_rewrite(
     edits: &HistoryEdits,
     opts: &RewriteOptions,
 ) -> Result<RewritePlan, HistoryError> {
-    plan_rewrite_with_order(repo, edits, opts, None, false)
+    plan_rewrite_with_order(repo, edits, opts, None, false, MergeFavor::default())
 }
 
 /// Like [`plan_rewrite`], but when `replay_order` is set, replays commits in that exact
 /// topological order (used by [`super::rebase::rebase_onto`](crate::history::rebase::rebase_onto)
 /// so merge side branches are included).
+///
+/// `merge_favor` applies to three-way tree replays during descendant replay (rebase uses this
+/// for `-X ours|theirs`; other callers pass [`MergeFavor::default()`]).
 pub(crate) fn plan_rewrite_with_order(
     repo: &Repository,
     edits: &HistoryEdits,
     opts: &RewriteOptions,
     replay_order: Option<&[ObjectId]>,
     flatten_leaf_merges: bool,
+    merge_favor: MergeFavor,
 ) -> Result<RewritePlan, HistoryError> {
     if edits.is_empty() {
         return Ok(RewritePlan {
@@ -276,6 +280,7 @@ pub(crate) fn plan_rewrite_with_order(
                     &old,
                     old_oid,
                     insert_parent,
+                    merge_favor,
                     opts,
                 )?;
                 (oid, Some(oid))
@@ -288,6 +293,7 @@ pub(crate) fn plan_rewrite_with_order(
                     &old,
                     old_oid,
                     insert_parent,
+                    merge_favor,
                     opts,
                 )?;
                 (oid, Some(oid))
@@ -325,6 +331,7 @@ pub(crate) fn plan_rewrite_with_order(
                         &old,
                         old_oid,
                         None,
+                        merge_favor,
                         opts,
                         Some(&parent_list),
                     )?
@@ -338,6 +345,7 @@ pub(crate) fn plan_rewrite_with_order(
                         &old.author,
                         &opts.committer,
                         &old.message,
+                        merge_favor,
                         opts,
                     )?
                 };
@@ -388,6 +396,7 @@ pub(crate) fn plan_rewrite_with_order(
                         author,
                         &opts.committer,
                         message,
+                        merge_favor,
                         opts,
                     )?
                 };
@@ -492,6 +501,7 @@ pub fn plan_replay_linear_segment(
             &old.author,
             &opts.committer,
             &old.message,
+            MergeFavor::default(),
             opts,
         )?;
         mapping.insert(old_oid, new_oid);
@@ -796,6 +806,7 @@ fn mapped_first_parent(
     Ok(mapping.get(&parent).copied().unwrap_or(parent))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn replay_commit_descendant(
     repo: &Repository,
     change_ids: &ChangeIdWriteContext,
@@ -803,6 +814,7 @@ fn replay_commit_descendant(
     old: &CommitData,
     old_oid: ObjectId,
     extra_parent: Option<ObjectId>,
+    merge_favor: MergeFavor,
     opts: &RewriteOptions,
 ) -> Result<ObjectId, HistoryError> {
     if old.parents.len() > 1 {
@@ -813,13 +825,24 @@ fn replay_commit_descendant(
             old,
             old_oid,
             extra_parent,
+            merge_favor,
             opts,
             None,
         );
     }
-    replay_descendant(repo, change_ids, mapping, old, old_oid, extra_parent, opts)
+    replay_descendant(
+        repo,
+        change_ids,
+        mapping,
+        old,
+        old_oid,
+        extra_parent,
+        merge_favor,
+        opts,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn replay_descendant(
     repo: &Repository,
     change_ids: &ChangeIdWriteContext,
@@ -827,6 +850,7 @@ fn replay_descendant(
     old: &CommitData,
     old_oid: ObjectId,
     extra_parent: Option<ObjectId>,
+    merge_favor: MergeFavor,
     opts: &RewriteOptions,
 ) -> Result<ObjectId, HistoryError> {
     let (_, new_parent) = replay_parent_pair(repo, old, mapping, extra_parent)?;
@@ -839,6 +863,7 @@ fn replay_descendant(
         &old.author,
         &opts.committer,
         &old.message,
+        merge_favor,
         opts,
     )
 }
@@ -851,13 +876,14 @@ fn replay_merge_descendant(
     old: &CommitData,
     old_oid: ObjectId,
     extra_parent: Option<ObjectId>,
+    merge_favor: MergeFavor,
     opts: &RewriteOptions,
     parent_list_override: Option<&[ObjectId]>,
 ) -> Result<ObjectId, HistoryError> {
     let parent_list = parent_list_override
         .map(<[_]>::to_vec)
         .unwrap_or_else(|| mapped_merge_parents(old, mapping, extra_parent));
-    let result_tree = replay_merge_tree(repo, old, old_oid, &parent_list)?;
+    let result_tree = replay_merge_tree(repo, old, old_oid, &parent_list, merge_favor)?;
 
     let committer = if opts.preserve_committer {
         old.committer.as_str()
@@ -962,6 +988,7 @@ fn replay_merge_tree(
     old: &CommitData,
     old_oid: ObjectId,
     new_parents: &[ObjectId],
+    merge_favor: MergeFavor,
 ) -> Result<ObjectId, HistoryError> {
     if old.parents.len() != new_parents.len() {
         return Err(HistoryError::Planning {
@@ -982,6 +1009,7 @@ fn replay_merge_tree(
             result_tree,
             old_parent_tree,
             new_parent_tree,
+            merge_favor,
         )?;
     }
     Ok(result_tree)
@@ -998,6 +1026,7 @@ fn replay_edited_commit(
     author: &str,
     committer: &str,
     message: &str,
+    merge_favor: MergeFavor,
     opts: &RewriteOptions,
 ) -> Result<ObjectId, HistoryError> {
     let committer = if opts.preserve_committer {
@@ -1019,7 +1048,14 @@ fn replay_edited_commit(
         commit_tree(repo, new_parent)?
     };
 
-    let result_tree = compute_replayed_tree(repo, old, old_oid, old_parent_tree, new_parent_tree)?;
+    let result_tree = compute_replayed_tree(
+        repo,
+        old,
+        old_oid,
+        old_parent_tree,
+        new_parent_tree,
+        merge_favor,
+    )?;
 
     if old.tree != old_parent_tree && result_tree == new_parent_tree {
         return match opts.empty {
@@ -1081,8 +1117,16 @@ fn compute_replayed_tree(
     old_oid: ObjectId,
     old_parent_tree: ObjectId,
     new_parent_tree: ObjectId,
+    merge_favor: MergeFavor,
 ) -> Result<ObjectId, HistoryError> {
-    transplant_tree_across_parent_move(repo, old_oid, old.tree, old_parent_tree, new_parent_tree)
+    transplant_tree_across_parent_move(
+        repo,
+        old_oid,
+        old.tree,
+        old_parent_tree,
+        new_parent_tree,
+        merge_favor,
+    )
 }
 
 fn transplant_tree_across_parent_move(
@@ -1091,6 +1135,7 @@ fn transplant_tree_across_parent_move(
     subject_tree: ObjectId,
     old_parent_tree: ObjectId,
     new_parent_tree: ObjectId,
+    merge_favor: MergeFavor,
 ) -> Result<ObjectId, HistoryError> {
     if old_parent_tree == new_parent_tree {
         return Ok(subject_tree);
@@ -1101,7 +1146,7 @@ fn transplant_tree_across_parent_move(
         old_parent_tree,
         new_parent_tree,
         subject_tree,
-        MergeFavor::default(),
+        merge_favor,
         WhitespaceMergeOptions::default(),
         None,
         TreeMergeConflictPresentation::default(),

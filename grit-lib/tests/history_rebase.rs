@@ -6,12 +6,13 @@ mod support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
+use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    apply_rewrite, plan_rebase, rebase_onto, ApplyOptions, EmptyPolicy, RebaseOntoOptions,
-    RebasePlan, RebaseRequest, RefScope, RewriteOptions,
+    apply_rewrite, plan_rebase, plan_rebase_check, rebase_onto, ApplyOptions, EmptyPolicy,
+    RebaseCheckPlan, RebaseOntoOptions, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
 };
 use support::assert_git_fsck_strict;
 use support::{
@@ -40,6 +41,7 @@ fn rebase_opts(scope: RefScope, empty: EmptyPolicy, skip: bool) -> RebaseOntoOpt
         },
         skip_applied: skip,
         flatten_leaf_merges: false,
+        favor: MergeFavor::default(),
     }
 }
 
@@ -789,4 +791,168 @@ fn history_rebase_matches_git_rebase() {
     assert_eq!(grit_tip, git_tip);
     assert_git_fsck_strict(wt_g);
     assert_git_fsck_strict(wt_git);
+}
+
+fn init_rebase_favor_fixture(wt: &std::path::Path) -> (ObjectId, ObjectId, ObjectId) {
+    commit_file(wt, "conflict.txt", "base\n", "base");
+    let upstream = git_rev_parse(wt, "HEAD");
+    git(wt, &["checkout", "-b", "topic"]);
+    commit_file(wt, "conflict.txt", "topic\n", "topic side");
+    commit_file(wt, "topic-only.txt", "only topic\n", "topic marker");
+    let tip = git_rev_parse(wt, "HEAD");
+    git(wt, &["checkout", "main"]);
+    commit_file(wt, "conflict.txt", "main\n", "main side");
+    let onto = git_rev_parse(wt, "HEAD");
+    git(wt, &["checkout", "topic"]);
+    (upstream, onto, tip)
+}
+
+fn git_rebase_onto_with_strategy(
+    wt: &std::path::Path,
+    onto: &ObjectId,
+    upstream: &ObjectId,
+    branch: &str,
+    strategy: &str,
+) {
+    std::process::Command::new("git")
+        .current_dir(wt)
+        .args([
+            "-c",
+            "rebase.applyCherryPicks=false",
+            "rebase",
+            "-X",
+            strategy,
+            "--onto",
+            &onto.to_hex(),
+            &upstream.to_hex(),
+            branch,
+        ])
+        .env("GIT_AUTHOR_NAME", "Refs Harness Author")
+        .env("GIT_AUTHOR_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_NAME", "Refs Harness Author")
+        .env("GIT_COMMITTER_EMAIL", "refs-harness@example.com")
+        .env("GIT_COMMITTER_DATE", "1700001000 +0000")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git rebase -X");
+}
+
+fn rebase_opts_with_favor(favor: MergeFavor) -> RebaseOntoOptions {
+    RebaseOntoOptions {
+        favor,
+        skip_applied: false,
+        ..rebase_opts(RefScope::Head, EmptyPolicy::Drop, true)
+    }
+}
+
+fn tip_tree(repo: &Repository, tip: ObjectId) -> ObjectId {
+    parse_commit(&repo.odb().read(&tip).expect("read").data)
+        .expect("parse")
+        .tree
+}
+
+#[test]
+fn rebase_favor_theirs_matches_git_rebase_x_theirs() {
+    let grit_repo = HistoryRepo::init();
+    let git_repo = HistoryRepo::init();
+    let wt_g = grit_repo.worktree();
+    let wt_git = git_repo.worktree();
+    git(wt_g, &["config", "grit.changeIds", "false"]);
+    git(wt_git, &["config", "grit.changeIds", "false"]);
+    let (u_g, o_g, t_g) = init_rebase_favor_fixture(wt_g);
+    let (u_git, o_git, t_git) = init_rebase_favor_fixture(wt_git);
+    let grit = open_grit(wt_g);
+    let plan = rebase_onto(
+        &grit,
+        u_g,
+        o_g,
+        &[t_g],
+        &rebase_opts_with_favor(MergeFavor::Theirs),
+    )
+    .expect("grit plan");
+    apply_plan(&grit, &plan);
+    git_rebase_onto_with_strategy(wt_git, &o_git, &u_git, "topic", "theirs");
+    let grit_tip = git_rev_parse(wt_g, "topic");
+    let git_tip = git_rev_parse(wt_git, "topic");
+    assert_eq!(
+        tip_tree(&grit, grit_tip),
+        tip_tree(&open_grit(wt_git), git_tip)
+    );
+    assert_git_fsck_strict(wt_g);
+    assert_git_fsck_strict(wt_git);
+}
+
+#[test]
+fn rebase_favor_ours_matches_git_rebase_x_ours() {
+    let grit_repo = HistoryRepo::init();
+    let git_repo = HistoryRepo::init();
+    let wt_g = grit_repo.worktree();
+    let wt_git = git_repo.worktree();
+    git(wt_g, &["config", "grit.changeIds", "false"]);
+    git(wt_git, &["config", "grit.changeIds", "false"]);
+    let (u_g, o_g, t_g) = init_rebase_favor_fixture(wt_g);
+    let (u_git, o_git, _t_git) = init_rebase_favor_fixture(wt_git);
+    let grit = open_grit(wt_g);
+    let plan = rebase_onto(
+        &grit,
+        u_g,
+        o_g,
+        &[t_g],
+        &rebase_opts_with_favor(MergeFavor::Ours),
+    )
+    .expect("grit plan");
+    apply_plan(&grit, &plan);
+    git_rebase_onto_with_strategy(wt_git, &o_git, &u_git, "topic", "ours");
+    let grit_tip = git_rev_parse(wt_g, "topic");
+    let git_tip = git_rev_parse(wt_git, "topic");
+    assert_eq!(
+        tip_tree(&grit, grit_tip),
+        tip_tree(&open_grit(wt_git), git_tip)
+    );
+    assert_git_fsck_strict(wt_g);
+    assert_git_fsck_strict(wt_git);
+}
+
+fn snapshot_repo_side_effects(wt: &std::path::Path) -> Vec<u8> {
+    let git_dir = wt.join(".git");
+    let mut out = Vec::new();
+    for name in ["HEAD", "index"] {
+        out.extend_from_slice(&std::fs::read(git_dir.join(name)).expect("read"));
+    }
+    out.extend_from_slice(&std::fs::read(wt.join("conflict.txt")).unwrap_or_default());
+    let reflog = git_dir.join("logs/HEAD");
+    if reflog.exists() {
+        out.extend_from_slice(&std::fs::read(reflog).expect("reflog"));
+    }
+    for entry in std::fs::read_dir(git_dir.join("refs/heads")).expect("heads") {
+        let path = entry.expect("entry").path();
+        out.extend_from_slice(&std::fs::read(path).expect("ref"));
+    }
+    out
+}
+
+#[test]
+fn rebase_check_reports_conflict_without_side_effects() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    git(wt, &["config", "grit.changeIds", "false"]);
+    let (upstream, onto, tip) = init_rebase_favor_fixture(wt);
+    let grit = open_grit(wt);
+    let request = RebaseRequest {
+        upstream,
+        onto: Some(onto),
+        branch_tip: tip,
+    };
+    let opts = rebase_opts(RefScope::Head, EmptyPolicy::Abort, true);
+    let before = snapshot_repo_side_effects(wt);
+    let check = plan_rebase_check(&grit, &request, &opts).expect("check");
+    let after = snapshot_repo_side_effects(wt);
+    assert_eq!(before, after, "refs, index, worktree and reflog must match");
+    match check {
+        RebaseCheckPlan::Conflict { paths, .. } => {
+            assert!(paths.iter().any(|p| p.contains("conflict")));
+        }
+        other => panic!("expected conflict prediction, got {other:?}"),
+    }
 }

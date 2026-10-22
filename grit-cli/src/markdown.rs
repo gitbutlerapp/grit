@@ -9,7 +9,8 @@ use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{file_diff_status_label, FileDiff, Hunk, Line, LineKind, Segment};
 use crate::commands::history::{
-    HeadPair, HistoryAbsorbOutcome, HistoryRewriteOutcome, RefPair, RewrittenPair,
+    HeadPair, HistoryAbsorbOutcome, HistoryRewriteOutcome, RebaseCheckOutcome, RebaseCheckResult,
+    RefPair, RewrittenPair,
 };
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
@@ -801,6 +802,30 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
 }
 
 /// Result of `grit history drop`, `move`, `reword`, `fixup` or `squash`.
+pub fn print_rebase_check_outcome(
+    w: &mut dyn Write,
+    outcome: &RebaseCheckOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Rebase check");
+    outln!(w);
+    match outcome.result {
+        RebaseCheckResult::UpToDate => outln!(w, "- Already up to date"),
+        RebaseCheckResult::Clean => {
+            let n = outcome.commits.as_ref().map_or(0, Vec::len);
+            outln!(w, "- Would rebase {n} commit(s) cleanly");
+        }
+        RebaseCheckResult::Conflicts => {
+            outln!(w, "- Would conflict during rebase");
+            if let Some(conflicts) = &outcome.conflicts {
+                for c in conflicts {
+                    outln!(w, "- `{}` ({})", c.path, c.kind);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn print_history_rewrite_outcome(
     w: &mut dyn Write,
     title: &str,

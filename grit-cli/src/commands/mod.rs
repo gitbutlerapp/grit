@@ -24,6 +24,7 @@ pub mod log;
 pub mod manager;
 pub mod merge;
 pub mod merge_base_cmd;
+pub mod merge_strategy;
 pub mod mv;
 pub mod notes;
 pub mod patch_id;

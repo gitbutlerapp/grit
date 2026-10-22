@@ -11,19 +11,22 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, plan_rebase, reword, squash, staged_fixup_paths, verify_rewrite_plan,
-    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment,
-    HunkRange, Placement, RebaseOntoOptions, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
-    RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
+    move_commit, plan_rebase, plan_rebase_check, reword, squash, staged_fixup_paths,
+    verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError,
+    HunkAssignment, HunkRange, Placement, RebaseCheckPlan, RebaseOntoOptions, RebasePlan,
+    RebaseRequest, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
+    UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::commands::merge_strategy::MergeStrategyArg;
 use crate::context;
 use crate::json_error;
 use crate::markdown;
+use crate::operation_output::{render_conflicts_human, ConflictJson};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Which local refs a history rewrite may move.
@@ -63,6 +66,139 @@ impl From<EmptyPolicyArg> for EmptyPolicy {
             EmptyPolicyArg::Drop => EmptyPolicy::Drop,
             EmptyPolicyArg::Keep => EmptyPolicy::Keep,
             EmptyPolicyArg::Abort => EmptyPolicy::Abort,
+        }
+    }
+}
+
+/// Extra flags for `grit rebase` / `grit history rebase`.
+#[derive(Debug, clap::Args)]
+pub struct RebaseRunFlags {
+    /// Predict whether the rebase would succeed without changing refs, index, or worktree.
+    #[arg(long = "check", conflicts_with = "dry_run")]
+    pub check: bool,
+    /// Auto-resolve replay conflicts: `ours` keeps the onto side, `theirs` keeps replayed commits.
+    #[arg(short = 'X', value_enum, value_name = "OURS|THEIRS")]
+    pub strategy: Option<MergeStrategyArg>,
+}
+
+/// Result of `grit rebase --check`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RebaseCheckOutcome {
+    pub operation: String,
+    pub result: RebaseCheckResult,
+    pub check: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub commits: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub conflicts: Option<Vec<ConflictJson>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+}
+
+/// Outcome category for [`RebaseCheckOutcome`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RebaseCheckResult {
+    UpToDate,
+    Clean,
+    Conflicts,
+}
+
+impl RebaseCheckOutcome {
+    fn up_to_date() -> Self {
+        Self {
+            operation: "rebase".into(),
+            result: RebaseCheckResult::UpToDate,
+            check: true,
+            commits: None,
+            conflicts: None,
+            commit: None,
+        }
+    }
+
+    fn clean(commits: Vec<ObjectId>) -> Self {
+        Self {
+            operation: "rebase".into(),
+            result: RebaseCheckResult::Clean,
+            check: true,
+            commits: Some(commits.iter().map(ObjectId::to_hex).collect()),
+            conflicts: None,
+            commit: None,
+        }
+    }
+
+    fn conflicts(commit: ObjectId, paths: Vec<String>) -> Self {
+        let conflicts = Some(
+            paths
+                .iter()
+                .map(|path| ConflictJson {
+                    path: path.clone(),
+                    kind: "content".into(),
+                    summary: None,
+                })
+                .collect(),
+        );
+        Self {
+            operation: "rebase".into(),
+            result: RebaseCheckResult::Conflicts,
+            check: true,
+            commits: None,
+            conflicts,
+            commit: Some(commit.to_hex()),
+        }
+    }
+}
+
+impl HumanRender for RebaseCheckOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        match self.result {
+            RebaseCheckResult::UpToDate => outln!(w, "Already up to date"),
+            RebaseCheckResult::Clean => {
+                let n = self.commits.as_ref().map_or(0, Vec::len);
+                outln!(w, "Would rebase {n} commit(s) cleanly");
+            }
+            RebaseCheckResult::Conflicts => {
+                outln!(w, "Would conflict during rebase");
+                if let Some(conflicts) = &self.conflicts {
+                    render_conflicts_human(conflicts, w)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for RebaseCheckOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_rebase_check_outcome(w, self)
+    }
+}
+
+/// Either a normal rewrite outcome or a `--check` prediction.
+#[derive(Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RebaseRunOutcome {
+    Rewrite(HistoryRewriteOutcome),
+    Check(RebaseCheckOutcome),
+}
+
+impl HumanRender for RebaseRunOutcome {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        match self {
+            Self::Rewrite(o) => o.render_human(w, ctx),
+            Self::Check(o) => o.render_human(w, ctx),
+        }
+    }
+}
+
+impl MarkdownRender for RebaseRunOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        match self {
+            Self::Rewrite(o) => o.render_markdown(w, ctx),
+            Self::Check(o) => o.render_markdown(w, ctx),
         }
     }
 }
@@ -585,7 +721,8 @@ pub fn run_rebase(
     upstream: Option<String>,
     onto: Option<String>,
     shared: &HistoryRewriteArgs,
-) -> Result<HistoryRewriteOutcome> {
+    flags: &RebaseRunFlags,
+) -> Result<RebaseRunOutcome> {
     let on_err = history_error("rebase");
     let repo = context::discover()?;
     let branch_tip = resolve_commit(&repo, "HEAD", "HEAD")?;
@@ -600,10 +737,18 @@ pub fn run_rebase(
         onto: onto_oid,
         branch_tip,
     };
-    let opts = RebaseOntoOptions::new(rewrite.options.clone());
+    let mut opts = RebaseOntoOptions::new(rewrite.options.clone());
+    if let Some(strategy) = flags.strategy {
+        opts.favor = strategy.into();
+    }
+    if flags.check {
+        return run_rebase_check(&rewrite.repo, &request, &opts, on_err);
+    }
     let plan = plan_rebase(&rewrite.repo, &request, &opts).map_err(on_err)?;
     match plan {
-        RebasePlan::UpToDate => Ok(HistoryRewriteOutcome::up_to_date("rebase", shared.dry_run)),
+        RebasePlan::UpToDate => Ok(RebaseRunOutcome::Rewrite(
+            HistoryRewriteOutcome::up_to_date("rebase", shared.dry_run),
+        )),
         RebasePlan::Conflict { commit, paths } => Err(json_error::operation_conflict(
             "rebase",
             paths,
@@ -617,8 +762,29 @@ pub fn run_rebase(
                 apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?)
                     .map_err(on_err)?;
             }
-            Ok(HistoryRewriteOutcome::new("rebase", &plan, shared.dry_run))
+            Ok(RebaseRunOutcome::Rewrite(HistoryRewriteOutcome::new(
+                "rebase",
+                &plan,
+                shared.dry_run,
+            )))
         }
+    }
+}
+
+fn run_rebase_check(
+    repo: &Repository,
+    request: &RebaseRequest,
+    opts: &RebaseOntoOptions,
+    on_err: impl Fn(HistoryError) -> anyhow::Error + Copy,
+) -> Result<RebaseRunOutcome> {
+    match plan_rebase_check(repo, request, opts).map_err(on_err)? {
+        RebaseCheckPlan::UpToDate => Ok(RebaseRunOutcome::Check(RebaseCheckOutcome::up_to_date())),
+        RebaseCheckPlan::Clean { commits } => {
+            Ok(RebaseRunOutcome::Check(RebaseCheckOutcome::clean(commits)))
+        }
+        RebaseCheckPlan::Conflict { commit, paths } => Ok(RebaseRunOutcome::Check(
+            RebaseCheckOutcome::conflicts(commit, paths),
+        )),
     }
 }
 

@@ -7,6 +7,7 @@ use std::cell::Cell;
 
 use crate::diff::diff_trees;
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
+use crate::merge_file::MergeFavor;
 use crate::objects::{parse_commit, ObjectId};
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
 use crate::repo::Repository;
@@ -71,6 +72,14 @@ pub struct RebaseOntoOptions {
     /// When `true`, drop merge commits that are branch tips in the replay range and move refs to
     /// the replayed second parent (matches `git pull --rebase=merges` on linearizable merges).
     pub flatten_leaf_merges: bool,
+    /// Auto-resolve replay conflicts the same way as `git rebase -X ours|theirs`.
+    ///
+    /// During replay, grit three-way-merges each commit's tree onto the new parent using the old
+    /// parent as base. In that merge, **ours** is the onto (upstream) tree and **theirs** is the
+    /// commit being replayed — matching Git's rebase implementation, not a branch merge where
+    /// "ours" is the checked-out branch. [`MergeFavor::Ours`] therefore keeps upstream content;
+    /// [`MergeFavor::Theirs`] keeps the replayed commit's changes.
+    pub favor: MergeFavor,
 }
 
 impl RebaseOntoOptions {
@@ -81,6 +90,49 @@ impl RebaseOntoOptions {
             rewrite,
             skip_applied: true,
             flatten_leaf_merges: false,
+            favor: MergeFavor::default(),
+        }
+    }
+}
+
+/// Predicted outcome of [`plan_rebase_check`] (no ref, index, or worktree updates).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RebaseCheckPlan {
+    /// Nothing would be replayed.
+    UpToDate,
+    /// Every commit would replay cleanly; lists replacement commit OIDs in replay order.
+    Clean {
+        /// New commit object ids that would become branch tips after apply.
+        commits: Vec<ObjectId>,
+    },
+    /// Replay would stop on this commit.
+    Conflict {
+        /// Original commit that could not be replayed cleanly.
+        commit: ObjectId,
+        /// Repository-relative paths that conflicted.
+        paths: Vec<String>,
+    },
+}
+
+/// Predict whether a rebase would succeed without updating refs, the index, or the worktree.
+///
+/// New commit objects may still be written to the object database (same as [`plan_rebase`]).
+///
+/// # Errors
+///
+/// Same planning errors as [`plan_rebase`], except conflicts are returned as
+/// [`RebaseCheckPlan::Conflict`].
+pub fn plan_rebase_check(
+    repo: &Repository,
+    request: &RebaseRequest,
+    opts: &RebaseOntoOptions,
+) -> Result<RebaseCheckPlan, HistoryError> {
+    match plan_rebase(repo, request, opts)? {
+        RebasePlan::UpToDate => Ok(RebaseCheckPlan::UpToDate),
+        RebasePlan::Conflict { commit, paths } => Ok(RebaseCheckPlan::Conflict { commit, paths }),
+        RebasePlan::Plan(plan) => {
+            let commits = plan.commits.iter().filter_map(|row| row.new).collect();
+            Ok(RebaseCheckPlan::Clean { commits })
         }
     }
 }
@@ -264,6 +316,7 @@ fn rebase_onto_impl(
         &opts.rewrite,
         Some(&replay_order),
         opts.flatten_leaf_merges,
+        opts.favor,
     )
 }
 
