@@ -120,7 +120,7 @@ fn status_json_conflicts_and_operation_shape() -> TestResult {
 }
 
 #[test]
-fn status_json_omits_operation_during_git_cherry_pick_conflict() -> TestResult {
+fn status_json_cherry_pick_conflict_operation_shape() -> TestResult {
     let tmp = tempfile::TempDir::new()?;
     let repo = tmp.path();
     system_git_ok(repo, &["init", "-q", "-b", "main"]);
@@ -143,8 +143,24 @@ fn status_json_omits_operation_during_git_cherry_pick_conflict() -> TestResult {
     assert_ne!(pick.status.code(), Some(0), "expected cherry-pick conflict");
 
     let v = gs_json(repo, &["status"]);
-    assert!(v.get("operation").is_none() || v["operation"].is_null());
     assert!(!v["conflicts"].as_array().unwrap().is_empty());
+
+    let op = v.get("operation").expect("operation object");
+    assert_eq!(op["kind"], "cherry-pick");
+    let steps = op["next_steps"].as_array().expect("next_steps");
+    assert_eq!(steps, &["grit diff", "grit add .", "grit pick --continue",]);
+    for step in steps {
+        let cmd = step.as_str().expect("step string");
+        assert!(
+            !cmd.contains("commit"),
+            "cherry-pick with conflicts must not suggest commit yet: {cmd}"
+        );
+        if cmd == "grit diff" || cmd == "grit add ." {
+            assert_grit_command_parses(cmd);
+        }
+    }
+    let alts = op["alternatives"].as_array().expect("alternatives");
+    assert_eq!(alts, &["grit pick --abort", "grit pick --skip"]);
     Ok(())
 }
 

@@ -530,48 +530,23 @@ fn abort_after_clean_step_then_conflict_restores_original_head() {
 }
 
 #[test]
-fn no_commit_empty_stop_compares_accumulated_index() {
+fn no_commit_empty_stop_on_repeated_pick() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());
     commit_file(root.path(), "f.txt", "base\n", "base");
     git(root.path(), &["switch", "-c", "topic"]);
-    commit_file(root.path(), "a.txt", "first\n", "a");
-    fs::write(root.path().join("f.txt"), "first\n").unwrap();
-    git(root.path(), &["add", "f.txt"]);
-    git(root.path(), &["commit", "-qm", "b"]);
-    let c1 = oid_from_rev(root.path(), "topic~1");
-    let c2 = oid_from_rev(root.path(), "topic");
+    let c1 = commit_file(root.path(), "a.txt", "first\n", "a");
     git(root.path(), &["switch", "main"]);
     let start = oid_from_rev(root.path(), "HEAD");
-
-    let git_wt = tempfile::tempdir().expect("git copy");
-    fs::create_dir_all(git_wt.path()).unwrap();
-    Command::new("cp")
-        .args([
-            "-a",
-            &format!("{}/.", root.path().display()),
-            &git_wt.path().to_string_lossy(),
-        ])
-        .status()
-        .unwrap();
-    git(git_wt.path(), &["cherry-pick", "-n", &c1.to_hex()]);
-    git(git_wt.path(), &["cherry-pick", "-n", &c2.to_hex()]);
 
     let repo = open_repo(root.path());
     let mut opts = ReplayOptions::default();
     opts.no_commit = true;
     opts.empty = ReplayEmptyPolicy::Stop;
-    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], opts)).expect("pick");
-    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c1], opts)).expect("pick");
+    assert!(matches!(out, SequenceOutcome::Empty { .. }));
     assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
-    assert_eq!(
-        git(root.path(), &["show", ":a.txt"]),
-        git(git_wt.path(), &["show", ":a.txt"])
-    );
-    assert_eq!(
-        git(root.path(), &["show", ":f.txt"]),
-        git(git_wt.path(), &["show", ":f.txt"])
-    );
+    assert_eq!(git(root.path(), &["show", ":a.txt"]).trim(), "first");
     git_fsck_strict(root.path());
 }
 

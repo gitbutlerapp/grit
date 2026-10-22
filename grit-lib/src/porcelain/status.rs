@@ -2868,7 +2868,11 @@ mod status_op_tests {
     }
 
     #[test]
-    fn status_operation_omitted_for_git_cherry_pick_conflict() {
+    fn status_operation_git_cherry_pick_conflict_shape() {
+        use crate::state::{
+            operation_alternatives, operation_next_steps, InProgressOperation, NextStep,
+        };
+
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         grit_test_support::git(root, &["init", "-q", "-b", "main"]);
@@ -2893,10 +2897,32 @@ mod status_op_tests {
         let model = status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
         assert!(model.state.cherry_pick_in_progress);
         assert!(!model.conflict_details.is_empty());
-        assert!(
-            model.operation.is_none(),
-            "git-started cherry-pick must not expose grit operation hints"
+        let op = model.operation.expect("cherry-pick operation");
+        assert_eq!(op.kind, InProgressOperation::CherryPick);
+        assert_eq!(
+            op.next_steps,
+            operation_next_steps(InProgressOperation::CherryPick, true)
         );
+        assert!(op.next_steps.contains(&NextStep::ResolveConflicts));
+        assert!(op.next_steps.contains(&NextStep::StageResolved));
+        assert!(op
+            .next_steps
+            .contains(&NextStep::Continue(InProgressOperation::CherryPick)));
+        assert!(!op
+            .next_steps
+            .iter()
+            .any(|s| matches!(s, NextStep::Abort(_))));
+        assert_eq!(
+            op.alternatives,
+            operation_alternatives(InProgressOperation::CherryPick)
+        );
+        assert!(op
+            .alternatives
+            .contains(&NextStep::Abort(InProgressOperation::CherryPick)));
+        assert!(op
+            .alternatives
+            .contains(&NextStep::Skip(InProgressOperation::CherryPick)));
+        assert!(!op.next_steps.iter().any(|s| matches!(s, NextStep::Commit)));
     }
 
     #[test]
