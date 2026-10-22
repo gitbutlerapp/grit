@@ -168,6 +168,7 @@ pub fn start_replay_sequence(
         ));
     }
     let mut todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
+    write_replay_sequence_start(repo, head_oid, req)?;
     run_sequence(
         repo,
         &refname,
@@ -228,6 +229,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         todo.remove(0);
     }
     write_sequencer_todo(repo.git_dir(), &todo)?;
+    write_sequencer_abort_safety(repo.git_dir(), new_oid)?;
     if todo.is_empty() {
         clear_replay_state(repo.git_dir())?;
         let created = replay_created_record(repo, source, new_oid)?;
@@ -242,7 +244,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         repo,
         &refname,
         new_oid,
-        head_oid,
+        new_oid,
         sequence_start,
         active.direction,
         identity,
@@ -415,6 +417,7 @@ fn run_sequence(
     let mut head = head_oid;
     let mut created_this_call = Vec::new();
     let _ = abort_safety;
+    write_sequencer_abort_safety(repo.git_dir(), head_oid)?;
     while let Some(entry) = todo.first().cloned() {
         match apply_one_step(
             repo,
@@ -431,6 +434,7 @@ fn run_sequence(
                 let record = replay_created_record(repo, entry.oid, oid)?;
                 created_so_far.push(record.clone());
                 created_this_call.push(record);
+                write_sequencer_abort_safety(repo.git_dir(), oid)?;
                 write_sequencer_todo(repo.git_dir(), todo)?;
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
@@ -550,6 +554,11 @@ fn apply_one_step(
     } else {
         head_tree
     };
+    let empty_compare_tree = if opts.no_commit {
+        ours_tree
+    } else {
+        head_tree
+    };
     let (base_tree, ours_tree, theirs_tree) = merge_trees_for_replay(
         repo,
         direction,
@@ -609,7 +618,7 @@ fn apply_one_step(
     }
 
     let new_tree = merged.result_tree;
-    if new_tree == head_tree {
+    if new_tree == empty_compare_tree {
         return match opts.empty {
             ReplayEmptyPolicy::Stop => Ok(StepResult::EmptyStop),
             ReplayEmptyPolicy::Drop => Ok(StepResult::DroppedEmpty),
@@ -625,7 +634,7 @@ fn apply_one_step(
                     &message,
                     &source_oid,
                     direction,
-                    head_tree,
+                    empty_compare_tree,
                     true,
                 )?;
                 *head = new_oid;
@@ -863,6 +872,29 @@ fn record_replay_stop(
     )
     .map_err(Error::Io)?;
     let _ = entry;
+    Ok(())
+}
+
+fn write_replay_sequence_start(repo: &Repository, sequence_start: ObjectId, req: &ReplaySequenceRequest) -> Result<()> {
+    let git_dir = repo.git_dir();
+    fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
+    fs::write(
+        git_dir.join("sequencer").join("head"),
+        format!("{}\n", sequence_start.to_hex()),
+    )
+    .map_err(Error::Io)?;
+    write_sequencer_abort_safety(git_dir, sequence_start)?;
+    write_persisted_options(git_dir, req)?;
+    Ok(())
+}
+
+fn write_sequencer_abort_safety(git_dir: &Path, head: ObjectId) -> Result<()> {
+    fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
+    fs::write(
+        git_dir.join("sequencer").join("abort-safety"),
+        format!("{}\n", head.to_hex()),
+    )
+    .map_err(Error::Io)?;
     Ok(())
 }
 

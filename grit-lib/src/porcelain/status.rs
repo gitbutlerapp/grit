@@ -2866,8 +2866,6 @@ mod status_op_tests {
 
     #[test]
     fn status_operation_omitted_for_git_cherry_pick_conflict() {
-        use crate::state::{InProgressOperation, NextStep};
-
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         grit_test_support::git(root, &["init", "-q", "-b", "main"]);
@@ -2892,16 +2890,10 @@ mod status_op_tests {
         let model = status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
         assert!(model.state.cherry_pick_in_progress);
         assert!(!model.conflict_details.is_empty());
-        let op = model
-            .operation
-            .as_ref()
-            .expect("git cherry-pick conflict should expose operation guidance");
-        assert_eq!(op.kind, InProgressOperation::CherryPick);
-        assert!(op
-            .next_steps
-            .iter()
-            .any(|s| matches!(s, NextStep::Continue(_))));
-        assert!(!op.next_steps.contains(&NextStep::Commit));
+        assert!(
+            model.operation.is_none(),
+            "git-started cherry-pick must not expose grit operation hints"
+        );
     }
 
     #[test]
