@@ -9,8 +9,11 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::config::ConfigSet;
-use crate::objects::ObjectId;
+use crate::branch_tracking::apply_push_set_upstream;
+use crate::config::{parse_git_config_maybe_bool, ConfigSet};
+use crate::merge_base::commits_reachable_excluding_ancestors_of;
+use crate::objects::{ObjectId, ObjectKind};
+use crate::push_report::PushRefResult;
 use crate::refs;
 use crate::refspec::{parse_push_refspec, RefspecItem};
 use crate::repo::Repository;
@@ -31,6 +34,10 @@ pub struct PushRequest {
     pub tags: bool,
     /// Remote refs to delete (`--delete`).
     pub delete: Vec<String>,
+    /// Push annotated tags reachable from the commits being pushed (`--follow-tags`).
+    pub follow_tags: bool,
+    /// After a successful branch push, write `branch.<name>.remote` / `.merge` (`-u`).
+    pub set_upstream: bool,
 }
 
 /// A fully resolved push target.
@@ -64,6 +71,8 @@ pub enum PushPlanKind {
 pub struct PushPlanContext {
     /// Advertised ref names on the remote (for delete mapping and dst guessing).
     pub remote_ref_names: HashSet<String>,
+    /// Tips of `refs/heads/*` on the remote (follow-tags walk boundary).
+    pub remote_branch_tips: HashSet<ObjectId>,
 }
 
 /// Errors while planning a push (typed; no stringly matching in callers).
@@ -143,21 +152,113 @@ pub fn resolve_push(
     let remote = configured_remote_for_push(repo, config, request.remote.as_deref())?;
     validate_remote(config, &remote)?;
 
-    if request.refspecs.is_empty() {
-        return resolve_default_push(repo, config, &remote, ctx);
+    let follow_tags = request.follow_tags || push_follow_tags_config(config);
+
+    let mut resolved = if request.refspecs.is_empty() {
+        resolve_default_push(repo, config, &remote, ctx)?
+    } else {
+        let mut specs = Vec::new();
+        for spec in &request.refspecs {
+            specs.extend(resolve_cli_refspec(repo, config, &remote, spec, ctx)?);
+        }
+        let branch_label = branch_label_from_specs(repo, &specs);
+        ResolvedPush {
+            remote,
+            specs,
+            branch_label,
+            kind: PushPlanKind::Refspecs,
+        }
+    };
+
+    if follow_tags {
+        let extra = follow_tag_push_specs(repo, &resolved.specs, ctx)?;
+        resolved.specs.extend(extra);
+    }
+    Ok(resolved)
+}
+
+/// Whether `push.followTags` is enabled in config (default false).
+#[must_use]
+pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
+    config
+        .get("push.followTags")
+        .or_else(|| config.get("push.followtags"))
+        .and_then(|v| parse_git_config_maybe_bool(&v))
+        .unwrap_or(false)
+}
+
+/// Append annotated tag refspecs reachable from the branch updates in `specs`.
+///
+/// Matches `git push --follow-tags`: lightweight tags are skipped, tags already on the remote
+/// are skipped, and reachability is computed with a revwalk from pushed tips that stops at
+/// remote-advertised branch tips.
+pub fn follow_tag_push_specs(
+    repo: &Repository,
+    specs: &[PushRefSpec],
+    ctx: &PushPlanContext,
+) -> PlanResult<Vec<PushRefSpec>> {
+    let tips: Vec<ObjectId> = specs
+        .iter()
+        .filter(|s| !s.delete)
+        .filter_map(|s| s.src)
+        .collect();
+    if tips.is_empty() {
+        return Ok(Vec::new());
+    }
+    let hide: Vec<ObjectId> = ctx.remote_branch_tips.iter().copied().collect();
+    let reachable = commits_reachable_excluding_ancestors_of(repo, &tips, &hide, None)
+        .map_err(|e| PushPlanError::Message(e.to_string()))?;
+    let mut reachable_commits: HashSet<ObjectId> = reachable.into_iter().collect();
+    for tip in tips {
+        reachable_commits.insert(tip);
     }
 
-    let mut specs = Vec::new();
-    for spec in &request.refspecs {
-        specs.extend(resolve_cli_refspec(repo, config, &remote, spec, ctx)?);
+    let existing: HashSet<&str> = specs.iter().map(|s| s.dst.as_str()).collect();
+    let odb = repo.odb();
+    let mut out = Vec::new();
+    for (tag_name, tag_oid) in list_local_refs(repo.git_dir(), "refs/tags/")? {
+        if ctx.remote_ref_names.contains(&tag_name) || existing.contains(tag_name.as_str()) {
+            continue;
+        }
+        let Ok(obj) = odb.read(&tag_oid) else {
+            continue;
+        };
+        if obj.kind != ObjectKind::Tag {
+            continue;
+        }
+        let Ok((peeled, _)) = odb.peel_tags(tag_oid) else {
+            continue;
+        };
+        if !reachable_commits.contains(&peeled) {
+            continue;
+        }
+        out.push(push_spec(
+            Some(tag_oid),
+            Some(tag_name.clone()),
+            tag_name,
+            false,
+            false,
+        ));
     }
-    let branch_label = branch_label_from_specs(repo, &specs);
-    Ok(ResolvedPush {
-        remote,
-        specs,
-        branch_label,
-        kind: PushPlanKind::Refspecs,
-    })
+    Ok(out)
+}
+
+/// After a successful push, apply `-u` / `--set-upstream` when [`PushRequest::set_upstream`] was set.
+///
+/// Returns the short names of branches whose upstream config was written. No-op when `set_upstream`
+/// is false or `dry_run` is true.
+pub fn apply_set_upstream_after_push(
+    repo: &Repository,
+    remote: &str,
+    set_upstream: bool,
+    dry_run: bool,
+    specs: &[PushRefSpec],
+    results: &[PushRefResult],
+) -> Result<Vec<String>, crate::error::Error> {
+    if !set_upstream || dry_run {
+        return Ok(Vec::new());
+    }
+    apply_push_set_upstream(repo, remote, specs, results)
 }
 
 fn resolve_delete_push(

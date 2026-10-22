@@ -17,7 +17,6 @@ fn dry_run_does_not_update_bare_remote() {
         .in_dir(&client)
         .exec();
     assert!(out.ok(), "grit push --dry-run failed: {}", out.stderr);
-<<<<<<< New base: Fix push command doc JSON field table for schema CI
     let after_refs = git(bare, &["for-each-ref", "--format=%(refname)"]);
     let after_objects = git(bare, &["rev-list", "--all", "--count"]);
     assert_eq!(before_refs, after_refs, "bare refs changed after dry-run");
@@ -50,16 +49,4 @@ fn bare_path_remote_positional_not_parsed_as_refspec() {
         "expected push plan output, got: {}",
         out.stdout
     );
-||||||| Common ancestor
-    let after = git(bare, &["for-each-ref", "--format=%(refname)"]);
-    assert_eq!(before, after, "bare refs changed after dry-run");
-=======
-    let after_refs = git(bare, &["for-each-ref", "--format=%(refname)"]);
-    let after_objects = git(bare, &["rev-list", "--all", "--count"]);
-    assert_eq!(before_refs, after_refs, "bare refs changed after dry-run");
-    assert_eq!(
-        before_objects, after_objects,
-        "bare objects changed after dry-run"
-    );
->>>>>>> Current commit: Fix push review blockers: JSON fields, remote DWIM, matching refspec, src
 }
