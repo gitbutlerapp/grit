@@ -196,12 +196,12 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
         }
     };
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         depth: Some(1),
         ..Default::default()
     };
-    let outcome = fetch_remote(&local_git, &mut *conn, &opts, &mut NoProgress)
+    let outcome = fetch_remote(&local_git, &mut *conn, &mut opts, &mut NoProgress)
         .expect("shallow depth=1 fetch over git daemon");
 
     // The tip landed; its parent is absent (truncated history).
@@ -368,12 +368,12 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
             return;
         }
     };
-    let shallow_opts = FetchOptions {
+    let mut shallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         depth: Some(1),
         ..Default::default()
     };
-    fetch_remote(&local_git, &mut *conn, &shallow_opts, &mut NoProgress)
+    fetch_remote(&local_git, &mut *conn, &mut shallow_opts, &mut NoProgress)
         .expect("initial shallow fetch");
     drop(conn);
 
@@ -397,12 +397,12 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
             return;
         }
     };
-    let unshallow_opts = FetchOptions {
+    let mut unshallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         unshallow: true,
         ..Default::default()
     };
-    let outcome = fetch_remote(&local_git, &mut *conn, &unshallow_opts, &mut NoProgress)
+    let outcome = fetch_remote(&local_git, &mut *conn, &mut unshallow_opts, &mut NoProgress)
         .expect("unshallow fetch");
     drop(conn);
 

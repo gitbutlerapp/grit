@@ -136,14 +136,14 @@ fn fetch_v0_malicious_advertisement_preserves_config() {
         .with_caps(&["multi_ack_detailed", "side-band-64k", "ofs-delta"])
         .with_version(0);
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::None,
         ..Default::default()
     };
 
     let mut conn = conn;
-    fetch_remote(&git_dir, &mut conn, &opts, &mut NoProgress).expect("fetch completes");
+    fetch_remote(&git_dir, &mut conn, &mut opts, &mut NoProgress).expect("fetch completes");
     assert_config_unchanged(&git_dir, &config_before);
     assert_no_tracking_ref_for_traversal(&git_dir);
 }
@@ -167,14 +167,14 @@ fn fetch_v2_malicious_ls_refs_preserves_config() {
         ])
         .with_version(2);
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::None,
         ..Default::default()
     };
 
     let mut conn = conn;
-    fetch_remote(&git_dir, &mut conn, &opts, &mut NoProgress).expect("v2 fetch completes");
+    fetch_remote(&git_dir, &mut conn, &mut opts, &mut NoProgress).expect("v2 fetch completes");
     assert_config_unchanged(&git_dir, &config_before);
     assert_no_tracking_ref_for_traversal(&git_dir);
 }

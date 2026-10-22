@@ -197,6 +197,7 @@ pub(crate) mod bitmap_walk;
 pub(crate) mod fetch;
 pub(crate) mod fetch_head;
 pub(crate) mod fetch_negotiator;
+mod fetch_request;
 pub(crate) mod filter_process;
 pub(crate) mod fmt_merge_msg;
 pub(crate) mod fsck;

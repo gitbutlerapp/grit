@@ -20,6 +20,10 @@ pub mod fetch {
     //! fetch API (re-exported at this path).
     pub use crate::fetch::*;
 }
+pub mod fetch_request {
+    //! Explicit fetch refspec resolution.
+    pub use crate::fetch_request::*;
+}
 pub mod push {
     //! push API (re-exported at this path).
     pub use crate::push::*;

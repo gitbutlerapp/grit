@@ -718,6 +718,24 @@ pub enum Error {
     #[error("could not read from remote repository")]
     RemoteReadFailed,
 
+    /// Explicit fetch refspec resolution failed (missing or ambiguous source).
+    #[error("{0}")]
+    FetchRefspec(#[from] crate::fetch_request::FetchRefspecError),
+
+    /// Fetch refused to overwrite a local branch with a non-fast-forward update.
+    #[error("non-fast-forward update for {local_ref}")]
+    FetchNonFastForward {
+        /// Local ref that would have been overwritten.
+        local_ref: String,
+    },
+
+    /// Fetch refused to update the branch checked out in this or a linked worktree.
+    #[error("cannot fetch into checked-out branch '{branch}'")]
+    FetchIntoCheckedOutBranch {
+        /// Short branch name under `refs/heads/`.
+        branch: String,
+    },
+
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.

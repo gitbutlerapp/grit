@@ -208,13 +208,13 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
 
     let main_oid = rev_parse(&source, "refs/heads/main");
     let mut cap = RemoteCap(Vec::new());
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::Following,
         remote_progress,
         ..Default::default()
     };
-    fetch_remote(&local_git, &mut conn, &opts, &mut cap).expect("fetch");
+    fetch_remote(&local_git, &mut conn, &mut opts, &mut cap).expect("fetch");
 
     let got = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
     assert_eq!(got, main_oid);
