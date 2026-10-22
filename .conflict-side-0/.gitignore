@@ -1,0 +1,23 @@
+target/*
+# Build dirs agents create with --target-dir (target-review-62/, review-target-910/)
+/target*/
+/review-target*/
+# rustup state when RUSTUP_HOME points into the checkout
+/.rustup/
+.claude/
+scripts/__pycache__
+scripts/subscripts/__pycache__
+scripts/tests/__pycache__
+.env
+logs/agent_*
+reports/*
+.DS_Store
+
+# Editor swap files (vim)
+*.swp
+*.swo
+.*.sw?
+
+# Agent skills installed locally by tools (e.g. GitButler)
+.agents/skills/
+grit-lib/tests/fixtures/tree_sha256/git-dot-git-1776/

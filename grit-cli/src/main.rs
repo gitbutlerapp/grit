@@ -1044,7 +1044,8 @@ enum Command {
         /// Commits or ranges to pick (`A..B`, branch tips, oids). Omit with `--continue`, `--abort`, or `--skip`.
         #[arg(
             required_unless_present_any = ["continue_pick", "abort", "skip"],
-            value_name = "COMMIT"
+            value_name = "COMMIT",
+            conflicts_with_all = ["continue_pick", "abort", "skip"]
         )]
         commits: Vec<String>,
         /// Parent number when picking a merge commit (1-based, long only).

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cursor usage summary</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+  padding: 2rem;
+  max-width: 960px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+h1 { font-size: 1.75rem; margin-bottom: 0.25rem; color: #f0f6fc; }
+.sub { color: #7d8590; font-size: 0.9rem; margin-bottom: 1.75rem; }
+h2 {
+  font-size: 1.1rem;
+  color: #f0f6fc;
+  margin: 2rem 0 0.75rem;
+  font-weight: 600;
+}
+p { margin-bottom: 1rem; color: #c9d1d9; font-size: 0.95rem; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin-bottom: 1rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid #30363d;
+}
+th {
+  color: #7d8590;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr:hover td { background: #161b22; }
+.bar-cell { width: 28%; vertical-align: middle; }
+.bar-wrap {
+  height: 8px;
+  border-radius: 4px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #388bfd, #79c0ff);
+  border-radius: 4px;
+  min-width: 2px;
+}
+.hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.stat {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  text-align: center;
+}
+.stat-val {
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: #79c0ff;
+  letter-spacing: -0.02em;
+}
+.stat-lbl {
+  font-size: 0.72rem;
+  color: #7d8590;
+  margin-top: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.note {
+  font-size: 0.82rem;
+  color: #6e7681;
+  margin-top: 0.5rem;
+}
+code { font-size: 0.85em; background: #21262d; padding: 0.1em 0.35em; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Cursor usage summary</h1>
+<p class="sub">Source: <code>data/usage-events-2026-04-08.csv</code> · Dates are UTC · Generated 2026-04-08</p>
+
+<p>This report sums the <strong>Total Tokens</strong> column for every row in the export (699 events with token data). “Per day” groups events by the calendar date of the timestamp.</p>
+
+<div class="hero">
+  <div class="stat">
+    <div class="stat-val">8,493,254,265</div>
+    <div class="stat-lbl">Total tokens</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">699</div>
+    <div class="stat-lbl">Events (rows)</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">7</div>
+    <div class="stat-lbl">Calendar days</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">$1,052.03</div>
+    <div class="stat-lbl">On-demand cost (sum of numeric Cost)</div>
+  </div>
+</div>
+<p class="note">Rows with non-numeric <code>Cost</code> values (Included, Free, etc.) are omitted from the dollar total; 85 rows had parseable numeric costs.</p>
+
+<h2>Usage by calendar day (UTC)</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th class="num">Events</th>
+      <th class="num">Total tokens</th>
+      <th class="num">Share</th>
+      <th class="bar-cell"></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2026-04-08</td>
+      <td class="num">143</td>
+      <td class="num">1,142,969,084</td>
+      <td class="num">13.5%</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill" style="width:46.3%"></div></div></td>
+    </tr>
+    <tr>
+      <td>2026-04-07</td>
+      <td class="num">291</td>
+      <td class="num">2,192,123,837</td>
+      <td class="num">25.8%</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill" style="width:88.7%"></div></div></td>
+    </tr>
+    <tr>
+      <td>2026-04-06</td>
+      <td class="num">71</td>
+      <td class="num">2,470,237,505</td>
+      <td class="num">29.1%</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill" style="width:100%"></div></div></td>
+    </tr>
+    <tr>
+      <td>2026-04-05</td>
+      <td class="num">53</td>
+      <td class="num">2,356,653,064</td>
+      <td class="num">27.8%</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill" style="width:95.4%"></div></div></td>
+    </tr>
+    <tr>
+      <td>2026-04-02</td>
+      <td class="num">2</td>
+      <td class="num">371,672</td>
+      <td class="num">0.0%</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill" style="width:0.02%"></div></div></td>
+    </tr>
+    <tr>
+      <td>2026-04-01</td>
+      <td class="num">127</td>
+      <td class="num">319,225,164</td>
+      <td class="num">3.8%</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill" style="width:12.9%"></div></div></td>
+    </tr>
+    <tr>
+      <td>2026-03-31</td>
+      <td class="num">12</td>
+      <td class="num">11,673,939</td>
+      <td class="num">0.1%</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill" style="width:0.5%"></div></div></td>
+    </tr>
+  </tbody>
+</table>
+<p class="note">Bar length is relative to the busiest day in this file (2026-04-06).</p>
+
+<h2>Usage by model (all days)</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Model</th>
+      <th class="num">Total tokens</th>
+      <th class="num">Share</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>gpt-5.3-codex-high</td><td class="num">5,353,945,577</td><td class="num">63.0%</td></tr>
+    <tr><td>composer-2</td><td class="num">2,213,145,910</td><td class="num">26.1%</td></tr>
+    <tr><td>composer-2-fast</td><td class="num">593,513,877</td><td class="num">7.0%</td></tr>
+    <tr><td>gpt-5.3-codex</td><td class="num">168,495,324</td><td class="num">2.0%</td></tr>
+    <tr><td>Premium (Codex 5.3)</td><td class="num">136,580,861</td><td class="num">1.6%</td></tr>
+    <tr><td>auto</td><td class="num">18,132,780</td><td class="num">0.2%</td></tr>
+    <tr><td>claude-4.6-sonnet-medium-thinking</td><td class="num">7,472,212</td><td class="num">0.1%</td></tr>
+    <tr><td>claude-4.6-opus-high-thinking</td><td class="num">1,967,724</td><td class="num">0.0%</td></tr>
+  </tbody>
+</table>
+
+</body>
+</html>

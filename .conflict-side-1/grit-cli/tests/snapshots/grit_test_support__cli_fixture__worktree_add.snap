@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Created worktree at [REPO]/linked-wt on branch wt-new\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"add\",\"path\":\"[REPO]/linked-wt\",\"branch\":\"wt-new\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Worktree add\n\n- Created **`[REPO]/linked-wt`** on branch **`wt-new`** · `83352a6`\n",
+    "stderr": ""
+  }
+}

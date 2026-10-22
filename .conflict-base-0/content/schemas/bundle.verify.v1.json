@@ -1,0 +1,61 @@
+{
+  "$id": "https://grit-scm.com/schemas/bundle.verify/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "BundleRefJson": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "oid"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Outcome of `grit bundle verify`.",
+  "properties": {
+    "hash_algorithm": {
+      "type": "string"
+    },
+    "missing_prerequisites": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "path": {
+      "type": "string"
+    },
+    "prerequisites": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "references": {
+      "items": {
+        "$ref": "#/definitions/BundleRefJson"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "hash_algorithm",
+    "missing_prerequisites",
+    "ok",
+    "path",
+    "prerequisites",
+    "references"
+  ],
+  "title": "BundleVerifyOutcome",
+  "type": "object"
+}

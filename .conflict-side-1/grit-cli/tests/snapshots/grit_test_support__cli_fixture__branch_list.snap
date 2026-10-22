@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "  feature\n* main\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"list\",\"current\":\"main\",\"branches\":[{\"name\":\"feature\",\"current\":false,\"is_remote\":false,\"oid\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"short_oid\":\"062ca6e\"},{\"name\":\"main\",\"current\":true,\"is_remote\":false,\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"short_oid\":\"83352a6\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Branches\n- `feature`\n- **`main`** (current)\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$id": "https://grit-scm.com/schemas/auth.logout/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit auth logout`.",
+  "properties": {
+    "host": {
+      "type": "string"
+    },
+    "logged_out": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "host",
+    "logged_out"
+  ],
+  "title": "LogoutOutcome",
+  "type": "object"
+}

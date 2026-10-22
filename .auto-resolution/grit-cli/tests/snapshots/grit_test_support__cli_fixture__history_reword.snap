@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Rewrote 2 commit(s)\n  commit 062ca6e → dcaee53 (reworded subject)\n  commit 83352a6 → 65887b9 (second)\n  refs/heads/feature 062ca6e → dcaee53\n  refs/heads/main 83352a6 → 65887b9\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"operation\":\"reword\",\"rewritten\":[{\"old\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"new\":\"dcaee53d75d9e05cf33140694c8dccbd36ffefc8\",\"change_id\":\"prkwwuwrytvxrwozplzrxmvozwutplkq\",\"subject\":\"reworded subject\"},{\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"65887b9fbc13fa5b5299b046f68010c71b2afcb3\",\"change_id\":\"xzyqzyyzswyupvtlsovyzultryuqzlvk\",\"subject\":\"second\"}],\"refs\":[{\"ref\":\"refs/heads/feature\",\"name\":\"refs/heads/feature\",\"old\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"new\":\"dcaee53d75d9e05cf33140694c8dccbd36ffefc8\"},{\"ref\":\"refs/heads/main\",\"name\":\"refs/heads/main\",\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"65887b9fbc13fa5b5299b046f68010c71b2afcb3\"}],\"head\":{\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"65887b9fbc13fa5b5299b046f68010c71b2afcb3\"},\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## History reword\n\n- commit `062ca6e` → `dcaee53` — reworded subject\n  - change id `prkwwuw`\n- commit `83352a6` → `65887b9` — second\n  - change id `xzyqzyy`\n- `refs/heads/feature` `062ca6e` → `dcaee53`\n- `refs/heads/main` `83352a6` → `65887b9`\n- HEAD `83352a6` → `65887b9`\n",
+    "stderr": ""
+  }
+}

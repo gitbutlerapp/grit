@@ -21,35 +21,13 @@ use crate::commit_pretty::format_reference_line;
 use crate::error::Result;
 use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::repo::Repository;
-use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
-
-/// Commits reachable from `include` but not from `exclude`, in revert apply order.
-///
-/// Uses the same revision set as `git rev-list <include> --not <exclude>` with
-/// `--topo-order` (tip before ancestors) so skewed committer dates cannot reorder
-/// descendants before their parents.
-///
-/// # Errors
-///
-/// Propagates rev-list and object read errors.
-pub fn revision_range_apply_order(
-    repo: &Repository,
-    include: &[ObjectId],
-    exclude: &[ObjectId],
-) -> Result<Vec<ObjectId>> {
-    let positive: Vec<String> = include.iter().map(ObjectId::to_hex).collect();
-    let negative: Vec<String> = exclude.iter().map(ObjectId::to_hex).collect();
-    let opts = RevListOptions {
-        ordering: OrderingMode::Topo,
-        ..RevListOptions::default()
-    };
-    Ok(rev_list(repo, &positive, &negative, &opts)?.commits)
-}
 
 /// Commits reachable from `include` tips but not from `exclude` tips, newest-first.
 ///
-/// Prefer [`revision_range_apply_order`] for revision ranges; this helper remains for
-/// callers that intentionally collect a wider reachable set sorted by committer date.
+/// Mirrors `git rev-list <include> --not <exclude>` ordering for revert: a first-parent
+/// reachability walk collecting commits whose ancestry is not pruned by an excluded tip,
+/// returned in descending committer-date order (newest first), matching how `git revert`
+/// replays a range.
 ///
 /// # Errors
 ///
@@ -118,7 +96,6 @@ pub fn merge_commit_message_for_revert(
     commit_oid: ObjectId,
     use_reference: bool,
     comment_char: char,
-    mainline_parent: Option<ObjectId>,
 ) -> (String, String) {
     let subject_line = commit.message.lines().next().unwrap_or("");
     let oid_full = commit_oid.to_hex();
@@ -132,14 +109,7 @@ pub fn merge_commit_message_for_revert(
         return (title, body);
     }
 
-    let body = if let Some(parent) = mainline_parent {
-        format!(
-            "This reverts merge commit {oid_full} (mainline parent {parent}).\n",
-            parent = parent.to_hex()
-        )
-    } else {
-        format!("This reverts commit {oid_full}.\n")
-    };
+    let body = format!("This reverts commit {oid_full}.\n");
 
     if let Some(rest) = subject_line.strip_prefix("Revert \"") {
         if let Some(orig) = rest.strip_suffix('"') {
@@ -154,14 +124,14 @@ pub fn merge_commit_message_for_revert(
     (title, body)
 }
 
-/// Extra body paragraph when reverting a merge commit with an explicit mainline parent.
+/// Extra body paragraph when reverting a merge using `--mainline`.
 ///
-/// Wording is Grit-specific (not Git's sequencer template).
+/// Wording is grit-specific (not Git's sequencer template) while remaining compatible
+/// with the `This reverts commit <oid>.` trailer line above.
 #[must_use]
-pub fn merge_mainline_revert_note(source_oid: ObjectId, mainline_parent: ObjectId) -> String {
+pub fn revert_mainline_extra_body(_reverted: ObjectId, mainline_parent: ObjectId) -> String {
     format!(
-        "Reverted merge {} using mainline parent {}.\n\n",
-        source_oid.to_hex(),
+        "Mainline parent {} was used when building the revert tree.\n",
         mainline_parent.to_hex()
     )
 }

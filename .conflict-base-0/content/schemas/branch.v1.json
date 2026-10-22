@@ -1,0 +1,264 @@
+{
+  "$id": "https://grit-scm.com/schemas/branch/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "BranchEntry": {
+      "description": "One branch in a `list` outcome.",
+      "properties": {
+        "current": {
+          "type": "boolean"
+        },
+        "is_remote": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "short_oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upstream": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BranchUpstreamEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "current",
+        "is_remote",
+        "name"
+      ],
+      "type": "object"
+    },
+    "BranchUpstreamEntry": {
+      "description": "Configured upstream for a local branch in a `list` outcome.",
+      "properties": {
+        "ahead": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "behind": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gone": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit branch`, tagged by `action`.",
+  "oneOf": [
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "list"
+          ],
+          "type": "string"
+        },
+        "branches": {
+          "items": {
+            "$ref": "#/definitions/BranchEntry"
+          },
+          "type": "array"
+        },
+        "current": {
+          "description": "The current branch, or `null` when detached / unborn.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "branches"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "create"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "short_oid": {
+          "type": "string"
+        },
+        "upstream": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "name",
+        "oid",
+        "short_oid"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "delete"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "short_oid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "name",
+        "oid",
+        "short_oid"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "rename"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "new": {
+          "type": "string"
+        },
+        "oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old": {
+          "type": "string"
+        },
+        "replaced": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "short_oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "new",
+        "old"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "set_upstream"
+          ],
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "upstream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "branch",
+        "upstream"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "unset_upstream"
+          ],
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "branch"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "BranchOutcome"
+}

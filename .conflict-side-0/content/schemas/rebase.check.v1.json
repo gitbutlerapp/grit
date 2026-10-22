@@ -1,0 +1,80 @@
+{
+  "$id": "https://grit-scm.com/schemas/rebase.check/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ConflictJson": {
+      "description": "One conflicted path in `--json` operation output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "RebaseCheckResult": {
+      "description": "Outcome category for [`RebaseCheckOutcome`].",
+      "enum": [
+        "up_to_date",
+        "clean",
+        "conflicts"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Result of `grit rebase --check`.",
+  "properties": {
+    "check": {
+      "type": "boolean"
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commits": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "conflicts": {
+      "items": {
+        "$ref": "#/definitions/ConflictJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "operation": {
+      "type": "string"
+    },
+    "result": {
+      "$ref": "#/definitions/RebaseCheckResult"
+    }
+  },
+  "required": [
+    "check",
+    "operation",
+    "result"
+  ],
+  "title": "RebaseCheckOutcome",
+  "type": "object"
+}

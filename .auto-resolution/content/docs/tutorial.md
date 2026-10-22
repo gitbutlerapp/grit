@@ -1,0 +1,230 @@
+---
+title: Tutorial
+summary: Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.
+---
+
+This walkthrough covers the commands you'll use every day. It assumes you have [installed grit](../install/) and know roughly what a commit and a branch are. The output shown is what `grit` prints, minus the colors.
+
+Regenerated on 2026-10-07 by running the listed commands with `grit` built from this repository (`cargo build --release -p grit-cli`), with `NO_COLOR=1` and author identity `Ada Lovelace <ada@example.com>`.
+
+## Tell grit who you are
+
+Every commit records an author. Set your name and email once, in your global config:
+
+```console
+$ grit config --global user.name "Ada Lovelace"
+$ grit config --global user.email ada@example.com
+```
+
+`grit` reads and writes the same config files as Git, so if you've already set these up for Git, you can skip this step.
+
+## Create a repository
+
+```console
+$ grit init project
+Initialized empty repository in /workspace/project/.git
+$ cd project
+```
+
+To work on an existing project instead, copy it with [`grit clone`](../clone/) and skip ahead to the next section:
+
+```console
+$ grit clone https://github.com/gitbutlerapp/grit.git
+```
+
+## Your home base: grit status
+
+Running `grit` with no arguments shows where you are and what's changed. Add a couple of files and look:
+
+```console
+$ echo "# Notes" > README.md
+$ echo "fn main() {}" > main.rs
+$ grit
+On main — no commits yet
+
+Untracked
+  ?  untracked     README.md
+  ?  untracked     main.rs
+
+→ grit add <file> to stage
+```
+
+The last line always suggests the next step. You'll come back to this screen a lot; [`grit status`](../status/) (or `grit st`) shows the same thing.
+
+## Record a commit
+
+[`grit commit`](../commit/) stages every change in the working tree and records it in one step:
+
+```console
+$ grit commit "Start the project"
+[main 310fdb0] Start the project
+2 changes committed
+```
+
+By default `grit commit` records every change in one step. When you need tighter control, use [`grit add`](../add/) (`--dry-run`, `-u`, or path lists) and [`grit commit --staged`](../commit/) or `grit commit -m "…" -- <paths>` to commit only part of the work while leaving other staged edits in the index.
+
+Each grit commit also gets a stable [change id](../change-ids/) that stays with the same logical change when you amend or rewrite history; `grit log` shows a short `change …` prefix beside each commit.
+
+Look at the history with [`grit log`](../log/):
+
+```console
+$ grit log
+  310fdb0  ada  just now  Start the project
+```
+
+## Work on a branch
+
+Create a branch and switch to it with [`grit switch -c`](../switch/):
+
+```console
+$ grit switch -c feature
+Created and switched to branch feature
+```
+
+Make a change and look at it with [`grit diff`](../diff/) before committing:
+
+```console
+$ printf 'fn main() {\n    println!("hi");\n}\n' > main.rs
+$ grit diff
+
+main.rs
+@@ -1 +1 @@
+ 1    │ - fn main() {}
+    1 │ + fn main() {
+    2 │ +     println!("hi");
+    3 │ + }
+```
+
+The two number columns are the old and new line numbers. Commit the change:
+
+```console
+$ grit commit "Say hi"
+[feature 2e409e2] Say hi
+1 change committed
+```
+
+[`grit show`](../show/) displays a commit, its message and the files it changed. With no argument, it shows the latest commit:
+
+```console
+$ grit show
+branch feature
+commit 2e409e26f8b370ea1928a8fb93dcf2e025418e1f
+Author: Ada Lovelace <ada@example.com>
+Date:   2026-10-07 14:55:47 +0000
+
+    Say hi
+
+ main.rs |   4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+```
+
+## Merge it back
+
+Switch back to `main` and [merge](../merge/) the branch in. Nothing else has happened on `main`, so `grit` just moves `main` forward:
+
+```console
+$ grit switch main
+Switched to branch main
+$ grit merge feature
+Fast-forwarded feature → 2e409e2
+```
+
+The branch is done, so [delete it](../branch/):
+
+```console
+$ grit branch -d feature
+Deleted branch feature (was 2e409e2).
+```
+
+`grit branch -d` refuses to delete a branch whose commits haven't been merged into the branch you're on. Use `--force-delete` (or `-D`) when you really mean it.
+
+## Share it with a remote
+
+A remote is another copy of the repository, usually on a server. Add one called `origin` with [`grit remote add`](../remote/), then [push](../push/):
+
+```console
+$ grit remote add origin https://github.com/ada/project.git
+Added remote origin → https://github.com/ada/project.git
+$ grit push
+  pushed main → origin refs/heads/main
+```
+
+`grit push` sends the current branch to a branch with the same name on `origin`, creating it if needed. To publish under another name, pass a refspec: `grit push origin HEAD:refs/heads/experiment`. Set upstream tracking with [`grit branch -u`](../branch/) when you want `grit pull` to know which remote branch to follow. For GitHub over HTTPS, [`grit auth`](../auth/) signs you in, and `grit` offers to run it if a push fails for lack of credentials.
+
+To download updates without moving your branch, [`grit fetch`](../fetch/) is enough. Fetch a single branch when you do not need every remote-tracking ref:
+
+```console
+$ grit fetch origin main
+  refs/remotes/origin/main  ← refs/heads/main  a8e620a → b52cca6
+Fetched 1 update from origin.
+```
+
+To get other people's work into your branch, run [`grit pull`](../pull/). It fetches and integrates: fast-forward when you have no local commits, a merge commit when both sides moved, or a rebase when you pass `--rebase` (or set `pull.rebase`):
+
+```console
+$ grit pull
+Merged origin/main into the current branch (91275a2)
+
+$ grit pull --rebase
+Rebased onto origin/main (c4f1a9b)
+```
+
+Use [`grit pull --ff-only`](../pull/) in scripts that must refuse merge commits (exit **1** with `refused_not_ff` when histories diverged).
+
+If someone pushed before you, a normal `grit push` is rejected:
+
+```console
+$ grit push
+  rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
+```
+
+To replay your own commits onto another base without fetching first, use [`grit rebase`](../rebase/) (default upstream is `@{upstream}`; `--onto` for Git's `--onto`).
+
+After rewriting commits with [`grit history`](../history/) (reword, drop, fixup, squash, or rebase), fetch so your remote-tracking refs are current, then push with a lease:
+
+```console
+$ grit fetch origin
+$ grit push --force-with-lease
+  pushed main → origin refs/heads/main
+```
+
+## Tag a release
+
+[`grit tag`](../tag/) marks the current commit, and `grit push --tags` publishes your tags. Signed or `tree-sha256` annotated tags can be checked locally with `grit tag --verify`:
+
+```console
+$ grit tag v0.1 -m 'release'
+Created tag v0.1
+$ grit tag --verify v0.1 --no-signature
+tag v0.1 (…): ok
+$ grit push --tags
+  pushed --tags → origin refs/tags/v0.1
+```
+
+## When things conflict
+
+When `grit merge`, `grit pull`, or `grit pick` hits conflicting changes, grit stops with conflict markers in the worktree and records in-progress state (for pick/revert, Git-compatible `CHERRY_PICK_HEAD` and `.git/sequencer/`). Fix the files, `grit add` the resolved paths, then run `grit merge` with a normal commit for merges, or `grit pick --continue` / `grit revert --continue` for cherry-picks and reverts. Use `--abort` on the same command to cancel.
+
+`grit` refuses to switch branches, merge, or pull when your local edits would be overwritten by files that differ on the other side. Unrelated uncommitted edits are kept, like Git. Use [`grit reset --soft HEAD~1`](../reset/) to uncommit while keeping changes staged.
+
+## Offline bundles and linked worktrees
+
+To move commits without a network, [`grit bundle create`](../bundle/) writes a single file; [`grit bundle unbundle`](../bundle/) ingests it into another repository. For a second checkout of the same repository, [`grit worktree add`](../worktree/) creates a linked working tree; [`grit worktree lock`](../worktree/) marks one as locked when you need to prevent accidental removal.
+
+## Scripting
+
+Every command takes `--json` and prints a single JSON object, which is handy for scripts and agents. `--filter` picks out the part you need:
+
+```console
+$ grit status --json --filter '{branch, clean}'
+{
+  "branch": "main",
+  "clean": true
+}
+```
+
+See [Scripting with grit](../scripting/) for details, and each command's page for its JSON fields.
+
+## Where to go next
+
+Every command has a man page with its options and examples. Start from the [command list](../#commands).

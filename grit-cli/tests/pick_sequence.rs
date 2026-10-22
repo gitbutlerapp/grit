@@ -220,6 +220,72 @@ fn pick_empty_policies() {
 }
 
 #[test]
+fn pick_abort_rejects_positional_commit() {
+    let dir = unique_tmp("pick-seq", "abort-positional");
+    init_repo(&dir);
+    commit_file(&dir, "a.txt", "a\n", "base");
+    let out = grit(&dir, &["pick", "HEAD", "--abort", "--json"]);
+    assert!(!out.ok());
+    assert_eq!(out.status, Some(2));
+}
+
+#[test]
+fn pick_range_conflict_continue_json_pairs_all_commits() {
+    let dir = unique_tmp("pick-seq", "range-continue-json");
+    init_repo(&dir);
+    commit_file(&dir, "shared.txt", "base\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    fs::write(dir.join("shared.txt"), "topic\n").unwrap();
+    git(&dir, &["add", "shared.txt"]);
+    git(&dir, &["commit", "-qm", "t1 conflict"]);
+    commit_file(&dir, "clean.txt", "clean\n", "t2");
+    let c1 = git(&dir, &["rev-parse", "topic~1"]).trim().to_owned();
+    let c2 = git(&dir, &["rev-parse", "topic"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+    fs::write(dir.join("shared.txt"), "main\n").unwrap();
+    git(&dir, &["add", "shared.txt"]);
+    git(&dir, &["commit", "-qm", "main"]);
+
+    assert!(!grit(&dir, &["pick", &c1, &c2]).ok());
+    fs::write(dir.join("shared.txt"), "resolved\n").unwrap();
+    git(&dir, &["add", "shared.txt"]);
+    let done = json_stdout(&["pick", "--continue", "--json"], &dir);
+    validate_pick_schema(&done);
+    assert_eq!(done["result"], "picked");
+    let rows = done["commits"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["source"].as_str().unwrap(), c1);
+    assert_eq!(rows[1]["source"].as_str().unwrap(), c2);
+    assert_ne!(
+        rows[0]["oid"].as_str().unwrap(),
+        rows[1]["oid"].as_str().unwrap()
+    );
+}
+
+#[test]
+fn pick_continue_json_reports_cherry_pick_source_without_x() {
+    let dir = unique_tmp("pick-seq", "continue-source");
+    init_repo(&dir);
+    commit_file(&dir, "f.txt", "base\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    fs::write(dir.join("f.txt"), "topic\n").unwrap();
+    git(&dir, &["commit", "-qam", "topic change"]);
+    let pick = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+    fs::write(dir.join("f.txt"), "main\n").unwrap();
+    git(&dir, &["commit", "-qam", "main change"]);
+
+    assert!(!grit(&dir, &["pick", &pick]).ok());
+    fs::write(dir.join("f.txt"), "resolved\n").unwrap();
+    git(&dir, &["add", "f.txt"]);
+    let done = json_stdout(&["pick", "--continue", "--json"], &dir);
+    validate_pick_schema(&done);
+    assert_eq!(done["commits"][0]["source"].as_str().unwrap(), pick);
+    let new_oid = done["commits"][0]["oid"].as_str().unwrap();
+    assert_ne!(new_oid, pick);
+}
+
+#[test]
 fn pick_message_requires_single_commit() {
     let dir = unique_tmp("pick-seq", "message");
     init_repo(&dir);
