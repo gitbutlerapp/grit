@@ -255,9 +255,9 @@ fn prepare_history_rebase(fixture: &CliFixture) {
 }
 
 #[test]
-fn snapshot_history_rebase() {
+fn snapshot_rebase() {
     snapshot_fresh(
-        "history_rebase",
+        "rebase",
         &["rebase", "HEAD~2", "--dry-run"],
         prepare_history_rebase,
     );

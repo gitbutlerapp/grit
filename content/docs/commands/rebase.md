@@ -40,18 +40,6 @@ Shared rewrite flags match [`grit history`](history.md): `--dry-run`, `--update-
 ## Examples
 
 ```console
-$ grit branch -u origin/main
-$ grit rebase --json
-{
-  "operation": "rebase",
-  "rewritten": [ … ],
-  "refs": [ … ],
-  "head": { "old": "…", "new": "…" },
-  "dry_run": false
-}
-```
-
-```console
 $ grit rebase --onto release/v2 origin/main --dry-run
 Dry run — refs would change:
   commit abc1234 → def5678 (feature work)
@@ -62,19 +50,48 @@ Dry run — refs would change:
 
 Schema: [v1](/schemas/rebase/v1.json)
 
+Pass `--json` on `grit rebase` or `grit history rebase`:
+
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `operation` | string | Always `rebase`. |
-| `rewritten` | array | Old/new OIDs, optional `change_id` and `subject` per commit. |
-| `refs` | array | `ref`, `old`, `new` (and deprecated `name`) for each moved ref. |
-| `head` | object or null | Previous and new `HEAD` commit when it changes. |
+| `rewritten` | array | `{old,new,change_id,subject}` full hex OIDs per replayed commit. |
+| `refs` | array | `{ref,old,new}` for each ref that would move or moved. `name` duplicates `ref` and is deprecated. |
+| `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
 | `dry_run` | boolean | Whether refs were left unchanged. |
+
+Example:
+
+```json
+{
+  "operation": "rebase",
+  "rewritten": [
+    {
+      "old": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+      "new": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+      "change_id": null,
+      "subject": "second"
+    },
+    {
+      "old": "1a2b3c4d5e6f70819293a4b4c5d6e7f8091a2b3c4d",
+      "new": "1a2b3c4d5e6f70819293a4b4c5d6e7f8091a2b3c4d",
+      "change_id": null,
+      "subject": "third"
+    }
+  ],
+  "refs": [],
+  "head": null,
+  "dry_run": true
+}
+```
 
 On conflict, stdout is a structured error (`kind: "conflict"`, `commit`, `conflicts`) and exit code is **1**.
 
 ## Markdown output
 
-Headings under `## Rebase` (or `## History rebase` for the alias). Lists rewritten commits and ref updates; `Already up to date` when nothing changes.
+Schema: [v1](/schemas/rebase/v1.json)
+
+Pass [`--markdown`](../global-options/) for a `## Rebase` heading (or `## History rebase` for the alias), rewritten commits, ref updates, and `Already up to date` when nothing changes.
 
 ## See also
 

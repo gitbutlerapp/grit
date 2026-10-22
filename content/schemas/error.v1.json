@@ -28,6 +28,13 @@
     "StructuredJsonError": {
       "description": "JSON object emitted on stdout for structured command failures.",
       "properties": {
+        "commit": {
+          "description": "Commit that could not be replayed cleanly, when `kind == \"conflict\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "conflicts": {
           "description": "Conflicting paths, when `kind == \"conflict\"`.",
           "items": {

@@ -629,7 +629,7 @@ fn resolve_rebase_upstream(repo: &Repository, upstream: Option<&str>) -> Result<
         Err(LibError::RevParse(RevParseError::NoUpstream { branch })) if upstream.is_none() => {
             anyhow::bail!(
                 "no upstream configured for branch '{branch}'\n\
-                 Set one with `grit branch --set-upstream <remote>/<branch>`"
+                 Set one with `grit branch -u <remote>/<branch>`"
             )
         }
         Err(other) => Err(other).with_context(|| format!("could not resolve upstream '{spec}'")),
