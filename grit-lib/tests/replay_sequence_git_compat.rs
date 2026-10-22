@@ -135,7 +135,17 @@ fn pick_range_clean_matches_git_cherry_pick_trees() {
     let repo = open_repo(root.path());
     let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default()))
         .expect("pick");
-    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    let created = match out {
+        SequenceOutcome::Completed { created, .. } => created,
+        other => panic!("expected completed, got {other:?}"),
+    };
+    assert_eq!(created.len(), 2);
+    assert_eq!(created[0].source, c1);
+    assert_eq!(created[1].source, c2);
+    assert_ne!(created[0].new_oid, c1);
+    assert_ne!(created[1].new_oid, c2);
+    assert!(created[0].change_id.is_some());
+    assert!(created[1].change_id.is_some());
     assert_eq!(head_tree_hex(root.path()), head_tree_hex(git_wt.path()));
     git_fsck_strict(root.path());
 }
@@ -584,10 +594,58 @@ fn continued_commit_gets_new_change_id() {
         SequenceOutcome::Completed { created, .. } => created,
         _ => panic!("expected completed"),
     };
-    let obj = repo.odb().read(&created[0]).expect("read");
+    assert_eq!(created.len(), 1);
+    let record = &created[0];
+    assert_eq!(record.source, pick);
+    let obj = repo.odb().read(&record.new_oid).expect("read");
     let commit = parse_commit(&obj.data).expect("parse");
     let src_obj = repo.odb().read(&pick).expect("src");
     let src = parse_commit(&src_obj.data).expect("src parse");
     assert_ne!(change_id(&commit), change_id(&src));
+    assert_eq!(record.change_id, change_id(&commit));
+    git_fsck_strict(root.path());
+}
+
+#[test]
+fn completed_created_records_after_continue() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    fs::write(root.path().join("f"), "topic\n").unwrap();
+    git(root.path(), &["commit", "-qam", "topic-f"]);
+    let c1 = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    fs::write(root.path().join("f"), "main\n").unwrap();
+    git(root.path(), &["commit", "-qam", "main"]);
+
+    let repo = open_repo(root.path());
+    let stop =
+        start_replay_sequence(&repo, &pick_req(vec![c1], ReplayOptions::default())).expect("pick");
+    let (current, mut created_so_far) = match stop {
+        SequenceOutcome::Conflicts {
+            current,
+            created_so_far,
+            ..
+        } => (current, created_so_far),
+        other => panic!("expected conflicts, got {other:?}"),
+    };
+    assert_eq!(current, c1);
+    assert!(created_so_far.is_empty());
+
+    fs::write(root.path().join("f"), "resolved\n").unwrap();
+    git(root.path(), &["add", "f"]);
+    let out = continue_replay_sequence(&repo, IDENT).expect("continue");
+    let created = match out {
+        SequenceOutcome::Completed { created, .. } => created,
+        other => panic!("expected completed, got {other:?}"),
+    };
+    assert_eq!(created.len(), 1);
+    let record = &created[0];
+    assert_eq!(record.source, c1);
+    assert_ne!(record.new_oid, c1);
+    assert!(record.change_id.is_some());
+    created_so_far.extend(created);
+    assert_eq!(created_so_far.len(), 1);
     git_fsck_strict(root.path());
 }
