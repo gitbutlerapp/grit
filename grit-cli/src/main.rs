@@ -93,10 +93,28 @@ enum RemoteAction {
         /// Only show refs under `refs/tags/`.
         #[arg(long)]
         tags: bool,
+        /// Sort refs by `name` or `version` (`git ls-remote --sort=version:refname`).
+        #[arg(long = "sort", value_name = "KEY", default_value = "name")]
+        sort: RemoteRefSortArg,
+        /// Reverse sort order (`git ls-remote --sort=-…`).
+        #[arg(long)]
+        reverse: bool,
+        /// Return at most this many refs after sorting.
+        #[arg(short = 'n', long = "limit", value_name = "N")]
+        limit: Option<usize>,
         /// Optional ref prefixes (same rules as `git ls-remote`).
         #[arg(value_name = "PREFIX")]
         prefixes: Vec<String>,
     },
+}
+
+/// Sort key for `grit remote refs`.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub(crate) enum RemoteRefSortArg {
+    /// Full ref name order.
+    Name,
+    /// Numeric `version:refname` order.
+    Version,
 }
 
 /// Subcommands of `grit reflog`.
@@ -1146,12 +1164,25 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 remote_or_url,
                 heads,
                 tags,
+                sort,
+                reverse,
+                limit,
                 prefixes,
-            }) => emit(
-                &commands::remote::run_refs(&remote_or_url, heads, tags, prefixes, opts.mode)?,
-                opts,
-                ctx,
-            ),
+            }) => {
+                let refs_cli = commands::remote::RemoteRefsCliOptions {
+                    heads,
+                    tags,
+                    sort,
+                    reverse,
+                    limit,
+                    prefixes,
+                };
+                emit(
+                    &commands::remote::run_refs(&remote_or_url, &refs_cli, opts.mode)?,
+                    opts,
+                    ctx,
+                )
+            }
         },
         Command::Log {
             rev,

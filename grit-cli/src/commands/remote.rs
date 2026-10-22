@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
+use grit_lib::refs::listing::{RefSort, SortKey};
 use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, RemoteRef};
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
@@ -139,23 +140,28 @@ pub fn run_list_or_add(add: Option<(String, String)>) -> Result<RemoteOutcome> {
     }
 }
 
+/// Flags for `grit remote refs` (sort, limit, namespaces, patterns).
+#[derive(Debug, Clone)]
+pub struct RemoteRefsCliOptions {
+    /// Only `refs/heads/`.
+    pub heads: bool,
+    /// Only `refs/tags/`.
+    pub tags: bool,
+    /// Sort key from argv.
+    pub sort: crate::RemoteRefSortArg,
+    /// Reverse sort order.
+    pub reverse: bool,
+    /// Maximum lines after sorting.
+    pub limit: Option<usize>,
+    /// `git ls-remote`-style ref patterns.
+    pub prefixes: Vec<String>,
+}
+
 pub fn run_refs(
     remote_or_url: &str,
-    heads: bool,
-    tags: bool,
-    prefixes: Vec<String>,
+    cli: &RemoteRefsCliOptions,
     mode: OutputMode,
 ) -> Result<RemoteOutcome> {
-    let opts = ListRefsOptions {
-        prefixes,
-        heads,
-        tags,
-        peel: true,
-        // Match `git ls-remote` on smart HTTP: use the ref advertisement from the
-        // initial `info/refs` GET instead of a v2 `ls-refs` POST when both work.
-        protocol_version: Some(0),
-        ..Default::default()
-    };
     let factory = DefaultHttpClientFactory;
     let repo = context::discover().ok();
     let env = crate::context::environment();
@@ -164,6 +170,26 @@ pub fn run_refs(
             ConfigSet::load(&env, Some(r.git_dir()), true).context("could not load config")?
         }
         None => ConfigSet::load(&env, None, true).context("could not load config")?,
+    };
+    let sort_key = match cli.sort {
+        crate::RemoteRefSortArg::Name => SortKey::Name,
+        crate::RemoteRefSortArg::Version => SortKey::Version,
+    };
+    let opts = ListRefsOptions {
+        prefixes: cli.prefixes.clone(),
+        heads: cli.heads,
+        tags: cli.tags,
+        peel: true,
+        sort: RefSort {
+            key: sort_key,
+            reverse: cli.reverse,
+        },
+        limit: cli.limit,
+        versionsort_suffixes: config.get_all("versionsort.suffix"),
+        // Match `git ls-remote` on smart HTTP: use the ref advertisement from the
+        // initial `info/refs` GET instead of a v2 `ls-refs` POST when both work.
+        protocol_version: Some(0),
+        ..Default::default()
     };
     let remote = resolve_remote_or_url(Some(&config), remote_or_url)?;
     let raw = remote

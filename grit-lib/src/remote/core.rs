@@ -18,6 +18,9 @@ use crate::fetch::{fetch_remote, Progress};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::push::push_remote;
+use crate::refs::listing::{
+    compare_version_names, patterns_match_ls_remote, RefQueryOptions, RefSort, SortKey,
+};
 use crate::repo::Repository;
 use crate::transfer::{
     fetch_local_with_progress, push_local, FetchOptions, FetchOutcome, PushOptions, PushOutcome,
@@ -192,6 +195,12 @@ pub struct ListRefsOptions {
     pub peel: bool,
     /// Requested wire protocol version for remote listing (`None` → prefer v2).
     pub protocol_version: Option<u8>,
+    /// Sort key and direction (after filtering; matches `git ls-remote --sort`).
+    pub sort: RefSort,
+    /// Maximum number of lines to return after sorting (`None` = unlimited).
+    pub limit: Option<usize>,
+    /// `versionsort.suffix` values for [`SortKey::Version`] (Git multi-valued config).
+    pub versionsort_suffixes: Vec<String>,
 }
 
 /// Builds HTTP clients for smart-HTTP remotes.
@@ -886,7 +895,8 @@ fn finalize_list_refs_output(
     head_symref: Option<String>,
     odb: Option<&Odb>,
 ) -> RemoteResult<Vec<RemoteRef>> {
-    entries.retain(|e| ref_matches_list_opts(&e.name, opts));
+    entries.retain(|e| remote_ref_matches_namespace(&e.name, opts));
+    entries.retain(|e| patterns_match_ls_remote(&e.name, &opts.prefixes));
     if opts.peel {
         let mut peel_lines: Vec<RemoteRef> = Vec::new();
         for e in &entries {
@@ -898,88 +908,121 @@ fn finalize_list_refs_output(
                 .copied()
                 .or_else(|| odb.and_then(|o| peel_tag(o, &e.oid)));
             if let Some(p) = peeled {
-                peel_lines.push(RemoteRef {
-                    name: format!("{}^{{}}", e.name),
-                    oid: p,
-                    symref_target: None,
-                });
+                let peel_name = format!("{}^{{}}", e.name);
+                if should_emit_peel_line(&peel_name, &opts.prefixes) {
+                    peel_lines.push(RemoteRef {
+                        name: peel_name,
+                        oid: p,
+                        symref_target: None,
+                    });
+                }
             }
         }
         entries.extend(peel_lines);
     }
-    entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
     if list_refs_includes_head(opts) {
         if let Some(sym) = head_symref {
-            if ref_matches_list_opts("HEAD", opts) {
-                if let Some(oid) = entries.iter().find(|e| e.name == sym).map(|e| e.oid) {
-                    entries.insert(
-                        0,
-                        RemoteRef {
-                            name: "HEAD".to_owned(),
-                            oid,
-                            symref_target: if opts.symrefs { Some(sym) } else { None },
-                        },
-                    );
-                }
+            if let Some(oid) = entries.iter().find(|e| e.name == sym).map(|e| e.oid) {
+                entries.push(RemoteRef {
+                    name: "HEAD".to_owned(),
+                    oid,
+                    symref_target: if opts.symrefs { Some(sym) } else { None },
+                });
             }
         }
+    }
+    let query_options = RefQueryOptions {
+        versionsort_suffixes: opts.versionsort_suffixes.clone(),
+        ..RefQueryOptions::default()
+    };
+    sort_remote_refs(
+        &mut entries,
+        &opts.sort,
+        &query_options.versionsort_suffixes,
+    );
+    if let Some(limit) = opts.limit {
+        entries.truncate(limit);
     }
     Ok(entries)
 }
 
-fn ref_matches_list_opts(refname: &str, opts: &ListRefsOptions) -> bool {
+/// Filter (heads/tags + ls-remote patterns), sort, and limit an in-memory remote ref list.
+///
+/// Callers that already applied peel lines and optional `HEAD` pass the full line list here.
+///
+/// # Panics
+///
+/// Never panics.
+#[must_use]
+pub fn query_remote_refs_in_memory(
+    mut entries: Vec<RemoteRef>,
+    opts: &ListRefsOptions,
+    query_options: &RefQueryOptions,
+) -> Vec<RemoteRef> {
+    entries.retain(|e| remote_ref_matches_namespace(&e.name, opts));
+    entries.retain(|e| patterns_match_ls_remote(&e.name, &opts.prefixes));
+    sort_remote_refs(
+        &mut entries,
+        &opts.sort,
+        &query_options.versionsort_suffixes,
+    );
+    if let Some(limit) = opts.limit {
+        entries.truncate(limit);
+    }
+    entries
+}
+
+fn should_emit_peel_line(peel_name: &str, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+    patterns_match_ls_remote(peel_name, patterns)
+}
+
+fn sort_remote_refs(entries: &mut [RemoteRef], sort: &RefSort, versionsort_suffixes: &[String]) {
+    entries.sort_by(|a, b| {
+        let primary = match sort.key {
+            SortKey::Name => a.name.cmp(&b.name),
+            SortKey::Version => compare_version_names(&a.name, &b.name, versionsort_suffixes),
+            SortKey::Date => a.name.cmp(&b.name),
+        };
+        let primary = if sort.reverse {
+            primary.reverse()
+        } else {
+            primary
+        };
+        if primary != std::cmp::Ordering::Equal {
+            return primary;
+        }
+        a.name.cmp(&b.name)
+    });
+}
+
+fn remote_ref_matches_namespace(refname: &str, opts: &ListRefsOptions) -> bool {
     if opts.heads || opts.tags {
         let is_branch = opts.heads && refname.starts_with("refs/heads/");
         let is_tag = opts.tags && refname.starts_with("refs/tags/");
+        if refname == "HEAD" {
+            return false;
+        }
+        if refname.ends_with("^{}") {
+            return is_tag;
+        }
         if !is_branch && !is_tag {
             return false;
         }
     }
-    ref_matches_ls_remote_patterns(refname, &opts.prefixes)
+    true
+}
+
+fn ref_matches_list_opts(refname: &str, opts: &ListRefsOptions) -> bool {
+    remote_ref_matches_namespace(refname, opts) && patterns_match_ls_remote(refname, &opts.prefixes)
 }
 
 /// Returns `true` when `refname` matches one of `patterns`, or when `patterns` is empty.
 #[must_use]
 pub fn ref_matches_ls_remote_patterns(refname: &str, patterns: &[String]) -> bool {
-    pattern_matches(refname, patterns)
-}
-
-fn pattern_matches(refname: &str, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return true;
-    }
-    let path = format!("/{refname}");
-    patterns.iter().any(|pat| {
-        let full = format!("*/{pat}");
-        glob_match(&full, &path)
-    })
-}
-
-fn glob_match(pattern: &str, text: &str) -> bool {
-    let pat: Vec<char> = pattern.chars().collect();
-    let txt: Vec<char> = text.chars().collect();
-    let (mut pi, mut ti) = (0, 0);
-    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
-    while ti < txt.len() {
-        if pi < pat.len() && (pat[pi] == '?' || pat[pi] == txt[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < pat.len() && pat[pi] == '*' {
-            star_pi = pi;
-            star_ti = ti;
-            pi += 1;
-        } else if star_pi != usize::MAX {
-            pi = star_pi + 1;
-            star_ti += 1;
-            ti = star_ti;
-        } else {
-            return false;
-        }
-    }
-    while pi < pat.len() && pat[pi] == '*' {
-        pi += 1;
-    }
-    pi == pat.len()
+    patterns_match_ls_remote(refname, patterns)
 }
 
 /// List references from a on-disk git directory (local / `file://` remotes).
@@ -1002,7 +1045,10 @@ fn list_refs_from_bundle(path: &Path, opts: &ListRefsOptions) -> RemoteResult<Ve
             symref_target: None,
         });
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
+    sort_remote_refs(&mut out, &opts.sort, &opts.versionsort_suffixes);
+    if let Some(limit) = opts.limit {
+        out.truncate(limit);
+    }
     Ok(out)
 }
 
@@ -1061,7 +1107,7 @@ pub fn list_refs_from_git_dir(
             });
             if opts.peel && name.starts_with("refs/tags/") {
                 let peel_name = format!("{name}^{{}}");
-                if ref_matches_list_opts(&peel_name, opts) {
+                if should_emit_peel_line(&peel_name, &opts.prefixes) {
                     let peel_odb = match odb {
                         Some(o) => o,
                         None => lazy_odb.get_or_insert_with(|| {
@@ -1081,15 +1127,10 @@ pub fn list_refs_from_git_dir(
         }
     }
 
-    entries.sort_unstable_by(|a, b| {
-        if a.name == "HEAD" {
-            std::cmp::Ordering::Less
-        } else if b.name == "HEAD" {
-            std::cmp::Ordering::Greater
-        } else {
-            a.name.cmp(&b.name)
-        }
-    });
+    sort_remote_refs(&mut entries, &opts.sort, &opts.versionsort_suffixes);
+    if let Some(limit) = opts.limit {
+        entries.truncate(limit);
+    }
     Ok(entries)
 }
 
@@ -1146,23 +1187,57 @@ mod tests {
 
     #[test]
     fn pattern_matches_empty_allows_all() {
-        assert!(super::pattern_matches("refs/heads/main", &[]));
-        assert!(super::pattern_matches("HEAD", &[]));
+        assert!(ref_matches_ls_remote_patterns("refs/heads/main", &[]));
+        assert!(ref_matches_ls_remote_patterns("HEAD", &[]));
     }
 
     #[test]
     fn pattern_matches_exact() {
         let pats = vec!["HEAD".to_owned()];
-        assert!(super::pattern_matches("HEAD", &pats));
-        assert!(!super::pattern_matches("refs/heads/main", &pats));
+        assert!(ref_matches_ls_remote_patterns("HEAD", &pats));
+        assert!(!ref_matches_ls_remote_patterns("refs/heads/main", &pats));
     }
 
     #[test]
     fn pattern_matches_suffix_component() {
         let pats = vec!["main".to_owned()];
-        assert!(super::pattern_matches("refs/heads/main", &pats));
-        assert!(!super::pattern_matches("refs/heads/notmain", &pats));
-        assert!(!super::pattern_matches("main-branch", &pats));
+        assert!(ref_matches_ls_remote_patterns("refs/heads/main", &pats));
+        assert!(!ref_matches_ls_remote_patterns("refs/heads/notmain", &pats));
+        assert!(!ref_matches_ls_remote_patterns("main-branch", &pats));
+    }
+
+    #[test]
+    fn query_remote_refs_in_memory_version_sort_and_limit() {
+        let entries = vec![
+            RemoteRef {
+                name: "refs/tags/v1.10".into(),
+                oid: ObjectId::from_hex("1".repeat(40).as_str()).unwrap(),
+                symref_target: None,
+            },
+            RemoteRef {
+                name: "refs/tags/v1.2".into(),
+                oid: ObjectId::from_hex("2".repeat(40).as_str()).unwrap(),
+                symref_target: None,
+            },
+            RemoteRef {
+                name: "refs/tags/v1.1".into(),
+                oid: ObjectId::from_hex("3".repeat(40).as_str()).unwrap(),
+                symref_target: None,
+            },
+        ];
+        let opts = ListRefsOptions {
+            sort: RefSort {
+                key: SortKey::Version,
+                reverse: false,
+            },
+            limit: Some(2),
+            ..Default::default()
+        };
+        let out = query_remote_refs_in_memory(entries, &opts, &RefQueryOptions::default());
+        assert_eq!(
+            out.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["refs/tags/v1.1", "refs/tags/v1.2"]
+        );
     }
 
     #[test]

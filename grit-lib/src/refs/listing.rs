@@ -1,9 +1,14 @@
 //! Shared ref listing: namespace selection, glob patterns, sort keys, and limits.
 //!
 //! Used by branch/tag list, `for-each-ref`-style queries, and in-memory remote ref
-//! lists. Pattern rules follow `git for-each-ref` / `git branch --list`: patterns
-//! match the **short** ref name (suffix after `refs/heads/`, `refs/tags/`, etc.),
-//! and a trailing `/` selects a directory prefix.
+//! lists.
+//!
+//! - **Local lists** (`query_refs`, `query_listings_from_pairs`): patterns follow
+//!   `git for-each-ref` / `git branch --list` on the **short** ref name (suffix after
+//!   `refs/heads/`, `refs/tags/`, etc.), and a trailing `/` selects a directory prefix.
+//! - **Remote advertisements** ([`pattern_matches_ls_remote_refname`]): patterns follow
+//!   `git ls-remote` tail-match rules on the **full** ref name (`main` matches
+//!   `refs/heads/main`; `refs/tags/v1*` also matches `refs/tags/v1^{}`).
 //!
 //! ```rust
 //! use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions, SortKey};
@@ -185,6 +190,55 @@ pub fn short_name_in_namespace(full_name: &str, namespace: &RefNamespace) -> Str
         .strip_prefix(prefix)
         .unwrap_or(full_name)
         .to_owned()
+}
+
+/// Whether `refname` matches `pattern` using `git ls-remote` tail-match rules.
+#[must_use]
+pub fn pattern_matches_ls_remote_refname(refname: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+    let path = format!("/{refname}");
+    let full = format!("*/{pattern}");
+    ls_remote_glob_match(&full, &path)
+}
+
+/// Returns `true` when `refname` matches one of `patterns`, or when `patterns` is empty.
+#[must_use]
+pub fn patterns_match_ls_remote(refname: &str, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+    patterns
+        .iter()
+        .any(|p| pattern_matches_ls_remote_refname(refname, p))
+}
+
+fn ls_remote_glob_match(pattern: &str, text: &str) -> bool {
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
+    while ti < txt.len() {
+        if pi < pat.len() && (pat[pi] == '?' || pat[pi] == txt[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < pat.len() && pat[pi] == '*' {
+            star_pi = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if star_pi != usize::MAX {
+            pi = star_pi + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+    while pi < pat.len() && pat[pi] == '*' {
+        pi += 1;
+    }
+    pi == pat.len()
 }
 
 /// Whether `short_name` matches `pattern` (Git `for-each-ref` / branch list rules).
@@ -649,5 +703,19 @@ mod tests {
     #[test]
     fn ignore_case_prefix_does_not_panic_on_utf8_short_names() {
         assert!(!pattern_matches_short_name("€x", "a", true));
+    }
+
+    #[test]
+    fn ls_remote_pattern_tail_component() {
+        assert!(pattern_matches_ls_remote_refname("refs/heads/main", "main"));
+        assert!(!pattern_matches_ls_remote_refname(
+            "refs/heads/topic",
+            "main"
+        ));
+        assert!(pattern_matches_ls_remote_refname(
+            "refs/tags/v1^{}",
+            "refs/tags/v1*"
+        ));
+        assert!(!pattern_matches_ls_remote_refname("refs/tags/v1^{}", "v1"));
     }
 }

@@ -53,6 +53,23 @@ fn grit(args: &[&str]) -> (String, String) {
     grit_in(Path::new("."), args)
 }
 
+fn parse_git_ls_remote_names_in_order(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some((a, b)) = line.split_once('\t') {
+            if a.starts_with("ref: ") {
+                continue;
+            }
+            names.push(b.to_owned());
+        }
+    }
+    names
+}
+
 fn parse_git_ls_remote(text: &str) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     for line in text.lines() {
@@ -68,6 +85,38 @@ fn parse_git_ls_remote(text: &str) -> BTreeMap<String, String> {
         }
     }
     map
+}
+
+fn bare_fixture_with_version_tags() -> (tempfile::TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(Some(&work), &["init", "-q", "-b", "main", "."]);
+    git(
+        Some(&work),
+        &[
+            "-c",
+            "user.email=t@e.com",
+            "-c",
+            "user.name=T",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+    );
+    for tag in ["v1.10", "v1.2", "v1.1", "topic"] {
+        git(
+            Some(&work),
+            &["-c", "user.email=t@e.com", "-c", "user.name=T", "tag", tag],
+        );
+    }
+    let bare = tmp.path().join("upstream.git");
+    git(
+        Some(&work),
+        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
+    );
+    (tmp, bare)
 }
 
 fn bare_fixture_with_annotated_tag() -> (tempfile::TempDir, PathBuf) {
@@ -129,6 +178,40 @@ fn grit_http_server_bin() -> PathBuf {
         debug
     })
     .clone()
+}
+
+#[test]
+fn remote_refs_patterns_match_git_ls_remote_sets() {
+    let (_tmp, bare) = bare_fixture_with_version_tags();
+    let url = bare.to_str().unwrap();
+    for pattern in ["main", "v1.*", "refs/tags/v1*"] {
+        let git_map = parse_git_ls_remote(&git(None, &["ls-remote", url, pattern]));
+        let (stdout, _) = grit(&["remote", "refs", url, pattern]);
+        assert_eq!(parse_git_ls_remote(&stdout), git_map, "pattern {pattern}");
+    }
+}
+
+#[test]
+fn remote_refs_version_sort_matches_git_ls_remote_order() {
+    let (_tmp, bare) = bare_fixture_with_version_tags();
+    let url = bare.to_str().unwrap();
+    let git_order = parse_git_ls_remote_names_in_order(&git(
+        None,
+        &["ls-remote", "--sort=version:refname", url],
+    ));
+    let (stdout, _) = grit(&["remote", "refs", "--sort=version", url]);
+    assert_eq!(parse_git_ls_remote_names_in_order(&stdout), git_order);
+}
+
+#[test]
+fn remote_refs_limit_bounds_output() {
+    let (_tmp, bare) = bare_fixture_with_version_tags();
+    let url = bare.to_str().unwrap();
+    let (stdout, _) = grit(&["remote", "refs", "-n", "3", url]);
+    let names = parse_git_ls_remote_names_in_order(&stdout);
+    assert_eq!(names.len(), 3);
+    let git_names = parse_git_ls_remote_names_in_order(&git(None, &["ls-remote", url]));
+    assert_eq!(names, git_names[..3]);
 }
 
 #[test]

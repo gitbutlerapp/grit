@@ -10,7 +10,7 @@ order: 1
 ```text
 grit remote
 grit remote add <name> <url>
-grit remote refs <remote-or-url> [--heads] [--tags] [<prefix>…]
+grit remote refs <remote-or-url> [--heads] [--tags] [--sort name|version] [--reverse] [-n N] [<prefix>…]
 ```
 
 ## Description
@@ -29,6 +29,9 @@ A remote is another copy of the repository that you fetch from and push to, usua
 | `refs <remote-or-url>` | List refs on the remote (or URL). |
 | `--heads` | With `refs`, only `refs/heads/`. |
 | `--tags` | With `refs`, only `refs/tags/`. |
+| `--sort` | With `refs`, `name` (default) or `version` (`git ls-remote --sort=version:refname`). |
+| `--reverse` | With `refs`, reverse `--sort` order. |
+| `-n`, `--limit` | With `refs`, return at most `N` lines after sorting. |
 | `<prefix>…` | With `refs`, optional ref prefixes (same rules as `git ls-remote`). |
 
 ## Examples
