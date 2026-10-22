@@ -355,6 +355,38 @@ pub enum ApplyError {
     /// Other apply parse failures.
     #[error("{0}")]
     Other(String),
+
+    /// A text hunk could not be matched or applied.
+    #[error("patch failed: {path}:{line}")]
+    PatchFailed {
+        /// File path from the patch.
+        path: String,
+        /// One-based line number in the patch input.
+        line: usize,
+    },
+
+    /// Index or blob apply failed for a path.
+    #[error("could not apply patch to {path}: {message}")]
+    Failed {
+        /// Repository-relative path.
+        path: String,
+        /// Failure detail.
+        message: String,
+    },
+
+    /// `--cached` apply requires a stage-0 index entry at the preimage path.
+    #[error("'{path}' is not in the index")]
+    NotInIndex {
+        /// Missing path.
+        path: String,
+    },
+
+    /// A binary diff marker without `GIT binary patch` payload cannot be applied.
+    #[error("binary patch data missing for '{path}'")]
+    BinaryDataMissing {
+        /// Path from the patch.
+        path: String,
+    },
 }
 
 /// Path lookup failures while formatting a diff.

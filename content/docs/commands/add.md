@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit add [-u | --update] [--dry-run] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
+grit add [-u | --update] [--dry-run] [--patch-file <file|->] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
 ```
 
 ## Description
@@ -28,6 +28,7 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 | `<path>...` | Files or directories to stage. Omit to stage every change. |
 | `-u`, `--update` | Stage tracked changes only (modified and deleted paths). Untracked files are left alone. With no paths, applies to the whole tree. |
 | `--dry-run` | List paths that would be staged without updating the index or writing objects. |
+| `--patch-file` | Apply a unified diff to the index only (like `git apply --cached`). Use `-` for stdin. Cannot be combined with paths, `-u` / `--update`, or `-N` / `--intent-to-add`. |
 | `-N`, `--intent-to-add` | Record intent-to-add entries (empty blob, extended flag) instead of hashing content. |
 | `-f`, `--force` | Stage ignored paths when named explicitly (instead of erroring with pathspec ignored). |
 | `--pathspec-from-file` | Read additional pathspecs from a file, or `-` for stdin (same rules as Git). |
@@ -49,6 +50,13 @@ Stage one file and a directory:
 ```console
 $ grit add README.md src/
 Staged 2 changes.
+```
+
+Apply a patch to the index (worktree files stay as-is until you edit them):
+
+```console
+$ grit add --patch-file changes.diff
+Staged 1 change.
 ```
 
 Mark a script executable when the filesystem does not track the execute bit:

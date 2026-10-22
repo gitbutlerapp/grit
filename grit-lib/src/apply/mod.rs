@@ -1590,6 +1590,14 @@ fn parse_range(s: &str) -> Result<(usize, usize)> {
     }
 }
 
+mod blob_apply;
+mod index_apply;
+
+pub use blob_apply::{apply_patch_to_blob, BlobApplyOptions};
+pub use index_apply::{
+    apply_patch_to_index, apply_patch_to_index_and_write, IndexApplyOptions, IndexApplyOutcome,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

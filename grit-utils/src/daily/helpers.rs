@@ -21,9 +21,10 @@ use crate::scenarios::{merge_argv, pick_argv, switch_argv, PrepareKind};
 use crate::shell::shell_quote;
 use crate::worktree_fixture::{
     ensure_worktree_bench_repo, record_matrix_path_targets, set_worktree_bench_cwd,
-    shell_git_add_modified_set, shell_git_add_modified_set_and_commit, shell_git_commit_paths_only,
-    shell_grit_add_modified_set, shell_grit_commit_paths, shell_mv_file, shell_redirect_devnull,
-    shell_restore_modified_set, shell_rm_dir_git, shell_rm_dir_grit,
+    shell_git_add_modified_set, shell_git_add_modified_set_and_commit, shell_git_apply_cached,
+    shell_git_commit_paths_only, shell_grit_add_modified_set, shell_grit_add_patch_file,
+    shell_grit_commit_paths, shell_mv_file, shell_redirect_devnull, shell_restore_modified_set,
+    shell_rm_dir_git, shell_rm_dir_grit,
 };
 
 /// Shortlog/compare target for git-git matrix rows (tag present on pinned git.git).
@@ -382,6 +383,13 @@ pub fn add_modified_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     )
 }
 
+pub fn add_patch_file_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_script(shell_grit_add_patch_file(&ctx.grit)),
+        sh_script(shell_git_apply_cached(&ctx.git)),
+    )
+}
+
 pub fn commit_small_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["commit", "bench"]),
@@ -637,6 +645,7 @@ pub fn prepare_bench_argv(
         PrepareKind::WorktreeStatusClean => "prepare-worktree-status-clean",
         PrepareKind::WorktreeStatusDirty => "prepare-worktree-status-dirty",
         PrepareKind::WorktreeAdd => "prepare-worktree-add",
+        PrepareKind::WorktreeAddPatchFile => "prepare-worktree-add-patch-file",
         PrepareKind::WorktreeCommit => "prepare-worktree-commit",
         PrepareKind::WorktreeCommitStaged => "prepare-worktree-commit-staged",
         PrepareKind::WorktreeDiff => "prepare-worktree-diff",
@@ -720,6 +729,12 @@ pub fn prepare_worktree_status_dirty(
 
 pub fn prepare_worktree_add(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {
     super::plan::DailyPrepare::Hook(PrepareKind::WorktreeAdd)
+}
+
+pub fn prepare_worktree_add_patch_file(
+    _: &super::plan::DailyHeadlineContext,
+) -> super::plan::DailyPrepare {
+    super::plan::DailyPrepare::Hook(PrepareKind::WorktreeAddPatchFile)
 }
 
 pub fn prepare_worktree_commit(_: &super::plan::DailyHeadlineContext) -> super::plan::DailyPrepare {

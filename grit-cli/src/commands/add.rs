@@ -5,6 +5,7 @@
 
 use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
+use grit_lib::apply::{apply_patch_to_index_and_write, parse_patch, IndexApplyOptions};
 use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions, StageOutcome};
 use grit_lib::porcelain::index_mode::StageExecutableHint;
@@ -12,7 +13,8 @@ use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::Path;
 
 use crate::context;
 use crate::json_error;
@@ -98,6 +100,45 @@ impl AddOutcome {
     }
 }
 
+pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
+    let repo = context::discover()?;
+    let label = if patch_file == "-" {
+        "stdin".to_string()
+    } else {
+        patch_file.to_string()
+    };
+    let patch_bytes = read_patch_bytes(patch_file)?;
+    let patch_text = std::str::from_utf8(&patch_bytes)
+        .map_err(|_| anyhow::anyhow!("patch file must be valid UTF-8"))?;
+    let patches =
+        parse_patch(patch_text, 1, &label, false, None).map_err(json_error::map_lib_error)?;
+    let outcome = apply_patch_to_index_and_write(&repo, &patches, &IndexApplyOptions { dry_run })
+        .map_err(map_apply_error)?;
+    let count = outcome.added.len() + outcome.modified.len() + outcome.removed.len();
+    Ok(AddOutcome {
+        added: outcome.added,
+        modified: outcome.modified,
+        removed: outcome.removed,
+        intent_to_add: Vec::new(),
+        dry_run: outcome.dry_run,
+        count,
+        staged: count,
+        no_paths: false,
+    })
+}
+
+fn read_patch_bytes(patch_file: &str) -> Result<Vec<u8>> {
+    if patch_file == "-" {
+        let mut buf = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut buf)
+            .map_err(|e| anyhow::anyhow!("could not read patch from stdin: {e}"))?;
+        return Ok(buf);
+    }
+    std::fs::read(Path::new(patch_file))
+        .map_err(|e| anyhow::anyhow!("could not read patch file '{patch_file}': {e}"))
+}
+
 pub fn run(
     args: &PathspecArgs,
     update: bool,
@@ -165,6 +206,10 @@ fn stage_with_hint(
         force_ignored,
     };
     stage_paths(repo, &opts, &mut NullProgress).map_err(map_add_error)
+}
+
+fn map_apply_error(err: grit_lib::error::ApplyError) -> anyhow::Error {
+    anyhow::anyhow!("{err}")
 }
 
 fn map_add_error(err: LibError) -> anyhow::Error {

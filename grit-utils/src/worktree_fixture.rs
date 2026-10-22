@@ -323,6 +323,46 @@ pub fn prepare_diff(git: &Path) -> Result<()> {
     apply_one_percent_modified(git, &active_worktree_repo())
 }
 
+const PATCH_FILE_MARKER: &str = "patch-file.diff";
+
+/// Modify ~1% of paths and write `git diff` to the bench scratch dir for `--patch-file` scenarios.
+pub fn prepare_add_patch_file(git: &Path) -> Result<()> {
+    let repo = active_worktree_repo();
+    apply_one_percent_modified(git, &repo)?;
+    let out = run_git_capture(git, &repo, &["diff"])?;
+    fs::write(scratch_dir().join(PATCH_FILE_MARKER), &out).context("write patch file")?;
+    Ok(())
+}
+
+fn run_git_capture(git: &Path, repo: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    let output = std::process::Command::new(git)
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .with_context(|| format!("run git {}", args.join(" ")))?;
+    anyhow::ensure!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(output.stdout)
+}
+
+/// Shell snippet: `grit add --patch-file` using the prepared diff.
+pub fn shell_grit_add_patch_file(grit: &Path) -> String {
+    let prog_q = shell_quote(&grit.to_string_lossy());
+    let patch_q = shell_quote(&scratch_dir().join(PATCH_FILE_MARKER).to_string_lossy());
+    format!("{prog_q} add --patch-file {patch_q} > /dev/null 2>&1")
+}
+
+/// Shell snippet: `git apply --cached` using the same prepared diff.
+pub fn shell_git_apply_cached(git: &Path) -> String {
+    let prog_q = shell_quote(&git.to_string_lossy());
+    let patch_q = shell_quote(&scratch_dir().join(PATCH_FILE_MARKER).to_string_lossy());
+    format!("{prog_q} apply --cached {patch_q} > /dev/null 2>&1")
+}
+
 const RM_DIR_MARKER: &str = ".grit-bench-rm-dir";
 const MV_SRC_MARKER: &str = ".grit-bench-mv-src";
 const MV_DST_MARKER: &str = ".grit-bench-mv-dst";

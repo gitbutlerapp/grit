@@ -619,6 +619,9 @@ enum Command {
         /// Mark staged regular files as non-executable (`100644`) in the index.
         #[arg(long = "non-executable", conflicts_with = "executable")]
         non_executable: bool,
+        /// Apply a unified diff to the index (`git apply --cached`). Use `-` for stdin.
+        #[arg(long = "patch-file", value_name = "FILE|-")]
+        patch_file: Option<String>,
     },
     /// Remove tracked paths from the working tree and index.
     Rm {
@@ -1636,19 +1639,41 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             force,
             executable,
             non_executable,
-        } => emit(
-            &commands::add::run(
-                &pathspecs,
-                update,
-                dry_run,
-                intent_to_add,
-                force,
-                executable,
-                non_executable,
-            )?,
-            opts,
-            ctx,
-        ),
+            patch_file,
+        } => {
+            if let Some(file) = patch_file {
+                if executable || non_executable {
+                    bail!("--patch-file cannot be used with --executable or --non-executable");
+                }
+                if force {
+                    bail!("--patch-file cannot be used with --force");
+                }
+                if update {
+                    bail!("--patch-file cannot be used with --update");
+                }
+                if intent_to_add {
+                    bail!("--patch-file cannot be used with --intent-to-add");
+                }
+                if !pathspecs.paths.is_empty() || pathspecs.pathspec_from_file.is_some() {
+                    bail!("--patch-file cannot be used with path arguments");
+                }
+                emit(&commands::add::run_patch_file(&file, dry_run)?, opts, ctx)
+            } else {
+                emit(
+                    &commands::add::run(
+                        &pathspecs,
+                        update,
+                        dry_run,
+                        intent_to_add,
+                        force,
+                        executable,
+                        non_executable,
+                    )?,
+                    opts,
+                    ctx,
+                )
+            }
+        }
         Command::Rm {
             pathspecs,
             cached,
