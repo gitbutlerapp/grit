@@ -17,6 +17,8 @@ grit tag <name> -s -m <message>
 grit tag <name> -f
 grit tag <name> --dry-run
 grit tag -d <name>
+grit tag --verify <name>...
+grit tag -v <name>... --no-signature
 ```
 
 ## Description
@@ -26,6 +28,8 @@ With no arguments, lists your tags. With a name and no `-m`/`-F`, creates a **li
 Use `-f` / `--force` to replace an existing tag (lightweight or annotated). The previous ref target is reported in `--json` as `replaced`.
 
 Use `--dry-run` on create or delete to preview the outcome without changing refs.
+
+Use `--verify` / `-v` on one or more **annotated** tag names to check the tag object's signature (OpenPGP or SSH, when present) and, when the tag carries a `tree-sha256` header, recompute that digest against the tagged commit's tree. Lightweight tags cannot be verified. Exit **0** when every named tag passes; **1** when any tag fails or cannot be verified. Use `--no-signature` to skip signature checking while still validating `tree-sha256` when present.
 
 Tag names must be valid as `refs/tags/<name>` under Git's ref-name rules (same checks as `git check-ref-format refs/tags/<name>`). Invalid names are rejected before writing under `.git/refs`.
 
@@ -45,6 +49,8 @@ Tags are local until you publish them with [`grit push --tags`](../push/). Delet
 | `-s`, `--sign` | Sign the tag object (implies annotated; honors `tag.gpgSign` when omitted). |
 | `--no-sign` | Do not sign, even when `tag.gpgSign` is true. |
 | `--signing-key` | Signing key id or path for this tag (overrides `user.signingkey`). |
+| `-v`, `--verify` | Verify annotated tags (one or more names). |
+| `--no-signature` | With `--verify`, skip signature checks (digest still checked when present). |
 | `--object` | Hidden alias for `<target>` (one release). |
 
 ## Examples
@@ -70,7 +76,20 @@ $ grit push --delete v0.1
 
 $ grit tag -d v0.1
 Deleted tag v0.1
+
+$ grit tag -v v0.2 -s -m 'Signed release'
+tag v0.2 (92501f1…): ok
+  target: abc1234…
+  signature: good (Release Bot <bot@example.com>)
+  elapsed: 12 ms
 ```
+
+## Exit codes
+
+| Code | When |
+| --- | --- |
+| 0 | Default; `--verify` when every tag passes. |
+| 1 | `--verify` when any tag fails verification or is not an annotated tag. |
 
 ## JSON output
 
@@ -80,7 +99,7 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `action` | string | `list`, `create`, or `delete`. |
+| `action` | string | `list`, `create`, `delete`, or `verify`. |
 | `tags` | array | For `list`, each tag with `name`, `oid`, `kind`, and optional `peeled`. |
 | `name` | string | For `create` or `delete`, the tag name. |
 | `oid` | string | For `create`, full id the tag ref points at (tag object or commit). |
@@ -89,6 +108,9 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | `peeled` | string | Commit oid when the tag peels to a commit. |
 | `replaced` | string | For `create` with `--force`, oid the tag ref pointed at before replacement. |
 | `dry_run` | boolean | For `create` or `delete`, whether refs were left unchanged. |
+| `ok` | boolean | For `verify`, whether every tag passed. |
+
+For `action: verify`, each element of `tags` includes `name`, `oid`, `target`, `ok`, `signature` (with `verdict`, optional `signer`, `key`, `trust`), optional `tree_sha256` (`claimed`, `computed`, `match_digest`, `files`, `submodules`, `excluded`, `bogus_excluded`, `cycles`), `not_verifiable_submodules` (`path`, `reason`), and `elapsed.ms`.
 
 Listing tags:
 
@@ -117,6 +139,41 @@ Creating an annotated tag:
   "signed": false,
   "dry_run": false,
   "peeled": "abc1234567890abcdef1234567890abcdef123456"
+}
+```
+
+Verifying tags:
+
+```json
+{
+  "action": "verify",
+  "ok": true,
+  "tags": [
+    {
+      "name": "v0.2",
+      "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
+      "target": "abc1234567890abcdef1234567890abcdef123456",
+      "ok": true,
+      "signature": {
+        "verdict": "good",
+        "signer": "Release Bot <bot@example.com>",
+        "key": "ABCD1234",
+        "trust": "fully"
+      },
+      "tree_sha256": {
+        "claimed": "a119881755f081b9f694f1f05eb31fa4771a108bc854d61fdd4d12482e2a14e2",
+        "computed": "a119881755f081b9f694f1f05eb31fa4771a108bc854d61fdd4d12482e2a14e2",
+        "match_digest": true,
+        "files": 3,
+        "submodules": 0,
+        "excluded": [],
+        "bogus_excluded": [],
+        "cycles": []
+      },
+      "not_verifiable_submodules": [],
+      "elapsed": { "ms": 12 }
+    }
+  ]
 }
 ```
 

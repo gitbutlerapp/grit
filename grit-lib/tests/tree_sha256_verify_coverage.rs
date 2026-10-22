@@ -33,6 +33,8 @@ fn public_tag_verify_types() {
             excluded: vec![],
             bogus_excluded: vec![],
             cycles: vec![],
+            files: 0,
+            submodules: 0,
         },
         TreeSha256TagHeaders {
             target: "0000000000000000000000000000000000000001".parse().unwrap(),

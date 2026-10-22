@@ -889,9 +889,10 @@ enum Command {
     /// List tags, or create / delete one.
     Tag {
         /// Name of the tag to create. Omit to list tags.
+        #[arg(value_name = "NAME")]
         name: Option<String>,
         /// Revision to tag (default `HEAD`).
-        #[arg(value_name = "TARGET", conflicts_with = "object")]
+        #[arg(value_name = "TARGET", conflicts_with_all = ["object", "verify"])]
         target: Option<String>,
         /// Delete the named tag instead of creating it.
         #[arg(short = 'd', long = "delete")]
@@ -930,6 +931,35 @@ enum Command {
         /// Signing key id or path (overrides `user.signingkey` for this tag).
         #[arg(long = "signing-key", value_name = "KEY")]
         signing_key: Option<String>,
+        /// Verify annotated tag signatures and optional `tree-sha256` claims.
+        #[arg(
+            short = 'v',
+            long = "verify",
+            conflicts_with_all = [
+                "delete",
+                "message",
+                "message_file",
+                "force",
+                "dry_run",
+                "sign",
+                "no_sign",
+                "signing_key",
+                "target",
+                "object"
+            ]
+        )]
+        verify: bool,
+        /// Tag names to verify (one or more, with `--verify`).
+        #[arg(
+            value_name = "NAME",
+            num_args = 1..,
+            requires = "verify",
+            last = true
+        )]
+        verify_names: Vec<String>,
+        /// Skip signature verification (still checks `tree-sha256` when present).
+        #[arg(long = "no-signature", requires = "verify")]
+        no_signature: bool,
     },
     /// List, add, or remove linked worktrees.
     Worktree {
@@ -1525,6 +1555,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             sign,
             no_sign,
             signing_key,
+            verify,
+            verify_names,
+            no_signature,
         } => {
             let sign_override = if sign {
                 Some(true)
@@ -1533,23 +1566,27 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             } else {
                 None
             };
-            emit(
-                &commands::tag::run(commands::tag::TagRunOptions {
-                    name,
-                    target,
-                    object,
-                    delete,
-                    message,
-                    message_file,
-                    force,
-                    dry_run,
-                    sign: sign_override,
-                    signing_key,
-                    now: ctx.now,
-                })?,
-                opts,
-                ctx,
-            )
+            let outcome = commands::tag::run(commands::tag::TagRunOptions {
+                name,
+                target,
+                object,
+                delete,
+                message,
+                message_file,
+                force,
+                dry_run,
+                sign: sign_override,
+                signing_key,
+                now: ctx.now,
+                verify,
+                verify_names,
+                no_signature,
+            })?;
+            emit(&outcome, opts, ctx)?;
+            if verify {
+                std::process::exit(commands::tag::verify_exit_code(&outcome));
+            }
+            Ok(())
         }
         Command::Worktree { action } => match action {
             WorktreeAction::List => emit(&commands::worktree::run_list()?, opts, ctx),

@@ -167,11 +167,13 @@ $ grit push
 
 ## Tag a release
 
-[`grit tag`](../tag/) marks the current commit, and `grit push --tags` publishes your tags:
+[`grit tag`](../tag/) marks the current commit, and `grit push --tags` publishes your tags. Signed or `tree-sha256` annotated tags can be checked locally with `grit tag --verify`:
 
 ```console
-$ grit tag v0.1
+$ grit tag v0.1 -m 'release'
 Created tag v0.1
+$ grit tag --verify v0.1 --no-signature
+tag v0.1 (…): ok
 $ grit push --tags
   pushed --tags → origin refs/tags/v0.1
 ```

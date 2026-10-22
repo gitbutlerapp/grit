@@ -86,6 +86,10 @@ pub struct TreeSha256Verdict {
     pub bogus_excluded: Vec<String>,
     /// Submodule cycle paths recorded while hashing.
     pub cycles: Vec<String>,
+    /// Regular files included in the digest (excluding excluded submodules).
+    pub files: usize,
+    /// Submodule gitlinks included in the digest.
+    pub submodules: usize,
 }
 
 /// Parsed tree-sha256-related headers from a raw annotated tag object.
@@ -224,6 +228,8 @@ fn tree_sha256_verdict(
         excluded: report.excluded.clone(),
         bogus_excluded,
         cycles: report.cycles.clone(),
+        files: report.files,
+        submodules: report.submodules,
     }
 }
 
