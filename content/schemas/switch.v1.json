@@ -6,6 +6,14 @@
     "branch": {
       "type": "string"
     },
+    "changed_paths": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "commit": {
       "type": [
         "string",
@@ -17,12 +25,16 @@
     },
     "detached": {
       "type": "boolean"
+    },
+    "dry_run": {
+      "type": "boolean"
     }
   },
   "required": [
     "branch",
     "created",
-    "detached"
+    "detached",
+    "dry_run"
   ],
   "title": "SwitchOutcome",
   "type": "object"

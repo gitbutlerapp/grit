@@ -651,6 +651,19 @@ pub fn print_history_absorb_outcome(
 pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyhow::Result<()> {
     outln!(w, "## Switch");
     outln!(w);
+    if outcome.dry_run {
+        let target = if outcome.detached {
+            outcome.commit.as_deref().map(short_hex).unwrap_or("HEAD")
+        } else {
+            outcome.branch.as_str()
+        };
+        outln!(
+            w,
+            "- Would switch to **`{target}`** ({} path(s) would change)",
+            outcome.changed_paths.unwrap_or(0)
+        );
+        return Ok(());
+    }
     if outcome.detached {
         let short = outcome.commit.as_deref().map(short_hex).unwrap_or("HEAD");
         outln!(w, "- HEAD detached at `{short}`");

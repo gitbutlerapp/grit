@@ -858,6 +858,32 @@ fn switch_json() -> TestResult {
 }
 
 #[test]
+fn switch_would_overwrite_json_shape() -> TestResult {
+    let scratch = Scratch::new("switch-overwrite-json")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "base\n");
+    gs_ok(&repo, &["commit", "base"]);
+    gs_ok(&repo, &["switch", "-c", "other"]);
+    write_file(&repo.join("b.txt"), "other\n");
+    gs_ok(&repo, &["commit", "other"]);
+    gs_ok(&repo, &["switch", "main"]);
+    write_file(&repo.join("b.txt"), "untracked\n");
+
+    let out = gs(&repo, ["switch", "other", "--json"]);
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    let v: Value = serde_json::from_str(&out.stdout)?;
+    assert_eq!(v["kind"], "would_overwrite");
+    assert_eq!(v["would_overwrite"]["reason"], "untracked");
+    let paths = v["would_overwrite"]["paths"]
+        .as_array()
+        .expect("paths array");
+    assert!(paths.iter().any(|p| p == "b.txt"));
+    Ok(())
+}
+
+#[test]
 fn remote_json_list_and_add() -> TestResult {
     let scratch = Scratch::new("remote")?;
     let repo = scratch.child("repo");

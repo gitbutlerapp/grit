@@ -71,7 +71,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Delete a merged branch | `grit branch -d <name>` |
 | Delete regardless | `grit branch -D <name>` |
 
-`grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run with uncommitted changes. Commit first. They also refuse rather than overwrite an untracked file.
+`grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run when checkout would overwrite local edits or untracked files. Preflight with `grit switch <branch> --dry-run --json` (checks only; reports `changed_paths`) before switching. On refusal, `--json` emits `kind: would_overwrite` with `reason` (`local_changes` or `untracked`) and sorted `paths`.
 
 ## Combining work
 

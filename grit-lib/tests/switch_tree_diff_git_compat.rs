@@ -117,6 +117,7 @@ fn switch_nested_gitattributes_crlf_clean_worktree_matches_git() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch must succeed on clean nested-eol=crlf worktree like git");
@@ -192,6 +193,7 @@ fn switch_wholesale_deleted_gitattributes_does_not_apply_stale_eol() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch");
@@ -267,6 +269,7 @@ fn switch_preserves_untracked_in_wholesale_deleted_directory() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch to target");
@@ -340,6 +343,7 @@ fn switch_preserves_untracked_fifo_under_fast_wholesale_delete_scan() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch to target");
@@ -405,6 +409,7 @@ fn switch_preserves_ignored_file_in_wholesale_deleted_directory() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch to target");
@@ -468,6 +473,7 @@ fn switch_preserves_ignored_file_from_nested_tracked_gitignore() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch to target");
@@ -531,6 +537,7 @@ fn switch_preserves_ignored_file_from_deep_nested_tracked_gitignore() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch to target");
@@ -611,6 +618,7 @@ fn switch_preserves_populated_gitlink_under_wholesale_deleted_directory() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch to target");
@@ -726,6 +734,7 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect_err("grit switch must refuse racy dirty worktree like git");
@@ -773,6 +782,7 @@ fn switch_tree_diff_git_clean_after() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("switch to target");
@@ -826,6 +836,7 @@ fn switch_refuses_dirty_conflicting_path_and_leaves_file() {
                 branch: "other".into(),
                 oid: other_oid,
             },
+            dry_run: false,
         },
     )
     .expect_err("dirty switch must fail");
@@ -925,6 +936,7 @@ fn switch_refuses_dirty_file_deleted_on_target_like_git() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect_err("grit must refuse switch like git");
@@ -991,6 +1003,7 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("switch");
@@ -1015,6 +1028,7 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
                 oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim())
                     .expect("main oid"),
             },
+            dry_run: false,
         },
     )
     .expect("switch back");
@@ -1129,6 +1143,7 @@ fn switch_removes_gitlink_when_parent_directory_dropped() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch");
@@ -1228,6 +1243,7 @@ fn switch_dirty_gitlink_on_changing_gitlink_matches_git() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch must match git and preserve dirty gitlink worktree");
@@ -1273,6 +1289,7 @@ fn switch_scoped_worktree_diff_limits_metadata_probes() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("switch");
@@ -1361,6 +1378,7 @@ fn switch_tracked_deletes_match_git_when_wholesale_dir_removal_fails() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch");
@@ -1438,6 +1456,7 @@ fn issue_1160_unstaged_delete_with_staged_add_deleted_allows_switch() {
                 branch: "main".into(),
                 oid: main_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch main with unstaged delete + AD path");
@@ -1527,6 +1546,7 @@ fn issue_1160_dangling_symlink_with_staged_add_deleted_refuses_switch() {
                 branch: "main".into(),
                 oid: main_oid,
             },
+            dry_run: false,
         },
     )
     .expect_err("grit must refuse switch for retargeted dangling symlink");
@@ -1601,6 +1621,7 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
                 branch: "target".into(),
                 oid: target_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch to target");
@@ -1622,6 +1643,7 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
                 branch: "main".into(),
                 oid: main_oid,
             },
+            dry_run: false,
         },
     )
     .expect("grit switch back to main");

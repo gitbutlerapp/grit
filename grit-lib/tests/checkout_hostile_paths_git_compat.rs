@@ -413,7 +413,14 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
         let git_snap = dir_bytes_snapshot(repo.git_dir());
 
         let mode = resolve_switch_target(&repo, "evil").expect("resolve evil");
-        let switch_err = switch_repository(&repo, &SwitchOptions { mode }).unwrap_err();
+        let switch_err = switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+            },
+        )
+        .unwrap_err();
         assert_invalid_path_component(switch_err);
         assert_eq!(dir_bytes_snapshot(repo.work_tree().expect("wt")), wt_snap);
         assert_eq!(dir_bytes_snapshot(repo.git_dir()), git_snap);

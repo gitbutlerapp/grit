@@ -41,6 +41,24 @@ impl std::fmt::Display for BadNumericSource {
     }
 }
 
+/// Why a tree transition would overwrite existing worktree content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OverwriteReason {
+    /// Staged or unstaged edits on paths that differ between trees.
+    LocalChanges,
+    /// Untracked paths that a checkout would replace.
+    Untracked,
+}
+
+impl std::fmt::Display for OverwriteReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LocalChanges => f.write_str("local_changes"),
+            Self::Untracked => f.write_str("untracked"),
+        }
+    }
+}
+
 /// Configuration parse and validation failures.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -718,6 +736,17 @@ pub enum Error {
     #[error("could not read from remote repository")]
     RemoteReadFailed,
 
+    /// Checkout or switch would overwrite local or untracked worktree content.
+    #[error("{message}")]
+    WouldOverwrite {
+        /// Whether tracked local edits or untracked paths block the operation.
+        reason: OverwriteReason,
+        /// Repository-relative paths that would be overwritten (sorted, deduplicated).
+        paths: Vec<String>,
+        /// Human-readable summary (depends on [`OverwriteReason`]).
+        message: String,
+    },
+
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.
@@ -963,6 +992,27 @@ pub enum Error {
 }
 
 impl Error {
+    /// Build [`Error::WouldOverwrite`] for switch and similar tree transitions.
+    #[must_use]
+    pub fn would_overwrite(reason: OverwriteReason, mut paths: Vec<String>) -> Self {
+        paths.sort();
+        paths.dedup();
+        let message = match reason {
+            OverwriteReason::LocalChanges => {
+                "you have uncommitted changes — commit them before switching".into()
+            }
+            OverwriteReason::Untracked => {
+                let first = paths.first().map(String::as_str).unwrap_or("<path>");
+                format!("untracked file '{first}' would be overwritten — move or remove it first")
+            }
+        };
+        Self::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        }
+    }
+
     /// Build [`Error::InvalidPathComponent`].
     #[must_use]
     pub fn invalid_path_component(
@@ -996,6 +1046,7 @@ impl Error {
                 crate::diagnostics::error_line(&self.to_string())
             }
             Error::Message(s) => s.clone(),
+            Error::WouldOverwrite { message, .. } => message.clone(),
             e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
             other => other.to_string(),
         }

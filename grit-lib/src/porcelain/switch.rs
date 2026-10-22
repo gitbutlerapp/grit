@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
-use crate::error::{Error, Result};
+use crate::error::{Error, OverwriteReason, Result};
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::{
@@ -18,7 +18,8 @@ use crate::porcelain::checkout_reflog::{
 };
 use crate::porcelain::worktree_guard::{
     collect_untracked_and_wholesale_trust_for_tree_changes, ensure_no_untracked_overwrite,
-    load_worktree_snapshot, worktree_snapshot_with_head_tree, TreeSwitchPlan, WorktreeSnapshot,
+    load_worktree_snapshot, untracked_would_be_overwritten_by_tree_changes,
+    worktree_snapshot_with_head_tree, TreeSwitchPlan, WorktreeSnapshot,
 };
 use crate::refs;
 use crate::repo::Repository;
@@ -62,6 +63,9 @@ pub enum SwitchMode {
 pub struct SwitchOptions {
     /// Resolved target branch, create, or detach mode.
     pub mode: SwitchMode,
+    /// When true, run overwrite checks and report [`SwitchOutcome::changed_paths`] without
+    /// updating refs, the index, or the worktree.
+    pub dry_run: bool,
 }
 
 /// Result of [`switch_repository`].
@@ -75,6 +79,10 @@ pub struct SwitchOutcome {
     pub detached: bool,
     /// Commit `HEAD` resolves to after the switch.
     pub commit: ObjectId,
+    /// When true, nothing was written to refs, the index, or the worktree.
+    pub dry_run: bool,
+    /// Paths that would differ after checkout; meaningful when [`Self::dry_run`] is true.
+    pub changed_paths: usize,
 }
 
 pub(crate) struct PreparedSwitch {
@@ -310,6 +318,16 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
     }
 
     if !detached && is_already_on_branch(repo, &branch_ref, target_oid)? {
+        if opts.dry_run {
+            return Ok(SwitchOutcome {
+                branch: branch_label,
+                created,
+                detached,
+                commit: target_oid,
+                dry_run: true,
+                changed_paths: 0,
+            });
+        }
         let head_before = resolve_head(repo.git_dir())?;
         if let Some(from_label) = checkout_reflog_from_label(&head_before) {
             let old_oid = head_before
@@ -323,6 +341,8 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
             created,
             detached,
             commit: target_oid,
+            dry_run: false,
+            changed_paths: 0,
         });
     }
     if detached && is_already_detached_at(repo, target_oid)? {
@@ -331,6 +351,8 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
             created,
             detached,
             commit: target_oid,
+            dry_run: opts.dry_run,
+            changed_paths: 0,
         });
     }
 
@@ -344,6 +366,7 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
         pending_create,
         track_upstream,
         &reflog_to,
+        opts.dry_run,
     )
 }
 
@@ -358,6 +381,7 @@ fn switch_to_target(
     pending_create: Option<(String, ObjectId, String)>,
     track_upstream: Option<(String, String)>,
     reflog_to_label: &str,
+    dry_run: bool,
 ) -> Result<SwitchOutcome> {
     let head_before = resolve_head(repo.git_dir())?;
     let head_oid = head_before.oid().copied();
@@ -386,6 +410,17 @@ fn switch_to_target(
     let snapshot = worktree_snapshot_with_head_tree(repo, head_tree)?;
 
     let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
+    let changed_paths = count_unique_tree_change_paths(&prepared.plan.tree_changes);
+    if dry_run {
+        return Ok(SwitchOutcome {
+            branch: branch_label.to_owned(),
+            created,
+            detached,
+            commit: target_oid,
+            dry_run: true,
+            changed_paths,
+        });
+    }
     checkout_prepared_tree_transition(repo, prepared)?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
@@ -421,7 +456,19 @@ fn switch_to_target(
         created,
         detached,
         commit: target_oid,
+        dry_run: false,
+        changed_paths: 0,
     })
+}
+
+fn count_unique_tree_change_paths(tree_changes: &[DiffEntry]) -> usize {
+    let mut paths: BTreeSet<&str> = BTreeSet::new();
+    for change in tree_changes {
+        if let Some(path) = path_from_diff(change) {
+            paths.insert(path);
+        }
+    }
+    paths.len()
 }
 
 fn tree_changes_contain_additions(tree_changes: &[DiffEntry]) -> bool {
@@ -433,14 +480,40 @@ fn prepare_tree_switch_allow_local_with_snapshot(
     to_tree: &ObjectId,
     snapshot: WorktreeSnapshot,
 ) -> Result<PreparedSwitch> {
-    prepare_tree_transition_allow_local_with_snapshot(
+    let prepared = prepare_tree_transition_allow_local_with_snapshot(
         repo,
         None,
         to_tree,
         snapshot,
         &HashSet::new(),
     )
-    .map_err(tree_transition_prepare_to_error)
+    .map_err(map_switch_tree_transition_prepare_error)?;
+    verify_prepared_switch_no_untracked_overwrite(&prepared.plan)?;
+    Ok(prepared)
+}
+
+fn map_switch_tree_transition_prepare_error(err: TreeTransitionPrepareError) -> Error {
+    match err {
+        TreeTransitionPrepareError::OverwritePaths(paths) => {
+            Error::would_overwrite(OverwriteReason::LocalChanges, paths)
+        }
+        TreeTransitionPrepareError::Failed(err) => err,
+    }
+}
+
+fn verify_prepared_switch_no_untracked_overwrite(plan: &TreeSwitchPlan) -> Result<()> {
+    if !tree_changes_contain_additions(&plan.tree_changes) {
+        return Ok(());
+    }
+    let collisions =
+        untracked_would_be_overwritten_by_tree_changes(&plan.untracked, &plan.tree_changes);
+    if collisions.is_empty() {
+        return Ok(());
+    }
+    Err(Error::would_overwrite(
+        OverwriteReason::Untracked,
+        collisions,
+    ))
 }
 
 /// Local edits on tree-diff paths block a tree transition.
@@ -819,6 +892,7 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
         tree_changes.iter().filter_map(path_from_diff).collect();
 
     let mut preserve_worktree_paths = HashSet::new();
+    let mut blocked_paths = Vec::new();
 
     for entry in staged {
         let Some(path) = path_from_diff(entry) else {
@@ -837,7 +911,7 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
         {
             continue;
         }
-        return Err(vec![path.to_owned()]);
+        blocked_paths.push(path.to_owned());
     }
 
     for entry in unstaged {
@@ -874,7 +948,13 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
                 continue;
             }
         }
-        return Err(vec![path.to_owned()]);
+        blocked_paths.push(path.to_owned());
+    }
+
+    if !blocked_paths.is_empty() {
+        blocked_paths.sort();
+        blocked_paths.dedup();
+        return Err(blocked_paths);
     }
 
     Ok(preserve_worktree_paths)
@@ -1028,10 +1108,17 @@ mod tests {
                     branch: "target".into(),
                     oid: target_tip,
                 },
+                dry_run: false,
             },
         )
         .expect_err("must refuse overwrite");
-        assert!(matches!(err, Error::Message(_)));
+        assert!(matches!(
+            err,
+            Error::WouldOverwrite {
+                reason: OverwriteReason::LocalChanges,
+                ..
+            }
+        ));
 
         let head_after = resolve_head(repo.git_dir()).expect("head");
         assert_eq!(head_before, head_after);
@@ -1161,10 +1248,17 @@ mod tests {
                     commit: c1,
                     reflog_to_label: "HEAD~1".into(),
                 },
+                dry_run: false,
             },
         )
         .expect_err("local changes should block switch");
-        assert!(matches!(err, Error::Message(_)));
+        assert!(matches!(
+            err,
+            Error::WouldOverwrite {
+                reason: OverwriteReason::LocalChanges,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1192,6 +1286,7 @@ mod tests {
                     branch: "other".into(),
                     oid: refs::resolve_ref(repo.git_dir(), "refs/heads/other").expect("oid"),
                 },
+                dry_run: false,
             },
         )
         .expect("switch");
@@ -1230,10 +1325,17 @@ mod tests {
                     create_source_label: "HEAD".into(),
                     track_upstream: None,
                 },
+                dry_run: false,
             },
         )
         .expect_err("conflict");
-        assert!(matches!(err, Error::Message(_)));
+        assert!(matches!(
+            err,
+            Error::WouldOverwrite {
+                reason: OverwriteReason::LocalChanges,
+                ..
+            }
+        ));
         assert!(refs::resolve_ref(repo.git_dir(), "refs/heads/leaked").is_err());
     }
 
@@ -1259,7 +1361,14 @@ mod tests {
             other => panic!("expected create from remote, got {other:?}"),
         }
 
-        switch_repository(&repo, &SwitchOptions { mode }).expect("switch");
+        switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+            },
+        )
+        .expect("switch");
         let config = repo.config().expect("config");
         assert_eq!(config.get("branch.topic.remote").as_deref(), Some("origin"));
         assert_eq!(
@@ -1313,6 +1422,7 @@ mod tests {
                     commit: resolved,
                     reflog_to_label: "v1".into(),
                 },
+                dry_run: false,
             },
         )
         .expect("detach at annotated tag");

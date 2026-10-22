@@ -4,10 +4,19 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use anyhow::Error;
-use grit_lib::error::Error as LibError;
+use grit_lib::error::{Error as LibError, OverwriteReason};
 use grit_lib::objects::ObjectId;
 use schemars::JsonSchema;
 use serde::Serialize;
+
+/// Paths that would be overwritten, when `kind == "would_overwrite"`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WouldOverwriteJson {
+    /// `local_changes` or `untracked`.
+    pub reason: String,
+    /// Sorted, deduplicated repository-relative paths.
+    pub paths: Vec<String>,
+}
 
 /// JSON object emitted on stdout for structured command failures.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -20,6 +29,10 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub conflicts: Option<Vec<String>>,
+    /// Overwrite details when `kind == "would_overwrite"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub would_overwrite: Option<WouldOverwriteJson>,
     /// Plain SHA-1 digest for colliding input, when `kind == "hash_collision"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -54,6 +67,7 @@ pub fn operation_conflict(operation: &str, mut paths: Vec<String>) -> Error {
             error: format!("{operation} has conflicts"),
             kind: "conflict",
             conflicts: Some(paths),
+            would_overwrite: None,
             oid: None,
         },
         human,
@@ -70,7 +84,32 @@ pub fn hash_collision(oid: ObjectId) -> Error {
             error: "SHA-1 hash collision".to_owned(),
             kind: "hash_collision",
             conflicts: None,
+            would_overwrite: None,
             oid: Some(hex),
+        },
+        human,
+    })
+}
+
+/// Build a structured CLI error for switch (and similar) overwrite refusal.
+pub fn would_overwrite_error(
+    reason: OverwriteReason,
+    mut paths: Vec<String>,
+    human: String,
+) -> Error {
+    paths.sort();
+    paths.dedup();
+    let reason_str = reason.to_string();
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: "would_overwrite",
+            conflicts: None,
+            would_overwrite: Some(WouldOverwriteJson {
+                reason: reason_str,
+                paths,
+            }),
+            oid: None,
         },
         human,
     })
@@ -80,6 +119,11 @@ pub fn hash_collision(oid: ObjectId) -> Error {
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
         LibError::HashCollision { oid } => hash_collision(oid),
+        LibError::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        } => would_overwrite_error(reason, paths, message),
         other => Error::new(other),
     }
 }
@@ -97,12 +141,46 @@ fn hash_collision_from_chain(err: &Error) -> Option<ObjectId> {
 }
 
 /// Wrap [`LibError::HashCollision`] anywhere in the chain as [`StructuredCliError`].
+fn would_overwrite_from_chain(err: &Error) -> Option<Error> {
+    if let Some(LibError::WouldOverwrite {
+        reason,
+        paths,
+        message,
+    }) = err.downcast_ref::<LibError>()
+    {
+        return Some(would_overwrite_error(
+            *reason,
+            paths.clone(),
+            message.clone(),
+        ));
+    }
+    for cause in err.chain() {
+        if let Some(LibError::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        }) = cause.downcast_ref::<LibError>()
+        {
+            return Some(would_overwrite_error(
+                *reason,
+                paths.clone(),
+                message.clone(),
+            ));
+        }
+    }
+    None
+}
+
+/// Wrap typed library failures anywhere in the chain as [`StructuredCliError`].
 pub fn ensure_structured(err: Error) -> Error {
     if structured_json_payload(&err).is_some() {
         return err;
     }
     if let Some(oid) = hash_collision_from_chain(&err) {
         return hash_collision(oid);
+    }
+    if let Some(structured) = would_overwrite_from_chain(&err) {
+        return structured;
     }
     err
 }
@@ -118,6 +196,7 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
             error: "SHA-1 hash collision".to_owned(),
             kind: "hash_collision",
             conflicts: None,
+            would_overwrite: None,
             oid: Some(hex),
         }
     })
@@ -131,6 +210,7 @@ pub fn incompatible_output_flags(human: impl Into<String>, kind: &'static str) -
             error: human.clone(),
             kind,
             conflicts: None,
+            would_overwrite: None,
             oid: None,
         },
         human,
@@ -160,6 +240,7 @@ pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) 
             error: human.clone(),
             kind: "invalid_pattern",
             conflicts: None,
+            would_overwrite: None,
             oid: None,
         },
         human,
@@ -175,6 +256,7 @@ pub fn invalid_pickaxe(err: grit_lib::diff::PickaxeError) -> Error {
             error: human.clone(),
             kind: "invalid_pattern",
             conflicts: None,
+            would_overwrite: None,
             oid: None,
         },
         human,

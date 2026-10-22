@@ -2011,6 +2011,7 @@ mod tests {
                     branch: "other".into(),
                     oid: tip_b,
                 },
+                dry_run: false,
             },
         );
         assert!(
@@ -2388,6 +2389,7 @@ mod tests {
                     branch: "target".into(),
                     oid: target_co,
                 },
+                dry_run: false,
             },
         );
         assert!(

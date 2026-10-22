@@ -428,6 +428,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
                 branch: "bench-wide".into(),
                 oid: fx.wide_switch_tip,
             },
+            dry_run: false,
         },
     )
     .expect("switch wide");
@@ -438,6 +439,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
                 branch: "main".into(),
                 oid: fx.main_head_oid,
             },
+            dry_run: false,
         },
     )
     .expect("switch main");

@@ -1,6 +1,6 @@
 //! `grit switch` — move to another branch, remote branch, or detached commit.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
@@ -10,8 +10,13 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
+use crate::json_error;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 /// Result of `grit switch`.
 #[derive(Serialize, JsonSchema)]
@@ -22,10 +27,32 @@ pub struct SwitchOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    #[schemars(skip_serializing_if = "is_false")]
+    pub dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub changed_paths: Option<usize>,
 }
 
 impl HumanRender for SwitchOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.dry_run {
+            outln!(
+                w,
+                "Would switch to {} ({} path(s) would change)",
+                if self.branch.is_empty() {
+                    self.commit
+                        .as_deref()
+                        .map(|c| &c[..7.min(c.len())])
+                        .unwrap_or("HEAD")
+                } else {
+                    self.branch.as_str()
+                },
+                self.changed_paths.unwrap_or(0)
+            );
+            return Ok(());
+        }
         if self.detached {
             let short = self
                 .commit
@@ -56,6 +83,7 @@ pub fn run(
     start_point: Option<String>,
     create: bool,
     detach: bool,
+    dry_run: bool,
 ) -> Result<SwitchOutcome> {
     let repo = context::discover()?;
 
@@ -80,9 +108,8 @@ pub fn run(
         resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
     };
 
-    let outcome = switch_repository(&repo, &SwitchOptions { mode })
-        .map_err(anyhow::Error::new)
-        .context("could not switch")?;
+    let outcome = switch_repository(&repo, &SwitchOptions { mode, dry_run })
+        .map_err(json_error::map_lib_error)?;
 
     Ok(SwitchOutcome {
         branch: outcome.branch,
@@ -93,5 +120,7 @@ pub fn run(
         } else {
             None
         },
+        dry_run: outcome.dry_run,
+        changed_paths: outcome.dry_run.then_some(outcome.changed_paths),
     })
 }
