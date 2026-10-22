@@ -2121,6 +2121,9 @@ fn worktree_against_tree(
     diff_options: &DiffOptions,
 ) -> Result<Vec<FileChange>> {
     let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
+    // The entry diff holds its own copy of the index; finish it before loading this one
+    // so two copies are never alive at once.
+    let entries = worktree_against_tree_entries(repo, base_tree, diff_options)?;
     let index = repo
         .index_handle()
         .load()
@@ -2133,7 +2136,7 @@ fn worktree_against_tree(
         index: &index,
         rules: rules_arc,
     };
-    worktree_against_tree_entries(repo, base_tree, diff_options)?
+    entries
         .into_iter()
         .map(|e| {
             let (old_bytes, old_bin) = old_side_bytes(repo.odb(), &e)?;
