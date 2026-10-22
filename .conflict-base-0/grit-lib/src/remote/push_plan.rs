@@ -190,8 +190,9 @@ pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
 /// Append annotated tag refspecs reachable from the branch updates in `specs`.
 ///
 /// Matches `git push --follow-tags`: lightweight tags are skipped, tags already on the remote
-/// are skipped, and reachability is computed with a revwalk from pushed tips that stops at
-/// remote-advertised branch tips.
+/// are skipped, and reachability is computed with a revwalk over every commit reachable from
+/// the pushed tips (matching Git: tags on older commits still qualify when the branch push is
+/// already up to date).
 pub fn follow_tag_push_specs(
     repo: &Repository,
     specs: &[PushRefSpec],
@@ -205,12 +206,11 @@ pub fn follow_tag_push_specs(
     if tips.is_empty() {
         return Ok(Vec::new());
     }
-    let hide: Vec<ObjectId> = ctx.remote_branch_tips.iter().copied().collect();
-    let reachable = commits_reachable_excluding_ancestors_of(repo, &tips, &hide, None)
+    let reachable = commits_reachable_excluding_ancestors_of(repo, &tips, &[], None)
         .map_err(|e| PushPlanError::Message(e.to_string()))?;
     let mut reachable_commits: HashSet<ObjectId> = reachable.into_iter().collect();
-    for tip in tips {
-        reachable_commits.insert(tip);
+    for tip in &tips {
+        reachable_commits.insert(*tip);
     }
 
     let existing: HashSet<&str> = specs.iter().map(|s| s.dst.as_str()).collect();

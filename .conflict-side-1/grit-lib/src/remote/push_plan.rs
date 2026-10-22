@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::branch_tracking::apply_push_set_upstream;
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
-use crate::merge_base::commits_reachable_excluding_ancestors_of;
+use crate::merge_base::is_ancestor;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::push_report::PushRefResult;
 use crate::refs;
@@ -71,7 +71,8 @@ pub enum PushPlanKind {
 pub struct PushPlanContext {
     /// Advertised ref names on the remote (for delete mapping and dst guessing).
     pub remote_ref_names: HashSet<String>,
-    /// Tips of `refs/heads/*` on the remote (follow-tags walk boundary).
+    /// Tips of `refs/heads/*` on the remote (reserved for push planning; follow-tags
+    /// uses commit-graph ancestor queries instead of materializing reachable sets).
     pub remote_branch_tips: HashSet<ObjectId>,
 }
 
@@ -190,9 +191,9 @@ pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
 /// Append annotated tag refspecs reachable from the branch updates in `specs`.
 ///
 /// Matches `git push --follow-tags`: lightweight tags are skipped, tags already on the remote
-/// are skipped, and reachability is computed with a revwalk over every commit reachable from
-/// the pushed tips (matching Git: tags on older commits still qualify when the branch push is
-/// already up to date).
+/// are skipped. Each candidate annotated tag is kept when its peeled target is an ancestor of
+/// at least one pushed commit tip, checked with commit-graph [`is_ancestor`] (no full history
+/// materialization).
 pub fn follow_tag_push_specs(
     repo: &Repository,
     specs: &[PushRefSpec],
@@ -200,17 +201,11 @@ pub fn follow_tag_push_specs(
 ) -> PlanResult<Vec<PushRefSpec>> {
     let tips: Vec<ObjectId> = specs
         .iter()
-        .filter(|s| !s.delete)
+        .filter(|s| !s.delete && s.dst.starts_with("refs/heads/"))
         .filter_map(|s| s.src)
         .collect();
     if tips.is_empty() {
         return Ok(Vec::new());
-    }
-    let reachable = commits_reachable_excluding_ancestors_of(repo, &tips, &[], None)
-        .map_err(|e| PushPlanError::Message(e.to_string()))?;
-    let mut reachable_commits: HashSet<ObjectId> = reachable.into_iter().collect();
-    for tip in &tips {
-        reachable_commits.insert(*tip);
     }
 
     let existing: HashSet<&str> = specs.iter().map(|s| s.dst.as_str()).collect();
@@ -229,7 +224,14 @@ pub fn follow_tag_push_specs(
         let Ok((peeled, _)) = odb.peel_tags(tag_oid) else {
             continue;
         };
-        if !reachable_commits.contains(&peeled) {
+        let mut on_push_history = false;
+        for &tip in &tips {
+            if is_ancestor(repo, peeled, tip).map_err(|e| PushPlanError::Message(e.to_string()))? {
+                on_push_history = true;
+                break;
+            }
+        }
+        if !on_push_history {
             continue;
         }
         out.push(push_spec(

@@ -88,7 +88,8 @@ pub enum PushPlanKind {
 pub struct PushPlanContext {
     /// Advertised ref names on the remote (for delete mapping and dst guessing).
     pub remote_ref_names: HashSet<String>,
-    /// Tips of `refs/heads/*` on the remote (follow-tags walk boundary).
+    /// Tips of `refs/heads/*` on the remote (reserved for push planning; follow-tags
+    /// uses commit-graph ancestor queries instead of materializing reachable sets).
     pub remote_branch_tips: HashSet<ObjectId>,
 }
 
