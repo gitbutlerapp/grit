@@ -818,7 +818,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
         }
         let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
         let entries = filter_diff_entries(staged_entries(&repo, &diff_options)?, &repo, &pathspecs);
-        let changes = filter_file_changes(staged_changes(&repo, &diff_options)?, &repo, &pathspecs);
+        let changes = staged_changes_from_entries(&repo, entries.clone())?;
         return patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet);
     }
     if opts.unstaged {
@@ -828,8 +828,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
         let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
         let entries =
             filter_diff_entries(unstaged_entries(&repo, &diff_options)?, &repo, &pathspecs);
-        let changes =
-            filter_file_changes(unstaged_changes(&repo, &diff_options)?, &repo, &pathspecs);
+        let changes = unstaged_changes_from_entries(&repo, entries.clone())?;
         return patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet);
     }
     if commits.len() > 2 {
@@ -987,18 +986,11 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
         let entries = filter_diff_entries(staged_entries(&repo, &diff_options)?, &repo, &pathspecs);
         let outcome = match detail {
-            DiffDetail::Patch => outcome_from_changes(
-                filter_file_changes(staged_changes(&repo, &diff_options)?, &repo, &pathspecs),
-                &config,
-                &thread_policy,
-                diff_options,
-                format,
-            ),
             DiffDetail::Stat | DiffDetail::NameOnly | DiffDetail::NameStatus => {
                 outcome_from_entries(&repo, entries, detail, diff_options, format)?
             }
             _ => outcome_from_changes(
-                filter_file_changes(staged_changes(&repo, &diff_options)?, &repo, &pathspecs),
+                staged_changes_from_entries(&repo, entries)?,
                 &config,
                 &thread_policy,
                 diff_options,
@@ -1015,15 +1007,8 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         let entries =
             filter_diff_entries(unstaged_entries(&repo, &diff_options)?, &repo, &pathspecs);
         let outcome = match detail {
-            DiffDetail::Patch => outcome_from_changes(
-                filter_file_changes(unstaged_changes(&repo, &diff_options)?, &repo, &pathspecs),
-                &config,
-                &thread_policy,
-                diff_options,
-                format,
-            ),
             DiffDetail::Stat => outcome_stat_from_changes(
-                filter_file_changes(unstaged_changes(&repo, &diff_options)?, &repo, &pathspecs),
+                unstaged_changes_from_entries(&repo, entries)?,
                 diff_options,
                 format,
             ),
@@ -1031,7 +1016,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 outcome_from_entries(&repo, entries, detail, diff_options, format)?
             }
             _ => outcome_from_changes(
-                filter_file_changes(unstaged_changes(&repo, &diff_options)?, &repo, &pathspecs),
+                unstaged_changes_from_entries(&repo, entries)?,
                 &config,
                 &thread_policy,
                 diff_options,
@@ -1748,6 +1733,14 @@ fn unstaged_changes(
     repo: &grit_lib::repo::Repository,
     diff_options: &DiffOptions,
 ) -> Result<Vec<FileChange>> {
+    unstaged_changes_from_entries(repo, unstaged_entries(repo, diff_options)?)
+}
+
+/// File changes, with both sides' contents, for entries from [`unstaged_entries`].
+fn unstaged_changes_from_entries(
+    repo: &grit_lib::repo::Repository,
+    entries: Vec<DiffEntry>,
+) -> Result<Vec<FileChange>> {
     let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
     let index = repo
         .index_handle()
@@ -1761,7 +1754,7 @@ fn unstaged_changes(
         index: &index,
         rules: std::sync::Arc::clone(&rules_arc),
     };
-    unstaged_entries(repo, diff_options)?
+    entries
         .into_iter()
         .map(|e| {
             let (old_bytes, old_bin) = old_side_bytes(repo.odb(), &e)?;
@@ -1947,12 +1940,13 @@ fn staged_entries(
     Ok(entries)
 }
 
-/// Staged changes: index vs HEAD's tree.
-fn staged_changes(
+/// Staged changes (index vs HEAD's tree), with both sides' contents, for entries from
+/// [`staged_entries`].
+fn staged_changes_from_entries(
     repo: &grit_lib::repo::Repository,
-    diff_options: &DiffOptions,
+    entries: Vec<DiffEntry>,
 ) -> Result<Vec<FileChange>> {
-    staged_entries(repo, diff_options)?
+    entries
         .into_iter()
         .map(|e| {
             let (old_bytes, old_bin) = old_side_bytes(repo.odb(), &e)?;
