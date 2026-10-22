@@ -46,6 +46,7 @@ fn grit_annotated_tag_round_trips_with_git() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("create annotated tag");

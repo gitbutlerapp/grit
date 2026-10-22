@@ -33,6 +33,7 @@ Keys are written as `section.name`, for example `user.email`.
 | `credential.helper` | Where HTTPS credentials are stored and looked up. See [`grit auth`](../auth/). |
 | `grit.githubClientId` | The GitHub OAuth app [`grit auth`](../auth/) signs in with. |
 | `grit.changeIds` | When true (default), [`grit commit`](../commit/) adds a `change-id` header to new commits and stores derived ids on amends when the old tip had none. |
+| `grit.treeSha256` | When true, every signed tag from [`grit tag`](../tag/) includes a [tree-sha256](../library/tree-sha256.md) digest header automatically. |
 | `grit.testing.changeId` | Test-only: `content-hash` makes change ids deterministic from commit bytes; any other value is used verbatim. |
 | `receive.denyNonFastForwards` | Refuse pushes that would discard commits. Enforced by [`grit receive-pack`](../receive-pack/). |
 | `receive.denyDeletes` | Refuse pushes that delete branches or tags. |

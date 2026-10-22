@@ -14,6 +14,7 @@ grit tag <name> [<target>]
 grit tag <name> -m <message>
 grit tag <name> -F <path|->
 grit tag <name> -s -m <message>
+grit tag <name> -s --tree-sha256 -m <message>
 grit tag <name> -f
 grit tag <name> --dry-run
 grit tag -d <name>
@@ -26,6 +27,8 @@ With no arguments, lists your tags. With a name and no `-m`/`-F`, creates a **li
 Use `-f` / `--force` to replace an existing tag (lightweight or annotated). The previous ref target is reported in `--json` as `replaced`.
 
 Use `--dry-run` on create or delete to preview the outcome without changing refs.
+
+Use `--tree-sha256` on a signed tag to attach a [tree-sha256](../library/tree-sha256.md) content digest of the tagged commit's tree (implies signing). Repeat `--exclude-submodule <glob>` to record excluded submodule paths in `tree-sha256-excluded` headers. When `grit.treeSha256=true`, every signed tag gets the digest automatically.
 
 Tag names must be valid as `refs/tags/<name>` under Git's ref-name rules (same checks as `git check-ref-format refs/tags/<name>`). Invalid names are rejected before writing under `.git/refs`.
 
@@ -45,6 +48,8 @@ Tags are local until you publish them with [`grit push --tags`](../push/). Delet
 | `-s`, `--sign` | Sign the tag object (implies annotated; honors `tag.gpgSign` when omitted). |
 | `--no-sign` | Do not sign, even when `tag.gpgSign` is true. |
 | `--signing-key` | Signing key id or path for this tag (overrides `user.signingkey`). |
+| `--tree-sha256` | Attach a tree-sha256 digest header (implies `--sign`). |
+| `--exclude-submodule` | Submodule path glob to exclude from the digest (repeatable). |
 | `--object` | Hidden alias for `<target>` (one release). |
 
 ## Examples
@@ -89,6 +94,11 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | `peeled` | string | Commit oid when the tag peels to a commit. |
 | `replaced` | string | For `create` with `--force`, oid the tag ref pointed at before replacement. |
 | `dry_run` | boolean | For `create` or `delete`, whether refs were left unchanged. |
+| `tree_sha256` | string | For `create`, 64-hex digest when a tree-sha256 claim was written. |
+| `tree_sha256_excluded` | array of strings | Submodule paths excluded from the digest. |
+| `tree_sha256_files` | number | Regular files counted in the digest. |
+| `tree_sha256_submodules` | number | Submodules walked for the digest. |
+| `tree_sha256_hash_ms` | number | Milliseconds spent computing the digest. |
 
 Listing tags:
 

@@ -45,6 +45,10 @@ Read a claim with [`TreeSha256Claim::from_tag`](rustdoc:grit_lib::tree_sha256::T
 
 Excluded paths in [`TreeSha256Claim::excluded`](rustdoc:grit_lib::tree_sha256::TreeSha256Claim::excluded) must be non-empty and must not contain NUL or newline when calling `apply_to_tag` (the same rules enforced when reading tags).
 
+## Signed tags
+
+[`create_tag`](rustdoc:grit_lib::porcelain::tag::create_tag) accepts optional [`TreeSha256Options`](rustdoc:grit_lib::tree_sha256::TreeSha256Options) on [`CreateTagRequest::tree_sha256`](rustdoc:grit_lib::porcelain::tag::CreateTagRequest::tree_sha256). Requesting a digest implies signing; pairing it with `sign: Some(false)` returns [`Error::TreeSha256RequiresSigning`](rustdoc:grit_lib::error::Error::TreeSha256RequiresSigning). With [`TreeSha256Policy`](rustdoc:grit_lib::tree_sha256::TreeSha256Policy) enabled (`grit.treeSha256=true`), every signed tag gets a default claim. The CLI exposes this as [`grit tag --tree-sha256`](../commands/tag.md).
+
 ## Verify a signed tag
 
 [`Repository::verify_tag`](rustdoc:grit_lib::repo::Repository::verify_tag) reads an annotated tag object by id (not via a ref), checks its appended signature with [`TagVerifyOptions::gpg`](rustdoc:grit_lib::tree_sha256::TagVerifyOptions::gpg), and recomputes the `tree-sha256` claim when the header is present. Signature verification and digest hashing run on separate threads.

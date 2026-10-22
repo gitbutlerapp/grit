@@ -25,6 +25,7 @@ pub use tag_verify::{
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 
 use crate::config::ConfigSet;
 use crate::diff::submodule_embedded_git_dir;
@@ -578,6 +579,41 @@ pub(crate) fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> 
     chain.contains(&gitlink)
 }
 
+/// Whether signed tags should automatically include a tree-sha256 claim (`grit.treeSha256`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TreeSha256Policy {
+    enabled: bool,
+}
+
+impl TreeSha256Policy {
+    /// Load `grit.treeSha256` (default false).
+    #[must_use]
+    pub fn from_config(config: &ConfigSet) -> Self {
+        let enabled = config
+            .get_bool("grit.treeSha256")
+            .and_then(|r| r.ok())
+            .unwrap_or(false);
+        Self { enabled }
+    }
+
+    /// When true, every signed tag grit creates gets a tree-sha256 header.
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
+/// Tree-sha256 digest, counts, and timing from tag creation.
+#[derive(Debug, Clone)]
+pub struct TagTreeSha256Outcome {
+    /// Headers written on the tag object.
+    pub claim: TreeSha256Claim,
+    /// Full hash report (files, submodules, excluded gitlinks).
+    pub report: TreeSha256Report,
+    /// Wall time spent computing the digest.
+    pub hash_elapsed: Duration,
+}
+
 /// Digest and excluded submodule paths recorded on an annotated tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeSha256Claim {
@@ -604,7 +640,7 @@ pub enum TreeSha256ClaimError {
 impl TreeSha256Claim {
     /// Read a claim from post-`tagger` extra headers on `tag`.
     ///
-    /// Returns [`Ok(None)`] when no `tree-sha256` header is present. Commit objects are not
+    /// Returns `Ok(None)` when no `tree-sha256` header is present. Commit objects are not
     /// supported.
     ///
     /// # Errors
@@ -667,6 +703,17 @@ impl TreeSha256Claim {
         claim.push(b'\n');
         tag.extra_headers = claim;
         tag.extra_headers.extend_from_slice(&unrelated);
+    }
+
+    /// Build a claim from a successful [`TreeSha256Report`] (excluded paths sorted).
+    #[must_use]
+    pub fn from_report(report: &TreeSha256Report) -> Self {
+        let mut excluded: Vec<String> = report.excluded.iter().map(|(p, _)| p.clone()).collect();
+        excluded.sort();
+        Self {
+            digest: report.digest,
+            excluded,
+        }
     }
 }
 

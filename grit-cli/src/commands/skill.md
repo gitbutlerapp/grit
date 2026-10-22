@@ -115,7 +115,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## Tags and config
 
-- `grit tag` lists tags. `grit tag <name> [<target>]` creates a lightweight tag at `HEAD` or `<target>`. `-m` / `-F` create an annotated tag; `-f` replaces an existing tag; `--dry-run` previews create/delete. `grit tag -d <name>` deletes one.
+- `grit tag` lists tags. `grit tag <name> [<target>]` creates a lightweight tag at `HEAD` or `<target>`. `-m` / `-F` create an annotated tag; `-f` replaces an existing tag; `--dry-run` previews create/delete. `grit tag -d <name>` deletes one. Annotated and signed tags use `-m` and `-s`; `--tree-sha256` adds a content digest header (implies `-s`). `grit.treeSha256=true` adds the digest to every signed tag.
 - `grit config <key>` reads, `grit config <key> <value>` sets, `grit config --unset <key>` removes, `grit config --list` lists. Add `--global` for the per-user file.
 
 ## Staying non-interactive

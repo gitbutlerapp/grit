@@ -530,6 +530,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("annotated tag");

@@ -322,6 +322,7 @@ fn list_and_delete_on_reftable_backend() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .unwrap();

@@ -103,6 +103,7 @@ fn create_tag_ssh_signed_verifies_with_git_verify_tag() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("create signed tag");
@@ -148,6 +149,7 @@ fn create_tag_honors_tag_gpgsign_config() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("create tag with tag.gpgSign");
@@ -179,6 +181,7 @@ fn signed_tag_passes_git_fsck_strict() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("signed tag");
@@ -313,6 +316,7 @@ fn create_tag_openpgp_signed_verifies_with_git() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("signed openpgp tag");

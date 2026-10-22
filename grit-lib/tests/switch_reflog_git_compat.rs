@@ -234,6 +234,7 @@ fn detach_at_annotated_tag_matches_git() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("annotated tag");

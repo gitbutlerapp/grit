@@ -53,6 +53,7 @@ fn force_replace_lightweight_with_annotated_git_clean() {
             signing_key: None,
             force: true,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("force annotated");
@@ -92,6 +93,7 @@ fn force_replace_annotated_with_lightweight_git_clean() {
             signing_key: None,
             force: true,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .expect("force lightweight");
@@ -127,6 +129,7 @@ fn create_dry_run_leaves_refs_untouched() {
             signing_key: None,
             force: false,
             dry_run: true,
+            tree_sha256: None,
         },
     )
     .expect("dry-run create");
@@ -145,6 +148,7 @@ fn create_dry_run_leaves_refs_untouched() {
             signing_key: None,
             force: true,
             dry_run: true,
+            tree_sha256: None,
         },
     )
     .expect("dry-run force");

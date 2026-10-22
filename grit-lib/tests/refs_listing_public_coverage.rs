@@ -113,6 +113,7 @@ fn references_query_peels_annotated_tags() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .unwrap();
@@ -149,6 +150,7 @@ fn references_query_peels_annotated_tag_to_non_commit() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .unwrap();
@@ -202,6 +204,7 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .unwrap();
@@ -255,6 +258,7 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
             signing_key: None,
             force: false,
             dry_run: false,
+            tree_sha256: None,
         },
     )
     .unwrap();

@@ -15,6 +15,7 @@ use grit_lib::refs::check_ref_format::validate_tag_short_name;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::tree_sha256::TreeSha256Options;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::{self, Read, Write};
@@ -41,6 +42,21 @@ pub enum TagOutcome {
         #[schemars(skip_serializing_if = "Option::is_none")]
         replaced: Option<String>,
         dry_run: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_excluded: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_files: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_submodules: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_hash_ms: Option<f64>,
     },
     /// A tag was deleted.
     Delete { name: String, dry_run: bool },
@@ -102,11 +118,37 @@ impl HumanRender for TagOutcome {
                     outln!(w, "  {}", tag.name);
                 }
             }
-            TagOutcome::Create { name, dry_run, .. } => {
+            TagOutcome::Create {
+                name,
+                dry_run,
+                tree_sha256,
+                tree_sha256_files,
+                tree_sha256_submodules,
+                tree_sha256_hash_ms,
+                ..
+            } => {
                 if *dry_run {
                     outln!(w, "Would create tag {name}");
                 } else {
                     outln!(w, "Created tag {name}");
+                }
+                if !dry_run {
+                    if let Some(digest) = tree_sha256 {
+                        let files = tree_sha256_files.unwrap_or(0);
+                        let subs = tree_sha256_submodules.unwrap_or(0);
+                        let ms = tree_sha256_hash_ms.unwrap_or(0.0);
+                        if subs > 0 {
+                            outln!(
+                                w,
+                                "{files} files in {subs} submodules hashed in {ms:.2}ms (tree-sha256 {digest})"
+                            );
+                        } else {
+                            outln!(
+                                w,
+                                "{files} files hashed in {ms:.2}ms (tree-sha256 {digest})"
+                            );
+                        }
+                    }
                 }
             }
             TagOutcome::Delete { name, dry_run } => {
@@ -133,6 +175,9 @@ impl MarkdownRender for TagOutcome {
                 signed,
                 replaced,
                 dry_run,
+                tree_sha256,
+                tree_sha256_hash_ms,
+                ..
             } => {
                 let short = oid.get(..7).unwrap_or(oid.as_str());
                 let kind_note = match (*kind, *signed) {
@@ -149,6 +194,11 @@ impl MarkdownRender for TagOutcome {
                 if let Some(old) = replaced {
                     let old_short = old.get(..7).unwrap_or(old.as_str());
                     outln!(w, "Replaced previous target `{old_short}`.");
+                }
+                if !dry_run {
+                    if let (Some(digest), Some(ms)) = (tree_sha256.as_ref(), tree_sha256_hash_ms) {
+                        outln!(w, "tree-sha256 `{digest}` (hashed in {ms:.2}ms).");
+                    }
                 }
             }
             TagOutcome::Delete { name, dry_run } => {
@@ -182,6 +232,10 @@ pub struct TagRunOptions {
     pub sign: Option<bool>,
     /// `--signing-key`.
     pub signing_key: Option<String>,
+    /// `--tree-sha256`.
+    pub tree_sha256: bool,
+    /// `--exclude-submodule` globs.
+    pub exclude_submodule: Vec<String>,
     /// Wall clock for tagger identity.
     pub now: OffsetDateTime,
 }
@@ -248,12 +302,21 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
     let config = repo.config().context("could not load config")?;
     let will_sign =
         should_sign_tag(&config, opts.sign).context("could not read tag signing config")?;
-    let needs_annotated = message.is_some() || will_sign;
+    let wants_tree_sha256 = opts.tree_sha256 || !opts.exclude_submodule.is_empty();
+    let needs_annotated = message.is_some() || will_sign || wants_tree_sha256;
     let tagger = if needs_annotated {
         Some(
             context::identity(&env, &config, IdentRole::Committer, opts.now)
                 .context("could not resolve tagger identity")?,
         )
+    } else {
+        None
+    };
+
+    let tree_sha256_opts = if wants_tree_sha256 {
+        let mut ts_opts = TreeSha256Options::default();
+        ts_opts.exclude_globs = opts.exclude_submodule.clone();
+        Some(ts_opts)
     } else {
         None
     };
@@ -269,9 +332,33 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
             signing_key: opts.signing_key.clone(),
             force: opts.force,
             dry_run: opts.dry_run,
+            tree_sha256: tree_sha256_opts,
         },
     )
     .map_err(map_tag_error)?;
+
+    let (
+        tree_sha256,
+        tree_sha256_excluded,
+        tree_sha256_files,
+        tree_sha256_submodules,
+        tree_sha256_hash_ms,
+    ) = outcome
+        .tree_sha256
+        .as_ref()
+        .map_or((None, None, None, None, None), |ts| {
+            (
+                Some(ts.claim.digest.to_hex()),
+                if ts.claim.excluded.is_empty() {
+                    None
+                } else {
+                    Some(ts.claim.excluded.clone())
+                },
+                Some(ts.report.files),
+                Some(ts.report.submodules),
+                Some(ts.hash_elapsed.as_secs_f64() * 1000.0),
+            )
+        });
 
     Ok(TagOutcome::Create {
         name: outcome.name,
@@ -281,6 +368,11 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
         signed: outcome.signed,
         replaced: outcome.replaced.map(|p| p.to_hex()),
         dry_run: outcome.dry_run,
+        tree_sha256,
+        tree_sha256_excluded,
+        tree_sha256_files,
+        tree_sha256_submodules,
+        tree_sha256_hash_ms,
     })
 }
 
@@ -319,6 +411,9 @@ fn map_tag_error(err: Error) -> anyhow::Error {
             TagError::NotFound { name } => anyhow::anyhow!("no tag named '{name}'"),
             TagError::EmptyMessage => anyhow::anyhow!("tag message cannot be empty"),
         },
+        Error::TreeSha256RequiresSigning => {
+            anyhow::anyhow!("tree-sha256 on a tag requires signing")
+        }
         other => anyhow::Error::msg(other.to_string()),
     }
 }

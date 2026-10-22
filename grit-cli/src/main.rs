@@ -982,6 +982,16 @@ enum Command {
         /// Signing key id or path (overrides `user.signingkey` for this tag).
         #[arg(long = "signing-key", value_name = "KEY")]
         signing_key: Option<String>,
+        /// Attach a tree-sha256 digest header (implies `--sign`).
+        #[arg(long = "tree-sha256", conflicts_with = "delete")]
+        tree_sha256: bool,
+        /// Submodule path glob excluded from the tree-sha256 digest (repeatable).
+        #[arg(
+            long = "exclude-submodule",
+            value_name = "GLOB",
+            conflicts_with = "delete"
+        )]
+        exclude_submodule: Vec<String>,
     },
     /// List, add, or remove linked worktrees.
     Worktree {
@@ -1610,6 +1620,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             sign,
             no_sign,
             signing_key,
+            tree_sha256,
+            exclude_submodule,
         } => {
             let sign_override = if sign {
                 Some(true)
@@ -1630,6 +1642,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     dry_run,
                     sign: sign_override,
                     signing_key,
+                    tree_sha256,
+                    exclude_submodule,
                     now: ctx.now,
                 })?,
                 opts,
