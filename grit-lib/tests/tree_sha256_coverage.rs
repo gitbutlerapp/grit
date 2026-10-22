@@ -4,11 +4,13 @@
 
 use std::str::FromStr;
 
+use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::tree_sha256::{
-    path_matches_glob, tree_sha256, MissingSubmodule, MissingSubmoduleReason, TreeSha256,
-    TreeSha256Options, TreeSha256Report,
+    path_matches_glob, tree_sha256, MissingSubmodule, MissingSubmoduleReason, TagTreeSha256Outcome,
+    TreeSha256, TreeSha256Claim, TreeSha256ClaimError, TreeSha256Options, TreeSha256Policy,
+    TreeSha256Report, TREE_SHA256_EXCLUDED_HEADER, TREE_SHA256_HEADER,
 };
 
 #[test]
@@ -17,7 +19,30 @@ fn public_tree_sha256_types() {
         TreeSha256Options::default(),
         MissingSubmoduleReason::NotCheckedOut,
         MissingSubmoduleReason::MissingCommit,
+        TREE_SHA256_HEADER,
+        TREE_SHA256_EXCLUDED_HEADER,
+        TreeSha256ClaimError::DuplicateDigestHeader,
+        TreeSha256Policy::from_config(&ConfigSet::new()),
     );
+    let _policy = TreeSha256Policy::from_config(&ConfigSet::new()).enabled();
+    let _tag_ts = TagTreeSha256Outcome {
+        claim: TreeSha256Claim {
+            digest: TreeSha256([0; 32]),
+            excluded: Vec::new(),
+        },
+        report: TreeSha256Report {
+            digest: TreeSha256([0; 32]),
+            files: 0,
+            submodules: 0,
+            excluded: Vec::new(),
+            cycles: Vec::new(),
+        },
+        hash_elapsed: std::time::Duration::from_millis(1),
+    };
+    let _claim = TreeSha256Claim {
+        digest: TreeSha256([0; 32]),
+        excluded: Vec::new(),
+    };
     let digest = <TreeSha256 as FromStr>::from_str(
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     )

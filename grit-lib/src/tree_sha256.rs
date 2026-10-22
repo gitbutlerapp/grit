@@ -12,13 +12,17 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 
 use crate::config::ConfigSet;
 use crate::diff::submodule_embedded_git_dir;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::hash::{try_par_hash_with, try_par_hash_with_force, PAR_HASH_MIN_ITEMS};
-use crate::objects::{parse_commit, parse_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{
+    iter_extra_headers, parse_commit, parse_tree, remove_header_lines, HashAlgo, ObjectId,
+    ObjectKind, TagData, TreeEntry,
+};
 use crate::parallel::ParallelHashError;
 use crate::parallel::ParallelOp;
 use crate::repo::Repository;
@@ -548,6 +552,166 @@ pub(crate) fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> 
     chain.contains(&gitlink)
 }
 
+/// Tag header name for the tree-sha256 digest (reference tool: [`HEADER`](https://github.com/schacon/tree-sha256)).
+pub const TREE_SHA256_HEADER: &str = "tree-sha256";
+
+/// Tag header naming a submodule path excluded from the digest.
+pub const TREE_SHA256_EXCLUDED_HEADER: &str = "tree-sha256-excluded";
+
+/// Whether signed tags should automatically include a tree-sha256 claim (`grit.treeSha256`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TreeSha256Policy {
+    enabled: bool,
+}
+
+impl TreeSha256Policy {
+    /// Load `grit.treeSha256` (default false).
+    #[must_use]
+    pub fn from_config(config: &ConfigSet) -> Self {
+        let enabled = config
+            .get_bool("grit.treeSha256")
+            .and_then(|r| r.ok())
+            .unwrap_or(false);
+        Self { enabled }
+    }
+
+    /// When true, every signed tag grit creates gets a tree-sha256 header.
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
+/// Tree-sha256 digest, counts, and timing from tag creation.
+#[derive(Debug, Clone)]
+pub struct TagTreeSha256Outcome {
+    /// Headers written on the tag object.
+    pub claim: TreeSha256Claim,
+    /// Full hash report (files, submodules, excluded gitlinks).
+    pub report: TreeSha256Report,
+    /// Wall time spent computing the digest.
+    pub hash_elapsed: Duration,
+}
+
+/// Digest and excluded submodule paths recorded on an annotated tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeSha256Claim {
+    /// Recorded tree-sha256 digest.
+    pub digest: TreeSha256,
+    /// Submodule paths left out of the digest (sorted when written with [`Self::apply_to_tag`]).
+    ///
+    /// Values must be non-empty and must not contain NUL or newline when passed to
+    /// [`Self::apply_to_tag`].
+    pub excluded: Vec<String>,
+}
+
+/// Failure modes when reading or validating a [`TreeSha256Claim`] from tag headers.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TreeSha256ClaimError {
+    /// More than one `tree-sha256` header appeared after `tagger`.
+    #[error("duplicate tree-sha256 header in tag")]
+    DuplicateDigestHeader,
+    /// A `tree-sha256-excluded` path was empty or contained NUL or newline.
+    #[error("invalid tree-sha256-excluded path")]
+    InvalidExcludedPath,
+}
+
+impl TreeSha256Claim {
+    /// Read a claim from post-`tagger` extra headers on `tag`.
+    ///
+    /// Returns [`Ok(None)`] when no `tree-sha256` header is present. Commit objects are not
+    /// supported.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TreeSha256ClaimError::DuplicateDigestHeader`] or
+    /// [`TreeSha256ClaimError::InvalidExcludedPath`], or [`Error::TreeSha256InvalidHex`] when the
+    /// digest value is not exactly 64 ASCII hex digits (no trimming; surrounding or trailing
+    /// whitespace is rejected).
+    pub fn from_tag(tag: &TagData) -> Result<Option<Self>> {
+        let header = TREE_SHA256_HEADER.as_bytes();
+        let excluded_key = TREE_SHA256_EXCLUDED_HEADER.as_bytes();
+        let mut digest: Option<TreeSha256> = None;
+        let mut excluded = Vec::new();
+        for (key, value) in iter_extra_headers(&tag.extra_headers) {
+            if key == header {
+                if digest.is_some() {
+                    return Err(TreeSha256ClaimError::DuplicateDigestHeader.into());
+                }
+                digest = Some(tree_sha256_digest_from_tag_header_value(value)?);
+            } else if key == excluded_key {
+                let path = std::str::from_utf8(value)
+                    .map_err(|_| TreeSha256ClaimError::InvalidExcludedPath)?;
+                validate_excluded_path(path)?;
+                excluded.push(path.to_owned());
+            }
+        }
+        Ok(digest.map(|d| Self {
+            digest: d,
+            excluded,
+        }))
+    }
+
+    /// Replace any existing tree-sha256 headers on `tag` with this claim.
+    ///
+    /// Excluded paths are written in sorted order, then the digest line, immediately after
+    /// `tagger` and before any other extra headers, matching the reference `tree-sha256-tag`
+    /// layout (inside the signed payload, before the blank line).
+    ///
+    /// Each entry in [`Self::excluded`] must be non-empty and must not contain NUL or newline;
+    /// invalid paths are not checked here — callers must only supply paths that would round-trip
+    /// through [`Self::from_tag`].
+    pub fn apply_to_tag(&self, tag: &mut TagData) {
+        let header = TREE_SHA256_HEADER.as_bytes();
+        let excluded_key = TREE_SHA256_EXCLUDED_HEADER.as_bytes();
+        let unrelated = remove_header_lines(&tag.extra_headers, |key| {
+            key == header || key == excluded_key
+        });
+        let mut claim = Vec::new();
+        let mut paths = self.excluded.clone();
+        paths.sort();
+        for path in paths {
+            claim.extend_from_slice(TREE_SHA256_EXCLUDED_HEADER.as_bytes());
+            claim.push(b' ');
+            claim.extend_from_slice(path.as_bytes());
+            claim.push(b'\n');
+        }
+        claim.extend_from_slice(TREE_SHA256_HEADER.as_bytes());
+        claim.push(b' ');
+        claim.extend_from_slice(self.digest.to_hex().as_bytes());
+        claim.push(b'\n');
+        tag.extra_headers = claim;
+        tag.extra_headers.extend_from_slice(&unrelated);
+    }
+
+    /// Build a claim from a successful [`TreeSha256Report`] (excluded paths sorted).
+    #[must_use]
+    pub fn from_report(report: &TreeSha256Report) -> Self {
+        let mut excluded: Vec<String> = report.excluded.iter().map(|(p, _)| p.clone()).collect();
+        excluded.sort();
+        Self {
+            digest: report.digest,
+            excluded,
+        }
+    }
+}
+
+/// Parse a `tree-sha256` tag header value: exactly 64 ASCII hex digits, no surrounding whitespace.
+fn tree_sha256_digest_from_tag_header_value(value: &[u8]) -> Result<TreeSha256> {
+    if value.len() != 64 || !value.iter().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Error::TreeSha256InvalidHex);
+    }
+    let text = std::str::from_utf8(value).map_err(|_| Error::TreeSha256InvalidHex)?;
+    TreeSha256::from_str(text)
+}
+
+fn validate_excluded_path(path: &str) -> Result<()> {
+    if path.is_empty() || path.bytes().any(|b| b == 0 || b == b'\n') {
+        return Err(TreeSha256ClaimError::InvalidExcludedPath.into());
+    }
+    Ok(())
+}
+
 /// Returns true when `path` matches `pattern` (Git tree-sha256 glob rules).
 #[must_use]
 pub fn path_matches_glob(path: &str, pattern: &str) -> bool {
@@ -637,5 +801,211 @@ mod glob_tests {
     #[test]
     fn trailing_slash_on_pattern_trimmed() {
         assert!(path_matches_glob("vendor", "vendor/"));
+    }
+}
+
+#[cfg(test)]
+mod claim_tests {
+    use super::{
+        TreeSha256, TreeSha256Claim, TreeSha256ClaimError, TREE_SHA256_EXCLUDED_HEADER,
+        TREE_SHA256_HEADER,
+    };
+    use crate::error::Error;
+    use crate::objects::{parse_tag, serialize_tag, TagData};
+    use std::str::FromStr;
+
+    fn sample_tag(extra: &[u8]) -> TagData {
+        TagData {
+            object: "15c242b3b6ace73d1884e431f0d814d7a0e827a1".parse().unwrap(),
+            object_type: "commit".into(),
+            tag: "t".into(),
+            tagger: Some("T <t@example.com> 1 +0000".into()),
+            extra_headers: extra.to_vec(),
+            message: "msg\n".into(),
+        }
+    }
+
+    #[test]
+    fn claim_roundtrip_tag() {
+        let digest = TreeSha256::from_str(
+            "c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a",
+        )
+        .unwrap();
+        let claim = TreeSha256Claim {
+            digest,
+            excluded: vec!["z/mod".into(), "a/mod".into()],
+        };
+        let mut tag = sample_tag(b"other x\n".as_slice());
+        claim.apply_to_tag(&mut tag);
+        assert!(
+            String::from_utf8_lossy(&tag.extra_headers).starts_with("tree-sha256-excluded a/mod"),
+            "claim must follow tagger, not unrelated headers: {:?}",
+            String::from_utf8_lossy(&tag.extra_headers)
+        );
+        assert!(
+            String::from_utf8_lossy(&tag.extra_headers).contains("other x\n"),
+            "unrelated headers must remain after the claim block"
+        );
+        let parsed = TreeSha256Claim::from_tag(&tag).unwrap().unwrap();
+        assert_eq!(parsed.digest, digest);
+        let mut want = claim.excluded.clone();
+        want.sort();
+        assert_eq!(parsed.excluded, want);
+        let bytes = serialize_tag(&tag);
+        let round = parse_tag(&bytes).unwrap();
+        assert_eq!(TreeSha256Claim::from_tag(&round).unwrap(), Some(parsed));
+    }
+
+    #[test]
+    fn claim_layout_matches_reference_tool_bytes() {
+        let fixture = include_bytes!("../tests/fixtures/tree_sha256/reference_tool_tag.txt");
+        let parsed = parse_tag(fixture).expect("parse fixture");
+        let claim = TreeSha256Claim::from_tag(&parsed)
+            .expect("from_tag")
+            .expect("claim");
+        let mut rebuilt = TagData {
+            extra_headers: Vec::new(),
+            ..parsed.clone()
+        };
+        claim.apply_to_tag(&mut rebuilt);
+        assert_eq!(serialize_tag(&rebuilt), fixture);
+    }
+
+    #[test]
+    fn apply_replaces_existing_claim() {
+        let digest = TreeSha256::from_str(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        .unwrap();
+        let old = TreeSha256Claim {
+            digest,
+            excluded: vec!["old/path".into()],
+        };
+        let new = TreeSha256Claim {
+            digest: TreeSha256::from_str(
+                "c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a",
+            )
+            .unwrap(),
+            excluded: vec![],
+        };
+        let mut tag = sample_tag(b"");
+        old.apply_to_tag(&mut tag);
+        new.apply_to_tag(&mut tag);
+        let claim = TreeSha256Claim::from_tag(&tag).unwrap().unwrap();
+        assert_eq!(claim, new);
+        assert!(
+            !String::from_utf8_lossy(&tag.extra_headers).contains("old/path"),
+            "previous excluded path must be gone"
+        );
+    }
+
+    #[test]
+    fn duplicate_header_rejected() {
+        let extra =
+            b"tree-sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\
+tree-sha256 c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a\n";
+        let tag = sample_tag(extra);
+        assert!(matches!(
+            TreeSha256Claim::from_tag(&tag),
+            Err(Error::TreeSha256Claim(
+                TreeSha256ClaimError::DuplicateDigestHeader
+            ))
+        ));
+    }
+
+    #[test]
+    fn bad_hex_rejected() {
+        let extra = b"tree-sha256 not_valid_hex\n";
+        let tag = sample_tag(extra);
+        assert!(matches!(
+            TreeSha256Claim::from_tag(&tag),
+            Err(Error::TreeSha256InvalidHex)
+        ));
+    }
+
+    #[test]
+    fn digest_header_whitespace_rejected() {
+        let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        for extra in [
+            format!("tree-sha256 {hex} \n"),
+            format!("tree-sha256  {hex}\n"),
+            format!("tree-sha256 {hex}x\n"),
+        ] {
+            let tag = sample_tag(extra.as_bytes());
+            assert!(
+                matches!(
+                    TreeSha256Claim::from_tag(&tag),
+                    Err(Error::TreeSha256InvalidHex)
+                ),
+                "must reject {extra:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_places_claim_immediately_after_tagger_byte_order() {
+        let digest = TreeSha256::from_str(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        .unwrap();
+        let claim = TreeSha256Claim {
+            digest,
+            excluded: vec!["sub/mod".into()],
+        };
+        let mut tag = sample_tag(b"other existing\n");
+        claim.apply_to_tag(&mut tag);
+        let want_prefix = "tree-sha256-excluded sub/mod\n\
+tree-sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\
+other existing\n";
+        assert_eq!(
+            String::from_utf8_lossy(&tag.extra_headers),
+            want_prefix,
+            "serialized extra headers must not place unrelated lines before the claim"
+        );
+        let bytes = serialize_tag(&tag);
+        let tagger_end = b"tagger T <t@example.com> 1 +0000\n";
+        let pos = bytes
+            .windows(tagger_end.len())
+            .position(|w| w == tagger_end)
+            .expect("tagger line");
+        let after_tagger = &bytes[pos + tagger_end.len()..];
+        assert!(
+            after_tagger.starts_with(want_prefix.as_bytes()),
+            "full tag bytes must place claim immediately after tagger"
+        );
+    }
+
+    #[test]
+    fn no_claim_returns_none() {
+        let tag = sample_tag(b"change-id abc\n");
+        assert_eq!(TreeSha256Claim::from_tag(&tag).unwrap(), None);
+    }
+
+    #[test]
+    fn invalid_excluded_path_rejected() {
+        let digest_line =
+            b"tree-sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n";
+        let cases: Vec<Vec<u8>> = vec![
+            b"tree-sha256-excluded \n".to_vec(),
+            b"tree-sha256-excluded bad\n more\n".to_vec(),
+            b"tree-sha256-excluded nul\0here\n".to_vec(),
+        ];
+        for extra in &cases {
+            let mut blob = extra.clone();
+            blob.extend_from_slice(digest_line);
+            let tag = sample_tag(&blob);
+            assert!(matches!(
+                TreeSha256Claim::from_tag(&tag),
+                Err(Error::TreeSha256Claim(
+                    TreeSha256ClaimError::InvalidExcludedPath
+                ))
+            ));
+        }
+    }
+
+    #[test]
+    fn header_constants_match_reference_tool() {
+        assert_eq!(TREE_SHA256_HEADER, "tree-sha256");
+        assert_eq!(TREE_SHA256_EXCLUDED_HEADER, "tree-sha256-excluded");
     }
 }

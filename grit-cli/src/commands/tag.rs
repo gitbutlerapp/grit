@@ -12,6 +12,7 @@ use grit_lib::refs::check_ref_format::validate_tag_short_name;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::tree_sha256::TreeSha256Options;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -34,6 +35,21 @@ pub enum TagOutcome {
         peeled: Option<String>,
         /// Whether the tag object carries a cryptographic signature.
         signed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_excluded: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_files: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_submodules: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_hash_ms: Option<f64>,
     },
     /// A tag was deleted.
     Delete { name: String },
@@ -95,7 +111,32 @@ impl HumanRender for TagOutcome {
                     outln!(w, "  {}", tag.name);
                 }
             }
-            TagOutcome::Create { name, .. } => outln!(w, "Created tag {name}"),
+            TagOutcome::Create {
+                name,
+                tree_sha256,
+                tree_sha256_files,
+                tree_sha256_submodules,
+                tree_sha256_hash_ms,
+                ..
+            } => {
+                outln!(w, "Created tag {name}");
+                if let Some(digest) = tree_sha256 {
+                    let files = tree_sha256_files.unwrap_or(0);
+                    let subs = tree_sha256_submodules.unwrap_or(0);
+                    let ms = tree_sha256_hash_ms.unwrap_or(0.0);
+                    if subs > 0 {
+                        outln!(
+                            w,
+                            "{files} files in {subs} submodules hashed in {ms:.2}ms (tree-sha256 {digest})"
+                        );
+                    } else {
+                        outln!(
+                            w,
+                            "{files} files hashed in {ms:.2}ms (tree-sha256 {digest})"
+                        );
+                    }
+                }
+            }
             TagOutcome::Delete { name } => outln!(w, "Deleted tag {name}"),
         }
         Ok(())
@@ -112,6 +153,9 @@ impl MarkdownRender for TagOutcome {
                 kind,
                 peeled,
                 signed,
+                tree_sha256,
+                tree_sha256_hash_ms,
+                ..
             } => {
                 let short = oid.get(..7).unwrap_or(oid.as_str());
                 let kind_note = match (*kind, *signed) {
@@ -124,6 +168,9 @@ impl MarkdownRender for TagOutcome {
                     .map(|p| format!(" → `{}`", p.get(..7).unwrap_or(p.as_str())))
                     .unwrap_or_default();
                 outln!(w, "Created tag `{name}`{kind_note} at `{short}`{peel}.");
+                if let (Some(digest), Some(ms)) = (tree_sha256.as_ref(), tree_sha256_hash_ms) {
+                    outln!(w, "tree-sha256 `{digest}` (hashed in {ms:.2}ms).");
+                }
             }
             TagOutcome::Delete { name } => outln!(w, "Deleted tag `{name}`."),
         }
@@ -132,6 +179,7 @@ impl MarkdownRender for TagOutcome {
 }
 
 /// Run `grit tag` with the parsed CLI arguments.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     name: Option<String>,
     delete: bool,
@@ -139,13 +187,25 @@ pub fn run(
     object: Option<String>,
     sign: Option<bool>,
     signing_key: Option<String>,
+    tree_sha256: bool,
+    exclude_submodule: Vec<String>,
     now: OffsetDateTime,
 ) -> Result<TagOutcome> {
     let repo = context::discover()?;
     match name {
         None => list(&repo),
         Some(name) if delete => remove(&repo, &name),
-        Some(name) => create(&repo, &name, message, object, sign, signing_key, now),
+        Some(name) => create(
+            &repo,
+            &name,
+            message,
+            object,
+            sign,
+            signing_key,
+            tree_sha256,
+            exclude_submodule,
+            now,
+        ),
     }
 }
 
@@ -163,6 +223,7 @@ fn list(repo: &Repository) -> Result<TagOutcome> {
     Ok(TagOutcome::List { tags })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create(
     repo: &Repository,
     name: &str,
@@ -170,6 +231,8 @@ fn create(
     object: Option<String>,
     sign: Option<bool>,
     signing_key: Option<String>,
+    tree_sha256: bool,
+    exclude_submodule: Vec<String>,
     now: OffsetDateTime,
 ) -> Result<TagOutcome> {
     if let Err(err) = validate_tag_short_name(name) {
@@ -199,6 +262,14 @@ fn create(
         None
     };
 
+    let tree_sha256_opts = if tree_sha256 || !exclude_submodule.is_empty() {
+        let mut opts = TreeSha256Options::default();
+        opts.exclude_globs = exclude_submodule;
+        Some(opts)
+    } else {
+        None
+    };
+
     let outcome = create_tag(
         repo,
         &CreateTagRequest {
@@ -208,9 +279,33 @@ fn create(
             tagger,
             sign,
             signing_key,
+            tree_sha256: tree_sha256_opts,
         },
     )
     .map_err(anyhow::Error::msg)?;
+
+    let (
+        tree_sha256,
+        tree_sha256_excluded,
+        tree_sha256_files,
+        tree_sha256_submodules,
+        tree_sha256_hash_ms,
+    ) = outcome
+        .tree_sha256
+        .as_ref()
+        .map_or((None, None, None, None, None), |ts| {
+            (
+                Some(ts.claim.digest.to_hex()),
+                if ts.claim.excluded.is_empty() {
+                    None
+                } else {
+                    Some(ts.claim.excluded.clone())
+                },
+                Some(ts.report.files),
+                Some(ts.report.submodules),
+                Some(ts.hash_elapsed.as_secs_f64() * 1000.0),
+            )
+        });
 
     Ok(TagOutcome::Create {
         name: outcome.name,
@@ -218,6 +313,11 @@ fn create(
         kind: outcome.kind.into(),
         peeled: outcome.peeled.map(|p| p.to_hex()),
         signed: outcome.signed,
+        tree_sha256,
+        tree_sha256_excluded,
+        tree_sha256_files,
+        tree_sha256_submodules,
+        tree_sha256_hash_ms,
     })
 }
 

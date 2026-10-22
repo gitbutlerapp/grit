@@ -228,6 +228,7 @@ fn detach_at_annotated_tag_matches_git() {
             tagger: Some("A <a@b.c> 0 +0000".into()),
             sign: None,
             signing_key: None,
+            tree_sha256: None,
         },
     )
     .expect("annotated tag");

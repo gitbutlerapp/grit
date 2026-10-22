@@ -528,6 +528,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             tagger: Some("T <t@example.com> 946684800 +0000".to_owned()),
             sign: None,
             signing_key: None,
+            tree_sha256: None,
         },
     )
     .expect("annotated tag");

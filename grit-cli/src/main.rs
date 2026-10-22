@@ -581,6 +581,12 @@ enum Command {
     Add {
         #[command(flatten)]
         pathspecs: pathspec_args::PathspecArgs,
+        /// Stage tracked changes only (modified and deleted paths; no untracked files).
+        #[arg(short = 'u', long = "update")]
+        update: bool,
+        /// Report paths that would be staged without writing the index or object database.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
         /// Mark staged regular files as executable (`100755`) in the index.
         #[arg(long = "executable", conflicts_with = "non_executable")]
         executable: bool,
@@ -872,6 +878,12 @@ enum Command {
         /// Signing key id or path (overrides `user.signingkey` for this tag).
         #[arg(long = "signing-key", value_name = "KEY")]
         signing_key: Option<String>,
+        /// Attach a tree-sha256 content digest to the tag (implies `--sign`).
+        #[arg(long = "tree-sha256")]
+        tree_sha256: bool,
+        /// Submodule path glob to exclude from the digest (repeatable).
+        #[arg(long = "exclude-submodule", value_name = "GLOB")]
+        exclude_submodule: Vec<String>,
     },
     /// List, add, or remove linked worktrees.
     Worktree {
@@ -1274,10 +1286,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
         Command::Add {
             pathspecs,
+            update,
+            dry_run,
             executable,
             non_executable,
         } => emit(
-            &commands::add::run(&pathspecs, executable, non_executable)?,
+            &commands::add::run(&pathspecs, update, dry_run, executable, non_executable)?,
             opts,
             ctx,
         ),
@@ -1449,6 +1463,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             sign,
             no_sign,
             signing_key,
+            tree_sha256,
+            exclude_submodule,
         } => {
             let sign_override = if sign {
                 Some(true)
@@ -1465,6 +1481,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     object,
                     sign_override,
                     signing_key,
+                    tree_sha256,
+                    exclude_submodule,
                     ctx.now,
                 )?,
                 opts,

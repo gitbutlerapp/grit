@@ -1,0 +1,9 @@
+object 15c242b3b6ace73d1884e431f0d814d7a0e827a1
+type commit
+tag reference-layout
+tagger T <t@example.com> 1 +0000
+tree-sha256-excluded a/sub
+tree-sha256-excluded b/sub
+tree-sha256 c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a
+
+layout test

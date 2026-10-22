@@ -303,6 +303,7 @@ fn list_and_delete_on_reftable_backend() {
             tagger: None,
             sign: None,
             signing_key: None,
+            tree_sha256: None,
         },
     )
     .unwrap();
