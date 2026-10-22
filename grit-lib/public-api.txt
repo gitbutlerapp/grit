@@ -11902,6 +11902,14 @@ pub grit_lib::prelude::Error::PathspecIgnored
 pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::prelude::Error::RestoreConflictMissingOurs
+pub grit_lib::prelude::Error::RestoreConflictMissingOurs::path: alloc::string::String
+pub grit_lib::prelude::Error::RestoreConflictMissingTheirs
+pub grit_lib::prelude::Error::RestoreConflictMissingTheirs::path: alloc::string::String
+pub grit_lib::prelude::Error::RestoreConflictNotUnmerged
+pub grit_lib::prelude::Error::RestoreConflictNotUnmerged::path: alloc::string::String
+pub grit_lib::prelude::Error::RestoreConflictWithSource
+pub grit_lib::prelude::Error::RestoreConflictWithStaged
 pub grit_lib::prelude::Error::PushOptionsUnsupported
 pub grit_lib::prelude::Error::ReceivedPackTempMissing
 pub grit_lib::prelude::Error::ReceivedPackTempMissing::path: std::path::PathBuf
