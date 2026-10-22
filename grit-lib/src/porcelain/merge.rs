@@ -789,7 +789,7 @@ fn conflict_path_set(merged: &TreeMergeOutput) -> BTreeSet<Vec<u8>> {
     set
 }
 
-fn apply_conflict_merge_worktree(
+pub(crate) fn apply_conflict_merge_worktree(
     repo: &Repository,
     head_tree: &ObjectId,
     merged: &TreeMergeOutput,
