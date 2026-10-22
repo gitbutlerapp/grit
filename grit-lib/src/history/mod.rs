@@ -58,8 +58,9 @@ mod squash;
 mod types;
 
 pub use absorb::{
-    absorb, default_absorb_base, staged_absorb_paths, AbsorbOptions, AbsorbPlan, HunkAssignment,
-    HunkRange, UnassignedHunk, UnassignedReason, DEFAULT_ABSORB_STACK_LIMIT,
+    absorb, default_absorb_base, format_hunk_range_header, staged_absorb_paths, AbsorbOptions,
+    AbsorbPlan, HunkAssignment, HunkRange, UnassignedHunk, UnassignedReason,
+    DEFAULT_ABSORB_STACK_LIMIT,
 };
 pub use apply::{apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, verify_rewrite_plan};
 pub use drop::drop;

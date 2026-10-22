@@ -856,6 +856,16 @@ fn print_history_rewrite_rows(
     Ok(())
 }
 
+fn absorb_hunk_header(range: &crate::commands::history::HunkRangeOut) -> String {
+    use grit_lib::revwalk::history::{format_hunk_range_header, HunkRange};
+    format_hunk_range_header(&HunkRange {
+        old_start: range.old_start,
+        old_lines: range.old_lines,
+        new_start: range.new_start,
+        new_lines: range.new_lines,
+    })
+}
+
 /// Result of `grit history absorb`.
 pub fn print_history_absorb_outcome(
     w: &mut dyn Write,
@@ -865,18 +875,40 @@ pub fn print_history_absorb_outcome(
     outln!(w);
     if outcome.dry_run {
         outln!(w, "- Dry run (refs unchanged)");
+        outln!(w);
     }
-    for row in &outcome.assignments {
-        outln!(
-            w,
-            "- assign `{}` hunk @{} → commit `{}`",
-            row.path,
-            row.hunk_range.old_start,
-            short_hex(&row.commit)
-        );
+    if !outcome.assignments.is_empty() {
+        outln!(w, "### Assigned hunks");
+        outln!(w);
+        outln!(w, "| Path | Hunk | Commit | Subject |");
+        outln!(w, "| --- | --- | --- | --- |");
+        for row in &outcome.assignments {
+            outln!(
+                w,
+                "| `{}` | `{}` | `{}` | {} |",
+                row.path,
+                absorb_hunk_header(&row.hunk_range),
+                short_hex(&row.commit),
+                row.subject
+            );
+        }
+        outln!(w);
     }
-    for row in &outcome.unassigned {
-        outln!(w, "- unassigned `{}` ({})", row.path, row.reason);
+    if !outcome.unassigned.is_empty() {
+        outln!(w, "### Unassigned hunks");
+        outln!(w);
+        outln!(w, "| Path | Hunk | Reason |");
+        outln!(w, "| --- | --- | --- |");
+        for row in &outcome.unassigned {
+            outln!(
+                w,
+                "| `{}` | `{}` | {} |",
+                row.path,
+                absorb_hunk_header(&row.hunk_range),
+                row.reason
+            );
+        }
+        outln!(w);
     }
     print_history_rewrite_rows(w, &outcome.rewritten, &outcome.refs, outcome.head.as_ref())
 }

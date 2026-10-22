@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use crate::blame::{blame_file, BlameOptions};
 use crate::branch_tracking::upstream_branch;
+use crate::diff::structured::format_hunk_range;
 use crate::diff::structured::{structured_text_diff, StructuredHunk, StructuredLineKind};
 use crate::diff::DiffOptions;
 use crate::diff::{diff_index_to_tree, diff_trees, DiffEntry, DiffStatus};
@@ -14,6 +15,7 @@ use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::porcelain::rebase::commit_subject_single_line;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::{resolve_head, HeadState};
@@ -60,6 +62,26 @@ pub struct HunkAssignment {
     pub hunk_range: HunkRange,
     /// Commit that will receive the fixup.
     pub commit: ObjectId,
+    /// First-line subject of the target commit (folded like Git's format-subject).
+    pub subject: String,
+}
+
+fn format_hunk_side(start: usize, count: usize) -> String {
+    if count == 0 {
+        format!("{start},0")
+    } else {
+        format_hunk_range(start, count)
+    }
+}
+
+/// Unified diff hunk header for one [`HunkRange`] (`@@ -old +new @@`).
+#[must_use]
+pub fn format_hunk_range_header(range: &HunkRange) -> String {
+    format!(
+        "@@ -{} +{} @@",
+        format_hunk_side(range.old_start, range.old_lines),
+        format_hunk_side(range.new_start, range.new_lines),
+    )
 }
 
 /// Why a staged hunk could not be absorbed.
@@ -370,6 +392,7 @@ fn classify_path_hunks(
                     path: path.clone(),
                     hunk_range: range,
                     commit,
+                    subject: commit_subject(repo, commit),
                 });
             }
             Ok(None) => {}
@@ -1213,6 +1236,12 @@ fn head_commit_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
             message: "HEAD does not point at a commit".into(),
         }),
     }
+}
+
+fn commit_subject(repo: &Repository, commit: ObjectId) -> String {
+    load_commit(repo, commit)
+        .map(|data| commit_subject_single_line(&data.message))
+        .unwrap_or_default()
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {

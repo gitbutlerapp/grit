@@ -142,7 +142,19 @@ Absorb staged fixes on a linear branch:
 $ grit add file.txt
 $ grit history absorb
 Absorbed 1 hunk(s) into 2 commit(s)
-  file.txt → commit a1b2c3d
+  file.txt @@ -2,0 +3,1 @@ → a1b2c3d touch line 4
+```
+
+Preview hunk → commit assignment without changing refs or the index:
+
+```console
+$ grit add file.txt
+$ grit history absorb --dry-run
+Dry run — absorb would change 2 commit(s)
+  file.txt @@ -2,0 +3,1 @@ → a1b2c3d touch line 4
+  other.txt @@ -1,0 +2,1 @@ — no_candidate
+  commit a1b2c3d → d4e5f60
+  refs/heads/main f6a7b89 → c0ffee0
 ```
 
 ## JSON output
@@ -163,7 +175,7 @@ For `absorb`, the object also includes:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `assignments` | array | `{path,hunk_range,commit}` for hunks assigned to historical commits. |
+| `assignments` | array | `{path,hunk_range,commit,subject}` for hunks assigned to historical commits. |
 | `unassigned` | array | `{path,hunk_range,reason}` for hunks left staged (`reason` is a stable code). |
 
 Example:

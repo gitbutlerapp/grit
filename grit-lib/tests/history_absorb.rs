@@ -203,6 +203,73 @@ fn absorb_respects_base() {
 }
 
 #[test]
+fn absorb_dry_run_leaves_index_file_unchanged() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "file.txt", "a\n", "a");
+    let target = git_rev_parse(wt, "HEAD").expect("target");
+    commit_file(wt, "file.txt", "a\nb\n", "b");
+    fs::write(wt.join("file.txt"), "a\nb\nfix\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    let index_path = wt.join(".git/index");
+    let before_index = fs::read(&index_path).expect("read index");
+    let grit = open_grit(wt);
+    let _plan = absorb(
+        &grit,
+        &AbsorbOptions {
+            base: Some(target),
+            rewrite: rewrite_opts(),
+        },
+    )
+    .expect("plan");
+    let after_index = fs::read(&index_path).expect("read index");
+    assert_eq!(
+        before_index, after_index,
+        "absorb planning must not rewrite index"
+    );
+}
+
+#[test]
+fn absorb_dry_run_assignment_matches_apply() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "file.txt", "line1\nline2\n", "first");
+    let base = git_rev_parse(wt, "HEAD").expect("base");
+    commit_file(wt, "file.txt", "line1\nchanged\n", "second");
+    fs::write(wt.join("file.txt"), "line1\nchanged\nfix\n").expect("write");
+    git(wt, &["add", "file.txt"]);
+    let grit = open_grit(wt);
+    let opts = AbsorbOptions {
+        base: Some(base),
+        rewrite: rewrite_opts(),
+    };
+    let plan = absorb(&grit, &opts).expect("plan");
+    let dry_assignments = plan.assignments.clone();
+    assert_eq!(dry_assignments.len(), 1);
+    assert_eq!(dry_assignments[0].subject, "second");
+    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    let new_target = plan
+        .plan
+        .commits
+        .iter()
+        .find(|row| row.old == dry_assignments[0].commit)
+        .and_then(|row| row.new)
+        .expect("rewritten target");
+    let fixed = parse_commit(&grit.odb().read(&new_target).expect("read").data).expect("parse");
+    let blob = grit.odb().read(&fixed.tree).expect("tree");
+    let entries = grit_lib::objects::parse_tree(&blob.data).expect("parse tree");
+    let file = entries
+        .iter()
+        .find(|e| e.name == b"file.txt")
+        .expect("file");
+    let content = grit.odb().read(&file.oid).expect("blob");
+    assert_eq!(
+        String::from_utf8_lossy(&content.data),
+        "line1\nchanged\nfix\n"
+    );
+}
+
+#[test]
 fn absorb_dry_run_changes_nothing() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();

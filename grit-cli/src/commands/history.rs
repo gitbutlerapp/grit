@@ -10,9 +10,10 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
-    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
-    RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
+    format_hunk_range_header, move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment,
+    HunkRange, Placement, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
+    UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -425,6 +426,8 @@ pub struct AbsorbAssignmentOut {
     pub hunk_range: HunkRangeOut,
     /// Target commit (full hex).
     pub commit: String,
+    /// Target commit subject (first line, folded).
+    pub subject: String,
 }
 
 /// Hunk coordinates for JSON output.
@@ -457,6 +460,7 @@ impl From<&HunkAssignment> for AbsorbAssignmentOut {
             path: row.path.clone(),
             hunk_range: (&row.hunk_range).into(),
             commit: row.commit.to_hex(),
+            subject: row.subject.clone(),
         }
     }
 }
@@ -518,10 +522,19 @@ impl HumanRender for HistoryAbsorbOutcome {
             );
         }
         for row in &self.assignments {
-            outln!(w, "  {} → commit {}", row.path, short(&row.commit));
+            let header = format_absorb_hunk_header(&row.hunk_range);
+            outln!(
+                w,
+                "  {} {} → {} {}",
+                row.path,
+                header,
+                short(&row.commit),
+                row.subject
+            );
         }
         for row in &self.unassigned {
-            outln!(w, "  {} stays staged ({})", row.path, row.reason);
+            let header = format_absorb_hunk_header(&row.hunk_range);
+            outln!(w, "  {} {} — {}", row.path, header, row.reason);
         }
         render_rewrite_rows(w, &self.rewritten, &self.refs)
     }
@@ -585,6 +598,15 @@ fn read_message(message: Option<String>, message_file: Option<String>) -> Result
             .map(Some)
             .with_context(|| format!("could not read message file '{path}'")),
     }
+}
+
+fn format_absorb_hunk_header(range: &HunkRangeOut) -> String {
+    format_hunk_range_header(&HunkRange {
+        old_start: range.old_start,
+        old_lines: range.old_lines,
+        new_start: range.new_start,
+        new_lines: range.new_lines,
+    })
 }
 
 /// Error mapper for `operation` (for example `history drop`), for use with `map_err`.

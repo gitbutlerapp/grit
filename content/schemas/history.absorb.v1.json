@@ -20,12 +20,17 @@
         "path": {
           "description": "Repository-relative path.",
           "type": "string"
+        },
+        "subject": {
+          "description": "Target commit subject (first line, folded).",
+          "type": "string"
         }
       },
       "required": [
         "commit",
         "hunk_range",
-        "path"
+        "path",
+        "subject"
       ],
       "type": "object"
     },

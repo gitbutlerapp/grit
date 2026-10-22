@@ -19514,6 +19514,7 @@ pub struct grit_lib::revwalk::history::HunkAssignment
 pub grit_lib::revwalk::history::HunkAssignment::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HunkAssignment::hunk_range: grit_lib::revwalk::history::HunkRange
 pub grit_lib::revwalk::history::HunkAssignment::path: alloc::string::String
+pub grit_lib::revwalk::history::HunkAssignment::subject: alloc::string::String
 impl core::clone::Clone for grit_lib::revwalk::history::HunkAssignment
 pub fn grit_lib::revwalk::history::HunkAssignment::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::HunkAssignment
@@ -19734,6 +19735,7 @@ pub fn grit_lib::revwalk::history::apply_absorb_rewrite(&grit_lib::repo::Reposit
 pub fn grit_lib::revwalk::history::apply_fixup_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::default_absorb_base(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::format_hunk_range_header(&grit_lib::revwalk::history::HunkRange) -> alloc::string::String
 pub fn grit_lib::revwalk::history::drop(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::fixup(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::FixupOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::move_commit(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::revwalk::history::Placement, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
