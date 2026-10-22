@@ -612,11 +612,47 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
 
 /// Result of `grit revert`.
 pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyhow::Result<()> {
+    use crate::commands::revert::RevertResult;
     outln!(w, "## Revert");
     outln!(w);
-    let src = short_hex(&outcome.source);
-    let new = short_hex(&outcome.oid);
-    outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
+    match outcome.result {
+        RevertResult::Aborted => outln!(w, "Revert aborted."),
+        RevertResult::Conflicts => {
+            outln!(w, "- Revert stopped with conflicts");
+            outln!(w);
+            if let Some(details) = &outcome.conflicts {
+                crate::operation_output::render_conflicts_markdown(details, w)?;
+            }
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        RevertResult::Empty => {
+            outln!(w, "- Revert stopped on an empty commit");
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        RevertResult::Completed => {
+            if outcome.dry_run == Some(true) {
+                outln!(w, "- Would revert {} commit(s)", outcome.commits.len());
+                for entry in &outcome.commits {
+                    let src = short_hex(&entry.source);
+                    outln!(w, "  - `{src}`");
+                }
+            } else {
+                for entry in &outcome.commits {
+                    let src = short_hex(&entry.source);
+                    let new = short_hex(&entry.oid);
+                    outln!(w, "- `{src}` → `{new}` — {}", entry.subject);
+                }
+            }
+        }
+    }
     Ok(())
 }
 

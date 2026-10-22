@@ -39,6 +39,14 @@ impl OperationConflictBlock {
         })
     }
 
+    /// Build conflict JSON and suggested `grit` commands for a paused revert sequence.
+    #[must_use]
+    pub fn for_revert(conflicts: &[Conflict]) -> Self {
+        Self::for_operation(InProgressOperation::Revert, conflicts, |c| {
+            conflict_json(c, None)
+        })
+    }
+
     fn for_operation(
         kind: InProgressOperation,
         conflicts: &[Conflict],
@@ -149,5 +157,12 @@ pub fn render_operation_guidance_markdown(
 pub fn render_merge_conflict_footer_human() {
     eprintln!(
         "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."
+    );
+}
+
+/// Human hint after a paused revert sequence.
+pub fn render_revert_conflict_footer_human() {
+    eprintln!(
+        "\nRevert stopped on conflicts; fix them and run `grit revert --continue`, or `grit revert --abort` / `grit revert --skip`."
     );
 }
