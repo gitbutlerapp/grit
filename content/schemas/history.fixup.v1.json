@@ -24,7 +24,7 @@
       "description": "One ref tip before and after rewrite.",
       "properties": {
         "name": {
-          "description": "Full ref name.",
+          "description": "Deprecated duplicate of [`Self::ref_name`]; removed in a future release.",
           "type": "string"
         },
         "new": {
@@ -34,12 +34,17 @@
         "old": {
           "description": "Previous tip OID (full hex).",
           "type": "string"
+        },
+        "ref": {
+          "description": "Full ref name.",
+          "type": "string"
         }
       },
       "required": [
         "name",
         "new",
-        "old"
+        "old",
+        "ref"
       ],
       "type": "object"
     },
@@ -63,6 +68,13 @@
         "old": {
           "description": "Commit OID before rewrite (full hex).",
           "type": "string"
+        },
+        "subject": {
+          "description": "First line of the replacement commit message, or the original when dropped.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

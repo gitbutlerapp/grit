@@ -416,6 +416,23 @@ fn history_reword_json_schema() -> TestResult {
     assert!(json.get("rewritten").is_some());
     assert!(json.get("refs").is_some());
     assert_eq!(json["dry_run"], false);
+    let rewritten = json["rewritten"].as_array().ok_or("rewritten array")?;
+    assert!(
+        rewritten.iter().all(|row| row.get("subject").is_some()),
+        "each rewritten row must include subject: {json}"
+    );
+    assert!(
+        rewritten
+            .iter()
+            .any(|row| row["subject"].as_str() == Some("schema test")),
+        "reworded subject in JSON: {json}"
+    );
+    let refs = json["refs"].as_array().ok_or("refs array")?;
+    assert!(
+        refs.iter()
+            .all(|row| row.get("ref").is_some() && row.get("name").is_some()),
+        "each ref row must include ref and deprecated name: {json}"
+    );
     let mut keys: Vec<_> = json
         .as_object()
         .ok_or("expected object")?

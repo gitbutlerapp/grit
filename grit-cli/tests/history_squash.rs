@@ -160,6 +160,17 @@ fn history_squash_json_head_maps_through_ref_update() -> TestResult {
     assert!(out.success(), "grit failed: {}", out.stderr);
     let json = parse_json(&out.stdout)?;
     assert_eq!(json["operation"], "squash");
+    let rewritten = json["rewritten"].as_array().ok_or("rewritten array")?;
+    assert!(
+        rewritten.iter().all(|row| row.get("subject").is_some()),
+        "each rewritten row must include subject: {json}"
+    );
+    let refs = json["refs"].as_array().ok_or("refs array")?;
+    assert!(
+        refs.iter()
+            .all(|row| row.get("ref").is_some() && row.get("name").is_some()),
+        "each ref row must include ref and deprecated name: {json}"
+    );
     let head = json["head"]
         .as_object()
         .ok_or("head must be an object when HEAD commit changes")?;

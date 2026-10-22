@@ -19548,6 +19548,7 @@ pub fn grit_lib::revwalk::history::RewritePlan::head_change(&self) -> core::opti
 pub fn grit_lib::revwalk::history::RewritePlan::mapped_tip(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::history::RewritePlan::ref_update_lines(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::revwalk::history::RewritePlan::replacement(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
+pub fn grit_lib::revwalk::history::RewritePlan::subjects(&self, &grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<core::option::Option<alloc::string::String>>, grit_lib::revwalk::history::HistoryError>
 impl core::clone::Clone for grit_lib::revwalk::history::RewritePlan
 pub fn grit_lib::revwalk::history::RewritePlan::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::RewritePlan
@@ -19567,6 +19568,7 @@ pub struct grit_lib::revwalk::history::RewrittenCommit
 pub grit_lib::revwalk::history::RewrittenCommit::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::revwalk::history::RewrittenCommit::new: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::history::RewrittenCommit::old: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::history::RewrittenCommit::subject: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::revwalk::history::RewrittenCommit
 pub fn grit_lib::revwalk::history::RewrittenCommit::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::RewrittenCommit
@@ -19644,6 +19646,7 @@ pub fn grit_lib::revwalk::history::apply_absorb_rewrite(&grit_lib::repo::Reposit
 pub fn grit_lib::revwalk::history::apply_fixup_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::default_absorb_base(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::commit_message_subject_line(&str) -> alloc::string::String
 pub fn grit_lib::revwalk::history::drop(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::fixup(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::FixupOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::move_commit(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::revwalk::history::Placement, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
@@ -19651,6 +19654,7 @@ pub fn grit_lib::revwalk::history::normalize_rewrite_message(&str) -> core::resu
 pub fn grit_lib::revwalk::history::plan_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::HistoryEdits, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::rebase_onto(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId], &grit_lib::revwalk::history::RebaseOntoOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::reword(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, alloc::string::String, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::rewritten_row_subject(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewrittenCommit) -> core::result::Result<core::option::Option<alloc::string::String>, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::split(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::revwalk::history::Pathspec<'_>, alloc::string::String, &grit_lib::revwalk::history::SplitOptions, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::squash(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::history::SquashOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::staged_absorb_paths(&grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::revwalk::history::HistoryError>

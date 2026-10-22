@@ -55,6 +55,7 @@ mod rebase;
 mod reword;
 mod split;
 mod squash;
+mod subject;
 mod types;
 
 pub use absorb::{
@@ -73,6 +74,7 @@ pub use rebase::{rebase_onto, RebaseOntoOptions};
 pub use reword::{normalize_rewrite_message, reword};
 pub use split::split;
 pub use squash::{squash, SquashMessage, SquashOptions};
+pub use subject::{commit_message_subject_line, rewritten_row_subject};
 pub use types::{
     AppliedRewrite, ApplyOptions, CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, NewCommit,
     Pathspec, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,

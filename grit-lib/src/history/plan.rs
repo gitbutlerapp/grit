@@ -24,6 +24,7 @@ use crate::state::resolve_head;
 use crate::worktree::{find_worktree_with_branch_checked_out, worktree_admin_dir};
 
 use super::error::HistoryError;
+use super::subject::subject_for_rewrite_row;
 use super::types::{
     CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, PlannedRefUpdate, RefScope, RewriteOptions,
     RewritePlan, RewrittenCommit,
@@ -216,6 +217,7 @@ pub(crate) fn plan_rewrite_with_order(
                 old: old_oid,
                 new: Some(*existing),
                 change_id: logical_change_id_for_commit(repo, *existing)?,
+                subject: subject_for_rewrite_row(repo, &old, Some(*existing))?,
             });
             continue;
         }
@@ -237,6 +239,7 @@ pub(crate) fn plan_rewrite_with_order(
                 old: old_oid,
                 new: None,
                 change_id: None,
+                subject: subject_for_rewrite_row(repo, &old, None)?,
             });
             continue;
         }
@@ -401,6 +404,7 @@ pub(crate) fn plan_rewrite_with_order(
                 Some(oid) => logical_change_id_for_commit(repo, oid)?,
                 None => None,
             },
+            subject: subject_for_rewrite_row(repo, &old, new_field)?,
         });
     }
 
@@ -498,10 +502,12 @@ pub fn plan_replay_linear_segment(
         .iter()
         .map(|&old| {
             let new = mapping.get(&old).copied().unwrap_or(old);
+            let old_commit = load_commit(repo, old)?;
             Ok(RewrittenCommit {
                 old,
                 new: Some(new),
                 change_id: logical_change_id_for_commit(repo, new)?,
+                subject: subject_for_rewrite_row(repo, &old_commit, Some(new))?,
             })
         })
         .collect::<Result<Vec<_>, HistoryError>>()?;
@@ -1354,12 +1360,14 @@ pub fn plan_fold_range_at_head(
         mapping.insert(oid, new_oid);
     }
     let squashed_change_id = logical_change_id_for_commit(repo, new_oid)?;
+    let squashed_subject = subject_for_rewrite_row(repo, &oldest_commit, Some(new_oid))?;
     let rewritten: Vec<RewrittenCommit> = commits
         .iter()
         .map(|&old| RewrittenCommit {
             old,
             new: Some(new_oid),
             change_id: squashed_change_id.clone(),
+            subject: squashed_subject.clone(),
         })
         .collect();
     let scoped_refs = collect_scoped_refs(repo, opts, oldest)?;

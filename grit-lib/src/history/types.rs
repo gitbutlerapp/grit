@@ -112,6 +112,8 @@ pub struct RewrittenCommit {
     pub new: Option<ObjectId>,
     /// `change-id` header on the replacement commit, or `None` when dropped or absent.
     pub change_id: Option<ChangeId>,
+    /// First line of the replacement commit message, or the original when dropped.
+    pub subject: Option<String>,
 }
 
 /// Planned movement of one ref (refs, index, and worktree are not updated by [`super::plan_rewrite`](crate::history::plan_rewrite)).
@@ -152,6 +154,22 @@ pub struct RewritePlan {
 }
 
 impl RewritePlan {
+    /// Subject line for each row in [`Self::commits`], in the same order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`super::HistoryError`] when a subject must be loaded from the object database and
+    /// the commit is missing or corrupt.
+    pub fn subjects(
+        &self,
+        repo: &crate::repo::Repository,
+    ) -> Result<Vec<Option<String>>, super::HistoryError> {
+        self.commits
+            .iter()
+            .map(|row| super::subject::rewritten_row_subject(repo, row))
+            .collect()
+    }
+
     /// Tip OID after rewrite when a ref update moves `old_tip`, if any.
     #[must_use]
     pub fn mapped_tip(&self, old_tip: ObjectId) -> Option<ObjectId> {
@@ -241,6 +259,7 @@ mod tests {
                     old: oid(old),
                     new: new.map(oid),
                     change_id: None,
+                    subject: None,
                 })
                 .collect(),
             ref_updates: ref_updates

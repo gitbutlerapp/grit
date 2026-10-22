@@ -101,12 +101,14 @@ impl HistoryRewriteOutcome {
                     old: row.old.to_hex(),
                     new: row.new.map(|new| new.to_hex()),
                     change_id: row.change_id.as_ref().map(|id| id.as_str().to_owned()),
+                    subject: row.subject.clone(),
                 })
                 .collect(),
             refs: plan
                 .ref_updates
                 .iter()
                 .map(|u| RefPair {
+                    ref_name: u.name.clone(),
                     name: u.name.clone(),
                     old: u.old.to_hex(),
                     new: u.new.to_hex(),
@@ -130,12 +132,17 @@ pub struct RewrittenPair {
     pub new: Option<String>,
     /// Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.
     pub change_id: Option<String>,
+    /// First line of the replacement commit message, or the original when dropped.
+    pub subject: Option<String>,
 }
 
 /// One ref tip before and after rewrite.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct RefPair {
     /// Full ref name.
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    /// Deprecated duplicate of [`Self::ref_name`]; removed in a future release.
     pub name: String,
     /// Previous tip OID (full hex).
     pub old: String,
@@ -163,15 +170,32 @@ fn render_rewrite_rows(
 ) -> Result<()> {
     for pair in rewritten {
         match &pair.new {
-            Some(new) => outln!(w, "  commit {} → {}", short(&pair.old), short(new)),
-            None => outln!(w, "  commit {} → (dropped)", short(&pair.old)),
+            Some(new) => {
+                if let Some(subject) = pair.subject.as_deref() {
+                    outln!(
+                        w,
+                        "  commit {} → {} ({subject})",
+                        short(&pair.old),
+                        short(new)
+                    );
+                } else {
+                    outln!(w, "  commit {} → {}", short(&pair.old), short(new));
+                }
+            }
+            None => {
+                if let Some(subject) = pair.subject.as_deref() {
+                    outln!(w, "  commit {} → (dropped) ({subject})", short(&pair.old));
+                } else {
+                    outln!(w, "  commit {} → (dropped)", short(&pair.old));
+                }
+            }
         }
     }
     for update in refs {
         outln!(
             w,
             "  {} {} → {}",
-            update.name,
+            update.ref_name,
             short(&update.old),
             short(&update.new)
         );

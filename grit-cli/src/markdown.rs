@@ -823,24 +823,43 @@ fn print_history_rewrite_rows(
     for pair in rewritten {
         match &pair.new {
             Some(new) => {
-                outln!(
-                    w,
-                    "- commit `{}` → `{}`",
-                    short_hex(&pair.old),
-                    short_hex(new)
-                );
+                if let Some(subject) = pair.subject.as_deref() {
+                    outln!(
+                        w,
+                        "- commit `{}` → `{}` — {subject}",
+                        short_hex(&pair.old),
+                        short_hex(new)
+                    );
+                } else {
+                    outln!(
+                        w,
+                        "- commit `{}` → `{}`",
+                        short_hex(&pair.old),
+                        short_hex(new)
+                    );
+                }
                 if let Some(id) = pair.change_id.as_deref() {
                     outln!(w, "  - change id `{short}`", short = short_change_id(id));
                 }
             }
-            None => outln!(w, "- commit `{}` → (dropped)", short_hex(&pair.old)),
+            None => {
+                if let Some(subject) = pair.subject.as_deref() {
+                    outln!(
+                        w,
+                        "- commit `{}` → (dropped) — {subject}",
+                        short_hex(&pair.old)
+                    );
+                } else {
+                    outln!(w, "- commit `{}` → (dropped)", short_hex(&pair.old));
+                }
+            }
         }
     }
     for update in refs {
         outln!(
             w,
             "- `{}` `{}` → `{}`",
-            update.name,
+            update.ref_name,
             short_hex(&update.old),
             short_hex(&update.new)
         );

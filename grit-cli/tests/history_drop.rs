@@ -150,6 +150,23 @@ fn history_drop_json_schema() -> TestResult {
     assert!(json.get("rewritten").is_some());
     assert!(json.get("refs").is_some());
     assert_eq!(json["dry_run"], false);
+    let rewritten = json["rewritten"].as_array().ok_or("rewritten array")?;
+    assert!(
+        rewritten.iter().all(|row| row.get("subject").is_some()),
+        "each rewritten row must include subject: {json}"
+    );
+    let dropped = rewritten
+        .iter()
+        .find(|row| row["new"].is_null())
+        .ok_or("dropped row")?;
+    assert_eq!(dropped["subject"].as_str(), Some("second"));
+    let refs = json["refs"].as_array().ok_or("refs array")?;
+    assert!(
+        refs.iter()
+            .all(|row| row.get("ref").is_some() && row.get("name").is_some()),
+        "each ref row must include ref and deprecated name: {json}"
+    );
+    assert_eq!(refs[0]["ref"], refs[0]["name"]);
     Ok(())
 }
 

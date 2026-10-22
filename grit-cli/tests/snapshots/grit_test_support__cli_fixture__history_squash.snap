@@ -1,22 +1,21 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
-assertion_line: 384
 expression: payload
 ---
 {
   "human": {
     "exit": 0,
-    "stdout": "Squashed 2 commit(s)\n  commit 83352a6 → dfadc9b\n  commit 2d78f4f → dfadc9b\n  refs/heads/main 2d78f4f → dfadc9b\n",
+    "stdout": "Squashed 2 commit(s)\n  commit 83352a6 → dfadc9b (second)\n  commit 2d78f4f → dfadc9b (second)\n  refs/heads/main 2d78f4f → dfadc9b\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"operation\":\"squash\",\"rewritten\":[{\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\",\"change_id\":\"xzyqzyyzswyupvtlsovyzultryuqzlvk\"},{\"old\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\",\"change_id\":\"xzyqzyyzswyupvtlsovyzultryuqzlvk\"}],\"refs\":[{\"name\":\"refs/heads/main\",\"old\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\"}],\"head\":{\"old\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\"},\"dry_run\":false}\n",
+    "stdout": "{\"operation\":\"squash\",\"rewritten\":[{\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\",\"change_id\":\"xzyqzyyzswyupvtlsovyzultryuqzlvk\",\"subject\":\"second\"},{\"old\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\",\"change_id\":\"xzyqzyyzswyupvtlsovyzultryuqzlvk\",\"subject\":\"second\"}],\"refs\":[{\"ref\":\"refs/heads/main\",\"name\":\"refs/heads/main\",\"old\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\"}],\"head\":{\"old\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\",\"new\":\"dfadc9b302528d432936e5099cf5e9e0037714db\"},\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## History squash\n\n- commit `83352a6` → `dfadc9b`\n  - change id `xzyqzyy`\n- commit `2d78f4f` → `dfadc9b`\n  - change id `xzyqzyy`\n- `refs/heads/main` `2d78f4f` → `dfadc9b`\n- HEAD `2d78f4f` → `dfadc9b`\n",
+    "stdout": "## History squash\n\n- commit `83352a6` → `dfadc9b` — second\n  - change id `xzyqzyy`\n- commit `2d78f4f` → `dfadc9b` — second\n  - change id `xzyqzyy`\n- `refs/heads/main` `2d78f4f` → `dfadc9b`\n- HEAD `2d78f4f` → `dfadc9b`\n",
     "stderr": ""
   }
 }
