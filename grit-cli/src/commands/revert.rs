@@ -21,6 +21,7 @@ use grit_lib::porcelain::replay_sequence::{
 use grit_lib::porcelain::revert::{committer_timestamp, revision_range_apply_order};
 use grit_lib::revwalk::parse_rev_walk_tokens;
 use grit_lib::revwalk::rev_list::resolve_revision_specs_to_commits;
+use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -302,6 +303,12 @@ fn resolve_revert_commits(
         || parsed.symmetric_left.is_some();
     if range_syntax {
         return revision_range_apply_order(repo, &include, &exclude).map_err(anyhow::Error::new);
+    }
+    if include.is_empty() {
+        for token in tokens {
+            resolve_revision_as_commit(repo, token).map_err(map_revert_committish_error)?;
+        }
+        bail!("at least one commit is required unless using --continue, --abort, or --skip");
     }
     order_commits_newest_first(repo, &include)
 }
