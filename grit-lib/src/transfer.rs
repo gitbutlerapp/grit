@@ -1586,10 +1586,10 @@ pub fn fetch_local_with_progress(
         crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &boundaries)?;
     }
 
-    // 4. Classify and apply ref updates. Ancestry checks use the local repo,
-    //    which now contains the fetched objects.
-    let local_repo = if opts.dry_run {
-        None
+    // 4. Classify and apply ref updates. Ancestry checks use the local repo
+    //    (or the bare remote during `--dry-run`, when objects are not copied).
+    let classify_repo = if opts.dry_run {
+        crate::repo::Repository::open(remote_git_dir, &RepositoryOptions::empty()).ok()
     } else {
         crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty()).ok()
     };
@@ -1639,7 +1639,13 @@ pub fn fetch_local_with_progress(
         let old = crate::refs::resolve_ref_cached(local_git_dir, local_ref, &packed)
             .ok()
             .flatten();
-        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
+        let mode = classify_update(
+            old.as_ref(),
+            &m.oid,
+            m.force,
+            m.dest_is_tag,
+            classify_repo.as_ref(),
+        );
 
         let write = matches!(
             mode,
@@ -1652,7 +1658,7 @@ pub fn fetch_local_with_progress(
             mode,
             opts,
             explicit_refspec_fetch,
-            local_repo.as_ref(),
+            classify_repo.as_ref(),
         )?;
         if write && !opts.dry_run {
             if !crate::refs::is_valid_storable_ref_name(local_ref) {
@@ -1666,7 +1672,7 @@ pub fn fetch_local_with_progress(
                 });
                 continue;
             }
-            if m.is_tag && !ref_target_exists(&local_odb, &remote_odb, m.oid) {
+            if m.dest_is_tag && !ref_target_exists(&local_odb, &remote_odb, m.oid) {
                 updates.push(RefUpdate {
                     remote_ref: m.remote_ref.clone(),
                     local_ref: Some(local_ref.clone()),
@@ -2256,6 +2262,8 @@ pub(crate) struct MatchedRef {
     pub(crate) oid: ObjectId,
     pub(crate) force: bool,
     pub(crate) is_tag: bool,
+    /// Local destination is under `refs/tags/` (tag clobber rules apply).
+    pub(crate) dest_is_tag: bool,
     /// Peeled target from ls-refs `peeled:` (annotated tags), when known.
     pub(crate) advertised_peel: Option<ObjectId>,
     /// How this ref appears in [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion).
@@ -2549,6 +2557,7 @@ pub(crate) fn apply_tag_mode(
                 oid,
                 force: false,
                 is_tag: true,
+                dest_is_tag: true,
                 advertised_peel: peeled,
                 fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
             });

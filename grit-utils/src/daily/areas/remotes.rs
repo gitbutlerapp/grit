@@ -95,7 +95,7 @@ fn fetch_one_branch_git(ctx: &DailyHeadlineContext) -> BenchArgv {
 
 fn fetch_one_branch_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     let branch = default_remote_branch(ctx);
-    sh_devnull(&ctx.grit, &["fetch", "origin", branch])
+    sh_devnull(&ctx.grit, &["fetch", "-q", "origin", branch])
 }
 
 fn fetch_dry_run_git(ctx: &DailyHeadlineContext) -> BenchArgv {

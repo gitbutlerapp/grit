@@ -383,6 +383,157 @@ fn missing_source_ref_typed_error_file() {
 }
 
 #[test]
+fn branch_to_tag_clobber_rejected_like_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = BareRemote::new(tmp.path(), "remote");
+    remote.commit_empty("r1");
+    let tag_oid = git_out(remote.path(), &["rev-parse", "HEAD"]);
+    remote.commit_empty("r2");
+
+    let grit_c = clone_consumer(tmp.path(), &remote, "grit-c");
+    let git_c = clone_consumer(tmp.path(), &remote, "git-c");
+    run_git(&grit_c, &["tag", "local-tag", &tag_oid]);
+    run_git(&git_c, &["tag", "local-tag", &tag_oid]);
+
+    let spec = "refs/heads/main:refs/tags/local-tag";
+    let cfg = ["+refs/heads/*:refs/remotes/origin/*"];
+
+    let grit_outcome = fetch_local(
+        &grit_c.join(".git"),
+        &remote.git_dir(),
+        &FetchOptions {
+            refspecs: vec![spec.into()],
+            configured_refspecs: cfg.iter().map(|s| (*s).into()).collect(),
+            tags: TagMode::None,
+            remote_name: Some("origin".into()),
+            ..Default::default()
+        },
+    )
+    .expect("grit fetch");
+    assert!(
+        grit_outcome.updates.iter().any(|u| {
+            u.local_ref.as_deref() == Some("refs/tags/local-tag")
+                && u.mode == grit_lib::remote::transfer::UpdateMode::TagUpdateRejected
+        }),
+        "expected tag clobber rejection, got {:?}",
+        grit_outcome.updates
+    );
+    assert_eq!(
+        tracking_tip(&grit_c.join(".git"), "refs/tags/local-tag"),
+        Some(ObjectId::from_hex(&tag_oid).expect("oid"))
+    );
+
+    let git_status = Command::new("git")
+        .current_dir(&git_c)
+        .args(["fetch", "origin", spec])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git fetch");
+    assert!(!git_status.success(), "git must reject tag clobber");
+    assert_eq!(
+        git_out(&git_c, &["rev-parse", "refs/tags/local-tag"]),
+        tag_oid
+    );
+}
+
+#[test]
+fn tag_to_branch_rejected_when_tag_would_clobber_branch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = BareRemote::new(tmp.path(), "remote");
+    remote.commit_empty("r1");
+    let main1 = git_out(remote.path(), &["rev-parse", "HEAD"]);
+    remote.commit_empty("r2");
+
+    let main2 = git_out(remote.path(), &["rev-parse", "HEAD"]);
+    let grit_c = clone_consumer(tmp.path(), &remote, "grit-c");
+    let git_c = clone_consumer(tmp.path(), &remote, "git-c");
+    // Branch is ahead of the tag; updating it from the tag must be rejected (non-FF).
+    run_git(&grit_c, &["branch", "from-tag", &main2]);
+    run_git(&git_c, &["branch", "from-tag", &main2]);
+    run_git(remote.path(), &["tag", "v1", &main1]);
+
+    let spec = "refs/tags/v1:refs/heads/from-tag";
+    let outcome = fetch_local(
+        &grit_c.join(".git"),
+        &remote.git_dir(),
+        &FetchOptions {
+            refspecs: vec![spec.into()],
+            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+            tags: TagMode::None,
+            remote_name: Some("origin".into()),
+            ..Default::default()
+        },
+    )
+    .expect("fetch");
+    assert!(
+        outcome.updates.iter().any(|u| {
+            u.local_ref.as_deref() == Some("refs/heads/from-tag")
+                && u.mode == grit_lib::remote::transfer::UpdateMode::NonFastForwardRejected
+        }),
+        "tag onto diverged branch must reject: {:?}",
+        outcome.updates
+    );
+
+    let git_status = Command::new("git")
+        .current_dir(&git_c)
+        .args(["fetch", "origin", spec])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git fetch");
+    assert!(!git_status.success());
+    assert_eq!(
+        git_out(&git_c, &["rev-parse", "refs/heads/from-tag"]),
+        main2
+    );
+}
+
+#[test]
+fn dry_run_classifies_fast_forward_without_writing() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = BareRemote::new(tmp.path(), "remote");
+    remote.commit_empty("r1");
+
+    let grit_c = clone_consumer(tmp.path(), &remote, "grit-c");
+    grit_fetch_file(
+        &grit_c,
+        &remote.git_dir(),
+        &["main"],
+        &["+refs/heads/*:refs/remotes/origin/*"],
+    );
+    run_git(&grit_c, &["branch", "probe", "main"]);
+    remote.commit_empty("r2");
+
+    let outcome = fetch_local(
+        &grit_c.join(".git"),
+        &remote.git_dir(),
+        &FetchOptions {
+            refspecs: vec!["refs/heads/main:refs/heads/probe".into()],
+            configured_refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+            tags: TagMode::None,
+            remote_name: Some("origin".into()),
+            dry_run: true,
+            ..Default::default()
+        },
+    )
+    .expect("dry-run fetch");
+    let update = outcome
+        .updates
+        .iter()
+        .find(|u| u.local_ref.as_deref() == Some("refs/heads/probe"))
+        .expect("probe update");
+    assert_eq!(
+        update.mode,
+        grit_lib::remote::transfer::UpdateMode::FastForward
+    );
+    assert_eq!(
+        tracking_tip(&grit_c.join(".git"), "refs/heads/probe"),
+        tracking_tip(&grit_c.join(".git"), "refs/heads/probe")
+    );
+}
+
+#[test]
 fn non_fast_forward_local_branch_rejected_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let remote = BareRemote::new(tmp.path(), "remote");

@@ -9,11 +9,7 @@ pub struct FetchArgs {
     #[arg(value_name = "REMOTE")]
     pub remote: Option<String>,
     /// Refspecs selecting refs to fetch (`main`, `+refs/heads/x:refs/heads/y`, …).
-    #[arg(
-        value_name = "REFSPEC",
-        trailing_var_arg = true,
-        allow_hyphen_values = true
-    )]
+    #[arg(value_name = "REFSPEC", num_args = 0..)]
     pub refspecs: Vec<String>,
     /// Fetch all tags from the remote (`git fetch --tags`).
     #[arg(long = "tags")]

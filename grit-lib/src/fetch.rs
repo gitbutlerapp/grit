@@ -31,6 +31,23 @@ use crate::transfer::{
 };
 use crate::transport::Connection;
 
+struct HookEnvGuard(Vec<(String, String)>);
+
+fn set_hook_env(pairs: Vec<(String, String)>) -> HookEnvGuard {
+    for (k, v) in &pairs {
+        std::env::set_var(k, v);
+    }
+    HookEnvGuard(pairs)
+}
+
+impl Drop for HookEnvGuard {
+    fn drop(&mut self) {
+        for (k, _) in &self.0 {
+            std::env::remove_var(k);
+        }
+    }
+}
+
 /// Sink for wire transport progress: typed phases via [`ProgressSink`] plus
 /// raw side-band channel 2 bytes from the remote.
 ///
@@ -1361,9 +1378,11 @@ pub fn fetch_remote(
         t_begin.elapsed()
     );
 
+    let mut dry_run_quarantine: Option<crate::receive_quarantine::ReceiveQuarantine> = None;
+
     if wants.is_empty() {
         crate::transport::send_client_flush(conn)?;
-    } else if !opts.dry_run {
+    } else {
         net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
@@ -1412,18 +1431,40 @@ pub fn fetch_remote(
                 &pack_config,
                 opts.index_pack_threads,
             )?;
-            let ingested = crate::index_pack::ingest_received_pack_path_with_progress(
-                path,
-                &local_odb,
-                &crate::index_pack::IngestPackOptions {
-                    fix_thin: true,
-                    skip_post_index_verify: true,
-                    threads: index_threads,
-                    merged_config: Some(pack_config),
-                    environment: opts.environment.clone(),
-                },
-                Some(progress),
-            )?;
+            if opts.dry_run && dry_run_quarantine.is_none() {
+                dry_run_quarantine = Some(crate::receive_quarantine::ReceiveQuarantine::create(
+                    &local_odb,
+                    local_git_dir,
+                )?);
+            }
+            let ingested = if let Some(q) = dry_run_quarantine.as_ref() {
+                let q_odb = q.odb();
+                crate::index_pack::ingest_received_pack_path_with_progress(
+                    path,
+                    &q_odb,
+                    &crate::index_pack::IngestPackOptions {
+                        fix_thin: true,
+                        skip_post_index_verify: true,
+                        threads: index_threads,
+                        merged_config: Some(pack_config),
+                        environment: opts.environment.clone(),
+                    },
+                    Some(progress),
+                )?
+            } else {
+                crate::index_pack::ingest_received_pack_path_with_progress(
+                    path,
+                    &local_odb,
+                    &crate::index_pack::IngestPackOptions {
+                        fix_thin: true,
+                        skip_post_index_verify: true,
+                        threads: index_threads,
+                        merged_config: Some(pack_config),
+                        environment: opts.environment.clone(),
+                    },
+                    Some(progress),
+                )?
+            };
             pack_oids = ingested.object_ids;
             let bytes = std::fs::metadata(&ingested.pack_path)
                 .map_err(crate::error::Error::Io)?
@@ -1476,7 +1517,12 @@ pub fn fetch_remote(
 
     // 5. Classify + apply ref updates (ancestry via the now-populated local repo).
     let t_apply = std::time::Instant::now();
-    let local_repo = if opts.dry_run {
+    let quarantine_env: Option<Vec<(String, String)>> =
+        dry_run_quarantine.as_ref().map(|q| q.hook_env());
+    let _quarantine_env_guard = quarantine_env
+        .as_ref()
+        .map(|pairs| set_hook_env(pairs.clone()));
+    let classify_repo = if opts.dry_run && dry_run_quarantine.is_none() {
         None
     } else {
         crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty()).ok()
@@ -1549,7 +1595,13 @@ pub fn fetch_remote(
         }
 
         let t = std::time::Instant::now();
-        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
+        let mode = classify_update(
+            old.as_ref(),
+            &m.oid,
+            m.force,
+            m.dest_is_tag,
+            classify_repo.as_ref(),
+        );
         d_classify += t.elapsed();
 
         let write = matches!(
@@ -1563,7 +1615,7 @@ pub fn fetch_remote(
             mode,
             opts,
             explicit_refspec_fetch,
-            local_repo.as_ref(),
+            classify_repo.as_ref(),
         )?;
         if write && !opts.dry_run {
             if !crate::refs::is_valid_storable_ref_name(local_ref) {
@@ -1785,6 +1837,7 @@ pub(crate) fn add_wire_tags(
             oid: *oid,
             force: false,
             is_tag: true,
+            dest_is_tag: true,
             advertised_peel: advertised_peel.get(name).copied(),
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         });
@@ -2222,6 +2275,7 @@ mod fetch_advertised_ref_tests {
             oid: shared,
             force: false,
             is_tag: false,
+            dest_is_tag: false,
             advertised_peel: None,
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         });
@@ -2270,6 +2324,7 @@ mod fetch_advertised_ref_tests {
             oid: tag_obj,
             force: false,
             is_tag: true,
+            dest_is_tag: true,
             advertised_peel: Some(commit),
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         }];
@@ -2291,6 +2346,7 @@ mod fetch_advertised_ref_tests {
             oid: tag_obj,
             force: false,
             is_tag: true,
+            dest_is_tag: true,
             advertised_peel: Some(tip),
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         }];

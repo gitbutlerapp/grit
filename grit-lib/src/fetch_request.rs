@@ -192,7 +192,18 @@ fn is_fetch_remote_token(config: &ConfigSet, token: &str) -> bool {
         || token.starts_with("../")
         || token.ends_with(".git")
         || token.ends_with(".bundle")
-        || (token.contains(':') && !token.contains(' '))
+        || (token.contains(':') && !token.contains(' ') && !looks_like_fetch_refspec(token))
+}
+
+/// True when `token` is an explicit `src:dst` fetch refspec, not an scp-style remote URL.
+fn looks_like_fetch_refspec(token: &str) -> bool {
+    let Ok(item) = parse_fetch_refspec(token) else {
+        return false;
+    };
+    if item.negative || item.pattern || item.matching {
+        return false;
+    }
+    token.contains(':') && item.src.is_some()
 }
 
 /// Inputs for [`FetchRefspecPlan::resolve`].
@@ -369,6 +380,7 @@ pub(crate) fn matched_refs_from_plan(
                     oid,
                     force: entry.force,
                     is_tag: entry.remote_ref.starts_with("refs/tags/"),
+                    dest_is_tag: ref_update_uses_tag_rules(entry.local_ref.as_deref()),
                     advertised_peel: None,
                     fetch_head: entry.fetch_head,
                 });
@@ -394,10 +406,11 @@ fn pattern_matched_refs(
             if seen.insert(key) {
                 matched.push(MatchedRef {
                     remote_ref: name.clone(),
-                    local_ref,
+                    local_ref: local_ref.clone(),
                     oid: *oid,
                     force: crate::transfer::refspecs_force(name, positive),
                     is_tag: name.starts_with("refs/tags/"),
+                    dest_is_tag: ref_update_uses_tag_rules(local_ref.as_deref()),
                     advertised_peel: None,
                     fetch_head: FetchHeadPolicy::ForMerge,
                 });
@@ -551,6 +564,12 @@ fn resolve_explicit_source(
             }
         }
     }
+}
+
+/// Whether ref-update rules treat the destination as a tag (no overwrite without `+`).
+#[must_use]
+pub(crate) fn ref_update_uses_tag_rules(local_ref: Option<&str>) -> bool {
+    local_ref.is_some_and(|r| r.starts_with("refs/tags/"))
 }
 
 fn resolve_explicit_destination(dst: Option<&str>, _remote_ref: &str) -> Option<String> {
@@ -774,6 +793,28 @@ mod tests {
     }
 
     #[test]
+    fn colon_refspec_is_not_treated_as_remote() {
+        use super::{resolve_fetch_invocation, FetchInvocation};
+        use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+
+        let file = ConfigFile::parse(
+            std::path::Path::new("cfg"),
+            "[remote \"origin\"]\n\turl = /tmp/x.git\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        let mut config = ConfigSet::new();
+        config.merge(&file);
+
+        assert_eq!(
+            resolve_fetch_invocation(&config, None, &["main:refs/heads/feature".into()], "origin"),
+            FetchInvocation {
+                remote: "origin".into(),
+                user_refspecs: vec!["main:refs/heads/feature".into()],
+            }
+        );
+    }
+
     fn resolve_fetch_invocation_remote_vs_refspec() {
         use super::{resolve_fetch_invocation, FetchInvocation};
         use crate::config::{ConfigFile, ConfigScope, ConfigSet};

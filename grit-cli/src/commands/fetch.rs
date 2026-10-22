@@ -91,7 +91,9 @@ impl HumanRender for FetchOutcome {
                 );
             }
         }
-        if self.updated == 0 && !self.rejected {
+        if self.rejected {
+            outln!(w, "Some ref updates from {} were rejected.", self.remote);
+        } else if self.updated == 0 {
             outln!(w, "Already up to date with {}.", self.remote);
         } else if self.updated > 0 {
             outln!(
@@ -171,7 +173,7 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         }
     };
 
-    let (updates, updated, rejected) = map_updates(&result.updates);
+    let (updates, updated, rejected) = map_updates(&result.updates, args.dry_run);
 
     Ok(FetchOutcome {
         remote: remote_name,
@@ -182,7 +184,7 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
     })
 }
 
-fn map_updates(raw: &[RefUpdate]) -> (Vec<FetchUpdate>, usize, bool) {
+fn map_updates(raw: &[RefUpdate], dry_run: bool) -> (Vec<FetchUpdate>, usize, bool) {
     let mut updates = Vec::new();
     let mut updated = 0usize;
     let mut rejected = false;
@@ -191,7 +193,7 @@ fn map_updates(raw: &[RefUpdate]) -> (Vec<FetchUpdate>, usize, bool) {
             continue;
         }
         let status = FetchUpdateStatus::from(update.mode);
-        if update.mode.modified_repo() {
+        if update.mode.modified_repo() && !dry_run {
             updated += 1;
         }
         if status == FetchUpdateStatus::Rejected {
@@ -201,9 +203,14 @@ fn map_updates(raw: &[RefUpdate]) -> (Vec<FetchUpdate>, usize, bool) {
             .local_ref
             .clone()
             .unwrap_or_else(|| update.remote_ref.clone());
+        let remote_ref = if update.remote_ref.is_empty() {
+            ref_name.clone()
+        } else {
+            update.remote_ref.clone()
+        };
         updates.push(FetchUpdate {
             ref_name,
-            remote_ref: update.remote_ref.clone(),
+            remote_ref,
             status,
             old_oid: update.old_oid.as_ref().map(|o| o.to_hex()),
             new_oid: update.new_oid.as_ref().map(|o| o.to_hex()),

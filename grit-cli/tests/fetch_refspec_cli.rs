@@ -258,7 +258,13 @@ fn fetch_dry_run_writes_nothing() -> TestResult {
 
     let json = grit_json(&client, &["fetch", "--dry-run", "origin", "main"]);
     assert_eq!(json["dry_run"], true);
+    assert_eq!(json["updated"], 0);
     assert!(json["updates"].as_array().is_some_and(|a| !a.is_empty()));
+    let main_update = json["updates"]
+        .as_array()
+        .and_then(|a| a.iter().find(|u| u["ref"] == "refs/remotes/origin/main"))
+        .expect("main update");
+    assert_eq!(main_update["status"], "fast_forward");
 
     let after_tip = git_out(&client, &["rev-parse", "refs/remotes/origin/main"]);
     assert_eq!(before_tip, after_tip);
@@ -307,22 +313,81 @@ fn fetch_tags_flags_match_git() -> TestResult {
     )?;
 
     git(&git_client, &["fetch", "-q", "--no-tags", "origin"])?;
-    grit(&grit_client, &["fetch", "--no-tags", "origin"])
-        .status
-        .success();
+    let no_tags = grit(&grit_client, &["fetch", "--no-tags", "origin"]);
+    assert!(no_tags.status.success(), "{}", stderr(&no_tags));
 
     let grit_tags = git_out(&grit_client, &["tag"]);
     let git_tags = git_out(&git_client, &["tag"]);
     assert_eq!(grit_tags, git_tags);
 
     git(&git_client, &["fetch", "-q", "--tags", "origin"])?;
-    grit(&grit_client, &["fetch", "--tags", "origin"])
-        .status
-        .success();
+    let with_tags = grit(&grit_client, &["fetch", "--tags", "origin"]);
+    assert!(with_tags.status.success(), "{}", stderr(&with_tags));
 
     let grit_tags = git_out(&grit_client, &["tag"]);
     let git_tags = git_out(&git_client, &["tag"]);
     assert_eq!(grit_tags, git_tags);
+    Ok(())
+}
+
+#[test]
+fn fetch_trailing_dry_run_flag() -> TestResult {
+    let base = tempfile::tempdir()?;
+    let (origin, _seed) = seed_remote(base.path())?;
+    let client = git_clone(base.path(), &origin, "client");
+
+    let json = grit_json(&client, &["fetch", "origin", "main", "--dry-run"]);
+    assert_eq!(json["dry_run"], true);
+    assert_eq!(json["updated"], 0);
+    Ok(())
+}
+
+#[test]
+fn fetch_branch_to_tag_rejected_exit_one() -> TestResult {
+    let base = tempfile::tempdir()?;
+    let (origin, seed) = seed_remote(base.path())?;
+    let client = git_clone(base.path(), &origin, "client");
+    let tag_oid = git_out(&seed, &["rev-parse", "HEAD"]);
+    git(&seed, &["tag", "local-tag"])?;
+    fs::write(seed.join("b.txt"), "b\n")?;
+    git(&seed, &["add", "b.txt"])?;
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-m",
+            "b",
+        ],
+    )?;
+    git(&seed, &["push", "origin", "main"])?;
+
+    git(&client, &["tag", "local-tag", &tag_oid])?;
+
+    let out = grit(
+        &client,
+        &[
+            "--json",
+            "fetch",
+            "origin",
+            "refs/heads/main:refs/tags/local-tag",
+        ],
+    );
+    assert!(
+        !out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        stderr(&out)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(json["rejected"], true);
+    assert_eq!(
+        git_out(&client, &["rev-parse", "refs/tags/local-tag"]),
+        tag_oid
+    );
     Ok(())
 }
 
