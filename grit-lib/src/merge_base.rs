@@ -2052,11 +2052,6 @@ impl<'repo> RefContainsBatch<'repo> {
             .copied()
             .collect();
         let min_target_gen = min_ranked_generation(&mut self.graph, &filter_targets);
-        let min_target_time = if min_target_gen.is_none() && self.tips.len() > 64 {
-            min_target_commit_time(&mut self.graph, &filter_targets)
-        } else {
-            None
-        };
 
         let mut reach: OidHashMap<HashSet<usize>> = oid_hash_map();
         let mut stack: Vec<ObjectId> = self.tips.clone();
@@ -2086,12 +2081,7 @@ impl<'repo> RefContainsBatch<'repo> {
             }
 
             for parent in self.graph.parents_of(oid)? {
-                if should_prune_ref_filter_parent(
-                    &mut self.graph,
-                    parent,
-                    min_target_gen,
-                    min_target_time,
-                )? {
+                if should_prune_ref_filter_parent(&mut self.graph, parent, min_target_gen) {
                     continue;
                 }
                 let entry = reach.entry(parent).or_default();
@@ -2130,37 +2120,16 @@ fn min_ranked_generation(graph: &mut CommitGraphCache<'_>, targets: &[ObjectId])
     min_gen
 }
 
-fn min_target_commit_time(graph: &mut CommitGraphCache<'_>, targets: &[ObjectId]) -> Option<i64> {
-    let mut min_time: Option<i64> = None;
-    for &target in targets {
-        let t = graph.commit_time(target).ok()?;
-        if t == 0 {
-            return None;
-        }
-        min_time = Some(min_time.map_or(t, |m| m.min(t)));
-    }
-    min_time
-}
-
 fn should_prune_ref_filter_parent(
     graph: &mut CommitGraphCache<'_>,
     parent: ObjectId,
     min_target_gen: Option<u64>,
-    min_target_time: Option<i64>,
-) -> Result<bool> {
-    if let Some(min_gen) = min_target_gen {
-        let p_gen = commit_rank_for_walk(graph, parent);
-        if p_gen != UNRANKED_COMMIT && p_gen < min_gen {
-            return Ok(true);
-        }
-    }
-    if let Some(min_time) = min_target_time {
-        let p_time = graph.commit_time(parent)?;
-        if p_time != 0 && p_time < min_time {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+) -> bool {
+    let Some(min_gen) = min_target_gen else {
+        return false;
+    };
+    let p_gen = commit_rank_for_walk(graph, parent);
+    p_gen != UNRANKED_COMMIT && p_gen < min_gen
 }
 
 /// Branch tips that are merged into any of `bases` (ancestors of a base commit).

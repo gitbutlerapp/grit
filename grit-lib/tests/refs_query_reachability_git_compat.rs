@@ -282,6 +282,52 @@ fn shared_history_contains_batched_matches_git() {
     let _ = shared;
 }
 
+/// Regression: date-based pruning with >64 unique tips returned 0 grit refs vs 65 from git.
+#[test]
+fn many_unique_tips_skewed_dates_contains_matches_git() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path();
+    let repo = init_repo(worktree, Backend::Files);
+    git_commit_with_date(worktree, "1893456000 +0000", "target");
+    let target = ObjectId::from_hex(git(worktree, &["rev-parse", "HEAD"]).trim()).expect("target");
+    for i in 0..80 {
+        git_commit_with_date(worktree, "946684800 +0000", &format!("old-{i}"));
+    }
+    for i in 0..65 {
+        let spec = format!("HEAD~{i}");
+        git(worktree, &["tag", &format!("batch-{i}"), &spec]);
+    }
+    let query = RefQuery {
+        namespaces: vec![RefNamespace::Tags],
+        contains: vec![target],
+        ..RefQuery::default()
+    };
+    let git_args = ["refs/tags/batch-*", &format!("--contains={target}")];
+    let git_names = git_refnames(worktree, &git_args);
+    let grit_names = grit_refnames(&repo, query.clone());
+    assert_eq!(
+        grit_names.len(),
+        git_names.len(),
+        "ref count: git={} grit={}",
+        git_names.len(),
+        grit_names.len()
+    );
+    assert_eq!(grit_names, git_names);
+    assert!(
+        git_names.len() >= 65,
+        "oracle expects at least 65 matching tags, got {}",
+        git_names.len()
+    );
+
+    maybe_write_graph(worktree, &repo, true);
+    let grit_with_graph = grit_refnames(&repo, query.clone());
+    let git_with_graph = git_refnames(worktree, &git_args);
+    assert_eq!(grit_with_graph, git_with_graph);
+}
+
 #[test]
 fn contains_skewed_committer_dates_matches_git() {
     if !git_interop_available(Backend::Files) {

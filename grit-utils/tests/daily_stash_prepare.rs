@@ -1,5 +1,6 @@
 //! Stash list daily prepare must leave at least one stash entry.
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
