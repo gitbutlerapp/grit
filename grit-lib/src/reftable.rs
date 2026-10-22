@@ -3111,10 +3111,6 @@ pub fn reftable_write_ref_with_write_options(
         None
     };
 
-    // Check config for logAllRefUpdates
-    let write_log = log.is_some() || should_log_ref_updates(&store_git_dir);
-    let log = if write_log { log } else { None };
-
     stack.write_ref(&storage_refname, RefValue::Val1(*oid), log, opts)
 }
 
@@ -3361,67 +3357,15 @@ pub fn reftable_replace_reflog(
         .replace_reflog(refname, entries.to_vec())
 }
 
-/// Effective `core.logAllRefUpdates` mode for a reftable store, reading the
-/// full config chain (system/global/local) via [`ConfigSet`].
-///
-/// `should_autocreate_reflog` in `refs.rs` only consults the repo-local
-/// `config` file, so a `core.logAllRefUpdates=false` set in the *global* config
-/// (as `test_config_global` does) is invisible to it. Reftable stores must see
-/// the merged value, so we resolve it here instead.
-enum LogRefsMode {
-    Always,
-    Normal,
-    None,
-}
-
-fn reftable_log_refs_mode(git_dir: &Path) -> LogRefsMode {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(git_dir),
-        true,
-    )
-    .ok();
-    let value = config
-        .as_ref()
-        .and_then(|cfg| cfg.get("core.logAllRefUpdates"));
-    match value.as_deref().map(str::to_ascii_lowercase).as_deref() {
-        Some("always") => LogRefsMode::Always,
-        Some("true") | Some("yes") | Some("on") | Some("1") => LogRefsMode::Normal,
-        Some("false") | Some("no") | Some("off") | Some("0") | Some("never") => LogRefsMode::None,
-        // Unset: git resolves to NONE for bare repos, NORMAL otherwise.
-        _ => {
-            let bare = config
-                .as_ref()
-                .and_then(|cfg| cfg.get_bool("core.bare"))
-                .and_then(std::result::Result::ok)
-                .unwrap_or(false);
-            if bare {
-                LogRefsMode::None
-            } else {
-                LogRefsMode::Normal
-            }
-        }
-    }
-}
-
 /// Whether a reflog entry should be written for `storage_refname`, mirroring
 /// git's reftable-backend `should_write_log`.
+///
+/// `core.logAllRefUpdates` is resolved against the merged config chain
+/// (system/global/local), so a global `logAllRefUpdates=false` is honoured.
 fn reftable_should_write_log(git_dir: &Path, storage_refname: &str) -> bool {
-    use crate::refs::should_autocreate_reflog_for_mode;
-    match reftable_log_refs_mode(git_dir) {
-        LogRefsMode::Always => true,
-        LogRefsMode::Normal => {
-            if should_autocreate_reflog_for_mode(
-                storage_refname,
-                crate::refs::LogRefsConfig::Normal,
-            ) {
-                true
-            } else {
-                reftable_reflog_exists(git_dir, storage_refname)
-            }
-        }
-        LogRefsMode::None => reftable_reflog_exists(git_dir, storage_refname),
-    }
+    let mode = crate::refs::effective_log_refs_config(git_dir);
+    crate::refs::should_autocreate_reflog_for_mode(storage_refname, mode)
+        || reftable_reflog_exists(git_dir, storage_refname)
 }
 
 /// Append a reflog entry for a reftable repo.
@@ -3546,118 +3490,42 @@ pub fn read_write_options_with_environment(
         ..Default::default()
     };
 
-    if let Ok(config) = ConfigSet::load(env, Some(git_dir), true) {
-        if let Some(value) = config.get("reftable.blockSize") {
-            if let Ok(v) = value.parse::<u32>() {
-                opts.block_size = v;
-            }
-        }
-        if let Some(value) = config.get("reftable.restartInterval") {
-            if let Ok(v) = value.parse::<usize>() {
-                opts.restart_interval = v;
-            }
-        }
-        if let Some(value) = config.get("reftable.indexObjects") {
-            let value = value.to_lowercase();
-            if value == "false" || value == "0" || value == "no" || value == "off" {
-                opts.skip_index_objects = true;
-            }
-        }
-        if let Some(value) = config.get("reftable.geometricFactor") {
-            apply_geometric_factor_from_config(&mut opts, &value);
-        }
-        if let Some(value) = config.get("core.logAllRefUpdates") {
-            let value = value.to_lowercase();
-            if !(value == "true" || value == "always") {
-                opts.write_log = false;
-            }
-        }
-        return opts;
+    let config = ConfigSet::load(env, Some(git_dir), true)
+        .unwrap_or_else(|_| local_config_best_effort(git_dir));
+    if let Some(Ok(v)) = config.get("reftable.blockSize").map(|v| v.parse::<u32>()) {
+        opts.block_size = v;
     }
-
-    let config_path = git_dir.join("config");
-    if let Ok(content) = fs::read_to_string(&config_path) {
-        let mut in_reftable = false;
-        let mut in_core = false;
-        let mut log_all_ref_updates: Option<bool> = None;
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') {
-                let section_lower = trimmed.to_lowercase();
-                in_reftable = section_lower.starts_with("[reftable]");
-                in_core = section_lower.starts_with("[core]");
-                continue;
-            }
-            if in_reftable {
-                if let Some((key, value)) = trimmed.split_once('=') {
-                    let key = key.trim().to_lowercase();
-                    let value = value.trim();
-                    match key.as_str() {
-                        "blocksize" => {
-                            if let Ok(v) = value.parse::<u32>() {
-                                opts.block_size = v;
-                            }
-                        }
-                        "restartinterval" => {
-                            if let Ok(v) = value.parse::<usize>() {
-                                opts.restart_interval = v;
-                            }
-                        }
-                        "indexobjects" => {
-                            let value = value.to_lowercase();
-                            if value == "false" || value == "0" || value == "no" || value == "off" {
-                                opts.skip_index_objects = true;
-                            }
-                        }
-                        "geometricfactor" => {
-                            apply_geometric_factor_from_config(&mut opts, value);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            if in_core {
-                if let Some((key, value)) = trimmed.split_once('=') {
-                    let key = key.trim().to_lowercase();
-                    let value = value.trim().to_lowercase();
-                    if key == "logallrefupdates" {
-                        log_all_ref_updates = Some(value == "true" || value == "always");
-                    }
-                }
-            }
-        }
-
-        if let Some(false) = log_all_ref_updates {
-            opts.write_log = false;
-        }
+    if let Some(Ok(v)) = config
+        .get("reftable.restartInterval")
+        .map(|v| v.parse::<usize>())
+    {
+        opts.restart_interval = v;
     }
-
+    if let Some(Ok(false)) = config.get_bool("reftable.indexObjects") {
+        opts.skip_index_objects = true;
+    }
+    if let Some(value) = config.get("reftable.geometricFactor") {
+        apply_geometric_factor_from_config(&mut opts, &value);
+    }
+    if config.log_refs_config() == crate::refs::LogRefsConfig::None {
+        opts.write_log = false;
+    }
     opts
 }
 
-/// Check if logAllRefUpdates is enabled.
-fn should_log_ref_updates(git_dir: &Path) -> bool {
-    let config_path = git_dir.join("config");
-    if let Ok(content) = fs::read_to_string(&config_path) {
-        let mut in_core = false;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') {
-                in_core = trimmed.to_lowercase().starts_with("[core]");
-                continue;
-            }
-            if in_core {
-                if let Some((key, value)) = trimmed.split_once('=') {
-                    if key.trim().eq_ignore_ascii_case("logallrefupdates") {
-                        let v = value.trim().to_lowercase();
-                        return v == "true" || v == "always";
-                    }
-                }
-            }
-        }
-    }
-    false
+/// The repository-local config entries that parse before the first malformed
+/// line, so write options survive a broken tail in `config`.
+fn local_config_best_effort(git_dir: &Path) -> ConfigSet {
+    let path = git_dir.join("config");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return ConfigSet::new();
+    };
+    let (entries, _) = crate::config::ConfigFile::parse_gitmodules_best_effort(
+        &path,
+        &content,
+        crate::config::ConfigScope::Local,
+    );
+    ConfigSet::from_entries(entries)
 }
 
 // ---------------------------------------------------------------------------
@@ -3987,6 +3855,75 @@ pub(crate) fn parse_identity_string(identity: &str) -> (String, String, u64, i16
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reftable_repo_with_config(extra: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::repo::init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
+        let git_dir = dir.path().join(".git");
+        let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read config");
+        cfg.push_str(extra);
+        fs::write(git_dir.join("config"), cfg).expect("write config");
+        (dir, git_dir)
+    }
+
+    #[test]
+    fn write_options_log_blocks_follow_log_all_ref_updates() {
+        for (value, write_log) in [
+            ("true", true),
+            ("always", true),
+            ("yes", true),
+            ("on", true),
+            ("1", true),
+            ("false", false),
+            ("no", false),
+            ("0", false),
+            ("never", false),
+        ] {
+            let (_dir, git_dir) =
+                reftable_repo_with_config(&format!("[core]\n\tlogAllRefUpdates = {value}\n"));
+            assert_eq!(
+                read_write_options(&git_dir).write_log,
+                write_log,
+                "core.logAllRefUpdates = {value}"
+            );
+        }
+        let (_dir, git_dir) = reftable_repo_with_config("");
+        assert!(read_write_options(&git_dir).write_log);
+    }
+
+    #[test]
+    fn write_options_broken_config_keeps_entries_before_bad_line() {
+        let (_dir, git_dir) = reftable_repo_with_config(
+            "[reftable]\n\tgeometricFactor = 5\n\tindexObjects = off\n[core]\n\tlogAllRefUpdates = no\n[broken\nblockSize = 1\n",
+        );
+        let opts = read_write_options(&git_dir);
+        assert_eq!(opts.auto_compaction_factor, 5);
+        assert!(opts.skip_index_objects);
+        assert!(!opts.write_log);
+        assert_eq!(opts.block_size, WriteOptions::default().block_size);
+    }
+
+    #[test]
+    fn should_write_log_follows_mode_and_existing_reflog() {
+        let (_dir, git_dir) = reftable_repo_with_config("[core]\n\tlogAllRefUpdates = true\n");
+        assert!(reftable_should_write_log(&git_dir, "refs/heads/main"));
+        assert!(!reftable_should_write_log(&git_dir, "refs/tags/v1"));
+
+        let (_dir, git_dir) = reftable_repo_with_config("[core]\n\tlogAllRefUpdates = always\n");
+        assert!(reftable_should_write_log(&git_dir, "refs/tags/v1"));
+
+        let (_dir, git_dir) = reftable_repo_with_config("[core]\n\tlogAllRefUpdates = false\n");
+        assert!(!reftable_should_write_log(&git_dir, "refs/heads/topic"));
+        reftable_create_reflog(&git_dir, "refs/heads/topic").expect("create reflog");
+        assert!(reftable_should_write_log(&git_dir, "refs/heads/topic"));
+    }
 
     #[test]
     fn read_refs_on_empty_reftable_without_tables_list() {

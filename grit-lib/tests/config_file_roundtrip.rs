@@ -107,7 +107,7 @@ fn config_set_pack_and_log_helpers() {
     assert_eq!(set.pack_index_threads(), Some(4));
     assert_eq!(set.loose_objects_zlib_level().expect("zlib"), 3);
     assert_eq!(
-        set.effective_log_refs_config(Path::new(".git")),
+        set.effective_log_refs_config(),
         grit_lib::refs::LogRefsConfig::Always
     );
     assert!(!set.quote_path_fully() || set.get_bool("core.quotepath").is_none());

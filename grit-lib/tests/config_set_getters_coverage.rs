@@ -122,6 +122,9 @@ fn effective_log_refs_config_and_i64_errors() {
     cfg.push_str("[core]\n\tlogAllRefUpdates = always\n[invalid]\n\ti = not-int\n");
     fs::write(git_dir.join("config"), cfg).expect("write");
     let set = ConfigSet::load_repo_local_only(&git_dir).expect("local");
-    let _ = set.effective_log_refs_config(&git_dir);
+    assert_eq!(
+        set.effective_log_refs_config(),
+        grit_lib::refs::LogRefsConfig::Always
+    );
     assert!(set.get_i64("invalid.i").unwrap().is_err());
 }

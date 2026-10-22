@@ -2095,6 +2095,18 @@ pub enum LogRefsConfig {
     Always,
 }
 
+impl LogRefsConfig {
+    /// Parse a `core.logAllRefUpdates` value; `None` when it is not a recognised mode.
+    pub(crate) fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "always" => Some(Self::Always),
+            "1" | "true" | "yes" | "on" => Some(Self::Normal),
+            "0" | "false" | "no" | "off" | "never" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
 /// Read `[core] logAllRefUpdates` from the repository config.
 ///
 /// Returns [`LogRefsConfig::Unset`] when the key is absent.
@@ -2104,31 +2116,20 @@ pub fn read_log_refs_config(git_dir: &Path) -> LogRefsConfig {
         Some(git_dir),
         true,
     )
-    .map(|cfg| log_refs_config_from_set(&cfg))
+    .map(|cfg| cfg.log_refs_config())
     .unwrap_or(LogRefsConfig::Unset)
 }
 
-fn log_refs_config_from_set(cfg: &ConfigSet) -> LogRefsConfig {
-    let Some(v) = cfg.get("core.logAllRefUpdates") else {
-        return LogRefsConfig::Unset;
-    };
-    let lower = v.trim().to_ascii_lowercase();
-    match lower.as_str() {
-        "always" => LogRefsConfig::Always,
-        "1" | "true" | "yes" | "on" => LogRefsConfig::Normal,
-        "0" | "false" | "no" | "off" | "never" => LogRefsConfig::None,
-        _ => LogRefsConfig::Unset,
-    }
-}
-
 /// Effective `logAllRefUpdates` after applying Git's `LOG_REFS_UNSET` rule.
+///
+/// Falls back to [`LogRefsConfig::Normal`] when the config cannot be loaded.
 pub fn effective_log_refs_config(git_dir: &Path) -> LogRefsConfig {
     ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
-    .map(|cfg| cfg.effective_log_refs_config(git_dir))
+    .map(|cfg| cfg.effective_log_refs_config())
     .unwrap_or(LogRefsConfig::Normal)
 }
 
@@ -2151,23 +2152,17 @@ pub fn should_autocreate_reflog_for_mode(refname: &str, mode: LogRefsConfig) -> 
 /// Whether a new reflog file may be auto-created for `refname` (Git `should_autocreate_reflog`).
 #[must_use]
 pub fn should_autocreate_reflog(git_dir: &Path, refname: &str) -> bool {
-    let cfg = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(git_dir),
-        true,
-    )
-    .unwrap_or_default();
-    should_autocreate_reflog_with_config(&cfg, git_dir, refname)
+    should_autocreate_reflog_for_mode(refname, effective_log_refs_config(git_dir))
 }
 
 /// Like [`should_autocreate_reflog`], using an already-loaded repository config snapshot.
 #[must_use]
 pub fn should_autocreate_reflog_with_config(
     config: &ConfigSet,
-    git_dir: &Path,
+    _git_dir: &Path,
     refname: &str,
 ) -> bool {
-    should_autocreate_reflog_for_mode(refname, config.effective_log_refs_config(git_dir))
+    should_autocreate_reflog_for_mode(refname, config.effective_log_refs_config())
 }
 
 /// Write a reflog entry.
@@ -4229,6 +4224,77 @@ mod ref_storage_traversal_guard_tests {
         write_ref(&git_dir, "refs/heads/HEAD", &sample_oid())
             .expect("refs/heads/HEAD is valid ref syntax");
         assert!(git_dir.join("refs/heads/HEAD").is_file());
+    }
+}
+
+#[cfg(test)]
+mod log_refs_config_tests {
+    use super::*;
+    use crate::config::{ConfigFile, ConfigScope};
+
+    fn set(text: &str) -> ConfigSet {
+        let file = ConfigFile::parse(Path::new("config"), text, ConfigScope::Local).unwrap();
+        let mut set = ConfigSet::new();
+        set.merge(&file);
+        set
+    }
+
+    #[test]
+    fn parse_accepts_modes_and_bool_spellings() {
+        for (raw, mode) in [
+            ("always", LogRefsConfig::Always),
+            (" ALWAYS ", LogRefsConfig::Always),
+            ("true", LogRefsConfig::Normal),
+            ("Yes", LogRefsConfig::Normal),
+            ("on", LogRefsConfig::Normal),
+            ("1", LogRefsConfig::Normal),
+            ("false", LogRefsConfig::None),
+            ("no", LogRefsConfig::None),
+            ("OFF", LogRefsConfig::None),
+            ("0", LogRefsConfig::None),
+            ("never", LogRefsConfig::None),
+        ] {
+            assert_eq!(LogRefsConfig::parse(raw), Some(mode), "{raw}");
+        }
+        assert_eq!(LogRefsConfig::parse("sometimes"), None);
+    }
+
+    #[test]
+    fn effective_mode_applies_bare_default_only_when_unset() {
+        assert_eq!(set("").log_refs_config(), LogRefsConfig::Unset);
+        assert_eq!(set("").effective_log_refs_config(), LogRefsConfig::Normal);
+        let bare = set("[core]\n\tbare = true\n");
+        assert_eq!(bare.effective_log_refs_config(), LogRefsConfig::None);
+        let bogus = set("[core]\n\tbare = true\n\tlogAllRefUpdates = sometimes\n");
+        assert_eq!(bogus.log_refs_config(), LogRefsConfig::Unset);
+        assert_eq!(bogus.effective_log_refs_config(), LogRefsConfig::None);
+        let bare_logged = set("[core]\n\tbare = true\n\tlogAllRefUpdates\n");
+        assert_eq!(
+            bare_logged.effective_log_refs_config(),
+            LogRefsConfig::Normal
+        );
+        let always = set("[core]\n\tlogAllRefUpdates = always\n");
+        assert_eq!(always.effective_log_refs_config(), LogRefsConfig::Always);
+    }
+
+    #[test]
+    fn autocreate_with_config_matches_mode() {
+        let normal = set("[core]\n\tlogAllRefUpdates = true\n");
+        let git_dir = Path::new(".git");
+        assert!(should_autocreate_reflog_with_config(
+            &normal,
+            git_dir,
+            "refs/heads/main"
+        ));
+        assert!(!should_autocreate_reflog_with_config(
+            &normal,
+            git_dir,
+            "refs/tags/v1"
+        ));
+        let none = set("[core]\n\tlogAllRefUpdates = false\n");
+        assert!(!should_autocreate_reflog_with_config(
+            &none, git_dir, "HEAD"
+        ));
     }
 }
 

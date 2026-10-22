@@ -2160,7 +2160,7 @@ pub struct grit_lib::config::ConfigSet
 impl grit_lib::config::ConfigSet
 pub const grit_lib::config::ConfigSet::LOOSE_OBJECTS_ZLIB_DEFAULT: i32
 pub fn grit_lib::config::ConfigSet::add_command_override(&mut self, &str, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::config::ConfigSet::effective_log_refs_config(&self, &std::path::Path) -> grit_lib::refs::LogRefsConfig
+pub fn grit_lib::config::ConfigSet::effective_log_refs_config(&self) -> grit_lib::refs::LogRefsConfig
 pub fn grit_lib::config::ConfigSet::entries(&self) -> &[grit_lib::config::ConfigEntry]
 pub fn grit_lib::config::ConfigSet::gc_auto_loose_disabled(&self) -> bool
 pub fn grit_lib::config::ConfigSet::gc_auto_loose_limit(&self) -> usize
@@ -12194,7 +12194,7 @@ pub struct grit_lib::prelude::ConfigSet
 impl grit_lib::config::ConfigSet
 pub const grit_lib::config::ConfigSet::LOOSE_OBJECTS_ZLIB_DEFAULT: i32
 pub fn grit_lib::config::ConfigSet::add_command_override(&mut self, &str, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::config::ConfigSet::effective_log_refs_config(&self, &std::path::Path) -> grit_lib::refs::LogRefsConfig
+pub fn grit_lib::config::ConfigSet::effective_log_refs_config(&self) -> grit_lib::refs::LogRefsConfig
 pub fn grit_lib::config::ConfigSet::entries(&self) -> &[grit_lib::config::ConfigEntry]
 pub fn grit_lib::config::ConfigSet::gc_auto_loose_disabled(&self) -> bool
 pub fn grit_lib::config::ConfigSet::gc_auto_loose_limit(&self) -> usize

@@ -2133,31 +2133,40 @@ impl ConfigSet {
             .unwrap_or(true)
     }
 
+    /// `core.logAllRefUpdates` as configured in this set, or [`refs::LogRefsConfig::Unset`] when
+    /// the key is absent or holds an unrecognised value.
+    #[must_use]
+    pub(crate) fn log_refs_config(&self) -> refs::LogRefsConfig {
+        self.get("core.logAllRefUpdates")
+            .and_then(|v| refs::LogRefsConfig::parse(&v))
+            .unwrap_or(refs::LogRefsConfig::Unset)
+    }
+
     /// Resolved `core.logAllRefUpdates` using this merged set (includes `git -c` / env), then Git's
     /// bare-repo default when the key is unset everywhere.
+    ///
+    /// Never returns [`refs::LogRefsConfig::Unset`]: an unset (or unrecognised) value resolves to
+    /// [`refs::LogRefsConfig::None`] in a bare repository and [`refs::LogRefsConfig::Normal`]
+    /// otherwise.
     #[must_use]
-    pub fn effective_log_refs_config(&self, _git_dir: &Path) -> refs::LogRefsConfig {
-        if let Some(v) = self.get("core.logAllRefUpdates") {
-            let lower = v.trim().to_ascii_lowercase();
-            let parsed = match lower.as_str() {
-                "always" => Some(refs::LogRefsConfig::Always),
-                "1" | "true" | "yes" | "on" => Some(refs::LogRefsConfig::Normal),
-                "0" | "false" | "no" | "off" | "never" => Some(refs::LogRefsConfig::None),
-                _ => None,
-            };
-            if let Some(c) = parsed {
-                return c;
+    pub fn effective_log_refs_config(&self) -> refs::LogRefsConfig {
+        match self.log_refs_config() {
+            refs::LogRefsConfig::Unset
+                if self
+                    .get_bool("core.bare")
+                    .and_then(|r| r.ok())
+                    .unwrap_or(false) =>
+            {
+                refs::LogRefsConfig::None
             }
+            refs::LogRefsConfig::Unset => refs::LogRefsConfig::Normal,
+            mode => mode,
         }
-        if self
-            .get_bool("core.bare")
-            .and_then(|r| r.ok())
-            .unwrap_or(false)
-        {
-            refs::LogRefsConfig::None
-        } else {
-            refs::LogRefsConfig::Normal
-        }
+    }
+
+    /// Build a set from already-parsed entries (in load order).
+    pub(crate) fn from_entries(entries: Vec<ConfigEntry>) -> Self {
+        Self { entries }
     }
 
     /// Get an integer value, supporting Git's `k`/`m`/`g` suffixes.
