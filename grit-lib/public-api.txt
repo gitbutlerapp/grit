@@ -11051,6 +11051,7 @@ pub fn grit_lib::porcelain::pull::plan_pull(&grit_lib::repo::Repository) -> core
 pub mod grit_lib::porcelain::quote_path
 pub fn grit_lib::porcelain::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_c_style(&str, bool) -> alloc::string::String
+pub fn grit_lib::porcelain::quote_path::quote_c_style_bytes(&[u8], bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_path_for_display(&str, bool) -> alloc::string::String
 pub mod grit_lib::porcelain::rebase
 pub enum grit_lib::porcelain::rebase::FixupMessageMode
@@ -13083,6 +13084,7 @@ pub fn &mut T::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, gri
 pub mod grit_lib::quote_path
 pub fn grit_lib::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
 pub fn grit_lib::quote_path::quote_c_style(&str, bool) -> alloc::string::String
+pub fn grit_lib::quote_path::quote_c_style_bytes(&[u8], bool) -> alloc::string::String
 pub fn grit_lib::quote_path::quote_path_for_display(&str, bool) -> alloc::string::String
 pub mod grit_lib::refs
 pub mod grit_lib::refs::branch_tracking
