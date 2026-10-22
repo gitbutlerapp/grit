@@ -12100,15 +12100,15 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_seq
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
 pub enum grit_lib::porcelain::replay_sequence::SequenceOutcome
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed
-pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::created: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::created: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
-pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::created_so_far: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::current: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty
-pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::created_so_far: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::current: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequenceOutcome
@@ -12126,6 +12126,25 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequenceOutco
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub struct grit_lib::porcelain::replay_sequence::ReplayCreated
+pub grit_lib::porcelain::replay_sequence::ReplayCreated::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::porcelain::replay_sequence::ReplayCreated::new_oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::ReplayCreated::source: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayCreated
+pub fn grit_lib::porcelain::replay_sequence::ReplayCreated::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::ReplayCreated
+pub fn grit_lib::porcelain::replay_sequence::ReplayCreated::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayCreated
+pub fn grit_lib::porcelain::replay_sequence::ReplayCreated::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayCreated
 pub struct grit_lib::porcelain::replay_sequence::ReplayOptions
 pub grit_lib::porcelain::replay_sequence::ReplayOptions::conflict_style: grit_lib::diff::merge_file::ConflictStyle
 pub grit_lib::porcelain::replay_sequence::ReplayOptions::empty: grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy

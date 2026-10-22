@@ -11,7 +11,7 @@ use std::fs;
 use std::num::NonZeroU32;
 use std::path::Path;
 
-use crate::change_id::ChangeIdPolicy;
+use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::commit_trailers::finalize_cherry_pick_message;
 use crate::error::{Error, Result};
 use crate::merge_file::{ConflictStyle, MergeFavor};
@@ -95,13 +95,24 @@ pub struct ReplaySequenceRequest {
     pub options: ReplayOptions,
 }
 
+/// One commit produced by a replay step (pick or revert).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayCreated {
+    /// Commit that was replayed.
+    pub source: ObjectId,
+    /// New commit written onto the current branch.
+    pub new_oid: ObjectId,
+    /// Stored `change-id` on `new_oid` when present.
+    pub change_id: Option<ChangeId>,
+}
+
 /// Result of starting or advancing a replay sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SequenceOutcome {
     /// Every requested step finished (commits may have been dropped per `empty`).
     Completed {
-        /// New commit oids created during this call (not prior `created_so_far`).
-        created: Vec<ObjectId>,
+        /// New commits created during this call (not prior `created_so_far`).
+        created: Vec<ReplayCreated>,
         /// Source commits skipped as empty/redundant.
         dropped: Vec<ObjectId>,
     },
@@ -112,7 +123,7 @@ pub enum SequenceOutcome {
         /// Conflicted paths and kinds.
         conflicts: Vec<Conflict>,
         /// Commits created before this stop in the sequence.
-        created_so_far: Vec<ObjectId>,
+        created_so_far: Vec<ReplayCreated>,
         /// Remaining todo oids (including `current`).
         remaining: Vec<ObjectId>,
     },
@@ -121,7 +132,7 @@ pub enum SequenceOutcome {
         /// Source commit that would be empty.
         current: ObjectId,
         /// Commits created before this stop.
-        created_so_far: Vec<ObjectId>,
+        created_so_far: Vec<ReplayCreated>,
         /// Remaining todo oids (including `current`).
         remaining: Vec<ObjectId>,
     },
@@ -219,12 +230,14 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
     write_sequencer_todo(repo.git_dir(), &todo)?;
     if todo.is_empty() {
         clear_replay_state(repo.git_dir())?;
+        let created = replay_created_record(repo, source, new_oid)?;
         return Ok(SequenceOutcome::Completed {
-            created: vec![new_oid],
+            created: vec![created],
             dropped: Vec::new(),
         });
     }
     let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
+    let continued = replay_created_record(repo, source, new_oid)?;
     run_sequence(
         repo,
         &refname,
@@ -235,7 +248,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         identity,
         &active.opts,
         &mut todo,
-        vec![new_oid],
+        vec![continued],
         Vec::new(),
     )
 }
@@ -396,7 +409,7 @@ fn run_sequence(
     committer: &str,
     opts: &ReplayOptions,
     todo: &mut Vec<TodoEntry>,
-    mut created_so_far: Vec<ObjectId>,
+    mut created_so_far: Vec<ReplayCreated>,
     mut dropped: Vec<ObjectId>,
 ) -> Result<SequenceOutcome> {
     let mut head = head_oid;
@@ -415,8 +428,9 @@ fn run_sequence(
         )? {
             StepResult::Committed { oid } => {
                 todo.remove(0);
-                created_so_far.push(oid);
-                created_this_call.push(oid);
+                let record = replay_created_record(repo, entry.oid, oid)?;
+                created_so_far.push(record.clone());
+                created_this_call.push(record);
                 write_sequencer_todo(repo.git_dir(), todo)?;
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
@@ -445,7 +459,15 @@ fn run_sequence(
             }
             StepResult::Conflicts { conflicts } => {
                 let remaining: Vec<ObjectId> = todo.iter().map(|t| t.oid).collect();
-                write_sequencer_state(repo, sequence_start, head, todo, opts, direction, committer)?;
+                write_sequencer_state(
+                    repo,
+                    sequence_start,
+                    head,
+                    todo,
+                    opts,
+                    direction,
+                    committer,
+                )?;
                 record_replay_stop(
                     repo,
                     direction,
@@ -464,7 +486,15 @@ fn run_sequence(
             }
             StepResult::EmptyStop => {
                 let remaining: Vec<ObjectId> = todo.iter().map(|t| t.oid).collect();
-                write_sequencer_state(repo, sequence_start, head, todo, opts, direction, committer)?;
+                write_sequencer_state(
+                    repo,
+                    sequence_start,
+                    head,
+                    todo,
+                    opts,
+                    direction,
+                    committer,
+                )?;
                 record_replay_stop(
                     repo,
                     direction,
@@ -720,6 +750,20 @@ fn replay_message(
             Ok(format!("{title}\n{body}"))
         }
     }
+}
+
+fn replay_created_record(
+    repo: &Repository,
+    source: ObjectId,
+    new_oid: ObjectId,
+) -> Result<ReplayCreated> {
+    let obj = repo.odb().read(&new_oid)?;
+    let commit = parse_commit(&obj.data)?;
+    Ok(ReplayCreated {
+        source,
+        new_oid,
+        change_id: change_id(&commit),
+    })
 }
 
 fn identity_name_email(ident: &str) -> (&str, &str) {
@@ -1156,12 +1200,7 @@ fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Resu
 
 fn index_stage0_tree(repo: &Repository) -> Result<ObjectId> {
     let mut index = repo.load_index()?;
-    write_tree_update_index(
-        repo.odb(),
-        &mut index,
-        "",
-        WriteTreeFlags::silent(),
-    )
+    write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
 }
 
 fn apply_git_sequencer_opts(git_dir: &Path, opts: &mut ReplayOptions) {
