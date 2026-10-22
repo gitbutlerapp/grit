@@ -1918,41 +1918,6 @@ impl<'r> CommitGraphCache<'r> {
         Ok(false)
     }
 
-    /// Exact ancestor test for ref `--contains` / `--no-contains` (no commit-date slop).
-    fn is_ancestor_for_ref_filter(
-        &mut self,
-        ancestor: ObjectId,
-        descendant: ObjectId,
-    ) -> Result<bool> {
-        let ancestor = peel_to_commit_for_merge_base(self.repo, ancestor).unwrap_or(ancestor);
-        let descendant = peel_to_commit_for_merge_base(self.repo, descendant).unwrap_or(descendant);
-        if ancestor == descendant {
-            return Ok(true);
-        }
-
-        let anc_gen = commit_rank_for_walk(self, ancestor);
-        let mut seen = oid_hash_set();
-        let mut stack = vec![descendant];
-        while let Some(oid) = stack.pop() {
-            if !seen.insert(oid) {
-                continue;
-            }
-            if oid == ancestor {
-                return Ok(true);
-            }
-            if anc_gen != UNRANKED_COMMIT {
-                let gen = commit_rank_for_walk(self, oid);
-                if gen != UNRANKED_COMMIT && gen < anc_gen {
-                    continue;
-                }
-            }
-            for parent in self.parents_of(oid)? {
-                stack.push(parent);
-            }
-        }
-        Ok(false)
-    }
-
     /// Mark branch tips that are ancestors of (merged into) any commit in `bases`.
     ///
     /// Uses commit-graph generations to stop the walk below the minimum generation among
@@ -2015,89 +1980,183 @@ impl<'r> CommitGraphCache<'r> {
     }
 }
 
-/// Memoized `(tip, target)` reachability for ref `--contains` / `--no-contains` probes.
-#[derive(Debug, Default)]
-pub(crate) struct RefContainsCache {
-    probe: std::collections::HashMap<(ObjectId, ObjectId), bool>,
+/// Per-tip results from one shared backward walk for `--contains` / `--no-contains`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RefContainsTipState {
+    /// Any `--contains` target appears in this tip's history (OR semantics).
+    pub contains_match: bool,
+    /// Any `--no-contains` target appears in this tip's history.
+    pub no_contains_match: bool,
 }
 
-/// Shared commit walk state for one ref-listing reachability pass.
-pub(crate) struct RefContainsProbe<'repo> {
+/// One memoized shared-history walk over all candidate ref tips.
+pub(crate) struct RefContainsBatch<'repo> {
     graph: CommitGraphCache<'repo>,
-    cache: RefContainsCache,
+    tips: Vec<ObjectId>,
+    tip_state: Vec<RefContainsTipState>,
+    tip_index: OidHashMap<usize>,
 }
 
-impl<'repo> RefContainsProbe<'repo> {
-    /// Start a new probe session on `repo`.
+impl<'repo> RefContainsBatch<'repo> {
+    /// Start a batch session on `repo`.
     pub(crate) fn new(repo: &'repo Repository) -> Self {
         Self {
             graph: CommitGraphCache::new(repo),
-            cache: RefContainsCache::default(),
+            tips: Vec::new(),
+            tip_state: Vec::new(),
+            tip_index: oid_hash_map(),
         }
     }
 
-    /// Whether `target` is reachable from `tip` (see [`tip_reaches_target`]).
-    pub(crate) fn tip_reaches_target(
-        &mut self,
-        repo: &'repo Repository,
-        tip: ObjectId,
-        target: ObjectId,
-    ) -> Result<bool> {
-        tip_reaches_target(repo, &mut self.graph, tip, target, &mut self.cache)
+    /// Register a peeled commit tip; returns its index (deduplicated by commit oid).
+    pub(crate) fn register_tip(&mut self, repo: &'repo Repository, tip: ObjectId) -> usize {
+        let peeled = peel_to_commit_for_merge_base(repo, tip).unwrap_or(tip);
+        if let Some(&idx) = self.tip_index.get(&peeled) {
+            return idx;
+        }
+        let idx = self.tips.len();
+        self.tips.push(peeled);
+        self.tip_state.push(RefContainsTipState {
+            contains_match: false,
+            no_contains_match: false,
+        });
+        self.tip_index.insert(peeled, idx);
+        idx
     }
 
-    /// Whether `tip` contains any of `targets` (OR semantics).
-    pub(crate) fn tip_contains_any(
+    /// Walk shared history from all registered tips and fill [`Self::tip_state`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates object read failures during parent walks.
+    pub(crate) fn run(
         &mut self,
-        repo: &'repo Repository,
-        tip: ObjectId,
-        targets: &[ObjectId],
-    ) -> Result<bool> {
-        tip_contains_any(repo, &mut self.graph, tip, targets, &mut self.cache)
+        contains_targets: &[ObjectId],
+        no_contains_targets: &[ObjectId],
+    ) -> Result<()> {
+        if self.tips.is_empty() || (contains_targets.is_empty() && no_contains_targets.is_empty()) {
+            return Ok(());
+        }
+
+        for state in &mut self.tip_state {
+            state.contains_match = contains_targets.is_empty();
+            state.no_contains_match = false;
+        }
+
+        let contains_set: OidHashSet = contains_targets.iter().copied().collect();
+        let no_contains_set: OidHashSet = no_contains_targets.iter().copied().collect();
+
+        let filter_targets: Vec<ObjectId> = contains_targets
+            .iter()
+            .chain(no_contains_targets.iter())
+            .copied()
+            .collect();
+        let min_target_gen = min_ranked_generation(&mut self.graph, &filter_targets);
+        let min_target_time = if min_target_gen.is_none() && self.tips.len() > 64 {
+            min_target_commit_time(&mut self.graph, &filter_targets)
+        } else {
+            None
+        };
+
+        let mut reach: OidHashMap<HashSet<usize>> = oid_hash_map();
+        let mut stack: Vec<ObjectId> = self.tips.clone();
+
+        for (i, &tip) in self.tips.iter().enumerate() {
+            reach.entry(tip).or_default().insert(i);
+        }
+
+        while let Some(oid) = stack.pop() {
+            let indices: Vec<usize> = reach
+                .get(&oid)
+                .map(|set| set.iter().copied().collect())
+                .unwrap_or_default();
+            if indices.is_empty() {
+                continue;
+            }
+
+            if contains_set.contains(&oid) {
+                for i in &indices {
+                    self.tip_state[*i].contains_match = true;
+                }
+            }
+            if no_contains_set.contains(&oid) {
+                for i in &indices {
+                    self.tip_state[*i].no_contains_match = true;
+                }
+            }
+
+            for parent in self.graph.parents_of(oid)? {
+                if should_prune_ref_filter_parent(
+                    &mut self.graph,
+                    parent,
+                    min_target_gen,
+                    min_target_time,
+                )? {
+                    continue;
+                }
+                let entry = reach.entry(parent).or_default();
+                let before = entry.len();
+                entry.extend(indices.iter().copied());
+                if entry.len() > before {
+                    stack.push(parent);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// State for a tip index from [`Self::register_tip`].
+    #[must_use]
+    pub(crate) fn tip_state(&self, index: usize) -> &RefContainsTipState {
+        &self.tip_state[index]
+    }
+
+    /// Peeled commit oid for a tip index from [`Self::register_tip`].
+    #[must_use]
+    pub(crate) fn tip_commit(&self, index: usize) -> ObjectId {
+        self.tips[index]
     }
 }
 
-/// Whether `target` is an ancestor of (or equal to) `tip`, with per-pair memoization.
-///
-/// Uses an exact ancestry walk (no commit-date slop). When both commits are ranked in the
-/// commit-graph, parent expansion stops below the target's generation.
-///
-/// # Errors
-///
-/// Propagates object read failures during parent walks.
-fn tip_reaches_target(
-    repo: &Repository,
-    graph: &mut CommitGraphCache<'_>,
-    tip: ObjectId,
-    target: ObjectId,
-    cache: &mut RefContainsCache,
-) -> Result<bool> {
-    let tip = peel_to_commit_for_merge_base(repo, tip).unwrap_or(tip);
-    let target = peel_to_commit_for_merge_base(repo, target).unwrap_or(target);
-    if tip == target {
-        return Ok(true);
-    }
-    if let Some(&hit) = cache.probe.get(&(tip, target)) {
-        return Ok(hit);
-    }
-    let hit = graph.is_ancestor_for_ref_filter(target, tip)?;
-    cache.probe.insert((tip, target), hit);
-    Ok(hit)
-}
-
-/// Whether `tip` contains any commit in `targets` (Git OR semantics for repeated `--contains`).
-fn tip_contains_any(
-    repo: &Repository,
-    graph: &mut CommitGraphCache<'_>,
-    tip: ObjectId,
-    targets: &[ObjectId],
-    cache: &mut RefContainsCache,
-) -> Result<bool> {
-    if targets.is_empty() {
-        return Ok(true);
-    }
+fn min_ranked_generation(graph: &mut CommitGraphCache<'_>, targets: &[ObjectId]) -> Option<u64> {
+    let mut min_gen: Option<u64> = None;
     for &target in targets {
-        if tip_reaches_target(repo, graph, tip, target, cache)? {
+        let gen = commit_rank_for_walk(graph, target);
+        if gen == UNRANKED_COMMIT {
+            return None;
+        }
+        min_gen = Some(min_gen.map_or(gen, |m| m.min(gen)));
+    }
+    min_gen
+}
+
+fn min_target_commit_time(graph: &mut CommitGraphCache<'_>, targets: &[ObjectId]) -> Option<i64> {
+    let mut min_time: Option<i64> = None;
+    for &target in targets {
+        let t = graph.commit_time(target).ok()?;
+        if t == 0 {
+            return None;
+        }
+        min_time = Some(min_time.map_or(t, |m| m.min(t)));
+    }
+    min_time
+}
+
+fn should_prune_ref_filter_parent(
+    graph: &mut CommitGraphCache<'_>,
+    parent: ObjectId,
+    min_target_gen: Option<u64>,
+    min_target_time: Option<i64>,
+) -> Result<bool> {
+    if let Some(min_gen) = min_target_gen {
+        let p_gen = commit_rank_for_walk(graph, parent);
+        if p_gen != UNRANKED_COMMIT && p_gen < min_gen {
+            return Ok(true);
+        }
+    }
+    if let Some(min_time) = min_target_time {
+        let p_time = graph.commit_time(parent)?;
+        if p_time != 0 && p_time < min_time {
             return Ok(true);
         }
     }

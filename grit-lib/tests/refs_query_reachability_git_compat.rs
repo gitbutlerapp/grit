@@ -254,6 +254,35 @@ fn git_commit_with_date(worktree: &std::path::Path, date: &str, msg: &str) {
 }
 
 #[test]
+fn shared_history_contains_batched_matches_git() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path();
+    let repo = init_repo(worktree, Backend::Files);
+    git(worktree, &["commit", "--allow-empty", "-q", "-m", "root"]);
+    let target = ObjectId::from_hex(git(worktree, &["rev-parse", "HEAD"]).trim()).expect("target");
+    git(worktree, &["commit", "--allow-empty", "-q", "-m", "shared"]);
+    let shared = git(worktree, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(worktree, &["branch", "tip-a", "HEAD"]);
+    git(worktree, &["branch", "tip-b", "HEAD"]);
+    git(worktree, &["tag", "t-a", "tip-a"]);
+    git(worktree, &["tag", "t-b", "tip-b"]);
+    let query = RefQuery {
+        namespaces: vec![RefNamespace::Tags],
+        contains: vec![target],
+        ..RefQuery::default()
+    };
+    let git_args = ["refs/tags/", &format!("--contains={target}")];
+    assert_same(worktree, &repo, &git_args, query.clone());
+
+    maybe_write_graph(worktree, &repo, true);
+    assert_same(worktree, &repo, &git_args, query);
+    let _ = shared;
+}
+
+#[test]
 fn contains_skewed_committer_dates_matches_git() {
     if !git_interop_available(Backend::Files) {
         return;

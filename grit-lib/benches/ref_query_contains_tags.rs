@@ -57,7 +57,8 @@ fn bench_contains_tags(c: &mut Criterion) {
         eprintln!("SKIP ref_query_contains_tags: history too shallow");
         return;
     };
-    let repo = Repository::discover(&worktree, &RepositoryOptions::empty()).expect("open git-git");
+    let repo =
+        Repository::discover(Some(&worktree), &RepositoryOptions::empty()).expect("open git-git");
     let contains_hex = contains.to_string();
 
     let mut group = c.benchmark_group("ref_query_contains_tags");

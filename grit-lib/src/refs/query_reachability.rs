@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use crate::error::Error;
-use crate::merge_base::{branch_tips_merged_into, RefContainsProbe};
-use crate::objects::{oid_hash_set, OidHashSet};
+use crate::merge_base::{branch_tips_merged_into, RefContainsBatch};
+use crate::objects::{oid_hash_map, oid_hash_set, OidHashMap, OidHashSet};
 use crate::objects::{parse_tag, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -129,7 +129,8 @@ fn row_passes_reachability<'repo>(
     odb: &Odb,
     row: &(String, ObjectId, Option<ObjectId>),
     ctx: &ReachabilityFilterCtx<'_>,
-    probe: &mut RefContainsProbe<'repo>,
+    tip_idx: Option<usize>,
+    batch: Option<&RefContainsBatch<'repo>>,
 ) -> std::result::Result<bool, RefQueryError> {
     let (_, ref_oid, peeled) = row;
     let needs_commit = !ctx.contains.is_empty()
@@ -141,16 +142,33 @@ fn row_passes_reachability<'repo>(
         return ref_points_at_any(odb, *ref_oid, &query.points_at).map_err(RefQueryError::Store);
     }
 
-    let tip = match peel_ref_tip_commit(repo, *ref_oid, *peeled)? {
-        Some(t) => t,
-        None => return Ok(false),
+    let tip = match (tip_idx, batch) {
+        (Some(idx), Some(batch)) => batch.tip_commit(idx),
+        _ => match peel_ref_tip_commit(repo, *ref_oid, *peeled)? {
+            Some(t) => t,
+            None => return Ok(false),
+        },
     };
 
-    if !ctx.contains.is_empty() && !probe.tip_contains_any(repo, tip, ctx.contains)? {
-        return Ok(false);
+    if !ctx.contains.is_empty() {
+        let Some(idx) = tip_idx else {
+            return Ok(false);
+        };
+        let Some(batch) = batch else {
+            return Ok(false);
+        };
+        if !batch.tip_state(idx).contains_match {
+            return Ok(false);
+        }
     }
-    for &target in ctx.no_contains {
-        if probe.tip_reaches_target(repo, tip, target)? {
+    if !ctx.no_contains.is_empty() {
+        let Some(idx) = tip_idx else {
+            return Ok(false);
+        };
+        let Some(batch) = batch else {
+            return Ok(false);
+        };
+        if batch.tip_state(idx).no_contains_match {
             return Ok(false);
         }
     }
@@ -191,14 +209,30 @@ pub(super) fn filter_listings_by_reachability(
     let no_merged = resolve_targets(repo, &query.no_merged)?;
     let odb = repo.odb();
 
-    let mut tips_for_merged: Vec<ObjectId> = Vec::new();
+    let mut peel_cache: OidHashMap<ObjectId> = oid_hash_map();
+    for (_, oid, peeled) in rows.iter_mut() {
+        if peeled.is_some() {
+            continue;
+        }
+        if let Some(&commit) = peel_cache.get(oid) {
+            *peeled = Some(commit);
+            continue;
+        }
+        if let Ok(Some(commit)) = peel_ref_tip_commit(repo, *oid, None) {
+            peel_cache.insert(*oid, commit);
+            *peeled = Some(commit);
+        }
+    }
+
+    let mut tips_for_merged_set = oid_hash_set();
     if !merged.is_empty() || !no_merged.is_empty() {
         for (_, oid, peeled) in rows.iter() {
             if let Some(t) = peel_ref_tip_commit(repo, *oid, *peeled)? {
-                tips_for_merged.push(t);
+                tips_for_merged_set.insert(t);
             }
         }
     }
+    let tips_for_merged: Vec<ObjectId> = tips_for_merged_set.into_iter().collect();
     let empty_merged = oid_hash_set();
     let merged_owned = if merged.is_empty() {
         None
@@ -227,10 +261,24 @@ pub(super) fn filter_listings_by_reachability(
         no_merged_tips,
     };
 
-    let mut probe = RefContainsProbe::new(repo);
+    let needs_contains = !contains.is_empty() || !no_contains.is_empty();
+    let mut batch = RefContainsBatch::new(repo);
+    let mut row_tip_idx: Vec<Option<usize>> = Vec::with_capacity(rows.len());
+    if needs_contains {
+        for (_, oid, peeled) in rows.iter() {
+            row_tip_idx.push(
+                peel_ref_tip_commit(repo, *oid, *peeled)?.map(|t| batch.register_tip(repo, t)),
+            );
+        }
+        batch.run(&contains, &no_contains)?;
+    } else {
+        row_tip_idx = vec![None; rows.len()];
+    }
+    let batch_ref = needs_contains.then_some(&batch);
+
     let mut kept = Vec::with_capacity(rows.len());
-    for row in rows.drain(..) {
-        if row_passes_reachability(repo, query, odb, &row, &ctx, &mut probe)? {
+    for (row, tip_idx) in rows.drain(..).zip(row_tip_idx.drain(..)) {
+        if row_passes_reachability(repo, query, odb, &row, &ctx, tip_idx, batch_ref)? {
             kept.push(row);
         }
     }

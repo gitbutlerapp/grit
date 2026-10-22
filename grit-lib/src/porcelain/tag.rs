@@ -21,7 +21,7 @@
 use crate::check_ref_format::validate_tag_short_name;
 use crate::error::{Error, Result};
 use crate::hash::hash_object;
-use crate::objects::{parse_commit, parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
+use crate::objects::{parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
 use crate::refs;
 use crate::refs::listing::{
     compare_version_names, creator_date as listing_creator_date, epoch_from_identity,
