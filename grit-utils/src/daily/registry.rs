@@ -155,6 +155,20 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 18] = [
         description: "List branches vs git branch",
     },
     ScenarioSpec {
+        id: "branch/list-json@many-refs",
+        area: Area::Branching,
+        headline: true,
+        name: Some("branch"),
+        description: "List branches with JSON vs git branch -vv",
+    },
+    ScenarioSpec {
+        id: "branch/merged@many-refs",
+        area: Area::Branching,
+        headline: true,
+        name: Some("branch"),
+        description: "Branch --merged vs git branch --merged",
+    },
+    ScenarioSpec {
         id: "merge/clean@synth-10k",
         area: Area::Branching,
         headline: true,

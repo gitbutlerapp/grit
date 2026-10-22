@@ -5,6 +5,7 @@
 //! doubles as the home base: running `grit` with no arguments shows you where you
 //! are, what's changed, and what to do next.
 
+mod branch_list_args;
 mod cli_messages;
 mod commands;
 mod commits_json;
@@ -744,6 +745,8 @@ enum Command {
         /// Delete even when the branch is not fully merged into the current branch.
         #[arg(short = 'D', long = "force")]
         force_delete: bool,
+        #[command(flatten)]
+        list: crate::branch_list_args::BranchListArgs,
     },
     /// Switch to another branch, remote branch, or detached commit.
     #[command(alias = "checkout", alias = "co")]
@@ -1439,11 +1442,16 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             name,
             delete,
             force_delete,
-        } => emit(
-            &commands::branch::run(name, delete, force_delete)?,
-            opts,
-            ctx,
-        ),
+            list,
+        } => {
+            let include_commit_details =
+                matches!(opts.mode, OutputMode::Json | OutputMode::Markdown);
+            emit(
+                &commands::branch::run(name, delete, force_delete, list, include_commit_details)?,
+                opts,
+                ctx,
+            )
+        }
         Command::Bundle { action } => match action {
             BundleAction::Create { file, revs } => {
                 emit(&commands::bundle::run_create(file.into(), revs)?, opts, ctx)

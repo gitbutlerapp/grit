@@ -266,7 +266,7 @@ fn segments_text(segments: &[Segment]) -> String {
     segments.iter().map(|s| s.text.as_str()).collect()
 }
 
-/// Branch list: current branch marked, others plain.
+/// Branch list as a table with upstream and worktree columns when present.
 pub fn print_branch_list(
     w: &mut dyn Write,
     branches: &[crate::commands::branch::BranchEntry],
@@ -276,12 +276,40 @@ pub fn print_branch_list(
         return Ok(());
     }
     outln!(w, "## Branches");
+    outln!(
+        w,
+        "| Branch | Current | OID | Subject | Upstream | Worktree |"
+    );
+    outln!(w, "| --- | --- | --- | --- | --- | --- |");
     for branch in branches {
-        if branch.current {
-            outln!(w, "- **`{}`** (current)", branch.name);
-        } else {
-            outln!(w, "- `{}`", branch.name);
-        }
+        let short_oid = branch.oid.get(..7).unwrap_or(&branch.oid);
+        let current = if branch.current { "yes" } else { "" };
+        let subject = branch.subject.as_deref().unwrap_or("");
+        let upstream = branch
+            .upstream
+            .as_ref()
+            .map(|up| {
+                if up.gone {
+                    format!("{} [gone]", up.ref_name)
+                } else {
+                    match (up.ahead, up.behind) {
+                        (Some(a), Some(b)) => format!("{} (+{a}/-{b})", up.ref_name),
+                        _ => up.ref_name.clone(),
+                    }
+                }
+            })
+            .unwrap_or_default();
+        let worktree = branch.worktree.as_deref().unwrap_or("");
+        outln!(
+            w,
+            "| `{}` | {} | `{}` | {} | {} | {} |",
+            branch.name,
+            current,
+            short_oid,
+            subject,
+            upstream,
+            worktree
+        );
     }
     Ok(())
 }

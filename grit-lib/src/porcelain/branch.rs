@@ -91,24 +91,28 @@ pub struct BranchList {
 ///
 /// Returns an error when `HEAD` or the ref store cannot be read.
 pub fn list_branches(repo: &Repository) -> Result<BranchList> {
-    let current = match resolve_head_for_repository(repo)? {
-        HeadState::Branch { short_name, .. } => Some(short_name),
-        HeadState::Detached { .. } | HeadState::Invalid => None,
+    use super::branch_list::{query_branches, BranchQuery};
+    use crate::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
+    let query = BranchQuery {
+        ref_query: RefQuery {
+            namespaces: vec![RefNamespace::Heads],
+            ..RefQuery::default()
+        },
+        ..BranchQuery::default()
     };
-    let branches = repo
-        .references()
-        .list(HEADS_PREFIX)?
-        .into_iter()
-        .map(|(refname, oid)| {
-            let name = refname
-                .strip_prefix(HEADS_PREFIX)
-                .unwrap_or(&refname)
-                .to_owned();
-            let current = current.as_deref() == Some(name.as_str());
-            LocalBranch { name, oid, current }
-        })
-        .collect();
-    Ok(BranchList { current, branches })
+    let listing = query_branches(repo, &query, &RefQueryOptions::default())?;
+    Ok(BranchList {
+        current: listing.current,
+        branches: listing
+            .branches
+            .into_iter()
+            .map(|branch| LocalBranch {
+                name: branch.name,
+                oid: branch.oid,
+                current: branch.current,
+            })
+            .collect(),
+    })
 }
 
 /// Result of [`delete_branch`].

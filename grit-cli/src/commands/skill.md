@@ -78,11 +78,15 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Task | Command |
 | --- | --- |
 | List branches | `grit branch` |
+| List with filters / JSON detail | `grit branch --list 'feat*' -a --merged main --sort date -n 20 --json` |
+| Current branch name only | `grit branch --show-current` |
 | Create a branch at the current commit (no switch) | `grit branch <name>` |
 | Create and switch | `grit switch -c <name>` |
 | Switch | `grit switch <name>` (also `grit checkout`, `grit co`) |
 | Delete a merged branch | `grit branch -d <name>` |
 | Delete regardless | `grit branch -D <name>` |
+
+`grit branch --json` returns `branches[]` with `full_ref`, `oid`, `subject`, `date`, optional `upstream` (`ref`, `remote`, `gone`, `ahead`, `behind`), and `worktree` when checked out elsewhere. Human output stays names plus an upstream marker when configured.
 
 `grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run with uncommitted changes. Commit first. They also refuse rather than overwrite an untracked file.
 

@@ -8,13 +8,93 @@
         "current": {
           "type": "boolean"
         },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "full_ref": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "remote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upstream": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BranchUpstreamEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "worktree": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "current",
-        "name"
+        "full_ref",
+        "name",
+        "oid"
+      ],
+      "type": "object"
+    },
+    "BranchUpstreamEntry": {
+      "description": "Upstream tracking row in JSON.",
+      "properties": {
+        "ahead": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "behind": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gone": {
+          "type": "boolean"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "remote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "gone",
+        "ref"
       ],
       "type": "object"
     }

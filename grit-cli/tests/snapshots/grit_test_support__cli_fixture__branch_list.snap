@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"list\",\"current\":\"main\",\"branches\":[{\"name\":\"feature\",\"current\":false},{\"name\":\"main\",\"current\":true}]}\n",
+    "stdout": "{\"action\":\"list\",\"current\":\"main\",\"branches\":[{\"name\":\"feature\",\"current\":false,\"full_ref\":\"refs/heads/feature\",\"oid\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"subject\":\"first\",\"date\":\"2023-11-14T22:13:20Z\"},{\"name\":\"main\",\"current\":true,\"full_ref\":\"refs/heads/main\",\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"subject\":\"second\",\"date\":\"2023-11-14T22:13:20Z\",\"worktree\":\"[REPO]\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Branches\n- `feature`\n- **`main`** (current)\n",
+    "stdout": "## Branches\n| Branch | Current | OID | Subject | Upstream | Worktree |\n| --- | --- | --- | --- | --- | --- |\n| `feature` |  | `062ca6e` | first |  |  |\n| `main` | yes | `83352a6` | second |  | [REPO] |\n",
     "stderr": ""
   }
 }

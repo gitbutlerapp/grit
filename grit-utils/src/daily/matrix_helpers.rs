@@ -391,6 +391,20 @@ pub fn branch_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+pub fn branch_list_json_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["branch", "--json"]),
+        sh_devnull(&ctx.git, &["branch", "-vv"]),
+    )
+}
+
+pub fn branch_merged_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["branch", "--merged", "main"]),
+        sh_devnull(&ctx.git, &["branch", "--merged", "main"]),
+    )
+}
+
 pub fn branch_create_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let name = ctx
         .branch_bench_name

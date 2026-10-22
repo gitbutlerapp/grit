@@ -825,8 +825,18 @@ fn branch_json_list_create_delete() -> TestResult {
         .map(|b| b["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["main", "topic"]);
-    let main = &listed["branches"][0];
+    let main = listed["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "main")
+        .expect("main");
     assert_eq!(main["current"], Value::Bool(true));
+    assert!(main["full_ref"]
+        .as_str()
+        .unwrap()
+        .starts_with("refs/heads/"));
+    assert!(main["oid"].as_str().unwrap().len() >= 40);
 
     let deleted = gs_json(&repo, &["branch", "-d", "topic"]);
     assert_eq!(deleted["action"], "delete");

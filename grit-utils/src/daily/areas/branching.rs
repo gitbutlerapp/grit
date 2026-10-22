@@ -6,12 +6,13 @@ use super::super::helpers::{
     setup_hot_path_pick_merge,
 };
 use super::super::matrix_helpers::{
-    branch_create_bench, branch_delete_bench, history_reword_bench, merge_100k_bench,
-    pick_100k_bench, prepare_branch_create, prepare_branch_delete, prepare_stash_list,
-    prepare_tag_create, revert_bench, setup_branch_create, setup_branch_delete,
-    setup_history_reword, setup_hot_path_pick_merge_100k, setup_hot_path_revert,
-    setup_hot_path_switch_100k, setup_many_refs, setup_many_refs_loose, setup_stash_with_entry,
-    setup_tag_create, stash_list_bench, switch_100k_bench, tag_create_bench, tag_list_bench,
+    branch_create_bench, branch_delete_bench, branch_list_json_bench, branch_merged_bench,
+    history_reword_bench, merge_100k_bench, pick_100k_bench, prepare_branch_create,
+    prepare_branch_delete, prepare_stash_list, prepare_tag_create, revert_bench,
+    setup_branch_create, setup_branch_delete, setup_history_reword, setup_hot_path_pick_merge_100k,
+    setup_hot_path_revert, setup_hot_path_switch_100k, setup_many_refs, setup_many_refs_loose,
+    setup_stash_with_entry, setup_tag_create, stash_list_bench, switch_100k_bench,
+    tag_create_bench, tag_list_bench,
 };
 use super::super::plan::DailyHeadlinePlan;
 
@@ -24,6 +25,24 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: super::super::helpers::prepare_none,
             build_git: |c| branch_list_bench(c).1,
             build_grit: |c| branch_list_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("branch/list-json@many-refs"),
+            pending: false,
+            setup: setup_many_refs,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| branch_list_json_bench(c).1,
+            build_grit: |c| branch_list_json_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: headline_spec("branch/merged@many-refs"),
+            pending: false,
+            setup: setup_many_refs,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| branch_merged_bench(c).1,
+            build_grit: |c| branch_merged_bench(c).0,
             correctness: None,
         },
         DailyHeadlinePlan {
