@@ -402,6 +402,37 @@ fn history_reword_json_head_null_when_head_unchanged() -> TestResult {
 }
 
 #[test]
+fn history_reword_author_json() -> TestResult {
+    let scratch = Scratch::new("author-json")?;
+    let dir = scratch.path();
+    let (_a, b, _c) = init_linear_repo(dir)?;
+    let out = gs(
+        dir,
+        [
+            "history",
+            "reword",
+            &b,
+            "--author",
+            "Json Author <json@example.com>",
+            "--json",
+        ],
+    )?;
+    assert!(out.success(), "{}", out.stderr);
+    let json = parse_json(&out.stdout)?;
+    assert_eq!(json["operation"], "reword");
+    let rows = json["rewritten"].as_array().ok_or("rewritten array")?;
+    let row = rows
+        .iter()
+        .find(|r| r["old"].as_str() == Some(b.as_str()))
+        .ok_or("row for b")?;
+    let new_b = row["new"].as_str().ok_or("new oid")?;
+    let idents = git(dir, &["log", "-1", new_b, "--format=%an|%ae"])?;
+    assert_eq!(idents.trim(), "Json Author|json@example.com");
+    git_fsck_strict(dir)?;
+    Ok(())
+}
+
+#[test]
 fn history_reword_json_schema() -> TestResult {
     let scratch = Scratch::new("schema")?;
     let dir = scratch.path();

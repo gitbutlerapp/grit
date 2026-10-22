@@ -7,12 +7,14 @@ mod support;
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, normalize_rewrite_message, reword, ApplyOptions, EmptyPolicy, HistoryError,
-    RefScope, RewriteOptions,
+    apply_rewrite, normalize_rewrite_message, reword, reword_with, ApplyOptions, EmptyPolicy,
+    HistoryError, RefScope, RewordOptions, RewriteOptions,
 };
 use grit_lib::state::resolve_head;
 
-use support::{build_commit_dag, git, git_fsck_strict, git_rev_parse, HistoryRepo};
+use support::{
+    build_commit_dag, commit_labeled_with_dates, git, git_fsck_strict, git_rev_parse, HistoryRepo,
+};
 
 fn tree_contains_path(repo: &Repository, tree: ObjectId, path: &str) -> bool {
     let raw = repo.odb().read(&tree).expect("read tree");
@@ -76,6 +78,149 @@ fn reword_changes_only_message_and_replays_descendants() {
     assert!(c_row.new.is_some());
     assert_ne!(c_row.new, Some(oids["c"]));
     git_fsck_strict(wt);
+}
+
+fn rewrite_opts(seq: i64) -> RewriteOptions {
+    RewriteOptions {
+        scope: RefScope::Branches,
+        empty: EmptyPolicy::Drop,
+        committer: committer(seq),
+        preserve_committer: false,
+        sign: true,
+    }
+}
+
+fn git_log_author_fields(wt: &std::path::Path, rev: &str) -> String {
+    git(wt, &["log", "-1", rev, "--format=%an|%ae|%ad"])
+        .trim()
+        .to_owned()
+}
+
+#[test]
+fn reword_author_only_keeps_message_and_date() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let a = commit_labeled_with_dates(wt, "a", &[], "1000 +0000", "1001 +0000");
+    let b = commit_labeled_with_dates(wt, "b", &[a], "5000 +0000", "5001 +0000");
+    git(wt, &["update-ref", "refs/heads/main", &b.to_hex()]);
+    let before = git_log_author_fields(wt, &b.to_hex());
+    let old_msg = parse_commit(&open_grit(wt).odb().read(&b).expect("read b").data)
+        .expect("parse b")
+        .message;
+
+    let grit = open_grit(wt);
+    let plan = reword_with(
+        &grit,
+        b,
+        &RewordOptions {
+            message: None,
+            author: Some("New Author <new@example.com>".into()),
+        },
+        &rewrite_opts(2),
+    )
+    .expect("reword author");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &ApplyOptions {
+            identity: "Rewriter <r@grit.test>".into(),
+            reflog_message: "history reword".into(),
+        },
+    )
+    .expect("apply");
+    let new_b = plan
+        .commits
+        .iter()
+        .find(|r| r.old == b)
+        .and_then(|r| r.new)
+        .expect("new b");
+    let new_parsed =
+        parse_commit(&grit.odb().read(&new_b).expect("read new").data).expect("parse new");
+    assert_eq!(new_parsed.message, old_msg);
+    let after = git_log_author_fields(wt, &new_b.to_hex());
+    let after_parts: Vec<_> = after.split('|').collect();
+    assert_eq!(after_parts[0], "New Author");
+    assert_eq!(after_parts[1], "new@example.com");
+    assert_eq!(
+        after_parts[2],
+        before.split('|').nth(2).expect("author date")
+    );
+    git_fsck_strict(wt);
+}
+
+#[test]
+fn reword_author_and_message() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let plan = reword_with(
+        &grit,
+        oids["b"],
+        &RewordOptions {
+            message: Some("both changed\n".into()),
+            author: Some("Both Author <both@example.com>".into()),
+        },
+        &rewrite_opts(3),
+    )
+    .expect("reword");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &ApplyOptions {
+            identity: "Rewriter <r@grit.test>".into(),
+            reflog_message: "history reword".into(),
+        },
+    )
+    .expect("apply");
+    let new_b = plan.replacement(oids["b"]).expect("mapped");
+    let fields: Vec<_> = git_log_author_fields(wt, &new_b.to_hex())
+        .split('|')
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(fields[0], "Both Author");
+    assert_eq!(fields[1], "both@example.com");
+    let parsed = parse_commit(&grit.odb().read(&new_b).expect("read").data).expect("parse");
+    assert_eq!(parsed.message, "both changed\n");
+    git_fsck_strict(wt);
+}
+
+#[test]
+fn reword_requires_message_or_author() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let err = reword_with(
+        &grit,
+        oids["b"],
+        &RewordOptions {
+            message: None,
+            author: None,
+        },
+        &rewrite_opts(4),
+    )
+    .unwrap_err();
+    assert!(matches!(err, HistoryError::NothingToReword));
+}
+
+#[test]
+fn reword_author_rejects_newline() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let err = reword_with(
+        &grit,
+        oids["b"],
+        &RewordOptions {
+            message: None,
+            author: Some("Bad\nInjected <x@y.example>".into()),
+        },
+        &rewrite_opts(5),
+    )
+    .unwrap_err();
+    assert!(matches!(err, HistoryError::InvalidAuthor(_)));
 }
 
 #[test]

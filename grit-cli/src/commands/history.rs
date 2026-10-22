@@ -10,9 +10,10 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
+    move_commit, reword_with, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
     ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
-    RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
+    RefScope, RewordOptions, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
+    UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -310,21 +311,30 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
     Ok(HistoryRewriteOutcome::new("drop", &plan, shared.dry_run))
 }
 
-/// Rewrite `commit`'s message to `message` and replay descendants.
+/// Rewrite `commit`'s message and/or author and replay descendants.
 pub fn run_reword(
     commit: &str,
     message: Option<String>,
     message_file: Option<String>,
+    author: Option<String>,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
-    let Some(message) = read_message(message, message_file)? else {
-        bail!("a new message is required (-m/--message or --message-file)");
-    };
+    let message = read_message(message, message_file)?;
+    let has_author = author.as_ref().is_some_and(|a| !a.trim().is_empty());
+    if message.is_none() && !has_author {
+        bail!("reword requires a new message (-m/--message or --message-file) or --author");
+    }
     let on_err = history_error("history reword");
     let repo = context::discover()?;
     let commit_oid = resolve_commit(&repo, commit, "commit")?;
     let rewrite = Rewrite::new(repo, shared)?;
-    let plan = reword(&rewrite.repo, commit_oid, message, &rewrite.options).map_err(on_err)?;
+    let plan = reword_with(
+        &rewrite.repo,
+        commit_oid,
+        &RewordOptions { message, author },
+        &rewrite.options,
+    )
+    .map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     let new_oid = plan
         .replacement(commit_oid)
@@ -595,6 +605,10 @@ fn history_error(operation: &'static str) -> impl Fn(HistoryError) -> anyhow::Er
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
         HistoryError::EmptyMessage => anyhow::anyhow!("commit message cannot be empty"),
+        HistoryError::NothingToReword => {
+            anyhow::anyhow!("reword requires a new message or author")
+        }
+        HistoryError::InvalidAuthor(err) => anyhow::anyhow!("{err}"),
         HistoryError::BareRepository => {
             anyhow::anyhow!("cannot run {operation} in a bare repository")
         }

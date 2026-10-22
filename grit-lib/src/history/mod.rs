@@ -70,7 +70,7 @@ pub use plan::plan_rewrite;
 pub use plan::{test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use r#move::{move_commit, Placement};
 pub use rebase::{rebase_onto, RebaseOntoOptions};
-pub use reword::{normalize_rewrite_message, reword};
+pub use reword::{normalize_rewrite_message, reword, reword_with, RewordOptions};
 pub use split::split;
 pub use squash::{squash, SquashMessage, SquashOptions};
 pub use types::{

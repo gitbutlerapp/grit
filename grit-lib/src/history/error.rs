@@ -16,6 +16,14 @@ pub enum HistoryError {
     #[error("commit message cannot be empty")]
     EmptyMessage,
 
+    /// [`super::reword::reword_with`](crate::history::reword::reword_with) needs a message and/or author change.
+    #[error("reword requires a new message or author")]
+    NothingToReword,
+
+    /// Author argument could not be parsed (`Name <email>` or bare email).
+    #[error("{0}")]
+    InvalidAuthor(#[from] crate::ident::AuthorArgError),
+
     /// [`super::fixup`](crate::history::fixup) requires a working tree and index.
     #[error("history fixup cannot run in a bare repository")]
     BareRepository,

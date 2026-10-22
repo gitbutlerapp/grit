@@ -255,6 +255,9 @@ enum HistoryAction {
             conflicts_with = "message"
         )]
         message_file: Option<String>,
+        /// Replacement author ident (`Name <email>` or bare email).
+        #[arg(long = "author")]
+        author: Option<String>,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -2053,9 +2056,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 commit,
                 message,
                 message_file,
+                author,
                 shared,
             } => emit(
-                &commands::history::run_reword(&commit, message, message_file, &shared)?,
+                &commands::history::run_reword(&commit, message, message_file, author, &shared)?,
                 opts,
                 ctx,
             ),
