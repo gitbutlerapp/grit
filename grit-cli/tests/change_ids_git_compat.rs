@@ -169,7 +169,7 @@ fn change_ids_end_to_end_with_system_git() {
     assert!(grit(&dir, &["switch", "main"]).ok());
     commit_file(&dir, "main.txt", "main\n", "main diverge");
     let pick = grit_json(&dir, &["pick", &side_oid, "--json"]);
-    let pick_id = pick["change_id"].as_str().expect("pick id");
+    let pick_id = pick["commits"][0]["change_id"].as_str().expect("pick id");
     assert_ne!(pick_id, side_id.as_str());
     assert_eq!(change_id_of_commit(&dir, "HEAD"), pick_id);
 

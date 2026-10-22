@@ -1586,6 +1586,36 @@ pub fn run_hot_path_suite(
             },
             &repo_series,
         )?);
+
+        if Some(size) == sizes.first().copied() {
+            scenarios.push(run_scenario(
+                hyperfine,
+                git,
+                grit,
+                cfg,
+                &Scenario {
+                    id: "pick-range-20".into(),
+                    group: "pick".into(),
+                    fixture: fixture.clone(),
+                    description:
+                        "grit pick base..topic vs git cherry-pick on 20-commit topic branch".into(),
+                    grit_argv: vec![
+                        "pick".into(),
+                        format!("{}..{}", meta_series.base_commit, meta_series.pick_commit),
+                    ],
+                    git_argv: vec![
+                        "cherry-pick".into(),
+                        "--no-edit".into(),
+                        format!("{}..{}", meta_series.base_commit, meta_series.pick_commit),
+                    ],
+                    driver: Driver::Cli,
+                    prepare_kind: Some(PrepareKind::PickSeriesReset),
+                    grit_via_shell: false,
+                    git_via_shell: false,
+                },
+                &repo_series,
+            )?);
+        }
     }
     Ok(build_report(git, grit, timestamp, scenarios))
 }

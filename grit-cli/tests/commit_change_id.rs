@@ -140,8 +140,10 @@ fn pick_json_reports_new_change_id() {
     fs::write(dir.join("main.txt"), b"main-only\n").unwrap();
     json_stdout(&["commit", "-m", "main diverge", "--json"], &dir);
     let json = json_stdout(&["pick", &source, "--json"], &dir);
-    assert_ne!(json["oid"].as_str(), Some(source.as_str()));
-    let pick_id = json["change_id"].as_str().expect("pick change_id");
+    assert_eq!(json["result"], "picked");
+    let row = &json["commits"][0];
+    assert_ne!(row["oid"].as_str(), Some(source.as_str()));
+    let pick_id = row["change_id"].as_str().expect("pick change_id");
     let head_id =
         change_id_from_cat(&git(&dir, &["cat-file", "-p", "HEAD"])).expect("head change-id");
     assert_eq!(pick_id, head_id.as_str());
