@@ -604,7 +604,7 @@ pub enum TreeSha256ClaimError {
 impl TreeSha256Claim {
     /// Read a claim from post-`tagger` extra headers on `tag`.
     ///
-    /// Returns [`Ok(None)`] when no `tree-sha256` header is present. Commit objects are not
+    /// Returns `Ok(None)` when no `tree-sha256` header is present. Commit objects are not
     /// supported.
     ///
     /// # Errors

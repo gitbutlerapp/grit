@@ -1,6 +1,6 @@
 //! Fetch from a remote and integrate the configured upstream into the current branch.
 //!
-//! [`pull`] runs fetch, resolves the branch upstream via [`upstream_branch`], then
+//! [`pull`] runs fetch, resolves the branch upstream via [`pull_upstream_branch`], then
 //! fast-forwards, merges, or refuses when `--ff-only` / `pull.ff=only` forbids a
 //! merge commit. Rebase pulls return [`PullError::RebaseUnsupported`] until the
 //! history engine wires `pull.rebase`.

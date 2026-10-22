@@ -23,7 +23,12 @@ The fetch step uses the same terminal progress as [`grit fetch`](../fetch/) and 
 
 ## Options
 
-`grit pull` takes no options beyond the [global ones](../global-options/).
+| Flag | Description |
+| ---- | ----------- |
+| `--ff-only` | Refuse when a merge commit would be required (exit 1 when diverged). |
+| `--no-rebase` | Merge instead of rebasing, overriding `pull.rebase`. |
+
+Plus the [global options](../global-options/).
 
 ## Examples
 
@@ -47,16 +52,15 @@ The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stabl
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `merged`, or `set_upstream`. |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, `refused_not_ff`, `conflicts`, or `set_upstream`. |
 | `branch` | string | Remote branch that was integrated. |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit, fast-forward tip, or adopted upstream). |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
 | `ahead` | integer or null | Local-only commits when `result` is `refused_not_ff`. |
 | `behind` | integer or null | Upstream-only commits when `result` is `refused_not_ff`. |
-| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text (same shape as [`grit merge`](../merge/#json-output)). |
-| `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts`. |
-| `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort`. |
+| `conflicts` | array or null | When `result` is `conflicts`, conflicted paths (strings). |
+| `conflict_details` | array or null | Structured conflicts with `path`, `kind`, and optional `summary` (same items as [`grit merge`](../merge/#json-output)). |
 
 Example:
 
