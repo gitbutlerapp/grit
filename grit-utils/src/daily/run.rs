@@ -219,6 +219,7 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
     let setup = DailySetup {
         git: &opts.git,
         grit: &opts.grit,
+        bench: &opts.measure_helper,
         smoke: opts.smoke,
         offline: opts.offline,
     };

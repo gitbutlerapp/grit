@@ -28,7 +28,7 @@ fn ctx_with_remote(
     setup: &DailySetup<'_>,
     remote: DailyRemoteState,
 ) -> DailyHeadlineContext {
-    let mut ctx = DailyHeadlineContext::new(repo, setup.git, setup.grit, setup.smoke);
+    let mut ctx = DailyHeadlineContext::new(repo, setup.git, setup.grit, setup.bench, setup.smoke);
     ctx.remote = Some(remote);
     ctx
 }

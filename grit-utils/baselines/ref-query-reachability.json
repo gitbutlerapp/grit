@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-22T08:30:00.000000000Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780713984,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.16",
+    "grit_commit": "pending"
+  },
+  "scenarios": [
+    {
+      "id": "ref-query-contains-tags@git-git-no-graph",
+      "group": "ref-query",
+      "fixture": "git-git",
+      "description": "Tag --contains ref query vs git for-each-ref (no commit-graph)",
+      "driver": "lib",
+      "git": { "median_ms": 7113.0 },
+      "grit": { "median_ms": 3030.0 },
+      "ratio": 0.426
+    },
+    {
+      "id": "ref-query-contains-tags@git-git-with-graph",
+      "group": "ref-query",
+      "fixture": "git-git",
+      "description": "Tag --contains ref query vs git for-each-ref (commit-graph)",
+      "driver": "lib",
+      "git": { "median_ms": 7113.0 },
+      "grit": { "median_ms": 3410.0 },
+      "ratio": 0.479
+    },
+    {
+      "id": "ref-query-merged-branches@refs-100k-packed",
+      "group": "ref-query",
+      "fixture": "refs-100k-packed",
+      "description": "Branch --merged ref query vs git for-each-ref on 100k packed refs",
+      "driver": "lib",
+      "git": { "median_ms": 48.1 },
+      "grit": { "median_ms": 689.3 },
+      "ratio": 14.33,
+      "grit_failure": "Does not meet 1.5x target; dominated by listing 100k packed heads in grit-lib before merge filter (git integrates filter in for-each-ref). Peel memoization and unique-tip merge walk applied."
+    }
+  ]
+}

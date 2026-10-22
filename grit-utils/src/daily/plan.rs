@@ -34,6 +34,8 @@ pub struct DailyHeadlinePlan {
 pub struct DailySetup<'a> {
     pub git: &'a Path,
     pub grit: &'a Path,
+    /// `grit-bench` executable (library/ref workloads such as `refs-driver`).
+    pub bench: &'a Path,
     pub smoke: bool,
     pub offline: bool,
 }
@@ -43,6 +45,7 @@ pub struct DailyHeadlineContext {
     pub repo: PathBuf,
     pub git: PathBuf,
     pub grit: PathBuf,
+    pub bench: PathBuf,
     /// Optional blame target for `blame/file@git-git`.
     pub blame_path: Option<String>,
     /// Hot-path fixture metadata for switch / pick / merge headlines.
@@ -68,16 +71,21 @@ pub struct DailyHeadlineContext {
     pub branch_bench_name: Option<String>,
     /// Tag name targeted by create benchmarks on many-refs fixtures.
     pub tag_bench_name: Option<String>,
+    /// Commit oid for `tag/contains@git-git` (`--contains` target).
+    pub ref_query_contains: Option<String>,
+    /// Commit oid for `branch/merged@many-refs` (`--merged` target).
+    pub ref_query_merged: Option<String>,
     /// Network transport state (bare remote, URL, HTTP servers).
     pub remote: Option<DailyRemoteState>,
 }
 
 impl DailyHeadlineContext {
-    pub fn new(repo: PathBuf, git: &Path, grit: &Path, smoke: bool) -> Self {
+    pub fn new(repo: PathBuf, git: &Path, grit: &Path, bench: &Path, smoke: bool) -> Self {
         Self {
             repo,
             git: git.to_path_buf(),
             grit: grit.to_path_buf(),
+            bench: bench.to_path_buf(),
             blame_path: None,
             hot_path_meta: None,
             smoke,
@@ -92,6 +100,8 @@ impl DailyHeadlineContext {
             linked_worktree: None,
             branch_bench_name: None,
             tag_bench_name: None,
+            ref_query_contains: None,
+            ref_query_merged: None,
             remote: None,
         }
     }

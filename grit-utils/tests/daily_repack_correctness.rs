@@ -1,6 +1,6 @@
 //! Regression tests for daily maintenance preflight (grit output + system git fsck).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
@@ -25,6 +25,10 @@ fn resolve_git() -> std::path::PathBuf {
     grit_utils::binary::resolve_binary("git", None).expect("git")
 }
 
+fn bench_exe() -> std::path::PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_grit-bench"))
+}
+
 fn build_grit() -> std::path::PathBuf {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let status = Command::new(env!("CARGO"))
@@ -41,6 +45,7 @@ fn preflight_grit_repack_reduces_loose_objects_and_fscks() {
     let _guard = lock_fixtures();
     let git = resolve_git();
     let grit = build_grit();
+    let bench = bench_exe();
     let cache = TempDir::new().expect("cache");
     std::env::set_var("GRIT_BENCH_CACHE", cache.path());
     grit_utils::fixture_registry::ensure_cached(&git, FixtureKind::Synth10kSmoke, true)
@@ -49,6 +54,7 @@ fn preflight_grit_repack_reduces_loose_objects_and_fscks() {
     let setup = DailySetup {
         git: &git,
         grit: &grit,
+        bench: &bench,
         smoke: true,
         offline: true,
     };
@@ -76,6 +82,7 @@ fn preflight_fsck_only_does_not_pack_loose_objects() {
     let _guard = lock_fixtures();
     let git = resolve_git();
     let grit = build_grit();
+    let bench = bench_exe();
     let cache = TempDir::new().expect("cache");
     std::env::set_var("GRIT_BENCH_CACHE", cache.path());
     grit_utils::fixture_registry::ensure_cached(&git, FixtureKind::Synth10kSmoke, true)
@@ -84,6 +91,7 @@ fn preflight_fsck_only_does_not_pack_loose_objects() {
     let setup = DailySetup {
         git: &git,
         grit: &grit,
+        bench: &bench,
         smoke: true,
         offline: true,
     };
@@ -109,6 +117,7 @@ fn preflight_grit_commit_graph_writes_file_and_verifies() {
     let _guard = lock_fixtures();
     let git = resolve_git();
     let grit = build_grit();
+    let bench = bench_exe();
     let cache = TempDir::new().expect("cache");
     std::env::set_var("GRIT_BENCH_CACHE", cache.path());
     grit_utils::fixture_registry::ensure_cached(&git, FixtureKind::Synth10kSmoke, true)
@@ -117,6 +126,7 @@ fn preflight_grit_commit_graph_writes_file_and_verifies() {
     let setup = DailySetup {
         git: &git,
         grit: &grit,
+        bench: &bench,
         smoke: true,
         offline: true,
     };
@@ -142,6 +152,7 @@ fn preflight_fsck_only_does_not_create_commit_graph() {
     let _guard = lock_fixtures();
     let git = resolve_git();
     let grit = build_grit();
+    let bench = bench_exe();
     let cache = TempDir::new().expect("cache");
     std::env::set_var("GRIT_BENCH_CACHE", cache.path());
     grit_utils::fixture_registry::ensure_cached(&git, FixtureKind::Synth10kSmoke, true)
@@ -150,6 +161,7 @@ fn preflight_fsck_only_does_not_create_commit_graph() {
     let setup = DailySetup {
         git: &git,
         grit: &grit,
+        bench: &bench,
         smoke: true,
         offline: true,
     };

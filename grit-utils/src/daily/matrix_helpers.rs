@@ -973,3 +973,91 @@ pub fn setup_remote_list(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext>
     )?;
     Ok(ctx)
 }
+
+fn git_rev_parse(git: &Path, repo: &Path, spec: &str) -> Result<String> {
+    let mut cmd = Command::new(git);
+    cmd.args(["rev-parse", spec]).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("git rev-parse {spec}"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git rev-parse {spec} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Git-git worktree with a deep-history `--contains` target for tag ref queries.
+pub fn setup_git_git_ref_contains(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let mut ctx = super::helpers::setup_git_git_history(setup)?;
+    ctx.ref_query_contains = Some(git_rev_parse(setup.git, &ctx.repo, "HEAD~5000")?);
+    Ok(ctx)
+}
+
+/// Many-refs worktree with HEAD as `--merged` target for branch ref queries.
+pub fn setup_many_refs_merged(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let mut ctx = setup_many_refs(setup)?;
+    ctx.ref_query_merged = Some(git_rev_parse(setup.git, &ctx.repo, "HEAD")?);
+    Ok(ctx)
+}
+
+/// Tag `--contains` ref query via `refs-driver` vs `git for-each-ref`.
+pub fn ref_query_contains_tags_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let Some(contains) = ctx.ref_query_contains.as_deref() else {
+        return noop_bench();
+    };
+    let grit = BenchArgv::new(
+        &ctx.bench,
+        vec![
+            "refs-driver".to_string(),
+            "ref-query".to_string(),
+            ctx.repo.display().to_string(),
+            "--namespace".to_string(),
+            "tags".to_string(),
+            "--contains".to_string(),
+            contains.to_string(),
+        ],
+    );
+    let git = BenchArgv::new(
+        &ctx.git,
+        vec![
+            "for-each-ref".to_string(),
+            "refs/tags/".to_string(),
+            format!("--contains={contains}"),
+            "--format=%(refname)".to_string(),
+        ],
+    );
+    (grit, git)
+}
+
+/// Branch `--merged` ref query via `refs-driver` vs `git for-each-ref`.
+pub fn ref_query_merged_branches_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let Some(merged) = ctx.ref_query_merged.as_deref() else {
+        return noop_bench();
+    };
+    let grit = BenchArgv::new(
+        &ctx.bench,
+        vec![
+            "refs-driver".to_string(),
+            "ref-query".to_string(),
+            ctx.repo.display().to_string(),
+            "--namespace".to_string(),
+            "heads".to_string(),
+            "--merged".to_string(),
+            merged.to_string(),
+        ],
+    );
+    let git = BenchArgv::new(
+        &ctx.git,
+        vec![
+            "for-each-ref".to_string(),
+            "refs/heads/".to_string(),
+            format!("--merged={merged}"),
+            "--format=%(refname)".to_string(),
+        ],
+    );
+    (grit, git)
+}

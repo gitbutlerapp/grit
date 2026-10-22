@@ -213,7 +213,7 @@ pub fn sh_script(script: String) -> BenchArgv {
 }
 
 pub fn ctx(repo: PathBuf, setup: &DailySetup<'_>) -> DailyHeadlineContext {
-    DailyHeadlineContext::new(repo, setup.git, setup.grit, setup.smoke)
+    DailyHeadlineContext::new(repo, setup.git, setup.grit, setup.bench, setup.smoke)
 }
 
 pub fn fixture_kind(shape: RepoShape, smoke: bool) -> FixtureKind {
@@ -796,6 +796,7 @@ mod tests {
             PathBuf::from("/tmp/sample-repo"),
             Path::new("/usr/bin/git"),
             Path::new("/usr/bin/grit"),
+            Path::new("/usr/bin/grit-bench"),
             false,
         );
         ctx.cat_blob = Some("deadbeef".into());
