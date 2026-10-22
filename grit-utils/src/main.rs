@@ -810,6 +810,15 @@ enum RefsDriveCmd {
     UpdateRefStdin {
         repo: PathBuf,
     },
+    RefQuery {
+        repo: PathBuf,
+        #[arg(long, default_value = "tags")]
+        namespace: String,
+        #[arg(long)]
+        contains: Option<String>,
+        #[arg(long)]
+        merged: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -970,6 +979,27 @@ fn run_refs_drive(workload: &RefsDriveCmd) -> Result<()> {
         }
         RefsDriveCmd::UpdateRefStdin { repo } => {
             refs_driver::update_ref_stdin_at(repo)?;
+        }
+        RefsDriveCmd::RefQuery {
+            repo,
+            namespace,
+            contains,
+            merged,
+        } => {
+            use grit_lib::objects::ObjectId;
+            let repo = refs_driver::open_repo_for_refs(repo)?;
+            let contains = contains
+                .as_deref()
+                .map(ObjectId::from_hex)
+                .transpose()
+                .context("parse --contains")?;
+            let merged = merged
+                .as_deref()
+                .map(ObjectId::from_hex)
+                .transpose()
+                .context("parse --merged")?;
+            let query = refs_driver::ref_query_for_driver(namespace, contains, merged);
+            refs_driver::ref_query(&repo, &query)?;
         }
     }
     Ok(())

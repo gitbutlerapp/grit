@@ -1917,6 +1917,124 @@ impl<'r> CommitGraphCache<'r> {
         }
         Ok(false)
     }
+
+    /// Mark branch tips that are ancestors of (merged into) any commit in `bases`.
+    ///
+    /// Uses commit-graph generations to stop the walk below the minimum generation among
+    /// `tips`, matching Git's `tips_reachable_from_bases` / `--merged` batch filter.
+    fn tips_merged_from_bases(
+        &mut self,
+        bases: &[ObjectId],
+        tips: &[ObjectId],
+    ) -> Result<OidHashSet> {
+        let mut merged = oid_hash_set();
+        if bases.is_empty() || tips.is_empty() {
+            return Ok(merged);
+        }
+
+        let mut tip_gens: Vec<(ObjectId, u64)> = Vec::with_capacity(tips.len());
+        for &tip in tips {
+            let peeled = peel_to_commit_for_merge_base(self.repo, tip).unwrap_or(tip);
+            tip_gens.push((peeled, commit_rank_for_walk(self, peeled)));
+        }
+        tip_gens.sort_by_key(|(_, gen)| *gen);
+        let mut min_gen_index = 0usize;
+        let mut min_generation = tip_gens[0].1;
+
+        let tip_set: OidHashSet = tip_gens.iter().map(|(tip, _)| *tip).collect();
+
+        let mut stack: Vec<ObjectId> = Vec::new();
+        for &base in bases {
+            let peeled = peel_to_commit_for_merge_base(self.repo, base).unwrap_or(base);
+            stack.push(peeled);
+        }
+
+        let mut seen: OidHashSet = oid_hash_set();
+        while let Some(oid) = stack.pop() {
+            if !seen.insert(oid) {
+                continue;
+            }
+            if tip_set.contains(&oid) {
+                merged.insert(oid);
+                while min_gen_index < tip_gens.len() && merged.contains(&tip_gens[min_gen_index].0)
+                {
+                    min_gen_index += 1;
+                }
+                if min_gen_index >= tip_gens.len() {
+                    break;
+                }
+                min_generation = tip_gens[min_gen_index].1;
+            }
+            for parent in self.parents_of(oid)? {
+                if seen.contains(&parent) {
+                    continue;
+                }
+                let p_gen = commit_rank_for_walk(self, parent);
+                if p_gen != UNRANKED_COMMIT && p_gen < min_generation {
+                    continue;
+                }
+                stack.push(parent);
+            }
+        }
+        Ok(merged)
+    }
+}
+
+/// Memoized `--contains` / `--no-contains` probes for ref listing.
+#[derive(Debug, Default)]
+pub(crate) struct RefContainsCache {
+    states: OidHashMap<u8>,
+}
+
+const CONTAINS_YES: u8 = 1;
+const CONTAINS_NO: u8 = 2;
+
+/// Whether every commit in `targets` is an ancestor of (or equal to) `tip`.
+///
+/// Memoizes the result per `tip` in `cache` so listing many refs reuses work when tips
+/// repeat. Uses [`CommitGraphCache::is_ancestor`] (generation-bounded when a commit-graph
+/// is present).
+///
+/// # Errors
+///
+/// Propagates object read failures during parent walks.
+pub(crate) fn commit_tip_contains_all(
+    repo: &Repository,
+    tip: ObjectId,
+    targets: &[ObjectId],
+    cache: &mut RefContainsCache,
+) -> Result<bool> {
+    if targets.is_empty() {
+        return Ok(true);
+    }
+    let tip = peel_to_commit_for_merge_base(repo, tip).unwrap_or(tip);
+    if let Some(&state) = cache.states.get(&tip) {
+        return Ok(state == CONTAINS_YES);
+    }
+    let mut graph = CommitGraphCache::new(repo);
+    for &target in targets {
+        let target = peel_to_commit_for_merge_base(repo, target).unwrap_or(target);
+        if target != tip && !graph.is_ancestor(target, tip)? {
+            cache.states.insert(tip, CONTAINS_NO);
+            return Ok(false);
+        }
+    }
+    cache.states.insert(tip, CONTAINS_YES);
+    Ok(true)
+}
+
+/// Branch tips that are merged into any of `bases` (ancestors of a base commit).
+///
+/// # Errors
+///
+/// Propagates object read failures during the ancestry walk.
+pub(crate) fn branch_tips_merged_into(
+    repo: &Repository,
+    bases: &[ObjectId],
+    tips: &[ObjectId],
+) -> Result<OidHashSet> {
+    let mut cache = CommitGraphCache::new(repo);
+    cache.tips_merged_from_bases(bases, tips)
 }
 
 #[cfg(test)]

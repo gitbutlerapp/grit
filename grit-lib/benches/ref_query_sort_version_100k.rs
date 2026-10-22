@@ -61,6 +61,7 @@ fn bench_version_sort(c: &mut Criterion) {
                     reverse: false,
                 },
                 limit: None,
+                ..RefQuery::default()
             };
             let rows =
                 query_listings_on_store(store.as_ref(), &query, &RefQueryOptions::default(), None)

@@ -10,16 +10,13 @@
 //!
 //! - Tag creation ([`create_tag`], [`CreateTagRequest`], [`TagKind`]), listing
 //!   ([`list_tags`], [`TagInfo`], [`tag_ref_metadata`]) and deletion ([`delete_tag`]).
-//! - The `--contains` / `--no-contains` / `--points-at` filter predicates
-//!   ([`tag_contains`], [`tag_points_at`]).
+//! - Ref list reachability filters (`--contains`, `--merged`, `--points-at`) live in [`crate::refs::listing`].
 //! - Ref list sort/filter helpers live in [`crate::refs::listing`] (`compare_version_names`,
 //!   [`crate::refs::listing::pattern_matches_short_name`], [`creator_date`],
 //!   [`crate::refs::listing::epoch_from_identity`]).
 //! - The `-n<N>` annotation
 //!   extraction ([`get_tag_annotation`]).
 //! - The `-m`/`-F` message cleanup ([`strip_comments`]).
-
-use std::collections::{HashSet, VecDeque};
 
 use crate::check_ref_format::validate_tag_short_name;
 use crate::error::{Error, Result};
@@ -308,77 +305,6 @@ pub fn get_tag_annotation(repo: &Repository, oid: &ObjectId, n: u32) -> Option<S
         return None;
     }
     Some(lines.join(" "))
-}
-
-/// Check if a tag contains (has reachable ancestry from) a commit.
-///
-/// Peels the tag ref to a commit, then walks ancestors.
-#[must_use]
-pub fn tag_contains(repo: &Repository, tag_oid: &ObjectId, target: &ObjectId) -> bool {
-    let Ok(Some(commit_oid)) = repo.odb().peel_to_commit(*tag_oid) else {
-        return false;
-    };
-
-    if &commit_oid == target {
-        return true;
-    }
-
-    // BFS/DFS walk
-    let mut visited = HashSet::new();
-    let mut queue = VecDeque::new();
-    queue.push_back(commit_oid);
-
-    while let Some(oid) = queue.pop_front() {
-        if !visited.insert(oid) {
-            continue;
-        }
-        if &oid == target {
-            return true;
-        }
-        if let Ok(obj) = repo.odb().read(&oid) {
-            if obj.kind == ObjectKind::Commit {
-                if let Ok(commit) = parse_commit(&obj.data) {
-                    for parent in commit.parents {
-                        if !visited.contains(&parent) {
-                            queue.push_back(parent);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    false
-}
-
-/// Check if a tag points at (or peels to) a given object.
-#[must_use]
-pub fn tag_points_at(repo: &Repository, tag_oid: &ObjectId, target: &ObjectId) -> bool {
-    if tag_oid == target {
-        return true;
-    }
-    // Peel through tag objects
-    let mut current = *tag_oid;
-    for _ in 0..10 {
-        let obj = match repo.odb().read(&current) {
-            Ok(o) => o,
-            Err(_) => return false,
-        };
-        match obj.kind {
-            ObjectKind::Tag => {
-                let tag = match parse_tag(&obj.data) {
-                    Ok(t) => t,
-                    Err(_) => return false,
-                };
-                if &tag.object == target {
-                    return true;
-                }
-                current = tag.object;
-            }
-            _ => return false,
-        }
-    }
-    false
 }
 
 /// Extract the "creator date" for a tag object.

@@ -54,6 +54,7 @@ fn query_listings_from_pairs_and_store() {
             reverse: false,
         },
         limit: Some(1),
+        ..RefQuery::default()
     };
     let out = query_listings_from_pairs(pairs, &query, &RefQueryOptions::default(), None).unwrap();
     assert_eq!(out.len(), 1);

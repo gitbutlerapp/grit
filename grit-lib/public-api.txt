@@ -12650,8 +12650,9 @@ pub fn grit_lib::porcelain::tag::glob_matches(&str, &str) -> bool
 pub fn grit_lib::porcelain::tag::list_tags(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::tag::TagInfo>>
 pub fn grit_lib::porcelain::tag::parse_epoch_from_ident(&str) -> i64
 pub fn grit_lib::porcelain::tag::strip_comments(&str) -> alloc::string::String
-pub fn grit_lib::porcelain::tag::tag_contains(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
-pub fn grit_lib::porcelain::tag::tag_points_at(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
+pub fn grit_lib::refs::query_reachability::ref_points_at(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::query_reachability::ref_points_at_any(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::query_reachability::resolve_commit_filter_target(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::refs::listing::RefQueryError>
 pub fn grit_lib::porcelain::tag::tag_ref_metadata(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> (grit_lib::porcelain::tag::TagKind, core::option::Option<grit_lib::objects::ObjectId>)
 pub fn grit_lib::porcelain::tag::version_segments(&str) -> alloc::vec::Vec<&str>
 pub mod grit_lib::porcelain::terminal
@@ -14435,6 +14436,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefNam
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefNamespace
 pub enum grit_lib::refs::listing::RefQueryError
 pub grit_lib::refs::listing::RefQueryError::MissingObjectDatabase
+pub grit_lib::refs::listing::RefQueryError::MissingObject(grit_lib::objects::ObjectId)
+pub grit_lib::refs::listing::RefQueryError::NotCommit(grit_lib::objects::ObjectId)
 pub grit_lib::refs::listing::RefQueryError::Store(grit_lib::error::Error)
 impl core::convert::From<grit_lib::error::Error> for grit_lib::refs::listing::RefQueryError
 pub fn grit_lib::refs::listing::RefQueryError::from(grit_lib::error::Error) -> Self
@@ -14495,8 +14498,13 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefListing
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefListing
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefListing
 pub struct grit_lib::refs::listing::RefQuery
+pub grit_lib::refs::listing::RefQuery::contains: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::refs::listing::RefQuery::limit: core::option::Option<usize>
+pub grit_lib::refs::listing::RefQuery::merged: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::refs::listing::RefQuery::namespaces: alloc::vec::Vec<grit_lib::refs::listing::RefNamespace>
+pub grit_lib::refs::listing::RefQuery::no_contains: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::refs::listing::RefQuery::no_merged: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::refs::listing::RefQuery::points_at: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::refs::listing::RefQuery::patterns: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::refs::listing::RefQuery::sort: grit_lib::refs::listing::RefSort
 impl core::clone::Clone for grit_lib::refs::listing::RefQuery

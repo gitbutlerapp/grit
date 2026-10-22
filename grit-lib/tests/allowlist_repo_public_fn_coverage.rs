@@ -57,9 +57,11 @@ use grit_lib::porcelain::checkout::apply_index_file_mode;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::stash::worktree_bytes_for_index_mode;
 use grit_lib::porcelain::status::{expand_untracked_for_staging, status_path_matches_worktree};
-use grit_lib::porcelain::tag::{creator_date, get_tag_annotation, tag_contains, tag_points_at};
+use grit_lib::porcelain::tag::{creator_date, get_tag_annotation};
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::progress::NullProgress;
+use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
+use grit_lib::refs::query_reachability::{ref_points_at, resolve_commit_filter_target};
 use grit_lib::refs::ref_storage::detect_format;
 use grit_lib::refs::{
     list_refs_glob_for_repository, reftable::verify_ref_transaction_batch_reftable, write_ref,
@@ -343,8 +345,18 @@ fn porcelain_stash_tag_status_and_worktree() {
         .expect("blob");
     let _ = get_tag_annotation(&repo, &tag_oid, 1);
     let _ = creator_date(&repo, &tag_oid);
-    let _ = tag_contains(&repo, &tag_oid, &tag_oid);
-    let _ = tag_points_at(&repo, &tag_oid, &tag_oid);
+    let _ = resolve_commit_filter_target(&repo, tag_oid).ok();
+    let _ = ref_points_at(repo.odb(), tag_oid, &tag_oid).ok();
+    let _ = query_refs(
+        &repo,
+        &RefQuery {
+            namespaces: vec![RefNamespace::Tags],
+            contains: vec![tag_oid],
+            ..RefQuery::default()
+        },
+        &RefQueryOptions::default(),
+    )
+    .ok();
 
     let gpg = grit_lib::commit::signing::GpgConfig::from_config(&ConfigSet::new()).expect("gpg");
     let _ = verify_tag(&gpg, b"not a signed tag");

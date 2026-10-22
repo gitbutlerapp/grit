@@ -214,6 +214,14 @@ name = "list_branches_full_10k"
 harness = false
 
 [[bench]]
+name = "ref_query_contains_tags"
+harness = false
+
+[[bench]]
+name = "ref_query_merged_branches"
+harness = false
+
+[[bench]]
 name = "tree_sha256"
 harness = false
 
