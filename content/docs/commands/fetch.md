@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit fetch [<remote>] [<refspec>…] [--tags] [--no-tags] [--prune] [--no-prune] [--dry-run] [-q]
+grit fetch [<remote>] [<refspec>…] [--all] [--tags] [--no-tags] [--prune] [--no-prune] [--dry-run] [-q]
 ```
 
 ## Description
@@ -29,6 +29,8 @@ Tag policy follows Git: default is follow-tags (reachable annotated tags), `--ta
 
 `-q` / `--quiet` suppresses progress and human output (JSON and markdown are unchanged).
 
+`--all` fetches every configured remote in config order. Remotes with `remote.<name>.skipFetchAll=true` are skipped. Each remote uses its own `remote.<name>.prune` and `remote.<name>.tagOpt` unless `--prune`, `--no-prune`, `--tags`, or `--no-tags` override on the command line. Failures on one remote do not stop the rest; the command exits **1** if any remote failed or any ref update was rejected. `--all` cannot be combined with `<remote>` or `<refspec>` arguments.
+
 ## Options
 
 | Option | Description |
@@ -40,6 +42,7 @@ Tag policy follows Git: default is follow-tags (reachable annotated tags), `--ta
 | `--prune` | Remove stale remote-tracking refs. |
 | `--no-prune` | Do not prune, even when config enables it. |
 | `--dry-run` | Report updates without writing. |
+| `--all` | Fetch all configured remotes (see above). |
 | `-q`, `--quiet` | Suppress progress and human stdout/stderr. |
 
 ## Examples
@@ -67,9 +70,11 @@ Fetched 1 update from origin.
 
 ## JSON output
 
-Schema: [v1](/schemas/fetch/v1.json)
+Pass `--json` for stable, scripting-friendly output.
 
-Pass `--json` for stable, scripting-friendly output:
+### Single remote (default)
+
+Schema: [v1](/schemas/fetch/v1.json)
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
@@ -113,6 +118,38 @@ Dry run:
       "status": "fast_forward",
       "old_oid": "a8e620a111111111111111111111111111111111",
       "new_oid": "b52cca6222222222222222222222222222222222"
+    }
+  ],
+  "updated": 0
+}
+```
+
+### `--all`
+
+Schema: [all v1](/schemas/fetch.all/v1.json)
+
+When `--all` is used, JSON has no top-level `remote` field. Each entry in `remotes` matches the single-remote shape (`remote`, `updates`, `updated`) plus an optional `error` string when that remote could not be fetched.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `remotes` | array | One object per remote attempted (skipFetchAll remotes omitted). |
+| `updated` | number | Total refs changed across all successful remotes. |
+
+Example:
+
+```json
+{
+  "remotes": [
+    {
+      "remote": "origin",
+      "updates": [],
+      "updated": 0
+    },
+    {
+      "remote": "broken",
+      "updates": [],
+      "updated": 0,
+      "error": "could not connect to remote"
     }
   ],
   "updated": 0

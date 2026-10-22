@@ -1788,9 +1788,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Fetch { fetch } => {
             let outcome = commands::fetch::run(&fetch, opts.mode)?;
             if !(fetch.quiet && opts.mode == OutputMode::Human) {
-                emit(&outcome, opts, ctx)?;
+                match &outcome {
+                    commands::fetch::FetchRunOutcome::One(one) => emit(one, opts, ctx)?,
+                    commands::fetch::FetchRunOutcome::All(all) => emit(all, opts, ctx)?,
+                }
             }
-            if outcome.rejected {
+            if outcome.exit_nonzero() {
                 std::process::exit(1);
             }
             Ok(())
@@ -2471,11 +2474,13 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     }
 
     fn schema_keys_for_command(command: &str) -> HashSet<String> {
-        use crate::json_schema::{expected_json_command_paths, load_committed_schema};
+        use crate::json_schema::{load_committed_schema, schema_registry};
         let mut keys = HashSet::new();
-        for path in expected_json_command_paths() {
-            if path == command || path.starts_with(&format!("{command}.")) {
-                keys.extend(schema_top_level_field_names(&load_committed_schema(&path)));
+        for entry in schema_registry() {
+            if entry.command == command || entry.command.starts_with(&format!("{command}.")) {
+                keys.extend(schema_top_level_field_names(&load_committed_schema(
+                    entry.command,
+                )));
             }
         }
         keys

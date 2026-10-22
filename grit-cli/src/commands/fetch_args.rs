@@ -5,6 +5,13 @@ use clap::Args;
 /// Options shared by fetch-like commands.
 #[derive(Args, Clone, Debug, Default)]
 pub struct FetchArgs {
+    /// Fetch from every configured remote (respects `remote.<name>.skipFetchAll`).
+    #[arg(
+        long = "all",
+        conflicts_with = "remote",
+        conflicts_with_all = ["refspecs"]
+    )]
+    pub all: bool,
     /// Remote to fetch from when no refspec names one (defaults to `origin`).
     #[arg(value_name = "REMOTE")]
     pub remote: Option<String>,

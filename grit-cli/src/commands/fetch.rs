@@ -31,6 +31,90 @@ pub struct FetchOutcome {
     pub rejected: bool,
 }
 
+/// Result of `grit fetch --all`.
+#[derive(Serialize, JsonSchema)]
+pub struct FetchAllOutcome {
+    pub remotes: Vec<FetchAllRemoteOutcome>,
+    pub updated: usize,
+}
+
+/// One remote's result inside [`FetchAllOutcome`].
+#[derive(Serialize, JsonSchema)]
+pub struct FetchAllRemoteOutcome {
+    pub remote: String,
+    pub updates: Vec<FetchUpdate>,
+    pub updated: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Human / JSON output for either single-remote or `--all` fetch.
+pub enum FetchRunOutcome {
+    One(FetchOutcome),
+    All(FetchAllOutcome),
+}
+
+impl FetchRunOutcome {
+    #[must_use]
+    pub fn exit_nonzero(&self) -> bool {
+        match self {
+            Self::One(o) => o.rejected,
+            Self::All(o) => o.remotes.iter().any(|r| {
+                r.error.is_some()
+                    || r.updates
+                        .iter()
+                        .any(|u| u.status == FetchUpdateStatus::Rejected)
+            }),
+        }
+    }
+}
+
+impl HumanRender for FetchAllOutcome {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        for remote in &self.remotes {
+            if let Some(err) = &remote.error {
+                outln!(w, "From {}:", remote.remote);
+                outln!(w, "  error: {err}");
+                continue;
+            }
+            let one = FetchOutcome {
+                remote: remote.remote.clone(),
+                updates: remote.updates.clone(),
+                updated: remote.updated,
+                dry_run: false,
+                rejected: remote
+                    .updates
+                    .iter()
+                    .any(|u| u.status == FetchUpdateStatus::Rejected),
+            };
+            one.render_human(w, ctx)?;
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for FetchAllOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        for remote in &self.remotes {
+            if let Some(err) = &remote.error {
+                outln!(w, "## {}", remote.remote);
+                outln!(w, "- error: {err}");
+                continue;
+            }
+            let one = FetchOutcome {
+                remote: remote.remote.clone(),
+                updates: remote.updates.clone(),
+                updated: remote.updated,
+                dry_run: false,
+                rejected: false,
+            };
+            one.render_markdown(w, ctx)?;
+        }
+        Ok(())
+    }
+}
+
 /// Per-ref fetch status in JSON.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -61,7 +145,7 @@ impl From<UpdateMode> for FetchUpdateStatus {
 
 /// One updated tracking ref. `old_oid`/`new_oid` are full hex, or `null` for a
 /// newly-created (`old_oid`) or deleted (`new_oid`) ref.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct FetchUpdate {
     #[serde(rename = "ref")]
     pub ref_name: String,
@@ -117,7 +201,14 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
-pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
+pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchRunOutcome> {
+    if args.all {
+        return run_all(args, mode).map(FetchRunOutcome::All);
+    }
+    run_one(args, mode).map(FetchRunOutcome::One)
+}
+
+fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
@@ -179,6 +270,65 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         updated,
         dry_run: args.dry_run,
         rejected,
+    })
+}
+
+fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
+    let repo = context::discover()?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
+    let factory = DefaultHttpClientFactory;
+    let progress = if args.quiet {
+        TerminalProgress::quiet(mode)
+    } else {
+        TerminalProgress::new(mode)
+    };
+    let mut progress = progress;
+    let base = FetchOptions {
+        dry_run: args.dry_run,
+        thread_policy: repo.thread_policy(),
+        environment: crate::context::environment(),
+        ..Default::default()
+    };
+    let raw = repo
+        .remotes()
+        .fetch_all(
+            &config,
+            &base,
+            args.prune_override(),
+            args.tag_mode_override(),
+            &mut progress,
+            Some(&factory),
+        )
+        .context("could not fetch all remotes")?;
+
+    let mut remotes = Vec::new();
+    let mut total_updated = 0usize;
+    for (name, result) in raw {
+        match result {
+            Ok(outcome) => {
+                let (updates, updated, _rejected) = map_updates(&outcome.updates);
+                total_updated += updated;
+                remotes.push(FetchAllRemoteOutcome {
+                    remote: name,
+                    updates,
+                    updated,
+                    error: None,
+                });
+            }
+            Err(err) => {
+                remotes.push(FetchAllRemoteOutcome {
+                    remote: name,
+                    updates: Vec::new(),
+                    updated: 0,
+                    error: Some(err.to_string()),
+                });
+            }
+        }
+    }
+    Ok(FetchAllOutcome {
+        remotes,
+        updated: total_updated,
     })
 }
 

@@ -28,6 +28,9 @@ pub use bundle::RepositoryBundles;
 pub use hooks::{HookInfo, HookSource, RepositoryHooks};
 pub use notes::{Note, NoteAddOutcome, NoteListing, NotesWriteOptions, RepositoryNotes};
 pub use reflog::{ExpireOptions, IndexedReflogEntry, ReflogExpireOutcome, RepositoryReflogs};
-pub use remote::{configured_remote_names, RepositoryRemotes};
+pub use remote::{
+    configured_remote_names, configured_remote_names_in_config_order, remote_skip_fetch_all,
+    RepositoryRemotes,
+};
 pub use stash::{RepositoryStash, StashApplyOptions, StashPushOptions};
 pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};
