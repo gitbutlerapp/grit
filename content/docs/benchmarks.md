@@ -198,6 +198,33 @@ cargo bench -p grit-lib --bench hash
 ./scripts/bench-hash.sh
 ```
 
+## Pick, revert and merge apply path (2026-10-22)
+
+A clean `grit pick` / `grit revert` of a commit touching 2000 paths spent most of its time on work that grows with the number of touched paths, not on I/O:
+
+- **Sparse tree merge.** "Is anything under this directory touched?" and "does the other side have a file under this path?" scanned every touched path, once per tree entry visited and once per file in the directory/file pass. A fallback re-walked each side tree from the root, cloning parsed trees along the way. A per-merge prefix index makes these hash lookups. Parsed trees are now shared, not copied. The merged tree is identical.
+- **Index after the merge checkout.** Checkout wrote the index, with fresh stat data for every file it wrote. Folding in the merge result then removed and re-inserted every touched row (one O(n) vector drain each) and re-stat'ed every file. A second index write re-hashed every same-second entry as racily clean. Rows checkout already left identical are now kept, and the index is written once, with checkout's racy policy. `post-index-change` runs once.
+- **Clean-worktree guard.** The dense index-to-worktree pass lstat'ed every tracked file twice. It now trusts the parallel scan's stat for unchanged, non-racy entries.
+
+`grit-bench hot-paths` (default sizes, warmup and runs), Grit before → after on the same VM sitting, vs system `git 2.43.0`. The refreshed numbers are committed in **`hot-paths-after.json`**:
+
+| Scenario | Git ms | Grit ms before → after | Grit ÷ Git before → after |
+| --- | ---: | ---: | ---: |
+| `pick-10000` | 110.3 | 203.5 → **58.4** | 1.80× → **0.53×** |
+| `revert-10000` | 105.7 | 239.2 → **60.2** | 2.25× → **0.57×** |
+| `merge-10000` | 18.6 | 28.5 → **22.6** | 1.53× → **1.21×** |
+| `pick-series-10000` | 111.0 | 512.4 → **300.7** | 4.60× → **2.71×** |
+| `pick-100000` | 185.0 | 1802.3 → **186.6** | 9.33× → **1.01×** |
+| `revert-100000` | 174.6 | 1765.7 → **185.0** | 9.37× → **1.06×** |
+| `merge-100000` | 138.9 | 138.4 → **107.1** | 0.83× → **0.77×** |
+| `pick-series-100000` | 868.2 | 4985.0 → **2451.9** | 5.78× → **2.82×** |
+
+`switch-*` rows are unchanged within noise. Peak RSS on `pick-10000` stays around **26 MiB**, against Git's 9 MiB. About 10 MiB of that is resident `grit` binary text, and the heap peak is one transient copy of the index during checkout. Memory is not addressed by this change.
+
+```bash
+./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output grit-utils/baselines/hot-paths-after.json
+```
+
 ## Performance plan close-out (2026-10-21)
 
 After the memory and libification wave (fair single-process `grit log --limit`, mapped pack index / commit-graph / MIDX, packed-refs seek, repository path cache, LTO release profile, merge tree cache, pick/revert/merge pass reduction, status/diff scan memory, add without full index copies), the factory re-ran the **cooking dashboard** matrix on **`grit 0.5.15`** (`756aa953`) vs system **`git 2.43.0`**. Committed baselines: **`suite-after-LH.json`**, **`hot-paths-after.json`**, **`commit-after-LH.json`**, and **`dashboard/current.json`**. **`grit-bench compare`** against the pre-plan dashboard snapshot at **`grit 0.5.14`** shows **no overlapping 10k scenario regressed more than 5%** on Grit median wall time.
@@ -249,7 +276,7 @@ At **100k** files the same suites land in **`dashboard/current.json`** (22 scena
 | `log-10000` / `log-100000` | **~1.37×** | Single `grit log --limit 100` vs `git log -100 --oneline`; remaining gap is revwalk + formatting, not paging. |
 | `status-clean-100000` | **1.26×** | Clean 100k worktree: untracked/ignore setup vs Git preload. |
 
-Factory follow-ups (queued as **Speed:** tasks): `diff-100000`, `add-100000`, `pick-series-100000`, `pick-100000`, `revert-100000`, `pick-series-10000`, `add-10000`, `diff-10000`, `pick-10000`, `revert-10000`, `merge-10000`, `log-100000`.
+Factory follow-ups (queued as **Speed:** tasks): `diff-100000`, `add-100000`, `pick-series-100000`, `pick-100000`, `revert-100000`, `pick-series-10000`, `add-10000`, `diff-10000`, `pick-10000`, `revert-10000`, `merge-10000`, `log-100000`. The `pick-*` and `revert-*` rows were closed on 2026-10-22. See [Pick, revert and merge apply path](#pick-revert-and-merge-apply-path-2026-10-22).
 
 ### git.git headlines (hyperfine wall time + peak RSS)
 
