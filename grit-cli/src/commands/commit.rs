@@ -6,7 +6,6 @@ use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
-use grit_lib::porcelain::add::{stage_for_commit, stage_for_commit_in_memory};
 use grit_lib::porcelain::commit::{
     commit_with_scope, default_commit_scope, CommitRequest, CommitScope, HookPolicy,
 };
@@ -157,15 +156,8 @@ pub fn run(
         None
     };
 
-    let message = resolve_commit_message(
-        message,
-        message_file,
-        amend,
-        reuse_message_from.is_some(),
-        &scope,
-        &repo,
-        dry_run,
-    )?;
+    let message =
+        resolve_commit_message(message, message_file, amend, reuse_message_from.is_some())?;
     let message_text = message.as_deref().unwrap_or("");
 
     let config = repo.config().context("could not load config")?;
@@ -292,9 +284,6 @@ fn resolve_commit_message(
     message_file: Option<String>,
     amend: bool,
     reuse_message: bool,
-    scope: &CommitScope,
-    repo: &grit_lib::repo::Repository,
-    dry_run: bool,
 ) -> Result<Option<String>> {
     match (message, message_file) {
         (Some(m), None) => {
@@ -317,15 +306,6 @@ fn resolve_commit_message(
         }
         (None, None) if amend || reuse_message => Ok(None),
         (None, None) => {
-            if matches!(scope, CommitScope::AutoStage) {
-                if dry_run {
-                    stage_for_commit_in_memory(repo, &mut NullProgress, true)
-                        .map_err(|e| anyhow::anyhow!("{e}"))?;
-                } else {
-                    stage_for_commit(repo, &mut NullProgress)
-                        .map_err(|e| anyhow::anyhow!("{e}"))?;
-                }
-            }
             bail!("provide a commit message, e.g. grit commit \"what changed\"");
         }
         (Some(_), Some(_)) => unreachable!("clap rejects message and message-file together"),

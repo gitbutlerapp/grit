@@ -1,4 +1,4 @@
-//! Bugbot regressions: stage before missing-message error; pre-commit hook sees staged index.
+//! Commit must not mutate the index when message validation fails.
 
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
@@ -105,7 +105,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 #[test]
-fn missing_commit_message_still_stages_worktree_changes() -> TestResult {
+fn missing_commit_message_does_not_stage_worktree_changes() -> TestResult {
     let scratch = Scratch::new("msg")?;
     let root = scratch.path();
     git(root, &["init", "-q", "-b", "main"]);
@@ -123,13 +123,69 @@ fn missing_commit_message_still_stages_worktree_changes() -> TestResult {
 
     let porcelain = git(root, &["diff", "--cached", "--name-only"]);
     assert!(
-        porcelain.contains("tracked.txt"),
-        "tracked edit should be staged before message error: {porcelain}"
+        porcelain.trim().is_empty(),
+        "failed commit must not stage anything: {porcelain:?}"
     );
-    assert!(
-        porcelain.contains("new.txt"),
-        "untracked file should be staged before message error: {porcelain}"
+    Ok(())
+}
+
+#[test]
+fn missing_message_preserves_curated_index() -> TestResult {
+    let scratch = Scratch::new("curated")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("a"), b"base\n")?;
+    fs::write(root.join("b"), b"base\n")?;
+    git(root, &["add", "a", "b"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    fs::write(root.join("a"), b"a2\n")?;
+    fs::write(root.join("b"), b"b2\n")?;
+    git(root, &["add", "a"]);
+
+    let cached = git(root, &["diff", "--cached", "--name-only"]);
+    assert_eq!(cached.trim(), "a", "only a should be staged");
+    let unstaged = git(root, &["diff", "--name-only"]);
+    assert_eq!(unstaged.trim(), "b", "only b should be unstaged");
+    let before = git(root, &["status", "--short"]);
+
+    let out = gs(root, ["commit"]);
+    assert_ne!(out.status, Some(0), "{}", out.dump());
+
+    let after = git(root, &["status", "--short"]);
+    assert_eq!(
+        before.trim(),
+        after.trim(),
+        "index must be unchanged after missing-message error"
     );
+    Ok(())
+}
+
+#[test]
+fn missing_message_with_staged_flag_preserves_curated_index() -> TestResult {
+    let scratch = Scratch::new("staged-flag")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("a"), b"base\n")?;
+    fs::write(root.join("b"), b"base\n")?;
+    git(root, &["add", "a", "b"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    fs::write(root.join("a"), b"a2\n")?;
+    fs::write(root.join("b"), b"b2\n")?;
+    git(root, &["add", "a"]);
+
+    let before = git(root, &["status", "--short"]);
+
+    let out = gs(root, ["commit", "--staged"]);
+    assert_ne!(out.status, Some(0), "{}", out.dump());
+
+    let after = git(root, &["status", "--short"]);
+    assert_eq!(before.trim(), after.trim());
     Ok(())
 }
 
