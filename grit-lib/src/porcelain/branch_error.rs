@@ -27,7 +27,7 @@ pub enum BranchError {
     InvalidName {
         /// User-supplied short name.
         name: String,
-        /// Validation detail from [`crate::check_ref_format`].
+        /// Validation detail from [`RefNameError`](crate::refs::check_ref_format::RefNameError).
         reason: String,
     },
 
@@ -62,14 +62,14 @@ pub enum BranchError {
         reason: String,
     },
 
-    /// [`super::set_upstream`] was given a ref that is not a local or remote-tracking branch.
+    /// [`set_upstream`](crate::porcelain::branch::set_upstream) was given a ref that is not a local or remote-tracking branch.
     #[error("upstream '{upstream}' is not a tracking branch")]
     UpstreamNotTracking {
         /// User-supplied upstream string.
         upstream: String,
     },
 
-    /// [`super::unset_upstream`] was called when no upstream is configured.
+    /// [`unset_upstream`](crate::porcelain::branch::unset_upstream) was called when no upstream is configured.
     #[error("branch '{name}' has no upstream configured")]
     NoUpstream {
         /// Short branch name.

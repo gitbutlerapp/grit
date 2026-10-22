@@ -159,6 +159,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `files` | array | Path-level changes (`path`, `status`, optional `old_path` for renames) |
 | `parents` | array of strings | Parent commit OIDs that would be stored |
 | `author` | object | `name`, `email`, and `date` recorded on the commit |
+| `change_id` | string | Stable change id for this commit (see [Change ids](../library/change-ids/)) |
 | `hooks_run` | array of strings | Hook names that ran (`pre-commit`, `commit-msg`); empty on dry-run |
 
 Example:
