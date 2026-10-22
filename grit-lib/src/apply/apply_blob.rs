@@ -98,7 +98,8 @@ pub fn apply_hunks_to_blob(
         let edit = line_edit_from_hunk(hunk, opts.reverse);
         let insert_only = hunk.old_count == 0;
         let hint = scan_hint_for_hunk(hunk, &edit, opts.reverse);
-        let Some(at) = locate_and_apply(&mut working, &edit, hint, hunk_index, insert_only)? else {
+        let Some(at) =
+            locate_and_apply(&mut working, &edit, hint, hunk, hunk_index, insert_only)? else {
             return Err(ApplyError::ContextMismatch {
                 hunk_index,
                 expected_line: if opts.reverse {
@@ -216,7 +217,8 @@ fn locate_and_apply(
     working: &mut WorkingBlob,
     edit: &LineEdit,
     hint: ScanHint,
-    hunk_index: usize,
+    hunk: &Hunk,
+    _hunk_index: usize,
     insert_only: bool,
 ) -> Result<Option<usize>, ApplyError> {
     let mut candidate = edit.clone();
@@ -229,7 +231,7 @@ fn locate_and_apply(
     loop {
         if candidate.match_rows.is_empty() {
             if insert_only && !candidate.replace_rows.is_empty() {
-                let row = hint.start_row.min(working.len());
+                let row = insert_only_row(hint, working, hunk);
                 splice_edit(working, row, &candidate);
                 return Ok(Some(row));
             }
@@ -242,19 +244,18 @@ fn locate_and_apply(
             hint,
             pin_front,
             pin_back,
-            hunk_index,
-        )? {
+        ) {
             splice_edit(working, row, &candidate);
             return Ok(Some(row));
         }
 
-        if prefix == 0 && suffix == 0 {
-            return Ok(None);
-        }
         if pin_front || pin_back {
             pin_front = false;
             pin_back = false;
             continue;
+        }
+        if prefix == 0 && suffix == 0 {
+            return Ok(None);
         }
         if prefix >= suffix {
             trim_edit_front(&mut candidate);
@@ -286,14 +287,27 @@ fn trim_edit_back(edit: &mut LineEdit) {
     }
 }
 
+fn insert_only_row(hint: ScanHint, working: &WorkingBlob, hunk: &Hunk) -> usize {
+    let len = working.len();
+    let at = hint.start_row.min(len);
+    if hint.only_at_back
+        && hunk.old_count == 0
+        && hunk.old_start > 0
+        && hunk.old_start >= len
+        && hunk.new_start >= hunk.old_start
+    {
+        return len;
+    }
+    at
+}
+
 fn search_outward(
     working: &WorkingBlob,
     pattern: &[Vec<u8>],
     hint: ScanHint,
     pin_front: bool,
     pin_back: bool,
-    hunk_index: usize,
-) -> Result<Option<usize>, ApplyError> {
+) -> Option<usize> {
     let width = pattern.len();
     debug_assert!(!pattern.is_empty());
     let mut anchor = hint.start_row.min(working.len());
@@ -309,12 +323,12 @@ fn search_outward(
 
     let attempts = working.len().saturating_add(width).saturating_add(1);
     for step in 0..attempts {
-        if rows_equal_pattern(working, cursor, pattern, hunk_index)? {
-            return Ok(Some(cursor));
+        if rows_equal_pattern(working, cursor, pattern, pin_front, pin_back) {
+            return Some(cursor);
         }
 
         let can_low = low > 0;
-        let can_high = high < working.len() && high + width <= working.len();
+        let can_high = high < working.len();
         if !can_low && !can_high {
             break;
         }
@@ -329,28 +343,35 @@ fn search_outward(
             cursor = high;
         }
     }
-    Ok(None)
+    None
 }
 
 fn rows_equal_pattern(
     working: &WorkingBlob,
     at: usize,
     pattern: &[Vec<u8>],
-    hunk_index: usize,
-) -> Result<bool, ApplyError> {
+    pin_front: bool,
+    pin_back: bool,
+) -> bool {
+    if pin_front && at != 0 {
+        return false;
+    }
+    if pin_back && at + pattern.len() != working.len() {
+        return false;
+    }
     if at + pattern.len() > working.len() {
-        return Err(ApplyError::UnexpectedEof { hunk_index });
+        return false;
     }
     for (offset, expected) in pattern.iter().enumerate() {
         let row = &working.rows[at + offset];
         if row.consumed {
-            return Err(ApplyError::HunksOverlap { hunk_index });
+            return false;
         }
         if row.raw != *expected {
-            return Ok(false);
+            return false;
         }
     }
-    Ok(true)
+    true
 }
 
 fn splice_edit(working: &mut WorkingBlob, at: usize, edit: &LineEdit) {

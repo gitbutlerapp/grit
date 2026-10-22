@@ -423,6 +423,58 @@ fn apply_git_apply_compat_corpus_impl() -> TestResult {
 }
 
 #[test]
+fn apply_trailing_context_beyond_hint_matches_with_offset() {
+    run_test(apply_trailing_context_beyond_hint_matches_with_offset_impl());
+}
+
+fn apply_trailing_context_beyond_hint_matches_with_offset_impl() -> TestResult {
+    let old = b"a\nb\nc\nd\n";
+    let patch = "--- a/f\n+++ b/f\n@@ -10,2 +10,2 @@\n-c\n+C\n d\n";
+    let hunks = parse_patch(patch, 1, "p", false, None)
+        .map_err(|e| format!("parse: {e}"))?
+        .pop()
+        .ok_or("file")?
+        .hunks;
+    let grit_out = grit_apply_bytes(old, &hunks)?;
+    let git_out = git_apply_bytes(old, &hunks)?;
+    assert_eq!(grit_out, git_out, "expected git-compatible offset apply");
+    assert_eq!(grit_out, b"a\nb\nC\nd\n");
+    Ok(())
+}
+
+#[test]
+fn apply_no_context_first_line_change() {
+    run_test(apply_no_context_first_line_change_impl());
+}
+
+fn apply_no_context_first_line_change_impl() -> TestResult {
+    let old = b"OLD\nmiddle\nlast\n";
+    let new = b"NEW\nmiddle\nlast\n";
+    let hunks = hunks_from_git_diff(old, new)?;
+    let grit_out = grit_apply_bytes(old, &hunks)?;
+    let git_out = git_apply_bytes(old, &hunks)?;
+    assert_eq!(grit_out, git_out);
+    assert_eq!(grit_out, new);
+    Ok(())
+}
+
+#[test]
+fn apply_append_lines_at_eof() {
+    run_test(apply_append_lines_at_eof_impl());
+}
+
+fn apply_append_lines_at_eof_impl() -> TestResult {
+    let old = b"one\ntwo\nthree\n";
+    let new = b"one\ntwo\nthree\nfour\nfive\n";
+    let hunks = hunks_from_git_diff(old, new)?;
+    let grit_out = grit_apply_bytes(old, &hunks)?;
+    let git_out = git_apply_bytes(old, &hunks)?;
+    assert_eq!(grit_out, git_out);
+    assert_eq!(grit_out, new);
+    Ok(())
+}
+
+#[test]
 fn apply_deterministic_git_diff_pairs_match_git() {
     run_test(apply_deterministic_git_diff_pairs_match_git_impl());
 }
