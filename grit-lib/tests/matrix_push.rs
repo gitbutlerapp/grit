@@ -183,6 +183,7 @@ fn spec(src: Option<ObjectId>, dst: &str) -> PushRefSpec {
         delete: false,
         expected_old: None,
         expect_absent: false,
+        ..Default::default()
     }
 }
 

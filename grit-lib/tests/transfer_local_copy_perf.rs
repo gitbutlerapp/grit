@@ -168,6 +168,7 @@ fn push_local_empty_bare_links_pack_within_budget() {
             delete: false,
             expected_old: None,
             expect_absent: false,
+            ..Default::default()
         }],
         &PushOptions::default(),
     )

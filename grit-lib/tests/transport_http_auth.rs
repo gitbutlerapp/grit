@@ -480,6 +480,7 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
         delete: false,
         expected_old: None,
         expect_absent: false,
+        ..Default::default()
     };
 
     // --- 1. NO credentials → typed auth error, remote ref untouched -------------

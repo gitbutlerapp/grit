@@ -173,20 +173,14 @@ fn resolve_delete_push(
         .iter()
         .map(|name| {
             let dst = resolve_push_delete_ref(repo.git_dir(), &ctx.remote_ref_names, name);
-            Ok(PushRefSpec {
-                src: None,
-                dst,
-                force: false,
-                delete: true,
-                expected_old: None,
-                expect_absent: false,
-            })
+            Ok(push_spec(None, None, dst, false, true))
         })
         .collect::<PlanResult<Vec<_>>>()?;
+    let branch_label = delete_branch_label(&specs);
     Ok(ResolvedPush {
         remote,
         specs,
-        branch_label: None,
+        branch_label,
         kind: PushPlanKind::Delete,
     })
 }
@@ -205,14 +199,7 @@ fn resolve_tags_push(
     }
     let specs = entries
         .into_iter()
-        .map(|(refname, oid)| PushRefSpec {
-            src: Some(oid),
-            dst: refname,
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-        })
+        .map(|(refname, oid)| push_spec(Some(oid), Some(refname.clone()), refname, false, false))
         .collect();
     Ok(ResolvedPush {
         remote,
@@ -251,14 +238,7 @@ fn resolve_default_push(
     let (short_name, oid) = current_branch_oid(repo)?;
     let src_ref = format!("refs/heads/{short_name}");
     let dst = default_push_destination(repo, config, remote, &short_name, &src_ref)?;
-    let spec = PushRefSpec {
-        src: Some(oid),
-        dst,
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-    };
+    let spec = push_spec(Some(oid), Some(src_ref.clone()), dst, false, false);
     Ok(ResolvedPush {
         remote: remote.to_owned(),
         specs: vec![spec],
@@ -489,14 +469,16 @@ fn expand_configured_push_refspec(
         let heads = list_local_refs(repo.git_dir(), "refs/heads/")?;
         let mut out = Vec::new();
         for (name, oid) in heads {
-            out.push(PushRefSpec {
-                src: Some(oid),
-                dst: name,
-                force: item.force,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-            });
+            if !ctx.remote_ref_names.contains(&name) {
+                continue;
+            }
+            out.push(push_spec(
+                Some(oid),
+                Some(name.clone()),
+                name,
+                item.force,
+                false,
+            ));
         }
         return Ok(out);
     }
@@ -511,13 +493,13 @@ fn expand_configured_push_refspec(
         for (name, _) in local {
             if let Some(dst) = refspec_map_src(&item, &name) {
                 let oid = resolve_src_ref(repo, &name)?;
-                out.push(build_spec_from_parts(
+                out.push(push_spec(
                     Some(oid),
+                    Some(name.clone()),
                     dst,
                     item.force,
                     false,
-                    ctx,
-                )?);
+                ));
             }
         }
         return Ok(out);
@@ -530,6 +512,9 @@ fn resolve_parsed_refspec(
     item: &RefspecItem,
     ctx: &PushPlanContext,
 ) -> PlanResult<Vec<PushRefSpec>> {
+    if item.negative {
+        return Ok(Vec::new());
+    }
     if item.matching {
         return expand_configured_push_refspec(
             repo,
@@ -554,14 +539,7 @@ fn resolve_parsed_refspec(
                 reason: "delete refspec missing destination".into(),
             })?;
         let resolved_dst = resolve_dst_name(repo, dst, None, ctx)?;
-        return Ok(vec![PushRefSpec {
-            src: None,
-            dst: resolved_dst,
-            force: item.force,
-            delete: true,
-            expected_old: None,
-            expect_absent: false,
-        }]);
+        return Ok(vec![push_spec(None, None, resolved_dst, item.force, true)]);
     }
 
     let src_oid = if item.exact_sha1 {
@@ -591,13 +569,13 @@ fn resolve_parsed_refspec(
                             });
                         };
                         let dst = resolve_dst_for_src(repo, item, &name, ctx)?;
-                        return Ok(vec![build_spec_from_parts(
+                        return Ok(vec![push_spec(
                             Some(oid),
+                            Some(name.clone()),
                             dst,
                             item.force,
                             false,
-                            ctx,
-                        )?]);
+                        )]);
                     }
                     _ => {
                         return Err(PushPlanError::SrcRefspecAmbiguous {
@@ -614,14 +592,15 @@ fn resolve_parsed_refspec(
     } else {
         Some(full_src_ref_name(repo, src_name)?)
     };
-    let dst = resolve_dst_for_src(repo, item, src_full.as_deref().unwrap_or(src_name), ctx)?;
-    Ok(vec![build_spec_from_parts(
+    let src_label = src_full.clone();
+    let dst = resolve_dst_for_src(repo, item, src_label.as_deref().unwrap_or(src_name), ctx)?;
+    Ok(vec![push_spec(
         Some(src_oid),
+        src_label,
         dst,
         item.force,
         false,
-        ctx,
-    )?])
+    )])
 }
 
 fn resolve_dst_for_src(
@@ -658,33 +637,30 @@ fn resolve_dst_name(
     if dst.starts_with("refs/") {
         return Ok(dst.to_owned());
     }
+    let remote_list = remote_ref_list(ctx);
+    match count_refname_match(dst, &remote_list) {
+        0 => {}
+        1 => {
+            let Some((name, _)) = refname_match(dst, &remote_list) else {
+                return Err(PushPlanError::InvalidRefspec {
+                    spec: dst.to_owned(),
+                    reason: "remote ref match failed".into(),
+                });
+            };
+            return Ok(name);
+        }
+        _ => {
+            return Err(PushPlanError::DstRefspecAmbiguous {
+                spec: dst.to_owned(),
+            });
+        }
+    }
     if let Some(src) = src_full {
         if let Some(guessed) = guess_qualified_dst(src, dst) {
-            if ctx.remote_ref_names.is_empty()
-                || count_refname_match(&guessed, &remote_ref_list(ctx)) <= 1
-            {
-                return Ok(guessed);
-            }
+            return Ok(guessed);
         }
     }
-    match count_refname_match(dst, &remote_ref_list(ctx)) {
-        0 => {
-            if let Some(src) = src_full {
-                guess_qualified_dst(src, dst).ok_or_else(|| PushPlanError::InvalidRefspec {
-                    spec: dst.to_owned(),
-                    reason: "unqualified destination does not match any remote ref".into(),
-                })
-            } else {
-                Ok(format!("refs/heads/{dst}"))
-            }
-        }
-        1 => Ok(refname_match(dst, &remote_ref_list(ctx))
-            .map(|(n, _)| n)
-            .unwrap_or_else(|| format!("refs/heads/{dst}"))),
-        _ => Err(PushPlanError::DstRefspecAmbiguous {
-            spec: dst.to_owned(),
-        }),
-    }
+    Ok(format!("refs/heads/{dst}"))
 }
 
 fn remote_ref_list(ctx: &PushPlanContext) -> Vec<(String, ObjectId)> {
@@ -709,21 +685,21 @@ fn guess_qualified_dst(src_full: &str, short_dst: &str) -> Option<String> {
     }
 }
 
-fn build_spec_from_parts(
+fn push_spec(
     src: Option<ObjectId>,
+    src_ref: Option<String>,
     dst: String,
     force: bool,
     delete: bool,
-    _ctx: &PushPlanContext,
-) -> PlanResult<PushRefSpec> {
-    Ok(PushRefSpec {
+) -> PushRefSpec {
+    PushRefSpec {
         src,
+        src_ref,
         dst,
         force,
         delete,
-        expected_old: None,
-        expect_absent: false,
-    })
+        ..Default::default()
+    }
 }
 
 fn resolve_src_ref(repo: &Repository, spec: &str) -> PlanResult<ObjectId> {
@@ -733,6 +709,11 @@ fn resolve_src_ref(repo: &Repository, spec: &str) -> PlanResult<ObjectId> {
 }
 
 fn full_src_ref_name(repo: &Repository, spec: &str) -> PlanResult<String> {
+    if spec.eq_ignore_ascii_case("HEAD") {
+        if let Ok(HeadState::Branch { short_name, .. }) = resolve_head(repo.git_dir()) {
+            return Ok(format!("refs/heads/{short_name}"));
+        }
+    }
     if spec.starts_with("refs/") {
         return Ok(spec.to_owned());
     }
@@ -847,6 +828,13 @@ fn match_refname_with_pattern(pattern: &str, refname: &str, replacement: &str) -
         (None, None) if pattern == refname => Some(replacement.to_owned()),
         _ => None,
     }
+}
+
+fn delete_branch_label(specs: &[PushRefSpec]) -> Option<String> {
+    if specs.len() != 1 {
+        return None;
+    }
+    specs[0].dst.strip_prefix("refs/heads/").map(str::to_owned)
 }
 
 fn branch_label_from_specs(repo: &Repository, specs: &[PushRefSpec]) -> Option<String> {

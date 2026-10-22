@@ -558,7 +558,7 @@ fn decide_push_wire(
                  message: Option<String>| {
         PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: crate::transfer::push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: old,
                 new_oid: new,
@@ -618,7 +618,7 @@ fn decide_push_wire(
         return Ok(match remote_current {
             Some(_) => PushDecision {
                 result: PushRefResult {
-                    local_ref: None,
+                    local_ref: crate::transfer::push_spec_local_ref(spec),
                     remote_ref: spec.dst.clone(),
                     old_oid: remote_current,
                     new_oid: None,
@@ -651,7 +651,7 @@ fn decide_push_wire(
     let Some(old) = remote_current else {
         return Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: crate::transfer::push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: None,
                 new_oid: Some(src),
@@ -692,7 +692,7 @@ fn decide_push_wire(
     if is_ff {
         Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: crate::transfer::push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: Some(old),
                 new_oid: Some(src),
@@ -707,7 +707,7 @@ fn decide_push_wire(
     } else if spec.force {
         Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: crate::transfer::push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: Some(old),
                 new_oid: Some(src),
@@ -722,7 +722,7 @@ fn decide_push_wire(
     } else {
         Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: crate::transfer::push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: Some(old),
                 new_oid: Some(src),

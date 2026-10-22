@@ -357,6 +357,7 @@ fn handle_fetch_push_local_bare_remote() {
                 delete: false,
                 expected_old: None,
                 expect_absent: false,
+                ..Default::default()
             }],
             PushOptions::default(),
             &mut progress,

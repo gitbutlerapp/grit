@@ -404,6 +404,7 @@ fn remote_push_local_file_url_matches_git() {
         delete: false,
         expected_old: None,
         expect_absent: false,
+        ..Default::default()
     };
     remote
         .push(

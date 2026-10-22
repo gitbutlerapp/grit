@@ -395,6 +395,7 @@ fn push_remote_rejects_protocol_v2_typed_before_touching_refs() {
         delete: false,
         expected_old: None,
         expect_absent: false,
+        ..Default::default()
     };
     let err = push_remote(
         &local_git,
@@ -456,6 +457,7 @@ fn push_remote_unpack_failure_report_demotes_all_sent_refs() {
         delete: false,
         expected_old: None,
         expect_absent: false,
+        ..Default::default()
     };
     let outcome = push_remote(
         &local_git,
@@ -580,6 +582,7 @@ fn push_http_rejects_v2_receive_pack_advertisement_typed() {
         delete: false,
         expected_old: None,
         expect_absent: false,
+        ..Default::default()
     };
     let err = push_http(
         client,
@@ -623,6 +626,7 @@ fn push_http_propagates_discovery_transport_error_typed() {
         delete: false,
         expected_old: None,
         expect_absent: false,
+        ..Default::default()
     };
     let err = push_http(
         client,

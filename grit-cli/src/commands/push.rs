@@ -33,7 +33,6 @@ pub struct PushOutcome {
     pub results: Vec<PushRefResult>,
     pub rejected: bool,
     /// True when `--dry-run` was used (no refs or objects written).
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dry_run: bool,
 }
 
@@ -92,7 +91,6 @@ pub struct PushRefResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub new_oid: Option<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub forced: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -132,7 +130,7 @@ impl HumanRender for PushOutcome {
 impl MarkdownRender for PushOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let label = self.branch.as_deref().unwrap_or("refs");
-        markdown::print_push_results(w, &self.remote, label, &self.results)?;
+        markdown::print_push_results(w, &self.remote, label, self.dry_run, &self.results)?;
         Ok(())
     }
 }
@@ -151,7 +149,7 @@ pub fn run(
 
     let (remote_override, refspecs) = split_positionals(&config, &repo, remote_flag, positionals)?;
 
-    let plan_ctx = load_remote_ref_names(&repo, &config, remote_override.as_deref(), delete_refs)?;
+    let plan_ctx = load_remote_ref_names(&repo, &config, remote_override.as_deref())?;
 
     let plan = resolve_push(
         &repo,
@@ -250,6 +248,14 @@ fn split_positionals(
         // Single token that is not a configured remote: treat as refspec.
         return Ok((None, positionals.to_vec()));
     }
+    if positionals.len() > 1
+        && !is_configured_remote(config, &positionals[0])
+        && !looks_like_remote_name(&positionals[0])
+    {
+        return Err(plan_error(PushPlanError::UnknownRemote(
+            positionals[0].clone(),
+        )));
+    }
     let _ = repo;
     Ok((None, positionals.to_vec()))
 }
@@ -269,19 +275,15 @@ fn load_remote_ref_names(
     repo: &grit_lib::repo::Repository,
     config: &ConfigSet,
     remote_override: Option<&str>,
-    delete_refs: &[String],
 ) -> Result<PushPlanContext> {
-    let need_remote_refs = !delete_refs.is_empty();
-    if !need_remote_refs {
-        return Ok(PushPlanContext::default());
-    }
     let remote = configured_remote_for_push(repo, config, remote_override).map_err(plan_error)?;
-    let remote_handle =
-        Remote::from_config(config, &remote).map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let Ok(remote_handle) = Remote::from_config(config, &remote) else {
+        return Ok(PushPlanContext::default());
+    };
     let factory = DefaultHttpClientFactory;
     let advertised = remote_handle
         .list_refs(Some(repo), &ListRefsOptions::default(), Some(&factory))
-        .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+        .unwrap_or_default();
     let remote_ref_names: HashSet<String> = advertised
         .into_iter()
         .map(|r| r.name)

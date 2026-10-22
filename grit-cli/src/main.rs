@@ -873,7 +873,7 @@ enum Command {
         dry_run: bool,
         /// Remote name (when not using `--remote`).
         #[arg(value_name = "REMOTE")]
-        push_remote: Option<String>,
+        remote_name: Option<String>,
         /// Refspec (`src`, `src:dst`, `:dst`, …).
         #[arg(value_name = "REFSPEC")]
         refspecs: Vec<String>,
@@ -1768,11 +1768,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             delete,
             remote,
             dry_run,
-            push_remote,
+            remote_name,
             refspecs,
         } => {
             let mut positionals = Vec::new();
-            if let Some(r) = push_remote {
+            if let Some(r) = remote_name {
                 positionals.push(r);
             }
             positionals.extend(refspecs);

@@ -108,6 +108,48 @@ fn dry_run_push_local(local_git: &Path, bare: &Path, specs: &[PushRefSpec]) {
     .expect("push_local dry-run");
 }
 
+#[test]
+fn short_dst_matches_remote_tag() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["checkout", "-q", "main"]);
+    git(&fx.local, &["push", "-q", "origin", "main"]);
+    git(&fx.bare, &["tag", "x"]);
+    git(&fx.local, &["checkout", "-q", "main"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let mut ctx = PushPlanContext::default();
+    ctx.remote_ref_names = list_remote_refs(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["main:x".into()],
+            remote: Some("origin".into()),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0].dst, "refs/tags/x");
+    compare_with_git(&fx.local, &["origin", "main:x"], &specs, &fx.bare);
+}
+
+#[test]
+fn matching_push_config_only_existing_remote_heads() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main"]);
+    git(&fx.local, &["config", "remote.origin.push", ":"]);
+    git(&fx.local, &["checkout", "-q", "main"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let mut ctx = PushPlanContext::default();
+    ctx.remote_ref_names = list_remote_refs(&fx.bare);
+    let specs = plan_specs(&repo, &config, PushRequest::default(), &ctx);
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0].dst, "refs/heads/main");
+    assert!(specs[0].src_ref.as_deref() == Some("refs/heads/main"));
+}
+
 fn compare_with_git(local: &Path, git_args: &[&str], specs: &[PushRefSpec], bare: &Path) {
     let git_lines = git_porcelain_dry_run(local, git_args);
     dry_run_push_local(&local.join(".git"), bare, specs);

@@ -986,6 +986,7 @@ pub fn print_push_results(
     w: &mut dyn Write,
     remote: &str,
     branch: &str,
+    dry_run: bool,
     results: &[crate::commands::push::PushRefResult],
 ) -> anyhow::Result<()> {
     if results.is_empty() {
@@ -996,11 +997,21 @@ pub fn print_push_results(
     for result in results {
         let target = format!("{remote} {}", result.ref_name);
         match result.status {
-            crate::commands::push::PushRefOutcomeStatus::Ok => outln!(
-                w,
-                "- **`{}`** · pushed `{branch}` → `{target}`",
-                result.ref_name
-            ),
+            crate::commands::push::PushRefOutcomeStatus::Ok => {
+                if dry_run {
+                    outln!(
+                        w,
+                        "- **`{}`** · would push `{branch}` → `{target}`",
+                        result.ref_name
+                    );
+                } else {
+                    outln!(
+                        w,
+                        "- **`{}`** · pushed `{branch}` → `{target}`",
+                        result.ref_name
+                    );
+                }
+            }
             crate::commands::push::PushRefOutcomeStatus::UpToDate => outln!(
                 w,
                 "- **`{}`** · `{target}` already up to date",

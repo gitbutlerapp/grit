@@ -2325,12 +2325,18 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     gs_ok(scratch.path(), &["init", "--bare", &path_arg(&remote)]);
     gs_ok(&seed, &["remote", "add", "origin", &path_arg(&remote)]);
     let push = gs_json(&seed, &["push"]);
-    assert_eq!(keys(&push), ["branch", "rejected", "remote", "results"]);
     assert_eq!(
-        keys(&push["results"][0]),
-        ["ref", "status"],
-        "an `ok` push result omits the optional `reason`"
+        keys(&push),
+        ["branch", "dry_run", "kind", "rejected", "remote", "results"]
     );
+    let result_keys = keys(&push["results"][0]);
+    for key in ["forced", "new_oid", "ref", "src", "status"] {
+        assert!(
+            result_keys.iter().any(|k| k == key),
+            "missing {key}: {result_keys:?}"
+        );
+    }
+    assert!(!result_keys.iter().any(|k| k == "reason"));
 
     let fetch = gs_json(&seed, &["fetch"]);
     assert_eq!(keys(&fetch), ["remote", "updated", "updates"]);

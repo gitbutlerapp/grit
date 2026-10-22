@@ -555,6 +555,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             delete: false,
             expected_old: None,
             expect_absent: false,
+            ..Default::default()
         }],
         &PushOptions::default(),
         &mut NoProgress,

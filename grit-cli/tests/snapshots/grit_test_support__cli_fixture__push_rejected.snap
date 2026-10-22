@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 1,
-    "stdout": "{\"remote\":\"origin\",\"kind\":\"branch\",\"branch\":\"main\",\"results\":[{\"ref\":\"refs/heads/main\",\"status\":\"rejected\",\"reason\":\"not a fast-forward — run `grit pull` first\",\"old_oid\":\"c2260968e457a68411ae6ddaee3d29943c879cf0\",\"new_oid\":\"92dcb23fb80c14f06ee7575c6294f2671a6a47f5\"}],\"rejected\":true}\n",
+    "stdout": "{\"remote\":\"origin\",\"kind\":\"branch\",\"branch\":\"main\",\"results\":[{\"ref\":\"refs/heads/main\",\"status\":\"rejected\",\"reason\":\"not a fast-forward — run `grit pull` first\",\"old_oid\":\"c2260968e457a68411ae6ddaee3d29943c879cf0\",\"new_oid\":\"92dcb23fb80c14f06ee7575c6294f2671a6a47f5\",\"forced\":false,\"src\":\"refs/heads/main\"}],\"rejected\":true,\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {

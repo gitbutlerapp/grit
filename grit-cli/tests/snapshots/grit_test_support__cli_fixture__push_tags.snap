@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"remote\":\"origin\",\"kind\":\"tags\",\"results\":[{\"ref\":\"refs/tags/v0.1\",\"status\":\"up_to_date\",\"old_oid\":\"c6908c1d057756ddf12e3c3de0b989960c8ff27d\",\"new_oid\":\"c6908c1d057756ddf12e3c3de0b989960c8ff27d\"},{\"ref\":\"refs/tags/v0.2\",\"status\":\"ok\",\"new_oid\":\"e2d71d930907e108de5f37b5a6d68d94e066ed4e\"}],\"rejected\":false}\n",
+    "stdout": "{\"remote\":\"origin\",\"kind\":\"tags\",\"results\":[{\"ref\":\"refs/tags/v0.1\",\"status\":\"up_to_date\",\"old_oid\":\"c6908c1d057756ddf12e3c3de0b989960c8ff27d\",\"new_oid\":\"c6908c1d057756ddf12e3c3de0b989960c8ff27d\",\"forced\":false,\"src\":\"refs/tags/v0.1\"},{\"ref\":\"refs/tags/v0.2\",\"status\":\"ok\",\"new_oid\":\"e2d71d930907e108de5f37b5a6d68d94e066ed4e\",\"forced\":false,\"src\":\"refs/tags/v0.2\"}],\"rejected\":false,\"dry_run\":false}\n",
     "stderr": ""
   },
   "markdown": {

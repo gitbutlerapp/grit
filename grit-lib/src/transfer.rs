@@ -386,10 +386,12 @@ fn local_objects_pack_dir(git_dir: &Path) -> PathBuf {
 }
 
 /// A single ref update requested by a push.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PushRefSpec {
     /// The source object to push (`None` for a deletion).
     pub src: Option<ObjectId>,
+    /// Local source ref name when known (for reports and `git push --porcelain`).
+    pub src_ref: Option<String>,
     /// The destination ref on the remote (e.g. `refs/heads/main`).
     pub dst: String,
     /// Whether a non-fast-forward update is allowed.
@@ -404,6 +406,12 @@ pub struct PushRefSpec {
     /// is rejected as stale (used for "create only" pushes whose lease is the
     /// ref's absence). Independent of [`Self::expected_old`].
     pub expect_absent: bool,
+}
+
+/// Local ref name carried on a push spec for status reporting.
+#[must_use]
+pub(crate) fn push_spec_local_ref(spec: &PushRefSpec) -> Option<String> {
+    spec.src_ref.clone()
 }
 
 /// Resolve the remote ref name for a push deletion from a short name or full ref.
@@ -1961,7 +1969,7 @@ fn decide_push(
             if remote_current == Some(src) {
                 return Ok(PushDecision {
                     result: PushRefResult {
-                        local_ref: None,
+                        local_ref: push_spec_local_ref(spec),
                         remote_ref: spec.dst.clone(),
                         old_oid: remote_current,
                         new_oid: Some(src),
@@ -1983,7 +1991,7 @@ fn decide_push(
     if spec.expect_absent && remote_current.is_some() {
         return Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: remote_current,
                 new_oid: spec.src,
@@ -2026,7 +2034,7 @@ fn decide_push(
         };
         return Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: remote_current,
                 new_oid: None,
@@ -2058,7 +2066,7 @@ fn decide_push(
     if remote_current == Some(src) {
         return Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: remote_current,
                 new_oid: Some(src),
@@ -2076,7 +2084,7 @@ fn decide_push(
     let Some(old) = remote_current else {
         return Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: None,
                 new_oid: Some(src),
@@ -2100,7 +2108,7 @@ fn decide_push(
     if is_ff {
         Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: Some(old),
                 new_oid: Some(src),
@@ -2115,7 +2123,7 @@ fn decide_push(
     } else if spec.force {
         Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: Some(old),
                 new_oid: Some(src),
@@ -2130,7 +2138,7 @@ fn decide_push(
     } else {
         Ok(PushDecision {
             result: PushRefResult {
-                local_ref: None,
+                local_ref: push_spec_local_ref(spec),
                 remote_ref: spec.dst.clone(),
                 old_oid: Some(old),
                 new_oid: Some(src),

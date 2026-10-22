@@ -195,6 +195,7 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
                 delete: false,
                 expected_old: None,
                 expect_absent: false,
+                ..Default::default()
             }],
             PushOptions::default(),
             &mut grit_lib::remote::fetch::NoProgress,
