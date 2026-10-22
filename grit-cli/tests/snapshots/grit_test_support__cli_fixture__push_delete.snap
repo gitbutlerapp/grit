@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"remote\":\"origin\",\"branch\":\"old-topic\",\"results\":[{\"ref\":\"refs/heads/old-topic\",\"status\":\"ok\"}],\"rejected\":false}\n",
+    "stdout": "{\"remote\":\"origin\",\"kind\":\"delete\",\"results\":[{\"ref\":\"refs/heads/old-topic\",\"status\":\"ok\",\"old_oid\":\"0c8b189f8669762be348e3c55343da7faec7313b\"}],\"rejected\":false}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Push to `origin`\n- **`refs/heads/old-topic`** · pushed `--delete` → `origin refs/heads/old-topic`\n",
+    "stdout": "## Push to `origin`\n- **`refs/heads/old-topic`** · pushed `refs` → `origin refs/heads/old-topic`\n",
     "stderr": ""
   }
 }

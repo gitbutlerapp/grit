@@ -438,6 +438,25 @@ pub fn verify_pull_fast_forward(ctx: &DailyHeadlineContext, cwd: &Path) -> Resul
     Ok(())
 }
 
+pub fn verify_push_refspec(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    configure_client_remote(&ctx.git, cwd, remote)?;
+    prepare_network_push(&ctx.git, &remote.bare)?;
+    run_git(
+        &ctx.git,
+        cwd,
+        &["push", "-q", "origin", "HEAD:refs/heads/bench"],
+    )?;
+    let git_oid = ref_oid(&ctx.git, &remote.bare, "refs/heads/bench")?;
+    prepare_network_push(&ctx.git, &remote.bare)?;
+    run_grit(&ctx.grit, cwd, &["push", "origin", "HEAD:refs/heads/bench"])?;
+    let grit_oid = ref_oid(&ctx.git, &remote.bare, "refs/heads/bench")?;
+    if git_oid != grit_oid {
+        bail!("push refspec: git {git_oid} != grit {grit_oid}");
+    }
+    Ok(())
+}
+
 pub fn verify_push_incremental(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;

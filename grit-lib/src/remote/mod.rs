@@ -13,6 +13,7 @@
 //! # }
 //! ```
 mod core;
+pub mod push_plan;
 
 pub use core::*;
 

@@ -1,6 +1,6 @@
 ---
 title: grit push
-summary: Publish the current branch or tags, or delete a remote ref.
+summary: Publish branches, tags, or explicit refspecs to a remote.
 group: Remotes
 order: 4
 ---
@@ -8,23 +8,24 @@ order: 4
 ## Synopsis
 
 ```text
-grit push
+grit push [<remote>] [<refspec>...]
 grit push --tags
 grit push --delete <ref>
-grit push --remote <name>
+grit push --dry-run
+grit push --remote <name>   # hidden alias for one release
 ```
 
 ## Description
 
-Sends the current branch to the remote, creating the branch there if it doesn't exist. There are no positional arguments: the branch goes to its configured remote (usually `origin`), under the same name. To push a branch somewhere else, set `branch.<name>.remote` and `branch.<name>.merge` with [`grit config`](../config/).
+Pushes refs to a remote over the smart HTTP or `file://` transport. With no refspecs, grit pushes the current branch using the same remote-selection rules as Git (`branch.<name>.pushRemote`, `remote.pushDefault`, `branch.<name>.remote`, then `origin`) and applies `remote.<name>.push` refspecs when configured.
 
-`grit push` never overwrites commits on the remote. If the remote branch has commits you don't have, the push is rejected and `grit` exits with an error; run [`grit pull`](../pull/) and push again.
+Explicit refspecs follow Git push rules: any revision on the left (`HEAD`, tags, branches), optional `+` for force, `:dst` to delete, and a bare branch name DWIMs to the matching local ref (then through configured push refspecs when present).
 
-With `--tags`, pushes every local tag to the remote instead of the current branch.
+`--dry-run` negotiates with the remote and reports what would change without updating refs or sending objects.
 
-With `--delete`, deletes a remote branch or tag (short names map to `refs/heads/<name>` when that branch exists locally, otherwise `refs/tags/<name>`). Repeat `--delete` to remove several refs in one push.
+With `--tags`, pushes every local tag under `refs/tags/`.
 
-Use `--remote` to target a remote other than the current branch's configured remote.
+With `--delete`, deletes remote branches or tags (short names map like Git).
 
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
@@ -32,9 +33,12 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 
 | Option | Description |
 | --- | --- |
-| `-t`, `--tags` | Push all tags instead of the current branch. |
-| `--delete` | Delete a remote ref (branch or tag). May be repeated. |
-| `--remote` | Remote name (default: current branch remote or `origin`). |
+| `<remote>` | Remote name (optional; defaults from branch / config). |
+| `<refspec>...` | Push refspecs (`feature`, `HEAD:refs/heads/x`, `+main:main`, `:gone`, …). |
+| `-t`, `--tags` | Push all local tags instead of the current branch. |
+| `--delete` | Delete a remote ref (repeatable). |
+| `--dry-run` | Contact the remote but do not update refs or send objects. |
+| `--remote` | Hidden alias for the remote name (prefer the positional `<remote>`). |
 
 ## Examples
 
@@ -42,14 +46,20 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 $ grit push
   pushed main → origin refs/heads/main
 
+$ grit push origin feature
+  pushed feature → origin refs/heads/feature
+
+$ grit push origin HEAD:refs/heads/bench
+  pushed refs → origin refs/heads/bench
+
+$ grit push --dry-run
+  would push main → origin refs/heads/main
+
 $ grit push --tags
-  pushed --tags → origin refs/tags/v0.1
+  pushed refs → origin refs/tags/v0.1
 
 $ grit push --delete v0.1
   pushed --delete → origin refs/tags/v0.1
-
-$ grit push --delete old-topic --remote origin
-  pushed --delete → origin refs/heads/old-topic
 ```
 
 When someone else pushed first:
@@ -68,31 +78,40 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `remote` | string | Remote that was pushed to. |
-| `branch` | string or omitted | Short branch name when the push targets one branch (including a single `--delete` ref). Omitted for `--tags` and when several refs are deleted in one push. |
-| `results` | array | Per-ref outcomes with `ref` and `status` (`ok`, `up_to_date`, or a rejection). |
+| `kind` | string | `branch`, `tags`, `delete`, or `refspecs`. |
+| `branch` | string? | Short branch name when `kind` is `branch` (omitted otherwise). |
+| `dry_run` | boolean | Present and `true` when `--dry-run` was used. |
+| `results` | array | Per-ref outcomes (see below). |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 
-Example (normal push):
+Each element of `results`:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `ref` | string | Remote ref updated. |
+| `status` | string | `ok`, `up_to_date`, or `rejected`. |
+| `reason` | string? | Rejection detail when `status` is `rejected`. |
+| `old_oid` | string? | Previous remote tip (full hex). |
+| `new_oid` | string? | New tip after a successful update. |
+| `forced` | boolean | `true` for a non-fast-forward update with force. |
+| `src` | string? | Local source ref when known. |
+
+Example:
 
 ```json
 {
   "remote": "origin",
+  "kind": "branch",
   "branch": "main",
   "results": [
-    { "ref": "refs/heads/main", "status": "ok" }
-  ],
-  "rejected": false
-}
-```
-
-Deleting one remote branch sets `branch` to that ref's short name:
-
-```json
-{
-  "remote": "origin",
-  "branch": "topic",
-  "results": [
-    { "ref": "refs/heads/topic", "status": "ok" }
+    {
+      "ref": "refs/heads/main",
+      "status": "ok",
+      "old_oid": null,
+      "new_oid": "83352a61f6715ec3f0a297c6d6150725154fb833",
+      "forced": false,
+      "src": "refs/heads/main"
+    }
   ],
   "rejected": false
 }
