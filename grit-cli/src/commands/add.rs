@@ -6,13 +6,18 @@
 use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
 use grit_lib::apply::{apply_patch_to_index_and_write, parse_patch, IndexApplyOptions};
+use grit_lib::diff::DiffSide;
 use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions, StageOutcome};
+use grit_lib::porcelain::hunk_select::{
+    parse_hunk_id_list, stage_hunks, HunkSelectError, StageHunksOutcome,
+};
 use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -35,6 +40,9 @@ pub struct AddOutcome {
     pub count: usize,
     /// How many paths were staged (alias of `count` for scripts written before path lists).
     pub staged: usize,
+    /// Hunk ids staged per path when `--hunks` was used.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub staged_hunks: BTreeMap<String, Vec<String>>,
     /// Whether the invocation had no path arguments (stages everything).
     #[serde(skip)]
     #[schemars(skip)]
@@ -52,7 +60,28 @@ impl AddOutcome {
             dry_run,
             count,
             staged: count,
+            staged_hunks: BTreeMap::new(),
             no_paths,
+        }
+    }
+
+    fn from_hunks(outcome: StageHunksOutcome) -> Self {
+        let staged_hunks: BTreeMap<String, Vec<String>> = outcome
+            .staged_hunks
+            .into_iter()
+            .map(|(path, ids)| (path, ids.into_iter().map(|id| id.as_str()).collect()))
+            .collect();
+        let count = outcome.added.len() + outcome.modified.len() + outcome.removed.len();
+        Self {
+            added: outcome.added,
+            modified: outcome.modified,
+            removed: outcome.removed,
+            intent_to_add: Vec::new(),
+            dry_run: outcome.dry_run,
+            count,
+            staged: count,
+            staged_hunks,
+            no_paths: false,
         }
     }
 }
@@ -100,6 +129,29 @@ impl AddOutcome {
     }
 }
 
+/// Exit code for `--hunks` failures (unknown, stale, or wrong-side ids).
+pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
+    if err.downcast_ref::<HunkSelectError>().is_some() {
+        2
+    } else {
+        1
+    }
+}
+
+pub fn run_hunks(args: &PathspecArgs, hunks: &[String], dry_run: bool) -> Result<AddOutcome> {
+    let repo = context::discover()?;
+    let resolved = args.resolve(&repo)?;
+    let (pathspecs, _) = resolved.into_pathspec_lists();
+    let selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
+    let outcome = stage_hunks(&repo, DiffSide::Unstaged, &selection, &pathspecs, dry_run)
+        .map_err(map_hunk_error)?;
+    Ok(AddOutcome::from_hunks(outcome))
+}
+
+fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
+    anyhow::Error::new(err)
+}
+
 pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
     let repo = context::discover()?;
     let label = if patch_file == "-" {
@@ -123,6 +175,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
         dry_run: outcome.dry_run,
         count,
         staged: count,
+        staged_hunks: BTreeMap::new(),
         no_paths: false,
     })
 }

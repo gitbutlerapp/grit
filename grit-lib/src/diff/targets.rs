@@ -1352,6 +1352,34 @@ fn bytes_for_diff(data: &[u8]) -> (SideBytes, bool) {
     }
 }
 
+/// Unstaged file diffs with staged peer hunks per path (for stable hunk ids).
+pub(crate) type UnstagedDiffWithPeers = (
+    Vec<FileDiff>,
+    std::collections::HashMap<String, Vec<StructuredHunk>>,
+);
+
+/// Unstaged [`FileDiff`] rows plus staged hunks on the same path (for stable hunk ids).
+pub(crate) fn unstaged_file_diffs_with_peer_hunks(
+    repo: &Repository,
+    pathspecs: &[String],
+    opts: DiffOptions,
+) -> Result<UnstagedDiffWithPeers> {
+    let config = repo.config()?;
+    let thread_policy = repo.thread_policy();
+    let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
+    let staged = filter_file_changes(staged_changes(repo, rename_threshold)?, repo, pathspecs);
+    let peer_hunks: std::collections::HashMap<String, Vec<StructuredHunk>> = staged
+        .iter()
+        .map(|fc| {
+            let structured = structured_for_file_change(fc, opts.clone());
+            (fc.path.clone(), structured.hunks)
+        })
+        .collect();
+    let unstaged = filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs);
+    let files = file_diffs_from_worktree_changes(unstaged, &config, &thread_policy, opts)?;
+    Ok((files, peer_hunks))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

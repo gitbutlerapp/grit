@@ -67,6 +67,7 @@ pub use patch_log::{
     LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchTextOptions,
 };
 pub use pickaxe::{Pickaxe, PickaxeError, PickaxeKind};
+pub(crate) use targets::{collect_files_for_target, unstaged_file_diffs_with_peer_hunks};
 pub use targets::{
     resolve_diff_arguments, DiffArguments, DiffTarget, FileDiff, ResolveDiffArgumentsError,
 };

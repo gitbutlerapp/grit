@@ -622,6 +622,9 @@ enum Command {
         /// Apply a unified diff to the index (`git apply --cached`). Use `-` for stdin.
         #[arg(long = "patch-file", value_name = "FILE|-")]
         patch_file: Option<String>,
+        /// Stage only the listed hunk ids from `grit diff --json` (comma-separated, repeatable).
+        #[arg(long = "hunks", value_name = "ID,...", action = clap::ArgAction::Append)]
+        hunks: Vec<String>,
     },
     /// Remove tracked paths from the working tree and index.
     Rm {
@@ -1640,8 +1643,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             executable,
             non_executable,
             patch_file,
+            hunks,
         } => {
             if let Some(file) = patch_file {
+                if !hunks.is_empty() {
+                    bail!("--patch-file cannot be used with --hunks");
+                }
                 if executable || non_executable {
                     bail!("--patch-file cannot be used with --executable or --non-executable");
                 }
@@ -1658,6 +1665,31 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     bail!("--patch-file cannot be used with path arguments");
                 }
                 emit(&commands::add::run_patch_file(&file, dry_run)?, opts, ctx)
+            } else if !hunks.is_empty() {
+                if executable || non_executable {
+                    bail!("--hunks cannot be used with --executable or --non-executable");
+                }
+                if force {
+                    bail!("--hunks cannot be used with --force");
+                }
+                if update {
+                    bail!("--hunks cannot be used with --update");
+                }
+                if intent_to_add {
+                    bail!("--hunks cannot be used with --intent-to-add");
+                }
+                match commands::add::run_hunks(&pathspecs, &hunks, dry_run) {
+                    Ok(outcome) => emit(&outcome, opts, ctx),
+                    Err(err) => {
+                        let code = commands::add::hunks_exit_code(&err);
+                        if opts.mode == OutputMode::Json {
+                            output::emit_error(&err, opts);
+                        } else {
+                            eprintln!("error: {err:#}");
+                        }
+                        std::process::exit(code);
+                    }
+                }
             } else {
                 emit(
                     &commands::add::run(
