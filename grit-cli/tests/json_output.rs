@@ -2040,7 +2040,9 @@ fn merge_conflict_json_is_structured() -> TestResult {
     assert_eq!(out.status, Some(1), "{}", out.dump());
     let v: Value = serde_json::from_str(&out.stdout)?;
     assert_eq!(v["result"], "conflicts");
-    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    assert_eq!(v["conflicts"][0]["path"], "f");
+    assert_eq!(v["conflicts"][0]["kind"], "content");
+    assert!(v["next_steps"].as_array().is_some());
     assert!(
         repo.join(".git/MERGE_HEAD").exists(),
         "merge should leave MERGE_HEAD"

@@ -151,7 +151,21 @@ impl NextStep {
             Self::StageResolved => Some("grit add .".to_owned()),
             Self::Commit => Some("grit commit \"message\"".to_owned()),
             Self::Abort(InProgressOperation::Merge) => Some("grit merge --abort".to_owned()),
-            Self::Abort(_) | Self::Continue(_) | Self::Skip(_) => None,
+            Self::Abort(InProgressOperation::CherryPick) => Some("grit pick --abort".to_owned()),
+            Self::Abort(InProgressOperation::Revert) => Some("grit revert --abort".to_owned()),
+            Self::Continue(InProgressOperation::Merge) => Some("grit merge --continue".to_owned()),
+            Self::Continue(InProgressOperation::CherryPick) => {
+                Some("grit pick --continue".to_owned())
+            }
+            Self::Continue(InProgressOperation::Revert) => {
+                Some("grit revert --continue".to_owned())
+            }
+            Self::Skip(InProgressOperation::CherryPick) => Some("grit pick --skip".to_owned()),
+            Self::Skip(InProgressOperation::Revert) => Some("grit revert --skip".to_owned()),
+            Self::Abort(_)
+            | Self::Continue(_)
+            | Self::Skip(InProgressOperation::Merge)
+            | Self::Skip(_) => None,
         }
     }
 }
@@ -208,9 +222,18 @@ pub fn operation_next_steps(
                 vec![NextStep::Commit]
             }
         }
-        InProgressOperation::CherryPick
-        | InProgressOperation::Revert
-        | InProgressOperation::Rebase
+        InProgressOperation::CherryPick | InProgressOperation::Revert => {
+            if has_unmerged_conflicts {
+                vec![
+                    NextStep::ResolveConflicts,
+                    NextStep::StageResolved,
+                    NextStep::Continue(kind),
+                ]
+            } else {
+                vec![NextStep::Continue(kind)]
+            }
+        }
+        InProgressOperation::Rebase
         | InProgressOperation::RebaseInteractive
         | InProgressOperation::Am
         | InProgressOperation::Bisect => vec![],
@@ -222,9 +245,15 @@ pub fn operation_next_steps(
 pub fn operation_alternatives(kind: InProgressOperation) -> Vec<NextStep> {
     match kind {
         InProgressOperation::Merge => vec![NextStep::Abort(InProgressOperation::Merge)],
-        InProgressOperation::CherryPick
-        | InProgressOperation::Revert
-        | InProgressOperation::Rebase
+        InProgressOperation::CherryPick => vec![
+            NextStep::Abort(InProgressOperation::CherryPick),
+            NextStep::Skip(InProgressOperation::CherryPick),
+        ],
+        InProgressOperation::Revert => vec![
+            NextStep::Abort(InProgressOperation::Revert),
+            NextStep::Skip(InProgressOperation::Revert),
+        ],
+        InProgressOperation::Rebase
         | InProgressOperation::RebaseInteractive
         | InProgressOperation::Am
         | InProgressOperation::Bisect => vec![],

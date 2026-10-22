@@ -28,7 +28,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `fetch` | [v1](/schemas/fetch/v1.json) |
 | `init` | [v1](/schemas/init/v1.json) |
 | `log` | [v1](/schemas/log/v1.json) |
-| `merge` | [v1](/schemas/merge/v1.json) |
+| `merge` | [v2](/schemas/merge/v2.json), [v1](/schemas/merge/v1.json) |
 | `mv` | [v1](/schemas/mv/v1.json) |
 | `notes` | [v1](/schemas/notes/v1.json) |
 | `notes.add` | [v1](/schemas/notes.add/v1.json) |
@@ -40,7 +40,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `history.reword` | [v1](/schemas/history.reword/v1.json) |
 | `history.fixup` | [v1](/schemas/history.fixup/v1.json) |
 | `history.absorb` | [v1](/schemas/history.absorb/v1.json) |
-| `pull` | [v1](/schemas/pull/v1.json) |
+| `pull` | [v2](/schemas/pull/v2.json), [v1](/schemas/pull/v1.json) |
 | `push` | [v1](/schemas/push/v1.json) |
 | `remote` | [v1](/schemas/remote/v1.json) |
 | `remote.add` | [v1](/schemas/remote.add/v1.json) |

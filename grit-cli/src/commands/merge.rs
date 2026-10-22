@@ -6,13 +6,16 @@
 
 use crate::context;
 use crate::markdown;
+use crate::operation_output::{
+    render_conflicts_human, ConflictJson, OperationConflictBlock,
+};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
 use grit_lib::objects::ObjectId;
+use grit_lib::operation::Conflict;
 use grit_lib::porcelain::merge::{
     abort_branch_merge, integrate_branch, IntegrateBranchOutcome, MergeConflictDetail,
-    MergeConflictKind,
 };
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -51,24 +54,14 @@ pub struct MergeOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
-    /// Conflicted paths when `result` is `conflicts`.
+    /// Structured conflicts when `result` is `conflicts`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
-    pub conflicts: Option<Vec<String>>,
-    /// Structured conflict metadata when `result` is `conflicts`.
+    pub conflicts: Option<Vec<ConflictJson>>,
+    /// Suggested `grit` commands when `result` is `conflicts`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
-    pub conflict_details: Option<Vec<MergeConflictJson>>,
-}
-
-/// One conflicted path in `--json` merge output.
-#[derive(Serialize, JsonSchema)]
-pub struct MergeConflictJson {
-    pub path: String,
-    pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
+    pub next_steps: Option<Vec<String>>,
 }
 
 impl MergeOutcome {
@@ -80,7 +73,7 @@ impl MergeOutcome {
             change_id: None,
             upstream: None,
             conflicts: None,
-            conflict_details: None,
+            next_steps: None,
         }
     }
 
@@ -92,7 +85,7 @@ impl MergeOutcome {
             change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
             upstream: None,
             conflicts: None,
-            conflict_details: None,
+            next_steps: None,
         }
     }
 
@@ -104,26 +97,27 @@ impl MergeOutcome {
             change_id: change_id.as_ref().map(|id| id.as_str().to_owned()),
             upstream: None,
             conflicts: None,
-            conflict_details: None,
+            next_steps: None,
         }
     }
 
     fn conflicts(label: &str, details: Vec<MergeConflictDetail>) -> Self {
-        let paths: Vec<String> = details.iter().map(|d| d.path.clone()).collect();
-        let conflict_details = Some(
-            details
-                .iter()
-                .map(|d| merge_conflict_json(d, label))
-                .collect(),
-        );
+        let library_conflicts: Vec<Conflict> = details
+            .iter()
+            .map(|d| Conflict {
+                path: d.path.clone(),
+                kind: d.kind,
+            })
+            .collect();
+        let block = OperationConflictBlock::for_merge(&library_conflicts, label);
         Self {
             result: MergeResult::Conflicts,
             branch: label.to_owned(),
             oid: None,
             change_id: None,
             upstream: None,
-            conflicts: Some(paths),
-            conflict_details,
+            conflicts: Some(block.conflicts),
+            next_steps: Some(block.next_steps),
         }
     }
 
@@ -135,7 +129,7 @@ impl MergeOutcome {
             change_id: None,
             upstream: None,
             conflicts: None,
-            conflict_details: None,
+            next_steps: None,
         }
     }
 
@@ -153,34 +147,8 @@ impl MergeOutcome {
             change_id,
             upstream: Some(upstream.to_owned()),
             conflicts: None,
-            conflict_details: None,
+            next_steps: None,
         }
-    }
-}
-
-fn merge_conflict_json(detail: &MergeConflictDetail, merge_label: &str) -> MergeConflictJson {
-    let (kind, summary) = match detail.kind {
-        MergeConflictKind::Content => ("content".to_owned(), None),
-        MergeConflictKind::AddAdd => ("add_add".to_owned(), None),
-        MergeConflictKind::ModifyDelete { deleted_in_current } => {
-            let summary = if deleted_in_current {
-                Some(format!(
-                    "{} deleted on the current branch and modified in {merge_label}; {merge_label}'s version is in the work tree",
-                    detail.path
-                ))
-            } else {
-                Some(format!(
-                    "{} modified on the current branch and deleted in {merge_label}; the current branch's version is in the work tree",
-                    detail.path
-                ))
-            };
-            ("modify_delete".to_owned(), summary)
-        }
-    };
-    MergeConflictJson {
-        path: detail.path.clone(),
-        kind,
-        summary,
     }
 }
 
@@ -196,23 +164,10 @@ impl HumanRender for MergeOutcome {
                 self.branch
             ),
             MergeResult::Conflicts => {
-                if let Some(details) = &self.conflict_details {
-                    for item in details {
-                        if let Some(summary) = &item.summary {
-                            eprintln!("CONFLICT ({kind}): {summary}", kind = item.kind);
-                        } else {
-                            eprintln!("CONFLICT ({kind}): {}", item.path, kind = item.kind);
-                        }
-                    }
-                } else {
-                    eprintln!("Merge has conflicts in:");
-                    for path in self.conflicts.as_deref().unwrap_or(&[]) {
-                        eprintln!("  {path}");
-                    }
+                if let Some(details) = &self.conflicts {
+                    render_conflicts_human(details, w)?;
                 }
-                eprintln!(
-                    "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."
-                );
+                crate::operation_output::render_merge_conflict_footer_human();
             }
             MergeResult::Aborted => outln!(w, "Merge aborted."),
             MergeResult::SetUpstream => outln!(
@@ -303,6 +258,8 @@ fn resolve_branch(repo: &Repository, name: &str) -> Result<ObjectId> {
 mod tests {
     use super::*;
     use grit_lib::objects::ObjectId;
+    use grit_lib::operation::ConflictKind;
+    use grit_test_support::CliFixture;
 
     #[test]
     fn merge_result_serializes_snake_case() {
@@ -319,7 +276,7 @@ mod tests {
                     "topic",
                     vec![MergeConflictDetail {
                         path: "a.txt".into(),
-                        kind: MergeConflictKind::Content,
+                        kind: ConflictKind::Content,
                     }],
                 ),
                 "conflicts",
@@ -334,5 +291,38 @@ mod tests {
             let value = serde_json::to_value(&outcome).expect("json");
             assert_eq!(value["result"].as_str(), Some(expected), "{value}");
         }
+    }
+
+    #[test]
+    fn merge_conflict_json_shape() {
+        let fixture = CliFixture::empty();
+        std::fs::write(fixture.path().join("f.txt"), "base\n").unwrap();
+        fixture.run_ok(&["add", "f.txt"]);
+        fixture.run_ok(&["commit", "-m", "base"]);
+        fixture.run_ok(&["switch", "--create", "side"]);
+        std::fs::write(fixture.path().join("f.txt"), "side\n").unwrap();
+        fixture.run_ok(&["commit", "-m", "side"]);
+        fixture.run_ok(&["switch", "main"]);
+        std::fs::write(fixture.path().join("f.txt"), "main\n").unwrap();
+        fixture.run_ok(&["commit", "-m", "main"]);
+
+        let out = fixture.run(&["--json", "merge", "side"]);
+        assert_eq!(out.status, Some(1), "{}", out.dump("merge"));
+        let v: serde_json::Value = serde_json::from_str(&out.stdout).expect("json");
+        assert_eq!(v["result"], "conflicts");
+        let conflicts = v["conflicts"].as_array().expect("conflicts array");
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0]["path"], "f.txt");
+        assert_eq!(conflicts[0]["kind"], "content");
+        let next = v["next_steps"].as_array().expect("next_steps");
+        assert!(
+            next.iter().any(|s| s.as_str() == Some("grit diff")),
+            "{next:?}"
+        );
+        assert!(
+            next.iter()
+                .any(|s| s.as_str() == Some("grit merge --abort")),
+            "{next:?}"
+        );
     }
 }

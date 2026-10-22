@@ -140,10 +140,10 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
         presentation,
     )?;
 
-    if has_merge_conflicts(&merged) {
-        return Ok(ReplayOutcome::Conflicts {
-            paths: conflict_paths(&merged),
-        });
+    if crate::operation::tree_merge_has_conflicts(&merged) {
+        let conflicts = crate::operation::conflicts_from_tree_merge(&merged);
+        let paths: Vec<String> = conflicts.iter().map(|c| c.path.clone()).collect();
+        return Ok(ReplayOutcome::Conflicts { paths });
     }
 
     let new_tree = merged.result_tree;
@@ -309,76 +309,4 @@ fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
 
 fn empty_tree(repo: &Repository) -> Result<ObjectId> {
     repo.odb().write(ObjectKind::Tree, &[])
-}
-
-fn has_merge_conflicts(merged: &crate::merge_trees::TreeMergeOutput) -> bool {
-    !merged.conflict_content.is_empty() || merged.index.entries().iter().any(|e| e.stage() != 0)
-}
-
-fn conflict_paths(merged: &crate::merge_trees::TreeMergeOutput) -> Vec<String> {
-    let mut paths: Vec<String> = merged
-        .conflict_content
-        .keys()
-        .map(|k| String::from_utf8_lossy(k).into_owned())
-        .collect();
-    paths.extend(
-        merged
-            .index
-            .entries()
-            .iter()
-            .filter(|e| e.stage() != 0)
-            .map(|e| String::from_utf8_lossy(&e.path).into_owned()),
-    );
-    paths.sort();
-    paths.dedup();
-    paths
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::index::{Index, IndexEntry};
-    use crate::merge_trees::TreeMergeOutput;
-    use std::collections::BTreeMap;
-
-    fn index_entry(path: &str, stage: u8) -> IndexEntry {
-        let mut entry = IndexEntry {
-            ctime_sec: 0,
-            ctime_nsec: 0,
-            mtime_sec: 0,
-            mtime_nsec: 0,
-            dev: 0,
-            ino: 0,
-            mode: crate::index::MODE_REGULAR,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            oid: crate::diff::zero_oid(),
-            flags: 0,
-            flags_extended: None,
-            path: path.as_bytes().to_vec(),
-            base_index_pos: 0,
-        };
-        entry.set_stage(stage);
-        entry
-    }
-
-    #[test]
-    fn conflict_paths_unions_text_markers_and_unmerged_index_paths() {
-        let mut index = Index::new();
-        index.add_or_replace(index_entry("b.txt", 1));
-        index.add_or_replace(index_entry("b.txt", 2));
-        let mut conflict_content = BTreeMap::new();
-        conflict_content.insert(b"a.txt".to_vec(), crate::diff::zero_oid());
-        let merged = TreeMergeOutput {
-            index,
-            conflict_content,
-            result_tree: crate::diff::zero_oid(),
-            touched_paths: std::collections::HashSet::new(),
-        };
-        assert_eq!(
-            conflict_paths(&merged),
-            vec!["a.txt".to_owned(), "b.txt".to_owned()]
-        );
-    }
 }

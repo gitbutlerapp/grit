@@ -41,7 +41,7 @@ Already up to date.
 
 ## JSON output
 
-Schema: [v1](/schemas/pull/v1.json)
+Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stable, scripting-friendly output:
 
@@ -52,8 +52,8 @@ The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stabl
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit, fast-forward tip, or adopted upstream). |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
-| `conflicts` | array | Conflicted paths when `result` is `conflicts`; omitted otherwise. |
-| `conflict_details` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text. |
+| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text (same shape as [`grit merge`](../merge/#json-output)). |
+| `next_steps` | array or null | Suggested `grit` command lines when `result` is `conflicts`. |
 
 Example:
 
@@ -69,7 +69,7 @@ Example:
 
 Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-Schema: [v1](/schemas/pull/v1.json)
+Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 

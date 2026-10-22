@@ -21,6 +21,7 @@ mod json_filter;
 mod json_schema;
 mod log_display;
 mod markdown;
+mod operation_output;
 mod output;
 mod pathspec_args;
 mod progress;

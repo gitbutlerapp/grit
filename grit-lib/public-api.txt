@@ -9854,6 +9854,125 @@ pub fn grit_lib::objects::tag_object_line_oid(&[u8]) -> core::option::Option<gri
 pub fn grit_lib::objects::tree_entry_cmp(&[u8], bool, &[u8], bool) -> core::cmp::Ordering
 pub type grit_lib::objects::OidHashMap<V> = hashbrown::map::HashMap<grit_lib::objects::ObjectId, V, grit_lib::objects::OidBuildHasher>
 pub type grit_lib::objects::OidHashSet = hashbrown::set::HashSet<grit_lib::objects::ObjectId, grit_lib::objects::OidBuildHasher>
+pub mod grit_lib::operation
+pub enum grit_lib::operation::ConflictKind
+pub grit_lib::operation::ConflictKind::AddAdd
+pub grit_lib::operation::ConflictKind::Content
+pub grit_lib::operation::ConflictKind::ModifyDelete
+pub grit_lib::operation::ConflictKind::ModifyDelete::deleted_in_current: bool
+impl grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::operation::ConflictKind
+impl core::cmp::PartialEq for grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::operation::ConflictKind
+impl core::marker::StructuralPartialEq for grit_lib::operation::ConflictKind
+impl core::marker::Freeze for grit_lib::operation::ConflictKind
+impl core::marker::Send for grit_lib::operation::ConflictKind
+impl core::marker::Sync for grit_lib::operation::ConflictKind
+impl core::marker::Unpin for grit_lib::operation::ConflictKind
+impl core::marker::UnsafeUnpin for grit_lib::operation::ConflictKind
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::operation::ConflictKind
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::operation::ConflictKind
+pub enum grit_lib::operation::InProgressOperation
+pub grit_lib::operation::InProgressOperation::Am
+pub grit_lib::operation::InProgressOperation::Bisect
+pub grit_lib::operation::InProgressOperation::CherryPick
+pub grit_lib::operation::InProgressOperation::Merge
+pub grit_lib::operation::InProgressOperation::Rebase
+pub grit_lib::operation::InProgressOperation::RebaseInteractive
+pub grit_lib::operation::InProgressOperation::Revert
+impl grit_lib::state::InProgressOperation
+pub fn grit_lib::state::InProgressOperation::description(&self) -> &'static str
+impl core::clone::Clone for grit_lib::state::InProgressOperation
+pub fn grit_lib::state::InProgressOperation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::state::InProgressOperation
+impl core::cmp::PartialEq for grit_lib::state::InProgressOperation
+pub fn grit_lib::state::InProgressOperation::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::state::InProgressOperation
+pub fn grit_lib::state::InProgressOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::state::InProgressOperation
+impl core::marker::StructuralPartialEq for grit_lib::state::InProgressOperation
+impl core::marker::Freeze for grit_lib::state::InProgressOperation
+impl core::marker::Send for grit_lib::state::InProgressOperation
+impl core::marker::Sync for grit_lib::state::InProgressOperation
+impl core::marker::Unpin for grit_lib::state::InProgressOperation
+impl core::marker::UnsafeUnpin for grit_lib::state::InProgressOperation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::InProgressOperation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::InProgressOperation
+pub enum grit_lib::operation::NextStep
+pub grit_lib::operation::NextStep::Abort(grit_lib::state::InProgressOperation)
+pub grit_lib::operation::NextStep::Commit
+pub grit_lib::operation::NextStep::Continue(grit_lib::state::InProgressOperation)
+pub grit_lib::operation::NextStep::ResolveConflicts
+pub grit_lib::operation::NextStep::Skip(grit_lib::state::InProgressOperation)
+pub grit_lib::operation::NextStep::StageResolved
+impl grit_lib::state::NextStep
+pub fn grit_lib::state::NextStep::grit_command(&self) -> core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::state::NextStep
+pub fn grit_lib::state::NextStep::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::state::NextStep
+impl core::cmp::PartialEq for grit_lib::state::NextStep
+pub fn grit_lib::state::NextStep::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::state::NextStep
+pub fn grit_lib::state::NextStep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::state::NextStep
+impl core::marker::Freeze for grit_lib::state::NextStep
+impl core::marker::Send for grit_lib::state::NextStep
+impl core::marker::Sync for grit_lib::state::NextStep
+impl core::marker::Unpin for grit_lib::state::NextStep
+impl core::marker::UnsafeUnpin for grit_lib::state::NextStep
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::NextStep
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::NextStep
+pub struct grit_lib::operation::Conflict
+pub grit_lib::operation::Conflict::kind: grit_lib::operation::ConflictKind
+pub grit_lib::operation::Conflict::path: alloc::string::String
+impl core::clone::Clone for grit_lib::operation::Conflict
+pub fn grit_lib::operation::Conflict::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::operation::Conflict
+impl core::cmp::PartialEq for grit_lib::operation::Conflict
+pub fn grit_lib::operation::Conflict::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::operation::Conflict
+pub fn grit_lib::operation::Conflict::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::operation::Conflict
+impl core::marker::Freeze for grit_lib::operation::Conflict
+impl core::marker::Send for grit_lib::operation::Conflict
+impl core::marker::Sync for grit_lib::operation::Conflict
+impl core::marker::Unpin for grit_lib::operation::Conflict
+impl core::marker::UnsafeUnpin for grit_lib::operation::Conflict
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::operation::Conflict
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::operation::Conflict
+pub struct grit_lib::operation::Operation
+pub grit_lib::operation::Operation::alternatives: alloc::vec::Vec<grit_lib::state::NextStep>
+pub grit_lib::operation::Operation::kind: grit_lib::state::InProgressOperation
+pub grit_lib::operation::Operation::next_steps: alloc::vec::Vec<grit_lib::state::NextStep>
+impl core::clone::Clone for grit_lib::state::Operation
+pub fn grit_lib::state::Operation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::state::Operation
+impl core::cmp::PartialEq for grit_lib::state::Operation
+pub fn grit_lib::state::Operation::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::state::Operation
+pub fn grit_lib::state::Operation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::state::Operation
+impl core::marker::Freeze for grit_lib::state::Operation
+impl core::marker::Send for grit_lib::state::Operation
+impl core::marker::Sync for grit_lib::state::Operation
+impl core::marker::Unpin for grit_lib::state::Operation
+impl core::marker::UnsafeUnpin for grit_lib::state::Operation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::Operation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::Operation
+pub fn grit_lib::operation::conflict_kind_from_stages(bool, bool, bool) -> grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::conflicts_from_index(&grit_lib::index::Index) -> alloc::vec::Vec<grit_lib::operation::Conflict>
+pub fn grit_lib::operation::conflicts_from_tree_merge(&grit_lib::diff::merge_trees::TreeMergeOutput) -> alloc::vec::Vec<grit_lib::operation::Conflict>
+pub fn grit_lib::operation::next_step_grit_commands(&[grit_lib::state::NextStep]) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::operation::operation_alternatives(grit_lib::state::InProgressOperation) -> alloc::vec::Vec<grit_lib::state::NextStep>
+pub fn grit_lib::operation::operation_next_steps(grit_lib::state::InProgressOperation, bool) -> alloc::vec::Vec<grit_lib::state::NextStep>
+pub fn grit_lib::operation::status_operation(&grit_lib::state::WtStatusState, bool) -> core::option::Option<grit_lib::state::Operation>
+pub fn grit_lib::operation::tree_merge_has_conflicts(&grit_lib::diff::merge_trees::TreeMergeOutput) -> bool
 pub mod grit_lib::pack_reuse
 pub struct grit_lib::pack_reuse::ReuseWriteStats
 pub grit_lib::pack_reuse::ReuseWriteStats::pack_ofs_fixup_objects: u32
@@ -10826,7 +10945,7 @@ pub type grit_lib::porcelain::log::DecorationMap = std::collections::hash::map::
 pub mod grit_lib::porcelain::merge
 pub enum grit_lib::porcelain::merge::IntegrateBranchOutcome
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts
-pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::details: alloc::vec::Vec<grit_lib::porcelain::merge::MergeConflictDetail>
+pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::details: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
@@ -10855,45 +10974,49 @@ pub grit_lib::porcelain::merge::MergeConflictKind::AddAdd
 pub grit_lib::porcelain::merge::MergeConflictKind::Content
 pub grit_lib::porcelain::merge::MergeConflictKind::ModifyDelete
 pub grit_lib::porcelain::merge::MergeConflictKind::ModifyDelete::deleted_in_current: bool
-impl core::clone::Clone for grit_lib::porcelain::merge::MergeConflictKind
-pub fn grit_lib::porcelain::merge::MergeConflictKind::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::porcelain::merge::MergeConflictKind
-impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeConflictKind
-pub fn grit_lib::porcelain::merge::MergeConflictKind::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::porcelain::merge::MergeConflictKind
-pub fn grit_lib::porcelain::merge::MergeConflictKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::porcelain::merge::MergeConflictKind
-impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeConflictKind
-impl core::marker::Freeze for grit_lib::porcelain::merge::MergeConflictKind
-impl core::marker::Send for grit_lib::porcelain::merge::MergeConflictKind
-impl core::marker::Sync for grit_lib::porcelain::merge::MergeConflictKind
-impl core::marker::Unpin for grit_lib::porcelain::merge::MergeConflictKind
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeConflictKind
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeConflictKind
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeConflictKind
+impl grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::operation::ConflictKind
+impl core::cmp::PartialEq for grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::operation::ConflictKind
+pub fn grit_lib::operation::ConflictKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::operation::ConflictKind
+impl core::marker::StructuralPartialEq for grit_lib::operation::ConflictKind
+impl core::marker::Freeze for grit_lib::operation::ConflictKind
+impl core::marker::Send for grit_lib::operation::ConflictKind
+impl core::marker::Sync for grit_lib::operation::ConflictKind
+impl core::marker::Unpin for grit_lib::operation::ConflictKind
+impl core::marker::UnsafeUnpin for grit_lib::operation::ConflictKind
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::operation::ConflictKind
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::operation::ConflictKind
 pub struct grit_lib::porcelain::merge::MergeConflictDetail
-pub grit_lib::porcelain::merge::MergeConflictDetail::kind: grit_lib::porcelain::merge::MergeConflictKind
+pub grit_lib::porcelain::merge::MergeConflictDetail::kind: grit_lib::operation::ConflictKind
 pub grit_lib::porcelain::merge::MergeConflictDetail::path: alloc::string::String
-impl core::clone::Clone for grit_lib::porcelain::merge::MergeConflictDetail
-pub fn grit_lib::porcelain::merge::MergeConflictDetail::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeConflictDetail
-pub fn grit_lib::porcelain::merge::MergeConflictDetail::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::porcelain::merge::MergeConflictDetail
-pub fn grit_lib::porcelain::merge::MergeConflictDetail::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::marker::Freeze for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::marker::Send for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::marker::Sync for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::marker::Unpin for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeConflictDetail
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeConflictDetail
+impl core::clone::Clone for grit_lib::operation::Conflict
+pub fn grit_lib::operation::Conflict::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::operation::Conflict
+impl core::cmp::PartialEq for grit_lib::operation::Conflict
+pub fn grit_lib::operation::Conflict::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::operation::Conflict
+pub fn grit_lib::operation::Conflict::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::operation::Conflict
+impl core::marker::Freeze for grit_lib::operation::Conflict
+impl core::marker::Send for grit_lib::operation::Conflict
+impl core::marker::Sync for grit_lib::operation::Conflict
+impl core::marker::Unpin for grit_lib::operation::Conflict
+impl core::marker::UnsafeUnpin for grit_lib::operation::Conflict
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::operation::Conflict
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::operation::Conflict
 pub fn grit_lib::porcelain::merge::abort_branch_merge(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::merge::compose_fast_forward_index(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::index::Index) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::porcelain::merge::compose_octopus_final_index(&grit_lib::index::Index, &mut grit_lib::index::Index)
+pub fn grit_lib::porcelain::merge::conflicts_from_tree_merge(&grit_lib::diff::merge_trees::TreeMergeOutput) -> alloc::vec::Vec<grit_lib::operation::Conflict>
 pub fn grit_lib::porcelain::merge::integrate_branch(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
 pub fn grit_lib::porcelain::merge::reduce_octopus_merge_heads(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[alloc::string::String]) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::objects::ObjectId>, alloc::vec::Vec<alloc::string::String>)>
+pub fn grit_lib::porcelain::merge::tree_merge_has_conflicts(&grit_lib::diff::merge_trees::TreeMergeOutput) -> bool
 pub fn grit_lib::porcelain::merge::tree_to_index_entries(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::index::IndexEntry>>
 pub fn grit_lib::porcelain::merge::tree_to_map(alloc::vec::Vec<grit_lib::index::IndexEntry>) -> std::collections::hash::map::HashMap<alloc::vec::Vec<u8>, grit_lib::index::IndexEntry>
 pub mod grit_lib::porcelain::paths
@@ -10961,6 +11084,7 @@ pub fn grit_lib::porcelain::pathspec_match::pathspec_matches_known_in_repository
 pub mod grit_lib::porcelain::quote_path
 pub fn grit_lib::porcelain::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_c_style(&str, bool) -> alloc::string::String
+pub fn grit_lib::porcelain::quote_path::quote_c_style_bytes(&[u8], bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_path_for_display(&str, bool) -> alloc::string::String
 pub mod grit_lib::porcelain::rebase
 pub enum grit_lib::porcelain::rebase::FixupMessageMode
@@ -12991,6 +13115,7 @@ pub fn &mut T::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, gri
 pub mod grit_lib::quote_path
 pub fn grit_lib::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
 pub fn grit_lib::quote_path::quote_c_style(&str, bool) -> alloc::string::String
+pub fn grit_lib::quote_path::quote_c_style_bytes(&[u8], bool) -> alloc::string::String
 pub fn grit_lib::quote_path::quote_path_for_display(&str, bool) -> alloc::string::String
 pub mod grit_lib::refs
 pub mod grit_lib::refs::branch_tracking

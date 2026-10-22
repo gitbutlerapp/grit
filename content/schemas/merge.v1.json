@@ -2,8 +2,8 @@
   "$id": "https://grit-scm.com/schemas/merge/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
-    "MergeConflictJson": {
-      "description": "One conflicted path in `--json` merge output.",
+    "ConflictJson": {
+      "description": "One conflicted path in `--json` operation output.",
       "properties": {
         "kind": {
           "type": "string"
@@ -50,18 +50,18 @@
         "null"
       ]
     },
-    "conflict_details": {
-      "description": "Structured conflict metadata when `result` is `conflicts`.",
+    "conflicts": {
+      "description": "Structured conflicts when `result` is `conflicts`.",
       "items": {
-        "$ref": "#/definitions/MergeConflictJson"
+        "$ref": "#/definitions/ConflictJson"
       },
       "type": [
         "array",
         "null"
       ]
     },
-    "conflicts": {
-      "description": "Conflicted paths when `result` is `conflicts`.",
+    "next_steps": {
+      "description": "Suggested `grit` commands when `result` is `conflicts`.",
       "items": {
         "type": "string"
       },

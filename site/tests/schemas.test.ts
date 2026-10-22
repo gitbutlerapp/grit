@@ -4,10 +4,12 @@ import { loadSchemas, schemaPublicUrl } from "../lib/schemas";
 
 describe("JSON schema routes", () => {
   it("generates a static param for every committed schema", () => {
-    const commands = loadSchemas().map((s) => s.command);
+    const schemas = loadSchemas();
     const params = generateStaticParams().map((p) => p.slug?.join("/"));
-    expect(params).toHaveLength(commands.length);
-    expect(new Set(params)).toEqual(new Set(commands.map((c) => `${c}/v1.json`)));
+    expect(params).toHaveLength(schemas.length);
+    expect(new Set(params)).toEqual(
+      new Set(schemas.map((s) => `${s.command}/v${s.version}.json`)),
+    );
   });
 
   it("serves status.v1.json with application/schema+json", async () => {

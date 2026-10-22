@@ -19,7 +19,7 @@ const OTHER_PATHS = new Set([
   "/install-nightly.ps1",
 ]);
 
-const SCHEMA_PATH = /^\/schemas\/[a-z0-9_.-]+\/v1\.json$/;
+const SCHEMA_PATH = /^\/schemas\/[a-z0-9_.-]+\/v[12]\.json$/;
 
 /** Anchors a page renders: its headings plus ids the overview layout adds. */
 function anchorsFor(site: Site): Map<string, Set<string>> {

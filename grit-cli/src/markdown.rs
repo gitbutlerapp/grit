@@ -507,24 +507,18 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         MergeResult::Conflicts => {
             outln!(w, "- Merge **`{}`** stopped with conflicts", outcome.branch);
             outln!(w);
-            if let Some(details) = &outcome.conflict_details {
-                for item in details {
-                    if let Some(summary) = &item.summary {
-                        outln!(w, "- **{}** — {summary}", item.kind);
-                    } else {
-                        outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
-                    }
-                }
-            } else {
-                for path in outcome.conflicts.as_deref().unwrap_or(&[]) {
-                    outln!(w, "- `{path}`");
-                }
+            if let Some(details) = &outcome.conflicts {
+                crate::operation_output::render_conflicts_markdown(details, w)?;
             }
-            outln!(w);
-            outln!(
-                w,
-                "→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`"
-            );
+            if let Some(steps) = &outcome.next_steps {
+                crate::operation_output::render_next_steps_markdown(steps, w)?;
+            } else {
+                outln!(w);
+                outln!(
+                    w,
+                    "→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`"
+                );
+            }
         }
         MergeResult::Aborted => outln!(w, "Merge aborted."),
         MergeResult::SetUpstream => {
