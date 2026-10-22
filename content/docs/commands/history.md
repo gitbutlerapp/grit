@@ -16,6 +16,7 @@ grit history drop|move|reword|fixup|squash|absorb … [--dry-run] [--update-refs
 grit history fixup <commit> [--empty=(drop|keep|abort)] [-m|--message-file]
 grit history squash <range>… [-m|--message-file|--combine]
 grit history absorb [--base <rev>]
+grit history split <commit> -m <message> [--rest-message <message>] -- <path>…
 ```
 
 ## Description
@@ -66,6 +67,12 @@ Fold every commit in a **connected** revision range into the **oldest** commit i
 
 The range uses the same revision syntax as `git rev-list` (for example `HEAD~3..HEAD` or full OIDs `abc..def`). With `--update-refs head`, grit may fold at `HEAD` without replaying when the range ends at the current tip and the message mode allows it.
 
+### `split`
+
+Peel changes that match pathspecs out of one commit into a **new parent commit**, then leave the target commit’s tree unchanged and replay descendants. The new parent’s tree is the target’s first parent plus only the selected paths; the target commit keeps its author and tree (and its message unless `--rest-message` is set).
+
+Provide `-m` / `--message-file` for the new parent commit and one or more paths after `--` (or `--pathspec-from-file`). Grit errors when the pathspec matches nothing or every change in the commit.
+
 ## Options
 
 | Option | Description |
@@ -75,6 +82,20 @@ The range uses the same revision syntax as `git rev-list` (for example `HEAD~3..
 | `--after` | Place `<commit>` immediately after this revision (`move` only). |
 | `-m`, `--message` | New commit message (conflicts with `--message-file`). |
 | `--message-file` | Read the new message from a file, or `-` for stdin. |
+| `--dry-run` | List ref updates without moving refs. |
+| `--update-refs` | `branches` (default) or `head`. |
+
+### `split` options
+
+| Option | Description |
+| --- | --- |
+| `<commit>` | Commit to split (revision spec). |
+| `-m`, `--message` | Message for the new parent commit (conflicts with `--message-file`). |
+| `--message-file` | Read the new parent message from a file, or `-` for stdin. |
+| `--rest-message` | Replace the remaining commit’s message after the split. |
+| `PATH`… | Pathspecs after `--` limiting which changes move into the new parent (required). |
+| `--pathspec-from-file` | Read pathspecs from a file, or `-` for stdin (same as other commands). |
+| `--pathspec-file-nul` | `--pathspec-from-file` entries are NUL-separated. |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |
 
@@ -145,15 +166,24 @@ Absorbed 1 hunk(s) into 2 commit(s)
   file.txt → commit a1b2c3d
 ```
 
+Split one file out of the parent of `HEAD`:
+
+```console
+$ grit history split HEAD~1 -m "add foo only" -- foo
+Split 2 commit(s)
+  commit a1b2c3d → d4e5f60
+  refs/heads/main f6a7b89 → c0ffee0
+```
+
 ## JSON output
 
 Schemas: [drop v1](/schemas/history.drop/v1.json), [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json), [squash v1](/schemas/history.squash/v1.json), [absorb v1](/schemas/history.absorb/v1.json), [rebase v1](/schemas/history.rebase/v1.json), [split v1](/schemas/history.split/v1.json)
 
-Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`, `grit history fixup`, `grit history squash`, or `grit history absorb`:
+Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`, `grit history fixup`, `grit history squash`, `grit history split`, or `grit history absorb`:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, or `"squash"`. |
+| `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, `"squash"`, or `"split"`. |
 | `rewritten` | array | `{old,new,change_id}` full hex OIDs and stored change id (`null` when dropped or absent). |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |

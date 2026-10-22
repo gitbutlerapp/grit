@@ -286,6 +286,28 @@ enum HistoryAction {
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
+    /// Peel path-limited changes out of a commit into a new parent and replay descendants.
+    Split {
+        /// Commit to split (revision spec).
+        commit: String,
+        /// Message for the new parent commit (the peeled-off changes).
+        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
+        message: Option<String>,
+        /// Read the new parent message from a file (`-` for stdin).
+        #[arg(
+            long = "message-file",
+            value_name = "PATH|-",
+            conflicts_with = "message"
+        )]
+        message_file: Option<String>,
+        /// Replace the remaining commit's message after the split.
+        #[arg(long = "rest-message")]
+        rest_message: Option<String>,
+        #[command(flatten)]
+        paths: crate::pathspec_args::TrailingPathspecArgs,
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
     /// Fold a revision range into the oldest commit and replay descendants.
     Squash {
         /// Revision range (same syntax as `git rev-list`, for example `base..tip`).
@@ -2083,6 +2105,25 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 shared,
             } => emit(
                 &commands::history::run_squash(&range, message, message_file, combine, &shared)?,
+                opts,
+                ctx,
+            ),
+            HistoryAction::Split {
+                commit,
+                message,
+                message_file,
+                rest_message,
+                paths,
+                shared,
+            } => emit(
+                &commands::history::run_split(
+                    &commit,
+                    message,
+                    message_file,
+                    rest_message,
+                    &paths,
+                    &shared,
+                )?,
                 opts,
                 ctx,
             ),

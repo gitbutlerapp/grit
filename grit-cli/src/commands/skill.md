@@ -115,7 +115,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Publish rewritten history safely | `grit fetch`, then `grit push --force-with-lease` (or `--force-with-lease=<rev>` for one ref); stale lease → exit **1**, `"rejected": true` |
 | Publish all local tags | `grit push --tags` |
 
-Ordinary pushes must fast-forward the remote. If the remote has commits you don't, grit rejects the push (exit **1**, `"rejected": true`); run `grit pull`, then push again. After `grit history` edits (reword, drop, fixup, squash), fetch and use `--force-with-lease` instead of `--force` so you don't overwrite someone else's work. `--force` overwrites unconditionally when you really need it.
+Ordinary pushes must fast-forward the remote. If the remote has commits you don't, grit rejects the push (exit **1**, `"rejected": true`); run `grit pull`, then push again. After `grit history` edits (reword, drop, fixup, squash, split), fetch and use `--force-with-lease` instead of `--force` so you don't overwrite someone else's work. `--force` overwrites unconditionally when you really need it.
 
 URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a local path.
 

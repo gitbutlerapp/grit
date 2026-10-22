@@ -46,15 +46,15 @@
     "RewrittenPair": {
       "description": "One commit OID before and after rewrite.",
       "properties": {
-        "new": {
-          "description": "Replacement commit OID (full hex), or JSON `null` when the commit was dropped.",
+        "change_id": {
+          "description": "Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.",
           "type": [
             "string",
             "null"
           ]
         },
-        "change_id": {
-          "description": "Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.",
+        "new": {
+          "description": "Replacement commit OID (full hex), or JSON `null` when the commit was dropped.",
           "type": [
             "string",
             "null"
@@ -71,7 +71,7 @@
       "type": "object"
     }
   },
-  "description": "Result of `grit history reword`, `grit history drop`, `grit history rebase`, and related rewrite subcommands.",
+  "description": "Result of `grit history drop`, `move`, `reword`, `fixup` and `squash`.",
   "properties": {
     "dry_run": {
       "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
@@ -89,7 +89,7 @@
       "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
     },
     "operation": {
-      "description": "Operation name (for example `reword`, `drop`, `fixup`, or `squash`).",
+      "description": "Operation name (`drop`, `move`, `reword`, `fixup` or `squash`).",
       "type": "string"
     },
     "refs": {

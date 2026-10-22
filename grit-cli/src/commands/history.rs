@@ -10,9 +10,10 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
+    move_commit, reword, split, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
     ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
-    RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
+    RefScope, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
+    UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -22,6 +23,7 @@ use crate::context;
 use crate::json_error;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::pathspec_args::TrailingPathspecArgs;
 
 /// Which local refs a history rewrite may move.
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
@@ -193,6 +195,7 @@ impl HumanRender for HistoryRewriteOutcome {
             let verb = match self.operation.as_str() {
                 "fixup" => "Fixed up",
                 "squash" => "Squashed",
+                "split" => "Split",
                 _ => "Rewrote",
             };
             outln!(w, "{verb} {} commit(s)", self.rewritten.len());
@@ -209,6 +212,7 @@ impl MarkdownRender for HistoryRewriteOutcome {
             "fixup" => "History fixup",
             "squash" => "History squash",
             "reword" => "History reword",
+            "split" => "History split",
             _ => "History rewrite",
         };
         markdown::print_history_rewrite_outcome(w, title, self)
@@ -414,6 +418,46 @@ pub fn run_squash(
         apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
     }
     Ok(HistoryRewriteOutcome::new("squash", &plan, shared.dry_run))
+}
+
+/// Split path-limited changes out of `commit` into a new parent commit and replay descendants.
+pub fn run_split(
+    commit: &str,
+    message: Option<String>,
+    message_file: Option<String>,
+    rest_message: Option<String>,
+    paths: &TrailingPathspecArgs,
+    shared: &HistoryRewriteArgs,
+) -> Result<HistoryRewriteOutcome> {
+    let Some(split_message) = read_message(message, message_file)? else {
+        bail!("a message is required for the new commit (-m/--message or --message-file)");
+    };
+    let on_err = history_error("history split");
+    let repo = context::discover()?;
+    paths.require_non_empty()?;
+    let resolved = paths.resolve(&repo)?;
+    let commit_oid = resolve_commit(&repo, commit, "commit")?;
+    let rewrite = Rewrite::new(repo, shared)?;
+    let plan = split(
+        &rewrite.repo,
+        commit_oid,
+        &resolved.specs,
+        split_message,
+        &SplitOptions { rest_message },
+        &rewrite.options,
+    )
+    .map_err(on_err)?;
+    verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
+    if !shared.dry_run {
+        let subject = rewrite.subject(commit_oid)?;
+        apply_rewrite(
+            &rewrite.repo,
+            &plan,
+            &rewrite.apply_options(format!("history split: {subject}"))?,
+        )
+        .map_err(on_err)?;
+    }
+    Ok(HistoryRewriteOutcome::new("split", &plan, shared.dry_run))
 }
 
 /// JSON/markdown assignment row for `grit history absorb`.
@@ -673,6 +717,12 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         }
         HistoryError::WorktreeApply { message } => {
             anyhow::anyhow!("worktree update failed: {message}")
+        }
+        HistoryError::SplitSelectsNothing => {
+            anyhow::anyhow!("pathspec did not select any changes from the commit")
+        }
+        HistoryError::SplitSelectsEverything => {
+            anyhow::anyhow!("pathspec selected every change in the commit")
         }
         _ => anyhow::anyhow!("{err}"),
     }
