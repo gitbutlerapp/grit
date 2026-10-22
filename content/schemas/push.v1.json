@@ -3,64 +3,91 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
     "PushKind": {
-      "description": "High-level classification of the push.",
-      "enum": ["branch", "tags", "delete", "refspecs"],
+      "description": "JSON classification for [`PushOutcome`].",
+      "enum": [
+        "branch",
+        "tags",
+        "delete",
+        "refspecs"
+      ],
       "type": "string"
     },
     "PushRefOutcomeStatus": {
       "description": "Per-ref push status in JSON (`ok`, `up_to_date`, or `rejected`).",
-      "enum": ["ok", "up_to_date", "rejected"],
+      "enum": [
+        "ok",
+        "up_to_date",
+        "rejected"
+      ],
       "type": "string"
     },
     "PushRefResult": {
       "description": "One ref's push result.",
       "properties": {
         "forced": {
-          "description": "True when the update was a forced (non-fast-forward) push.",
           "type": "boolean"
         },
         "new_oid": {
-          "description": "New object id on the remote ref (full hex).",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "old_oid": {
-          "description": "Previous object id on the remote ref (full hex).",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reason": {
-          "description": "Rejection detail, present only when `status == \"rejected\"`.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "ref": {
           "type": "string"
         },
         "src": {
-          "description": "Local source ref name when known.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/definitions/PushRefOutcomeStatus"
         }
       },
-      "required": ["ref", "status"],
+      "required": [
+        "forced",
+        "ref",
+        "status"
+      ],
       "type": "object"
     }
   },
   "description": "Result of `grit push`: the per-ref outcomes for the remote.",
   "properties": {
     "branch": {
-      "description": "Local branch short name when `kind` is `branch`.",
-      "type": ["string", "null"]
+      "description": "Local branch short name when [`Self::kind`] is `branch` (legacy `branch` field).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "dry_run": {
-      "description": "True when `--dry-run` was used.",
+      "description": "True when `--dry-run` was used (no refs or objects written).",
       "type": "boolean"
     },
     "kind": {
-      "$ref": "#/definitions/PushKind"
+      "allOf": [
+        {
+          "$ref": "#/definitions/PushKind"
+        }
+      ],
+      "description": "High-level push kind (`branch`, `tags`, `delete`, `refspecs`)."
     },
     "rejected": {
-      "description": "True when any ref was rejected (dispatch exits non-zero on this).",
       "type": "boolean"
     },
     "remote": {
@@ -73,7 +100,13 @@
       "type": "array"
     }
   },
-  "required": ["kind", "rejected", "remote", "results"],
+  "required": [
+    "dry_run",
+    "kind",
+    "rejected",
+    "remote",
+    "results"
+  ],
   "title": "PushOutcome",
   "type": "object"
 }
