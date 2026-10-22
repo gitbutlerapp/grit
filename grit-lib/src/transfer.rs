@@ -2401,6 +2401,35 @@ pub(crate) fn ref_excluded(refname: &str, negatives: &[RefspecItem]) -> bool {
     })
 }
 
+/// Inverse of [`apply_refspec`]: given a stored tracking ref and a refspec, return the remote-side ref.
+pub(crate) fn reverse_apply_refspec(
+    src: &str,
+    dst: Option<&str>,
+    tracking_ref: &str,
+) -> Option<String> {
+    let dst = dst.filter(|d| !d.is_empty())?;
+    match dst.find('*') {
+        Some(star) => {
+            let prefix = &dst[..star];
+            let suffix = &dst[star + 1..];
+            if !tracking_ref.starts_with(prefix)
+                || !tracking_ref.ends_with(suffix)
+                || tracking_ref.len() < prefix.len() + suffix.len()
+            {
+                return None;
+            }
+            let middle = &tracking_ref[prefix.len()..tracking_ref.len() - suffix.len()];
+            src.find('*').map(|_| src.replacen('*', middle, 1))
+        }
+        None => {
+            if dst != tracking_ref {
+                return None;
+            }
+            Some(src.to_owned())
+        }
+    }
+}
+
 /// Apply a `<src>[:<dst>]` refspec to `refname`, returning the destination ref.
 ///
 /// Supports a single `*` wildcard (Git's fetch refspec form). When `dst` is

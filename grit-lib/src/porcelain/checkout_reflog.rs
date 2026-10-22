@@ -5,11 +5,7 @@ use crate::diff::zero_oid;
 use crate::error::Result;
 use crate::ident_resolve::resolve_loose_committer_identity_with;
 use crate::objects::ObjectId;
-use crate::refs::handle::ExistingRef;
-use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
-use crate::refs::{
-    self, append_reflog_with_config, commit_ref_update_on_store, create_ref_with_reflog, delete_ref,
-};
+use crate::refs::{self, append_reflog_with_config, create_ref_with_reflog, delete_ref};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 
@@ -92,48 +88,31 @@ pub fn create_branch_ref_with_reflog(
     create_ref_with_reflog(repo.git_dir(), branch_ref, &start_oid, &identity, &message)
 }
 
-/// Move an existing branch ref and append `branch: Reset to …` to its reflog.
-pub(crate) fn reset_branch_ref_with_reflog(
+/// Move an existing branch ref and append `branch: Reset to …` on its reflog.
+pub fn reset_branch_ref_with_reflog(
     repo: &Repository,
     branch_ref: &str,
     new_oid: ObjectId,
     source_label: &str,
-    existing: &ExistingRef,
 ) -> Result<()> {
-    let identity = checkout_reflog_identity(repo);
-    let message = format!("branch: Reset to {source_label}");
+    let old_oid = refs::resolve_ref(repo.git_dir(), branch_ref)?;
+    if old_oid == new_oid {
+        return Ok(());
+    }
+    refs::write_ref(repo.git_dir(), branch_ref, &new_oid)?;
     let config =
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
-    let reflog =
-        if crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), branch_ref)
-            || crate::reflog::reflog_exists(repo.git_dir(), branch_ref)
-        {
-            Some(ReflogUpdate {
-                identity,
-                message,
-                time: time::OffsetDateTime::now_utc(),
-                old_oid: None,
-                new_oid: None,
-            })
-        } else {
-            None
-        };
-    let (expected, no_deref) = match &existing.raw {
-        RawRef::Symbolic(target) => (Expected::Symref(target.clone()), true),
-        RawRef::Direct(oid) => (Expected::Oid(*oid), false),
-    };
-    commit_ref_update_on_store(
-        repo.refs(),
-        RefUpdate {
-            name: branch_ref.to_owned(),
-            new_value: Some(RawRef::Direct(new_oid)),
-            expected,
-            reflog,
-            flags: RefUpdateFlags {
-                no_deref,
-                ..RefUpdateFlags::default()
-            },
-        },
+    let identity = checkout_reflog_identity(repo);
+    let message = format!("branch: Reset to {source_label}");
+    append_reflog_with_config(
+        repo.git_dir(),
+        branch_ref,
+        &old_oid,
+        &new_oid,
+        &identity,
+        &message,
+        false,
+        Some(&config),
     )
 }
 

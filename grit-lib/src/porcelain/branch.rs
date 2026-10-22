@@ -134,8 +134,8 @@ pub fn create_branch(repo: &Repository, opts: &CreateBranchOptions) -> Result<Cr
         });
     }
 
-    if let Some(existing_ref) = &existing {
-        reset_branch_ref_with_reflog(repo, &branch_ref, start_oid, &source_label, existing_ref)?;
+    if existing.is_some() {
+        reset_branch_ref_with_reflog(repo, &branch_ref, start_oid, &source_label)?;
     } else {
         create_branch_ref_with_reflog(repo, &branch_ref, start_oid, &source_label)?;
     }
@@ -190,7 +190,12 @@ pub fn resolve_create_tracking(
     {
         return Ok(None);
     }
-    upstream_config_for_branch_ref(&tracking_ref)
+    let upstream = if is_remote {
+        crate::branch_tracking::upstream_config_from_tracking_ref(repo, &tracking_ref)
+    } else {
+        upstream_config_for_branch_ref(&tracking_ref)
+    };
+    upstream
         .ok_or_else(|| {
             Error::Branch(BranchError::UpstreamNotTracking {
                 upstream: start_label.to_owned(),

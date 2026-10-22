@@ -61,6 +61,7 @@ fn switch_local_changes_refusal_paths_match_git() {
                 branch: other.clone(),
                 oid: other_oid,
             },
+            discard_changes: false,
             dry_run: false,
         },
     )
@@ -94,6 +95,7 @@ fn switch_untracked_refusal_paths_match_git() {
                 branch: other,
                 oid: other_oid,
             },
+            discard_changes: false,
             dry_run: false,
         },
     )
@@ -133,6 +135,7 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
                 branch: other.clone(),
                 oid: other_oid,
             },
+            discard_changes: false,
             dry_run: true,
         },
     )
@@ -157,6 +160,7 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
                 branch: other,
                 oid: other_oid,
             },
+            discard_changes: false,
             dry_run: false,
         },
     )

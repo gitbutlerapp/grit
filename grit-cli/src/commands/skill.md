@@ -78,16 +78,20 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | List branches | `grit branch` |
 | Create a branch at the current commit (no switch) | `grit branch <name>` |
 | Create and switch | `grit switch -c <name>` |
-| Switch | `grit switch <name>` (also `grit checkout`, `grit co`) |
+| Create/reset and switch | `grit switch -C <name> [<start>]` |
+| New unborn branch | `grit switch --orphan <name>` |
+| Switch | `grit switch <name>` (also `grit checkout`, `grit co`; `-` / `@{-1}` for previous branch) |
+| Switch discarding local edits on differing paths | `grit switch --discard-changes <name>` |
+| Track / no-track on create | `grit switch -c <name> -t <remote/start>` / `--no-track` |
+| Disable remote DWIM | `grit switch --no-guess <name>` |
 | Delete a merged branch | `grit branch -d <name>` |
-| Predict merge conflicts (no repo changes) | `grit merge --check <branch>` (exit 0 = clean/ff/up to date, 1 = would conflict; `--json` → `result: clean\|conflicts\|…`) |
 | Delete regardless | `grit branch -D <name>` |
 
-`grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run when checkout would overwrite local edits or untracked files. Preflight with `grit switch <branch> --dry-run --json` (checks only; reports `changed_paths`) before switching. On refusal, `--json` emits `kind: would_overwrite` with `reason` (`local_changes` or `untracked`) and sorted `paths`.
+`grit switch` (without `--discard-changes`), `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run with uncommitted changes on paths that differ between branches. Commit first, or pass `--discard-changes` on switch. They also refuse rather than overwrite an untracked file.
 
 ## Combining work
 
-- `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`). Use `grit merge --check <branch>` to predict conflicts in memory without touching refs, the index, or the worktree.
+- `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`).
 - `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
 - `grit revert <commit>` undoes one non-merge commit with a new inverse commit (`Revert "…"` message).
 - On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or the matching `--continue` command when pick/revert support lands. Use `--abort` on the same command to cancel.
@@ -128,7 +132,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## What grit doesn't do
 
-grit has no equivalent of `rebase`, `reset`, partial staging, interactive commands, or annotated or signed tags. During a merge conflict, use `grit restore --ours|--theirs|--merge` to compare sides or restore markers, then `grit merge --continue` (or `grit commit` for Git-compatible finish). Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
+grit has no equivalent of `rebase`, `reset`, partial staging, interactive commands, or full conflict resolution (no `merge --continue` yet). Use `grit restore --ours|--theirs|--merge` to compare sides or restore markers; use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
 
 ## More
 
