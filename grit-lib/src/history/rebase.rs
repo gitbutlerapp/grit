@@ -2,9 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::merge_base::is_ancestor;
-use crate::objects::ObjectId;
-use crate::patch_ids::{compute_patch_id, PatchIdMode};
+#[cfg(any(test, feature = "unstable-bench-helpers"))]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use crate::diff::diff_trees;
+use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
+use crate::objects::{parse_commit, ObjectId};
+use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths, PatchIdMode};
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 
@@ -12,12 +16,55 @@ use super::error::HistoryError;
 use super::plan::{collect_scoped_refs, commit_parents, plan_rewrite_with_order};
 use super::types::{CommitEdit, HistoryEdits, RefScope, RewriteOptions, RewritePlan};
 
-/// Options for [`rebase_onto`].
+#[cfg(any(test, feature = "unstable-bench-helpers"))]
+static PATCH_ID_COMPUTE_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// Returns how many times patch-id computation ran since the last reset.
+#[cfg(any(test, feature = "unstable-bench-helpers"))]
+#[must_use]
+pub fn test_patch_id_compute_call_count() -> usize {
+    PATCH_ID_COMPUTE_CALLS.load(Ordering::Relaxed)
+}
+
+/// Clears the patch-id computation counter used by tests and benchmarks.
+#[cfg(any(test, feature = "unstable-bench-helpers"))]
+pub fn test_reset_patch_id_compute_call_count() {
+    PATCH_ID_COMPUTE_CALLS.store(0, Ordering::Relaxed);
+}
+
+/// Inputs for [`plan_rebase`], matching `git rebase [--onto <base>] <upstream>` on a single branch tip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebaseRequest {
+    /// Commits reachable from the branch tip but not from this commit are replayed (Git's upstream argument).
+    pub upstream: ObjectId,
+    /// When `None`, replay onto [`RebaseRequest::upstream`]; otherwise onto this commit.
+    pub onto: Option<ObjectId>,
+    /// Tip of the branch being rebased (typically `HEAD`).
+    pub branch_tip: ObjectId,
+}
+
+/// Result of [`plan_rebase`]: already current, a rewrite plan, or a conflict report (not an error).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RebasePlan {
+    /// The branch is already based on the effective onto commit with nothing to replay.
+    UpToDate,
+    /// Commits to replay and ref updates to apply.
+    Plan(RewritePlan),
+    /// Replay of a commit would conflict; the repository is unchanged.
+    Conflict {
+        /// Original commit that could not be replayed cleanly.
+        commit: ObjectId,
+        /// Repository-relative paths that conflicted.
+        paths: Vec<String>,
+    },
+}
+
+/// Options for [`rebase_onto`] and [`plan_rebase`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RebaseOntoOptions {
     /// Scope, empty-commit policy, and committer ident for replayed commits.
     pub rewrite: RewriteOptions,
-    /// When `true` (default), omit commits whose stable patch-id already appears in `onto`'s history.
+    /// When `true` (default), omit commits whose stable patch-id already appears on the onto side between fork and onto.
     pub skip_applied: bool,
     /// When `true`, drop merge commits that are branch tips in the replay range and move refs to
     /// the replayed second parent (matches `git pull --rebase=merges` on linearizable merges).
@@ -36,7 +83,36 @@ impl RebaseOntoOptions {
     }
 }
 
+/// Plan a rebase with fork-point detection and bounded cherry patch-id lookup.
+///
+/// The replayed range is `merge-base(upstream, branch_tip)..branch_tip`, applied onto
+/// `onto.unwrap_or(upstream)`, matching `git rebase [--onto X] U` on `branch_tip`.
+///
+/// # Errors
+///
+/// Returns [`HistoryError::Planning`] when tips or upstream are inconsistent, and other
+/// planning failures except conflicts (those are returned as [`RebasePlan::Conflict`]).
+pub fn plan_rebase(
+    repo: &Repository,
+    request: &RebaseRequest,
+    opts: &RebaseOntoOptions,
+) -> Result<RebasePlan, HistoryError> {
+    let fork = rebase_fork(repo, request.upstream, request.branch_tip)?;
+    let effective_onto = request.onto.unwrap_or(request.upstream);
+    if is_rebase_up_to_date(repo, fork, effective_onto, request.branch_tip)? {
+        return Ok(RebasePlan::UpToDate);
+    }
+    match rebase_onto_impl(repo, fork, effective_onto, &[request.branch_tip], opts) {
+        Ok(plan) => Ok(RebasePlan::Plan(plan)),
+        Err(HistoryError::Conflict { commit, paths }) => Ok(RebasePlan::Conflict { commit, paths }),
+        Err(other) => Err(other),
+    }
+}
+
 /// Plan replay of `upstream..tips` onto `onto` in topological order.
+///
+/// The `upstream` argument is the exclude boundary (fork point), not necessarily the user's
+/// upstream ref; [`plan_rebase`] computes the fork from upstream and tip instead.
 ///
 /// Merge commits in the range are replayed with updated parents and trees. Under
 /// [`RefScope::Branches`](super::RefScope::Branches),
@@ -53,6 +129,47 @@ pub fn rebase_onto(
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
 ) -> Result<RewritePlan, HistoryError> {
+    rebase_onto_impl(repo, upstream, onto, tips, opts)
+}
+
+fn rebase_fork(
+    repo: &Repository,
+    upstream: ObjectId,
+    branch_tip: ObjectId,
+) -> Result<ObjectId, HistoryError> {
+    let bases = merge_bases_first_vs_rest(repo, branch_tip, &[upstream]).map_err(library_err)?;
+    bases
+        .into_iter()
+        .next()
+        .ok_or_else(|| HistoryError::Planning {
+            message: format!(
+                "no merge base between upstream {} and tip {}",
+                upstream.to_hex(),
+                branch_tip.to_hex()
+            ),
+        })
+}
+
+fn is_rebase_up_to_date(
+    repo: &Repository,
+    fork: ObjectId,
+    effective_onto: ObjectId,
+    branch_tip: ObjectId,
+) -> Result<bool, HistoryError> {
+    if branch_tip == effective_onto {
+        return Ok(true);
+    }
+    let range = commits_in_rebase_range(repo, fork, &[branch_tip])?;
+    Ok(range.is_empty())
+}
+
+fn rebase_onto_impl(
+    repo: &Repository,
+    fork: ObjectId,
+    onto: ObjectId,
+    tips: &[ObjectId],
+    opts: &RebaseOntoOptions,
+) -> Result<RewritePlan, HistoryError> {
     if tips.is_empty() {
         return Err(HistoryError::Planning {
             message: "at least one tip commit is required".into(),
@@ -60,18 +177,18 @@ pub fn rebase_onto(
     }
 
     for &tip in tips {
-        if !is_ancestor(repo, upstream, tip).map_err(library_err)? {
+        if !is_ancestor(repo, fork, tip).map_err(library_err)? {
             return Err(HistoryError::Planning {
                 message: format!(
-                    "upstream {} is not an ancestor of tip {}",
-                    upstream.to_hex(),
+                    "fork {} is not an ancestor of tip {}",
+                    fork.to_hex(),
                     tip.to_hex()
                 ),
             });
         }
     }
 
-    let range = commits_in_rebase_range(repo, upstream, tips)?;
+    let range = commits_in_rebase_range(repo, fork, tips)?;
     if range.is_empty() {
         return Ok(RewritePlan {
             commits: Vec::new(),
@@ -81,7 +198,7 @@ pub fn rebase_onto(
     }
 
     let skip_map = if opts.skip_applied {
-        applied_by_patch(repo, onto, &range)?
+        applied_by_patch(repo, fork, onto, &range)?
     } else {
         HashMap::new()
     };
@@ -96,7 +213,7 @@ pub fn rebase_onto(
         let parents = commit_parents(repo, commit)?;
         let is_local_root = parents
             .iter()
-            .all(|parent| *parent == upstream || !range_set.contains(parent));
+            .all(|parent| *parent == fork || !range_set.contains(parent));
         if is_local_root {
             let reparent_onto = if let Some(mainline) =
                 mainline_anchor_for_parallel_root(repo, commit, &range_set)?
@@ -117,8 +234,7 @@ pub fn rebase_onto(
         }
     }
 
-    let replay_order =
-        extend_rebase_replay_order(repo, upstream, &range, &opts.rewrite, &skip_map)?;
+    let replay_order = extend_rebase_replay_order(repo, fork, &range, &opts.rewrite, &skip_map)?;
     plan_rewrite_with_order(
         repo,
         &edits,
@@ -131,7 +247,7 @@ pub fn rebase_onto(
 /// Include sibling branch tips (same parent in the rebase range) when updating all descendant refs.
 fn extend_rebase_replay_order(
     repo: &Repository,
-    upstream: ObjectId,
+    fork: ObjectId,
     range: &[ObjectId],
     opts: &RewriteOptions,
     skip_map: &HashMap<ObjectId, ObjectId>,
@@ -156,7 +272,7 @@ fn extend_rebase_replay_order(
             let parents = commit_parents(repo, *tip)?;
             if parents
                 .iter()
-                .all(|parent| *parent == upstream || in_order.contains(parent))
+                .all(|parent| *parent == fork || in_order.contains(parent))
             {
                 order.push(*tip);
                 in_order.insert(*tip);
@@ -206,11 +322,11 @@ fn is_leaf_merge_in_range(
 
 fn commits_in_rebase_range(
     repo: &Repository,
-    upstream: ObjectId,
+    fork: ObjectId,
     tips: &[ObjectId],
 ) -> Result<Vec<ObjectId>, HistoryError> {
     let positive: Vec<String> = tips.iter().map(ObjectId::to_hex).collect();
-    let negative = vec![upstream.to_hex()];
+    let negative = vec![fork.to_hex()];
     let walk_opts = RevListOptions {
         ordering: OrderingMode::Topo,
         reverse: false,
@@ -220,9 +336,9 @@ fn commits_in_rebase_range(
     };
     let walk = rev_list(repo, &positive, &negative, &walk_opts).map_err(library_err)?;
     let mut commits = walk.commits;
-    commits.retain(|oid| *oid != upstream);
+    commits.retain(|oid| *oid != fork);
     for &tip in tips {
-        if tip != upstream && !commits.contains(&tip) {
+        if tip != fork && !commits.contains(&tip) {
             commits.push(tip);
         }
     }
@@ -231,11 +347,74 @@ fn commits_in_rebase_range(
     Ok(commits)
 }
 
-fn patch_ids_in_history(
+fn paths_changed_by_commit(
     repo: &Repository,
-    start: ObjectId,
+    commit: ObjectId,
+) -> Result<HashSet<String>, HistoryError> {
+    let obj = repo.odb().read(&commit).map_err(library_err)?;
+    let parsed = parse_commit(&obj.data).map_err(library_err)?;
+    let mut paths = HashSet::new();
+    if parsed.parents.is_empty() {
+        let empty = crate::diff::zero_oid();
+        let changes =
+            diff_trees(repo.odb(), Some(&empty), Some(&parsed.tree), "").map_err(library_err)?;
+        for entry in changes {
+            paths.insert(entry.path().to_string());
+        }
+        return Ok(paths);
+    }
+    for parent in &parsed.parents {
+        let parent_obj = repo.odb().read(parent).map_err(library_err)?;
+        let parent_parsed = parse_commit(&parent_obj.data).map_err(library_err)?;
+        let changes = diff_trees(
+            repo.odb(),
+            Some(&parent_parsed.tree),
+            Some(&parsed.tree),
+            "",
+        )
+        .map_err(library_err)?;
+        for entry in changes {
+            paths.insert(entry.path().to_string());
+        }
+    }
+    Ok(paths)
+}
+
+fn collect_range_touched_paths(
+    repo: &Repository,
+    range: &[ObjectId],
+) -> Result<HashSet<String>, HistoryError> {
+    let mut paths = HashSet::new();
+    for &commit in range {
+        paths.extend(paths_changed_by_commit(repo, commit)?);
+    }
+    Ok(paths)
+}
+
+fn commit_touches_any_path(
+    repo: &Repository,
+    commit: ObjectId,
+    paths: &HashSet<String>,
+) -> Result<bool, HistoryError> {
+    if paths.is_empty() {
+        return Ok(true);
+    }
+    let touched = paths_changed_by_commit(repo, commit)?;
+    Ok(touched.iter().any(|p| paths.contains(p)))
+}
+
+/// Stable patch-ids for commits on `fork..onto`, optionally limited to commits touching `range_paths`.
+fn patch_ids_in_fork_to_onto(
+    repo: &Repository,
+    fork: ObjectId,
+    onto: ObjectId,
+    range_paths: &HashSet<String>,
 ) -> Result<HashMap<ObjectId, ObjectId>, HistoryError> {
-    let positive = vec![start.to_hex()];
+    if fork == onto {
+        return Ok(HashMap::new());
+    }
+    let positive = vec![onto.to_hex()];
+    let negative = vec![fork.to_hex()];
     let walk_opts = RevListOptions {
         ordering: OrderingMode::Topo,
         reverse: false,
@@ -243,31 +422,72 @@ fn patch_ids_in_history(
         full_history: true,
         ..RevListOptions::default()
     };
-    let walk = rev_list(repo, &positive, &[], &walk_opts).map_err(library_err)?;
+    let walk = rev_list(repo, &positive, &negative, &walk_opts).map_err(library_err)?;
     let algo = repo.odb().hash_algo();
     let mut by_patch: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut commits = walk.commits;
     commits.reverse();
+    let path_list: Vec<String> = range_paths.iter().cloned().collect();
     for oid in commits {
-        if let Ok(Some(pid)) = compute_patch_id(algo, repo.odb(), &oid, PatchIdMode::Stable) {
+        if !commit_touches_any_path(repo, oid, range_paths)? {
+            continue;
+        }
+        if let Ok(Some(pid)) = compute_patch_id_recorded(
+            algo,
+            repo.odb(),
+            &oid,
+            if path_list.is_empty() {
+                None
+            } else {
+                Some(path_list.as_slice())
+            },
+        ) {
             by_patch.insert(pid, oid);
         }
     }
     Ok(by_patch)
 }
 
-/// Map each commit in `range` to an existing commit in `onto` history with the same patch-id.
+fn compute_patch_id_recorded(
+    algo: crate::objects::HashAlgo,
+    odb: &crate::odb::Odb,
+    commit_oid: &ObjectId,
+    paths: Option<&[String]>,
+) -> Result<Option<ObjectId>, crate::error::Error> {
+    #[cfg(any(test, feature = "unstable-bench-helpers"))]
+    PATCH_ID_COMPUTE_CALLS.fetch_add(1, Ordering::Relaxed);
+    match paths {
+        Some(paths) if !paths.is_empty() => {
+            compute_patch_id_for_paths(algo, odb, commit_oid, paths, PatchIdMode::Stable)
+        }
+        _ => compute_patch_id(algo, odb, commit_oid, PatchIdMode::Stable),
+    }
+}
+
+/// Map each commit in `range` to an existing commit in `fork..onto` with the same patch-id.
 fn applied_by_patch(
     repo: &Repository,
+    fork: ObjectId,
     onto: ObjectId,
     range: &[ObjectId],
 ) -> Result<HashMap<ObjectId, ObjectId>, HistoryError> {
-    let by_patch = patch_ids_in_history(repo, onto)?;
+    let range_paths = collect_range_touched_paths(repo, range)?;
+    let by_patch = patch_ids_in_fork_to_onto(repo, fork, onto, &range_paths)?;
     let algo = repo.odb().hash_algo();
+    let path_list: Vec<String> = range_paths.iter().cloned().collect();
     let mut out = HashMap::new();
     for &commit in range {
-        let Some(pid) = compute_patch_id(algo, repo.odb(), &commit, PatchIdMode::Stable)
-            .map_err(library_err)?
+        let Some(pid) = compute_patch_id_recorded(
+            algo,
+            repo.odb(),
+            &commit,
+            if path_list.is_empty() {
+                None
+            } else {
+                Some(path_list.as_slice())
+            },
+        )
+        .map_err(library_err)?
         else {
             continue;
         };
@@ -359,7 +579,69 @@ mod tests {
         let onto_tip = write_commit(&repo, tree_b, &[root], "on base", &id).expect("onto");
         let replay = write_commit(&repo, tree_b, &[root], "on base", &id).expect("replay");
         let range = vec![replay];
-        let map = applied_by_patch(&repo, onto_tip, &range).expect("map");
+        let map = applied_by_patch(&repo, root, onto_tip, &range).expect("map");
         assert_eq!(map.get(&replay), Some(&onto_tip));
+    }
+
+    #[test]
+    fn patch_id_scan_bounded_on_large_onto_side() {
+        test_reset_patch_id_compute_call_count();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let id = ident(1);
+        let fork_tree = blob_tree(&repo, "f.txt", b"base\n").expect("fork tree");
+        let fork = write_commit(&repo, fork_tree, &[], "fork", &id).expect("fork");
+        let mut parent = fork;
+        for i in 0..120 {
+            let noise = format!("noise/{i}.txt");
+            let tree = blob_tree(&repo, &noise, format!("n{i}\n").as_bytes()).expect("noise tree");
+            parent = write_commit(&repo, tree, &[parent], "noise", &id).expect("noise commit");
+        }
+        let onto = parent;
+        let branch_tree = blob_tree(&repo, "f.txt", b"topic\n").expect("branch tree");
+        let tip = write_commit(&repo, branch_tree, &[fork], "topic", &id).expect("tip");
+        let range = commits_in_rebase_range(&repo, fork, &[tip]).expect("range");
+        assert_eq!(range.len(), 1);
+        let _map = applied_by_patch(&repo, fork, onto, &range).expect("applied");
+        let calls = test_patch_id_compute_call_count();
+        assert!(
+            calls <= 4,
+            "expected patch-id work proportional to fork..onto overlap, got {calls} calls"
+        );
+    }
+
+    #[test]
+    fn plan_rebase_up_to_date_when_at_upstream() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let id = ident(1);
+        let tree = blob_tree(&repo, "f.txt", b"a\n").expect("tree");
+        let upstream = write_commit(&repo, tree, &[], "only", &id).expect("commit");
+        let opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: crate::revwalk::history::EmptyPolicy::Drop,
+            committer: id.clone(),
+            preserve_committer: false,
+            sign: false,
+        });
+        let request = RebaseRequest {
+            upstream,
+            onto: None,
+            branch_tip: upstream,
+        };
+        let plan = plan_rebase(&repo, &request, &opts).expect("plan");
+        assert_eq!(plan, RebasePlan::UpToDate);
     }
 }

@@ -69,7 +69,9 @@ pub use plan::plan_rewrite;
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 pub use plan::{test_merge_tree_call_count, test_reset_merge_tree_call_count};
 pub use r#move::{move_commit, Placement};
-pub use rebase::{rebase_onto, RebaseOntoOptions};
+pub use rebase::{plan_rebase, rebase_onto, RebaseOntoOptions, RebasePlan, RebaseRequest};
+#[cfg(any(test, feature = "unstable-bench-helpers"))]
+pub use rebase::{test_patch_id_compute_call_count, test_reset_patch_id_compute_call_count};
 pub use reword::{normalize_rewrite_message, reword};
 pub use split::split;
 pub use squash::{squash, SquashMessage, SquashOptions};

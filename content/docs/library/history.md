@@ -18,6 +18,8 @@ For a single message change, [`reword`](rustdoc:grit_lib::revwalk::history::rewo
 
 To reorder one commit on the linear first-parent chain of `HEAD`, [`move_commit`](rustdoc:grit_lib::revwalk::history::move_commit) takes a [`Placement`](rustdoc:grit_lib::revwalk::history::Placement) (`Before` / `After` another commit), replays the affected segment in the new order, and returns a [`RewritePlan`](rustdoc:grit_lib::revwalk::history::RewritePlan). Commits must sit on the same first-parent chain with no merge commits in the segment; conflicts and no-op moves surface as [`HistoryError`](rustdoc:grit_lib::revwalk::history::HistoryError) variants.
 
+For rebasing a branch tip onto a new base with fork-point detection and bounded cherry patch-id lookup, see [Rebase planning](rebase.md) ([`plan_rebase`](rustdoc:grit_lib::revwalk::history::plan_rebase) / [`RebaseRequest`](rustdoc:grit_lib::revwalk::history::RebaseRequest)).
+
 To assign staged hunks automatically, [`absorb`](rustdoc:grit_lib::revwalk::history::absorb) blame-maps each hunk to a candidate commit between [`AbsorbOptions::base`](rustdoc:grit_lib::revwalk::history::AbsorbOptions::base) and `HEAD`, verifies commutation with later commits, builds one combined [`RewritePlan`](rustdoc:grit_lib::revwalk::history::RewritePlan), and returns [`AbsorbPlan`](rustdoc:grit_lib::revwalk::history::AbsorbPlan) with [`HunkAssignment`](rustdoc:grit_lib::revwalk::history::HunkAssignment) and [`UnassignedHunk`](rustdoc:grit_lib::revwalk::history::UnassignedHunk) detail. Call [`apply_absorb_rewrite`](rustdoc:grit_lib::revwalk::history::apply_absorb_rewrite) so only assigned hunks are removed from the index.
 
 ## Apply options and result

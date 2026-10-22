@@ -112,6 +112,11 @@ name = "history_rewrite"
 harness = false
 
 [[bench]]
+name = "history_plan_rebase"
+harness = false
+required-features = ["unstable-bench-helpers"]
+
+[[bench]]
 name = "fsck"
 harness = false
 
