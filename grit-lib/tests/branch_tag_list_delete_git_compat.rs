@@ -10,7 +10,9 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::{create_branch, delete_branch, list_branches};
+use grit_lib::porcelain::branch::{
+    create_branch, delete_branch, list_branches, BranchError, CreateBranchOptions, DeleteMode,
+};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::tag::{create_tag, delete_tag, list_tags, CreateTagRequest, TagKind};
 use grit_lib::progress::NullProgress;
@@ -186,7 +188,7 @@ fn delete_branch_merged_check_agrees_with_git() {
         assert_eq!(git_deleted, merged, "git branch -d {name}");
 
         let tip = oid(&dir, name);
-        let ours = delete_branch(&repo, name, false);
+        let ours = delete_branch(&repo, name, DeleteMode::Safe, false);
         assert_eq!(ours.is_ok(), git_deleted, "{name}: {ours:?}");
         match ours {
             Ok(deleted) => {
@@ -196,7 +198,10 @@ fn delete_branch_merged_check_agrees_with_git() {
             }
             Err(err) => {
                 assert!(
-                    matches!(&err, Error::BranchNotMerged { branch } if branch == name),
+                    matches!(
+                        &err,
+                        Error::Branch(BranchError::NotFullyMerged { name: b, .. }) if b == name
+                    ),
                     "{err:?}"
                 );
                 assert_eq!(oid(&dir, name), tip);
@@ -204,7 +209,7 @@ fn delete_branch_merged_check_agrees_with_git() {
         }
     }
 
-    let forced = delete_branch(&repo, "side", true).unwrap();
+    let forced = delete_branch(&repo, "side", DeleteMode::Force, false).unwrap();
     assert_eq!(forced.oid, oid(&dir, "refs/remotes/origin/tracked"));
     assert!(!ref_exists(&dir, "refs/heads/side"));
     git(&dir, &["fsck", "--no-progress"]);
@@ -216,19 +221,28 @@ fn delete_branch_refuses_checked_out_branches() {
     let dir = git_fixture(tmp.path());
     let repo = open(&dir);
 
-    let err = delete_branch(&repo, "main", true).unwrap_err();
+    let err = delete_branch(&repo, "main", DeleteMode::Force, false).unwrap_err();
     assert!(
-        matches!(&err, Error::CannotDeleteCurrentBranch { branch } if branch == "main"),
+        matches!(
+            &err,
+            Error::Branch(BranchError::CheckedOut { name, .. }) if name == "main"
+        ),
         "{err:?}"
     );
-    let err = delete_branch(&repo, "wt", true).unwrap_err();
+    let err = delete_branch(&repo, "wt", DeleteMode::Force, false).unwrap_err();
     assert!(
-        matches!(&err, Error::BranchCheckedOutInWorktree { branch, .. } if branch == "wt"),
+        matches!(
+            &err,
+            Error::Branch(BranchError::CheckedOut { name, .. }) if name == "wt"
+        ),
         "{err:?}"
     );
-    let err = delete_branch(&repo, "missing", true).unwrap_err();
+    let err = delete_branch(&repo, "missing", DeleteMode::Force, false).unwrap_err();
     assert!(
-        matches!(&err, Error::BranchNotFound { branch } if branch == "missing"),
+        matches!(
+            &err,
+            Error::Branch(BranchError::NotFound { name }) if name == "missing"
+        ),
         "{err:?}"
     );
     assert!(ref_exists(&dir, "refs/heads/main"));
@@ -293,7 +307,7 @@ fn list_and_delete_on_reftable_backend() {
     )
     .unwrap()
     .oid;
-    create_branch(&repo, "topic").unwrap();
+    create_branch(&repo, &CreateBranchOptions::at_head("topic")).unwrap();
     create_tag(
         &repo,
         &CreateTagRequest {
@@ -316,7 +330,12 @@ fn list_and_delete_on_reftable_backend() {
     assert_eq!(names, ["main", "topic"]);
     assert_eq!(list_tags(&repo).unwrap().len(), 1);
 
-    assert_eq!(delete_branch(&repo, "topic", false).unwrap().oid, tip);
+    assert_eq!(
+        delete_branch(&repo, "topic", DeleteMode::Safe, false)
+            .unwrap()
+            .oid,
+        tip
+    );
     assert_eq!(delete_tag(&repo, "v1").unwrap(), tip);
     let names: Vec<String> = list_branches(&repo)
         .unwrap()
@@ -395,14 +414,14 @@ fn list_and_delete_use_injected_memory_ref_store() {
         .collect();
     assert_eq!(tags, ["injected"]);
 
-    let err = delete_branch(&repo, "main", true).unwrap_err();
+    let err = delete_branch(&repo, "main", DeleteMode::Force, false).unwrap_err();
     assert!(
-        matches!(err, Error::CannotDeleteCurrentBranch { .. }),
+        matches!(err, Error::Branch(BranchError::CheckedOut { .. })),
         "{err:?}"
     );
 
     assert!(store.reflog_exists("refs/heads/topic").unwrap());
-    let deleted = delete_branch(&repo, "topic", false).unwrap();
+    let deleted = delete_branch(&repo, "topic", DeleteMode::Safe, false).unwrap();
     assert_eq!(deleted.oid, tip);
     assert_eq!(store.read_raw("refs/heads/topic").unwrap(), None);
     assert!(!store.reflog_exists("refs/heads/topic").unwrap());
@@ -427,7 +446,7 @@ fn delete_nested_branch_leaves_no_reflog_directories() {
     git(&dir, &["branch", "feature/x"]);
     assert!(dir.join(".git/logs/refs/heads/feature/x").is_file());
 
-    delete_branch(&open(&dir), "feature/x", false).unwrap();
+    delete_branch(&open(&dir), "feature/x", DeleteMode::Safe, false).unwrap();
     assert!(!dir.join(".git/logs/refs/heads/feature").exists());
     assert!(!dir.join(".git/refs/heads/feature").exists());
 

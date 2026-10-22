@@ -4,7 +4,7 @@ use grit_lib::diff::zero_oid;
 use grit_lib::index::entry_from_stat;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
-use grit_lib::porcelain::branch::create_branch;
+use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
@@ -211,7 +211,7 @@ fn run_repro_sequence(repo: &Repository) {
     )
     .expect("switch main");
 
-    create_branch(repo, "b2").expect("branch b2");
+    create_branch(repo, &CreateBranchOptions::at_head("b2")).expect("branch b2");
 }
 
 #[test]
@@ -581,7 +581,8 @@ fn create_branch_leaves_no_ref_when_reflog_dir_not_writable() {
     std::fs::create_dir_all(&logs_heads).expect("logs dir");
     std::fs::set_permissions(&logs_heads, std::fs::Permissions::from_mode(0o500)).expect("chmod");
 
-    let err = create_branch(&repo, "fail").expect_err("reflog should fail");
+    let err = create_branch(&repo, &CreateBranchOptions::at_head("fail"))
+        .expect_err("reflog should fail");
     assert!(!err.to_string().is_empty());
 
     std::fs::set_permissions(&logs_heads, std::fs::Permissions::from_mode(0o755))

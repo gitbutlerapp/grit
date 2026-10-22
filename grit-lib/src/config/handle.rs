@@ -67,6 +67,36 @@ impl<'repo> ConfigHandle<'repo> {
         self.repo.reload_config()
     }
 
+    /// Remove `key` from the repository-local config file and reload the snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Propagates config parse, validation, and I/O errors.
+    pub fn unset_local(&self, key: &str) -> Result<()> {
+        let path = crate::repo::local_config_write_path(self.repo.git_dir());
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let mut file = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+        file.unset(key)?;
+        file.write()?;
+        self.repo.reload_config()
+    }
+
+    /// Remove an entire section from the repository-local config file.
+    ///
+    /// Section names use dotted form (for example `branch.topic` or `branch.feature/x`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates config parse, validation, and I/O errors.
+    pub fn remove_local_section(&self, section: &str) -> Result<()> {
+        let path = crate::repo::local_config_write_path(self.repo.git_dir());
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let mut file = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+        file.remove_section(section)?;
+        file.write()?;
+        self.repo.reload_config()
+    }
+
     /// Shared merged config snapshot (same as [`Repository::config`]).
     #[inline]
     pub fn snapshot(&self) -> Result<Arc<ConfigSet>> {

@@ -4,7 +4,9 @@ use anyhow::{Context, Result};
 use std::io::Write;
 
 use grit_lib::error::Error;
-use grit_lib::porcelain::branch::{create_branch, delete_branch, list_branches};
+use grit_lib::porcelain::branch::{
+    create_branch, delete_branch, list_branches, CreateBranchOptions, DeleteMode,
+};
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -106,17 +108,24 @@ fn list(repo: &Repository) -> Result<BranchOutcome> {
 }
 
 fn create(repo: &Repository, name: &str) -> Result<BranchOutcome> {
-    create_branch(repo, name).context("could not create branch")?;
+    create_branch(repo, &CreateBranchOptions::at_head(name)).context("could not create branch")?;
     Ok(BranchOutcome::Create {
         name: name.to_owned(),
     })
 }
 
 fn remove(repo: &Repository, name: &str, force_delete: bool) -> Result<BranchOutcome> {
-    let deleted = delete_branch(repo, name, force_delete).map_err(|err| match err {
-        Error::BranchNotMerged { .. } => anyhow::anyhow!(
-            "{err}.\nIf you are sure you want to delete it, run 'grit branch -D {name}'"
-        ),
+    let mode = if force_delete {
+        DeleteMode::Force
+    } else {
+        DeleteMode::Safe
+    };
+    let deleted = delete_branch(repo, name, mode, false).map_err(|err| match err {
+        Error::Branch(grit_lib::porcelain::branch::BranchError::NotFullyMerged { .. }) => {
+            anyhow::anyhow!(
+                "{err}.\nIf you are sure you want to delete it, run 'grit branch -D {name}'"
+            )
+        }
         other => anyhow::Error::new(other),
     })?;
     let oid = deleted.oid.to_hex();

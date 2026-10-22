@@ -23,6 +23,34 @@ struct FetchRefspecs {
     negative: Vec<RefspecItem>,
 }
 
+/// Whether `tracking_ref` is the destination of a positive fetch refspec for its remote.
+///
+/// Returns `false` when `tracking_ref` is not under `refs/remotes/`.
+pub fn remote_tracking_ref_is_mapped(repo: &Repository, tracking_ref: &str) -> Result<bool> {
+    let Some(rest) = tracking_ref.strip_prefix("refs/remotes/") else {
+        return Ok(false);
+    };
+    let Some((remote, branch)) = rest.split_once('/') else {
+        return Ok(false);
+    };
+    let config = repo.config()?;
+    let refspecs = FetchRefspecs::load(&config, remote);
+    let remote_ref = format!("refs/heads/{branch}");
+    Ok(refspecs.tracking_ref(remote, &remote_ref).as_deref() == Some(tracking_ref))
+}
+
+/// Map a resolved upstream ref to `branch.<name>.remote` / `.merge` values.
+#[must_use]
+pub fn upstream_config_for_branch_ref(upstream_full: &str) -> Option<(String, String)> {
+    if let Some(rest) = upstream_full.strip_prefix("refs/remotes/") {
+        let (remote, branch) = rest.split_once('/')?;
+        return Some((remote.to_owned(), format!("refs/heads/{branch}")));
+    }
+    upstream_full
+        .strip_prefix("refs/heads/")
+        .map(|branch| (".".to_owned(), format!("refs/heads/{branch}")))
+}
+
 impl FetchRefspecs {
     fn load(config: &ConfigSet, remote_name: &str) -> Self {
         let (negative, positive) = config

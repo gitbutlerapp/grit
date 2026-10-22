@@ -7,6 +7,8 @@ use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId};
+use crate::porcelain::branch::{resolve_create_tracking, write_branch_upstream_config};
+use crate::porcelain::branch_error::TrackMode;
 use crate::porcelain::checkout::{
     checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,
     trusted_wholesale_directories_for_switch, CheckoutApplyOptions, WholesalePrecomputeResult,
@@ -158,7 +160,13 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
                 branch: short.clone(),
                 start_oid: oid,
                 create_source_label: candidate.clone(),
-                track_upstream: upstream_config_from_remote_tracking_ref(&candidate, &short),
+                track_upstream: resolve_create_tracking(
+                    repo,
+                    &short,
+                    &candidate,
+                    oid,
+                    TrackMode::Auto,
+                )?,
             });
         }
     }
@@ -168,31 +176,6 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
     }
 
     Err(Error::Message(format!("no branch named '{spec}'")))
-}
-
-fn upstream_config_from_remote_tracking_ref(
-    tracking_ref: &str,
-    branch_short: &str,
-) -> Option<(String, String)> {
-    let rest = tracking_ref.strip_prefix("refs/remotes/")?;
-    let suffix = format!("/{branch_short}");
-    let remote = rest.strip_suffix(&suffix)?;
-    if remote.is_empty() {
-        return None;
-    }
-    Some((remote.to_owned(), format!("refs/heads/{branch_short}")))
-}
-
-fn write_branch_upstream_config(
-    repo: &Repository,
-    branch_short: &str,
-    remote: &str,
-    merge: &str,
-) -> Result<()> {
-    let handle = repo.config_handle();
-    handle.set_local(&format!("branch.{branch_short}.remote"), remote)?;
-    handle.set_local(&format!("branch.{branch_short}.merge"), merge)?;
-    Ok(())
 }
 
 fn normalize_switch_spec(spec: &str) -> &str {

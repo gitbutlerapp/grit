@@ -1763,9 +1763,11 @@ pub struct grit_lib::config::handle::ConfigHandle<'repo>
 impl<'repo> grit_lib::config::handle::ConfigHandle<'repo>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::get(&self, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
+pub fn grit_lib::config::handle::ConfigHandle<'repo>::remove_local_section(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::set_local(&self, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::snapshot(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
+pub fn grit_lib::config::handle::ConfigHandle<'repo>::unset_local(&self, &str) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::config::handle::ConfigHandle<'repo>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::config::handle::ConfigHandle<'repo>
@@ -2141,9 +2143,11 @@ pub struct grit_lib::config::ConfigHandle<'repo>
 impl<'repo> grit_lib::config::handle::ConfigHandle<'repo>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::get(&self, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
+pub fn grit_lib::config::handle::ConfigHandle<'repo>::remove_local_section(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::set_local(&self, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::snapshot(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
+pub fn grit_lib::config::handle::ConfigHandle<'repo>::unset_local(&self, &str) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::config::handle::ConfigHandle<'repo>
 pub fn grit_lib::config::handle::ConfigHandle<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::config::handle::ConfigHandle<'repo>
@@ -4464,6 +4468,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::DiffPathError
 pub grit_lib::error::Error::AmendUnborn
 pub grit_lib::error::Error::Apply(grit_lib::error::ApplyError)
 pub grit_lib::error::Error::Auth(alloc::string::String)
+pub grit_lib::error::Error::Branch(grit_lib::porcelain::branch_error::BranchError)
 pub grit_lib::error::Error::BranchCheckedOutInWorktree
 pub grit_lib::error::Error::BranchCheckedOutInWorktree::branch: alloc::string::String
 pub grit_lib::error::Error::BranchCheckedOutInWorktree::worktree_path: alloc::string::String
@@ -4632,6 +4637,8 @@ impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_l
 pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
+impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::prelude::MidxError) -> Self
 impl core::convert::From<grit_lib::refs::store::RefStoreError> for grit_lib::error::Error
@@ -10457,6 +10464,86 @@ pub fn grit_lib::porcelain::add::stage(&grit_lib::repo::Repository, &grit_lib::p
 pub fn grit_lib::porcelain::add::stage_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub fn grit_lib::porcelain::add::stage_on_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub mod grit_lib::porcelain::branch
+#[non_exhaustive] pub enum grit_lib::porcelain::branch::BranchError
+pub grit_lib::porcelain::branch::BranchError::AlreadyExists
+pub grit_lib::porcelain::branch::BranchError::AlreadyExists::name: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::CheckedOut
+pub grit_lib::porcelain::branch::BranchError::CheckedOut::name: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::CheckedOut::worktree: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::InvalidName
+pub grit_lib::porcelain::branch::BranchError::InvalidName::name: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::InvalidName::reason: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::NoCommits
+pub grit_lib::porcelain::branch::BranchError::NoUpstream
+pub grit_lib::porcelain::branch::BranchError::NoUpstream::name: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::NotFound
+pub grit_lib::porcelain::branch::BranchError::NotFound::name: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::NotFullyMerged
+pub grit_lib::porcelain::branch::BranchError::NotFullyMerged::base: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::NotFullyMerged::name: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::UpstreamNotTracking
+pub grit_lib::porcelain::branch::BranchError::UpstreamNotTracking::upstream: alloc::string::String
+impl core::clone::Clone for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::BranchError
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
+impl core::error::Error for grit_lib::porcelain::branch_error::BranchError
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Send for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Sync for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::BranchError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::BranchError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::BranchError
+pub enum grit_lib::porcelain::branch::DeleteMode
+pub grit_lib::porcelain::branch::DeleteMode::Force
+pub grit_lib::porcelain::branch::DeleteMode::Safe
+impl core::clone::Clone for grit_lib::porcelain::branch_error::DeleteMode
+pub fn grit_lib::porcelain::branch_error::DeleteMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::DeleteMode
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::DeleteMode
+pub fn grit_lib::porcelain::branch_error::DeleteMode::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::DeleteMode
+pub fn grit_lib::porcelain::branch_error::DeleteMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Send for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Sync for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::DeleteMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::DeleteMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::DeleteMode
+pub enum grit_lib::porcelain::branch::TrackMode
+pub grit_lib::porcelain::branch::TrackMode::Always
+pub grit_lib::porcelain::branch::TrackMode::Auto
+pub grit_lib::porcelain::branch::TrackMode::Never
+impl core::clone::Clone for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::TrackMode
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Send for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Sync for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::TrackMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::TrackMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::TrackMode
 pub struct grit_lib::porcelain::branch::BranchList
 pub grit_lib::porcelain::branch::BranchList::branches: alloc::vec::Vec<grit_lib::porcelain::branch::LocalBranch>
 pub grit_lib::porcelain::branch::BranchList::current: core::option::Option<alloc::string::String>
@@ -10475,6 +10562,29 @@ impl core::marker::Unpin for grit_lib::porcelain::branch::BranchList
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::BranchList
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::BranchList
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::BranchList
+pub struct grit_lib::porcelain::branch::CreateBranchOptions
+pub grit_lib::porcelain::branch::CreateBranchOptions::dry_run: bool
+pub grit_lib::porcelain::branch::CreateBranchOptions::force: bool
+pub grit_lib::porcelain::branch::CreateBranchOptions::name: alloc::string::String
+pub grit_lib::porcelain::branch::CreateBranchOptions::start: core::option::Option<grit_lib::porcelain::branch_error::StartPoint>
+pub grit_lib::porcelain::branch::CreateBranchOptions::track: grit_lib::porcelain::branch_error::TrackMode
+impl grit_lib::porcelain::branch::CreateBranchOptions
+pub fn grit_lib::porcelain::branch::CreateBranchOptions::at_head(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for grit_lib::porcelain::branch::CreateBranchOptions
+pub fn grit_lib::porcelain::branch::CreateBranchOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::cmp::PartialEq for grit_lib::porcelain::branch::CreateBranchOptions
+pub fn grit_lib::porcelain::branch::CreateBranchOptions::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch::CreateBranchOptions
+pub fn grit_lib::porcelain::branch::CreateBranchOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::marker::Freeze for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::marker::Send for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::marker::Sync for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::marker::Unpin for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::CreateBranchOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::CreateBranchOptions
 pub struct grit_lib::porcelain::branch::CreateBranchOutcome
 pub grit_lib::porcelain::branch::CreateBranchOutcome::name: alloc::string::String
 pub grit_lib::porcelain::branch::CreateBranchOutcome::oid: grit_lib::objects::ObjectId
@@ -10530,9 +10640,129 @@ impl core::marker::Unpin for grit_lib::porcelain::branch::LocalBranch
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::LocalBranch
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::LocalBranch
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::LocalBranch
-pub fn grit_lib::porcelain::branch::create_branch(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::branch::CreateBranchOutcome>
-pub fn grit_lib::porcelain::branch::delete_branch(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<grit_lib::porcelain::branch::DeletedBranch>
+pub struct grit_lib::porcelain::branch::StartPoint
+pub grit_lib::porcelain::branch::StartPoint::label: alloc::string::String
+pub grit_lib::porcelain::branch::StartPoint::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::branch_error::StartPoint
+pub fn grit_lib::porcelain::branch_error::StartPoint::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::StartPoint
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::StartPoint
+pub fn grit_lib::porcelain::branch_error::StartPoint::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::StartPoint
+pub fn grit_lib::porcelain::branch_error::StartPoint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Send for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Sync for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::StartPoint
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::StartPoint
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::StartPoint
+pub fn grit_lib::porcelain::branch::create_branch(&grit_lib::repo::Repository, &grit_lib::porcelain::branch::CreateBranchOptions) -> grit_lib::error::Result<grit_lib::porcelain::branch::CreateBranchOutcome>
+pub fn grit_lib::porcelain::branch::delete_branch(&grit_lib::repo::Repository, &str, grit_lib::porcelain::branch_error::DeleteMode, bool) -> grit_lib::error::Result<grit_lib::porcelain::branch::DeletedBranch>
 pub fn grit_lib::porcelain::branch::list_branches(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::branch::BranchList>
+pub fn grit_lib::porcelain::branch::resolve_create_tracking(&grit_lib::repo::Repository, &str, &str, grit_lib::objects::ObjectId, grit_lib::porcelain::branch_error::TrackMode) -> grit_lib::error::Result<core::option::Option<(alloc::string::String, alloc::string::String)>>
+pub fn grit_lib::porcelain::branch::set_upstream(&grit_lib::repo::Repository, &str, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::branch::unset_upstream(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<()>
+pub mod grit_lib::porcelain::branch_error
+#[non_exhaustive] pub enum grit_lib::porcelain::branch_error::BranchError
+pub grit_lib::porcelain::branch_error::BranchError::AlreadyExists
+pub grit_lib::porcelain::branch_error::BranchError::AlreadyExists::name: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::CheckedOut
+pub grit_lib::porcelain::branch_error::BranchError::CheckedOut::name: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::CheckedOut::worktree: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::InvalidName
+pub grit_lib::porcelain::branch_error::BranchError::InvalidName::name: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::InvalidName::reason: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::NoCommits
+pub grit_lib::porcelain::branch_error::BranchError::NoUpstream
+pub grit_lib::porcelain::branch_error::BranchError::NoUpstream::name: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::NotFound
+pub grit_lib::porcelain::branch_error::BranchError::NotFound::name: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::NotFullyMerged
+pub grit_lib::porcelain::branch_error::BranchError::NotFullyMerged::base: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::NotFullyMerged::name: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::UpstreamNotTracking
+pub grit_lib::porcelain::branch_error::BranchError::UpstreamNotTracking::upstream: alloc::string::String
+impl core::clone::Clone for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::BranchError
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
+impl core::error::Error for grit_lib::porcelain::branch_error::BranchError
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::porcelain::branch_error::BranchError
+pub fn grit_lib::porcelain::branch_error::BranchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Send for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Sync for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::BranchError
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::BranchError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::BranchError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::BranchError
+pub enum grit_lib::porcelain::branch_error::DeleteMode
+pub grit_lib::porcelain::branch_error::DeleteMode::Force
+pub grit_lib::porcelain::branch_error::DeleteMode::Safe
+impl core::clone::Clone for grit_lib::porcelain::branch_error::DeleteMode
+pub fn grit_lib::porcelain::branch_error::DeleteMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::DeleteMode
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::DeleteMode
+pub fn grit_lib::porcelain::branch_error::DeleteMode::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::DeleteMode
+pub fn grit_lib::porcelain::branch_error::DeleteMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Send for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Sync for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::DeleteMode
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::DeleteMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::DeleteMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::DeleteMode
+pub enum grit_lib::porcelain::branch_error::TrackMode
+pub grit_lib::porcelain::branch_error::TrackMode::Always
+pub grit_lib::porcelain::branch_error::TrackMode::Auto
+pub grit_lib::porcelain::branch_error::TrackMode::Never
+impl core::clone::Clone for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::TrackMode
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::TrackMode
+pub fn grit_lib::porcelain::branch_error::TrackMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Send for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Sync for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::TrackMode
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::TrackMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::TrackMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::TrackMode
+pub struct grit_lib::porcelain::branch_error::StartPoint
+pub grit_lib::porcelain::branch_error::StartPoint::label: alloc::string::String
+pub grit_lib::porcelain::branch_error::StartPoint::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::branch_error::StartPoint
+pub fn grit_lib::porcelain::branch_error::StartPoint::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::branch_error::StartPoint
+impl core::cmp::PartialEq for grit_lib::porcelain::branch_error::StartPoint
+pub fn grit_lib::porcelain::branch_error::StartPoint::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::branch_error::StartPoint
+pub fn grit_lib::porcelain::branch_error::StartPoint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Freeze for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Send for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Sync for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::Unpin for grit_lib::porcelain::branch_error::StartPoint
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::StartPoint
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::StartPoint
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::StartPoint
 pub mod grit_lib::porcelain::checkout
 pub fn grit_lib::porcelain::checkout::apply_index_file_mode(&std::path::Path, u32) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_between_trees(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
@@ -10961,6 +11191,7 @@ pub fn grit_lib::porcelain::pathspec_match::pathspec_matches_known_in_repository
 pub mod grit_lib::porcelain::quote_path
 pub fn grit_lib::porcelain::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_c_style(&str, bool) -> alloc::string::String
+pub fn grit_lib::porcelain::quote_path::quote_c_style_bytes(&[u8], bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_path_for_display(&str, bool) -> alloc::string::String
 pub mod grit_lib::porcelain::rebase
 pub enum grit_lib::porcelain::rebase::FixupMessageMode
@@ -11785,6 +12016,7 @@ pub mod grit_lib::prelude
 pub grit_lib::prelude::Error::AmendUnborn
 pub grit_lib::prelude::Error::Apply(grit_lib::error::ApplyError)
 pub grit_lib::prelude::Error::Auth(alloc::string::String)
+pub grit_lib::prelude::Error::Branch(grit_lib::porcelain::branch_error::BranchError)
 pub grit_lib::prelude::Error::BranchCheckedOutInWorktree
 pub grit_lib::prelude::Error::BranchCheckedOutInWorktree::branch: alloc::string::String
 pub grit_lib::prelude::Error::BranchCheckedOutInWorktree::worktree_path: alloc::string::String
@@ -11953,6 +12185,8 @@ impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_l
 pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
+impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::prelude::MidxError) -> Self
 impl core::convert::From<grit_lib::refs::store::RefStoreError> for grit_lib::error::Error
@@ -12991,6 +13225,7 @@ pub fn &mut T::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, gri
 pub mod grit_lib::quote_path
 pub fn grit_lib::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
 pub fn grit_lib::quote_path::quote_c_style(&str, bool) -> alloc::string::String
+pub fn grit_lib::quote_path::quote_c_style_bytes(&[u8], bool) -> alloc::string::String
 pub fn grit_lib::quote_path::quote_path_for_display(&str, bool) -> alloc::string::String
 pub mod grit_lib::refs
 pub mod grit_lib::refs::branch_tracking
@@ -13192,9 +13427,11 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::T
 pub const grit_lib::refs::branch_tracking::DEFAULT_TARGET_CANDIDATES: [&str; 4]
 pub fn grit_lib::refs::branch_tracking::apply_push_remote_tracking_updates(&std::path::Path, &str, &[grit_lib::remote::push_report::PushRefResult]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::branch_tracking::comparison_base(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::branch_tracking::ComparisonBase>>
+pub fn grit_lib::refs::branch_tracking::remote_tracking_ref_is_mapped(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::branch_tracking::status_ahead_behind_enabled(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::refs::branch_tracking::target_branch(&grit_lib::repo::Repository) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::branch_tracking::ComparisonBase>>
 pub fn grit_lib::refs::branch_tracking::upstream_branch(&grit_lib::repo::Repository, &str) -> core::option::Option<grit_lib::refs::branch_tracking::ComparisonBase>
+pub fn grit_lib::refs::branch_tracking::upstream_config_for_branch_ref(&str) -> core::option::Option<(alloc::string::String, alloc::string::String)>
 pub fn grit_lib::refs::branch_tracking::upstream_tracking_full_ref(&grit_lib::repo::Repository, &str) -> core::option::Option<alloc::string::String>
 pub mod grit_lib::refs::check_ref_format
 pub enum grit_lib::refs::check_ref_format::RefNameError

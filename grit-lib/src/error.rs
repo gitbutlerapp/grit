@@ -615,6 +615,10 @@ pub enum Error {
     #[error(transparent)]
     Config(#[from] ConfigError),
 
+    /// Branch create, delete, or upstream configuration failure.
+    #[error(transparent)]
+    Branch(#[from] crate::porcelain::branch_error::BranchError),
+
     /// Reference lock failure while updating refs.
     #[error(transparent)]
     RefLock(#[from] RefLockError),
