@@ -220,6 +220,7 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
         &ApplyOptions {
             identity: "Rewriter <rewriter@test>".into(),
             reflog_message: "history reword".into(),
+            record_operation: None,
         },
     )
     .expect("apply");

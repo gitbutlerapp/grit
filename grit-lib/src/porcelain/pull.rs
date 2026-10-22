@@ -722,6 +722,7 @@ fn rebase_fetched_upstream(
             &ApplyOptions {
                 identity: checkout_reflog_identity(repo),
                 reflog_message: format!("pull: rebase onto {label}"),
+                record_operation: Some("rebase".into()),
             },
         )
         .map_err(map_history_error)?;

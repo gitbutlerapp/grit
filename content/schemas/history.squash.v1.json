@@ -89,7 +89,7 @@
       "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
     },
     "operation": {
-      "description": "Operation name (`drop`, `move`, `reword`, `fixup` or `squash`).",
+      "description": "Operation name (`drop`, `move`, `reword`, `fixup`, `squash`, or `undo`).",
       "type": "string"
     },
     "refs": {

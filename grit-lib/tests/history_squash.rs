@@ -48,6 +48,7 @@ fn apply_plan(repo: &Repository, plan: &RewritePlan) {
         &ApplyOptions {
             identity: "Squasher <s@grit.test>".into(),
             reflog_message: "history squash".into(),
+            record_operation: None,
         },
     )
     .expect("apply");

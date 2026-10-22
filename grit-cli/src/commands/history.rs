@@ -10,9 +10,10 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, reword, squash, staged_fixup_paths, verify_rewrite_plan, AbsorbOptions,
-    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
-    RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
+    move_commit, reword, squash, staged_fixup_paths, undo_last_rewrite, verify_rewrite_plan,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment,
+    HunkRange, Placement, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
+    UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -78,7 +79,7 @@ pub struct HistoryRewriteArgs {
 /// Result of `grit history drop`, `move`, `reword`, `fixup` and `squash`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HistoryRewriteOutcome {
-    /// Operation name (`drop`, `move`, `reword`, `fixup` or `squash`).
+    /// Operation name (`drop`, `move`, `reword`, `fixup`, `squash`, or `undo`).
     pub operation: String,
     /// Original and replacement commit OIDs for every rewritten commit.
     pub rewritten: Vec<RewrittenPair>,
@@ -189,6 +190,12 @@ impl HumanRender for HistoryRewriteOutcome {
                 "Dropped 1 commit, replayed {} descendant commit(s)",
                 self.rewritten.len()
             );
+        } else if self.operation == "undo" {
+            if self.dry_run {
+                outln!(w, "Dry run — undo would restore refs:");
+            } else {
+                outln!(w, "Undid last history rewrite");
+            }
         } else {
             let verb = match self.operation.as_str() {
                 "fixup" => "Fixed up",
@@ -209,6 +216,7 @@ impl MarkdownRender for HistoryRewriteOutcome {
             "fixup" => "History fixup",
             "squash" => "History squash",
             "reword" => "History reword",
+            "undo" => "History undo",
             _ => "History rewrite",
         };
         markdown::print_history_rewrite_outcome(w, title, self)
@@ -246,10 +254,11 @@ impl Rewrite {
         })
     }
 
-    fn apply_options(&self, reflog_message: String) -> Result<ApplyOptions> {
+    fn apply_options(&self, operation: &str, reflog_message: String) -> Result<ApplyOptions> {
         Ok(ApplyOptions {
             identity: context::committer_reflog_identity(self.repo.environment(), &self.config)?,
             reflog_message,
+            record_operation: Some(operation.into()),
         })
     }
 
@@ -290,7 +299,12 @@ pub fn run_move(
     .map_err(on_err)?;
     if !shared.dry_run {
         let message = format!("history move: {}", short(&commit_oid.to_hex()));
-        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
+        apply_rewrite(
+            &rewrite.repo,
+            &plan,
+            &rewrite.apply_options("move", message)?,
+        )
+        .map_err(on_err)?;
     }
     Ok(HistoryRewriteOutcome::new("move", &plan, shared.dry_run))
 }
@@ -305,7 +319,12 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
         let message = format!("history drop: {}", rewrite.subject(commit_oid)?);
-        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
+        apply_rewrite(
+            &rewrite.repo,
+            &plan,
+            &rewrite.apply_options("drop", message)?,
+        )
+        .map_err(on_err)?;
     }
     Ok(HistoryRewriteOutcome::new("drop", &plan, shared.dry_run))
 }
@@ -331,7 +350,12 @@ pub fn run_reword(
         .ok_or_else(|| anyhow::anyhow!("rewritten commit missing from plan"))?;
     if !shared.dry_run {
         let message = format!("history reword: {}", rewrite.subject(new_oid)?);
-        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
+        apply_rewrite(
+            &rewrite.repo,
+            &plan,
+            &rewrite.apply_options("reword", message)?,
+        )
+        .map_err(on_err)?;
     }
     Ok(HistoryRewriteOutcome::new("reword", &plan, shared.dry_run))
 }
@@ -371,7 +395,7 @@ pub fn run_fixup(
         apply_fixup_rewrite(
             &rewrite.repo,
             &plan,
-            &rewrite.apply_options(format!("history fixup: {subject}"))?,
+            &rewrite.apply_options("fixup", format!("history fixup: {subject}"))?,
             &staged_paths,
         )
         .map_err(on_err)?;
@@ -411,7 +435,12 @@ pub fn run_squash(
             None => "squash".into(),
         };
         let message = format!("history squash: {subject}");
-        apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?).map_err(on_err)?;
+        apply_rewrite(
+            &rewrite.repo,
+            &plan,
+            &rewrite.apply_options("squash", message)?,
+        )
+        .map_err(on_err)?;
     }
     Ok(HistoryRewriteOutcome::new("squash", &plan, shared.dry_run))
 }
@@ -533,6 +562,37 @@ impl MarkdownRender for HistoryAbsorbOutcome {
     }
 }
 
+/// Restore refs (and the worktree when needed) from the last recorded history rewrite.
+pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryRewriteOutcome> {
+    let on_err = history_error("history undo");
+    let repo = context::discover()?;
+    let rewrite = Rewrite::new(repo, shared)?;
+    let apply_opts = ApplyOptions {
+        identity: context::committer_reflog_identity(rewrite.repo.environment(), &rewrite.config)?,
+        reflog_message: "history undo".into(),
+        record_operation: None,
+    };
+    let outcome = undo_last_rewrite(&rewrite.repo, &apply_opts, shared.dry_run).map_err(on_err)?;
+    Ok(HistoryRewriteOutcome {
+        operation: "undo".into(),
+        rewritten: Vec::new(),
+        refs: outcome
+            .ref_updates
+            .iter()
+            .map(|u| RefPair {
+                name: u.name.clone(),
+                old: u.old.to_hex(),
+                new: u.new.to_hex(),
+            })
+            .collect(),
+        head: outcome.head_change.map(|(old, new)| HeadPair {
+            old: old.to_hex(),
+            new: new.to_hex(),
+        }),
+        dry_run: outcome.dry_run,
+    })
+}
+
 /// Assign staged hunks into history and replay descendants once.
 pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<HistoryAbsorbOutcome> {
     let on_err = history_error("history absorb");
@@ -553,7 +613,7 @@ pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<His
         apply_absorb_rewrite(
             &rewrite.repo,
             &absorb_plan,
-            &rewrite.apply_options("history absorb".into())?,
+            &rewrite.apply_options("absorb", "history absorb".into())?,
         )
         .map_err(on_err)?;
     }
@@ -673,6 +733,13 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         }
         HistoryError::WorktreeApply { message } => {
             anyhow::anyhow!("worktree update failed: {message}")
+        }
+        HistoryError::NoUndoRecord => anyhow::anyhow!("no history rewrite to undo"),
+        HistoryError::UndoStale { name } => anyhow::anyhow!(
+            "ref {name} changed since the last history rewrite — undo is no longer safe"
+        ),
+        HistoryError::UndoRecordRead { message } | HistoryError::UndoRecordWrite { message } => {
+            anyhow::anyhow!("history undo record error: {message}")
         }
         _ => anyhow::anyhow!("{err}"),
     }

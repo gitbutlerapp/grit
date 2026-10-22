@@ -50,6 +50,7 @@ fn apply_plan(wt: &std::path::Path, plan: &grit_lib::revwalk::history::RewritePl
         &ApplyOptions {
             identity: "T <t@grit.test>".into(),
             reflog_message: "history move".into(),
+            record_operation: None,
         },
     )
     .expect("apply");

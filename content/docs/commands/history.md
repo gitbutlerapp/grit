@@ -16,6 +16,7 @@ grit history drop|move|reword|fixup|squash|absorb … [--dry-run] [--update-refs
 grit history fixup <commit> [--empty=(drop|keep|abort)] [-m|--message-file]
 grit history squash <range>… [-m|--message-file|--combine]
 grit history absorb [--base <rev>]
+grit history undo [--dry-run]
 ```
 
 ## Description
@@ -59,6 +60,12 @@ Provide exactly one of `-m` / `--message` or `--message-file` when you want an e
 Assign **staged** hunks into the commits that last touched overlapping lines (between `--base` and `HEAD`), then replay descendants in **one** rewrite. Grit uses blame line mapping to find candidate commits and checks that each hunk commutes with commits after its target. Assigned hunks are folded into target commits via the same three-way merge as [`fixup`](#fixup); unassigned hunks stay staged.
 
 `--base` is exclusive: commits at and before the base are not considered. When omitted, grit hides other local branch tips, applies an upstream fork-point when configured, and caps the stack at ten commits.
+
+### `undo`
+
+Restore branch tips (and the worktree when `HEAD`'s tree changed) from the last successful history rewrite that moved refs. Grit records each apply in `.git/grit/history-last` (ignored by `git fsck --strict`); `undo` inverts that plan when every recorded ref is still at its post-rewrite tip. A second `undo` redoes the rewrite. Old commits remain reachable via reflogs until they expire.
+
+There is nothing to undo when no record exists, when a listed ref moved, or when local changes would be overwritten by the checkout.
 
 ### `squash`
 
@@ -147,13 +154,13 @@ Absorbed 1 hunk(s) into 2 commit(s)
 
 ## JSON output
 
-Schemas: [drop v1](/schemas/history.drop/v1.json), [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json), [squash v1](/schemas/history.squash/v1.json), [absorb v1](/schemas/history.absorb/v1.json), [rebase v1](/schemas/history.rebase/v1.json), [split v1](/schemas/history.split/v1.json)
+Schemas: [drop v1](/schemas/history.drop/v1.json), [move v1](/schemas/history.move/v1.json), [reword v1](/schemas/history.reword/v1.json), [fixup v1](/schemas/history.fixup/v1.json), [squash v1](/schemas/history.squash/v1.json), [absorb v1](/schemas/history.absorb/v1.json), [undo v1](/schemas/history.undo/v1.json), [rebase v1](/schemas/history.rebase/v1.json), [split v1](/schemas/history.split/v1.json)
 
-Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`, `grit history fixup`, `grit history squash`, or `grit history absorb`:
+Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`, `grit history fixup`, `grit history squash`, `grit history absorb`, or `grit history undo`:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, or `"squash"`. |
+| `operation` | string | `"drop"`, `"move"`, `"reword"`, `"fixup"`, `"squash"`, `"absorb"`, or `"undo"`. |
 | `rewritten` | array | `{old,new,change_id}` full hex OIDs and stored change id (`null` when dropped or absent). |
 | `refs` | array | `{name,old,new}` for each ref that would move or moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |

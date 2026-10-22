@@ -117,6 +117,8 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 
 Ordinary pushes must fast-forward the remote. If the remote has commits you don't, grit rejects the push (exit **1**, `"rejected": true`); run `grit pull`, then push again. After `grit history` edits (reword, drop, fixup, squash), fetch and use `--force-with-lease` instead of `--force` so you don't overwrite someone else's work. `--force` overwrites unconditionally when you really need it.
 
+After a successful history rewrite (drop, move, reword, fixup, squash, absorb, or rebase apply), grit stores the ref plan in `.git/grit/history-last`. `grit history undo` restores those refs when tips are unchanged; run it again to redo. Use `--dry-run` to preview ref movements. Undo refuses when a ref moved or local changes would be overwritten.
+
 URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a local path.
 
 ## Bundles and linked worktrees

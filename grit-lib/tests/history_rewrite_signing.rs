@@ -181,6 +181,7 @@ fn history_rewrite_resigns_when_gpgsign() {
         &ApplyOptions {
             identity: "Rewriter <r@grit.test>".into(),
             reflog_message: "history reword".into(),
+            record_operation: None,
         },
     )
     .expect("apply");

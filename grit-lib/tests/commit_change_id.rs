@@ -650,6 +650,7 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
         &ApplyOptions {
             identity: ident(),
             reflog_message: "reword".into(),
+            record_operation: None,
         },
     )
     .expect("apply");

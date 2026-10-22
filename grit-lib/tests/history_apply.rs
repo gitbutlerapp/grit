@@ -31,6 +31,7 @@ fn apply_opts() -> ApplyOptions {
     ApplyOptions {
         identity: "Applier <apply@grit.test>".into(),
         reflog_message: "history rewrite".into(),
+        record_operation: None,
     }
 }
 

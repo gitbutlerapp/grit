@@ -190,6 +190,31 @@ pub enum HistoryError {
         message: String,
     },
 
+    /// No `.git/grit/history-last` record exists.
+    #[error("no history rewrite to undo")]
+    NoUndoRecord,
+
+    /// A ref or `HEAD` moved since the recorded rewrite.
+    #[error("ref {name} changed since the last history rewrite — undo is no longer safe")]
+    UndoStale {
+        /// Ref that no longer matches the recorded post-rewrite tip.
+        name: String,
+    },
+
+    /// Failed to read `.git/grit/history-last`.
+    #[error("could not read history undo record: {message}")]
+    UndoRecordRead {
+        /// Parse or I/O failure summary.
+        message: String,
+    },
+
+    /// Failed to write `.git/grit/history-last`.
+    #[error("could not write history undo record: {message}")]
+    UndoRecordWrite {
+        /// I/O or lock failure summary.
+        message: String,
+    },
+
     /// Checkout failed after refs were updated; rollback or worktree restore may also have failed.
     #[error("checkout failed after refs were updated")]
     ApplyRollbackIncomplete {

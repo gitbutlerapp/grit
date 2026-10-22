@@ -286,6 +286,11 @@ enum HistoryAction {
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
+    /// Undo the last applied history rewrite using the recorded ref plan.
+    Undo {
+        #[command(flatten)]
+        shared: commands::history::HistoryRewriteArgs,
+    },
     /// Fold a revision range into the oldest commit and replay descendants.
     Squash {
         /// Revision range (same syntax as `git rev-list`, for example `base..tip`).
@@ -2075,6 +2080,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 opts,
                 ctx,
             ),
+            HistoryAction::Undo { shared } => {
+                emit(&commands::history::run_undo(&shared)?, opts, ctx)
+            }
             HistoryAction::Squash {
                 range,
                 message,

@@ -67,6 +67,7 @@ fn apply_opts() -> ApplyOptions {
     ApplyOptions {
         identity: "Tester <t@grit.test>".into(),
         reflog_message: "history drop".into(),
+        record_operation: None,
     }
 }
 

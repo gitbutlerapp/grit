@@ -207,6 +207,21 @@ pub struct ApplyOptions {
     pub identity: String,
     /// Reflog message for every ref update in the batch.
     pub reflog_message: String,
+    /// When set, persist ref movements to `.git/grit/history-last` after a successful apply.
+    pub record_operation: Option<String>,
+}
+
+/// Result of [`super::undo::undo_last_rewrite`](crate::history::undo::undo_last_rewrite).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndoOutcome {
+    /// Ref updates that were applied or would be applied (`--dry-run`).
+    pub ref_updates: Vec<PlannedRefUpdate>,
+    /// Commit OID `HEAD` resolves to after undo (or would resolve to when dry-run).
+    pub head: ObjectId,
+    /// Previous and new `HEAD` commit OIDs when undo moves `HEAD`'s commit.
+    pub head_change: Option<(ObjectId, ObjectId)>,
+    /// Whether refs were left unchanged.
+    pub dry_run: bool,
 }
 
 /// Result of [`super::apply_rewrite`](crate::history::apply_rewrite).

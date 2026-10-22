@@ -56,6 +56,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         &ApplyOptions {
             identity: "History Guide <guide@grit.test>".into(),
             reflog_message: "history reword".into(),
+            record_operation: None,
         },
     )
     .map_err(grit_lib::error::Error::History)?;

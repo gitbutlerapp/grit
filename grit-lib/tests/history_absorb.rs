@@ -37,6 +37,7 @@ fn apply_opts() -> ApplyOptions {
     ApplyOptions {
         identity: "Absorb <a@grit.test>".into(),
         reflog_message: "history absorb".into(),
+        record_operation: None,
     }
 }
 

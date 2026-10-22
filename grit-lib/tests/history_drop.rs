@@ -45,6 +45,7 @@ fn apply_opts() -> ApplyOptions {
     ApplyOptions {
         identity: "Dropper <drop@grit.test>".into(),
         reflog_message: "history drop".into(),
+        record_operation: None,
     }
 }
 

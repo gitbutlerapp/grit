@@ -172,6 +172,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<HistoryRewriteOutcome>("history.fixup"),
         entry::<HistoryRewriteOutcome>("history.squash"),
         entry::<HistoryAbsorbOutcome>("history.absorb"),
+        entry::<HistoryRewriteOutcome>("history.undo"),
         entry::<RevertOutcome>("revert"),
         entry::<StashPushOutcome>("stash"),
         entry::<StashPushOutcome>("stash.push"),
@@ -303,6 +304,7 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("fixup") => "history.fixup",
             Some("squash") => "history.squash",
             Some("absorb") => "history.absorb",
+            Some("undo") => "history.undo",
             _ => return None,
         },
         cmd if NO_JSON_COMMANDS.contains(&cmd) => return None,
@@ -381,6 +383,7 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
         || command == "history.fixup"
         || command == "history.squash"
         || command == "history.absorb"
+        || command == "history.undo"
     {
         ensure_required_nullable_head(&mut value);
     }
