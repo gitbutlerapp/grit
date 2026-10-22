@@ -1,0 +1,120 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-22T11:04:03.031732895Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.16",
+    "grit_commit": "89801676260ec6f3847e5ad52b1542641093673f"
+  },
+  "scenarios": [
+    {
+      "id": "branch/create@many-refs",
+      "area": "branching",
+      "description": "Create one branch vs git branch",
+      "git": {
+        "median_wall_ms": 2.211135,
+        "peak_rss_bytes": 7852032,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.298597,
+        "peak_rss_bytes": 15941632,
+        "runs": 20
+      },
+      "ratio": 1.4918116713814398
+    },
+    {
+      "id": "branch/delete@many-refs",
+      "area": "branching",
+      "description": "Delete one branch vs git branch -D",
+      "git": {
+        "median_wall_ms": 5.01302,
+        "peak_rss_bytes": 8040448,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 11.2761795,
+        "peak_rss_bytes": 17432576,
+        "runs": 20
+      },
+      "ratio": 2.249378518338247
+    },
+    {
+      "id": "branch/list@many-refs",
+      "area": "branching",
+      "headline": true,
+      "name": "branch",
+      "description": "List branches vs git branch",
+      "git": {
+        "median_wall_ms": 2.2078525,
+        "peak_rss_bytes": 7086080,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.296288,
+        "peak_rss_bytes": 14274560,
+        "runs": 20
+      },
+      "ratio": 1.492983793074945
+    },
+    {
+      "id": "branch/list@many-refs-loose",
+      "area": "branching",
+      "description": "List branches on loose many-refs fixture vs git branch",
+      "git": {
+        "median_wall_ms": 2.2057225000000003,
+        "peak_rss_bytes": 6963200,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.2912685,
+        "peak_rss_bytes": 14278656,
+        "runs": 20
+      },
+      "ratio": 1.4921498511258782
+    },
+    {
+      "id": "tag/create@many-refs",
+      "area": "branching",
+      "description": "Create lightweight tag vs git tag",
+      "git": {
+        "median_wall_ms": 2.2210505,
+        "peak_rss_bytes": 7704576,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.353605999999999,
+        "peak_rss_bytes": 14348288,
+        "runs": 20
+      },
+      "ratio": 1.9601562413821745
+    },
+    {
+      "id": "tag/list@many-refs",
+      "area": "branching",
+      "description": "List tags vs git tag -l",
+      "git": {
+        "median_wall_ms": 3.3045065,
+        "peak_rss_bytes": 8208384,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 35.304937499999994,
+        "peak_rss_bytes": 16744448,
+        "runs": 20
+      },
+      "ratio": 10.683875943351902
+    }
+  ]
+}
