@@ -65,7 +65,7 @@ pub struct SplitOptions {
 pub type HistoryEdits = BTreeMap<ObjectId, CommitEdit>;
 
 /// Which local refs may move when a plan is applied later.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RefScope {
     /// Every local branch whose tip descends from the oldest edited commit, plus `HEAD`.
     #[default]
@@ -75,7 +75,7 @@ pub enum RefScope {
 }
 
 /// Behavior when a replayed commit's tree matches its new parent's tree but did not before.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum EmptyPolicy {
     /// Skip creating a commit; map to the new parent OID.
     #[default]
@@ -87,7 +87,7 @@ pub enum EmptyPolicy {
 }
 
 /// Inputs for [`super::plan_rewrite`](crate::history::plan_rewrite).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RewriteOptions {
     /// Which refs to consider when collecting tips and ref updates.
     pub scope: RefScope,
@@ -219,7 +219,7 @@ impl RewritePlan {
 }
 
 /// Identity and reflog text recorded when [`super::apply_rewrite`](crate::history::apply_rewrite) moves refs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ApplyOptions {
     /// Reflog identity (`Name <email>`).
     pub identity: String,

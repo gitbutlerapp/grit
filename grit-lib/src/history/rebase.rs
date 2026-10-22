@@ -13,7 +13,10 @@ use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 
 use super::error::HistoryError;
-use super::plan::{collect_scoped_refs, commit_parents, plan_rewrite_with_order};
+use super::plan::{
+    collect_scoped_refs, commit_parents, plan_rewrite_with_order,
+    plan_rewrite_with_order_resumable, ResumablePlanOutcome,
+};
 use super::types::{CommitEdit, HistoryEdits, RefScope, RewriteOptions, RewritePlan};
 
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
@@ -62,7 +65,7 @@ pub enum RebasePlan {
 }
 
 /// Options for [`rebase_onto`] and [`plan_rebase`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RebaseOntoOptions {
     /// Scope, empty-commit policy, and committer ident for replayed commits.
     pub rewrite: RewriteOptions,
@@ -141,7 +144,7 @@ pub fn rebase_onto(
     rebase_onto_impl(repo, upstream, onto, tips, opts)
 }
 
-fn rebase_fork(
+pub(crate) fn rebase_fork(
     repo: &Repository,
     upstream: ObjectId,
     branch_tip: ObjectId,
@@ -186,13 +189,14 @@ fn is_rebase_up_to_date(
     Ok(false)
 }
 
-fn rebase_onto_impl(
+/// Build rebase [`HistoryEdits`], replay order, and commit range for `fork..tips` onto `onto`.
+pub(crate) fn build_rebase_rewrite_inputs(
     repo: &Repository,
     fork: ObjectId,
     onto: ObjectId,
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> Result<(HistoryEdits, Vec<ObjectId>, Vec<ObjectId>), HistoryError> {
     if tips.is_empty() {
         return Err(HistoryError::Planning {
             message: "at least one tip commit is required".into(),
@@ -213,11 +217,7 @@ fn rebase_onto_impl(
 
     let range = commits_in_rebase_range(repo, fork, tips)?;
     if range.is_empty() {
-        return Ok(RewritePlan {
-            commits: Vec::new(),
-            ref_updates: Vec::new(),
-            head: super::types::HeadEffect::default(),
-        });
+        return Ok((HistoryEdits::new(), Vec::new(), range));
     }
 
     let skip_map = if opts.skip_applied {
@@ -258,6 +258,24 @@ fn rebase_onto_impl(
     }
 
     let replay_order = extend_rebase_replay_order(repo, fork, &range, &opts.rewrite, &skip_map)?;
+    Ok((edits, replay_order, range))
+}
+
+fn rebase_onto_impl(
+    repo: &Repository,
+    fork: ObjectId,
+    onto: ObjectId,
+    tips: &[ObjectId],
+    opts: &RebaseOntoOptions,
+) -> Result<RewritePlan, HistoryError> {
+    let (edits, replay_order, range) = build_rebase_rewrite_inputs(repo, fork, onto, tips, opts)?;
+    if range.is_empty() {
+        return Ok(RewritePlan {
+            commits: Vec::new(),
+            ref_updates: Vec::new(),
+            head: super::types::HeadEffect::default(),
+        });
+    }
     plan_rewrite_with_order(
         repo,
         &edits,
@@ -265,6 +283,39 @@ fn rebase_onto_impl(
         Some(&replay_order),
         opts.flatten_leaf_merges,
     )
+}
+
+/// Like [`plan_rebase`], but resumable planning may stop on the first replay conflict.
+pub(crate) fn plan_rebase_resumable(
+    repo: &Repository,
+    request: &RebaseRequest,
+    opts: &RebaseOntoOptions,
+) -> Result<Result<ResumablePlanOutcome, RebasePlan>, HistoryError> {
+    let fork = rebase_fork(repo, request.upstream, request.branch_tip)?;
+    let effective_onto = request.onto.unwrap_or(request.upstream);
+    if is_rebase_up_to_date(
+        repo,
+        fork,
+        effective_onto,
+        request.upstream,
+        request.onto,
+        request.branch_tip,
+    )? {
+        return Ok(Err(RebasePlan::UpToDate));
+    }
+    let tips = [request.branch_tip];
+    let (edits, replay_order, range) =
+        build_rebase_rewrite_inputs(repo, fork, effective_onto, &tips, opts)?;
+    if range.is_empty() {
+        return Ok(Err(RebasePlan::UpToDate));
+    }
+    Ok(Ok(plan_rewrite_with_order_resumable(
+        repo,
+        &edits,
+        &opts.rewrite,
+        Some(&replay_order),
+        opts.flatten_leaf_merges,
+    )?))
 }
 
 /// Include sibling branch tips (same parent in the rebase range) when updating all descendant refs.

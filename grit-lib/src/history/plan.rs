@@ -1,5 +1,6 @@
 //! In-memory history rewrite planning.
 
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,7 +15,7 @@ use crate::error::Error;
 use crate::merge_base::is_ancestor;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
+    merge_trees_three_way, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::porcelain::commit::prepare_commit_bytes;
@@ -32,6 +33,82 @@ use super::types::{
 
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 static MERGE_TREE_CALLS: AtomicUsize = AtomicUsize::new(0); // hygiene: merge-call counter for tests and unstable-bench-helpers
+
+thread_local! {
+    static RESUMABLE_REPLAY: Cell<bool> = const { Cell::new(false) };
+    static REPLAY_STOP_PARENT: Cell<Option<ObjectId>> = const { Cell::new(None) };
+    static REPLAY_STOP_COMMIT: Cell<Option<ObjectId>> = const { Cell::new(None) };
+    static REPLAY_STOP_MERGE: RefCell<Option<TreeMergeOutput>> = const { RefCell::new(None) };
+}
+
+/// Conflict snapshot when resumable replay stops mid-plan.
+pub(crate) struct PartialReplayConflict {
+    /// Original commit being replayed when the tree merge conflicted.
+    pub commit: ObjectId,
+    /// Mapped first parent (detached `HEAD` target during stop/resume).
+    pub replayed_parent: ObjectId,
+    /// Three-way merge output with conflict stages and marker payloads.
+    pub merge: TreeMergeOutput,
+}
+
+/// Partial progress returned when resumable planning stops on a conflict.
+pub(crate) struct PartialRewritePlan {
+    /// Old→new OIDs for commits fully replayed before the stop.
+    pub mapping: HashMap<ObjectId, ObjectId>,
+    /// Rewrite rows for commits handled before the stop.
+    pub rewritten: Vec<RewrittenCommit>,
+    /// Conflict at the stopping commit.
+    pub conflict: PartialReplayConflict,
+    /// Full replay order for the rewrite (including not-yet-replayed commits).
+    pub commits_to_replay: Vec<ObjectId>,
+    /// Scoped branch tips collected at plan start.
+    pub scoped_refs: Vec<(String, ObjectId)>,
+    /// Edits map used for this plan.
+    pub edits: HistoryEdits,
+    /// Rewrite options.
+    pub opts: RewriteOptions,
+    /// Leaf-merge flatten flag passed to planning.
+    pub flatten_leaf_merges: bool,
+}
+
+/// Outcome of [`plan_rewrite_with_order_resumable`].
+pub(crate) enum ResumablePlanOutcome {
+    /// Every commit in the replay order was planned.
+    Complete(RewritePlan),
+    /// Replay stopped on a conflict; partial mapping and ODB objects are retained.
+    Partial(Box<PartialRewritePlan>),
+}
+
+/// Run `f` with resumable conflict capture enabled for tree replay during planning.
+pub(crate) fn with_resumable_replay<R>(f: impl FnOnce() -> R) -> R {
+    RESUMABLE_REPLAY.with(|f| f.set(true));
+    REPLAY_STOP_PARENT.with(|f| f.set(None));
+    REPLAY_STOP_COMMIT.with(|f| f.set(None));
+    REPLAY_STOP_MERGE.with(|f| *f.borrow_mut() = None);
+    let out = f();
+    RESUMABLE_REPLAY.with(|f| f.set(false));
+    out
+}
+
+fn note_resumable_conflict(commit: ObjectId, replayed_parent: ObjectId, merge: TreeMergeOutput) {
+    if !RESUMABLE_REPLAY.with(Cell::get) {
+        return;
+    }
+    REPLAY_STOP_COMMIT.with(|c| c.set(Some(commit)));
+    REPLAY_STOP_PARENT.with(|p| p.set(Some(replayed_parent)));
+    REPLAY_STOP_MERGE.with(|m| *m.borrow_mut() = Some(merge));
+}
+
+fn take_resumable_conflict() -> Option<PartialReplayConflict> {
+    let commit = REPLAY_STOP_COMMIT.with(|c| c.take())?;
+    let replayed_parent = REPLAY_STOP_PARENT.with(|p| p.take())?;
+    let merge = REPLAY_STOP_MERGE.with(|m| m.borrow_mut().take())?;
+    Some(PartialReplayConflict {
+        commit,
+        replayed_parent,
+        merge,
+    })
+}
 
 /// Test hook: number of three-way tree merges performed by planning.
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
@@ -113,6 +190,66 @@ pub fn plan_rewrite(
 /// Like [`plan_rewrite`], but when `replay_order` is set, replays commits in that exact
 /// topological order (used by [`super::rebase::rebase_onto`](crate::history::rebase::rebase_onto)
 /// so merge side branches are included).
+#[allow(clippy::too_many_arguments)]
+fn finish_plan_rewrite_on_replay_error(
+    err: HistoryError,
+    mapping: HashMap<ObjectId, ObjectId>,
+    rewritten: Vec<RewrittenCommit>,
+    commits_to_replay: Vec<ObjectId>,
+    scoped_refs: Vec<(String, ObjectId)>,
+    edits: &HistoryEdits,
+    opts: &RewriteOptions,
+    flatten_leaf_merges: bool,
+) -> Result<ResumablePlanOutcome, HistoryError> {
+    if matches!(err, HistoryError::Conflict { .. }) {
+        if let Some(conflict) = take_resumable_conflict() {
+            return Ok(ResumablePlanOutcome::Partial(Box::new(PartialRewritePlan {
+                mapping,
+                rewritten,
+                conflict,
+                commits_to_replay,
+                scoped_refs,
+                edits: edits.clone(),
+                opts: opts.clone(),
+                flatten_leaf_merges,
+            })));
+        }
+    }
+    Err(err)
+}
+
+/// Like [`plan_rewrite_with_order`], but may stop on the first replay conflict and return partial progress.
+pub(crate) fn plan_rewrite_with_order_resumable(
+    repo: &Repository,
+    edits: &HistoryEdits,
+    opts: &RewriteOptions,
+    replay_order: Option<&[ObjectId]>,
+    flatten_leaf_merges: bool,
+) -> Result<ResumablePlanOutcome, HistoryError> {
+    plan_rewrite_with_order_resumable_seeded(
+        repo,
+        edits,
+        opts,
+        replay_order,
+        flatten_leaf_merges,
+        None,
+    )
+}
+
+/// Resumable planning with an existing partial mapping (continue/skip after a stop).
+pub(crate) fn plan_rewrite_with_order_resumable_seeded(
+    repo: &Repository,
+    edits: &HistoryEdits,
+    opts: &RewriteOptions,
+    replay_order: Option<&[ObjectId]>,
+    flatten_leaf_merges: bool,
+    seed: Option<(HashMap<ObjectId, ObjectId>, Vec<RewrittenCommit>)>,
+) -> Result<ResumablePlanOutcome, HistoryError> {
+    with_resumable_replay(|| {
+        plan_rewrite_with_order_impl(repo, edits, opts, replay_order, flatten_leaf_merges, seed)
+    })
+}
+
 pub(crate) fn plan_rewrite_with_order(
     repo: &Repository,
     edits: &HistoryEdits,
@@ -120,12 +257,27 @@ pub(crate) fn plan_rewrite_with_order(
     replay_order: Option<&[ObjectId]>,
     flatten_leaf_merges: bool,
 ) -> Result<RewritePlan, HistoryError> {
+    match plan_rewrite_with_order_impl(repo, edits, opts, replay_order, flatten_leaf_merges, None)?
+    {
+        ResumablePlanOutcome::Complete(plan) => Ok(plan),
+        ResumablePlanOutcome::Partial(_) => unreachable!("non-resumable planning cannot stop"),
+    }
+}
+
+fn plan_rewrite_with_order_impl(
+    repo: &Repository,
+    edits: &HistoryEdits,
+    opts: &RewriteOptions,
+    replay_order: Option<&[ObjectId]>,
+    flatten_leaf_merges: bool,
+    seed: Option<(HashMap<ObjectId, ObjectId>, Vec<RewrittenCommit>)>,
+) -> Result<ResumablePlanOutcome, HistoryError> {
     if edits.is_empty() {
-        return Ok(RewritePlan {
+        return Ok(ResumablePlanOutcome::Complete(RewritePlan {
             commits: Vec::new(),
             ref_updates: Vec::new(),
             head: HeadEffect::default(),
-        });
+        }));
     }
 
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
@@ -196,10 +348,17 @@ pub(crate) fn plan_rewrite_with_order(
         }
     }
 
-    let mut mapping: HashMap<ObjectId, ObjectId> = HashMap::new();
-    let mut rewritten: Vec<RewrittenCommit> = Vec::with_capacity(commits_to_replay.len());
+    let (mut mapping, mut rewritten) = if let Some((mapping, rewritten)) = seed {
+        (mapping, rewritten)
+    } else {
+        (HashMap::new(), Vec::with_capacity(commits_to_replay.len()))
+    };
+    let skip_replayed: HashSet<ObjectId> = mapping.keys().copied().collect();
 
-    for old_oid in commits_to_replay {
+    for &old_oid in &commits_to_replay {
+        if skip_replayed.contains(&old_oid) {
+            continue;
+        }
         let old = load_commit(repo, old_oid)?;
         let edit = edits.get(&old_oid);
 
@@ -267,133 +426,160 @@ pub(crate) fn plan_rewrite_with_order(
             _ => None,
         };
 
-        let (new_oid, new_field) = match edit {
-            None => {
-                let oid = replay_commit_descendant(
-                    repo,
-                    &change_ids,
-                    &mapping,
-                    &old,
-                    old_oid,
-                    insert_parent,
-                    opts,
-                )?;
-                (oid, Some(oid))
+        if RESUMABLE_REPLAY.with(Cell::get) {
+            if let Ok(replayed_parent) = mapped_first_parent(&mapping, &old, old_oid) {
+                REPLAY_STOP_PARENT.with(|p| p.set(Some(replayed_parent)));
+                REPLAY_STOP_COMMIT.with(|c| c.set(Some(old_oid)));
             }
-            Some(CommitEdit::InsertBefore(_)) => {
-                let oid = replay_commit_descendant(
-                    repo,
-                    &change_ids,
-                    &mapping,
-                    &old,
-                    old_oid,
-                    insert_parent,
-                    opts,
-                )?;
-                (oid, Some(oid))
-            }
-            Some(CommitEdit::SplitBefore { rest_message, .. }) => {
-                let parent_list = if let Some(inserted) = insert_parent {
-                    vec![inserted]
-                } else if old.parents.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![mapped_first_parent(&mapping, &old, old_oid)?]
-                };
-                let message = rest_message.as_deref().unwrap_or(&old.message);
-                let oid = write_rewritten_commit(
-                    repo,
-                    opts,
-                    &change_ids,
-                    &old,
-                    old_oid,
-                    old.tree,
-                    &parent_list,
-                    &old.author,
-                    &opts.committer,
-                    message,
-                )?;
-                (oid, Some(oid))
-            }
-            Some(CommitEdit::Reparent { parent }) => {
-                let parent_list = reparent_parent_list(&old, *parent, &mapping);
-                let oid = if old.parents.len() > 1 {
-                    replay_merge_descendant(
+        }
+
+        let replay_step = || -> Result<(ObjectId, Option<ObjectId>), HistoryError> {
+            match edit {
+                None => {
+                    let oid = replay_commit_descendant(
                         repo,
                         &change_ids,
                         &mapping,
                         &old,
                         old_oid,
-                        None,
+                        insert_parent,
                         opts,
-                        Some(&parent_list),
-                    )?
-                } else {
-                    replay_edited_commit(
+                    )?;
+                    Ok((oid, Some(oid)))
+                }
+                Some(CommitEdit::InsertBefore(_)) => {
+                    let oid = replay_commit_descendant(
                         repo,
+                        &change_ids,
+                        &mapping,
+                        &old,
+                        old_oid,
+                        insert_parent,
+                        opts,
+                    )?;
+                    Ok((oid, Some(oid)))
+                }
+                Some(CommitEdit::SplitBefore { rest_message, .. }) => {
+                    let parent_list = if let Some(inserted) = insert_parent {
+                        vec![inserted]
+                    } else if old.parents.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![mapped_first_parent(&mapping, &old, old_oid)?]
+                    };
+                    let message = rest_message.as_deref().unwrap_or(&old.message);
+                    let oid = write_rewritten_commit(
+                        repo,
+                        opts,
                         &change_ids,
                         &old,
                         old_oid,
+                        old.tree,
                         &parent_list,
                         &old.author,
                         &opts.committer,
-                        &old.message,
-                        opts,
-                    )?
-                };
-                (oid, Some(oid))
-            }
-            Some(CommitEdit::Rewrite {
-                tree,
-                message,
-                author,
-                parents,
-            }) => {
-                let parent_list = if let Some(parents) = parents {
-                    parents.clone()
-                } else if let Some(inserted) = insert_parent {
-                    vec![inserted]
-                } else if old.parents.is_empty() {
-                    Vec::new()
-                } else if old.parents.len() > 1 {
-                    old.parents
-                        .iter()
-                        .map(|p| mapping.get(p).copied().unwrap_or(*p))
-                        .collect()
-                } else {
-                    vec![mapped_first_parent(&mapping, &old, old_oid)?]
-                };
-                let author = author.as_deref().unwrap_or(&old.author);
-                let message = message.as_deref().unwrap_or(&old.message);
-                let oid = if let Some(explicit_tree) = *tree {
-                    write_rewritten_commit(
-                        repo,
-                        opts,
-                        &change_ids,
-                        &old,
-                        old_oid,
-                        explicit_tree,
-                        &parent_list,
-                        author,
-                        &opts.committer,
                         message,
-                    )?
-                } else {
-                    replay_edited_commit(
-                        repo,
-                        &change_ids,
-                        &old,
-                        old_oid,
-                        &parent_list,
-                        author,
-                        &opts.committer,
-                        message,
-                        opts,
-                    )?
-                };
-                (oid, Some(oid))
+                    )?;
+                    Ok((oid, Some(oid)))
+                }
+                Some(CommitEdit::Reparent { parent }) => {
+                    let parent_list = reparent_parent_list(&old, *parent, &mapping);
+                    let oid = if old.parents.len() > 1 {
+                        replay_merge_descendant(
+                            repo,
+                            &change_ids,
+                            &mapping,
+                            &old,
+                            old_oid,
+                            None,
+                            opts,
+                            Some(&parent_list),
+                        )?
+                    } else {
+                        replay_edited_commit(
+                            repo,
+                            &change_ids,
+                            &old,
+                            old_oid,
+                            &parent_list,
+                            &old.author,
+                            &opts.committer,
+                            &old.message,
+                            opts,
+                        )?
+                    };
+                    Ok((oid, Some(oid)))
+                }
+                Some(CommitEdit::Rewrite {
+                    tree,
+                    message,
+                    author,
+                    parents,
+                }) => {
+                    let parent_list = if let Some(parents) = parents {
+                        parents.clone()
+                    } else if let Some(inserted) = insert_parent {
+                        vec![inserted]
+                    } else if old.parents.is_empty() {
+                        Vec::new()
+                    } else if old.parents.len() > 1 {
+                        old.parents
+                            .iter()
+                            .map(|p| mapping.get(p).copied().unwrap_or(*p))
+                            .collect()
+                    } else {
+                        vec![mapped_first_parent(&mapping, &old, old_oid)?]
+                    };
+                    let author = author.as_deref().unwrap_or(&old.author);
+                    let message = message.as_deref().unwrap_or(&old.message);
+                    let oid = if let Some(explicit_tree) = *tree {
+                        write_rewritten_commit(
+                            repo,
+                            opts,
+                            &change_ids,
+                            &old,
+                            old_oid,
+                            explicit_tree,
+                            &parent_list,
+                            author,
+                            &opts.committer,
+                            message,
+                        )?
+                    } else {
+                        replay_edited_commit(
+                            repo,
+                            &change_ids,
+                            &old,
+                            old_oid,
+                            &parent_list,
+                            author,
+                            &opts.committer,
+                            message,
+                            opts,
+                        )?
+                    };
+                    Ok((oid, Some(oid)))
+                }
+                Some(CommitEdit::Drop) | Some(CommitEdit::Reuse(_)) => {
+                    unreachable!("handled above")
+                }
             }
-            Some(CommitEdit::Drop) | Some(CommitEdit::Reuse(_)) => unreachable!("handled above"),
+        };
+
+        let (new_oid, new_field) = match replay_step() {
+            Ok(v) => v,
+            Err(err) => {
+                return finish_plan_rewrite_on_replay_error(
+                    err,
+                    mapping,
+                    rewritten,
+                    commits_to_replay.clone(),
+                    scoped_refs.clone(),
+                    edits,
+                    opts,
+                    flatten_leaf_merges,
+                );
+            }
         };
 
         mapping.insert(old_oid, new_oid);
@@ -411,11 +597,11 @@ pub(crate) fn plan_rewrite_with_order(
     let ref_updates = plan_ref_updates(&scoped_refs, &mapping);
     let head = head_effect(repo, &mapping)?;
 
-    Ok(RewritePlan {
+    Ok(ResumablePlanOutcome::Complete(RewritePlan {
         commits: rewritten,
         ref_updates,
         head,
-    })
+    }))
 }
 
 /// Replay a contiguous first-parent segment in a custom order (each commit onto the previous).
@@ -1109,10 +1295,13 @@ fn transplant_tree_across_parent_move(
     .map_err(library_err)?;
 
     if merge.index.has_unmerged_entries() || !merge.conflict_content.is_empty() {
-        return Err(HistoryError::Conflict {
-            commit,
-            paths: conflict_paths(&merge),
-        });
+        let paths = conflict_paths(&merge);
+        if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
+            if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
+                note_resumable_conflict(commit, replayed_parent, merge);
+            }
+        }
+        return Err(HistoryError::Conflict { commit, paths });
     }
     Ok(merge.result_tree)
 }

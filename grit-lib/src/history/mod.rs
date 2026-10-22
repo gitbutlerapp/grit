@@ -52,6 +52,7 @@ mod fixup;
 mod r#move;
 mod plan;
 mod rebase;
+mod rebase_session;
 mod reword;
 mod split;
 mod squash;
@@ -73,6 +74,10 @@ pub use r#move::{move_commit, Placement};
 pub use rebase::{plan_rebase, rebase_onto, RebaseOntoOptions, RebasePlan, RebaseRequest};
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 pub use rebase::{test_patch_id_compute_call_count, test_reset_patch_id_compute_call_count};
+pub use rebase_session::{
+    abort_rebase, continue_rebase, skip_rebase, start_rebase, RebaseOutcome, RebaseSessionError,
+    RebaseStop, StartRebaseOptions,
+};
 pub use reword::{normalize_rewrite_message, reword};
 pub use split::split;
 pub use squash::{squash, SquashMessage, SquashOptions};
