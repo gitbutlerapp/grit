@@ -131,8 +131,7 @@ pub struct RebaseCliOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refs: Vec<RefPair>,
     /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub head: Option<HeadPair>,
     /// Whether refs were left unchanged (`true` for `--dry-run`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

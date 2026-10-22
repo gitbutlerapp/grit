@@ -173,6 +173,7 @@
           "type": "null"
         }
       ],
+      "default": null,
       "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes."
     },
     "next_steps": {

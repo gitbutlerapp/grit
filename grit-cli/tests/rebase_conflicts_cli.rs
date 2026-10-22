@@ -180,6 +180,7 @@ fn rebase_stops_on_conflict_json() -> TestResult {
           "path": "f.txt"
         }
       ],
+      "head": null,
       "next_steps": [
         "grit diff",
         "grit add .",

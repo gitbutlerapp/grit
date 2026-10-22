@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"result\":\"completed\",\"operation\":\"rebase\",\"dry_run\":true}\n",
+    "stdout": "{\"result\":\"completed\",\"operation\":\"rebase\",\"head\":null,\"dry_run\":true}\n",
     "stderr": ""
   },
   "markdown": {
