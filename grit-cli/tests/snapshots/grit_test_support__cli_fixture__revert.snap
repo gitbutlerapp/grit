@@ -1,5 +1,6 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
+assertion_line: 384
 expression: payload
 ---
 {
@@ -15,7 +16,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Revert\n\n- `0678d03` → `5037fa0` — Revert \"third\"\n",
+    "stdout": "## Revert\n\n- `0678d03` → `5037fa0` — Revert \"third\"\n- change id `mtzmkvm`\n",
     "stderr": ""
   }
 }
