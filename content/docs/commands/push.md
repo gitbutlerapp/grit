@@ -68,11 +68,11 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `remote` | string | Remote that was pushed to. |
-| `branch` | string | Branch that was pushed, `--tags`, or `--delete`. |
+| `branch` | string or omitted | Short branch name when the push targets one branch (including a single `--delete` ref). Omitted for `--tags` and when several refs are deleted in one push. |
 | `results` | array | Per-ref outcomes with `ref` and `status` (`ok`, `up_to_date`, or a rejection). |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 
-Example:
+Example (normal push):
 
 ```json
 {
@@ -80,6 +80,19 @@ Example:
   "branch": "main",
   "results": [
     { "ref": "refs/heads/main", "status": "ok" }
+  ],
+  "rejected": false
+}
+```
+
+Deleting one remote branch sets `branch` to that ref's short name:
+
+```json
+{
+  "remote": "origin",
+  "branch": "topic",
+  "results": [
+    { "ref": "refs/heads/topic", "status": "ok" }
   ],
   "rejected": false
 }

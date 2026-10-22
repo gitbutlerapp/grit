@@ -38,8 +38,11 @@
   "description": "Result of `grit push`: the per-ref outcomes for the remote.",
   "properties": {
     "branch": {
-      "description": "Local branch (short name) that was pushed, or `\"--tags\"` when this push targeted tags instead of the current branch.",
-      "type": "string"
+      "description": "Local branch (short name) that was pushed, when there is a single unambiguous branch. Omitted for `--tags`, multi-ref `--delete`, and similar pushes that do not map to one branch name.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "rejected": {
       "description": "True when any ref was rejected (dispatch exits non-zero on this).",
@@ -56,7 +59,6 @@
     }
   },
   "required": [
-    "branch",
     "rejected",
     "remote",
     "results"

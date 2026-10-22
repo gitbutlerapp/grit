@@ -27,12 +27,18 @@ use std::collections::HashSet;
 #[derive(Serialize, JsonSchema)]
 pub struct PushOutcome {
     pub remote: String,
-    /// Local branch (short name) that was pushed, or `"--tags"` when this
-    /// push targeted tags instead of the current branch.
-    pub branch: String,
+    /// Local branch (short name) that was pushed, when there is a single
+    /// unambiguous branch. Omitted for `--tags`, multi-ref `--delete`, and
+    /// similar pushes that do not map to one branch name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub branch: Option<String>,
     pub results: Vec<PushRefResult>,
     /// True when any ref was rejected (dispatch exits non-zero on this).
     pub rejected: bool,
+    /// Human/markdown label for what was pushed (branch name, `--tags`, or `--delete`).
+    #[serde(skip)]
+    display_label: String,
 }
 
 /// Per-ref push status in JSON (`ok`, `up_to_date`, or `rejected`).
@@ -71,7 +77,9 @@ impl HumanRender for PushOutcome {
         for result in &self.results {
             let target = format!("{} {}", self.remote, result.ref_name);
             match result.status {
-                PushRefOutcomeStatus::Ok => outln!(w, "  pushed {} → {target}", self.branch),
+                PushRefOutcomeStatus::Ok => {
+                    outln!(w, "  pushed {} → {target}", self.display_label)
+                }
                 PushRefOutcomeStatus::UpToDate => outln!(w, "  {target} already up to date"),
                 PushRefOutcomeStatus::Rejected => outln!(
                     w,
@@ -86,7 +94,7 @@ impl HumanRender for PushOutcome {
 
 impl MarkdownRender for PushOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_push_results(w, &self.remote, &self.branch, &self.results)?;
+        markdown::print_push_results(w, &self.remote, &self.display_label, &self.results)?;
         Ok(())
     }
 }
@@ -100,7 +108,7 @@ pub fn run(
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
 
-    let (branch_label, remote, specs) = if !delete_refs.is_empty() {
+    let (branch, display_label, remote, specs) = if !delete_refs.is_empty() {
         let remote = configured_remote_for_push(&repo, &config, remote_override);
         let remote_handle =
             Remote::from_config(&config, &remote).map_err(|e| anyhow::Error::msg(e.to_string()))?;
@@ -117,7 +125,12 @@ pub fn run(
             .iter()
             .map(|name| map_delete_ref(repo.git_dir(), name, &remote_names))
             .collect::<Result<Vec<_>>>()?;
-        ("--delete".to_owned(), remote, specs)
+        let branch = if delete_refs.len() == 1 {
+            Some(delete_refs[0].clone())
+        } else {
+            None
+        };
+        (branch, "--delete".to_owned(), remote, specs)
     } else if tags {
         let entries =
             refs::list_refs(repo.git_dir(), "refs/tags/").context("could not list tags")?;
@@ -136,6 +149,7 @@ pub fn run(
             })
             .collect::<Vec<_>>();
         (
+            None,
             "--tags".to_owned(),
             configured_remote_for_push(&repo, &config, remote_override),
             specs,
@@ -172,7 +186,7 @@ pub fn run(
             expected_old: None,
             expect_absent: false,
         };
-        (short_name, remote, vec![spec])
+        (Some(short_name.clone()), short_name, remote, vec![spec])
     };
 
     // On an HTTPS auth failure, `grit auth` can refresh the token and we retry once.
@@ -223,9 +237,10 @@ pub fn run(
 
     Ok(PushOutcome {
         remote,
-        branch: branch_label,
+        branch,
         results,
         rejected,
+        display_label,
     })
 }
 

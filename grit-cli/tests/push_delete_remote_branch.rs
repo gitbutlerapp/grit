@@ -27,22 +27,6 @@ fn git(dir: &Path, args: &[&str]) {
     );
 }
 
-fn grit(dir: &Path, args: &[&str]) {
-    let out = Command::new(GRIT)
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .expect("grit");
-    assert!(
-        out.status.success(),
-        "grit {:?}: {}",
-        args,
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
 fn ls_remote_heads(origin: &Path) -> Vec<String> {
     let out = Command::new("git")
         .args(["ls-remote", "--heads", origin.to_str().unwrap()])
@@ -87,16 +71,31 @@ fn delete_remote_branch_after_local_branch_deleted() {
     git(&local, &["checkout", "main"]);
     git(&local, &["branch", "-D", "old-topic"]);
 
-    grit(
-        &local,
-        &[
+    let out = Command::new(GRIT)
+        .args([
             "push",
             "--delete",
             "old-topic",
             "--remote",
             "origin",
             "--json",
-        ],
+        ])
+        .current_dir(&local)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("grit");
+    assert!(
+        out.status.success(),
+        "grit push --delete: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("push --json stdout is valid JSON");
+    assert_eq!(
+        json.get("branch").and_then(|v| v.as_str()),
+        Some("old-topic"),
+        "branch must name the deleted ref, not a flag: {json}"
     );
 
     let heads = ls_remote_heads(&origin);
