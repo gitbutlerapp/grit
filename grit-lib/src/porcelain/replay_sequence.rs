@@ -202,11 +202,44 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         "",
         crate::write_tree::WriteTreeFlags::silent(),
     )?;
+    repo.write_index(&mut index)?;
     let head_tree = commit_tree(repo, &head_oid)?;
     let allow_empty = active.opts.empty == ReplayEmptyPolicy::Keep || new_tree == head_tree;
     if !allow_empty && new_tree == head_tree {
         return Err(Error::NothingToCommit);
     }
+
+    clear_step_heads(repo.git_dir(), active.direction)?;
+    let mut todo = active.todo;
+    if !todo.is_empty() {
+        todo.remove(0);
+    }
+    write_sequencer_todo(repo.git_dir(), &todo)?;
+
+    if active.opts.no_commit {
+        if todo.is_empty() {
+            clear_replay_state(repo.git_dir())?;
+            return Ok(SequenceOutcome::Completed {
+                created: Vec::new(),
+                dropped: Vec::new(),
+            });
+        }
+        let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
+        return run_sequence(
+            repo,
+            &refname,
+            head_oid,
+            head_oid,
+            sequence_start,
+            active.direction,
+            identity,
+            &active.opts,
+            &mut todo,
+            Vec::new(),
+            Vec::new(),
+        );
+    }
+
     let new_oid = write_replay_commit(
         repo,
         &refname,
@@ -218,12 +251,6 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         new_tree,
         allow_empty,
     )?;
-    clear_step_heads(repo.git_dir(), active.direction)?;
-    let mut todo = active.todo;
-    if !todo.is_empty() {
-        todo.remove(0);
-    }
-    write_sequencer_todo(repo.git_dir(), &todo)?;
     let finished = ReplayCommitRecord {
         source,
         created: new_oid,

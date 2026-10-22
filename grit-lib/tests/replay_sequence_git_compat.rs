@@ -560,6 +560,41 @@ fn grit_stop_record_origin_git_cherry_pick_continue() {
 }
 
 #[test]
+fn no_commit_continue_after_revert_conflict_preserves_head() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f", "base\n", "base");
+    git(root.path(), &["switch", "-c", "side"]);
+    fs::write(root.path().join("f"), "side\n").unwrap();
+    git(root.path(), &["commit", "-qam", "side"]);
+    let rev = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    fs::write(root.path().join("f"), "main\n").unwrap();
+    git(root.path(), &["commit", "-qam", "main"]);
+    let start = oid_from_rev(root.path(), "HEAD");
+    let commit_count_before = git(root.path(), &["rev-list", "--count", "HEAD"]);
+
+    let repo = open_repo(root.path());
+    let mut opts = ReplayOptions::default();
+    opts.no_commit = true;
+    let out = start_replay_sequence(&repo, &revert_req(vec![rev], opts)).expect("revert");
+    assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
+
+    fs::write(root.path().join("f"), "base\n").unwrap();
+    git(root.path(), &["add", "f"]);
+    let out = continue_replay_sequence(&repo, IDENT).expect("continue");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
+    assert_eq!(
+        git(root.path(), &["rev-list", "--count", "HEAD"]),
+        commit_count_before
+    );
+    assert_eq!(git(root.path(), &["show", ":f"]), "base\n");
+    assert!(!root.path().join(".git/REVERT_HEAD").exists());
+    git_fsck_strict(root.path());
+}
+
+#[test]
 fn continued_commit_gets_new_change_id() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());
