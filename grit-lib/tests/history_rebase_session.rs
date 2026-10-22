@@ -54,6 +54,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
         apply: grit_lib::revwalk::history::ApplyOptions {
             identity: IDENT.into(),
             reflog_message: "rebase".into(),
+            record_operation: None,
         },
     }
 }
@@ -615,6 +616,7 @@ fn stacked_branches_move_atomically_after_continue() {
         apply: grit_lib::revwalk::history::ApplyOptions {
             identity: IDENT.into(),
             reflog_message: "rebase".into(),
+            record_operation: None,
         },
     };
     let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").unwrap();

@@ -3,13 +3,16 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::bundle::bundle_remote::write_bundle_from_rev_specs;
+use grit_lib::bundle::bundle_remote::{
+    write_bundle_from_rev_specs, write_bundle_with_options, BundleCreateOptions,
+};
 use grit_lib::bundle::{read_header, write_bundle, Bundle, BundleError, BundleSpec, FilterSpec};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::RefSelection;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -482,6 +485,53 @@ fn grit_write_filtered_bundle_omits_blobs_from_pack() {
     }
     assert!(saw_commit, "pack should contain a commit");
     assert!(saw_tree, "pack should contain a tree");
+}
+
+#[test]
+// Regression for issue #1512: `bundle create --all` must list every branch and tag.
+fn bundle_create_all_matches_git_list_heads() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    git_ok(src, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(src.join("a"), b"a\n").unwrap();
+    git_ok(src, &["add", "a"]);
+    git_ok(src, &["commit", "-qm", "one"]);
+    git_ok(src, &["tag", "-a", "rel-1", "-m", "r"]);
+    git_ok(src, &["tag", "lw"]);
+    git_ok(src, &["switch", "-qc", "feature/v1.2/x"]);
+    std::fs::write(src.join("b"), b"b\n").unwrap();
+    git_ok(src, &["add", "b"]);
+    git_ok(src, &["commit", "-qm", "two"]);
+    git_ok(src, &["switch", "-q", "main"]);
+
+    let grit_bundle = src.join("grit-all.bundle");
+    write_bundle_with_options(
+        &grit_repo(src),
+        &grit_bundle,
+        &BundleCreateOptions {
+            ref_selections: vec![RefSelection::All],
+            rev_tokens: Vec::new(),
+        },
+    )
+    .expect("grit bundle --all");
+
+    let git_bundle = src.join("git-all.bundle");
+    git_ok(
+        src,
+        &["bundle", "create", git_bundle.to_str().unwrap(), "--all"],
+    );
+
+    let grit_heads = git(
+        src,
+        &["bundle", "list-heads", grit_bundle.to_str().unwrap()],
+    );
+    let git_heads = git(src, &["bundle", "list-heads", git_bundle.to_str().unwrap()]);
+    assert_eq!(
+        normalize_bundle_heads(&grit_heads),
+        normalize_bundle_heads(&git_heads),
+        "grit bundle create --all should match git\ngrit:\n{grit_heads}\ngit:\n{git_heads}"
+    );
+    git_ok(src, &["bundle", "verify", grit_bundle.to_str().unwrap()]);
 }
 
 #[test]

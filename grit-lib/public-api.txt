@@ -515,6 +515,11 @@ pub fn grit_lib::bundle::bundle_remote::fetch_from_bundle_with_progress(&std::pa
 pub fn grit_lib::bundle::bundle_remote::is_bundle_path(&std::path::Path) -> bool
 pub fn grit_lib::bundle::bundle_remote::split_revision_specs_for_bundle(&[alloc::string::String]) -> (alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)
 pub fn grit_lib::bundle::bundle_remote::write_bundle_from_rev_specs(&grit_lib::repo::Repository, &std::path::Path, &[alloc::string::String]) -> grit_lib::error::Result<usize>
+pub fn grit_lib::bundle::bundle_remote::write_bundle_with_options(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::bundle::bundle_remote::BundleCreateOptions) -> grit_lib::error::Result<usize>
+pub struct grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub grit_lib::bundle::bundle_remote::BundleCreateOptions::from_rev_tokens(alloc::vec::Vec<alloc::string::String>) -> grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub grit_lib::bundle::bundle_remote::BundleCreateOptions::ref_selections: alloc::vec::Vec<grit_lib::revwalk::RefSelection>
+pub grit_lib::bundle::bundle_remote::BundleCreateOptions::rev_tokens: alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub enum grit_lib::bundle::BundleError
 pub grit_lib::bundle::BundleError::BadSignature
 pub grit_lib::bundle::BundleError::EmptyRefs

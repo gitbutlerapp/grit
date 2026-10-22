@@ -154,7 +154,7 @@ fn symmetric_rev_list_specs(
     Ok((vec![left.to_hex(), right.to_hex()], negative, left, right))
 }
 
-fn expand_ref_selections(
+pub(crate) fn expand_ref_selections(
     repo: &Repository,
     selections: &[RefSelection],
 ) -> Result<(bool, Vec<String>)> {

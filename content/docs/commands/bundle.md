@@ -8,7 +8,7 @@ order: 6
 ## Synopsis
 
 ```text
-grit bundle create <file> <rev>…
+grit bundle create <file> [--all] [<rev>…]
 grit bundle verify <file>
 grit bundle list <file>
 grit bundle unbundle <file>
@@ -32,10 +32,11 @@ You can also treat a bundle path like a remote: [`grit fetch`](../fetch/) and [`
 
 `create`:
 
-| Argument | Description |
+| Argument / flag | Description |
 | --- | --- |
 | `<file>` | Output bundle path. |
-| `<rev>…` | One or more positive revision specs (commits, branches, ranges). |
+| `--all` | Include `HEAD`, every branch, and every tag in the bundle header (same idea as `git bundle create --all`). Omit `<rev>…` when using this flag. |
+| `<rev>…` | One or more positive revision specs (commits, branches, ranges). Not used together with `--all`. |
 
 `verify` / `list` / `unbundle`:
 
@@ -46,6 +47,9 @@ You can also treat a bundle path like a remote: [`grit fetch`](../fetch/) and [`
 ## Examples
 
 ```console
+$ grit bundle create backup.bundle --all
+Wrote bundle backup.bundle (5 refs).
+
 $ grit bundle create backup.bundle main
 Wrote bundle backup.bundle (1 refs).
 

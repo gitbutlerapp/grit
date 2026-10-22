@@ -420,8 +420,11 @@ enum BundleAction {
         /// Output bundle path.
         file: String,
         /// Commits or ref ranges to include (same rules as `grit log`).
-        #[arg(value_name = "REV")]
+        #[arg(value_name = "REV", conflicts_with = "all")]
         revs: Vec<String>,
+        /// Include every ref tip in the bundle header (`HEAD`, all branches and tags).
+        #[arg(long)]
+        all: bool,
     },
     /// Check that a bundle file is well-formed.
     Verify {
@@ -1865,9 +1868,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Bundle { action } => match action {
-            BundleAction::Create { file, revs } => {
-                emit(&commands::bundle::run_create(file.into(), revs)?, opts, ctx)
-            }
+            BundleAction::Create { file, revs, all } => emit(
+                &commands::bundle::run_create(file.into(), revs, all)?,
+                opts,
+                ctx,
+            ),
             BundleAction::Verify { file } => {
                 let outcome = commands::bundle::run_verify(file.into())?;
                 emit(&outcome, opts, ctx)?;

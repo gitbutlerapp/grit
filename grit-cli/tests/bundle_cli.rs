@@ -118,6 +118,74 @@ fn bundle_verify_and_list_json_schema() {
 }
 
 #[test]
+fn bundle_create_all_matches_git_list_heads() {
+    let dir = unique_tmp("all");
+    git(&dir, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(dir.join("a"), b"a\n").unwrap();
+    git(&dir, &["add", "a"]);
+    git(&dir, &["commit", "-qm", "one"]);
+    git(&dir, &["tag", "-a", "rel-1", "-m", "r"]);
+    git(&dir, &["tag", "lw"]);
+    git(&dir, &["switch", "-qc", "feature/v1.2/x"]);
+    std::fs::write(dir.join("b"), b"b\n").unwrap();
+    git(&dir, &["add", "b"]);
+    git(&dir, &["commit", "-qm", "two"]);
+    git(&dir, &["switch", "-q", "main"]);
+
+    let grit_bundle = dir.join("grit-all.bundle");
+    let out = grit(
+        &dir,
+        &[
+            "bundle",
+            "create",
+            grit_bundle.to_str().unwrap(),
+            "--all",
+            "--json",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "grit bundle create --all: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(json["refs"], 5);
+
+    git(&dir, &["bundle", "verify", grit_bundle.to_str().unwrap()]);
+
+    let git_bundle = dir.join("git-all.bundle");
+    git(
+        &dir,
+        &["bundle", "create", git_bundle.to_str().unwrap(), "--all"],
+    );
+    let git_heads = Command::new("git")
+        .current_dir(&dir)
+        .args(["bundle", "list-heads", git_bundle.to_str().unwrap()])
+        .output()
+        .expect("git list-heads");
+    let grit_heads = Command::new("git")
+        .current_dir(&dir)
+        .args(["bundle", "list-heads", grit_bundle.to_str().unwrap()])
+        .output()
+        .expect("grit list-heads");
+    let mut git_lines: Vec<_> = String::from_utf8_lossy(&git_heads.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let mut grit_lines: Vec<_> = String::from_utf8_lossy(&grit_heads.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+    git_lines.sort();
+    grit_lines.sort();
+    assert_eq!(git_lines, grit_lines);
+}
+
+#[test]
 fn bundle_create_range_matches_git_oracle() {
     let dir = unique_tmp("range");
     git(&dir, &["init", "-q", "-b", "main", "."]);

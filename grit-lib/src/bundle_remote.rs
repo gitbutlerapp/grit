@@ -11,6 +11,8 @@ use crate::error::{Error, Result};
 use crate::fetch::{NoProgress, Progress};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
+use crate::revwalk::queries::expand_ref_selections;
+use crate::revwalk::RefSelection;
 use crate::transfer::{
     apply_tag_mode, classify_update, prune_tracking_refs, FetchOptions, FetchOutcome, RefUpdate,
     TagMode, TransferStats, UpdateMode,
@@ -28,6 +30,26 @@ pub fn is_bundle_path(path: &Path) -> bool {
     bytes.starts_with(V2_SIGNATURE) || bytes.starts_with(V3_SIGNATURE)
 }
 
+/// Ref tips and revision tokens for [`write_bundle_with_options`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BundleCreateOptions {
+    /// Positive ref sets (`--all`, `--branches`, …), same semantics as [`RefSelection`] on `grit log`.
+    pub ref_selections: Vec<RefSelection>,
+    /// Revision arguments (tips, ranges, exclusions).
+    pub rev_tokens: Vec<String>,
+}
+
+impl BundleCreateOptions {
+    /// Build options from positional revision tokens only.
+    #[must_use]
+    pub fn from_rev_tokens(rev_tokens: Vec<String>) -> Self {
+        Self {
+            ref_selections: Vec::new(),
+            rev_tokens,
+        }
+    }
+}
+
 /// Write a bundle file from revision arguments (supports `A..B` ranges like `git bundle create`).
 ///
 /// # Errors
@@ -38,33 +60,54 @@ pub fn write_bundle_from_rev_specs(
     path: &Path,
     rev_tokens: &[String],
 ) -> Result<usize> {
-    let (positive_specs, negative_specs) = split_revision_specs_for_bundle(rev_tokens);
-    if positive_specs.is_empty() {
+    write_bundle_with_options(
+        repo,
+        path,
+        &BundleCreateOptions::from_rev_tokens(rev_tokens.to_vec()),
+    )
+}
+
+/// Write a bundle file using ref-set flags and revision tokens.
+///
+/// When [`RefSelection::All`] is present (or `--all` appears among `rev_tokens`), the bundle header
+/// lists `HEAD` and every ref under `refs/`, matching `git bundle create --all`.
+///
+/// # Errors
+///
+/// Propagates rev-list, ref resolution, and bundle write failures.
+pub fn write_bundle_with_options(
+    repo: &Repository,
+    path: &Path,
+    options: &BundleCreateOptions,
+) -> Result<usize> {
+    let (rev_tokens, mut ref_selections) = strip_all_rev_flag(&options.rev_tokens);
+    ref_selections.extend(options.ref_selections.clone());
+
+    let (positive_specs, negative_specs) = split_revision_specs_for_bundle(&rev_tokens);
+    let (all_refs, extra_positive) = expand_ref_selections(repo, &ref_selections)?;
+    let bundle_every_ref = ref_selections.contains(&RefSelection::All);
+
+    let mut positive_specs = positive_specs;
+    positive_specs.extend(extra_positive);
+
+    if positive_specs.is_empty() && !all_refs {
         return Err(Error::Message("at least one revision is required".into()));
     }
+
     let rev_opts = crate::rev_list::RevListOptions {
         boundary: true,
         objects: true,
+        all_refs,
         ..Default::default()
     };
     let revs = crate::rev_list::rev_list(repo, &positive_specs, &negative_specs, &rev_opts)?;
 
-    let mut include: Vec<(ObjectId, String)> = Vec::new();
-    for spec in &positive_specs {
-        if let Ok(oid) = crate::rev_parse::resolve_revision(repo, spec) {
-            if revs.commits.contains(&oid) || revs.objects.iter().any(|(o, _)| *o == oid) {
-                let name = display_ref_for_spec(repo, spec, oid)?;
-                if !include.iter().any(|(_, n)| n == &name) {
-                    include.push((oid, name));
-                }
-            }
-        }
-    }
-    if include.is_empty() {
-        for oid in &revs.commits {
-            include.push((*oid, format!("refs/heads/bundle-tip/{}", oid.to_hex())));
-        }
-    }
+    let include = if bundle_every_ref {
+        refs_for_bundle_header(repo)?
+    } else {
+        include_refs_from_rev_specs(repo, &positive_specs, &revs)?
+    };
+
     if include.is_empty() {
         return Err(map_bundle_err(BundleError::EmptyRefs));
     }
@@ -79,6 +122,54 @@ pub fn write_bundle_from_rev_specs(
     crate::bundle::write_bundle(repo, &spec, &mut out).map_err(map_bundle_err)?;
     out.flush().map_err(Error::Io)?;
     Ok(spec.include.len())
+}
+
+fn strip_all_rev_flag(tokens: &[String]) -> (Vec<String>, Vec<RefSelection>) {
+    let mut rev_tokens = Vec::new();
+    let mut ref_selections = Vec::new();
+    for token in tokens {
+        if token == "--all" {
+            ref_selections.push(RefSelection::All);
+        } else {
+            rev_tokens.push(token.clone());
+        }
+    }
+    (rev_tokens, ref_selections)
+}
+
+fn refs_for_bundle_header(repo: &Repository) -> Result<Vec<(ObjectId, String)>> {
+    let mut include = Vec::new();
+    if let Ok(head) = crate::refs::resolve_ref(repo.git_dir(), "HEAD") {
+        include.push((head, "HEAD".to_owned()));
+    }
+    for (name, oid) in crate::refs::list_refs(repo.git_dir(), "refs/")? {
+        include.push((oid, name));
+    }
+    Ok(include)
+}
+
+fn include_refs_from_rev_specs(
+    repo: &Repository,
+    positive_specs: &[String],
+    revs: &crate::rev_list::RevListResult,
+) -> Result<Vec<(ObjectId, String)>> {
+    let mut include: Vec<(ObjectId, String)> = Vec::new();
+    for spec in positive_specs {
+        if let Ok(oid) = crate::rev_parse::resolve_revision(repo, spec) {
+            if revs.commits.contains(&oid) || revs.objects.iter().any(|(o, _)| *o == oid) {
+                let name = display_ref_for_spec(repo, spec, oid)?;
+                if !include.iter().any(|(_, n)| n == &name) {
+                    include.push((oid, name));
+                }
+            }
+        }
+    }
+    if include.is_empty() {
+        for oid in &revs.commits {
+            include.push((*oid, format!("refs/heads/bundle-tip/{}", oid.to_hex())));
+        }
+    }
+    Ok(include)
 }
 
 fn display_ref_for_spec(repo: &Repository, spec: &str, _oid: ObjectId) -> Result<String> {
