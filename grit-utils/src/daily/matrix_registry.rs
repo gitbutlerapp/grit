@@ -419,7 +419,7 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         area: Area::Branching,
         headline: false,
         name: None,
-        description: "Rebase onto upstream vs git rebase on git.git clone",
+        description: "Rebase onto HEAD~10 vs git rebase on pinned git.git (conflict-free replay)",
     },
     ScenarioSpec {
         id: "stash/list@synth-10k",

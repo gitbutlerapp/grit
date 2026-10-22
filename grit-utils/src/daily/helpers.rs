@@ -29,6 +29,10 @@ use crate::worktree_fixture::{
 /// Shortlog/compare target for git-git matrix rows (tag present on pinned git.git).
 pub const GIT_GIT_SHORTLOG_TARGET: &str = "v2.46.0";
 
+/// Upstream for `rebase/onto@git-git`: deep enough to replay real work, shallow enough
+/// that replaying `upstream..HEAD` on the pinned v2.47.0 tip completes without conflicts.
+pub const GIT_GIT_REBASE_UPSTREAM: &str = "HEAD~10";
+
 pub fn synth10k_kind(smoke: bool) -> FixtureKind {
     if smoke {
         FixtureKind::Synth10kSmoke

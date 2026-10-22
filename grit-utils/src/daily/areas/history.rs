@@ -9,7 +9,8 @@ use super::super::helpers::{
     shortlog_ahead_bench, show_head_bench, synth10k_kind,
 };
 use super::super::matrix_helpers::{
-    prepare_daily_reset, rebase_onto_bench, rebase_onto_git_git_bench, setup_history_reword,
+    prepare_rebase_git_git_reset, rebase_onto_bench, rebase_onto_git_git_bench,
+    setup_history_reword,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;
@@ -232,7 +233,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             spec: scenario_spec("rebase/onto@git-git"),
             pending: false,
             setup: setup_git_git_history,
-            prepare: prepare_daily_reset,
+            prepare: prepare_rebase_git_git_reset,
             correctness: None,
             build_git: |c| rebase_onto_git_git_bench(c).1,
             build_grit: |c| rebase_onto_git_git_bench(c).0,

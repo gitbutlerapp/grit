@@ -472,6 +472,8 @@ pub fn rebase_onto_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
 }
 
 pub fn rebase_onto_git_git_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    use super::helpers::GIT_GIT_REBASE_UPSTREAM;
+
     let meta = HistoryRewriteMeta {
         commit_count: 0,
         reword: String::new(),
@@ -482,7 +484,7 @@ pub fn rebase_onto_git_git_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, Benc
         fixup_path: String::new(),
         squash_range: String::new(),
         squash_rebase_parent: String::new(),
-        rebase_upstream: "HEAD~40".into(),
+        rebase_upstream: GIT_GIT_REBASE_UPSTREAM.into(),
         bench_message: String::new(),
     };
     let (grit_argv, git_argv) = rebase_onto_scenario(&ctx.grit, &ctx.git, &meta);
@@ -928,8 +930,9 @@ pub fn prepare_branch_rename(ctx: &DailyHeadlineContext) -> DailyPrepare {
 pub fn prepare_reset_branch_rename(git: &Path, old: &str, new: &str) -> BenchArgv {
     let reset = prepare_daily_reset_script(git);
     let script = format!(
-        "{reset}\n{} 2>/dev/null || true\n{}",
+        "{reset}\n{} 2>/dev/null || true\n{} 2>/dev/null || true\n{}",
         shell_command(git, &["branch", "-D", new]),
+        shell_command(git, &["branch", "-D", old]),
         shell_command(git, &["branch", old, "HEAD"])
     );
     BenchArgv::new("/bin/sh", ["-c", script.as_str()])
@@ -1003,6 +1006,15 @@ pub fn prepare_worktree_remove(ctx: &DailyHeadlineContext) -> DailyPrepare {
 
 pub fn prepare_daily_reset(ctx: &DailyHeadlineContext) -> DailyPrepare {
     DailyPrepare::Shell(prepare_reset_shell(&ctx.git))
+}
+
+/// Reset git.git to the pinned tip and drop any in-progress rebase before timed runs.
+pub fn prepare_rebase_git_git_reset(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let repo_q = shell_quote_path(&ctx.repo);
+    let abort = shell_command(&ctx.git, &["rebase", "--abort"]);
+    let script = format!("set -eu\ncd {repo_q} && ({abort} 2>/dev/null || true)\n{reset}");
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
 }
 
 pub fn prepare_stash_list(ctx: &DailyHeadlineContext) -> DailyPrepare {
