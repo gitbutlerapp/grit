@@ -189,6 +189,133 @@ fn contains_rejects_non_commit_target() {
     assert!(matches!(err, RefQueryError::NotCommit(_)));
 }
 
+fn seed_two_roots(worktree: &std::path::Path) -> (ObjectId, ObjectId) {
+    git(worktree, &["commit", "--allow-empty", "-q", "-m", "root-a"]);
+    let a = ObjectId::from_hex(git(worktree, &["rev-parse", "HEAD"]).trim()).expect("a");
+    git(worktree, &["checkout", "--orphan", "other"]);
+    git(worktree, &["commit", "--allow-empty", "-q", "-m", "root-b"]);
+    let b = ObjectId::from_hex(git(worktree, &["rev-parse", "HEAD"]).trim()).expect("b");
+    git(worktree, &["checkout", "-B", "master"]);
+    git(
+        worktree,
+        &["merge", "--allow-unrelated-histories", "--no-edit", "other"],
+    );
+    (a, b)
+}
+
+#[test]
+fn combined_contains_matches_git_on_two_roots() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path();
+    let repo = init_repo(worktree, Backend::Files);
+    let (a, b) = seed_two_roots(worktree);
+
+    for (extra, query) in [
+        (
+            vec![format!("--contains={a}"), format!("--contains={b}")],
+            RefQuery {
+                namespaces: vec![RefNamespace::Heads],
+                contains: vec![a, b],
+                ..RefQuery::default()
+            },
+        ),
+        (
+            vec![format!("--contains={a}"), format!("--no-contains={b}")],
+            RefQuery {
+                namespaces: vec![RefNamespace::Heads],
+                contains: vec![a],
+                no_contains: vec![b],
+                ..RefQuery::default()
+            },
+        ),
+    ] {
+        let mut git_args = vec!["for-each-ref", "--format=%(refname)"];
+        for e in &extra {
+            git_args.push(e.as_str());
+        }
+        git_args.push("refs/heads/");
+        let git_names = git_refnames(worktree, &git_args);
+        let grit_names = grit_refnames(&repo, query);
+        assert_eq!(grit_names, git_names, "git args {git_args:?}");
+    }
+}
+
+fn git_commit_with_date(worktree: &std::path::Path, date: &str, msg: &str) {
+    std::process::Command::new("git")
+        .current_dir(worktree)
+        .args(["commit", "--allow-empty", "-q", "-m", msg])
+        .env("GIT_AUTHOR_DATE", date)
+        .env("GIT_COMMITTER_DATE", date)
+        .status()
+        .expect("commit");
+}
+
+#[test]
+fn contains_skewed_committer_dates_matches_git() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path();
+    let repo = init_repo(worktree, Backend::Files);
+    git_commit_with_date(worktree, "1893456000 +0000", "target");
+    let target = ObjectId::from_hex(git(worktree, &["rev-parse", "HEAD"]).trim()).expect("target");
+    for i in 0..101 {
+        git_commit_with_date(worktree, "946684800 +0000", &format!("old-{i}"));
+    }
+    assert_same(
+        worktree,
+        &repo,
+        &["refs/heads/", &format!("--contains={target}")],
+        RefQuery {
+            namespaces: vec![RefNamespace::Heads],
+            contains: vec![target],
+            ..RefQuery::default()
+        },
+    );
+}
+
+#[test]
+fn points_at_deep_tag_chain_matches_git() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path();
+    let repo = init_repo(worktree, Backend::Files);
+    git(worktree, &["commit", "--allow-empty", "-q", "-m", "base"]);
+    let inner = ObjectId::from_hex(git(worktree, &["rev-parse", "HEAD"]).trim()).expect("inner");
+    let mut target = inner;
+    for i in 0..35 {
+        git(
+            worktree,
+            &[
+                "tag",
+                "-a",
+                &format!("t{i}"),
+                "-m",
+                "m",
+                &target.to_string(),
+            ],
+        );
+        target = ObjectId::from_hex(git(worktree, &["rev-parse", &format!("t{i}")]).trim())
+            .expect("tag");
+    }
+    assert_same(
+        worktree,
+        &repo,
+        &["refs/tags/", &format!("--points-at={inner}")],
+        RefQuery {
+            namespaces: vec![RefNamespace::Tags],
+            points_at: vec![inner],
+            ..RefQuery::default()
+        },
+    );
+}
+
 #[test]
 fn contains_missing_object_is_typed() {
     if !git_interop_available(Backend::Files) {
