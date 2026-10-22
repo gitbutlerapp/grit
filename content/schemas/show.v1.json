@@ -309,6 +309,22 @@
             "null"
           ]
         },
+        "id": {
+          "description": "Stable id for `--hunks` selection (unstaged and staged diffs).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "index": {
+          "description": "0-based hunk index within the file (unstaged and staged diffs).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "lines": {
           "items": {
             "$ref": "#/definitions/Line"

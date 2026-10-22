@@ -18,14 +18,14 @@ use anyhow::{Context, Result};
 use grit_lib::diff::{
     apply_diff_filter, apply_rename_detection_to_diff_entries, build_file_diffs, commit_diff_files,
     diff_commits_with_renames_and_policy, diff_index_to_tree_with_renames,
-    diff_index_to_worktree_with_renames, diff_trees_with_renames_and_policy, line_change_counts,
-    read_submodule_head_oid, read_worktree_side_bytes_for_diff,
+    diff_index_to_worktree_with_renames, diff_trees_with_renames_and_policy, hunk_ids,
+    line_change_counts, read_submodule_head_oid, read_worktree_side_bytes_for_diff,
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
     submodule_porcelain_flags, tree_diff_structured_parallel, write_patch, write_patch_resolved,
     DiffDetail, DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions,
-    DiffStatus, PatchResolvedSide, PatchTextOptions, TreeDiffStructured,
+    DiffSide, DiffStatus, PatchResolvedSide, PatchTextOptions, TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -185,6 +185,14 @@ pub struct Hunk {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub combined_header: Option<String>,
+    /// Stable id for `--hunks` selection (unstaged and staged diffs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// 0-based hunk index within the file (unstaged and staged diffs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
     pub lines: Vec<Line>,
 }
 
@@ -560,6 +568,8 @@ fn lib_file_to_cli(f: grit_lib::diff::ListedFileDiff, detail: DiffDetail) -> Fil
                     new_lines: 0,
                     context: None,
                     combined_header: Some(h.header),
+                    id: None,
+                    index: None,
                     lines: h
                         .lines
                         .into_iter()
@@ -589,43 +599,8 @@ fn lib_file_to_cli(f: grit_lib::diff::ListedFileDiff, detail: DiffDetail) -> Fil
                 .collect(),
         )
     } else {
-        f.structured.map(|structured| {
-            structured
-                .hunks
-                .into_iter()
-                .map(|h| Hunk {
-                    old_start: h.old_start,
-                    new_start: h.new_start,
-                    old_lines: h.old_lines,
-                    new_lines: h.new_lines,
-                    context: h.context,
-                    combined_header: None,
-                    lines: h
-                        .lines
-                        .into_iter()
-                        .map(|l| Line {
-                            kind: match l.kind {
-                                StructuredLineKind::Context => LineKind::Context,
-                                StructuredLineKind::Add => LineKind::Add,
-                                StructuredLineKind::Del => LineKind::Del,
-                            },
-                            old: l.old,
-                            new: l.new,
-                            segments: l
-                                .segments
-                                .into_iter()
-                                .map(|s| Segment {
-                                    text: s.text,
-                                    emphasis: s.emphasis,
-                                })
-                                .collect(),
-                            no_newline_at_eof: l.no_newline_at_eof,
-                            parents: None,
-                        })
-                        .collect(),
-                })
-                .collect()
-        })
+        f.structured
+            .map(|structured| hunk_assign_ids(DiffSide::Other, &f.path, structured.hunks))
     };
     FileDiff {
         path: f.path,
@@ -993,6 +968,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &thread_policy,
                 diff_options,
                 format,
+                DiffSide::Staged,
             ),
             DiffDetail::Stat | DiffDetail::NameOnly | DiffDetail::NameStatus => {
                 outcome_from_entries(&repo, entries, detail, diff_options, format)?
@@ -1003,6 +979,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &thread_policy,
                 diff_options,
                 format,
+                DiffSide::Staged,
             ),
         };
         return Ok(finish_outcome(&repo, format, outcome));
@@ -1021,6 +998,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &thread_policy,
                 diff_options,
                 format,
+                DiffSide::Unstaged,
             ),
             DiffDetail::Stat => outcome_stat_from_changes(
                 filter_file_changes(unstaged_changes(&repo, &diff_options)?, &repo, &pathspecs),
@@ -1036,6 +1014,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &thread_policy,
                 diff_options,
                 format,
+                DiffSide::Unstaged,
             ),
         };
         return Ok(finish_outcome(&repo, format, outcome));
@@ -1062,10 +1041,22 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     outcome_from_change_names(changes, format)
                 }
                 DiffDetail::Stat => outcome_stat_from_changes(changes, diff_options, format),
-                DiffDetail::Patch => {
-                    outcome_from_changes(changes, &config, &thread_policy, diff_options, format)
-                }
-                _ => outcome_from_changes(changes, &config, &thread_policy, diff_options, format),
+                DiffDetail::Patch => outcome_from_changes(
+                    changes,
+                    &config,
+                    &thread_policy,
+                    diff_options,
+                    format,
+                    DiffSide::Other,
+                ),
+                _ => outcome_from_changes(
+                    changes,
+                    &config,
+                    &thread_policy,
+                    diff_options,
+                    format,
+                    DiffSide::Other,
+                ),
             };
             return Ok(finish_outcome(&repo, format, outcome));
         }
@@ -1158,14 +1149,26 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
     let filtered = filter_file_changes(changes, &repo, &pathspecs);
     let outcome = match detail {
-        DiffDetail::Patch => {
-            outcome_from_changes(filtered, &config, &thread_policy, diff_options, format)
-        }
+        DiffDetail::Patch => outcome_from_changes(
+            filtered,
+            &config,
+            &thread_policy,
+            diff_options,
+            format,
+            DiffSide::Other,
+        ),
         DiffDetail::Stat => outcome_stat_from_changes(filtered, diff_options, format),
         DiffDetail::NameOnly | DiffDetail::NameStatus => {
             outcome_from_change_names(filtered, format)
         }
-        _ => outcome_from_changes(filtered, &config, &thread_policy, diff_options, format),
+        _ => outcome_from_changes(
+            filtered,
+            &config,
+            &thread_policy,
+            diff_options,
+            format,
+            DiffSide::Other,
+        ),
     };
     Ok(finish_outcome(&repo, format, outcome))
 }
@@ -1259,7 +1262,14 @@ pub fn outcome_from_tree_entries(
     Ok(finish_outcome(
         repo,
         format,
-        outcome_from_changes(changes, &config, &thread_policy, diff_options, format),
+        outcome_from_changes(
+            changes,
+            &config,
+            &thread_policy,
+            diff_options,
+            format,
+            DiffSide::Other,
+        ),
     ))
 }
 
@@ -1303,42 +1313,7 @@ fn file_diff_from_lib(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDi
         None
     };
     let hunks = if detail == DiffDetail::Patch {
-        Some(
-            f.hunks
-                .into_iter()
-                .map(|h| Hunk {
-                    old_start: h.old_start,
-                    new_start: h.new_start,
-                    old_lines: h.old_lines,
-                    new_lines: h.new_lines,
-                    context: h.context,
-                    combined_header: None,
-                    lines: h
-                        .lines
-                        .into_iter()
-                        .map(|l| Line {
-                            kind: match l.kind {
-                                StructuredLineKind::Context => LineKind::Context,
-                                StructuredLineKind::Add => LineKind::Add,
-                                StructuredLineKind::Del => LineKind::Del,
-                            },
-                            old: l.old,
-                            new: l.new,
-                            segments: l
-                                .segments
-                                .into_iter()
-                                .map(|s| Segment {
-                                    text: s.text,
-                                    emphasis: s.emphasis,
-                                })
-                                .collect(),
-                            no_newline_at_eof: l.no_newline_at_eof,
-                            parents: None,
-                        })
-                        .collect(),
-                })
-                .collect(),
-        )
+        Some(hunk_assign_ids(DiffSide::Other, &f.path, f.hunks))
     } else {
         None
     };
@@ -1373,11 +1348,7 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
         .filter(|op| op.as_str() != path)
         .cloned();
     let structured = t.structured;
-    let hunks = structured
-        .hunks
-        .into_iter()
-        .map(hunk_from_structured)
-        .collect();
+    let hunks = hunk_assign_ids(DiffSide::Other, &path, structured.hunks);
     FileDiff {
         path,
         old_path,
@@ -1395,6 +1366,31 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
     }
 }
 
+fn hunk_assign_ids(
+    side: DiffSide,
+    path: &str,
+    hunks: Vec<grit_lib::diff::structured::StructuredHunk>,
+) -> Vec<Hunk> {
+    let assign = matches!(side, DiffSide::Unstaged | DiffSide::Staged);
+    let ids = if assign {
+        hunk_ids(side, path, &hunks)
+    } else {
+        Vec::new()
+    };
+    hunks
+        .into_iter()
+        .enumerate()
+        .map(|(index, h)| {
+            let mut out = hunk_from_structured(h);
+            if assign {
+                out.id = Some(ids[index].to_string());
+                out.index = Some(index);
+            }
+            out
+        })
+        .collect()
+}
+
 fn hunk_from_structured(h: grit_lib::diff::structured::StructuredHunk) -> Hunk {
     Hunk {
         old_start: h.old_start,
@@ -1403,6 +1399,8 @@ fn hunk_from_structured(h: grit_lib::diff::structured::StructuredHunk) -> Hunk {
         new_lines: h.new_lines,
         context: h.context,
         combined_header: None,
+        id: None,
+        index: None,
         lines: h
             .lines
             .into_iter()
@@ -1435,6 +1433,7 @@ fn outcome_from_changes(
     thread_policy: &grit_lib::parallel::ThreadPolicy,
     diff_options: DiffOptions,
     format: DiffFormatArgs,
+    side: DiffSide,
 ) -> DiffOutcome {
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(changes.len());
     let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
@@ -1442,7 +1441,7 @@ fn outcome_from_changes(
     let est_bytes = changes.len().saturating_mul(8192);
     use grit_lib::parallel::par_map;
     let files: Vec<FileDiff> = par_map(&changes, par_opts, est_bytes, |fc| {
-        build_file_diff(fc, diff_options.clone())
+        build_file_diff(fc, diff_options.clone(), side)
     })
     .into_iter()
     .filter(|f| {
@@ -2309,43 +2308,9 @@ fn structured_for_file_change(fc: &FileChange, diff_options: DiffOptions) -> Str
     }
 }
 
-fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
+fn build_file_diff(fc: &FileChange, diff_options: DiffOptions, side: DiffSide) -> FileDiff {
     let structured = structured_for_file_change(fc, diff_options);
-    let hunks = structured
-        .hunks
-        .into_iter()
-        .map(|h| Hunk {
-            old_start: h.old_start,
-            new_start: h.new_start,
-            old_lines: h.old_lines,
-            new_lines: h.new_lines,
-            context: h.context,
-            combined_header: None,
-            lines: h
-                .lines
-                .into_iter()
-                .map(|l| Line {
-                    kind: match l.kind {
-                        StructuredLineKind::Context => LineKind::Context,
-                        StructuredLineKind::Add => LineKind::Add,
-                        StructuredLineKind::Del => LineKind::Del,
-                    },
-                    old: l.old,
-                    new: l.new,
-                    segments: l
-                        .segments
-                        .into_iter()
-                        .map(|s| Segment {
-                            text: s.text,
-                            emphasis: s.emphasis,
-                        })
-                        .collect(),
-                    no_newline_at_eof: l.no_newline_at_eof,
-                    parents: None,
-                })
-                .collect(),
-        })
-        .collect();
+    let hunks = hunk_assign_ids(side, &fc.path, structured.hunks);
 
     FileDiff {
         path: fc.path.clone(),

@@ -1165,6 +1165,42 @@ fn diff_json_payload_stays_near_line_text_size() -> TestResult {
     Ok(())
 }
 
+fn assert_hunk_id_field(hunk: &Value) {
+    let id = hunk["id"].as_str().expect("hunk id");
+    assert_eq!(id.len(), 12, "hunk id length");
+    assert!(
+        id.bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+        "hunk id must be lowercase hex: {id}"
+    );
+    hunk["index"]
+        .as_u64()
+        .expect("hunk index must be a non-negative integer");
+}
+
+#[test]
+fn diff_json_hunks_have_ids() -> TestResult {
+    let scratch = Scratch::new("diff-hunk-ids")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("f.txt"), "one\n");
+    gs_ok(&repo, &["commit", "-m", "init"]);
+    write_file(&repo.join("f.txt"), "one\ntwo\n");
+    let unstaged = gs_json(&repo, &["diff", "--unstaged"]);
+    let uh = &unstaged["files"][0]["hunks"][0];
+    assert_hunk_id_field(uh);
+    assert_eq!(uh["index"], 0);
+
+    gs_ok(&repo, &["add", "f.txt"]);
+    write_file(&repo.join("f.txt"), "one\ntwo\nthree\n");
+    let staged = gs_json(&repo, &["diff", "--staged"]);
+    let sh = &staged["files"][0]["hunks"][0];
+    assert_hunk_id_field(sh);
+    assert_eq!(sh["index"], 0);
+    Ok(())
+}
+
 #[test]
 fn diff_json_head_includes_staged_added_then_worktree_edited() -> TestResult {
     let scratch = Scratch::new("diff-staged-add-edit")?;

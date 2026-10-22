@@ -21,6 +21,7 @@ mod filter;
 mod git_histogram;
 pub mod handle;
 mod has_changes;
+pub mod hunk_id;
 mod merge_commit;
 mod no_index;
 mod options;
@@ -42,6 +43,7 @@ pub use handle::Diff;
 pub use has_changes::{
     text_sides_differ, HAS_CHANGES_CALL_COUNT, WORKTREE_HAS_CHANGES_ENTRIES_SCANNED,
 };
+pub use hunk_id::{hunk_ids, DiffSide, HunkId, HunkIdError};
 pub use merge_commit::{combined_structured_patch_body, commit_diff_files, DiffMerges};
 pub use no_index::{diff_paths, write_paths_patch, NoIndexError};
 pub use options::{

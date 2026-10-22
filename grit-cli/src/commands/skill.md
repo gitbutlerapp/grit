@@ -42,6 +42,8 @@ The target branch is the first that exists of: the `target.branch` config value,
 | History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` |
 
+`grit diff --json` on **`--staged`** or **`--unstaged`** patch output includes stable **`hunks[].id`** (12 lowercase hex chars) and **`hunks[].index`** (0-based within the file). Ids hash side, path, and line bodies (not line numbers), so they stay valid when earlier hunks are staged. Use these fields with future `--hunks` / `--lines` on `add`, `restore`, and `commit`; commit-range diffs omit `id` for now.
+
 Revisions can be full or short ids, branch or tag names, or expressions like `HEAD~2`.
 
 Commit rows in `--json` from `log`, `show`, `revs`, and `status` share `change_id` (reverse-hex) and `change_id_stored`. Human `log` and `show` prefix each commit with `change <8 chars>`; `--oneline` does not.
