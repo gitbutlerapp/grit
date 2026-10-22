@@ -217,17 +217,25 @@ fn resolve_default_push(
 ) -> PlanResult<ResolvedPush> {
     let push_specs = remote_push_refspec_strings(config, remote);
     if !push_specs.is_empty() {
-        let mut specs = Vec::new();
+        let mut positive_specs = Vec::new();
+        let mut negative_items = Vec::new();
         for spec in push_specs {
             let item = parse_push_refspec(&spec).map_err(|e| PushPlanError::InvalidRefspec {
                 spec: spec.clone(),
                 reason: e.to_string(),
             })?;
             if item.negative {
-                specs.retain(|s| !push_spec_excluded_by_negative(&item, s));
-                continue;
+                negative_items.push(item);
+            } else {
+                positive_specs.push(spec);
             }
+        }
+        let mut specs = Vec::new();
+        for spec in positive_specs {
             specs.extend(expand_configured_push_refspec(repo, spec, ctx)?);
+        }
+        for item in negative_items {
+            specs.retain(|s| !push_spec_excluded_by_negative(&item, s));
         }
         let branch_label = branch_label_from_specs(repo, &specs);
         let kind = if specs.len() == 1 {
