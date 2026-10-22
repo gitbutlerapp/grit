@@ -839,6 +839,19 @@ fn lookup_lone_blob_in_directory(
             continue;
         }
         if dir_entry_name_matches(index_file_name, &entry) {
+            #[cfg(windows)]
+            {
+                return match symlink_metadata_path(target_abs) {
+                    Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
+                    Err(e)
+                        if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) =>
+                    {
+                        BlobDiskLookup::Missing
+                    }
+                    Err(e) => BlobDiskLookup::Io(e),
+                };
+            }
+            #[cfg(not(windows))]
             return match dir_entry_metadata(&entry) {
                 Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
                 Err(e) => BlobDiskLookup::Io(e),
@@ -1136,6 +1149,21 @@ fn lookup_blob_in_directory(
     index_file_name: &[u8],
     target_abs: impl FnOnce() -> PathBuf,
 ) -> BlobDiskLookup {
+    #[cfg(windows)]
+    let found_in_dir = on_disk.contains_key(index_file_name)
+        || on_disk
+            .values()
+            .any(|entry| dir_entry_name_matches(index_file_name, entry));
+    #[cfg(windows)]
+    if found_in_dir {
+        return match symlink_metadata_path(&target_abs()) {
+            Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
+                BlobDiskLookup::Missing
+            }
+            Err(e) => BlobDiskLookup::Io(e),
+        };
+    }
     if let Some(entry) = on_disk.get(index_file_name) {
         return match dir_entry_metadata(entry) {
             Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),

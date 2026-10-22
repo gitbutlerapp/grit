@@ -614,7 +614,8 @@ pub fn run_dense_leaf_worktree_suite(
     let tracked =
         spec.leaf_dirs * spec.files_per_leaf + spec.deep_chains * spec.deep_files_per_chain;
     let fixture = format!("dense-leaf-{tracked}");
-    let mut scenarios = vec![run_scenario(
+    let mut scenarios = Vec::new();
+    scenarios.push(run_scenario(
         hyperfine,
         git,
         grit,
@@ -632,8 +633,26 @@ pub fn run_dense_leaf_worktree_suite(
             git_via_shell: false,
         },
         &repo,
-    )?];
-
+    )?);
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: "add-clean-dense-leaf".into(),
+            group: "add".into(),
+            fixture: fixture.clone(),
+            description: "no-op add on clean dense-leaf worktree (#1518 / #1041 layout)".into(),
+            grit_argv: vec!["add".into()],
+            git_argv: vec!["add".into(), "-A".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &repo,
+    )?);
     modify_txt_files_for_diff(&repo, MODIFIED_TXT)?;
     scenarios.push(run_scenario(
         hyperfine,

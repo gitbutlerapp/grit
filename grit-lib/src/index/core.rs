@@ -4338,6 +4338,12 @@ impl IndexStatFields {
             }
         }
         if policy.check_stat && self.ino != ie.ino {
+            // Directory scans on Windows populate identity fields with zero (no `MetadataExt::ino`).
+            // Do not treat that as a mismatch against index rows written by Git or grit (#1518).
+            #[cfg(windows)]
+            if self.ino == 0 {
+                return true;
+            }
             return false;
         }
         true
