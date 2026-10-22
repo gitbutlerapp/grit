@@ -60,6 +60,7 @@ pub mod serve_request;
 pub mod shell;
 pub mod stats;
 pub mod synth;
+pub mod tag_tree_sha256_suite;
 pub mod worktree_fixture;
 pub mod worktree_suite;
 

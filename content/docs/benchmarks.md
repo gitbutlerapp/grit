@@ -618,6 +618,31 @@ Full ledger (51 scenarios): `grit-bench campaign --ledger --from grit-utils/base
 
 **Superseded micro-baselines.** Per-command JSON files (`hot-paths-after.json`, `commit-after-LH.json`, etc.) remain for focused regressions; the **campaign** pair is the authoritative before/after scorecard for real-repository CLI work. Prefer updating campaign baselines when a change targets end-to-end porcelain on git.git or large synthetic worktrees.
 
+## grit-bench: tree-sha256 tags
+
+Scenario group **`tag-tree-sha256`** (`grit-bench tag-tree-sha256`) measures signed annotated tags with optional [tree-sha256](../library/tree-sha256.md) claims on **git-dot-git**, **chromium-synth**, and optionally **linux** worktrees (same fixture prep as the [real-world campaign](#real-world-campaign)).
+
+| Scenario id | What it measures |
+| --- | --- |
+| `<fixture>/tag-verify-digest-no-signature` | `grit tag --verify --no-signature` vs a git-only `ls-tree` / `cat-file` / SHA-256 reproduction pipeline |
+| `<fixture>/tag-verify-digest-reference` | Same grit verify path vs the reference `tree-sha256` binary when installed (skipped otherwise) |
+| `<fixture>/tag-sign-tree-sha256` | `grit tag --sign --tree-sha256` total time vs `grit tag --sign` only (overhead should stay within recomputed hash time + **10 ms**) |
+| `<fixture>/tag-verify-signed` | Full `grit tag --verify` vs `git verify-tag` on a signed tag carrying a tree-sha256 header |
+
+**Acceptance bars (factory VM):** digest verify ≤ **1.2×** reference wall time when the reference tool is present, and ≤ the git-only pipeline on all three shapes; signed verify ≤ **max(signature, hash) + 10 ms** overhead on the sign scenario; peak RSS for each row is recorded in the committed JSON (`peak_rss_bytes`).
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+export GRIT_BENCH_ODB_CACHE=/tmp/grit-bench-odb-cache
+./target/release/grit-bench tag-tree-sha256 --format json --output grit-utils/baselines/tag-tree-sha256.json
+# optional linux row:
+GRIT_BENCH_LINUX=1 ./target/release/grit-bench tag-tree-sha256 --with-linux --format json --output grit-utils/baselines/tag-tree-sha256.json
+```
+
+Committed baseline: **`grit-utils/baselines/tag-tree-sha256.json`** (listed in `content/docs/site.toml`).
+
+Criterion micro-benchmark: `cargo bench -p grit-lib --bench tree_sha256` (compare with `--baseline tree_sha256-before` when changing hot paths).
+
 ## grit-bench: repository fsck (`fsck-medium`)
 
 Scenario **`fsck-medium`** (`grit-bench fsck`) runs **`grit fsck --no-dangling`** and **`git fsck --no-dangling`** on a cloned deep-history worktree (same fixture as other network-cache scenarios). Baseline: **`grit-utils/baselines/fsck-medium.json`**.

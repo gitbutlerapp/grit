@@ -17,6 +17,10 @@ followup = "GitHub issue #1159"
 documented = "directory pathspec rev walk on git.git (#1159); ratio tracked, no hard gate yet"
 followup = "GitHub issue #1159"
 
+[scenario."git-dot-git/tag-sign-tree-sha256"]
+documented = "tree-sha256 sign overhead on git.git may exceed hash+10ms until digest hot path is tightened"
+followup = "factory step 2801 follow-up"
+
 [scenario."git-dot-git/rev-list-count"]
 owned_by_item_14 = true
 

@@ -52,6 +52,7 @@ use grit_utils::scenarios::{
 };
 use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
+use grit_utils::tag_tree_sha256_suite::run_tag_tree_sha256_suite;
 use grit_utils::worktree_fixture::{
     prepare_add as prepare_worktree_add, prepare_clean_untracked as prepare_worktree_clean,
     prepare_commit as prepare_worktree_commit,
@@ -176,6 +177,14 @@ enum Cmd {
     Hash {
         #[arg(long)]
         smoke: bool,
+    },
+    /// tree-sha256 tag sign/verify vs git and reference tools on real-shaped fixtures
+    TagTreeSha256 {
+        #[arg(long)]
+        smoke: bool,
+        /// Include pinned linux kernel worktree (or set `GRIT_BENCH_LINUX=1`).
+        #[arg(long)]
+        with_linux: bool,
     },
     /// `grit gc`, repack, and commit-graph vs git on deep-history fixture
     Maintenance {
@@ -1738,6 +1747,19 @@ fn main() -> Result<()> {
                     .unwrap_or_else(|_| PathBuf::from("grit-bench")),
             };
             run_hash_suite(&hyperfine, &git, &grit, &cfg, *smoke, timestamp)?
+        }
+        Cmd::TagTreeSha256 { smoke, with_linux } => {
+            eprintln!("Running tree-sha256 tag benchmarks...");
+            let cfg = run_config(&cli, true);
+            run_tag_tree_sha256_suite(
+                &hyperfine,
+                &git,
+                &grit,
+                &cfg,
+                *smoke,
+                *with_linux,
+                timestamp,
+            )?
         }
         Cmd::Maintenance { smoke } => {
             eprintln!("Running maintenance (gc) benchmarks...");

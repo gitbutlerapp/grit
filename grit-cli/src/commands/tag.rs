@@ -19,7 +19,7 @@ use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::tree_sha256::{
     parse_tree_sha256_tag_headers, MissingSubmodule, MissingSubmoduleReason, SignatureVerdict,
-    TagVerifyOptions, TreeSha256Verdict,
+    TagVerifyOptions, TreeSha256Options, TreeSha256Verdict,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -44,6 +44,21 @@ pub enum TagOutcome {
         peeled: Option<String>,
         /// Whether the tag object carries a cryptographic signature.
         signed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_excluded: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_files: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_submodules: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schemars(skip_serializing_if = "Option::is_none")]
+        tree_sha256_hash_ms: Option<f64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         #[schemars(skip_serializing_if = "Option::is_none")]
         replaced: Option<String>,
@@ -218,6 +233,7 @@ impl MarkdownRender for TagOutcome {
                 signed,
                 replaced,
                 dry_run,
+                ..
             } => {
                 let short = oid.get(..7).unwrap_or(oid.as_str());
                 let kind_note = match (*kind, *signed) {
@@ -283,6 +299,10 @@ pub struct TagRunOptions {
     pub verify_names: Vec<String>,
     /// Skip OpenPGP / SSH signature checking (digest still checked when present).
     pub no_signature: bool,
+    /// Attach a tree-sha256 digest (implies signing).
+    pub tree_sha256: bool,
+    /// Submodule path globs excluded from the digest (repeatable).
+    pub exclude_submodule: Vec<String>,
 }
 
 /// Run `grit tag` with the parsed CLI arguments.
@@ -323,7 +343,13 @@ fn validate_verify_options(opts: &TagRunOptions) -> Result<()> {
     if opts.message.is_some() || opts.message_file.is_some() {
         bail!("annotated tag options cannot be used with `--verify`");
     }
-    if opts.force || opts.dry_run || opts.sign.is_some() || opts.signing_key.is_some() {
+    if opts.force
+        || opts.dry_run
+        || opts.sign.is_some()
+        || opts.signing_key.is_some()
+        || opts.tree_sha256
+        || !opts.exclude_submodule.is_empty()
+    {
         bail!("create/delete options cannot be used with `--verify`");
     }
     Ok(())
@@ -460,6 +486,14 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
         None
     };
 
+    let tree_sha256_opts = if opts.tree_sha256 || !opts.exclude_submodule.is_empty() {
+        let mut tree_opts = TreeSha256Options::default();
+        tree_opts.exclude_globs = opts.exclude_submodule.clone();
+        Some(tree_opts)
+    } else {
+        None
+    };
+
     let outcome = create_tag(
         repo,
         &CreateTagRequest {
@@ -469,11 +503,35 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
             tagger,
             sign: opts.sign,
             signing_key: opts.signing_key.clone(),
+            tree_sha256: tree_sha256_opts,
             force: opts.force,
             dry_run: opts.dry_run,
         },
     )
     .map_err(map_tag_error)?;
+
+    let (
+        tree_sha256,
+        tree_sha256_excluded,
+        tree_sha256_files,
+        tree_sha256_submodules,
+        tree_sha256_hash_ms,
+    ) = outcome
+        .tree_sha256
+        .as_ref()
+        .map_or((None, None, None, None, None), |ts| {
+            (
+                Some(ts.claim.digest.to_hex()),
+                if ts.claim.excluded.is_empty() {
+                    None
+                } else {
+                    Some(ts.claim.excluded.clone())
+                },
+                Some(ts.report.files),
+                Some(ts.report.submodules),
+                Some(ts.hash_elapsed.as_secs_f64() * 1000.0),
+            )
+        });
 
     Ok(TagOutcome::Create {
         name: outcome.name,
@@ -481,6 +539,11 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
         kind: outcome.kind.into(),
         peeled: outcome.peeled.map(|p| p.to_hex()),
         signed: outcome.signed,
+        tree_sha256,
+        tree_sha256_excluded,
+        tree_sha256_files,
+        tree_sha256_submodules,
+        tree_sha256_hash_ms,
         replaced: outcome.replaced.map(|p| p.to_hex()),
         dry_run: outcome.dry_run,
     })

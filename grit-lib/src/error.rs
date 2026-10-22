@@ -1102,6 +1102,10 @@ pub enum Error {
     /// Annotated tag tree-sha256 header parsing failed.
     #[error(transparent)]
     TreeSha256Claim(#[from] crate::tree_sha256::TreeSha256ClaimError),
+
+    /// [`crate::porcelain::tag::CreateTagRequest::tree_sha256`] was set while signing was disabled.
+    #[error("tree-sha256 on a tag requires signing")]
+    TreeSha256RequiresSigning,
 }
 
 impl Error {

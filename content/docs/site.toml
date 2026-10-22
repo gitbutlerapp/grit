@@ -112,6 +112,7 @@ baseline = [
   "grit-utils/baselines/fsck-medium.json",
   "grit-utils/baselines/hash-before.json",
   "grit-utils/baselines/hash-after.json",
+  "grit-utils/baselines/tag-tree-sha256.json",
   "grit-utils/baselines/maintenance-medium.json",
   "grit-utils/baselines/merge-check.json",
   "grit-utils/baselines/history.json",

@@ -282,6 +282,44 @@
         "signed": {
           "description": "Whether the tag object carries a cryptographic signature.",
           "type": "boolean"
+        },
+        "tree_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tree_sha256_excluded": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "tree_sha256_files": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tree_sha256_hash_ms": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tree_sha256_submodules": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [

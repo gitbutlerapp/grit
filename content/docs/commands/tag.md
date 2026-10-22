@@ -14,6 +14,7 @@ grit tag <name> [<target>]
 grit tag <name> -m <message>
 grit tag <name> -F <path|->
 grit tag <name> -s -m <message>
+grit tag <name> -s --tree-sha256 -m <message>
 grit tag <name> -f
 grit tag <name> --dry-run
 grit tag -d <name>
@@ -28,6 +29,8 @@ With no arguments, lists your tags. With a name and no `-m`/`-F`, creates a **li
 Use `-f` / `--force` to replace an existing tag (lightweight or annotated). The previous ref target is reported in `--json` as `replaced`.
 
 Use `--dry-run` on create or delete to preview the outcome without changing refs.
+
+Use `--tree-sha256` on a signed tag to attach a [tree-sha256](../library/tree-sha256.md) content digest of the tagged commit's tree (implies signing). Repeat `--exclude-submodule <glob>` to record excluded submodule paths in `tree-sha256-excluded` headers. When `grit.treeSha256=true`, every signed tag gets the digest automatically.
 
 Use `--verify` / `-v` on one or more **annotated** tag names to check the tag object's signature (OpenPGP or SSH, when present) and, when the tag carries a `tree-sha256` header, recompute that digest against the tagged commit's tree. Lightweight tags cannot be verified. Use `--no-signature` to skip signature checking while still validating `tree-sha256` when present.
 
@@ -51,6 +54,8 @@ Tags are local until you publish them with [`grit push --tags`](../push/). Delet
 | `-s`, `--sign` | Sign the tag object (implies annotated; honors `tag.gpgSign` when omitted). |
 | `--no-sign` | Do not sign, even when `tag.gpgSign` is true. |
 | `--signing-key` | Signing key id or path for this tag (overrides `user.signingkey`). |
+| `--tree-sha256` | Attach a tree-sha256 digest (implies `--sign`). |
+| `--exclude-submodule` | Submodule path glob excluded from the digest (repeatable). |
 | `-v`, `--verify` | Verify annotated tags (one or more names). |
 | `--no-signature` | With `--verify`, skip signature checks (digest still checked when present). |
 | `--object` | Hidden alias for `<target>` (one release). |
