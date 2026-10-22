@@ -1,6 +1,5 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
-assertion_line: 384
 expression: payload
 ---
 {
@@ -16,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Pick\n\n- `d5d832b` → `d5d832b` — pick me\n- change id `voklnxq`\n",
+    "stdout": "## Pick\n\n- `d5d832b` → `d5d832b` — pick me\n",
     "stderr": ""
   }
 }

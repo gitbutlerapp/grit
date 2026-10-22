@@ -396,6 +396,8 @@ pub fn verify_fetch_dry_run(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()
     let branch = remote.meta.default_branch.as_str();
     let tracking = format!("refs/remotes/origin/{branch}");
     prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_git(&ctx.git, cwd, &["fetch", "-q", "origin", branch])?;
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
     let before = ref_oid(&ctx.git, cwd, &tracking)?;
     run_git(
         &ctx.git,
@@ -406,6 +408,8 @@ pub fn verify_fetch_dry_run(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()
     if before != after_git {
         bail!("git fetch --dry-run must not move {tracking}");
     }
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_git(&ctx.git, cwd, &["fetch", "-q", "origin", branch])?;
     prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
     let before_grit = ref_oid(&ctx.git, cwd, &tracking)?;
     run_grit(&ctx.grit, cwd, &["fetch", "--dry-run", "origin", branch])?;

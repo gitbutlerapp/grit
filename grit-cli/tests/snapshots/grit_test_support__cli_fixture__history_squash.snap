@@ -1,6 +1,5 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
-assertion_line: 384
 expression: payload
 ---
 {
@@ -16,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## History squash\n\n- commit `83352a6` → `dfadc9b`\n  - change id `xzyqzyy`\n- commit `2d78f4f` → `dfadc9b`\n  - change id `xzyqzyy`\n- `refs/heads/main` `2d78f4f` → `dfadc9b`\n- HEAD `2d78f4f` → `dfadc9b`\n",
+    "stdout": "## History squash\n\n- commit `83352a6` → `dfadc9b`\n- commit `2d78f4f` → `dfadc9b`\n- `refs/heads/main` `2d78f4f` → `dfadc9b`\n- HEAD `2d78f4f` → `dfadc9b`\n",
     "stderr": ""
   }
 }

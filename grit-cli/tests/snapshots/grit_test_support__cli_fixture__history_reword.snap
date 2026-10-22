@@ -1,6 +1,5 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
-assertion_line: 384
 expression: payload
 ---
 {
@@ -16,7 +15,7 @@ expression: payload
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## History reword\n\n- commit `062ca6e` → `dcaee53`\n  - change id `prkwwuw`\n- commit `83352a6` → `65887b9`\n  - change id `xzyqzyy`\n- `refs/heads/feature` `062ca6e` → `dcaee53`\n- `refs/heads/main` `83352a6` → `65887b9`\n- HEAD `83352a6` → `65887b9`\n",
+    "stdout": "## History reword\n\n- commit `062ca6e` → `dcaee53`\n- commit `83352a6` → `65887b9`\n- `refs/heads/feature` `062ca6e` → `dcaee53`\n- `refs/heads/main` `83352a6` → `65887b9`\n- HEAD `83352a6` → `65887b9`\n",
     "stderr": ""
   }
 }

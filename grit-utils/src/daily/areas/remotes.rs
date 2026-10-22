@@ -81,20 +81,31 @@ fn fetch_incr_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     sh_devnull(&ctx.grit, &["fetch", "origin"])
 }
 
+fn default_remote_branch(ctx: &DailyHeadlineContext) -> &str {
+    ctx.remote
+        .as_ref()
+        .map(|r| r.meta.default_branch.as_str())
+        .unwrap_or("master")
+}
+
 fn fetch_one_branch_git(ctx: &DailyHeadlineContext) -> BenchArgv {
-    sh_devnull(&ctx.git, &["fetch", "-q", "origin", "main"])
+    let branch = default_remote_branch(ctx);
+    sh_devnull(&ctx.git, &["fetch", "-q", "origin", branch])
 }
 
 fn fetch_one_branch_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
-    sh_devnull(&ctx.grit, &["fetch", "origin", "main"])
+    let branch = default_remote_branch(ctx);
+    sh_devnull(&ctx.grit, &["fetch", "origin", branch])
 }
 
 fn fetch_dry_run_git(ctx: &DailyHeadlineContext) -> BenchArgv {
-    sh_devnull(&ctx.git, &["fetch", "--dry-run", "-q", "origin", "main"])
+    let branch = default_remote_branch(ctx);
+    sh_devnull(&ctx.git, &["fetch", "--dry-run", "-q", "origin", branch])
 }
 
 fn fetch_dry_run_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
-    sh_devnull(&ctx.grit, &["fetch", "--dry-run", "origin", "main"])
+    let branch = default_remote_branch(ctx);
+    sh_devnull(&ctx.grit, &["fetch", "--dry-run", "origin", branch])
 }
 
 fn pull_ff_git(ctx: &DailyHeadlineContext) -> BenchArgv {

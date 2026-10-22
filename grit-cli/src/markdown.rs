@@ -201,6 +201,9 @@ fn render_file_patch(file: &FileDiff) -> String {
         for line in &hunk.lines {
             out.push_str(&render_patch_line(line));
             out.push('\n');
+            if line.no_newline_at_eof {
+                out.push_str("\\ No newline at end of file\n");
+            }
         }
     }
     out.trim_end_matches('\n').to_owned()
