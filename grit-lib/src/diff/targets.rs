@@ -561,18 +561,18 @@ struct WorktreeDiffSide<'a> {
 }
 
 #[derive(Clone)]
-pub(crate) struct FileChange {
-    pub(crate) path: String,
-    pub(crate) old_path: Option<String>,
-    pub(crate) status: DiffStatus,
-    pub(crate) old_mode: String,
-    pub(crate) new_mode: String,
-    pub(crate) old_oid: ObjectId,
-    pub(crate) new_oid: ObjectId,
-    pub(crate) old_bytes: SideBytes,
-    pub(crate) new_bytes: SideBytes,
-    pub(crate) binary: bool,
-    pub(crate) content_changed: bool,
+struct FileChange {
+    path: String,
+    old_path: Option<String>,
+    status: DiffStatus,
+    old_mode: String,
+    new_mode: String,
+    old_oid: ObjectId,
+    new_oid: ObjectId,
+    old_bytes: SideBytes,
+    new_bytes: SideBytes,
+    binary: bool,
+    content_changed: bool,
 }
 
 fn tree_structured_from_worktree_changes(
@@ -1357,92 +1357,6 @@ pub(crate) type UnstagedDiffWithPeers = (
     Vec<FileDiff>,
     std::collections::HashMap<String, Vec<StructuredHunk>>,
 );
-
-pub(crate) type UnstagedRawWithPeers = (
-    Vec<FileChange>,
-    std::collections::HashMap<String, Vec<StructuredHunk>>,
-);
-
-/// Raw unstaged [`FileChange`] rows plus staged peer hunks (no structured diff built yet).
-pub(crate) fn unstaged_raw_changes_with_peer_hunks(
-    repo: &Repository,
-    pathspecs: &[String],
-    opts: DiffOptions,
-) -> Result<UnstagedRawWithPeers> {
-    let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
-    let peer_hunks =
-        staged_peer_hunks_for_pathspecs(repo, pathspecs, opts.clone(), rename_threshold)?;
-    let unstaged = filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs);
-    Ok((unstaged, peer_hunks))
-}
-
-fn blob_oid_in_tree(repo: &Repository, tree: ObjectId, path: &str) -> Result<Option<ObjectId>> {
-    use crate::objects::parse_tree;
-    let mut cur = tree;
-    let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    for (i, name) in components.iter().enumerate() {
-        let raw = repo.odb().read(&cur)?;
-        let entries = parse_tree(&raw.data)?;
-        let name_bytes = name.as_bytes();
-        let Some(entry) = entries.iter().find(|e| e.name.as_slice() == name_bytes) else {
-            return Ok(None);
-        };
-        if i + 1 == components.len() {
-            return Ok(Some(entry.oid));
-        }
-        if entry.mode != crate::index::MODE_TREE {
-            return Ok(None);
-        }
-        cur = entry.oid;
-    }
-    Ok(None)
-}
-
-fn path_has_staged_delta_vs_head(repo: &Repository, path: &str) -> Result<bool> {
-    let index = repo.index_handle().load()?;
-    let path_bytes = path.as_bytes();
-    if index.get(path_bytes, 2).is_some() || index.get(path_bytes, 3).is_some() {
-        return Ok(true);
-    }
-    let head = resolve_head(repo.git_dir())?;
-    let Some(head_oid) = head.oid() else {
-        return Ok(index.get(path_bytes, 0).is_some());
-    };
-    let tree = commit_tree(repo, head_oid)?;
-    let head_blob = blob_oid_in_tree(repo, tree, path)?;
-    let Some(idx_entry) = index.get(path_bytes, 0) else {
-        return Ok(head_blob.is_some());
-    };
-    match head_blob {
-        None => Ok(true),
-        Some(h) => Ok(idx_entry.oid != h),
-    }
-}
-
-fn staged_peer_hunks_for_pathspecs(
-    repo: &Repository,
-    pathspecs: &[String],
-    opts: DiffOptions,
-    rename_threshold: u32,
-) -> Result<std::collections::HashMap<String, Vec<StructuredHunk>>> {
-    if !pathspecs.is_empty()
-        && pathspecs.iter().all(|p| {
-            path_has_staged_delta_vs_head(repo, p)
-                .map(|delta| !delta)
-                .unwrap_or(false)
-        })
-    {
-        return Ok(std::collections::HashMap::new());
-    }
-    let staged = filter_file_changes(staged_changes(repo, rename_threshold)?, repo, pathspecs);
-    Ok(staged
-        .iter()
-        .map(|fc| {
-            let structured = structured_for_file_change(fc, opts.clone());
-            (fc.path.clone(), structured.hunks)
-        })
-        .collect())
-}
 
 /// Unstaged [`FileDiff`] rows plus staged hunks on the same path (for stable hunk ids).
 pub(crate) fn unstaged_file_diffs_with_peer_hunks(

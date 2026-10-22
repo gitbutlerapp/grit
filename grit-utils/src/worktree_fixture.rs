@@ -375,12 +375,6 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
 
     let repo = active_worktree_repo();
     ensure_large_file_committed(git, &repo)?;
-    // Each hyperfine iteration must start from a clean index and worktree at `HEAD`, then only
-    // the 500 one-line worktree edits below (partial staging from the timed command must not
-    // carry over).
-    run_git(git, &repo, &["reset", "--hard", "HEAD"])?;
-    run_git(git, &repo, &["clean", "-fd", "-q"])?;
-    pin_worktree_bench_config(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
     let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
@@ -388,8 +382,12 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     let (file, peer) = snapshots
         .first()
         .context("large.txt should appear in unstaged diff")?;
-    let ids =
-        hunk_ids_with_duplicate_peers(DiffSide::Unstaged, LARGE_HUNKS_FILE, &file.hunks, peer);
+    let ids = hunk_ids_with_duplicate_peers(
+        DiffSide::Unstaged,
+        LARGE_HUNKS_FILE,
+        &file.hunks,
+        peer,
+    );
     let half_len = ids.len() / 2;
     let half_ids: Vec<_> = ids.iter().take(half_len).cloned().collect();
     let id_line = half_ids
@@ -408,8 +406,7 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
         &HunkSelection { ids: half_ids },
         &pathspec,
     )
-    .map_err(|e| anyhow::anyhow!("resolve hunk selection: {e}"))?
-    .patches;
+    .map_err(|e| anyhow::anyhow!("resolve hunk selection: {e}"))?;
     let mut patch_text = String::new();
     for patch in &patches {
         patch_text.push_str(&format_file_patch_for_git(patch));

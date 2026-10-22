@@ -1,24 +1,20 @@
 //! Select structured diff hunks by stable id and apply them to the index.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 
 use thiserror::Error;
 
 use crate::apply::{
-    apply_patch_to_index_and_write, parse_patch, FilePatch, Hunk, HunkLine, IndexApplyOptions,
-    IndexApplyOutcome,
+    apply_patch_to_index_and_write, FilePatch, Hunk, HunkLine, IndexApplyOptions, IndexApplyOutcome,
 };
 use crate::diff::hunk_id::{
     hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId, HunkIdError,
 };
-use crate::diff::structured::structured_file_diff;
-use crate::diff::structured::{SideBytes, StructuredHunk, StructuredLineKind};
+use crate::diff::structured::{StructuredHunk, StructuredLineKind};
 use crate::diff::{
-    collect_files_for_target, imara_unified_hunk_slices, unified_hunk_body_for_diff_options,
-    unstaged_file_diffs_with_peer_hunks, unstaged_raw_changes_with_peer_hunks, DiffOptions,
-    DiffStatus, DiffTarget, FileChange, FileDiff,
+    collect_files_for_target, unstaged_file_diffs_with_peer_hunks, DiffOptions, DiffStatus,
+    DiffTarget, FileDiff,
 };
 use crate::error::{ApplyError, Error};
 use crate::repo::Repository;
@@ -28,15 +24,6 @@ use crate::repo::Repository;
 pub struct HunkSelection {
     /// Stable hunk ids from `grit diff --json` (`hunks[].id`).
     pub ids: Vec<HunkId>,
-}
-
-/// Resolved patches and the staged id map for one hunk selection.
-#[derive(Debug, Clone)]
-pub struct ResolvedHunkPatches {
-    /// Index-ready patches for the selected hunks.
-    pub patches: Vec<FilePatch>,
-    /// Staged ids per path (same shape as [`StageHunksOutcome::staged_hunks`]).
-    pub staged_hunks: BTreeMap<String, Vec<HunkId>>,
 }
 
 /// Failure while resolving or staging hunk ids.
@@ -178,12 +165,9 @@ pub fn resolve_selection(
     side: DiffSide,
     selection: &HunkSelection,
     pathspecs: &[String],
-) -> std::result::Result<ResolvedHunkPatches, HunkSelectError> {
+) -> std::result::Result<Vec<FilePatch>, HunkSelectError> {
     if selection.ids.is_empty() {
-        return Ok(ResolvedHunkPatches {
-            patches: Vec::new(),
-            staged_hunks: BTreeMap::new(),
-        });
+        return Ok(Vec::new());
     }
     let opts = DiffOptions::default();
     let requested: HashSet<HunkId> = selection.ids.iter().cloned().collect();
@@ -204,7 +188,7 @@ fn resolve_staged(
     pathspecs: &[String],
     opts: DiffOptions,
     requested: &HashSet<HunkId>,
-) -> std::result::Result<ResolvedHunkPatches, HunkSelectError> {
+) -> std::result::Result<Vec<FilePatch>, HunkSelectError> {
     let files = collect_files_for_target(repo, &DiffTarget::IndexVsHead, pathspecs, opts)
         .map_err(|e| HunkSelectError::UnknownId { id: e.to_string() })?;
     resolve_on_files(
@@ -221,185 +205,17 @@ fn resolve_unstaged(
     pathspecs: &[String],
     opts: DiffOptions,
     requested: &HashSet<HunkId>,
-) -> std::result::Result<ResolvedHunkPatches, HunkSelectError> {
-    let (changes, peer_hunks) = unstaged_raw_changes_with_peer_hunks(repo, pathspecs, opts.clone())
-        .map_err(map_repo_err)?;
-    let mut patches = Vec::new();
-    let mut staged_hunks = BTreeMap::new();
-    let mut found = HashSet::new();
-
-    for change in &changes {
-        if change.binary {
-            continue;
-        }
-        let peer = peer_hunks
-            .get(&change.path)
-            .map(|h| h.as_slice())
-            .unwrap_or(&[]);
-        let (file_patches, staged, matched) =
-            resolve_file_change_by_unified_body(DiffSide::Unstaged, change, peer, requested)?;
-        found.extend(matched);
-        if let Some(staged) = staged {
-            staged_hunks.insert(change.path.clone(), staged);
-        }
-        patches.extend(file_patches);
-    }
-
-    let missing: Vec<HunkId> = requested
-        .iter()
-        .filter(|id| !found.contains(*id))
-        .cloned()
-        .collect();
-    if let Some(id) = missing.first().cloned() {
-        if let Some(wrong) = find_id_on_staged_side(repo, pathspecs, opts.clone(), requested)? {
-            return Err(HunkSelectError::WrongSide {
-                id: wrong,
-                actual_side: "staged",
-                requested_side: "unstaged",
-            });
-        }
-        let files: Vec<FileDiff> = changes
-            .iter()
-            .filter(|c| !c.binary)
-            .map(|c| build_file_diff_for_stale(c, &opts))
-            .collect();
-        let current_ids = current_ids_for_stale(DiffSide::Unstaged, pathspecs, &files, &peer_hunks);
-        return Err(HunkSelectError::StaleId {
+) -> std::result::Result<Vec<FilePatch>, HunkSelectError> {
+    if let Some(id) = find_id_on_staged_side(repo, pathspecs, opts.clone(), requested)? {
+        return Err(HunkSelectError::WrongSide {
             id,
-            path: stale_path_hint(pathspecs, &files),
-            current_ids,
+            actual_side: "staged",
+            requested_side: "unstaged",
         });
     }
-
-    Ok(ResolvedHunkPatches {
-        patches,
-        staged_hunks,
-    })
-}
-
-fn side_text(bytes: &SideBytes) -> Cow<'_, str> {
-    if bytes.data.is_empty() {
-        return Cow::Borrowed("");
-    }
-    match std::str::from_utf8(&bytes.data) {
-        Ok(text) => Cow::Borrowed(text),
-        Err(_) => Cow::Owned(String::from_utf8_lossy(&bytes.data).into_owned()),
-    }
-}
-
-fn line_count(text: &str) -> usize {
-    if text.is_empty() {
-        return 0;
-    }
-    let ends_nl = text.ends_with('\n');
-    let mut parts = text.split('\n').count();
-    if ends_nl {
-        parts = parts.saturating_sub(1);
-    }
-    parts
-}
-
-type UnifiedHunkResolve = (Vec<FilePatch>, Option<Vec<HunkId>>, HashSet<HunkId>);
-
-fn resolve_file_change_by_unified_body(
-    side: DiffSide,
-    change: &FileChange,
-    peer_hunks: &[StructuredHunk],
-    requested: &HashSet<HunkId>,
-) -> std::result::Result<UnifiedHunkResolve, HunkSelectError> {
-    let old_text = side_text(&change.old_bytes);
-    let new_text = side_text(&change.new_bytes);
-    let opts = DiffOptions::default();
-    let body = unified_hunk_body_for_diff_options(old_text.as_ref(), new_text.as_ref(), &opts);
-    let before_count = line_count(old_text.as_ref());
-    let after_count = line_count(new_text.as_ref());
-    let before_ends_nl = old_text.as_ref().ends_with('\n');
-    let after_ends_nl = new_text.as_ref().ends_with('\n');
-    let slices = imara_unified_hunk_slices(&body);
-    let ids = crate::diff::hunk_id::hunk_ids_for_unified_slices(
-        side,
-        &change.path,
-        &slices,
-        before_count,
-        after_count,
-        before_ends_nl,
-        after_ends_nl,
-        peer_hunks,
-    );
-    let mut selected_slices = Vec::new();
-    let mut staged_ids = Vec::new();
-    let mut matched = HashSet::new();
-    for (slice, id) in slices.iter().zip(ids.iter()) {
-        if requested.contains(id) {
-            selected_slices.push(*slice);
-            staged_ids.push(id.clone());
-            matched.insert(id.clone());
-        }
-    }
-    if selected_slices.is_empty() {
-        return Ok((Vec::new(), None, matched));
-    }
-    let patch = file_patch_from_unified_slices(change, &selected_slices)?;
-    Ok((vec![patch], Some(staged_ids), matched))
-}
-
-fn file_patch_from_unified_slices(
-    change: &FileChange,
-    slices: &[&str],
-) -> std::result::Result<FilePatch, HunkSelectError> {
-    let path = &change.path;
-    let mut text = format!("diff --git a/{path} b/{path}\n");
-    if change.old_mode == "000000" {
-        text.push_str(&format!("new file mode {}\n", change.new_mode));
-    }
-    let old = if change.old_mode == "000000" {
-        "/dev/null".to_string()
-    } else {
-        format!("a/{}", change.old_path.as_deref().unwrap_or(path.as_str()))
-    };
-    let new = if change.new_mode == "000000" {
-        "/dev/null".to_string()
-    } else {
-        format!("b/{path}")
-    };
-    text.push_str(&format!("--- {old}\n+++ {new}\n"));
-    for slice in slices {
-        text.push_str(slice);
-        if !slice.ends_with('\n') {
-            text.push('\n');
-        }
-    }
-    let mut patches = parse_patch(&text, 1, path, false, None).map_err(map_parse_err)?;
-    let mut patch = patches.pop().ok_or_else(|| HunkSelectError::UnknownId {
-        id: "empty patch".into(),
-    })?;
-    // Index preimage comes from the existing stage-0 entry (including intent-to-add).
-    patch.is_new = false;
-    Ok(patch)
-}
-
-fn build_file_diff_for_stale(change: &FileChange, opts: &DiffOptions) -> FileDiff {
-    let structured = structured_file_diff(
-        &change.old_mode,
-        &change.new_mode,
-        &change.old_bytes,
-        &change.new_bytes,
-        opts.clone(),
-    );
-    FileDiff {
-        path: change.path.clone(),
-        old_path: change.old_path.clone(),
-        status: change.status,
-        old_mode: structured.old_mode,
-        new_mode: structured.new_mode,
-        old_oid: change.old_oid,
-        new_oid: change.new_oid,
-        binary: change.binary,
-        content_changed: change.content_changed,
-        old_encoding_lossy: structured.old_encoding_lossy,
-        new_encoding_lossy: structured.new_encoding_lossy,
-        hunks: structured.hunks,
-    }
+    let (files, peer_hunks) =
+        unstaged_file_diffs_with_peer_hunks(repo, pathspecs, opts).map_err(map_repo_err)?;
+    resolve_on_files(DiffSide::Unstaged, files, peer_hunks, requested, pathspecs)
 }
 
 fn find_id_on_staged_side(
@@ -430,7 +246,7 @@ fn resolve_on_files(
     peer_hunks: HashMap<String, Vec<StructuredHunk>>,
     requested: &HashSet<HunkId>,
     pathspecs: &[String],
-) -> std::result::Result<ResolvedHunkPatches, HunkSelectError> {
+) -> std::result::Result<Vec<FilePatch>, HunkSelectError> {
     let mut found = HashSet::new();
     let mut patches = Vec::new();
     let mut staged_by_path: BTreeMap<String, Vec<HunkId>> = BTreeMap::new();
@@ -474,10 +290,8 @@ fn resolve_on_files(
         });
     }
 
-    Ok(ResolvedHunkPatches {
-        patches,
-        staged_hunks: staged_by_path,
-    })
+    let _ = staged_by_path;
+    Ok(patches)
 }
 
 fn stale_path_hint(pathspecs: &[String], files: &[FileDiff]) -> Option<String> {
@@ -601,23 +415,60 @@ pub fn stage_hunks(
     pathspecs: &[String],
     dry_run: bool,
 ) -> std::result::Result<StageHunksOutcome, HunkSelectError> {
-    let resolved = resolve_selection(repo, side, selection, pathspecs)?;
-    let apply =
-        apply_patch_to_index_and_write(repo, &resolved.patches, &IndexApplyOptions { dry_run })?;
-    Ok(StageHunksOutcome::from_apply(
-        dry_run,
-        resolved.staged_hunks,
-        apply,
-    ))
+    let patches = resolve_selection(repo, side, selection, pathspecs)?;
+    let staged_hunks = staged_ids_from_patches(repo, side, selection, pathspecs, &patches)?;
+    let apply = apply_patch_to_index_and_write(repo, &patches, &IndexApplyOptions { dry_run })?;
+    Ok(StageHunksOutcome::from_apply(dry_run, staged_hunks, apply))
+}
+
+fn staged_ids_from_patches(
+    repo: &Repository,
+    side: DiffSide,
+    selection: &HunkSelection,
+    pathspecs: &[String],
+    patches: &[FilePatch],
+) -> std::result::Result<BTreeMap<String, Vec<HunkId>>, HunkSelectError> {
+    let opts = DiffOptions::default();
+    let (files, peer_hunks) = match side {
+        DiffSide::Unstaged => {
+            unstaged_file_diffs_with_peer_hunks(repo, pathspecs, opts).map_err(map_repo_err)?
+        }
+        DiffSide::Staged => {
+            let files = collect_files_for_target(repo, &DiffTarget::IndexVsHead, pathspecs, opts)
+                .map_err(map_repo_err)?;
+            (files, HashMap::new())
+        }
+        DiffSide::Other => (Vec::new(), HashMap::new()),
+    };
+    let requested: HashSet<HunkId> = selection.ids.iter().cloned().collect();
+    let mut out = BTreeMap::new();
+    for patch in patches {
+        let path = patch
+            .effective_path()
+            .ok_or_else(|| HunkSelectError::UnknownId {
+                id: "patch missing path".into(),
+            })?
+            .to_string();
+        let Some(file) = files.iter().find(|f| f.path == path) else {
+            continue;
+        };
+        let peer = peer_hunks
+            .get(&file.path)
+            .map(|h| h.as_slice())
+            .unwrap_or(&[]);
+        let ids = hunk_ids_with_duplicate_peers(side, &file.path, &file.hunks, peer);
+        let staged: Vec<HunkId> = ids
+            .into_iter()
+            .filter(|id| requested.contains(id))
+            .collect();
+        if !staged.is_empty() {
+            out.insert(path, staged);
+        }
+    }
+    Ok(out)
 }
 
 fn map_repo_err(err: Error) -> HunkSelectError {
-    HunkSelectError::UnknownId {
-        id: err.to_string(),
-    }
-}
-
-fn map_parse_err(err: Error) -> HunkSelectError {
     HunkSelectError::UnknownId {
         id: err.to_string(),
     }
@@ -690,9 +541,7 @@ mod tests {
             ids: vec![ids[0].clone()],
         };
 
-        let patch = resolve_selection(&repo, DiffSide::Unstaged, &selection, &[])
-            .unwrap()
-            .patches;
+        let patch = resolve_selection(&repo, DiffSide::Unstaged, &selection, &[]).unwrap();
         let mut patch_text = String::new();
         for p in &patch {
             patch_text.push_str(&format_patch_for_git(p));
