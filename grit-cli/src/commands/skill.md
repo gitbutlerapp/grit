@@ -42,9 +42,9 @@ The target branch is the first that exists of: the `target.branch` config value,
 | History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` |
 
-`grit diff --json` on **`--staged`** or **`--unstaged`** patch output includes stable **`hunks[].id`** (12 lowercase hex chars) and **`hunks[].index`** (0-based within the file). Ids hash side, path, and line bodies (not line numbers), so they stay valid when earlier hunks are staged. Use **`grit add --hunks <id,...>`** (optional `-- paths`) to stage selected hunks; **`--lines`** on `add`, `restore`, and `commit` follow in later releases. Commit-range diffs omit `id` for now.
+`grit diff --json` on **`--staged`** or **`--unstaged`** patch output includes stable **`hunks[].id`** (12 lowercase hex chars) and **`hunks[].index`** (0-based within the file). Ids hash side, path, and line bodies (not line numbers), so they stay valid when earlier hunks are staged. Use **`grit add --hunks <id,...>`** or **`grit add --lines path:start-end`** (new-side **`lines[].new`**, 1-based inclusive); commit-range diffs omit `id` for now.
 
-**Select hunks workflow:** `grit diff --unstaged --json -- path | jq '.files[].hunks[] | .id'` → pick ids → `grit add --hunks id1,id2 -- path`. Use `--dry-run` to preview. Exit code **2** for unknown, stale, or wrong-side ids.
+**Partial staging:** `grit diff --unstaged --json -- path | jq '.files[].hunks[] | .id'` → `grit add --hunks id1,id2 -- path`, or pick **`lines[].new`** → `grit add --lines path:10-15 -- path`. Mix `--hunks` and `--lines`. Use `--dry-run` to preview. Exit code **2** for unknown/stale ids or invalid line ranges.
 
 Revisions can be full or short ids, branch or tag names, or expressions like `HEAD~2`.
 
@@ -70,6 +70,7 @@ $ grit commit -m "Explain what changed and why"
 | Stage specific paths | `grit add -- path/to/file` |
 | Apply a unified diff to the index | `grit add --patch-file file.diff` (or `-` for stdin; like `git apply --cached`) |
 | Stage selected diff hunks by id | `grit add --hunks <id,...>` (from `grit diff --json`; optional `-- paths`) |
+| Stage part of a hunk by line range | `grit add --lines path:start-end` (new-side lines from `grit diff --json`; mix with `--hunks`) |
 
 `grit add --json` returns `{added, modified, removed, intent_to_add, dry_run, count, staged}` with repository-relative paths. Use `--dry-run` before bulk staging to bound agent work; path lists are sorted and stable. With `--patch-file`, paths come from the patch (same JSON fields as path-based staging).
 

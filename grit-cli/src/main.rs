@@ -652,6 +652,9 @@ enum Command {
         /// Stage only the listed hunk ids from `grit diff --json` (comma-separated, repeatable).
         #[arg(long = "hunks", value_name = "ID,...", action = clap::ArgAction::Append)]
         hunks: Vec<String>,
+        /// Stage only new-side line ranges from `grit diff --json` (`path:start-end`, repeatable).
+        #[arg(long = "lines", value_name = "PATH:START-END", action = clap::ArgAction::Append)]
+        lines: Vec<String>,
     },
     /// Remove tracked paths from the working tree and index.
     Rm {
@@ -1672,10 +1675,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             non_executable,
             patch_file,
             hunks,
+            lines,
         } => {
             if let Some(file) = patch_file {
-                if !hunks.is_empty() {
-                    bail!("--patch-file cannot be used with --hunks");
+                if !hunks.is_empty() || !lines.is_empty() {
+                    bail!("--patch-file cannot be used with --hunks or --lines");
                 }
                 if executable || non_executable {
                     bail!("--patch-file cannot be used with --executable or --non-executable");
@@ -1693,20 +1697,22 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     bail!("--patch-file cannot be used with path arguments");
                 }
                 emit(&commands::add::run_patch_file(&file, dry_run)?, opts, ctx)
-            } else if !hunks.is_empty() {
+            } else if !hunks.is_empty() || !lines.is_empty() {
                 if executable || non_executable {
-                    bail!("--hunks cannot be used with --executable or --non-executable");
+                    bail!(
+                        "--hunks and --lines cannot be used with --executable or --non-executable"
+                    );
                 }
                 if force {
-                    bail!("--hunks cannot be used with --force");
+                    bail!("--hunks and --lines cannot be used with --force");
                 }
                 if update {
-                    bail!("--hunks cannot be used with --update");
+                    bail!("--hunks and --lines cannot be used with --update");
                 }
                 if intent_to_add {
-                    bail!("--hunks cannot be used with --intent-to-add");
+                    bail!("--hunks and --lines cannot be used with --intent-to-add");
                 }
-                match commands::add::run_hunks(&pathspecs, &hunks, dry_run) {
+                match commands::add::run_hunks(&pathspecs, &hunks, &lines, dry_run) {
                     Ok(outcome) => emit(&outcome, opts, ctx),
                     Err(err) => {
                         let code = commands::add::hunks_exit_code(&err);

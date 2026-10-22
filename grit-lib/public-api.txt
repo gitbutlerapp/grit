@@ -11714,6 +11714,13 @@ pub enum grit_lib::porcelain::hunk_select::HunkSelectError
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Apply(grit_lib::error::ApplyError)
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Binary
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Binary::path: alloc::string::String
+pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds
+pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::end: usize
+pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::max_line: usize
+pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::path: alloc::string::String
+pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeOutOfBounds::start: usize
+pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeSelectsNothing
+pub grit_lib::porcelain::hunk_select::HunkSelectError::RangeSelectsNothing::path: alloc::string::String
 pub grit_lib::porcelain::hunk_select::HunkSelectError::Repo(alloc::string::String)
 pub grit_lib::porcelain::hunk_select::HunkSelectError::StaleId
 pub grit_lib::porcelain::hunk_select::HunkSelectError::StaleId::current_ids: alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>
@@ -11750,8 +11757,28 @@ impl core::marker::Unpin for grit_lib::porcelain::hunk_select::HunkSelectError
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::HunkSelectError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::HunkSelectError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::HunkSelectError
+pub struct grit_lib::porcelain::hunk_select::LineRange
+pub grit_lib::porcelain::hunk_select::LineRange::end: usize
+pub grit_lib::porcelain::hunk_select::LineRange::path: alloc::string::String
+pub grit_lib::porcelain::hunk_select::LineRange::start: usize
+impl core::clone::Clone for grit_lib::porcelain::hunk_select::LineRange
+pub fn grit_lib::porcelain::hunk_select::LineRange::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::hunk_select::LineRange
+impl core::cmp::PartialEq for grit_lib::porcelain::hunk_select::LineRange
+pub fn grit_lib::porcelain::hunk_select::LineRange::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::hunk_select::LineRange
+pub fn grit_lib::porcelain::hunk_select::LineRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::hunk_select::LineRange
+impl core::marker::Freeze for grit_lib::porcelain::hunk_select::LineRange
+impl core::marker::Send for grit_lib::porcelain::hunk_select::LineRange
+impl core::marker::Sync for grit_lib::porcelain::hunk_select::LineRange
+impl core::marker::Unpin for grit_lib::porcelain::hunk_select::LineRange
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::LineRange
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::LineRange
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::LineRange
 pub struct grit_lib::porcelain::hunk_select::HunkSelection
 pub grit_lib::porcelain::hunk_select::HunkSelection::ids: alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>
+pub grit_lib::porcelain::hunk_select::HunkSelection::ranges: alloc::vec::Vec<grit_lib::porcelain::hunk_select::LineRange>
 impl core::clone::Clone for grit_lib::porcelain::hunk_select::HunkSelection
 pub fn grit_lib::porcelain::hunk_select::HunkSelection::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::hunk_select::HunkSelection
@@ -11775,6 +11802,7 @@ pub grit_lib::porcelain::hunk_select::StageHunksOutcome::dry_run: bool
 pub grit_lib::porcelain::hunk_select::StageHunksOutcome::modified: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::hunk_select::StageHunksOutcome::removed: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::hunk_select::StageHunksOutcome::staged_hunks: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>>
+pub grit_lib::porcelain::hunk_select::StageHunksOutcome::staged_lines: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<alloc::string::String>>
 impl core::clone::Clone for grit_lib::porcelain::hunk_select::StageHunksOutcome
 pub fn grit_lib::porcelain::hunk_select::StageHunksOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::hunk_select::StageHunksOutcome

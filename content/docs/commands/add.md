@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit add [-u | --update] [--dry-run] [--hunks <id,...>] [--patch-file <file|->] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
+grit add [-u | --update] [--dry-run] [--hunks <id,...>] [--lines <path:start-end>] [--patch-file <file|->] [--executable | --non-executable] [--pathspec-from-file <file|->] [--pathspec-file-nul] [<path>...]
 ```
 
 ## Description
@@ -29,6 +29,7 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 | `-u`, `--update` | Stage tracked changes only (modified and deleted paths). Untracked files are left alone. With no paths, applies to the whole tree. |
 | `--dry-run` | List paths that would be staged without updating the index or writing objects. |
 | `--hunks` | Stage only the listed hunk ids from `grit diff --json` (`hunks[].id`). Comma-separated ids; pass the flag again to add more. Optional `-- paths` narrow the diff scan. Cannot be combined with `--patch-file`, `-u` / `--update`, or `-N` / `--intent-to-add`. |
+| `--lines` | Stage only new-side line ranges from `grit diff --json` (`lines[].new`). Use `path:start-end` or `path:line` (1-based, inclusive); comma-separate or repeat the flag. Mix with `--hunks`. Same restrictions as `--hunks`. |
 | `--patch-file` | Apply a unified diff to the index only (like `git apply --cached`). Use `-` for stdin. Cannot be combined with `--hunks`, paths, `-u` / `--update`, or `-N` / `--intent-to-add`. |
 | `-N`, `--intent-to-add` | Record intent-to-add entries (empty blob, extended flag) instead of hashing content. |
 | `-f`, `--force` | Stage ignored paths when named explicitly (instead of erroring with pathspec ignored). |
@@ -69,6 +70,13 @@ $ grit add --hunks a1b2c3d4e5f6 -- f.txt
 Staged 1 change.
 ```
 
+Stage a line range within one hunk:
+
+```console
+$ grit add --lines f.txt:10-15 -- f.txt
+Staged 1 change.
+```
+
 Mark a script executable when the filesystem does not track the execute bit:
 
 ```console
@@ -92,6 +100,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `count` | number | Total paths in `added`, `modified`, and `removed`. |
 | `staged` | number | Same as `count` (kept for older scripts). |
 | `staged_hunks` | object | When `--hunks` was used: map of path → array of staged hunk id strings. |
+| `staged_lines` | object | When `--lines` was used: map of path → array of range strings (`start` or `start-end`). |
 
 Example:
 

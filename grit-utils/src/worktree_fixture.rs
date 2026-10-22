@@ -327,6 +327,8 @@ const PATCH_FILE_MARKER: &str = "patch-file.diff";
 const LARGE_HUNKS_FILE: &str = "large.txt";
 const HUNKS_HALF_IDS_MARKER: &str = "hunks-half.ids";
 const HUNKS_HALF_PATCH_MARKER: &str = "hunks-half.patch";
+const LINES_HALF_PATCH_MARKER: &str = "lines-half.patch";
+const LINES_HALF_RANGE: &str = "1-25000";
 
 /// Modify ~1% of paths and write `git diff` to the bench scratch dir for `--patch-file` scenarios.
 pub fn prepare_add_patch_file(git: &Path) -> Result<()> {
@@ -399,7 +401,10 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     let patches = resolve_selection(
         &grit_repo,
         DiffSide::Unstaged,
-        &HunkSelection { ids: half_ids },
+        &HunkSelection {
+            ids: half_ids,
+            ranges: Vec::new(),
+        },
         &pathspec,
     )
     .map_err(|e| anyhow::anyhow!("resolve hunk selection: {e}"))?;
@@ -495,6 +500,65 @@ fn write_hunk_patch_line(out: &mut String, prefix: char, text: &str) {
         out.push_str(text);
         out.push('\n');
     }
+}
+
+/// Ensure bench artifacts for `grit add --lines` on the first 25k new-side lines of `large.txt`.
+pub fn prepare_add_lines_large(git: &Path) -> Result<()> {
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::diff::hunk_id::DiffSide;
+    use grit_lib::porcelain::hunk_select::{resolve_selection, HunkSelection, LineRange};
+    use grit_lib::repo::Repository;
+
+    let repo = active_worktree_repo();
+    ensure_large_file_committed(git, &repo)?;
+    modify_large_file_five_hundred_hunks(&repo)?;
+    let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
+    let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
+    let patches = resolve_selection(
+        &grit_repo,
+        DiffSide::Unstaged,
+        &HunkSelection {
+            ids: Vec::new(),
+            ranges: vec![LineRange {
+                path: LARGE_HUNKS_FILE.to_string(),
+                start: 1,
+                end: 25_000,
+            }],
+        },
+        &pathspec,
+    )
+    .map_err(|e| anyhow::anyhow!("resolve line selection: {e}"))?;
+    let mut patch_text = String::new();
+    for patch in &patches {
+        patch_text.push_str(&format_file_patch_for_git(patch));
+    }
+    fs::write(
+        scratch_dir().join(LINES_HALF_PATCH_MARKER),
+        patch_text.as_bytes(),
+    )
+    .context("write lines half patch")?;
+    Ok(())
+}
+
+/// Shell snippet: `grit add --lines` for the first 25k lines of `large.txt`.
+pub fn shell_grit_add_lines(grit: &Path) -> String {
+    let prog_q = shell_quote(&grit.to_string_lossy());
+    let file_q = shell_quote(LARGE_HUNKS_FILE);
+    format!(
+        "{prog_q} add --lines {file_q}:{range} -- {file_q} > /dev/null 2>&1",
+        range = LINES_HALF_RANGE
+    )
+}
+
+/// Shell snippet: `git apply --cached` for the same line-range patch.
+pub fn shell_git_apply_lines_half(git: &Path) -> String {
+    let prog_q = shell_quote(&git.to_string_lossy());
+    let patch_q = shell_quote(
+        &scratch_dir()
+            .join(LINES_HALF_PATCH_MARKER)
+            .to_string_lossy(),
+    );
+    format!("{prog_q} apply --cached {patch_q} > /dev/null 2>&1")
 }
 
 /// Shell snippet: `grit add --hunks` using prepared ids (half of 500 hunks).

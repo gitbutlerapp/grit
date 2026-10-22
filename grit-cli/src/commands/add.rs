@@ -10,7 +10,7 @@ use grit_lib::diff::DiffSide;
 use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions, StageOutcome};
 use grit_lib::porcelain::hunk_select::{
-    parse_hunk_id_list, stage_hunks, HunkSelectError, StageHunksOutcome,
+    parse_hunk_id_list, stage_hunks, HunkSelectError, LineRange, StageHunksOutcome,
 };
 use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::NullProgress;
@@ -42,6 +42,8 @@ pub struct AddOutcome {
     pub staged: usize,
     /// Hunk ids staged per path when `--hunks` was used (empty object when unused).
     pub staged_hunks: BTreeMap<String, Vec<String>>,
+    /// Line ranges staged per path when `--lines` was used (`start-end` strings).
+    pub staged_lines: BTreeMap<String, Vec<String>>,
     /// Whether the invocation had no path arguments (stages everything).
     #[serde(skip)]
     #[schemars(skip)]
@@ -60,6 +62,7 @@ impl AddOutcome {
             count,
             staged: count,
             staged_hunks: BTreeMap::new(),
+            staged_lines: BTreeMap::new(),
             no_paths,
         }
     }
@@ -80,6 +83,7 @@ impl AddOutcome {
             count,
             staged: count,
             staged_hunks,
+            staged_lines: outcome.staged_lines,
             no_paths: false,
         }
     }
@@ -128,7 +132,7 @@ impl AddOutcome {
     }
 }
 
-/// Exit code for `--hunks` failures (unknown, stale, or wrong-side ids).
+/// Exit code for `--hunks` / `--lines` failures (unknown, stale, or wrong-side ids).
 pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     if err.downcast_ref::<HunkSelectError>().is_some() {
         2
@@ -137,13 +141,68 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     }
 }
 
-pub fn run_hunks(args: &PathspecArgs, hunks: &[String], dry_run: bool) -> Result<AddOutcome> {
+/// Parse `<path>:<start>-<end>` or `<path>:<line>` tokens from `--lines`.
+pub fn parse_line_range_list(tokens: &[String]) -> Result<Vec<LineRange>> {
+    let mut ranges = Vec::new();
+    for token in tokens {
+        for part in token.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            ranges.push(parse_line_range_token(part)?);
+        }
+    }
+    Ok(ranges)
+}
+
+fn parse_line_range_token(token: &str) -> Result<LineRange> {
+    let colon = token
+        .rfind(':')
+        .ok_or_else(|| anyhow::anyhow!("invalid line range '{token}' (expected path:start-end)"))?;
+    let path = token[..colon].trim();
+    if path.is_empty() {
+        bail!("invalid line range '{token}' (missing path before ':')");
+    }
+    let spec = token[colon + 1..].trim();
+    let (start, end) = if let Some((a, b)) = spec.split_once('-') {
+        let start: usize = a
+            .trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid line number in '{token}'"))?;
+        let end: usize = b
+            .trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid line number in '{token}'"))?;
+        (start, end)
+    } else {
+        let n: usize = spec
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid line number in '{token}'"))?;
+        (n, n)
+    };
+    Ok(LineRange {
+        path: path.to_string(),
+        start,
+        end,
+    })
+}
+
+pub fn run_hunks(
+    args: &PathspecArgs,
+    hunks: &[String],
+    lines: &[String],
+    dry_run: bool,
+) -> Result<AddOutcome> {
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
     let (pathspecs, _) = resolved.into_pathspec_lists();
-    let selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
-    let outcome = stage_hunks(&repo, DiffSide::Unstaged, &selection, &pathspecs, dry_run)
-        .map_err(map_hunk_error)?;
+    let mut id_selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
+    id_selection.ranges = parse_line_range_list(lines)?;
+    let outcome = stage_hunks(
+        &repo,
+        DiffSide::Unstaged,
+        &id_selection,
+        &pathspecs,
+        dry_run,
+    )
+    .map_err(map_hunk_error)?;
     Ok(AddOutcome::from_hunks(outcome))
 }
 
@@ -175,6 +234,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
         count,
         staged: count,
         staged_hunks: BTreeMap::new(),
+        staged_lines: BTreeMap::new(),
         no_paths: false,
     })
 }

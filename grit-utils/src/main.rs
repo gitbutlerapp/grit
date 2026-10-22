@@ -54,6 +54,7 @@ use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
 use grit_utils::worktree_fixture::{
     prepare_add as prepare_worktree_add, prepare_add_hunks_large as prepare_worktree_add_hunks,
+    prepare_add_lines_large as prepare_worktree_add_lines,
     prepare_add_patch_file as prepare_worktree_add_patch_file,
     prepare_clean_untracked as prepare_worktree_clean, prepare_commit as prepare_worktree_commit,
     prepare_commit_staged as prepare_worktree_commit_staged, prepare_diff as prepare_worktree_diff,
@@ -533,6 +534,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareWorktreeAddHunks {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareWorktreeAddLines {
         #[arg(long)]
         git: PathBuf,
     },
@@ -1426,6 +1432,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_add_hunks(&git);
         }
+        Cmd::PrepareWorktreeAddLines { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_worktree_add_lines(&git);
+        }
         Cmd::PrepareWorktreeCommit { git } => {
             let git = resolve_binary("git", Some(git))?;
             return prepare_worktree_commit(&git);
@@ -2008,6 +2018,7 @@ fn main() -> Result<()> {
         | Cmd::PrepareWorktreeAdd { .. }
         | Cmd::PrepareWorktreeAddPatchFile { .. }
         | Cmd::PrepareWorktreeAddHunks { .. }
+        | Cmd::PrepareWorktreeAddLines { .. }
         | Cmd::PrepareWorktreeCommit { .. }
         | Cmd::PrepareWorktreeCommitStaged { .. }
         | Cmd::PrepareWorktreeDiff { .. }

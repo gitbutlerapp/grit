@@ -51,6 +51,16 @@
       },
       "description": "Hunk ids staged per path when `--hunks` was used (empty object when unused).",
       "type": "object"
+    },
+    "staged_lines": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "description": "Line ranges staged per path when `--lines` was used (`start-end` strings).",
+      "type": "object"
     }
   },
   "required": [
@@ -61,7 +71,8 @@
     "modified",
     "removed",
     "staged",
-    "staged_hunks"
+    "staged_hunks",
+    "staged_lines"
   ],
   "title": "AddOutcome",
   "type": "object"

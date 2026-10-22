@@ -11,7 +11,9 @@ use crate::apply::{
 use crate::diff::hunk_id::{
     hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId, HunkIdError,
 };
-use crate::diff::structured::{StructuredHunk, StructuredLineKind};
+use crate::diff::structured::{
+    StructuredHunk, StructuredLine, StructuredLineKind, StructuredSegment,
+};
 use crate::diff::{
     collect_files_for_target, hunk_diff_bundle, unstaged_file_diffs_with_peer_hunks, DiffOptions,
     DiffStatus, DiffTarget, FileDiff,
@@ -19,11 +21,26 @@ use crate::diff::{
 use crate::error::{ApplyError, Error};
 use crate::repo::Repository;
 
-/// Selected hunks by stable id (line ranges will extend this in a later step).
+/// New-side line range for partial hunk staging (1-based, inclusive).
+///
+/// Line numbers match `grit diff --json` `lines[].new` on the unstaged side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineRange {
+    /// Repository-relative path.
+    pub path: String,
+    /// First new-side line number in the range (1-based).
+    pub start: usize,
+    /// Last new-side line number in the range (1-based, inclusive).
+    pub end: usize,
+}
+
+/// Selected hunks by stable id and/or new-side line ranges.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HunkSelection {
     /// Stable hunk ids from `grit diff --json` (`hunks[].id`).
     pub ids: Vec<HunkId>,
+    /// Partial selections by new-side line number (`diff --json` `lines[].new`).
+    pub ranges: Vec<LineRange>,
 }
 
 /// Failure while resolving or staging hunk ids.
@@ -42,7 +59,7 @@ pub enum HunkSelectError {
         id: HunkId,
         /// Path when the caller narrowed the diff (or a single candidate file).
         path: Option<String>,
-        /// Current ids on [`StaleId::path`] when cheap to compute.
+        /// Current ids on the stale path when cheap to compute.
         current_ids: Vec<HunkId>,
     },
     /// Id belongs to the other index/worktree side (for example staged vs unstaged).
@@ -64,6 +81,24 @@ pub enum HunkSelectError {
     /// Index apply failed after hunk resolution.
     #[error("{0}")]
     Apply(#[from] ApplyError),
+    /// Line range lies outside the file's new-side line count.
+    #[error("line range {start}-{end} is out of bounds for {path} (file has {max_line} lines)")]
+    RangeOutOfBounds {
+        /// Path named in the range.
+        path: String,
+        /// Range start (1-based).
+        start: usize,
+        /// Range end (1-based).
+        end: usize,
+        /// Last valid new-side line number.
+        max_line: usize,
+    },
+    /// Range does not select any additions or deletions.
+    #[error("line range selects nothing on {path}")]
+    RangeSelectsNothing {
+        /// Path named in the range.
+        path: String,
+    },
     /// Repository or diff engine failure (not a hunk-id selection error).
     #[error("{0}")]
     Repo(String),
@@ -88,6 +123,8 @@ pub struct StageHunksOutcome {
     pub dry_run: bool,
     /// Staged ids per path (repository-relative).
     pub staged_hunks: BTreeMap<String, Vec<HunkId>>,
+    /// Staged line ranges per path when line-range selection was used (`start` or `start-end` strings).
+    pub staged_lines: BTreeMap<String, Vec<String>>,
     /// Index paths touched by the apply engine.
     pub added: Vec<String>,
     /// Paths updated in the index.
@@ -100,11 +137,13 @@ impl StageHunksOutcome {
     fn from_apply(
         dry_run: bool,
         staged_hunks: BTreeMap<String, Vec<HunkId>>,
+        staged_lines: BTreeMap<String, Vec<String>>,
         apply: IndexApplyOutcome,
     ) -> Self {
         Self {
             dry_run,
             staged_hunks,
+            staged_lines,
             added: apply.added,
             modified: apply.modified,
             removed: apply.removed,
@@ -158,7 +197,10 @@ pub fn parse_hunk_id_list(
             );
         }
     }
-    Ok(HunkSelection { ids })
+    Ok(HunkSelection {
+        ids,
+        ranges: Vec::new(),
+    })
 }
 
 /// Resolve `selection` on `side` to index-ready [`FilePatch`] rows.
@@ -183,6 +225,28 @@ pub fn resolve_selection(
 struct ResolvedSelection {
     patches: Vec<FilePatch>,
     staged_hunks: BTreeMap<String, Vec<HunkId>>,
+    staged_lines: BTreeMap<String, Vec<String>>,
+}
+
+fn merge_resolved(into: &mut ResolvedSelection, other: ResolvedSelection) {
+    for (path, ids) in other.staged_hunks {
+        into.staged_hunks.entry(path).or_default().extend(ids);
+    }
+    for (path, ranges) in other.staged_lines {
+        into.staged_lines.entry(path).or_default().extend(ranges);
+    }
+    for patch in other.patches {
+        if let Some(existing) = into
+            .patches
+            .iter_mut()
+            .find(|p| p.effective_path() == patch.effective_path())
+        {
+            existing.hunks.extend(patch.hunks);
+            existing.hunks.sort_by_key(|h| (h.new_start, h.old_start));
+        } else {
+            into.patches.push(patch);
+        }
+    }
 }
 
 fn diff_opts(repo: &Repository) -> std::result::Result<DiffOptions, HunkSelectError> {
@@ -195,23 +259,52 @@ fn resolve_selection_with_staged(
     selection: &HunkSelection,
     pathspecs: &[String],
 ) -> std::result::Result<ResolvedSelection, HunkSelectError> {
-    if selection.ids.is_empty() {
+    if selection.ids.is_empty() && selection.ranges.is_empty() {
         return Ok(ResolvedSelection {
             patches: Vec::new(),
             staged_hunks: BTreeMap::new(),
+            staged_lines: BTreeMap::new(),
         });
     }
     let opts = diff_opts(repo)?;
     let requested: HashSet<HunkId> = selection.ids.iter().cloned().collect();
 
     match side {
-        DiffSide::Unstaged => resolve_unstaged(repo, pathspecs, opts, &requested),
-        DiffSide::Staged => resolve_staged(repo, pathspecs, opts, &requested),
-        DiffSide::Other => Err(HunkSelectError::WrongSide {
-            id: selection.ids[0].clone(),
-            actual_side: "other",
-            requested_side: side_label(side),
-        }),
+        DiffSide::Unstaged => {
+            let mut resolved = if requested.is_empty() {
+                ResolvedSelection {
+                    patches: Vec::new(),
+                    staged_hunks: BTreeMap::new(),
+                    staged_lines: BTreeMap::new(),
+                }
+            } else {
+                resolve_unstaged(repo, pathspecs, opts.clone(), &requested)?
+            };
+            if !selection.ranges.is_empty() {
+                let line_part =
+                    resolve_line_ranges_unstaged(repo, pathspecs, opts, selection, &requested)?;
+                merge_resolved(&mut resolved, line_part);
+            }
+            Ok(resolved)
+        }
+        DiffSide::Staged => {
+            if !selection.ranges.is_empty() {
+                return Err(HunkSelectError::RangeSelectsNothing {
+                    path: selection.ranges[0].path.clone(),
+                });
+            }
+            resolve_staged(repo, pathspecs, opts, &requested)
+        }
+        DiffSide::Other => {
+            let id = selection.ids.first().cloned().ok_or_else(|| {
+                HunkSelectError::Repo("hunk selection requires unstaged or staged side".into())
+            })?;
+            Err(HunkSelectError::WrongSide {
+                id,
+                actual_side: "other",
+                requested_side: side_label(side),
+            })
+        }
     }
 }
 
@@ -333,6 +426,7 @@ fn resolve_on_files(
     Ok(ResolvedSelection {
         patches,
         staged_hunks: staged_by_path,
+        staged_lines: BTreeMap::new(),
     })
 }
 
@@ -422,6 +516,271 @@ fn file_patch_from_hunks(
     })
 }
 
+fn merge_intervals(ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    if ranges.is_empty() {
+        return Vec::new();
+    }
+    let mut sorted = ranges.to_vec();
+    sorted.sort_unstable_by_key(|(s, _)| *s);
+    let mut out = vec![sorted[0]];
+    for (start, end) in sorted.into_iter().skip(1) {
+        if let Some(last) = out.last_mut() {
+            if start <= last.1 + 1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        out.push((start, end));
+    }
+    out
+}
+
+fn line_in_intervals(line: usize, intervals: &[(usize, usize)]) -> bool {
+    intervals
+        .iter()
+        .any(|(start, end)| line >= *start && line <= *end)
+}
+
+fn deletion_selected(removal_point: usize, intervals: &[(usize, usize)]) -> bool {
+    intervals
+        .iter()
+        .any(|(start, end)| removal_point >= *start && removal_point <= *end + 1)
+}
+
+fn max_new_line_in_hunks(hunks: &[StructuredHunk]) -> usize {
+    hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .filter_map(|l| l.new)
+        .max()
+        .unwrap_or(0)
+}
+
+fn range_label(start: usize, end: usize) -> String {
+    if start == end {
+        format!("{start}")
+    } else {
+        format!("{start}-{end}")
+    }
+}
+
+fn validate_line_ranges(
+    path: &str,
+    intervals: &[(usize, usize)],
+    max_line: usize,
+) -> std::result::Result<(), HunkSelectError> {
+    for &(start, end) in intervals {
+        if start == 0 || end == 0 || start > end || end > max_line {
+            return Err(HunkSelectError::RangeOutOfBounds {
+                path: path.to_string(),
+                start,
+                end,
+                max_line,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn filter_hunk_by_intervals(
+    hunk: &StructuredHunk,
+    intervals: &[(usize, usize)],
+) -> Option<StructuredHunk> {
+    let mut new_cur = hunk.new_start;
+    let mut old_cur = hunk.old_start;
+    let mut out_lines = Vec::new();
+    let mut any_change = false;
+
+    for line in &hunk.lines {
+        match line.kind {
+            StructuredLineKind::Context => {
+                let new_n = line.new.unwrap_or(new_cur);
+                let old_n = line.old.unwrap_or(old_cur);
+                out_lines.push(line.clone());
+                new_cur = new_n.saturating_add(1);
+                old_cur = old_n.saturating_add(1);
+            }
+            StructuredLineKind::Del => {
+                let removal = new_cur;
+                let old_n = line.old.unwrap_or(old_cur);
+                if deletion_selected(removal, intervals) {
+                    out_lines.push(line.clone());
+                    any_change = true;
+                } else {
+                    let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
+                    out_lines.push(StructuredLine {
+                        kind: StructuredLineKind::Context,
+                        old: Some(old_n),
+                        new: Some(removal),
+                        segments: vec![StructuredSegment {
+                            text,
+                            emphasis: false,
+                        }],
+                        no_newline_at_eof: line.no_newline_at_eof,
+                    });
+                }
+                old_cur = old_n.saturating_add(1);
+            }
+            StructuredLineKind::Add => {
+                let new_n = line.new.unwrap_or(new_cur);
+                if line_in_intervals(new_n, intervals) {
+                    out_lines.push(line.clone());
+                    any_change = true;
+                }
+                new_cur = new_n.saturating_add(1);
+            }
+        }
+    }
+
+    if !any_change {
+        return None;
+    }
+
+    let mut filtered = StructuredHunk {
+        old_start: hunk.old_start,
+        new_start: hunk.new_start,
+        old_lines: hunk.old_lines,
+        new_lines: hunk.new_lines,
+        context: hunk.context.clone(),
+        lines: out_lines,
+    };
+    recount_structured_hunk(&mut filtered);
+    Some(filtered)
+}
+
+fn recount_structured_hunk(hunk: &mut StructuredHunk) {
+    let mut old_start = None;
+    let mut new_start = None;
+    let mut old_count = 0usize;
+    let mut new_count = 0usize;
+    let mut old_line = 0usize;
+    let mut new_line = 0usize;
+
+    for line in &mut hunk.lines {
+        match line.kind {
+            StructuredLineKind::Context => {
+                if old_start.is_none() {
+                    old_start = line.old.or(Some(old_line));
+                    new_start = line.new.or(Some(new_line));
+                }
+                old_count += 1;
+                new_count += 1;
+                if let Some(o) = line.old {
+                    old_line = o.saturating_add(1);
+                } else {
+                    old_line = old_line.saturating_add(1);
+                }
+                if let Some(n) = line.new {
+                    new_line = n.saturating_add(1);
+                } else {
+                    new_line = new_line.saturating_add(1);
+                }
+            }
+            StructuredLineKind::Del => {
+                if old_start.is_none() {
+                    old_start = line.old.or(Some(old_line));
+                    new_start = Some(new_line);
+                }
+                old_count += 1;
+                if let Some(o) = line.old {
+                    old_line = o.saturating_add(1);
+                } else {
+                    old_line = old_line.saturating_add(1);
+                }
+            }
+            StructuredLineKind::Add => {
+                if old_start.is_none() {
+                    old_start = Some(old_line);
+                    new_start = line.new.or(Some(new_line));
+                }
+                new_count += 1;
+                if let Some(n) = line.new {
+                    new_line = n.saturating_add(1);
+                } else {
+                    new_line = new_line.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    hunk.old_start = old_start.unwrap_or(1);
+    hunk.new_start = new_start.unwrap_or(1);
+    hunk.old_lines = old_count;
+    hunk.new_lines = new_count;
+}
+
+fn resolve_line_ranges_unstaged(
+    repo: &Repository,
+    pathspecs: &[String],
+    opts: DiffOptions,
+    selection: &HunkSelection,
+    id_selected: &HashSet<HunkId>,
+) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+    let bundle = hunk_diff_bundle(repo, pathspecs, opts)?;
+    let mut by_path: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
+    let mut labels: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for range in &selection.ranges {
+        if !pathspecs.is_empty() && !pathspecs.iter().any(|p| p == &range.path) {
+            continue;
+        }
+        by_path
+            .entry(range.path.clone())
+            .or_default()
+            .push((range.start, range.end));
+        labels
+            .entry(range.path.clone())
+            .or_default()
+            .push(range_label(range.start, range.end));
+    }
+
+    let mut patches = Vec::new();
+    let mut staged_lines = BTreeMap::new();
+
+    for (path, raw_intervals) in by_path {
+        let intervals = merge_intervals(&raw_intervals);
+        let file = bundle
+            .unstaged
+            .iter()
+            .find(|f| f.path == path)
+            .ok_or_else(|| HunkSelectError::RangeSelectsNothing { path: path.clone() })?;
+        if file.binary {
+            return Err(HunkSelectError::Binary { path: path.clone() });
+        }
+        let max_line = max_new_line_in_hunks(&file.hunks);
+        validate_line_ranges(&path, &intervals, max_line)?;
+        let peer = bundle
+            .peer_hunks
+            .get(&path)
+            .map(|h| h.as_slice())
+            .unwrap_or(&[]);
+        let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &path, &file.hunks, peer);
+        let mut partial = Vec::new();
+        let mut selected_any = false;
+        for (hunk, id) in file.hunks.iter().zip(ids.iter()) {
+            if id_selected.contains(id) {
+                continue;
+            }
+            if let Some(filtered) = filter_hunk_by_intervals(hunk, &intervals) {
+                selected_any = true;
+                partial.push(filtered);
+            }
+        }
+        if !selected_any {
+            return Err(HunkSelectError::RangeSelectsNothing { path: path.clone() });
+        }
+        patches.push(file_patch_from_hunks(file, &partial)?);
+        if let Some(labs) = labels.remove(&path) {
+            staged_lines.insert(path, labs);
+        }
+    }
+
+    Ok(ResolvedSelection {
+        patches,
+        staged_hunks: BTreeMap::new(),
+        staged_lines,
+    })
+}
+
 fn structured_hunk_to_apply_hunk(hunk: &StructuredHunk, first_body_line: usize) -> Hunk {
     let mut lines = Vec::new();
     for line in &hunk.lines {
@@ -463,6 +822,7 @@ pub fn stage_hunks(
     Ok(StageHunksOutcome::from_apply(
         dry_run,
         resolved.staged_hunks,
+        resolved.staged_lines,
         apply,
     ))
 }
@@ -537,6 +897,7 @@ mod tests {
         assert!(ids.len() >= 2);
         let selection = HunkSelection {
             ids: vec![ids[0].clone()],
+            ranges: Vec::new(),
         };
 
         let patch = resolve_selection(&repo, DiffSide::Unstaged, &selection, &[]).unwrap();
@@ -633,7 +994,10 @@ mod tests {
         stage_hunks(
             &repo,
             DiffSide::Unstaged,
-            &HunkSelection { ids: vec![id0] },
+            &HunkSelection {
+                ids: vec![id0],
+                ranges: Vec::new(),
+            },
             &[],
             false,
         )
@@ -641,7 +1005,10 @@ mod tests {
         stage_hunks(
             &repo,
             DiffSide::Unstaged,
-            &HunkSelection { ids: vec![id2] },
+            &HunkSelection {
+                ids: vec![id2],
+                ranges: Vec::new(),
+            },
             &[],
             false,
         )
@@ -681,6 +1048,7 @@ mod tests {
             DiffSide::Unstaged,
             &HunkSelection {
                 ids: vec![ids[0].clone()],
+                ranges: Vec::new(),
             },
             &[],
             false,
@@ -712,7 +1080,10 @@ mod tests {
         let err = stage_hunks(
             &repo,
             DiffSide::Unstaged,
-            &HunkSelection { ids: vec![id] },
+            &HunkSelection {
+                ids: vec![id],
+                ranges: Vec::new(),
+            },
             &["f.txt".into()],
             false,
         )
@@ -738,6 +1109,7 @@ mod tests {
             DiffSide::Unstaged,
             &HunkSelection {
                 ids: vec![stale.clone()],
+                ranges: Vec::new(),
             },
             &[],
             false,
@@ -767,6 +1139,7 @@ mod tests {
             DiffSide::Unstaged,
             &HunkSelection {
                 ids: vec![staged_id],
+                ranges: Vec::new(),
             },
             &[],
             false,
@@ -812,7 +1185,10 @@ mod tests {
         stage_hunks(
             &repo,
             DiffSide::Unstaged,
-            &HunkSelection { ids: ids.clone() },
+            &HunkSelection {
+                ids: ids.clone(),
+                ranges: Vec::new(),
+            },
             &[],
             false,
         )
@@ -824,5 +1200,165 @@ mod tests {
             .get(b"new.txt", 0)
             .is_some());
         git(root, &["fsck"]);
+    }
+
+    fn stage_lines_and_compare_git(
+        repo: &Repository,
+        root: &std::path::Path,
+        path: &str,
+        ranges: Vec<LineRange>,
+    ) {
+        let selection = HunkSelection {
+            ids: Vec::new(),
+            ranges,
+        };
+        let patch =
+            resolve_selection(&repo, DiffSide::Unstaged, &selection, &[path.into()]).unwrap();
+        let mut patch_text = String::new();
+        for p in &patch {
+            patch_text.push_str(&format_patch_for_git(p));
+        }
+        stage_hunks(&repo, DiffSide::Unstaged, &selection, &[path.into()], false).unwrap();
+        let grit_tree =
+            write_tree_from_index(repo.odb(), &repo.index_handle().load().unwrap(), "").unwrap();
+        git(root, &["read-tree", "HEAD"]);
+        let patch_path = root.join("partial.diff");
+        std::fs::write(&patch_path, patch_text).unwrap();
+        git(root, &["apply", "--cached", patch_path.to_str().unwrap()]);
+        let git_tree = Command::new("git")
+            .current_dir(root)
+            .args(["write-tree"])
+            .output()
+            .expect("write-tree");
+        let git_tree_hex = String::from_utf8_lossy(&git_tree.stdout).trim().to_string();
+        assert_eq!(grit_tree.to_hex(), git_tree_hex);
+        git(root, &["fsck"]);
+    }
+
+    #[test]
+    fn lines_selects_part_of_hunk() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        std::fs::write(root.join("f.txt"), b"a\nb\nc\nd\n").unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("f.txt"), b"a\nB\nc\nD\n").unwrap();
+        stage_lines_and_compare_git(
+            &repo,
+            root,
+            "f.txt",
+            vec![LineRange {
+                path: "f.txt".into(),
+                start: 2,
+                end: 2,
+            }],
+        );
+    }
+
+    #[test]
+    fn lines_unselected_deletion_becomes_context() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        std::fs::write(root.join("f.txt"), b"keep\nremove\nstay\n").unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("f.txt"), b"keep\nstay\n").unwrap();
+        stage_lines_and_compare_git(
+            &repo,
+            root,
+            "f.txt",
+            vec![LineRange {
+                path: "f.txt".into(),
+                start: 1,
+                end: 1,
+            }],
+        );
+    }
+
+    #[test]
+    fn lines_selected_deletion_at_range_edge() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        std::fs::write(root.join("f.txt"), b"a\nb\nc\n").unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("f.txt"), b"a\nc\n").unwrap();
+        stage_lines_and_compare_git(
+            &repo,
+            root,
+            "f.txt",
+            vec![LineRange {
+                path: "f.txt".into(),
+                start: 1,
+                end: 1,
+            }],
+        );
+    }
+
+    #[test]
+    fn lines_range_spanning_two_hunks() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        let (base, edited) = three_hunk_body();
+        std::fs::write(root.join("f.txt"), base).unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("f.txt"), edited).unwrap();
+        stage_lines_and_compare_git(
+            &repo,
+            root,
+            "f.txt",
+            vec![LineRange {
+                path: "f.txt".into(),
+                start: 5,
+                end: 14,
+            }],
+        );
+    }
+
+    #[test]
+    fn lines_out_of_bounds_error() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        std::fs::write(root.join("f.txt"), b"one\n").unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("f.txt"), b"two\n").unwrap();
+        let err = stage_hunks(
+            &repo,
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: Vec::new(),
+                ranges: vec![LineRange {
+                    path: "f.txt".into(),
+                    start: 1,
+                    end: 99,
+                }],
+            },
+            &[],
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(err, HunkSelectError::RangeOutOfBounds { .. }));
+    }
+
+    #[test]
+    fn lines_no_eof_newline() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        std::fs::write(root.join("f.txt"), b"old").unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join("f.txt"), b"new").unwrap();
+        stage_lines_and_compare_git(
+            &repo,
+            root,
+            "f.txt",
+            vec![LineRange {
+                path: "f.txt".into(),
+                start: 1,
+                end: 1,
+            }],
+        );
     }
 }
