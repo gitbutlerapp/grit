@@ -303,8 +303,8 @@ fn apply_df_file_directory_conflicts_trees(
 
     let odb = repo.odb();
     let mut out = DfEscapes::default();
-    let theirs_sparse: HashSet<Vec<u8>> = theirs.keys().cloned().collect();
-    let ours_sparse: HashSet<Vec<u8>> = ours.keys().cloned().collect();
+    let theirs_sparse = merge_trees_walk::PathPrefixIndex::new(theirs.keys());
+    let ours_sparse = merge_trees_walk::PathPrefixIndex::new(ours.keys());
     let ours_paths: Vec<Vec<u8>> = ours.keys().cloned().collect();
     for path in ours_paths {
         let Some(entry) = ours.get(&path) else {

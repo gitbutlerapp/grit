@@ -1,7 +1,9 @@
 //! Parsed-tree cache and per-side directory metadata for three-way tree merges.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
+use super::merge_trees_walk::PathPrefixIndex;
 use crate::objects::{parse_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 
@@ -18,7 +20,7 @@ pub(crate) enum MergeTreeSide {
 /// Per-merge cache: parsed tree bodies and directory paths known to contain files.
 #[derive(Default)]
 pub(crate) struct MergeTreeCache {
-    parsed: HashMap<ObjectId, Vec<TreeEntry>>,
+    parsed: HashMap<ObjectId, Rc<[TreeEntry]>>,
     dir_with_descendant: [HashSet<Vec<u8>>; 3],
 }
 
@@ -27,17 +29,18 @@ impl MergeTreeCache {
         &mut self,
         odb: &Odb,
         oid: &ObjectId,
-    ) -> crate::error::Result<&[TreeEntry]> {
-        if !self.parsed.contains_key(oid) {
-            let obj = odb.read(oid)?;
-            let entries = if obj.kind == ObjectKind::Tree {
-                parse_tree(&obj.data)?
-            } else {
-                Vec::new()
-            };
-            self.parsed.insert(*oid, entries);
+    ) -> crate::error::Result<Rc<[TreeEntry]>> {
+        if let Some(entries) = self.parsed.get(oid) {
+            return Ok(Rc::clone(entries));
         }
-        Ok(self.parsed.get(oid).map_or(&[][..], |v| v.as_slice()))
+        let obj = odb.read(oid)?;
+        let entries: Rc<[TreeEntry]> = if obj.kind == ObjectKind::Tree {
+            parse_tree(&obj.data)?.into()
+        } else {
+            Rc::from(Vec::new())
+        };
+        self.parsed.insert(*oid, Rc::clone(&entries));
+        Ok(entries)
     }
 
     pub(crate) fn note_file_path(&mut self, side: MergeTreeSide, path: &[u8]) {
@@ -49,33 +52,15 @@ impl MergeTreeCache {
         }
     }
 
+    /// True when a noted file lies under `prefix/`. [`Self::note_file_path`] records every
+    /// ancestor directory, so any deeper recorded directory implies `prefix` itself is recorded.
     pub(crate) fn dir_has_descendant(&self, side: MergeTreeSide, prefix: &[u8]) -> bool {
-        let set = &self.dir_with_descendant[side as usize];
-        if set.contains(prefix) {
-            return true;
-        }
-        let need = prefix.len().saturating_add(1);
-        set.iter().any(|p| {
-            p.len() >= need
-                && p.starts_with(prefix)
-                && p.as_slice().get(prefix.len()) == Some(&b'/')
-        })
+        self.dir_with_descendant[side as usize].contains(prefix)
     }
 }
 
 pub(crate) fn find_tree_entry<'a>(entries: &'a [TreeEntry], name: &[u8]) -> Option<&'a TreeEntry> {
     entries.iter().find(|e| e.name.as_slice() == name)
-}
-
-fn full_path(prefix: &[u8], name: &[u8]) -> Vec<u8> {
-    if prefix.is_empty() {
-        name.to_vec()
-    } else {
-        let mut p = prefix.to_vec();
-        p.push(b'/');
-        p.extend_from_slice(name);
-        p
-    }
 }
 
 fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> crate::index::IndexEntry {
@@ -114,7 +99,7 @@ pub(crate) fn lookup_index_entry_at_path_cached(
     let mut current = *tree_oid;
     for (i, comp) in parts.iter().enumerate() {
         let entries = cache.tree_entries(odb, &current)?;
-        let Some(te) = find_tree_entry(entries, comp) else {
+        let Some(te) = find_tree_entry(&entries, comp) else {
             return Ok(None);
         };
         let is_last = i + 1 == parts.len();
@@ -139,32 +124,48 @@ pub(crate) fn tree_has_entries_with_path_prefix_cached(
     if cache.dir_has_descendant(side, prefix) {
         return Ok(true);
     }
+    // Descend only along `prefix`'s components; `rest` is the part of `prefix` not yet
+    // matched. Every tree entry name is compared against `rest` the same way a full-path
+    // comparison would, so names that themselves contain `/` are still honoured.
     fn walk(
         cache: &mut MergeTreeCache,
         odb: &Odb,
         tree_oid: &ObjectId,
-        current: &[u8],
-        prefix: &[u8],
+        rest: &[u8],
     ) -> crate::error::Result<bool> {
-        let entries: Vec<TreeEntry> = cache.tree_entries(odb, tree_oid)?.to_vec();
-        for te in entries {
-            let fp = full_path(current, &te.name);
-            if fp.len() > prefix.len()
-                && fp.starts_with(prefix)
-                && fp.as_slice().get(prefix.len()) == Some(&b'/')
-            {
+        let entries = cache.tree_entries(odb, tree_oid)?;
+        let mut descend: Vec<(ObjectId, usize)> = Vec::new();
+        for te in entries.iter() {
+            let name = te.name.as_slice();
+            if name.len() > rest.len() && name.starts_with(rest) && name[rest.len()] == b'/' {
                 return Ok(true);
             }
-            if te.mode == MODE_DIR
-                && (fp.starts_with(prefix) || prefix.starts_with(&fp))
-                && walk(cache, odb, &te.oid, &fp, prefix)?
+            if te.mode != MODE_DIR {
+                continue;
+            }
+            if name == rest {
+                descend.push((te.oid, rest.len()));
+            } else if rest.len() > name.len() && rest.starts_with(name) && rest[name.len()] == b'/'
             {
+                descend.push((te.oid, name.len() + 1));
+            }
+        }
+        drop(entries);
+        for (oid, consumed) in descend {
+            if consumed == rest.len() {
+                if !cache.tree_entries(odb, &oid)?.is_empty() {
+                    return Ok(true);
+                }
+            } else if walk(cache, odb, &oid, &rest[consumed..])? {
                 return Ok(true);
             }
         }
         Ok(false)
     }
-    walk(cache, odb, tree_oid, b"", prefix)
+    if prefix.is_empty() {
+        return Ok(false);
+    }
+    walk(cache, odb, tree_oid, prefix)
 }
 
 pub(crate) fn side_tree_has_descendant_at_cached(
@@ -173,13 +174,9 @@ pub(crate) fn side_tree_has_descendant_at_cached(
     tree_oid: &ObjectId,
     side: MergeTreeSide,
     prefix: &[u8],
-    sparse_paths: &HashSet<Vec<u8>>,
+    sparse_paths: &PathPrefixIndex,
 ) -> crate::error::Result<bool> {
-    let need = prefix.len().saturating_add(1);
-    if sparse_paths
-        .iter()
-        .any(|p| p.len() >= need && p.starts_with(prefix) && p[prefix.len()] == b'/')
-    {
+    if sparse_paths.has_descendant(prefix) {
         return Ok(true);
     }
     if cache.dir_has_descendant(side, prefix) {

@@ -18,15 +18,48 @@ use crate::write_tree::is_empty_tree_oid;
 
 const MODE_DIR: u32 = 0o040000;
 
-pub(crate) fn path_has_prefix(path: &[u8], prefix: &[u8]) -> bool {
-    if prefix.is_empty() {
-        return true;
-    }
-    path.starts_with(prefix) && (path.len() == prefix.len() || path[prefix.len()] == b'/')
+/// Index over a set of paths answering "is anything at or under `prefix`" and
+/// "is anything strictly under `prefix/`" with hash lookups instead of scans.
+pub(crate) struct PathPrefixIndex {
+    paths: HashSet<Vec<u8>>,
+    ancestor_dirs: HashSet<Vec<u8>>,
 }
 
-pub(crate) fn subtree_touched(prefix: &[u8], touched: &HashSet<Vec<u8>>) -> bool {
-    touched.iter().any(|p| path_has_prefix(p, prefix))
+impl PathPrefixIndex {
+    pub(crate) fn new<'a>(paths: impl IntoIterator<Item = &'a Vec<u8>>) -> Self {
+        let mut index = Self {
+            paths: HashSet::new(),
+            ancestor_dirs: HashSet::new(),
+        };
+        for path in paths {
+            index.paths.insert(path.clone());
+            for (i, &b) in path.iter().enumerate() {
+                if b == b'/' && !index.ancestor_dirs.contains(&path[..i]) {
+                    index.ancestor_dirs.insert(path[..i].to_vec());
+                }
+            }
+        }
+        index
+    }
+
+    /// True when some path equals `prefix` or lies under `prefix/` (any path at all
+    /// for the empty prefix).
+    pub(crate) fn subtree_touched(&self, prefix: &[u8]) -> bool {
+        if prefix.is_empty() {
+            return !self.paths.is_empty();
+        }
+        self.paths.contains(prefix) || self.ancestor_dirs.contains(prefix)
+    }
+
+    /// True when some path lies strictly under `prefix/`.
+    pub(crate) fn has_descendant(&self, prefix: &[u8]) -> bool {
+        self.ancestor_dirs.contains(prefix)
+    }
+
+    /// True when `path` itself is in the set.
+    pub(crate) fn contains(&self, path: &[u8]) -> bool {
+        self.paths.contains(path)
+    }
 }
 
 pub(crate) fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> IndexEntry {
@@ -111,6 +144,7 @@ pub(crate) fn build_sparse_maps(
     let mut ours = BTreeMap::new();
     let mut theirs = BTreeMap::new();
     let empty_tree = odb.write(crate::objects::ObjectKind::Tree, &[])?;
+    let touched = PathPrefixIndex::new(paths);
     fill_sparse_maps_walk(
         cache,
         odb,
@@ -118,7 +152,7 @@ pub(crate) fn build_sparse_maps(
         &base_tree,
         &ours_tree,
         &theirs_tree,
-        paths,
+        &touched,
         &empty_tree,
         &mut base,
         &mut ours,
@@ -135,28 +169,28 @@ fn fill_sparse_maps_walk(
     base_oid: &ObjectId,
     ours_oid: &ObjectId,
     theirs_oid: &ObjectId,
-    touched: &HashSet<Vec<u8>>,
+    touched: &PathPrefixIndex,
     empty_tree: &ObjectId,
     base: &mut BTreeMap<Vec<u8>, IndexEntry>,
     ours: &mut BTreeMap<Vec<u8>, IndexEntry>,
     theirs: &mut BTreeMap<Vec<u8>, IndexEntry>,
 ) -> crate::error::Result<()> {
-    if !prefix.is_empty() && !subtree_touched(prefix, touched) {
+    if !prefix.is_empty() && !touched.subtree_touched(prefix) {
         return Ok(());
     }
 
-    let base_entries: Vec<TreeEntry> = cache.tree_entries(odb, base_oid)?.to_vec();
-    let ours_entries: Vec<TreeEntry> = cache.tree_entries(odb, ours_oid)?.to_vec();
-    let theirs_entries: Vec<TreeEntry> = cache.tree_entries(odb, theirs_oid)?.to_vec();
+    let base_entries = cache.tree_entries(odb, base_oid)?;
+    let ours_entries = cache.tree_entries(odb, ours_oid)?;
+    let theirs_entries = cache.tree_entries(odb, theirs_oid)?;
 
     let mut names: BTreeMap<Vec<u8>, ()> = BTreeMap::new();
-    for e in &base_entries {
+    for e in base_entries.iter() {
         names.insert(e.name.clone(), ());
     }
-    for e in &ours_entries {
+    for e in ours_entries.iter() {
         names.insert(e.name.clone(), ());
     }
-    for e in &theirs_entries {
+    for e in theirs_entries.iter() {
         names.insert(e.name.clone(), ());
     }
 
@@ -190,7 +224,7 @@ fn fill_sparse_maps_walk(
         let b_sub = b_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
         let o_sub = o_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
         let t_sub = t_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
-        if !subtree_touched(&fp, touched) {
+        if !touched.subtree_touched(&fp) {
             continue;
         }
 
@@ -228,7 +262,7 @@ pub(crate) fn side_tree_has_descendant_at(
     tree_oid: &ObjectId,
     side: MergeTreeSide,
     prefix: &[u8],
-    sparse_paths: &HashSet<Vec<u8>>,
+    sparse_paths: &PathPrefixIndex,
 ) -> crate::error::Result<bool> {
     side_tree_has_descendant_at_cached(cache, odb, tree_oid, side, prefix, sparse_paths)
 }
@@ -241,40 +275,43 @@ pub(crate) fn compose_merged_tree_oid(
     base_oid: &ObjectId,
     ours_oid: &ObjectId,
     theirs_oid: &ObjectId,
-    touched: &HashSet<Vec<u8>>,
+    touched: &PathPrefixIndex,
     renamed_away: &HashSet<Vec<u8>>,
     stage0_by_path: &BTreeMap<Vec<u8>, IndexEntry>,
     empty_tree: &ObjectId,
 ) -> crate::error::Result<ObjectId> {
-    if !subtree_touched(prefix, touched) {
+    if !touched.subtree_touched(prefix) {
         return Ok(*ours_oid);
     }
 
-    let base_entries: Vec<TreeEntry> = cache.tree_entries(odb, base_oid)?.to_vec();
-    let ours_entries: Vec<TreeEntry> = cache.tree_entries(odb, ours_oid)?.to_vec();
-    let theirs_entries: Vec<TreeEntry> = cache.tree_entries(odb, theirs_oid)?.to_vec();
+    let base_entries = cache.tree_entries(odb, base_oid)?;
+    let ours_entries = cache.tree_entries(odb, ours_oid)?;
+    let theirs_entries = cache.tree_entries(odb, theirs_oid)?;
 
     let mut names: BTreeMap<Vec<u8>, ()> = BTreeMap::new();
-    for e in &base_entries {
+    for e in base_entries.iter() {
         names.insert(e.name.clone(), ());
     }
-    for e in &ours_entries {
+    for e in ours_entries.iter() {
         names.insert(e.name.clone(), ());
     }
-    for e in &theirs_entries {
+    for e in theirs_entries.iter() {
         names.insert(e.name.clone(), ());
     }
-    for path in stage0_by_path.keys() {
-        if !path_has_prefix(path, prefix) {
-            continue;
-        }
-        let rel = if prefix.is_empty() {
-            path.as_slice()
-        } else if path.len() > prefix.len() + 1 && path.starts_with(prefix) {
-            &path[prefix.len() + 1..]
-        } else {
-            continue;
-        };
+    let mut dir_prefix = prefix.to_vec();
+    if !dir_prefix.is_empty() {
+        dir_prefix.push(b'/');
+    }
+    // Keys sharing a byte prefix are contiguous in the ordered map.
+    for path in stage0_by_path
+        .range::<[u8], _>((
+            std::ops::Bound::Included(dir_prefix.as_slice()),
+            std::ops::Bound::Unbounded,
+        ))
+        .map(|(path, _)| path)
+        .take_while(|path| path.starts_with(&dir_prefix))
+    {
+        let rel = &path[dir_prefix.len()..];
         if let Some(slash) = rel.iter().position(|&b| b == b'/') {
             names.insert(rel[..slash].to_vec(), ());
         } else if !rel.is_empty() {
@@ -289,7 +326,7 @@ pub(crate) fn compose_merged_tree_oid(
         let o_te = find_tree_entry(&ours_entries, &name);
         let t_te = find_tree_entry(&theirs_entries, &name);
 
-        if !subtree_touched(&fp, touched) {
+        if !touched.subtree_touched(&fp) {
             if let Some(te) = o_te {
                 if te.mode == MODE_DIR && is_empty_tree_oid(odb, &te.oid) {
                     continue;
@@ -608,6 +645,7 @@ pub(crate) fn finish_merge_result_tree(
         }
     }
     let empty_tree = odb.write(crate::objects::ObjectKind::Tree, &[])?;
+    let touched = PathPrefixIndex::new(&output.touched_paths);
     compose_merged_tree_oid(
         cache,
         odb,
@@ -615,9 +653,93 @@ pub(crate) fn finish_merge_result_tree(
         &base_tree,
         &ours_tree,
         &theirs_tree,
-        &output.touched_paths,
+        &touched,
         renamed_away,
         &stage0,
         &empty_tree,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PathPrefixIndex;
+
+    fn path_has_prefix(path: &[u8], prefix: &[u8]) -> bool {
+        if prefix.is_empty() {
+            return true;
+        }
+        path.starts_with(prefix) && (path.len() == prefix.len() || path[prefix.len()] == b'/')
+    }
+
+    fn naive_has_descendant(paths: &[Vec<u8>], prefix: &[u8]) -> bool {
+        paths
+            .iter()
+            .any(|p| p.len() > prefix.len() && p.starts_with(prefix) && p[prefix.len()] == b'/')
+    }
+
+    #[test]
+    fn path_prefix_index_matches_linear_scans() {
+        let paths: Vec<Vec<u8>> = [
+            "a",
+            "ab/c",
+            "d/e/f.txt",
+            "d/e/g.txt",
+            "d/h",
+            "x//y",
+            "deep/one/two/three/four",
+        ]
+        .iter()
+        .map(|p| p.as_bytes().to_vec())
+        .collect();
+        let index = PathPrefixIndex::new(&paths);
+        let probes = [
+            "",
+            "a",
+            "a/",
+            "ab",
+            "ab/c",
+            "ab/c/d",
+            "abc",
+            "d",
+            "d/",
+            "d/e",
+            "d/e/f.txt",
+            "d/e/f",
+            "d/h",
+            "d/h/i",
+            "e",
+            "x",
+            "x/",
+            "x//y",
+            "deep",
+            "deep/one",
+            "deep/one/two/three",
+            "deep/one/two/three/four",
+            "deep/on",
+        ];
+        for probe in probes {
+            let probe = probe.as_bytes();
+            assert_eq!(
+                index.subtree_touched(probe),
+                paths.iter().any(|p| path_has_prefix(p, probe)),
+                "subtree_touched({:?})",
+                String::from_utf8_lossy(probe)
+            );
+            assert_eq!(
+                index.has_descendant(probe),
+                naive_has_descendant(&paths, probe),
+                "has_descendant({:?})",
+                String::from_utf8_lossy(probe)
+            );
+            assert_eq!(index.contains(probe), paths.iter().any(|p| p == probe));
+        }
+    }
+
+    #[test]
+    fn empty_path_prefix_index_reports_nothing_touched() {
+        let index = PathPrefixIndex::new(std::iter::empty());
+        assert!(!index.subtree_touched(b""));
+        assert!(!index.subtree_touched(b"a"));
+        assert!(!index.has_descendant(b""));
+    }
 }
