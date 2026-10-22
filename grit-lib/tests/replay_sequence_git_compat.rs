@@ -201,10 +201,7 @@ fn grit_stop_then_git_cherry_pick_continue() {
     start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default())).expect("pick");
     fs::write(root.path().join("f"), "resolved\n").unwrap();
     git(root.path(), &["add", "f"]);
-    git(
-        root.path(),
-        &["commit", "--no-gpg-sign", "-F", ".git/MERGE_MSG"],
-    );
+    git(root.path(), &["cherry-pick", "--continue", "--no-gpg-sign"]);
     assert_eq!(
         git(root.path(), &["log", "-1", "--format=%s"]).trim(),
         "topic-f"
@@ -481,6 +478,87 @@ fn record_origin_appends_cherry_picked_from_line() {
     start_replay_sequence(&repo, &pick_req(vec![pick], opts)).expect("pick");
     let log_msg = git(root.path(), &["log", "-1", "--format=%B"]);
     assert!(log_msg.contains("(cherry picked from commit"));
+    git_fsck_strict(root.path());
+}
+
+#[test]
+fn abort_after_clean_step_then_conflict_restores_original_head() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "shared.txt", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    commit_file(root.path(), "only-topic.txt", "one\n", "t1");
+    fs::write(root.path().join("shared.txt"), "topic\n").unwrap();
+    git(root.path(), &["add", "shared.txt"]);
+    git(root.path(), &["commit", "-qm", "t2"]);
+    let c1 = oid_from_rev(root.path(), "topic~1");
+    let c2 = oid_from_rev(root.path(), "topic");
+    git(root.path(), &["switch", "main"]);
+    fs::write(root.path().join("shared.txt"), "main\n").unwrap();
+    git(root.path(), &["add", "shared.txt"]);
+    git(root.path(), &["commit", "-qm", "main"]);
+    let start = oid_from_rev(root.path(), "HEAD");
+
+    let repo = open_repo(root.path());
+    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default()))
+        .expect("pick");
+    assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
+    assert!(root.path().join(".git/sequencer/todo").is_file());
+    abort_replay_sequence(&repo).expect("abort");
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
+    assert!(!root.path().join(".git/CHERRY_PICK_HEAD").exists());
+    git_fsck_strict(root.path());
+}
+
+#[test]
+fn no_commit_range_accumulates_staged_changes() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "base.txt", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    commit_file(root.path(), "a.txt", "a\n", "a");
+    commit_file(root.path(), "b.txt", "b\n", "b");
+    let c1 = oid_from_rev(root.path(), "topic~1");
+    let c2 = oid_from_rev(root.path(), "topic");
+    git(root.path(), &["switch", "main"]);
+    let start = oid_from_rev(root.path(), "HEAD");
+
+    let repo = open_repo(root.path());
+    let mut opts = ReplayOptions::default();
+    opts.no_commit = true;
+    let out = start_replay_sequence(&repo, &pick_req(vec![c1, c2], opts)).expect("pick");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
+    let staged = git(root.path(), &["show", ":a.txt"]);
+    assert_eq!(staged, "a\n");
+    let staged_b = git(root.path(), &["show", ":b.txt"]);
+    assert_eq!(staged_b, "b\n");
+    git_fsck_strict(root.path());
+}
+
+#[test]
+fn grit_stop_record_origin_git_cherry_pick_continue() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    fs::write(root.path().join("f"), "topic\n").unwrap();
+    git(root.path(), &["commit", "-qam", "topic-f"]);
+    let pick = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    fs::write(root.path().join("f"), "main\n").unwrap();
+    git(root.path(), &["commit", "-qam", "main"]);
+
+    let repo = open_repo(root.path());
+    let mut opts = ReplayOptions::default();
+    opts.record_origin = true;
+    start_replay_sequence(&repo, &pick_req(vec![pick], opts)).expect("pick");
+    fs::write(root.path().join("f"), "resolved\n").unwrap();
+    git(root.path(), &["add", "f"]);
+    git(root.path(), &["cherry-pick", "--continue", "--no-gpg-sign"]);
+    let body = git(root.path(), &["log", "-1", "--format=%B"]);
+    assert!(body.contains("(cherry picked from commit"));
+    assert_eq!(body.matches("(cherry picked from commit").count(), 1);
     git_fsck_strict(root.path());
 }
 
