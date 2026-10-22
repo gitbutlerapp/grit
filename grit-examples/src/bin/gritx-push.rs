@@ -122,7 +122,6 @@ fn current_branch_spec(git_dir: &std::path::Path, force: bool) -> Result<PushRef
         delete: false,
         expected_old: None,
         expect_absent: false,
-        ..Default::default()
     })
 }
 
@@ -150,7 +149,6 @@ fn parse_refspec(git_dir: &std::path::Path, spec: &str, force_flag: bool) -> Res
             delete: true,
             expected_old: None,
             expect_absent: false,
-            ..Default::default()
         });
     }
 
@@ -167,7 +165,6 @@ fn parse_refspec(git_dir: &std::path::Path, spec: &str, force_flag: bool) -> Res
         delete: false,
         expected_old: None,
         expect_absent: false,
-        ..Default::default()
     })
 }
 
