@@ -7504,12 +7504,14 @@ impl<'r> CommitGraph<'r> {
                 return Ok(());
             }
         }
-        let commit = load_commit(self.repo, oid)?;
+        let mut commit = load_commit(self.repo, oid)?;
         // Shallow boundaries: treat commit as having no parents
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
-        } else {
+        } else if self.retained.is_some() {
             commit.parents.clone()
+        } else {
+            std::mem::take(&mut commit.parents)
         };
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();

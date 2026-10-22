@@ -203,6 +203,37 @@ fn bench_revwalk_limit_near_full_history(c: &mut Criterion) {
     group.finish();
 }
 
+/// `grit log --limit N` walk options: default order, no path reordering, parsed commits kept for
+/// rendering. Limits above 4096 used to fall back to a full sort.
+fn bench_revwalk_log_limit(c: &mut Criterion) {
+    let fx = HistoryBenchFixtures::global();
+    let full = fx.commit_count;
+    let mut group = c.benchmark_group("revwalk/log_limit");
+    for (label, max_count, retain_commit_data) in [
+        ("limit_100", 100usize.min(full), true),
+        ("limit_5000", 5000usize.min(full), true),
+        ("limit_5000_no_retain", 5000usize.min(full), false),
+        ("limit_full", full, true),
+    ] {
+        group.throughput(Throughput::Elements(max_count as u64));
+        group.bench_function(BenchmarkId::from_parameter(label), |b| {
+            b.iter(|| {
+                let opts = RevListOptions {
+                    max_count: Some(max_count),
+                    path_graph_reorder: false,
+                    use_commit_graph: true,
+                    retain_commit_data,
+                    ..Default::default()
+                };
+                let result =
+                    rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+                black_box((result.commits.len(), result.commit_data.len()))
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let mut group = c.benchmark_group("revwalk/log_first_1000_gitgit_like");
@@ -374,6 +405,7 @@ criterion_group!(
     bench_revwalk_path_limited,
     bench_log_first_1000_gitgit_like,
     bench_revwalk_limit_near_full_history,
+    bench_revwalk_log_limit,
     bench_merge_base_deep,
     bench_rev_parse,
     bench_tree_diff,
