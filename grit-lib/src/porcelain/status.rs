@@ -887,6 +887,11 @@ fn collect_untracked_parallel_top_level(
         dir_count.saturating_mul(4096),
         || matcher_template.clone(),
         |matcher, task| {
+            // The matcher caches rules per directory it enters; starting each subtree from
+            // the template keeps that cache bounded by one subtree instead of a worker's share.
+            if crate::read_dir_kind::entry_is_dir(&task.entry).unwrap_or(false) {
+                matcher.clone_from(&matcher_template);
+            }
             let mut local_untracked = Vec::new();
             let mut local_ignored = Vec::new();
             let _ = visit_untracked_dir_entry(
