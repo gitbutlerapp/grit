@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
+use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
 use grit_lib::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use grit_lib::repo::Repository;
 
@@ -140,4 +141,34 @@ fn parse_update_ref_stdin() -> Result<Vec<RefTransactionItem>> {
 /// Open a repository at `path` for refs driver subcommands.
 pub fn open_repo_for_refs(path: &std::path::Path) -> Result<Repository> {
     open_repo(path)
+}
+
+/// List refs matching [`RefQuery`] (for benchmarks; stdout is ref names only).
+pub fn ref_query(repo: &Repository, query: &RefQuery) -> Result<()> {
+    let rows = query_refs(repo, query, &RefQueryOptions::default()).context("query_refs")?;
+    let mut stdout = io::stdout().lock();
+    for row in rows {
+        writeln!(stdout, "{}", row.full_name)?;
+    }
+    Ok(())
+}
+
+/// Build a [`RefQuery`] for driver benchmarks from namespace and filter oids.
+#[must_use]
+pub fn ref_query_for_driver(
+    namespace: &str,
+    contains: Option<ObjectId>,
+    merged: Option<ObjectId>,
+) -> RefQuery {
+    let namespaces = match namespace {
+        "tags" => vec![RefNamespace::Tags],
+        "heads" => vec![RefNamespace::Heads],
+        other => vec![RefNamespace::Custom(format!("refs/{other}/"))],
+    };
+    RefQuery {
+        namespaces,
+        contains: contains.into_iter().collect(),
+        merged: merged.into_iter().collect(),
+        ..RefQuery::default()
+    }
 }
