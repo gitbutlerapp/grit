@@ -5,7 +5,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::diff::{CommitFilesManyInput, CommitFilesManyOptions, DiffOptions};
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{CommitData, ObjectId, OidHashMap};
 use grit_lib::revwalk::graph::{
     display_parents_for_graph, log_graph_materialize, GraphCharset, GraphCommitInput, GraphLayout,
     GraphLineKind, GraphRenderedLine,
@@ -340,6 +340,7 @@ pub fn run(
         return build_commit_outcome(
             &repo,
             &page.commits,
+            &mut OidHashMap::default(),
             format,
             &rev.paths,
             next,
@@ -380,9 +381,11 @@ pub fn run(
             rev.max_count
         };
         fetch_opts.limit = fetch_limit_plus_one(page_limit);
-        let list_result = walk
+        fetch_opts.retain_commit_data = !display.graph && display.group_by.is_none();
+        let mut list_result = walk
             .rev_list_result(&token_refs, &fetch_opts)
             .context("could not list commits")?;
+        let mut parsed = std::mem::take(&mut list_result.commit_data);
         let graph_linkage = list_result.log_graph_linkage.clone();
         let (oids, truncated) = truncate_oid_list(list_result.commits, page_limit);
         if display.group_by == Some(LogGroupBy::Author) {
@@ -424,6 +427,7 @@ pub fn run(
         return build_commit_outcome(
             &repo,
             &oids,
+            &mut parsed,
             format,
             &rev.paths,
             None,
@@ -448,6 +452,7 @@ pub fn run(
     build_commit_outcome(
         &repo,
         &page.commits,
+        &mut OidHashMap::default(),
         format,
         &rev.paths,
         next,
@@ -578,6 +583,7 @@ fn build_author_group_outcome_from_groups(
 fn build_commit_outcome(
     repo: &grit_lib::repo::Repository,
     oids: &[ObjectId],
+    parsed: &mut OidHashMap<CommitData>,
     format: DiffFormatArgs,
     path_args: &[String],
     next: Option<String>,
@@ -626,9 +632,9 @@ fn build_commit_outcome(
 
     let (commit_json_rows, commit_rows) = if need_refs {
         let loader = CommitJsonLoader::new(repo)?;
-        loader.load_with_summaries(repo, oids, now)?
+        loader.load_with_summaries_reusing(repo, oids, now, parsed)?
     } else {
-        let summaries = CommitJsonLoader::load_summaries_only(repo, oids)?;
+        let summaries = CommitJsonLoader::load_summaries_only(repo, oids, parsed)?;
         let json_rows = summaries
             .iter()
             .map(|s| CommitJson::from_summary(s, now))

@@ -5,9 +5,10 @@ mod support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::ObjectKind;
+use grit_lib::objects::{parse_commit, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
+use grit_lib::revwalk::RevWalkListOptions;
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
@@ -298,6 +299,65 @@ fn large_max_count_matches_git_order_with_tied_and_skewed_dates() {
         expected_reversed.reverse();
         assert_eq!(reversed, expected_reversed);
     }
+}
+
+#[test]
+fn retain_commit_data_returns_parsed_listed_commits() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let tip = write_tied_skewed_history(repo.odb(), 60);
+    let tip_hex = tip.to_hex();
+    let base = RevListOptions {
+        max_count: Some(25),
+        skip: 5,
+        path_graph_reorder: false,
+        ..Default::default()
+    };
+
+    let plain = rev_list(&repo, std::slice::from_ref(&tip_hex), &[], &base).expect("rev-list");
+    assert!(plain.commit_data.is_empty(), "nothing is kept unless asked");
+
+    let retained = rev_list(
+        &repo,
+        std::slice::from_ref(&tip_hex),
+        &[],
+        &RevListOptions {
+            retain_commit_data: true,
+            ..base
+        },
+    )
+    .expect("rev-list retaining commits");
+    assert_eq!(retained.commits, plain.commits);
+    assert_eq!(retained.commits.len(), 25);
+    assert_eq!(retained.commit_data.len(), retained.commits.len());
+    for oid in &retained.commits {
+        let expected = parse_commit(&repo.odb().read(oid).expect("read").data).expect("parse");
+        assert_eq!(retained.commit_data.get(oid), Some(&expected), "{oid}");
+    }
+}
+
+#[test]
+fn rev_walk_forwards_retain_commit_data() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let tip = write_tied_skewed_history(repo.odb(), 30);
+    let tip_hex = tip.to_hex();
+    let result = repo
+        .rev_walk()
+        .rev_list_result(
+            &[tip_hex.as_str()],
+            &RevWalkListOptions {
+                limit: Some(10),
+                retain_commit_data: true,
+                ..Default::default()
+            },
+        )
+        .expect("rev walk");
+    assert_eq!(result.commits.len(), 10);
+    assert!(result
+        .commits
+        .iter()
+        .all(|oid| result.commit_data.contains_key(oid)));
 }
 
 #[test]

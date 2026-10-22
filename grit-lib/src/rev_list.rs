@@ -24,8 +24,8 @@ use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{
-    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind,
-    OidHashMap, OidHashSet, TreeRefIter,
+    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -583,6 +583,9 @@ pub struct RevListOptions {
     pub commit_filter: Option<Arc<CommitFilter>>,
     /// Pickaxe filter (`-S` / `-G`) applied after cheap commit filters.
     pub pickaxe: Option<Arc<crate::diff::Pickaxe>>,
+    /// Keep the commits a walk parses anyway in [`RevListResult::commit_data`], so callers that
+    /// render the listed commits do not read and inflate them a second time.
+    pub retain_commit_data: bool,
 }
 
 impl RevListOptions {
@@ -672,6 +675,7 @@ impl Default for RevListOptions {
             paths_resolved_from_argv: false,
             commit_filter: None,
             pickaxe: None,
+            retain_commit_data: false,
         }
     }
 }
@@ -725,6 +729,12 @@ pub struct RevListResult {
     pub tip_annotated_tag_by_commit: HashMap<ObjectId, ObjectId>,
     /// Populated by bounded topological walks for `log --graph` (avoids a second linkage pass).
     pub log_graph_linkage: Option<LogGraphLinkage>,
+    /// Parsed listed commits, keyed by id, when [`RevListOptions::retain_commit_data`] is set.
+    ///
+    /// Only walks that parse commit objects fill this, and only for commits they parsed (a
+    /// commit-graph walk reads parents and dates without parsing), so it may cover some, all,
+    /// or none of [`Self::commits`].
+    pub commit_data: OidHashMap<CommitData>,
 }
 
 impl RevListResult {
@@ -985,6 +995,7 @@ pub fn rev_list(
                 reachable_non_commit_object_count: None,
                 tip_annotated_tag_by_commit: HashMap::new(),
                 log_graph_linkage: None,
+                commit_data: OidHashMap::default(),
             });
         }
         return Err(Error::InvalidRef("no revisions specified".to_owned()));
@@ -1018,8 +1029,8 @@ pub fn rev_list(
         return Ok(rev_list_result_from_commits(ordered));
     }
 
-    if let Some(ordered) = try_bounded_limit_list(repo, &include, &exclude, options)? {
-        return Ok(rev_list_result_from_commits(ordered));
+    if let Some(result) = try_bounded_limit_list(repo, &include, &exclude, options)? {
+        return Ok(result);
     }
 
     if let Some((ordered, linkage)) =
@@ -1272,6 +1283,7 @@ pub fn rev_list(
             reachable_non_commit_object_count: None,
             tip_annotated_tag_by_commit: HashMap::new(),
             log_graph_linkage: None,
+            commit_data: OidHashMap::default(),
         });
     }
 
@@ -1810,6 +1822,7 @@ pub fn rev_list(
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit,
         log_graph_linkage: None,
+        commit_data: OidHashMap::default(),
     })
 }
 
@@ -5902,6 +5915,7 @@ fn rev_list_result_from_commits_with_linkage(
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit: HashMap::new(),
         log_graph_linkage,
+        commit_data: OidHashMap::default(),
     }
 }
 
@@ -6029,6 +6043,7 @@ fn try_commit_graph_count_only(
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit: HashMap::new(),
         log_graph_linkage: None,
+        commit_data: OidHashMap::default(),
     }))
 }
 
@@ -6151,6 +6166,7 @@ fn try_rev_list_accelerated(
             .then_some(non_commit_count),
         tip_annotated_tag_by_commit: HashMap::new(),
         log_graph_linkage: None,
+        commit_data: OidHashMap::default(),
     }))
 }
 
@@ -6695,7 +6711,7 @@ fn try_bounded_limit_list(
     include: &[ObjectId],
     exclude: &[ObjectId],
     options: &RevListOptions,
-) -> Result<Option<Vec<ObjectId>>> {
+) -> Result<Option<RevListResult>> {
     if include.is_empty() || !can_use_bounded_limit_list(options) {
         return Ok(None);
     }
@@ -6748,7 +6764,7 @@ fn try_bounded_limit_list(
     if options.reverse {
         ordered.reverse();
     }
-    Ok(Some(ordered))
+    Ok(Some(rev_list_result_from_commits(ordered)))
 }
 
 /// `--max-count` / `--skip` list in Git's default order, stopping as soon as the page is full.
@@ -6756,12 +6772,16 @@ fn streaming_default_order_list(
     repo: &Repository,
     include: &[ObjectId],
     options: &RevListOptions,
-) -> Result<Vec<ObjectId>> {
+) -> Result<RevListResult> {
     let max_count = options.max_count.unwrap_or(usize::MAX);
     let mut ordered = Vec::with_capacity(max_count.min(4096));
+    let mut commit_data = OidHashMap::default();
     if max_count > 0 {
         repo.odb().with_pack_read_context(|| -> Result<()> {
             let mut graph = CommitGraph::with_commit_graph(repo, false, options.use_commit_graph);
+            if options.retain_commit_data {
+                graph.retain_parsed_commits();
+            }
             let mut seen = 0usize;
             streaming_date_walk(&mut graph, include, &HashSet::new(), false, |_, oid| {
                 seen += 1;
@@ -6773,13 +6793,17 @@ fn streaming_default_order_list(
                 } else {
                     WalkControl::Continue
                 })
-            })
+            })?;
+            commit_data = graph.take_retained_commits(&ordered);
+            Ok(())
         })?;
     }
     if options.reverse {
         ordered.reverse();
     }
-    Ok(ordered)
+    let mut result = rev_list_result_from_commits(ordered);
+    result.commit_data = commit_data;
+    Ok(result)
 }
 
 fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
@@ -7312,6 +7336,8 @@ pub(crate) struct CommitGraph<'r> {
     shallow_boundaries: OidHashSet,
     graft_parents: OidHashMap<Vec<ObjectId>>,
     subjects: HashMap<ObjectId, String>,
+    /// Parsed commits kept for the caller once [`Self::retain_parsed_commits`] is called.
+    retained: Option<OidHashMap<CommitData>>,
 }
 
 impl<'r> CommitGraph<'r> {
@@ -7349,7 +7375,26 @@ impl<'r> CommitGraph<'r> {
             shallow_boundaries,
             graft_parents,
             subjects: HashMap::new(),
+            retained: None,
         }
+    }
+
+    /// Keep every commit object parsed from here on, for [`Self::take_retained_commits`].
+    ///
+    /// Retained commits stand in for the per-commit subject cache, so [`Self::subject_of`] is
+    /// `None` for them.
+    pub(crate) fn retain_parsed_commits(&mut self) {
+        self.retained.get_or_insert_with(oid_hash_map);
+    }
+
+    /// Parsed commits among `listed`, moved out of the retained set.
+    pub(crate) fn take_retained_commits(&mut self, listed: &[ObjectId]) -> OidHashMap<CommitData> {
+        let Some(mut retained) = self.retained.take() else {
+            return OidHashMap::default();
+        };
+        let listed: OidHashSet = listed.iter().copied().collect();
+        retained.retain(|oid, _| listed.contains(oid));
+        retained
     }
 
     pub(crate) fn subject_of(&self, oid: ObjectId) -> Option<&str> {
@@ -7464,7 +7509,7 @@ impl<'r> CommitGraph<'r> {
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
         } else {
-            commit.parents
+            commit.parents.clone()
         };
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();
@@ -7478,8 +7523,15 @@ impl<'r> CommitGraph<'r> {
             .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
         self.commit_trees.insert(oid, commit.tree);
         self.parents.insert(oid, parents);
-        self.subjects
-            .insert(oid, subject_line_from_commit_message(&commit.message));
+        match self.retained.as_mut() {
+            Some(retained) => {
+                retained.insert(oid, commit);
+            }
+            None => {
+                self.subjects
+                    .insert(oid, subject_line_from_commit_message(&commit.message));
+            }
+        }
         Ok(())
     }
 }

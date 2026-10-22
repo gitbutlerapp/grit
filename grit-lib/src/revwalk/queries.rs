@@ -83,6 +83,9 @@ pub struct RevWalkListOptions {
     pub pickaxe: Option<Arc<crate::diff::Pickaxe>>,
     /// Topological order and graph-friendly path handling (`log --graph`).
     pub graph: bool,
+    /// Return the commits the walk parses in [`RevListResult::commit_data`] (see
+    /// [`RevListOptions::retain_commit_data`]), for callers that render the listed commits.
+    pub retain_commit_data: bool,
 }
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
@@ -231,6 +234,7 @@ pub(crate) fn rev_list_options_from_walk(
         symmetric_right: parsed.symmetric_right,
         commit_filter: walk.commit_filter.clone(),
         pickaxe: walk.pickaxe.clone(),
+        retain_commit_data: walk.retain_commit_data,
         ..RevListOptions::default()
     })
 }

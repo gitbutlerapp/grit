@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 use crate::change_id::{resolved_change_id, ChangeId};
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::{parse_commit, CommitData, ObjectId, OidHashMap};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -210,11 +210,36 @@ pub fn load_commits_with_decorations(
     oids: &[ObjectId],
     decorations: &DecorationMap,
 ) -> Result<Vec<LoadedCommit>> {
+    load_commits_with_decorations_reusing(repo, oids, decorations, &mut OidHashMap::default())
+}
+
+/// Like [`load_commits_with_decorations`], but takes commits already parsed (for example
+/// [`crate::revwalk::rev_list::RevListResult::commit_data`]) out of `parsed` instead of reading them
+/// again. Commits missing from `parsed` are read from the object database.
+///
+/// # Parameters
+///
+/// - `repo` - repository to read commits missing from `parsed` from.
+/// - `oids` - commits to load, in output order.
+/// - `decorations` - ref labels from [`collect_decorations`].
+/// - `parsed` - parsed commits by id; entries for `oids` are moved out.
+///
+/// # Errors
+///
+/// Returns ODB and commit-parse errors when an oid is missing or corrupt.
+pub fn load_commits_with_decorations_reusing(
+    repo: &Repository,
+    oids: &[ObjectId],
+    decorations: &DecorationMap,
+    parsed: &mut OidHashMap<CommitData>,
+) -> Result<Vec<LoadedCommit>> {
     let odb = repo.odb();
     let mut out = Vec::with_capacity(oids.len());
     for oid in oids {
-        let obj = odb.read(oid)?;
-        let data = parse_commit(&obj.data)?;
+        let data = match parsed.remove(oid) {
+            Some(data) => data,
+            None => parse_commit(&odb.read(oid)?.data)?,
+        };
         let resolved = resolved_change_id(oid, &data);
         let hex = oid.to_hex();
         let refs = decorations

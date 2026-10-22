@@ -10817,6 +10817,7 @@ pub fn grit_lib::porcelain::log::collect_decorations(&grit_lib::repo::Repository
 pub fn grit_lib::porcelain::log::collect_decorations_inner(&grit_lib::repo::Repository, bool, bool, &grit_lib::porcelain::log::DecorationFilter) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
 pub fn grit_lib::porcelain::log::current_branch_decoration_index(&[grit_lib::porcelain::log::DecorationItem], &grit_lib::state::HeadState) -> core::option::Option<usize>
 pub fn grit_lib::porcelain::log::load_commits_with_decorations(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &grit_lib::porcelain::log::DecorationMap) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::log::LoadedCommit>>
+pub fn grit_lib::porcelain::log::load_commits_with_decorations_reusing(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &grit_lib::porcelain::log::DecorationMap, &mut grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::log::LoadedCommit>>
 pub fn grit_lib::porcelain::log::normalize_glob_ref(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::log::peel_to_commit_hex(&grit_lib::objects::odb::Odb, &str) -> core::option::Option<alloc::string::String>
 pub type grit_lib::porcelain::log::DecorationMap = std::collections::hash::map::HashMap<alloc::string::String, alloc::vec::Vec<grit_lib::porcelain::log::DecorationItem>>
@@ -18032,6 +18033,7 @@ pub grit_lib::revwalk::queries::RevWalkListOptions::merges: grit_lib::revwalk::q
 pub grit_lib::revwalk::queries::RevWalkListOptions::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::revwalk::queries::RevWalkListOptions::pickaxe: core::option::Option<alloc::rcs::arc::Arc<grit_lib::diff::pickaxe::Pickaxe>>
 pub grit_lib::revwalk::queries::RevWalkListOptions::refs: alloc::vec::Vec<grit_lib::revwalk::queries::RefSelection>
+pub grit_lib::revwalk::queries::RevWalkListOptions::retain_commit_data: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::reverse: bool
 pub grit_lib::revwalk::queries::RevWalkListOptions::since: core::option::Option<i64>
 pub grit_lib::revwalk::queries::RevWalkListOptions::skip: usize
@@ -18305,6 +18307,7 @@ pub grit_lib::revwalk::rev_list::RevListOptions::paths_resolved_from_argv: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::pickaxe: core::option::Option<alloc::rcs::arc::Arc<grit_lib::diff::pickaxe::Pickaxe>>
 pub grit_lib::revwalk::rev_list::RevListOptions::preserve_simplify_merges_graph_merges: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::quiet: bool
+pub grit_lib::revwalk::rev_list::RevListOptions::retain_commit_data: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::reverse: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::right_only: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::show_pulls: bool
@@ -18340,6 +18343,7 @@ pub struct grit_lib::revwalk::rev_list::RevListResult
 pub grit_lib::revwalk::rev_list::RevListResult::bitmap_object_format: bool
 pub grit_lib::revwalk::rev_list::RevListResult::boundary_commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::rev_list::RevListResult::cherry_equivalent: std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
+pub grit_lib::revwalk::rev_list::RevListResult::commit_data: grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>
 pub grit_lib::revwalk::rev_list::RevListResult::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::rev_list::RevListResult::left_right_map: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, bool>
 pub grit_lib::revwalk::rev_list::RevListResult::log_graph_linkage: core::option::Option<grit_lib::revwalk::rev_list::LogGraphLinkage>
@@ -19027,6 +19031,7 @@ pub grit_lib::revwalk::RevWalkListOptions::merges: grit_lib::revwalk::queries::M
 pub grit_lib::revwalk::RevWalkListOptions::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::revwalk::RevWalkListOptions::pickaxe: core::option::Option<alloc::rcs::arc::Arc<grit_lib::diff::pickaxe::Pickaxe>>
 pub grit_lib::revwalk::RevWalkListOptions::refs: alloc::vec::Vec<grit_lib::revwalk::queries::RefSelection>
+pub grit_lib::revwalk::RevWalkListOptions::retain_commit_data: bool
 pub grit_lib::revwalk::RevWalkListOptions::reverse: bool
 pub grit_lib::revwalk::RevWalkListOptions::since: core::option::Option<i64>
 pub grit_lib::revwalk::RevWalkListOptions::skip: usize

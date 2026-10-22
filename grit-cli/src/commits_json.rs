@@ -1,9 +1,9 @@
 //! Shared commit JSON loading for `log`, `show`, `revs`, and `shortlog`.
 
 use anyhow::Result;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{CommitData, ObjectId, OidHashMap};
 use grit_lib::porcelain::log::{
-    collect_decorations, load_commits_with_decorations, DecorationMap, LoadedCommit,
+    collect_decorations, load_commits_with_decorations_reusing, DecorationMap, LoadedCommit,
 };
 use grit_lib::repo::Repository;
 
@@ -24,11 +24,18 @@ impl CommitJsonLoader {
     }
 
     /// Build human [`CommitSummary`] rows without loading ref decorations (no extra config I/O).
-    pub fn load_summaries_only(repo: &Repository, oids: &[ObjectId]) -> Result<Vec<CommitSummary>> {
+    /// Commits already parsed (by the walk) are taken out of `parsed` instead of read again.
+    pub fn load_summaries_only(
+        repo: &Repository,
+        oids: &[ObjectId],
+        parsed: &mut OidHashMap<CommitData>,
+    ) -> Result<Vec<CommitSummary>> {
         let mut summaries = Vec::with_capacity(oids.len());
         for oid in oids {
-            let obj = repo.odb().read(oid)?;
-            let data = grit_lib::objects::parse_commit(&obj.data)?;
+            let data = match parsed.remove(oid) {
+                Some(data) => data,
+                None => grit_lib::objects::parse_commit(&repo.odb().read(oid)?.data)?,
+            };
             let resolved = grit_lib::change_id::resolved_change_id(oid, &data);
             let (author, timestamp) = context::author_and_time(&data.author);
             summaries.push(CommitSummary {
@@ -56,7 +63,18 @@ impl CommitJsonLoader {
         oids: &[ObjectId],
         now: i64,
     ) -> Result<(Vec<CommitJson>, Vec<CommitSummary>)> {
-        let loaded = load_commits_with_decorations(repo, oids, &self.decorations)?;
+        self.load_with_summaries_reusing(repo, oids, now, &mut OidHashMap::default())
+    }
+
+    /// Like [`Self::load_with_summaries`], taking commits the walk already parsed out of `parsed`.
+    pub fn load_with_summaries_reusing(
+        &self,
+        repo: &Repository,
+        oids: &[ObjectId],
+        now: i64,
+        parsed: &mut OidHashMap<CommitData>,
+    ) -> Result<(Vec<CommitJson>, Vec<CommitSummary>)> {
+        let loaded = load_commits_with_decorations_reusing(repo, oids, &self.decorations, parsed)?;
         let mut json = Vec::with_capacity(loaded.len());
         let mut summaries = Vec::with_capacity(loaded.len());
         for row in &loaded {

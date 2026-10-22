@@ -231,6 +231,7 @@ impl RevSelectArgs {
             commit_filter,
             pickaxe,
             graph: false,
+            retain_commit_data: false,
         })
     }
 
