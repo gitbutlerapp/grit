@@ -30,6 +30,13 @@ fn shell_escape(path: &Path) -> String {
     format!("'{}'", path.display())
 }
 
+fn ensure_scratch_root() -> Result<PathBuf> {
+    let root = scratch_root();
+    std::fs::create_dir_all(&root)
+        .with_context(|| format!("create bench scratch root {}", root.display()))?;
+    Ok(root)
+}
+
 fn reference_tree_sha256_bin() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("TREE_SHA256_BIN") {
         let path = PathBuf::from(path);
@@ -72,7 +79,8 @@ fn git_output(git: &Path, worktree: &Path, args: &[&str]) -> Result<String> {
 }
 
 fn ensure_signing_config(git: &Path, worktree: &Path) -> Result<()> {
-    let key = scratch_root().join("tag-bench-signing-key");
+    let scratch = ensure_scratch_root()?;
+    let key = scratch.join("tag-bench-signing-key");
     if !key.with_extension("pub").is_file() {
         let status = Command::new("ssh-keygen")
             .args(["-q", "-t", "ed25519", "-N", "", "-f"])
@@ -83,7 +91,7 @@ fn ensure_signing_config(git: &Path, worktree: &Path) -> Result<()> {
             anyhow::bail!("ssh-keygen failed");
         }
     }
-    let allowed = scratch_root().join("tag-bench-allowed-signers");
+    let allowed = scratch.join("tag-bench-allowed-signers");
     let pub_key = std::fs::read_to_string(key.with_extension("pub")).context("read signing pub")?;
     std::fs::write(&allowed, format!("bench@example.com {pub_key}")).context("write allowed")?;
     for (k, v) in [
@@ -169,7 +177,8 @@ fn materialized_git_tree_sha256_digest_script() -> Result<PathBuf> {
     if let Some(path) = PATH.get() {
         return Ok(path.clone());
     }
-    let path = scratch_root().join("tree_sha256_git_digest.py");
+    let scratch = ensure_scratch_root()?;
+    let path = scratch.join("tree_sha256_git_digest.py");
     std::fs::write(&path, GIT_TREE_SHA256_DIGEST_PY)
         .with_context(|| format!("write {}", path.display()))?;
     let _ = PATH.set(path.clone());
