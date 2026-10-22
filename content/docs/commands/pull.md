@@ -9,6 +9,8 @@ order: 3
 
 ```text
 grit pull
+grit pull --ff-only
+grit pull --no-rebase
 ```
 
 ## Description
@@ -23,7 +25,12 @@ The fetch step uses the same terminal progress as [`grit fetch`](../fetch/) and 
 
 ## Options
 
-`grit pull` takes no options beyond the [global ones](../global-options/).
+| Option | Description |
+| --- | --- |
+| `--ff-only` | Refuse to create a merge commit when the current branch has local commits; exit with `refused_not_ff` in `--json` output instead. Honors `pull.ff=only` when set. |
+| `--no-rebase` | After fetch, merge the upstream with a merge commit when a fast-forward is not possible (the default when `pull.rebase` is not true). |
+
+All [global options](../global-options/) apply as well.
 
 ## Examples
 
@@ -47,16 +54,15 @@ The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stabl
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `merged`, or `set_upstream`. |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, `refused_not_ff`, `conflicts`, or `set_upstream`. |
 | `branch` | string | Remote branch that was integrated. |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit, fast-forward tip, or adopted upstream). |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
 | `ahead` | integer or null | Local-only commits when `result` is `refused_not_ff`. |
 | `behind` | integer or null | Upstream-only commits when `result` is `refused_not_ff`. |
-| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text (same shape as [`grit merge`](../merge/#json-output)). |
-| `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts`. |
-| `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort`. |
+| `conflicts` | array or null | When `result` is `conflicts`, short conflict labels (legacy v1 field; may be null in v2). |
+| `conflict_details` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text (same shape as [`grit merge`](../merge/#json-output)). |
 
 Example:
 

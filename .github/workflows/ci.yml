@@ -38,7 +38,9 @@ jobs:
         with:
           components: llvm-tools-preview
 
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Install rustfilt and pinned nightly (public-fn rustdoc JSON)
         run: |
