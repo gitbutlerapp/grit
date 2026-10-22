@@ -1118,14 +1118,32 @@ pub(crate) fn plan_deltas(
         .collect();
 
     if opts.window > 0 && opts.max_depth > 0 {
+        // Without a readable pack directory, every pair is simply tried.
+        let packed = if opts.reuse_deltas {
+            let blobs: OidHashSet = objects
+                .iter()
+                .filter(|(_, obj)| obj.kind == ObjectKind::Blob && !obj.data.is_empty())
+                .map(|(oid, _)| *oid)
+                .collect();
+            crate::pack::locate_packed_objects(odb.objects_dir(), &blobs).ok()
+        } else {
+            None
+        };
         crate::pack_delta::extend_send_order_blob_deltas(
-            send,
-            &objects,
-            blob_name_hashes,
-            &islands,
+            crate::pack_delta::SendOrderDeltaInput {
+                send,
+                objects: &objects,
+                blob_name_hashes,
+                islands: &islands,
+                skip_targets: &reuse_delta_bases,
+                packed: packed.as_ref(),
+                // Same-path history chains up to `max_depth` deep, so earlier revisions
+                // within that distance stay useful bases; beyond it the pass would be
+                // quadratic in a path's revision count.
+                window: opts.window.max(opts.max_depth),
+                hash_len: odb.hash_algo().len(),
+            },
             &mut delta_to_base,
-            &reuse_delta_bases,
-            odb.hash_algo().len(),
         );
         let skip_targets: OidHashSet = delta_to_base.keys().copied().collect();
         let window_found = crate::pack_delta::search_windowed_blob_deltas(
@@ -1137,6 +1155,7 @@ pub(crate) fn plan_deltas(
                 skip_targets: &skip_targets,
                 skip_as_target: &reuse_delta_bases,
                 warmup_delta_edges: &delta_to_base,
+                packed: packed.as_ref(),
                 opts,
             },
             search_threads,

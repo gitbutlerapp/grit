@@ -9,7 +9,7 @@
 //! (delta bytes + deflate per planned entry) and a serial emission stage (headers,
 //! OFS vs REF selection, trailer).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +26,7 @@ use crate::objects::{
     oid_hash_map, HashAlgo, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet,
 };
 use crate::odb::Odb;
+use crate::pack::PackedSlot;
 use crate::pack_objects::{
     append_pack_trailer, encode_ofs_delta_distance, encode_pack_object_header, pack_type_code,
     PackBuildOptions, PlannedEntry,
@@ -34,17 +35,69 @@ use crate::parallel::{
     try_par_map_force, ParallelHashError, ParallelOp, ParallelOptions, ThreadPolicy,
 };
 
+/// Whether a delta from `base` to `target` was already rejected by an earlier pack write.
+///
+/// When both objects come from the same existing pack and `target` is stored whole
+/// there, the packer that wrote it already considered (and declined) that pair, so
+/// Git does not try it again while reusing deltas. `slots` is `None` when deltas are
+/// not being reused.
+fn already_rejected_in_pack(
+    slots: Option<&OidHashMap<PackedSlot>>,
+    target: &ObjectId,
+    base: &ObjectId,
+) -> bool {
+    let Some(slots) = slots else {
+        return false;
+    };
+    match (slots.get(target), slots.get(base)) {
+        (Some(t), Some(b)) => t.whole && t.pack == b.pack,
+        _ => false,
+    }
+}
+
+/// Inputs for [`extend_send_order_blob_deltas`].
+pub(crate) struct SendOrderDeltaInput<'a> {
+    pub send: &'a [ObjectId],
+    pub objects: &'a OidHashMap<Object>,
+    pub blob_name_hashes: &'a OidHashMap<u32>,
+    pub islands: &'a DeltaIslands,
+    pub skip_targets: &'a OidHashSet,
+    /// Pack locations of the objects, when on-disk deltas are reused.
+    pub packed: Option<&'a OidHashMap<PackedSlot>>,
+    /// How many earlier blobs with the same name hash are tried as bases.
+    pub window: usize,
+    pub hash_len: usize,
+}
+
 /// Try consecutive blob deltas in discovery order so bases precede targets in the pack stream.
+///
+/// Each blob is tried against the last `window` blobs that share its name hash, newest first.
 pub(crate) fn extend_send_order_blob_deltas(
-    send: &[ObjectId],
-    objects: &OidHashMap<Object>,
-    blob_name_hashes: &OidHashMap<u32>,
-    islands: &DeltaIslands,
+    input: SendOrderDeltaInput<'_>,
     delta_to_base: &mut OidHashMap<ObjectId>,
-    skip_targets: &OidHashSet,
-    hash_len: usize,
 ) {
-    let mut recent_same_path: HashMap<u32, Vec<ObjectId>> = HashMap::new();
+    let SendOrderDeltaInput {
+        send,
+        objects,
+        blob_name_hashes,
+        islands,
+        skip_targets,
+        packed,
+        window,
+        hash_len,
+    } = input;
+    if window == 0 {
+        return;
+    }
+    let mut recent_same_path: HashMap<u32, VecDeque<ObjectId>> = HashMap::new();
+    let remember =
+        |recent_same_path: &mut HashMap<u32, VecDeque<ObjectId>>, path_key: u32, oid: ObjectId| {
+            let recent = recent_same_path.entry(path_key).or_default();
+            if recent.len() == window {
+                recent.pop_front();
+            }
+            recent.push_back(oid);
+        };
     for &oid in send {
         let obj = &objects[&oid];
         if obj.kind != ObjectKind::Blob || obj.data.is_empty() {
@@ -52,7 +105,7 @@ pub(crate) fn extend_send_order_blob_deltas(
         }
         let path_key = blob_name_hashes.get(&oid).copied().unwrap_or(0);
         if skip_targets.contains(&oid) || delta_to_base.contains_key(&oid) {
-            recent_same_path.entry(path_key).or_default().push(oid);
+            remember(&mut recent_same_path, path_key, oid);
             continue;
         }
         let max_size = obj.data.len().saturating_div(2).saturating_sub(hash_len);
@@ -61,7 +114,10 @@ pub(crate) fn extend_send_order_blob_deltas(
             let mut best_len = max_size.saturating_add(1);
             if let Some(candidates) = recent_same_path.get(&path_key) {
                 for &base in candidates.iter().rev() {
-                    if base == oid || !islands.in_same_island(&oid, &base) {
+                    if base == oid
+                        || !islands.in_same_island(&oid, &base)
+                        || already_rejected_in_pack(packed, &oid, &base)
+                    {
                         continue;
                     }
                     let base_data = &objects[&base].data;
@@ -83,7 +139,7 @@ pub(crate) fn extend_send_order_blob_deltas(
                 delta_to_base.insert(oid, base);
             }
         }
-        recent_same_path.entry(path_key).or_default().push(oid);
+        remember(&mut recent_same_path, path_key, oid);
     }
 }
 
@@ -106,6 +162,8 @@ pub(crate) struct DeltaSearchInput<'a> {
     pub skip_as_target: &'a OidHashSet,
     /// Send-order / reuse deltas fixed before window search; used for warmup depth only.
     pub warmup_delta_edges: &'a OidHashMap<ObjectId>,
+    /// Pack locations of the objects, when on-disk deltas are reused.
+    pub packed: Option<&'a OidHashMap<PackedSlot>>,
     pub opts: &'a PackBuildOptions,
 }
 
@@ -125,6 +183,7 @@ pub(crate) fn search_windowed_blob_deltas(
         skip_targets,
         skip_as_target,
         warmup_delta_edges,
+        packed,
         opts,
     } = input;
     if opts.window == 0 || opts.max_depth == 0 {
@@ -168,6 +227,7 @@ pub(crate) fn search_windowed_blob_deltas(
         max_depth: opts.max_depth,
         hash_len,
         window_memory,
+        packed,
     };
 
     if workers <= 1 {
@@ -242,11 +302,12 @@ fn type_size_sort(
 }
 
 #[derive(Clone, Copy)]
-struct SegmentSearchParams {
+struct SegmentSearchParams<'a> {
     window: usize,
     max_depth: usize,
     hash_len: usize,
     window_memory: u64,
+    packed: Option<&'a OidHashMap<PackedSlot>>,
 }
 
 fn segment_warmup(sorted: &[ObjectId], start: usize, window: usize) -> Vec<ObjectId> {
@@ -278,28 +339,38 @@ fn fixed_delta_segments(n: usize, window: usize) -> Vec<(usize, usize)> {
     out
 }
 
-struct WindowSlot {
+struct WindowSlot<'a> {
     oid: Option<ObjectId>,
-    data: Vec<u8>,
+    data: &'a [u8],
     depth: usize,
     base: Option<ObjectId>,
     delta_size: Option<usize>,
 }
 
-impl WindowSlot {
-    fn clear(&mut self) -> usize {
-        let mem = self.data.len();
-        self.oid = None;
-        self.data.clear();
-        self.depth = 0;
-        self.base = None;
-        self.delta_size = None;
+impl<'a> WindowSlot<'a> {
+    const EMPTY: Self = Self {
+        oid: None,
+        data: &[],
+        depth: 0,
+        base: None,
+        delta_size: None,
+    };
+
+    /// Empty the slot, dropping its cached delta index; returns the memory released.
+    fn clear(&mut self, index_cache: &mut HashMap<ObjectId, Arc<DeltaIndex>>) -> usize {
+        let mut mem = self.data.len();
+        if let Some(oid) = self.oid {
+            if index_cache.remove(&oid).is_some() {
+                mem += self.data.len() * 2;
+            }
+        }
+        *self = Self::EMPTY;
         mem
     }
 
-    fn load(&mut self, oid: ObjectId, data: &[u8]) {
+    fn load(&mut self, oid: ObjectId, data: &'a [u8]) {
         self.oid = Some(oid);
-        self.data = data.to_vec();
+        self.data = data;
         self.depth = 0;
         self.base = None;
         self.delta_size = None;
@@ -329,7 +400,7 @@ fn find_deltas_in_segment(
     warmup: &[ObjectId],
     objects: &OidHashMap<Object>,
     islands: &DeltaIslands,
-    params: SegmentSearchParams,
+    params: SegmentSearchParams<'_>,
     out: &mut OidHashMap<ObjectId>,
     prior_edges: &OidHashMap<ObjectId>,
 ) {
@@ -341,23 +412,16 @@ fn find_deltas_in_segment(
         max_depth,
         hash_len,
         window_memory,
+        packed,
     } = params;
-    let mut array: Vec<WindowSlot> = (0..window)
-        .map(|_| WindowSlot {
-            oid: None,
-            data: Vec::new(),
-            depth: 0,
-            base: None,
-            delta_size: None,
-        })
-        .collect();
+    let mut array: Vec<WindowSlot<'_>> = (0..window).map(|_| WindowSlot::EMPTY).collect();
     let mut index_cache: HashMap<ObjectId, Arc<DeltaIndex>> = HashMap::new();
     let mut idx = 0usize;
     let mut count = 0usize;
     let mut mem_usage = 0u64;
 
     for &warm_oid in warmup {
-        mem_usage = mem_usage.saturating_sub(array[idx].clear() as u64);
+        mem_usage = mem_usage.saturating_sub(array[idx].clear(&mut index_cache) as u64);
         array[idx].load(warm_oid, &objects[&warm_oid].data);
         if let Some(base) = prior_edges.get(&warm_oid) {
             array[idx].base = Some(*base);
@@ -374,13 +438,13 @@ fn find_deltas_in_segment(
     }
 
     for &entry_oid in list {
-        mem_usage = mem_usage.saturating_sub(array[idx].clear() as u64);
+        mem_usage = mem_usage.saturating_sub(array[idx].clear(&mut index_cache) as u64);
         array[idx].load(entry_oid, &objects[&entry_oid].data);
         mem_usage = mem_usage.saturating_add(array[idx].data.len() as u64);
 
         while window_memory > 0 && mem_usage > window_memory && count > 1 {
             let tail = (idx + window - count) % window;
-            mem_usage = mem_usage.saturating_sub(array[tail].clear() as u64);
+            mem_usage = mem_usage.saturating_sub(array[tail].clear(&mut index_cache) as u64);
             count -= 1;
         }
 
@@ -396,14 +460,17 @@ fn find_deltas_in_segment(
             let Some(src_oid) = array[other_idx].oid else {
                 break;
             };
+            if already_rejected_in_pack(packed, &entry_oid, &src_oid) {
+                continue;
+            }
             let src_depth = array[other_idx].depth;
-            let src_data = array[other_idx].data.clone();
+            let src_data = array[other_idx].data;
             let ret = try_delta_pair(
                 &mut array[idx],
                 TryDeltaContext {
                     src_oid,
                     src_depth,
-                    src_data: &src_data,
+                    src_data,
                     trg_oid: entry_oid,
                     max_depth,
                     hash_len,
@@ -441,31 +508,13 @@ fn find_deltas_in_segment(
     }
 }
 
-fn rotate_best_base(slots: &mut [WindowSlot], idx: usize, best_base: usize, window: usize) {
-    let swap = std::mem::replace(
-        &mut slots[best_base],
-        WindowSlot {
-            oid: None,
-            data: Vec::new(),
-            depth: 0,
-            base: None,
-            delta_size: None,
-        },
-    );
+fn rotate_best_base(slots: &mut [WindowSlot<'_>], idx: usize, best_base: usize, window: usize) {
+    let swap = std::mem::replace(&mut slots[best_base], WindowSlot::EMPTY);
     let mut dst = best_base;
     let dist = (window + idx - best_base) % window;
     for _ in 0..dist {
         let src = (dst + 1) % window;
-        slots[dst] = std::mem::replace(
-            &mut slots[src],
-            WindowSlot {
-                oid: None,
-                data: Vec::new(),
-                depth: 0,
-                base: None,
-                delta_size: None,
-            },
-        );
+        slots[dst] = std::mem::replace(&mut slots[src], WindowSlot::EMPTY);
         dst = src;
     }
     slots[dst] = swap;
@@ -482,7 +531,7 @@ struct TryDeltaContext<'a> {
 }
 
 fn try_delta_pair(
-    trg: &mut WindowSlot,
+    trg: &mut WindowSlot<'_>,
     ctx: TryDeltaContext<'_>,
     index_cache: &mut HashMap<ObjectId, Arc<DeltaIndex>>,
     mem_usage: &mut u64,
@@ -533,7 +582,7 @@ fn try_delta_pair(
     }
 
     if trg.data.starts_with(src_data) && trg.data.len() > src_data.len() {
-        let delta = match encode_prefix_extension_delta(src_data, &trg.data) {
+        let delta = match encode_prefix_extension_delta(src_data, trg.data) {
             Ok(d) => d,
             Err(_) => return 0,
         };
@@ -556,7 +605,7 @@ fn try_delta_pair(
         Arc::new(DeltaIndex::new(src_data))
     });
 
-    let Some(delta) = index.encode(&trg.data, max_size) else {
+    let Some(delta) = index.encode(trg.data, max_size) else {
         return 0;
     };
     if let Some(prev) = trg.delta_size {
@@ -878,6 +927,7 @@ mod tests {
                     skip_targets: &skip,
                     skip_as_target: &skip,
                     warmup_delta_edges: &warmup_edges,
+                    packed: None,
                     opts: &opts,
                 },
                 Some(threads),
@@ -934,11 +984,131 @@ mod tests {
                 max_depth: 2,
                 hash_len: 0,
                 window_memory: 0,
+                packed: None,
             },
             &mut out,
             &prior,
         );
         assert_eq!(out.get(&target_oid), Some(&base_oid));
+    }
+
+    fn similar_blobs(count: u8) -> (Vec<ObjectId>, OidHashMap<Object>) {
+        let mut oids = Vec::new();
+        let mut objects = oid_hash_map();
+        for i in 0..count {
+            let mut data = vec![b'x'; 2048];
+            data.push(b'a' + i);
+            let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, &data);
+            objects.insert(oid, Object::new(ObjectKind::Blob, data));
+            oids.push(oid);
+        }
+        (oids, objects)
+    }
+
+    fn whole_in(pack: u32) -> PackedSlot {
+        PackedSlot { pack, whole: true }
+    }
+
+    #[test]
+    fn rejected_pairs_need_a_whole_target_in_the_base_pack() {
+        let (oids, _) = similar_blobs(3);
+        let (t, b, loose) = (oids[0], oids[1], oids[2]);
+        let mut slots = oid_hash_map();
+        slots.insert(t, whole_in(0));
+        slots.insert(
+            b,
+            PackedSlot {
+                pack: 0,
+                whole: false,
+            },
+        );
+        assert!(already_rejected_in_pack(Some(&slots), &t, &b));
+        assert!(!already_rejected_in_pack(None, &t, &b));
+        assert!(!already_rejected_in_pack(Some(&slots), &b, &t));
+        assert!(!already_rejected_in_pack(Some(&slots), &t, &loose));
+        assert!(!already_rejected_in_pack(Some(&slots), &loose, &t));
+        slots.insert(b, whole_in(1));
+        assert!(!already_rejected_in_pack(Some(&slots), &t, &b));
+    }
+
+    #[test]
+    fn window_search_skips_pairs_already_rejected_in_the_same_pack() {
+        let (oids, objects) = similar_blobs(2);
+        let (base, target) = (oids[0], oids[1]);
+        let run = |packed: Option<&OidHashMap<PackedSlot>>| {
+            let mut out = oid_hash_map();
+            find_deltas_in_segment(
+                &[base, target],
+                &[],
+                &objects,
+                &DeltaIslands::default(),
+                SegmentSearchParams {
+                    window: 3,
+                    max_depth: 10,
+                    hash_len: 20,
+                    window_memory: 0,
+                    packed,
+                },
+                &mut out,
+                &oid_hash_map(),
+            );
+            out
+        };
+        assert_eq!(run(None).get(&target), Some(&base));
+
+        let mut same_pack = oid_hash_map();
+        same_pack.insert(base, whole_in(0));
+        same_pack.insert(target, whole_in(0));
+        assert!(run(Some(&same_pack)).is_empty());
+
+        let mut other_pack = same_pack.clone();
+        other_pack.insert(target, whole_in(1));
+        assert_eq!(run(Some(&other_pack)).get(&target), Some(&base));
+
+        let mut target_loose = same_pack;
+        target_loose.remove(&target);
+        assert_eq!(run(Some(&target_loose)).get(&target), Some(&base));
+    }
+
+    #[test]
+    fn send_order_deltas_try_only_the_last_window_same_path_blobs() {
+        let (oids, objects) = similar_blobs(4);
+        let mut name_hashes = oid_hash_map();
+        for oid in &oids {
+            name_hashes.insert(*oid, 7);
+        }
+        let skip = oid_hash_set();
+        let run = |window: usize, packed: Option<&OidHashMap<PackedSlot>>| {
+            let mut edges = oid_hash_map();
+            extend_send_order_blob_deltas(
+                SendOrderDeltaInput {
+                    send: &oids,
+                    objects: &objects,
+                    blob_name_hashes: &name_hashes,
+                    islands: &DeltaIslands::default(),
+                    skip_targets: &skip,
+                    packed,
+                    window,
+                    hash_len: 20,
+                },
+                &mut edges,
+            );
+            edges
+        };
+        let edges = run(1, None);
+        assert_eq!(edges.len(), 3);
+        for pair in oids.windows(2) {
+            assert_eq!(edges.get(&pair[1]), Some(&pair[0]));
+        }
+        assert!(run(0, None).is_empty());
+
+        let mut slots = oid_hash_map();
+        for oid in &oids[..3] {
+            slots.insert(*oid, whole_in(0));
+        }
+        let edges = run(10, Some(&slots));
+        assert_eq!(edges.len(), 1, "only the loose blob is a target: {edges:?}");
+        assert!(edges.contains_key(&oids[3]));
     }
 
     #[test]

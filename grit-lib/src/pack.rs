@@ -4466,6 +4466,50 @@ fn on_disk_delta_chain_in_send_map(
     }
 }
 
+/// Where an object to be packed currently lives among the local packs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PackedSlot {
+    /// Position of the pack in oldest-first order (only compared for equality).
+    pub pack: u32,
+    /// The object is stored whole (not as `OFS_DELTA` / `REF_DELTA`) in that pack.
+    pub whole: bool,
+}
+
+/// Locate each object of `wanted` in the local packs, oldest pack first, as
+/// [`collect_packed_delta_reuse_for_send`] does when choosing which copy to reuse.
+///
+/// Objects that are not packed are absent from the result.
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] when a pack entry header is malformed, or
+/// [`Error::Io`] when a pack cannot be read.
+pub(crate) fn locate_packed_objects(
+    objects_dir: &Path,
+    wanted: &crate::objects::OidHashSet,
+) -> Result<crate::objects::OidHashMap<PackedSlot>> {
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
+    sort_pack_indexes_oldest_first(&mut indexes);
+    let mut slots = crate::objects::oid_hash_map_with_capacity(wanted.len());
+    for (pack, idx) in (0u32..).zip(&indexes) {
+        let bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        for entry in idx.iter() {
+            let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
+                continue;
+            };
+            if !wanted.contains(&oid) || slots.contains_key(&oid) {
+                continue;
+            }
+            let mut pos = usize::try_from(entry.offset()?)
+                .map_err(|_| Error::CorruptObject("pack offset exceeds memory".to_owned()))?;
+            let (packed_type, _) = parse_pack_object_header(&bytes, &mut pos)?;
+            let whole = !matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta);
+            slots.insert(oid, PackedSlot { pack, whole });
+        }
+    }
+    Ok(slots)
+}
+
 /// Scan local packs once and collect on-disk delta reuse candidates for objects in `send`.
 ///
 /// Copies zlib delta bytes from the source pack (CRC-checked when the index provides CRC32).

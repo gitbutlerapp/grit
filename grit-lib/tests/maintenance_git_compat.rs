@@ -898,6 +898,74 @@ fn gc_packs_loose_objects_like_git() {
     git_fsck(grit_dir.path(), true);
 }
 
+/// Objects stored as deltas in the single pack under `dir`, per `git verify-pack -v`.
+fn git_verify_pack_delta_count(dir: &Path) -> usize {
+    let pack = std::fs::read_dir(dir.join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+        .expect("pack file")
+        .path();
+    let out = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(&pack)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("verify-pack");
+    assert!(out.status.success(), "verify-pack failed");
+    // Delta rows add `<depth> <base>` to `<oid> <type> <size> <size-in-pack> <offset>`.
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| line.split_whitespace().count() == 7)
+        .count()
+}
+
+#[test]
+fn gc_over_existing_pack_keeps_its_deltas_and_deltifies_new_blobs() {
+    let _pack_guard = test_pack_cache_guard();
+    let seed = repo_with_loose_only_edited_blob_history();
+    git(seed.path(), &["repack", "-a", "-d"]);
+    let packed_deltas = git_verify_pack_delta_count(seed.path());
+    assert!(packed_deltas >= 8, "git should deltify the edit history");
+
+    let f = seed.path().join("f.txt");
+    for i in 0..3 {
+        let mut text = std::fs::read_to_string(&f).expect("read f.txt");
+        text.push_str(&format!("appended {i}\n"));
+        std::fs::write(&f, text).expect("write f.txt");
+        git(seed.path(), &["add", "f.txt"]);
+        git(seed.path(), &["commit", "-m", &format!("loose {i}")]);
+    }
+
+    let git_copy = TempDir::new().expect("git copy");
+    duplicate_repo_tree(seed.path(), git_copy.path());
+    git(git_copy.path(), &["gc", "--quiet"]);
+
+    let repo =
+        Repository::discover(Some(seed.path()), &RepositoryOptions::empty()).expect("open repo");
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    clear_pack_cache_after_disk_maintenance();
+
+    assert_eq!(git_pack_count(&seed.path().join(".git")), 1);
+    assert_eq!(git_loose_object_count(seed.path()), 0);
+    let fsck = git_fsck(seed.path(), true);
+    assert!(fsck.ok, "git fsck --strict: {:?}", fsck.msg_ids);
+    let deltas = git_verify_pack_delta_count(seed.path());
+    assert!(
+        deltas > packed_deltas,
+        "pack deltas must be reused and new blobs deltified: {deltas} after, {packed_deltas} before"
+    );
+    let (grit_kib, git_kib) = (
+        git_size_pack_kib(seed.path()),
+        git_size_pack_kib(git_copy.path()),
+    );
+    assert!(
+        grit_kib <= git_kib * 2,
+        "grit gc pack {grit_kib} KiB vs git gc {git_kib} KiB"
+    );
+}
+
 #[test]
 fn gc_repacks_loose_after_existing_pack_issue_1320() {
     let _pack_guard = test_pack_cache_guard();
