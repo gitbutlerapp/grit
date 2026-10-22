@@ -1394,6 +1394,27 @@ pub fn grit_lib::commit::trailers::message_ends_with_trailer(&str, &grit_lib::co
 pub fn grit_lib::commit::assemble_identity(&str, &str, core::option::Option<&str>, time::offset_date_time::OffsetDateTime) -> alloc::string::String
 pub fn grit_lib::commit::format_git_timestamp(time::offset_date_time::OffsetDateTime) -> alloc::string::String
 pub fn grit_lib::commit::parse_date_to_git_timestamp(&str) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::commit::normalize_commit_date_override(&str) -> core::result::Result<alloc::string::String, grit_lib::git_date::parse::DateParseError>
+pub fn grit_lib::commit::parse_trailer_command_line_arg(&str) -> core::result::Result<(alloc::string::String, alloc::string::String), grit_lib::commit::TrailerArgParseError>
+pub struct grit_lib::commit::TrailerArgParseError
+pub grit_lib::commit::TrailerArgParseError::raw: alloc::string::String
+impl core::clone::Clone for grit_lib::commit::TrailerArgParseError
+pub fn grit_lib::commit::TrailerArgParseError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::commit::TrailerArgParseError
+impl core::cmp::PartialEq for grit_lib::commit::TrailerArgParseError
+pub fn grit_lib::commit::TrailerArgParseError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::commit::TrailerArgParseError
+impl core::fmt::Debug for grit_lib::commit::TrailerArgParseError
+pub fn grit_lib::commit::TrailerArgParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::commit::TrailerArgParseError
+pub fn grit_lib::commit::TrailerArgParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::commit::TrailerArgParseError
+impl core::marker::Send for grit_lib::commit::TrailerArgParseError
+impl core::marker::Sync for grit_lib::commit::TrailerArgParseError
+impl core::marker::Unpin for grit_lib::commit::TrailerArgParseError
+impl core::marker::UnsafeUnpin for grit_lib::commit::TrailerArgParseError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::commit::TrailerArgParseError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::commit::TrailerArgParseError
 pub mod grit_lib::config
 pub mod grit_lib::config::dotfile
 pub fn grit_lib::config::dotfile::dotfile_matches(&str, &str) -> bool

@@ -27,7 +27,7 @@
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::git_date::parse::parse_date;
+use crate::git_date::parse::{parse_date, DateParseError};
 
 /// Normalise a date string into Git's stored `<epoch> <offset>` timestamp.
 ///
@@ -107,6 +107,92 @@ pub fn parse_date_to_git_timestamp(date_str: &str) -> Option<String> {
     None
 }
 
+/// True when `s` is already Git's canonical `<unix-seconds> <±HHMM>` form with a valid zone.
+fn is_canonical_epoch_numeric_tz(s: &str) -> bool {
+    let Some((epoch, tz)) = s.rsplit_once(' ') else {
+        return false;
+    };
+    if epoch.is_empty() || !epoch.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let tz = tz.as_bytes();
+    if tz.len() != 5 || (tz[0] != b'+' && tz[0] != b'-') {
+        return false;
+    }
+    if !tz[1..].iter().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let hh = (tz[1] - b'0') as u32 * 10 + (tz[2] - b'0') as u32;
+    let mm = (tz[3] - b'0') as u32 * 10 + (tz[4] - b'0') as u32;
+    hh <= 23 && mm <= 59
+}
+
+/// Error when a `--trailer` argument is not `key=value` or `key: value`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrailerArgParseError {
+    raw: String,
+}
+
+impl std::fmt::Display for TrailerArgParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "trailer must be key=value or key: value (got '{}')",
+            self.raw
+        )
+    }
+}
+
+impl std::error::Error for TrailerArgParseError {}
+
+/// Split a `git commit --trailer` argument into token and value.
+///
+/// The separator is the first `:` or `=` in the string (whichever comes first),
+/// matching Git's `parse_trailer_arg` / `git interpret-trailers --trailer`.
+///
+/// # Errors
+///
+/// Returns [`TrailerArgParseError`] when neither separator appears.
+pub fn parse_trailer_command_line_arg(raw: &str) -> Result<(String, String), TrailerArgParseError> {
+    let raw = raw.trim();
+    let sep_pos = raw
+        .char_indices()
+        .find(|(_, c)| *c == ':' || *c == '=')
+        .map(|(i, _)| i);
+    let Some(pos) = sep_pos else {
+        return Err(TrailerArgParseError {
+            raw: raw.to_owned(),
+        });
+    };
+    Ok((
+        raw[..pos].trim().to_owned(),
+        raw[pos + 1..].trim().to_owned(),
+    ))
+}
+
+/// Normalise a user-supplied author/committer date (CLI `--date`, env overrides) into
+/// Git's stored `<epoch> <±HHMM>` form.
+///
+/// Canonical raw timestamps pass through unchanged. Other strings are parsed with the
+/// same rules as Git's `parse_date` (invalid zone tokens such as `garbage` become
+/// `+0000`, matching `git commit --date`).
+///
+/// # Errors
+///
+/// Returns [`DateParseError`] when the string cannot be interpreted as any date Git accepts.
+pub fn normalize_commit_date_override(raw: &str) -> Result<String, DateParseError> {
+    let trimmed = raw.trim();
+    if is_canonical_epoch_numeric_tz(trimmed) {
+        return Ok(trimmed.to_owned());
+    }
+    if let Some(ts) = parse_date_to_git_timestamp(trimmed) {
+        if is_canonical_epoch_numeric_tz(&ts) {
+            return Ok(ts);
+        }
+    }
+    parse_date(trimmed)
+}
+
 /// Format a timestamp in Git's format: `<epoch> <offset>`.
 pub fn format_git_timestamp(dt: OffsetDateTime) -> String {
     let epoch = dt.unix_timestamp();
@@ -147,7 +233,7 @@ pub fn assemble_identity(
                     }
                 }
             }
-            parse_date_to_git_timestamp(d).unwrap_or_else(|| d.to_string())
+            normalize_commit_date_override(d).unwrap_or_else(|_| d.to_string())
         }
         None => format_git_timestamp(now),
     };
@@ -208,6 +294,51 @@ mod tests {
             now,
         );
         assert_eq!(line, "A U Thor <author@example.com> 1112911993 +0000");
+    }
+
+    #[test]
+    fn parse_trailer_command_line_arg_splits_on_first_colon_or_equals() {
+        let (k, v) = parse_trailer_command_line_arg("Link: https://x?a=b").unwrap();
+        assert_eq!(k, "Link");
+        assert_eq!(v, "https://x?a=b");
+        let (k, v) = parse_trailer_command_line_arg("Acked-by: Alice=Bob").unwrap();
+        assert_eq!(k, "Acked-by");
+        assert_eq!(v, "Alice=Bob");
+        let (k, v) = parse_trailer_command_line_arg("key=value").unwrap();
+        assert_eq!(k, "key");
+        assert_eq!(v, "value");
+    }
+
+    #[test]
+    fn normalize_commit_date_override_rejects_invalid_tz_suffix() {
+        assert_eq!(
+            normalize_commit_date_override("946684800 garbage").unwrap(),
+            "946684800 +0000"
+        );
+        assert_eq!(
+            normalize_commit_date_override("@946684800 garbage").unwrap(),
+            "946684800 +0000"
+        );
+        assert_eq!(
+            normalize_commit_date_override("946684800 +0000").unwrap(),
+            "946684800 +0000"
+        );
+        assert_eq!(
+            normalize_commit_date_override("946684800 +0530").unwrap(),
+            "946684800 +0530"
+        );
+    }
+
+    #[test]
+    fn assemble_identity_normalizes_bad_tz_suffix_like_git() {
+        let now = OffsetDateTime::from_unix_timestamp(0).unwrap();
+        let line = assemble_identity(
+            "A U Thor",
+            "author@example.com",
+            Some("946684800 garbage"),
+            now,
+        );
+        assert_eq!(line, "A U Thor <author@example.com> 946684800 +0000");
     }
 
     #[test]

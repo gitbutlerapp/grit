@@ -1,7 +1,7 @@
 //! `grit commit` — record a new commit with configurable staging scope.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::commit::parse_date_to_git_timestamp;
+use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_line_arg};
 use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
@@ -333,30 +333,12 @@ fn resolve_commit_message(
 }
 
 fn parse_trailer_arg(raw: &str) -> Result<(String, String)> {
-    let raw = raw.trim();
-    let sep_pos = raw
-        .char_indices()
-        .find(|(_, c)| *c == ':' || *c == '=')
-        .map(|(i, _)| i);
-    let Some(pos) = sep_pos else {
-        bail!("trailer must be key=value or key: value (got '{raw}')");
-    };
-    Ok((
-        raw[..pos].trim().to_owned(),
-        raw[pos + 1..].trim().to_owned(),
-    ))
+    parse_trailer_command_line_arg(raw).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn parse_trailer_date(raw: &str) -> Result<String> {
-    let trimmed = raw.trim();
-    if let Some(canonical) = parse_date_to_git_timestamp(trimmed) {
-        return Ok(canonical);
-    }
-    let parts: Vec<&str> = trimmed.rsplitn(2, ' ').collect();
-    if parts.len() == 2 && parts[1].chars().all(|c| c.is_ascii_digit()) {
-        return Ok(trimmed.to_owned());
-    }
-    Err(anyhow::anyhow!("could not parse --date '{raw}'"))
+    normalize_commit_date_override(raw)
+        .map_err(|e| anyhow::anyhow!("could not parse --date '{raw}': {e}"))
 }
 
 fn read_message_file(path: &str) -> Result<String> {

@@ -170,6 +170,114 @@ fn commit_p1_raw_git_date_timestamp() -> TestResult {
     Ok(())
 }
 
+fn git_interpret_trailers_trailer_line(trailer: &str) -> String {
+    let out = Command::new("git")
+        .args([
+            "interpret-trailers",
+            "--trailer",
+            trailer,
+            "--only-trailers",
+        ])
+        .stdin(std::process::Stdio::null())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("spawn git interpret-trailers");
+    assert!(
+        out.status.success(),
+        "git interpret-trailers: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+#[test]
+fn commit_p1_trailer_link_url_query_matches_git() -> TestResult {
+    let trailer = "Link: https://x?a=b";
+    let git_line = git_interpret_trailers_trailer_line(trailer);
+    let (grit_key, grit_val) = grit_lib::commit::parse_trailer_command_line_arg(trailer)?;
+    let grit_line = if grit_val.is_empty() {
+        format!("{grit_key}:")
+    } else {
+        format!("{grit_key}: {grit_val}")
+    };
+    assert_eq!(grit_line, git_line);
+
+    let scratch = Scratch::new("trailer-link")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "grit.changeIds", "false"]);
+    fs::write(root.join("f"), "x\n")?;
+
+    let (code, _, stderr) = gs(root, ["commit", "-m", "subject", "--trailer", trailer]);
+    assert_eq!(code, 0, "{stderr}");
+    let body = git(root, &["log", "-1", "--format=%B"]);
+    assert!(
+        body.contains("Link: https://x?a=b"),
+        "expected Link trailer with query string, got:\n{body}"
+    );
+    git(root, &["fsck", "--strict"]);
+    Ok(())
+}
+
+#[test]
+fn commit_p1_bad_timezone_normalizes_like_git() -> TestResult {
+    let scratch = Scratch::new("bad-tz")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "grit.changeIds", "false"]);
+    fs::write(root.join("f"), "x\n")?;
+
+    let (code, _, stderr) = gs(
+        root,
+        [
+            "commit",
+            "-m",
+            "dated",
+            "--author",
+            "A <a@example.com>",
+            "--date",
+            "946684800 garbage",
+        ],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    let at_ai = git(root, &["log", "-1", "--format=%at %ai"])
+        .trim()
+        .to_string();
+    assert_eq!(at_ai, "946684800 2000-01-01 00:00:00 +0000");
+    git(root, &["fsck", "--strict"]);
+    Ok(())
+}
+
+#[test]
+fn commit_p1_at_epoch_bad_timezone_normalizes_like_git() -> TestResult {
+    let scratch = Scratch::new("at-bad-tz")?;
+    let root = scratch.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "grit.changeIds", "false"]);
+    fs::write(root.join("f"), "x\n")?;
+
+    let (code, _, stderr) = gs(
+        root,
+        [
+            "commit",
+            "-m",
+            "dated",
+            "--author",
+            "A <a@example.com>",
+            "--date",
+            "@946684800 garbage",
+        ],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    let at_ai = git(root, &["log", "-1", "--format=%at %ai"])
+        .trim()
+        .to_string();
+    assert_eq!(at_ai, "946684800 2000-01-01 00:00:00 +0000");
+    git(root, &["fsck", "--strict"]);
+    Ok(())
+}
+
 #[test]
 fn commit_p1_trailer_colon_before_equals_in_value() -> TestResult {
     let scratch = Scratch::new("trailer-colon")?;
