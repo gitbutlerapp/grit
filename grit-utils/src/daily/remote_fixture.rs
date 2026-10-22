@@ -377,6 +377,45 @@ pub fn verify_fetch_incremental(ctx: &DailyHeadlineContext, cwd: &Path) -> Resul
     Ok(())
 }
 
+pub fn verify_fetch_one_branch(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    configure_client_remote(&ctx.git, cwd, remote)?;
+    let branch = remote.meta.default_branch.as_str();
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_git(&ctx.git, cwd, &["fetch", "-q", "origin", branch])?;
+    verify_client_fetch_tip(&ctx.git, &remote.bare, cwd, branch)?;
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_grit(&ctx.grit, cwd, &["fetch", "origin", branch])?;
+    verify_client_fetch_tip(&ctx.git, &remote.bare, cwd, branch)?;
+    Ok(())
+}
+
+pub fn verify_fetch_dry_run(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    configure_client_remote(&ctx.git, cwd, remote)?;
+    let branch = remote.meta.default_branch.as_str();
+    let tracking = format!("refs/remotes/origin/{branch}");
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    let before = ref_oid(&ctx.git, cwd, &tracking)?;
+    run_git(
+        &ctx.git,
+        cwd,
+        &["fetch", "--dry-run", "-q", "origin", branch],
+    )?;
+    let after_git = ref_oid(&ctx.git, cwd, &tracking)?;
+    if before != after_git {
+        bail!("git fetch --dry-run must not move {tracking}");
+    }
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    let before_grit = ref_oid(&ctx.git, cwd, &tracking)?;
+    run_grit(&ctx.grit, cwd, &["fetch", "--dry-run", "origin", branch])?;
+    let after_grit = ref_oid(&ctx.git, cwd, &tracking)?;
+    if before_grit != after_grit {
+        bail!("grit fetch --dry-run must not move {tracking}");
+    }
+    Ok(())
+}
+
 pub fn verify_fetch_noop(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;

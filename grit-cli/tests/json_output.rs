@@ -2360,7 +2360,10 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     );
 
     let fetch = gs_json(&seed, &["fetch"]);
-    assert_eq!(keys(&fetch), ["remote", "updated", "updates"]);
+    assert_eq!(
+        keys(&fetch),
+        ["dry_run", "rejected", "remote", "updated", "updates"]
+    );
 
     write_file(&seed.join("a.txt"), "dirty\n");
     let restored = gs_json(&seed, &["restore", "a.txt"]);

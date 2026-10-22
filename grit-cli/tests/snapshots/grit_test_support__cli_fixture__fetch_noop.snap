@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"remote\":\"origin\",\"updates\":[],\"updated\":0}\n",
+    "stdout": "{\"remote\":\"origin\",\"updates\":[],\"updated\":0,\"dry_run\":false,\"rejected\":false}\n",
     "stderr": ""
   },
   "markdown": {

@@ -395,7 +395,7 @@ fn non_fast_forward_local_branch_rejected_file() {
     run_git(&grit_c, &["checkout", "-q", "main"]);
     remote.commit_empty("r3");
 
-    let err = fetch_local(
+    let outcome = fetch_local(
         &grit_c.join(".git"),
         &remote.git_dir(),
         &FetchOptions {
@@ -406,10 +406,17 @@ fn non_fast_forward_local_branch_rejected_file() {
             ..Default::default()
         },
     )
-    .unwrap_err();
+    .expect("fetch");
+    let rejected = outcome
+        .updates
+        .iter()
+        .find(|u| u.local_ref.as_deref() == Some("refs/heads/forceme"));
     assert!(
-        matches!(err, Error::FetchNonFastForward { .. }),
-        "got {err:?}"
+        rejected.is_some_and(
+            |u| u.mode == grit_lib::remote::transfer::UpdateMode::NonFastForwardRejected
+        ),
+        "expected rejected update, got {:?}",
+        outcome.updates
     );
 }
 

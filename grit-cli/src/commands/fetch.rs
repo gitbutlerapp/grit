@@ -1,10 +1,14 @@
 //! `grit fetch` — download refs and objects from a remote (default `origin`).
 
+use crate::commands::fetch_args::FetchArgs;
 use crate::output::OutputMode;
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode};
+use grit_lib::remote::fetch_request::resolve_fetch_invocation;
+use grit_lib::remote::transfer::{
+    resolve_fetch_prune, resolve_fetch_tags, FetchOptions, RefUpdate, TagMode, UpdateMode,
+};
 use grit_lib::remote::{DefaultHttpClientFactory, RemoteError, DEFAULT_REMOTE};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -21,6 +25,38 @@ pub struct FetchOutcome {
     pub remote: String,
     pub updates: Vec<FetchUpdate>,
     pub updated: usize,
+    /// True when the fetch was a dry run (no refs or objects written).
+    pub dry_run: bool,
+    /// True when any ref update was rejected (exit 1 when set).
+    pub rejected: bool,
+}
+
+/// Per-ref fetch status in JSON.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FetchUpdateStatus {
+    New,
+    FastForward,
+    Forced,
+    Pruned,
+    Rejected,
+    UpToDate,
+}
+
+impl From<UpdateMode> for FetchUpdateStatus {
+    fn from(mode: UpdateMode) -> Self {
+        match mode {
+            UpdateMode::New => Self::New,
+            UpdateMode::FastForward => Self::FastForward,
+            UpdateMode::Forced => Self::Forced,
+            UpdateMode::DeletedMissing => Self::Pruned,
+            UpdateMode::NonFastForwardRejected | UpdateMode::TagUpdateRejected => Self::Rejected,
+            UpdateMode::UpToDate | UpdateMode::NoChangeNeeded | UpdateMode::Unborn => {
+                Self::UpToDate
+            }
+            UpdateMode::SourceObjectNotFound => Self::Rejected,
+        }
+    }
 }
 
 /// One updated tracking ref. `old_oid`/`new_oid` are full hex, or `null` for a
@@ -29,8 +65,14 @@ pub struct FetchOutcome {
 pub struct FetchUpdate {
     #[serde(rename = "ref")]
     pub ref_name: String,
+    pub remote_ref: String,
+    pub status: FetchUpdateStatus,
     pub old_oid: Option<String>,
     pub new_oid: Option<String>,
+    /// Rejection detail, present only when `status == "rejected"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl HumanRender for FetchOutcome {
@@ -38,11 +80,20 @@ impl HumanRender for FetchOutcome {
         for update in &self.updates {
             let from = update.old_oid.as_deref().map_or("new", short_hex);
             let to = update.new_oid.as_deref().map_or("deleted", short_hex);
-            outln!(w, "  {}  {from} → {to}", update.ref_name);
+            if update.remote_ref == update.ref_name {
+                outln!(w, "  {}  {from} → {to}", update.ref_name);
+            } else {
+                outln!(
+                    w,
+                    "  {}  ← {}  {from} → {to}",
+                    update.ref_name,
+                    update.remote_ref
+                );
+            }
         }
-        if self.updated == 0 {
+        if self.updated == 0 && !self.rejected {
             outln!(w, "Already up to date with {}.", self.remote);
-        } else {
+        } else if self.updated > 0 {
             outln!(
                 w,
                 "Fetched {} update{} from {}.",
@@ -66,84 +117,156 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
-pub fn run(
-    remote: Option<String>,
-    prune: bool,
-    no_prune: bool,
-    mode: OutputMode,
-) -> Result<FetchOutcome> {
+pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
-    let remote_name = remote.unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
-    let cli_prune = if prune {
-        Some(true)
-    } else if no_prune {
-        Some(false)
-    } else {
-        None
-    };
-    let prune_enabled = resolve_fetch_prune(&config, &remote_name, cli_prune)
+    let invocation = resolve_fetch_invocation(
+        &config,
+        args.remote.as_deref(),
+        &args.refspecs,
+        DEFAULT_REMOTE,
+    );
+    let remote_name = invocation.remote.clone();
+    let prune_enabled = resolve_fetch_prune(&config, &remote_name, args.prune_override())
         .context("could not resolve fetch prune settings")?;
+    let tags = resolve_fetch_tags(&config, &remote_name, args.tag_mode_override());
 
     let factory = DefaultHttpClientFactory;
-    let result = match fetch_once(&repo, &config, &remote_name, prune_enabled, &factory, mode) {
+    let progress = if args.quiet {
+        TerminalProgress::quiet(mode)
+    } else {
+        TerminalProgress::new(mode)
+    };
+    let mut progress = progress;
+    let result = match fetch_once(
+        &repo,
+        &config,
+        &invocation,
+        tags,
+        prune_enabled,
+        args.dry_run,
+        &factory,
+        &mut progress,
+    ) {
         Ok(result) => result,
         Err(err) => {
             let url = config
                 .get(&format!("remote.{remote_name}.url"))
                 .unwrap_or_default();
             if auth::offer_reauth(&err, &url)? {
-                fetch_once(&repo, &config, &remote_name, prune_enabled, &factory, mode)?
+                fetch_once(
+                    &repo,
+                    &config,
+                    &invocation,
+                    tags,
+                    prune_enabled,
+                    args.dry_run,
+                    &factory,
+                    &mut progress,
+                )?
             } else {
                 return Err(err);
             }
         }
     };
 
-    let updates: Vec<FetchUpdate> = result
-        .updates
-        .iter()
-        .filter(|update| update.mode.modified_repo())
-        .filter_map(|update| {
-            let ref_name = update.local_ref.clone()?;
-            Some(FetchUpdate {
-                ref_name,
-                old_oid: update.old_oid.as_ref().map(|o| o.to_hex()),
-                new_oid: update.new_oid.as_ref().map(|o| o.to_hex()),
-            })
-        })
-        .collect();
-    let updated = updates.len();
+    let (updates, updated, rejected) = map_updates(&result.updates);
 
     Ok(FetchOutcome {
         remote: remote_name,
         updates,
         updated,
+        dry_run: args.dry_run,
+        rejected,
     })
 }
 
+fn map_updates(raw: &[RefUpdate]) -> (Vec<FetchUpdate>, usize, bool) {
+    let mut updates = Vec::new();
+    let mut updated = 0usize;
+    let mut rejected = false;
+    for update in raw {
+        if !include_in_report(update.mode) {
+            continue;
+        }
+        let status = FetchUpdateStatus::from(update.mode);
+        if update.mode.modified_repo() {
+            updated += 1;
+        }
+        if status == FetchUpdateStatus::Rejected {
+            rejected = true;
+        }
+        let ref_name = update
+            .local_ref
+            .clone()
+            .unwrap_or_else(|| update.remote_ref.clone());
+        updates.push(FetchUpdate {
+            ref_name,
+            remote_ref: update.remote_ref.clone(),
+            status,
+            old_oid: update.old_oid.as_ref().map(|o| o.to_hex()),
+            new_oid: update.new_oid.as_ref().map(|o| o.to_hex()),
+            reason: rejection_reason(update.mode, &update.note),
+        });
+    }
+    (updates, updated, rejected)
+}
+
+fn include_in_report(mode: UpdateMode) -> bool {
+    matches!(
+        mode,
+        UpdateMode::New
+            | UpdateMode::FastForward
+            | UpdateMode::Forced
+            | UpdateMode::DeletedMissing
+            | UpdateMode::NonFastForwardRejected
+            | UpdateMode::TagUpdateRejected
+            | UpdateMode::SourceObjectNotFound
+    )
+}
+
+fn rejection_reason(mode: UpdateMode, note: &Option<String>) -> Option<String> {
+    if note.is_some() && mode == UpdateMode::NonFastForwardRejected {
+        return note.clone();
+    }
+    match mode {
+        UpdateMode::NonFastForwardRejected => {
+            Some("not a fast-forward — use a leading `+` on the refspec to force".to_owned())
+        }
+        UpdateMode::TagUpdateRejected => {
+            Some("tag already exists locally and did not move".to_owned())
+        }
+        UpdateMode::SourceObjectNotFound => Some("source ref not found on the remote".to_owned()),
+        _ => note.clone(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn fetch_once(
     repo: &grit_lib::repo::Repository,
     config: &ConfigSet,
-    remote_name: &str,
+    invocation: &grit_lib::remote::fetch_request::FetchInvocation,
+    tags: TagMode,
     prune: bool,
+    dry_run: bool,
     factory: &DefaultHttpClientFactory,
-    mode: OutputMode,
+    progress: &mut TerminalProgress,
 ) -> Result<grit_lib::remote::transfer::FetchOutcome> {
-    let remote = crate::commands::remote::resolve_remote_or_url(Some(config), remote_name)?;
-    let mut progress = TerminalProgress::new(mode);
+    let remote = crate::commands::remote::resolve_remote_or_url(Some(config), &invocation.remote)?;
     remote
         .fetch(
             repo,
             FetchOptions {
-                tags: TagMode::Following,
+                refspecs: invocation.user_refspecs.clone(),
+                tags,
                 thread_policy: repo.thread_policy(),
                 environment: crate::context::environment(),
                 prune,
+                dry_run,
                 ..Default::default()
             },
-            &mut progress,
+            progress,
             Some(factory),
         )
         .map_err(map_remote_fetch_error)
@@ -207,5 +330,26 @@ mod map_remote_error_tests {
         let payload = structured_json_payload(&err).expect("structured payload");
         assert_eq!(payload.kind, "hash_collision");
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));
+    }
+
+    #[test]
+    fn fetch_update_status_serializes_snake_case() {
+        use super::{FetchUpdate, FetchUpdateStatus};
+        for (status, expected) in [
+            (FetchUpdateStatus::New, "new"),
+            (FetchUpdateStatus::FastForward, "fast_forward"),
+            (FetchUpdateStatus::Rejected, "rejected"),
+        ] {
+            let update = FetchUpdate {
+                ref_name: "refs/heads/main".to_owned(),
+                remote_ref: "refs/heads/main".to_owned(),
+                status,
+                old_oid: None,
+                new_oid: None,
+                reason: None,
+            };
+            let value = serde_json::to_value(&update).expect("json");
+            assert_eq!(value["status"].as_str(), Some(expected));
+        }
     }
 }

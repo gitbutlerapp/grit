@@ -402,7 +402,16 @@ pub fn print_fetch_updates(
             .as_deref()
             .map(short_hex)
             .unwrap_or("deleted");
-        outln!(w, "- `{}` · `{from}` → `{to}`", update.ref_name);
+        if update.remote_ref == update.ref_name {
+            outln!(w, "- `{}` · `{from}` → `{to}`", update.ref_name);
+        } else {
+            outln!(
+                w,
+                "- `{}` ← `{}` · `{from}` → `{to}`",
+                update.ref_name,
+                update.remote_ref
+            );
+        }
     }
     if updated > 0 {
         outln!(w);

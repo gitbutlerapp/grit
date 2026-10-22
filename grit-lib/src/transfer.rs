@@ -280,6 +280,29 @@ pub fn resolve_fetch_prune(
     Ok(false)
 }
 
+/// Resolve tag-following policy for a fetch.
+///
+/// When `cli_tags` is [`Some`], `true` maps to [`TagMode::All`] (`--tags`) and
+/// `false` to [`TagMode::None`] (`--no-tags`). Otherwise reads
+/// `remote.<remote>.tagOpt` (`--tags` / `--no-tags`, Git-compatible) and defaults
+/// to [`TagMode::Following`].
+#[must_use]
+pub fn resolve_fetch_tags(
+    config: &crate::config::ConfigSet,
+    remote: &str,
+    cli_tags: Option<bool>,
+) -> TagMode {
+    if let Some(all) = cli_tags {
+        return if all { TagMode::All } else { TagMode::None };
+    }
+    let key = format!("remote.{remote}.tagOpt");
+    match config.get(&key).as_deref().map(str::trim) {
+        Some("--tags") | Some("tags") | Some("all") => TagMode::All,
+        Some("--no-tags") | Some("no-tags") | Some("no") | Some("never") => TagMode::None,
+        _ => TagMode::Following,
+    }
+}
+
 fn optional_config_bool(config: &crate::config::ConfigSet, key: &str) -> Result<Option<bool>> {
     match config.get_bool(key) {
         None => Ok(None),
@@ -1314,11 +1337,7 @@ pub(crate) fn enforce_fetch_ref_update(
             }
         }
     }
-    if mode == UpdateMode::NonFastForwardRejected && explicit_refspec_fetch {
-        return Err(Error::FetchNonFastForward {
-            local_ref: local_ref.to_owned(),
-        });
-    }
+    let _ = explicit_refspec_fetch;
     Ok(())
 }
 
@@ -2274,7 +2293,14 @@ pub(crate) fn finish_anonymous_url_fetch(
     if !write_fetch_head {
         return Ok(());
     }
-    let Some(source) = opts.fetch_source.as_deref() else {
+    let source = opts.fetch_source.clone().or_else(|| {
+        let name = opts.remote_name.as_deref()?;
+        let config = config_for_git_dir(git_dir)?;
+        config
+            .get(&format!("remote.{name}.url"))
+            .filter(|url| !url.trim().is_empty())
+    });
+    let Some(source) = source.as_deref() else {
         return Ok(());
     };
     let lines = fetch_head_lines_for_ad_hoc_fetch(

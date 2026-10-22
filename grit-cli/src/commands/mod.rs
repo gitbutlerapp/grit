@@ -13,6 +13,7 @@ pub mod completions;
 pub mod config;
 pub mod diff;
 pub mod fetch;
+pub mod fetch_args;
 pub mod fsck;
 pub mod gc;
 pub mod history;

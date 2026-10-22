@@ -8,7 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
-grit pull
+grit pull [--ff-only] [--no-rebase]
 ```
 
 ## Description
@@ -23,7 +23,12 @@ The fetch step uses the same terminal progress as [`grit fetch`](../fetch/) and 
 
 ## Options
 
-`grit pull` takes no options beyond the [global ones](../global-options/).
+| Option | Description |
+| --- | --- |
+| `--ff-only` | Refuse when a merge would be required (exit 1 when diverged). |
+| `--no-rebase` | Merge instead of rebasing, overriding `pull.rebase`. |
+
+See also [global options](../global-options/).
 
 ## Examples
 
@@ -54,9 +59,8 @@ The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stabl
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
 | `ahead` | integer or null | Local-only commits when `result` is `refused_not_ff`. |
 | `behind` | integer or null | Upstream-only commits when `result` is `refused_not_ff`. |
-| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text (same shape as [`grit merge`](../merge/#json-output)). |
-| `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts`. |
-| `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort`. |
+| `conflict_details` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text (same shape as [`grit merge`](../merge/#json-output)). |
+| `conflicts` | array of strings or null | Paths with conflicts (legacy parallel to `conflict_details`). |
 
 Example:
 

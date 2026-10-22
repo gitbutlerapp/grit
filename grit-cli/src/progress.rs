@@ -145,7 +145,17 @@ impl TerminalProgress {
     /// Create a sink; it draws nothing unless `mode` is human and stderr is a TTY.
     #[must_use]
     pub fn new(mode: OutputMode) -> Self {
-        let draw = mode == OutputMode::Human && io::stderr().is_terminal();
+        Self::new_inner(mode, false)
+    }
+
+    /// Progress sink that never draws (for `-q` / `--quiet`).
+    #[must_use]
+    pub fn quiet(mode: OutputMode) -> Self {
+        Self::new_inner(mode, true)
+    }
+
+    fn new_inner(mode: OutputMode, force_silent: bool) -> Self {
+        let draw = !force_silent && mode == OutputMode::Human && io::stderr().is_terminal();
         Self {
             origin: Instant::now(),
             draw,

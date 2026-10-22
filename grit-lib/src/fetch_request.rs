@@ -5,11 +5,14 @@
 //! remote-tracking refs (without duplicating [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) lines).
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use thiserror::Error;
 
+use crate::config::ConfigSet;
 use crate::objects::ObjectId;
 use crate::refspec::{parse_fetch_refspec, RefspecError, RefspecItem};
+use crate::repo_handles::configured_remote_names;
 use crate::transfer::{match_positive, ref_excluded, MatchedRef};
 
 /// How an explicit fetch refspec source side was resolved against advertised refs.
@@ -125,6 +128,71 @@ pub struct FetchRemoteAdvertisement<'a> {
     pub refs: &'a [(String, ObjectId)],
     /// Tip oid of the remote `HEAD` ref when advertised (even if omitted from `refs`).
     pub head_oid: Option<ObjectId>,
+}
+
+/// Remote name and explicit refspec strings after parsing `grit fetch` positionals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchInvocation {
+    /// Configured remote name, URL, or filesystem path to fetch from.
+    pub remote: String,
+    /// Command-line refspecs (`main`, `refs/heads/x:refs/heads/y`, …). Empty uses configured refspecs.
+    pub user_refspecs: Vec<String>,
+}
+
+/// Classify `grit fetch [<remote>] [<refspec>…]` positionals (no refspec parsing).
+///
+/// The first token is treated as the remote when it names a configured remote,
+/// looks like a URL, or is an existing path; otherwise the default remote is
+/// used and every token is a refspec.
+#[must_use]
+pub fn resolve_fetch_invocation(
+    config: &ConfigSet,
+    remote: Option<&str>,
+    refspecs: &[String],
+    default_remote: &str,
+) -> FetchInvocation {
+    let mut tokens: Vec<String> = Vec::new();
+    if let Some(name) = remote {
+        if !name.is_empty() {
+            tokens.push(name.to_owned());
+        }
+    }
+    tokens.extend_from_slice(refspecs);
+
+    if tokens.is_empty() {
+        return FetchInvocation {
+            remote: default_remote.to_owned(),
+            user_refspecs: Vec::new(),
+        };
+    }
+
+    if is_fetch_remote_token(config, &tokens[0]) {
+        FetchInvocation {
+            remote: tokens.remove(0),
+            user_refspecs: tokens,
+        }
+    } else {
+        FetchInvocation {
+            remote: default_remote.to_owned(),
+            user_refspecs: tokens,
+        }
+    }
+}
+
+fn is_fetch_remote_token(config: &ConfigSet, token: &str) -> bool {
+    if configured_remote_names(config).iter().any(|n| n == token) {
+        return true;
+    }
+    if Path::new(token).exists() {
+        return true;
+    }
+    token.contains("://")
+        || token.starts_with('/')
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.ends_with(".git")
+        || token.ends_with(".bundle")
+        || (token.contains(':') && !token.contains(' '))
 }
 
 /// Inputs for [`FetchRefspecPlan::resolve`].
@@ -702,6 +770,36 @@ mod tests {
         assert!(
             refname_match_fetch_dwim("main", "refs/heads/main")
                 > refname_match_fetch_dwim("main", "refs/tags/main")
+        );
+    }
+
+    #[test]
+    fn resolve_fetch_invocation_remote_vs_refspec() {
+        use super::{resolve_fetch_invocation, FetchInvocation};
+        use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+
+        let file = ConfigFile::parse(
+            std::path::Path::new("cfg"),
+            "[remote \"origin\"]\n\turl = /tmp/x.git\n",
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        let mut config = ConfigSet::new();
+        config.merge(&file);
+
+        assert_eq!(
+            resolve_fetch_invocation(&config, Some("origin"), &["main".into()], "origin"),
+            FetchInvocation {
+                remote: "origin".into(),
+                user_refspecs: vec!["main".into()],
+            }
+        );
+        assert_eq!(
+            resolve_fetch_invocation(&config, None, &["main".into()], "origin"),
+            FetchInvocation {
+                remote: "origin".into(),
+                user_refspecs: vec!["main".into()],
+            }
         );
     }
 }
