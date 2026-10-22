@@ -109,19 +109,67 @@ fn hash_hunk_id(
     side: DiffSide,
     path: &str,
     hunk: &StructuredHunk,
-    include_line_anchor: bool,
+    duplicate_rank: Option<u32>,
 ) -> HunkId {
     let mut hasher = HashAlgo::Sha1.checksum_hasher();
     hasher.update(&[side.tag_byte()]);
     hasher.update(path.as_bytes());
     hasher.update(&[0]);
     hash_hunk_body(&mut hasher, hunk);
-    if include_line_anchor {
-        hasher.update(&(hunk.old_start as u64).to_le_bytes());
-        hasher.update(&(hunk.new_start as u64).to_le_bytes());
+    if let Some(rank) = duplicate_rank {
+        hasher.update(&rank.to_le_bytes());
     }
     let digest = hasher.finalize();
     HunkId::from_digest(&digest)
+}
+
+#[derive(Eq, PartialEq, Ord, PartialOrd)]
+struct DuplicateSortKey {
+    old_start: usize,
+    new_start: usize,
+    is_peer: bool,
+    index: usize,
+}
+
+fn duplicate_ranks(hunks: &[StructuredHunk], peer_hunks: &[StructuredHunk]) -> Vec<Option<u32>> {
+    let body_counts = body_count_map(hunks, peer_hunks);
+    hunks
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            let body = hunk_body_digest(h);
+            if body_counts.get(&body).copied().unwrap_or(0) <= 1 {
+                return None;
+            }
+            let mut keys: Vec<DuplicateSortKey> = Vec::new();
+            for (j, x) in hunks.iter().enumerate() {
+                if hunk_body_digest(x) == body {
+                    keys.push(DuplicateSortKey {
+                        old_start: x.old_start,
+                        new_start: x.new_start,
+                        is_peer: false,
+                        index: j,
+                    });
+                }
+            }
+            for (j, x) in peer_hunks.iter().enumerate() {
+                if hunk_body_digest(x) == body {
+                    keys.push(DuplicateSortKey {
+                        old_start: x.old_start,
+                        new_start: x.new_start,
+                        is_peer: true,
+                        index: j,
+                    });
+                }
+            }
+            keys.sort();
+            let rank = keys
+                .iter()
+                .position(|k| !k.is_peer && k.index == i)
+                .expect("hunk present in duplicate sort list") as u32;
+            Some(rank)
+        })
+        .collect()
 }
 
 fn body_count_map(
@@ -177,14 +225,11 @@ pub fn hunk_ids_with_duplicate_peers(
     hunks: &[StructuredHunk],
     peer_hunks: &[StructuredHunk],
 ) -> Vec<HunkId> {
-    let body_counts = body_count_map(hunks, peer_hunks);
+    let ranks = duplicate_ranks(hunks, peer_hunks);
     hunks
         .iter()
-        .map(|h| {
-            let body = hunk_body_digest(h);
-            let duplicate_body = body_counts.get(&body).copied().unwrap_or(0) > 1;
-            hash_hunk_id(side, path, h, duplicate_body)
-        })
+        .zip(ranks)
+        .map(|(h, rank)| hash_hunk_id(side, path, h, rank))
         .collect()
 }
 
@@ -290,6 +335,28 @@ mod tests {
         let with_peer =
             hunk_ids_with_duplicate_peers(DiffSide::Unstaged, "f", &[second.clone()], &[first]);
         assert_eq!(with_peer[0], both[1]);
+    }
+
+    #[test]
+    fn hunk_id_stable_when_insertion_coordinates_shift_after_staging() {
+        let body = vec![line(StructuredLineKind::Add, "insert")];
+        let mut first = hunk(body.clone());
+        first.old_start = 19;
+        first.new_start = 19;
+        let mut second = hunk(body);
+        second.old_start = 19;
+        second.new_start = 20;
+
+        let both = hunk_ids(DiffSide::Unstaged, "f", &[first.clone(), second.clone()]);
+        assert_ne!(both[0], both[1]);
+        let id_later = both[1].clone();
+
+        let mut shifted = second;
+        shifted.old_start = 20;
+        shifted.new_start = 20;
+
+        let after = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, "f", &[shifted], &[first]);
+        assert_eq!(after[0], id_later);
     }
 
     #[test]
