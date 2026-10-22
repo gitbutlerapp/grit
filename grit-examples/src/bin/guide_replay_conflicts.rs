@@ -163,7 +163,10 @@ fn main() -> Result<(), grit_lib::error::Error> {
         return Ok(());
     }
 
-    let root = std::env::args().nth(1).map(PathBuf::from).expect("path");
+    let root = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
     let repo = open_repo(&root)?;
 
     if repo.git_dir().join("CHERRY_PICK_HEAD").exists()
