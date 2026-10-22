@@ -5,12 +5,12 @@
 //! This module is the single owner of the `sha1`, `sha2`, and `sha1dc` crates in
 //! `grit-lib`.
 //!
-//! **Object ids** name Git objects. SHA-1 ids are computed with [`sha1dc`] (collision
-//! detection, standard digest mode). Use [`ObjectHasher::try_finalize`] on ingestion
-//! paths. [`ObjectHasher`] / [`HashAlgo::hash_object`] remain for callers not yet on
-//! the checked API. Canonical store bytes are `"<kind> <len>\\0<payload>"`; use
-//! [`HashAlgo::digest`] when hashing raw bytes that should become an [`ObjectId`]
-//! (for example verifying loose object headers).
+//! **Object ids** name Git objects. SHA-1 ids use accelerated plain SHA-1 from the
+//! [`sha1`] crate (same digests as Git). The [`sha1dc`] crate is used only for
+//! optional chosen-prefix collision *signals* ([`sha1dc_chosen_prefix_digest`]); ingestion
+//! and object-id computation never fail because of sha1dc. Canonical store bytes are
+//! `"<kind> <len>\\0<payload>"`; use [`HashAlgo::digest`] when hashing raw bytes that
+//! should become an [`ObjectId`] (for example verifying loose object headers).
 //!
 //! **Checksums** detect corruption in pack, index, MIDX, commit-graph, and related
 //! file trailers. They use the same digest algorithms but are not object identities.
@@ -70,9 +70,8 @@ impl std::fmt::Display for Backend {
 
 /// Report the hashing backend used for object-id digests on this CPU.
 ///
-/// SHA-1 object ids go through [`sha1dc`] (hardware SHA-1 when available). SHA-256
-/// uses the `sha2` crate. File checksums use plain accelerated SHA-1 from the `sha1`
-/// crate, not sha1dc.
+/// SHA-1 object ids use accelerated plain SHA-1 from the [`sha1`] crate. SHA-256
+/// uses the `sha2` crate. File checksums also use plain SHA-1 from [`sha1`], not sha1dc.
 ///
 /// Detection uses the same target features as those crates (`sha` on x86_64, `sha2` on
 /// AArch64). `algo` is accepted for a stable signature; both supported algorithms share
@@ -189,7 +188,7 @@ impl Write for ChecksumHasher {
 /// Incremental hasher for Git's supported object-id algorithms.
 #[derive(Debug, Clone)]
 pub enum ObjectHasher {
-    /// SHA-1 (20-byte digests) with sha1dc collision detection.
+    /// SHA-1 (20-byte digests); internal hasher may use sha1dc but ids match plain SHA-1.
     Sha1(Sha1dcHasher),
     /// SHA-256 (32-byte digests).
     Sha256(Sha256),
@@ -244,20 +243,11 @@ impl ObjectHasher {
         }
     }
 
-    /// Finish hashing and return the object id, or [`Error::HashCollision`] for SHA-1.
+    /// Finish hashing and return the object id (same result as [`Self::finalize`]).
     ///
-    /// # Errors
-    ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// SHA-1 uses plain accelerated digests for Git compatibility; sha1dc is not consulted.
     pub fn try_finalize(self) -> Result<ObjectId> {
-        match self {
-            Self::Sha1(h) => match h.finalize() {
-                Ok(digest) => Ok(object_id_from_sha1_digest(&digest)),
-                Err(collision) => Err(collision_to_error(collision)),
-            },
-            Self::Sha256(h) => Ok(ObjectId::from_bytes(h.finalize().as_slice())
-                .unwrap_or_else(|_| unreachable!("SHA-256 digest is 32 bytes"))),
-        }
+        Ok(self.finalize())
     }
 
     /// Write the raw digest into `out` and return the number of bytes written.
@@ -269,10 +259,7 @@ impl ObjectHasher {
     pub fn finalize_into(self, out: &mut [u8]) -> Result<usize> {
         match self {
             Self::Sha1(h) => {
-                let oid = match h.finalize() {
-                    Ok(digest) => object_id_from_sha1_digest(&digest),
-                    Err(collision) => return Err(collision_to_error(collision)),
-                };
+                let oid = sha1_object_id_infallible(h);
                 let bytes = oid.as_bytes();
                 if out.len() < bytes.len() {
                     return Err(Error::InvalidObjectId(format!(
@@ -346,15 +333,9 @@ impl HashAlgo {
         hasher.finalize()
     }
 
-    /// Like [`Self::digest`], but surfaces SHA-1 collision detection.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Like [`Self::digest`]; kept for a stable checked API (always succeeds for SHA-1).
     pub fn try_digest(self, data: &[u8]) -> Result<ObjectId> {
-        let mut hasher = self.hasher();
-        hasher.update(data);
-        hasher.try_finalize()
+        Ok(self.digest(data))
     }
 
     /// Hash canonical Git store bytes for `kind` and `data`.
@@ -363,11 +344,7 @@ impl HashAlgo {
         hash_object(self, kind, data)
     }
 
-    /// Like [`Self::hash_object`], but surfaces SHA-1 collision detection.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Like [`Self::hash_object`]; kept for a stable checked API (always succeeds for SHA-1).
     pub fn try_hash_object(self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         try_hash_object(self, kind, data)
     }
@@ -385,30 +362,22 @@ pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
     hasher.finalize()
 }
 
-/// Like [`hash_object`], but surfaces SHA-1 collision detection.
-///
-/// # Errors
-///
-/// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+/// Like [`hash_object`]; kept for a stable checked API (always succeeds for SHA-1).
 pub fn try_hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
-    let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
-    let mut hasher = ObjectHasher::for_object(algo, kind, len);
-    hasher.update(data);
-    let oid = hasher.try_finalize()?;
-    if algo == HashAlgo::Sha1 {
-        detect_standalone_sha1_collision(data)?;
-    }
-    Ok(oid)
+    Ok(hash_object(algo, kind, data))
 }
 
-/// Detect chosen-prefix collisions on `payload` alone (SHAttered block prefixes).
-fn detect_standalone_sha1_collision(payload: &[u8]) -> Result<()> {
+/// Run sha1dc on `data` and return the colliding digest when a chosen-prefix collision is detected.
+///
+/// This does not affect object-id computation; use it for optional diagnostics (for example fsck).
+#[must_use]
+pub fn sha1dc_chosen_prefix_digest(data: &[u8]) -> Option<ObjectId> {
     let mut hasher = Sha1dcHasher::new();
-    hasher.update(payload);
-    if let Err(collision) = hasher.finalize() {
-        return Err(collision_to_error(collision));
-    }
-    Ok(())
+    hasher.update(data);
+    hasher
+        .finalize()
+        .err()
+        .map(|collision| object_id_from_sha1_digest(&collision.digest()))
 }
 
 fn object_id_from_sha1_digest(digest: &sha1dc::Digest) -> ObjectId {
@@ -420,12 +389,6 @@ fn sha1_object_id_infallible(hasher: Sha1dcHasher) -> ObjectId {
     match hasher.finalize() {
         Ok(digest) => object_id_from_sha1_digest(&digest),
         Err(collision) => object_id_from_sha1_digest(&collision.digest()),
-    }
-}
-
-fn collision_to_error(collision: sha1dc::Collision) -> Error {
-    Error::HashCollision {
-        oid: object_id_from_sha1_digest(&collision.digest()),
     }
 }
 
@@ -1001,20 +964,16 @@ mod tests {
     }
 
     #[test]
-    fn try_finalize_detects_shattered_prefix() {
+    fn shattered_prefix_ingests_like_git() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
         for name in ["shattered-1-prefix.bin", "shattered-2-prefix.bin"] {
             let bytes = std::fs::read(dir.join(name)).expect("fixture");
-            let mut hasher = ObjectHasher::new(HashAlgo::Sha1);
-            hasher.update(&bytes);
-            let err = hasher
-                .try_finalize()
-                .expect_err("SHAttered block must collide");
-            assert!(matches!(err, Error::HashCollision { .. }));
-            assert!(matches!(
-                try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &bytes),
-                Err(Error::HashCollision { .. })
-            ));
+            assert!(
+                sha1dc_chosen_prefix_digest(&bytes).is_some(),
+                "{name} must trigger sha1dc on raw bytes"
+            );
+            let oid = try_hash_object(HashAlgo::Sha1, ObjectKind::Blob, &bytes).expect("ingest");
+            assert_eq!(oid, hash_object(HashAlgo::Sha1, ObjectKind::Blob, &bytes));
         }
     }
 

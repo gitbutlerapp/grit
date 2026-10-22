@@ -276,6 +276,7 @@ fn object_fsck_default_level(msg_id: &str) -> ObjectFsckDefaultLevel {
         | "badTagName"
         | "missingTaggerEntry" => ObjectFsckDefaultLevel::Info,
         "extraHeaderEntry" => ObjectFsckDefaultLevel::Ignore,
+        "sha1Collision" => ObjectFsckDefaultLevel::Warn,
         _ => ObjectFsckDefaultLevel::Error,
     }
 }

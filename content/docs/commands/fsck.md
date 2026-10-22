@@ -72,7 +72,7 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `ok` | boolean | `true` when no error-severity issues were found (warnings and info alone still yield `true`). |
 | `objects_checked` | integer | Loose and packed objects examined during store validation (0 with `--connectivity-only`). |
-| `issues` | array | Each entry has `kind` (camelCase msg-id), `severity` (`error`, `warning`, or `info`), optional `oid` and `path`, and `detail`. Known kinds include `missingObject`, `hasSha1`, and `sha1Collision` (SHA-1 chosen-prefix collision detected by grit). |
+| `issues` | array | Each entry has `kind` (camelCase msg-id), `severity` (`error`, `warning`, or `info`), optional `oid` and `path`, and `detail`. Known kinds include `missingObject`, `hasSha1`, and `sha1Collision` (optional sha1dc signal; default severity is **warning**, matching Git’s tolerance for SHAttered objects). |
 | `dangling` | array | Unreachable objects as `{kind, oid}` (`kind` is `commit`, `tree`, `blob`, or `tag`). |
 
 Example:
@@ -104,18 +104,18 @@ Example with a problem:
 }
 ```
 
-SHA-1 chosen-prefix collision on a loose object (grit is stricter than stock Git here):
+When configured to surface sha1dc diagnostics, `sha1Collision` is a **warning** by default (strict mode promotes it to an error):
 
 ```json
 {
-  "ok": false,
+  "ok": true,
   "objects_checked": 1,
   "issues": [
     {
       "kind": "sha1Collision",
-      "severity": "error",
-      "oid": "3877757a463c672a0969c856c4683a0992a9c592",
-      "detail": "SHA-1 chosen-prefix collision: SHA-1 collision detected while verifying loose object (digest …)"
+      "severity": "warning",
+      "oid": "ba9aaa145ccd24ef760cf31c74d8f7ca1a2e47b0",
+      "detail": "SHA-1 chosen-prefix collision: …"
     }
   ],
   "dangling": []

@@ -7182,6 +7182,7 @@ pub fn grit_lib::objects::hash::hmac_sha1(&[u8], &[u8]) -> [u8; 20]
 pub fn grit_lib::objects::hash::index_parallelism_from_config(&grit_lib::config::ConfigSet) -> grit_lib::parallel::Parallelism
 pub fn grit_lib::objects::hash::par_hash_with<T, R, F>(&[T], core::num::nonzero::NonZeroUsize, usize, F) -> alloc::vec::Vec<R> where T: core::marker::Sync, R: core::marker::Send, F: core::ops::function::Fn(&T) -> R + core::marker::Sync
 pub fn grit_lib::objects::hash::parallel_hash_worthwhile(usize, usize, usize) -> bool
+pub fn grit_lib::objects::hash::sha1dc_chosen_prefix_digest(&[u8]) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::hash::try_hash_object(grit_lib::objects::HashAlgo, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::hash::try_hash_objects_parallel(grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectKind, &[u8])], core::num::nonzero::NonZeroUsize) -> core::result::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>, grit_lib::parallel::ParallelHashError<grit_lib::error::Error>>
 pub fn grit_lib::objects::hash::try_par_hash_with<T, R, E, F>(&[T], core::num::nonzero::NonZeroUsize, usize, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, F: core::ops::function::Fn(&T) -> core::result::Result<R, E> + core::marker::Sync

@@ -1,14 +1,12 @@
-//! SHA-1 collision detection on object ingestion paths (sha1dc).
+//! Git-compatible ingestion for SHAttered test vectors (sha1dc signals, plain SHA-1 ids).
 
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::process::{Command, Stdio};
 
-use grit_lib::error::Error;
-use grit_lib::maintenance::repository_fsck::{
-    fsck, issue_msg_id, FsckIssue, FsckOptions, FsckReport,
-};
-use grit_lib::objects::hash::{hash_object, try_hash_objects_parallel, ParallelHashError};
+use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions, FsckReport, FsckSeverity};
+use grit_lib::objects::hash::sha1dc_chosen_prefix_digest;
+use grit_lib::objects::hash::{hash_object, try_hash_objects_parallel};
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::verify_pack_and_collect;
@@ -30,131 +28,68 @@ fn shattered_prefix(which: u8) -> Vec<u8> {
     .expect("fixture")
 }
 
-fn assert_hash_collision<T: std::fmt::Debug>(result: Result<T, Error>) {
-    assert!(matches!(result, Err(Error::HashCollision { .. })));
-}
-
-fn shattered_blob_store_bytes(which: u8) -> Vec<u8> {
-    let payload = shattered_prefix(which);
-    let mut store = format!("blob {}\0", payload.len()).into_bytes();
-    store.extend_from_slice(&payload);
-    store
-}
-
 #[test]
-fn odb_write_raw_rejects_shattered_store_bytes() {
-    let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
-    let odb = Odb::new(&repo.objects_dir());
-    let store = shattered_blob_store_bytes(1);
-    let err = odb
-        .write_raw(&store)
-        .expect_err("write_raw must reject collision");
-    assert!(matches!(err, Error::HashCollision { .. }));
-}
-
-#[test]
-fn odb_write_raw_local_rejects_shattered_store_bytes() {
-    let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
-    let odb = Odb::new(&repo.objects_dir());
-    let store = shattered_blob_store_bytes(2);
-    let err = odb
-        .write_raw_local(&store)
-        .expect_err("write_raw_local must reject collision");
-    assert!(matches!(err, Error::HashCollision { .. }));
-}
-
-#[test]
-fn odb_write_rejects_shattered_blob() {
+fn odb_write_accepts_shattered_prefix_blob() {
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     let odb = Odb::new(&repo.objects_dir());
     let data = shattered_prefix(1);
-    assert_hash_collision(HashAlgo::Sha1.try_digest(&data));
-    assert_hash_collision(odb.try_hash(ObjectKind::Blob, &data));
-    let err = odb
-        .write(ObjectKind::Blob, &data)
-        .expect_err("write must reject when object id hashing detects collision");
-    assert!(matches!(err, Error::HashCollision { .. }));
+    assert!(sha1dc_chosen_prefix_digest(&data).is_some());
+    let oid = odb.write(ObjectKind::Blob, &data).expect("write");
+    assert_eq!(oid, hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data));
+    let round = odb.read(&oid).expect("read");
+    assert_eq!(round.data, data);
 }
 
 #[test]
-fn index_pack_rejects_pack_with_shattered_blob() {
+fn odb_write_raw_accepts_shattered_store_bytes() {
+    let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
+    let odb = Odb::new(&repo.objects_dir());
+    let payload = shattered_prefix(2);
+    let mut store = format!("blob {}\0", payload.len()).into_bytes();
+    store.extend_from_slice(&payload);
+    odb.write_raw(&store).expect("write_raw");
+}
+
+#[test]
+fn index_pack_accepts_pack_with_shattered_blob() {
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     let odb = Odb::new(&repo.objects_dir());
     let mut builder = PackBuilder::new(FixtureAlgo::Sha1);
     builder.add_full(PackKind::Blob, &shattered_prefix(1));
     let pack = builder.build().bytes;
-    let err =
-        install_pack_bytes(pack, &odb, &IngestPackOptions::default()).expect_err("index-pack");
-    assert!(matches!(err, Error::HashCollision { .. }));
+    install_pack_bytes(pack, &odb, &IngestPackOptions::default()).expect("index-pack");
 }
 
 #[test]
-fn unpack_objects_rejects_shattered_blob() {
+fn unpack_objects_accepts_shattered_blob() {
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     let odb = Odb::new(&repo.objects_dir());
     let mut builder = PackBuilder::new(FixtureAlgo::Sha1);
     builder.add_full(PackKind::Blob, &shattered_prefix(2));
     let pack = builder.build().bytes;
-    let err =
-        unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).expect_err("unpack");
-    assert!(matches!(err, Error::HashCollision { .. }));
+    unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).expect("unpack");
 }
 
 #[test]
-fn fsck_reports_shattered_object() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+fn parallel_hash_matches_shattered_prefix() {
     let data = shattered_prefix(1);
-    let oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
-    grit_test_support::write_loose_object(
-        repo.odb().objects_dir(),
-        FixtureAlgo::Sha1,
-        "blob",
-        &data,
-    )
-    .expect("write loose bytes at colliding oid path");
-
-    let report = fsck(
-        &repo,
-        &FsckOptions::default(),
-        &mut NullProgress,
-        &NeverCancel,
-    )
-    .expect("fsck");
-    assert_shattered_fsck_finding(&report, &oid);
-}
-
-fn assert_shattered_fsck_finding(report: &FsckReport, oid: &grit_lib::objects::ObjectId) {
-    assert!(
-        report.issues.iter().any(|issue| {
-            issue_msg_id(issue) == "sha1Collision"
-                && matches!(issue, FsckIssue::BadObject { oid: found, .. } if found == oid)
-        }),
-        "expected sha1Collision for {oid}, got {:?}",
-        report.issues.iter().map(issue_msg_id).collect::<Vec<_>>()
+    let items = [(ObjectKind::Blob, data.as_slice())];
+    let threads = NonZeroUsize::new(2).expect("threads");
+    let oids = try_hash_objects_parallel(HashAlgo::Sha1, &items, threads).expect("parallel");
+    assert_eq!(
+        oids[0],
+        hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data)
     );
 }
 
 #[test]
-fn parallel_hash_surfaces_collision() {
+fn grit_matches_git_hash_object_on_shattered_prefix() {
     let data = shattered_prefix(1);
-    let items = [(ObjectKind::Blob, data.as_slice())];
-    let threads = NonZeroUsize::new(2).expect("threads");
-    let err = try_hash_objects_parallel(HashAlgo::Sha1, &items, threads).expect_err("parallel");
-    match err {
-        ParallelHashError::Task(Error::HashCollision { .. }) => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
-}
-
-#[test]
-fn grit_stricter_than_git_on_shattered_prefix_blob() {
-    let data = shattered_prefix(1);
-    assert_hash_collision(HashAlgo::Sha1.try_hash_object(ObjectKind::Blob, &data));
+    let grit_oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     let mut child = Command::new("git")
         .current_dir(repo.path())
-        .args(["hash-object", "-w", "-t", "blob", "--stdin"])
+        .args(["hash-object", "-t", "blob", "--stdin"])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .stdin(Stdio::piped())
@@ -169,9 +104,34 @@ fn grit_stricter_than_git_on_shattered_prefix_blob() {
         .write_all(&data)
         .expect("write");
     let out = child.wait_with_output().expect("wait");
-    if !out.status.success() {
-        assert!(out.stdout.is_empty());
-    }
+    assert!(out.status.success(), "git hash-object: {:?}", out.stderr);
+    let git_hex = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert_eq!(grit_oid.to_hex(), git_hex);
+}
+
+#[test]
+fn git_written_shattered_blob_repack_grit_clone_smoke() {
+    let fixture = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
+    let data = shattered_prefix(1);
+    std::fs::write(fixture.path().join("collision.bin"), &data).expect("write");
+    let add = fixture.git(&["add", "collision.bin"]);
+    assert!(add.ok, "git add: {}", add.stderr);
+    let commit = fixture.git(&["commit", "-m", "collision"]);
+    assert!(commit.ok, "git commit: {}", commit.stderr);
+    let repack = fixture.git(&["repack", "-a", "-d"]);
+    assert!(repack.ok, "git repack: {}", repack.stderr);
+    let pack_dir = fixture.objects_dir().join("pack");
+    let idx_path = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find_map(|e| {
+            let p = e.path();
+            p.extension().is_some_and(|x| x == "idx").then_some(p)
+        })
+        .expect("pack idx");
+    verify_pack_and_collect(&idx_path).expect("grit verify pack");
+    let fsck = git_fsck(fixture.path(), true);
+    assert!(fsck.ok, "git fsck --strict: {:?}", fsck.msg_ids);
 }
 
 #[test]
@@ -180,6 +140,8 @@ fn grit_written_loose_and_packs_pass_git_fsck_strict() {
     let odb = Odb::new(&fixture.objects_dir());
     let oid = odb.write(ObjectKind::Blob, b"safe payload").expect("write");
     assert!(!oid.to_hex().is_empty());
+    odb.write(ObjectKind::Blob, &shattered_prefix(1))
+        .expect("shattered write");
 
     let mut builder = PackBuilder::new(FixtureAlgo::Sha1);
     builder.add_full(PackKind::Blob, b"pack-safe");
@@ -210,4 +172,38 @@ fn git_written_pack_indexes_and_fscks_clean_with_grit() {
         })
         .expect("pack idx");
     verify_pack_and_collect(&idx_path).expect("grit verify pack");
+}
+
+fn assert_fsck_ok(report: &FsckReport) {
+    use grit_lib::maintenance::repository_fsck::issue_severity;
+    let config = grit_lib::config::ConfigSet::default();
+    let errors = report
+        .issues
+        .iter()
+        .filter(|i| issue_severity(i, &config, false) == FsckSeverity::Error)
+        .count();
+    assert_eq!(errors, 0, "unexpected fsck errors: {:?}", report.issues);
+}
+
+#[test]
+fn fsck_passes_on_shattered_loose_object() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let data = shattered_prefix(1);
+    grit_test_support::write_loose_object(
+        repo.odb().objects_dir(),
+        FixtureAlgo::Sha1,
+        "blob",
+        &data,
+    )
+    .expect("write loose");
+
+    let report = fsck(
+        &repo,
+        &FsckOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("fsck");
+    assert_fsck_ok(&report);
 }

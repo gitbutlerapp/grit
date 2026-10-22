@@ -27,7 +27,7 @@ When `fetch.prune` or `remote.<name>.prune` is true, stale remote-tracking refs 
 
 Repositories created as shallow clones with Git (for example `git clone --depth 1`) are supported: `grit fetch` respects the existing shallow boundary, does not create tag refs to missing commits, and leaves a clean repository when there is nothing new to download.
 
-Received packs are checked for SHA-1 chosen-prefix collisions during indexing. With `--json`, that failure uses `kind` `hash_collision` and an `oid` field on the error object (see [`grit add`](add.md) and the [error schema](/schemas/error/v1.json)).
+Pack indexing uses plain SHA-1 object ids compatible with Git (including SHAttered blobs in upstream histories).
 
 On an interactive terminal (human output, not `--json` or `--markdown`), grit prints live progress on stderr while objects are received and indexed, using the same style as [`grit clone`](../clone/). When stderr is not a TTY, no progress lines are shown.
 

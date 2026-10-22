@@ -1906,11 +1906,7 @@ impl Odb {
         hash_object_data_with(self.hash_algo(), kind, data)
     }
 
-    /// Like [`Self::hash`], but surfaces SHA-1 collision detection on ingestion.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Like [`Self::hash`]; stable `Result` API (SHA-1 ids match plain Git digests).
     pub fn try_hash(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         try_hash_object_data_with(self.hash_algo(), kind, data)
     }

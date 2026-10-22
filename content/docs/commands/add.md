@@ -72,7 +72,7 @@ Example:
 }
 ```
 
-When staging would hash blob data that triggers an SHA-1 chosen-prefix collision, the command fails (exit **1**). With `--json`, stdout is the shared [error object](../scripting.md) with `kind` `hash_collision` and `oid` set to the unsafe digest hex (see [error schema](/schemas/error/v1.json)).
+Grit computes blob object ids with the same plain SHA-1 digests as Git. SHAttered test vectors (for example blobs in the `git/git` history) stage and commit normally; grit does not reject them during ingestion.
 
 ## Markdown output
 

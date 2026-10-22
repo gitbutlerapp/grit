@@ -52,7 +52,7 @@ On failure, `grit clone` exits **1** for most errors (destination not empty, che
 
 If a large receive fails with `received pack file missing` pointing at a `pack-receive-*.tmp` path under `.git/objects/incoming/`, real-time antivirus or disk cleanup may have removed the in-progress pack before index-pack ran; retry the clone or check that nothing else is deleting files under the repository directory during the receive.
 
-While indexing received objects, grit rejects SHA-1 chosen-prefix collisions. With `--json`, that failure uses `kind` `hash_collision` and an `oid` field on the error object (same shape as [`grit add`](add.md)).
+Object ids in received packs use plain SHA-1 like Git, so repositories such as `git/git` (which include SHAttered test blobs) clone successfully.
 
 ## Options
 
