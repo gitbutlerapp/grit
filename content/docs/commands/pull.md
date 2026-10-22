@@ -15,7 +15,9 @@ grit pull
 
 Runs [`grit fetch`](../fetch/), then merges the remote's copy of the current branch into it, as [`grit merge`](../merge/) would: a fast-forward when you have no new commits of your own, and a merge commit when both sides do. On a branch with no commits yet, it simply takes the remote's.
 
-The remote is the one in `branch.<name>.remote`, or `origin`. The remote branch is the one in `branch.<name>.merge`, or the branch with the same name as yours.
+The remote is the one in `branch.<name>.remote`, or `origin`. The remote branch is the one in `branch.<name>.merge`, or the branch with the same name as yours. The remote's `remote.<name>.fetch` refspecs decide which local ref holds that branch after the fetch, so a custom refspec works and a branch the refspecs exclude is an error. With `branch.<name>.remote = .` the upstream is a local branch, and `grit pull` merges it without fetching.
+
+On a branch with no commits yet, the branch is created at the remote's commit with an `initial pull` reflog entry.
 
 Like `grit merge`, `grit pull` uses the same scoped local-change rules as [`grit switch`](../switch/), won't run with a detached HEAD, and stops without changing anything if there are conflicts.
 

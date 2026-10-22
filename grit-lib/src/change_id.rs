@@ -319,6 +319,27 @@ pub fn resolved_change_id(oid: &ObjectId, data: &CommitData) -> ResolvedChangeId
     }
 }
 
+/// The change id `oid` reports: its stored header, or, when the repository's
+/// [`ChangeIdPolicy`] is enabled, the id derived from its commit id.
+///
+/// # Errors
+///
+/// Propagates object read, commit parse, and config load failures.
+pub(crate) fn logical_change_id_for_commit(
+    repo: &Repository,
+    oid: ObjectId,
+) -> Result<Option<ChangeId>> {
+    let obj = repo.odb().read(&oid)?;
+    let data = crate::objects::parse_commit(&obj.data)?;
+    if let Some(id) = change_id(&data) {
+        return Ok(Some(id));
+    }
+    let config = repo.config()?;
+    Ok(ChangeIdPolicy::from_config(&config)
+        .enabled()
+        .then(|| ChangeId::derived_from_commit_id(&oid)))
+}
+
 /// Whether `spec` can name a change id (4–32 chars, alphabet `k`–`z`).
 #[must_use]
 pub fn is_change_id_spec_token(spec: &str) -> bool {

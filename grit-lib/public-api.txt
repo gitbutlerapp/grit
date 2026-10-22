@@ -4618,6 +4618,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::midx::CompactError
 pub fn grit_lib::objects::midx::CompactError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::CloneError
@@ -10958,6 +10960,94 @@ pub fn grit_lib::porcelain::paths::remove_paths(&grit_lib::repo::Repository, &gr
 pub mod grit_lib::porcelain::pathspec_match
 pub fn grit_lib::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository(&grit_lib::repo::Repository, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::pathspec_match::pathspec_matches_known_in_repository(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<bool>
+pub mod grit_lib::porcelain::pull
+#[non_exhaustive] pub enum grit_lib::porcelain::pull::PullError
+pub grit_lib::porcelain::pull::PullError::DetachedHead
+pub grit_lib::porcelain::pull::PullError::InvalidHead
+pub grit_lib::porcelain::pull::PullError::Library(grit_lib::error::Error)
+pub grit_lib::porcelain::pull::PullError::MissingUpstream
+pub grit_lib::porcelain::pull::PullError::MissingUpstream::upstream_ref: alloc::string::String
+pub grit_lib::porcelain::pull::PullError::UpstreamNotTracked
+pub grit_lib::porcelain::pull::PullError::UpstreamNotTracked::merge: alloc::string::String
+pub grit_lib::porcelain::pull::PullError::UpstreamNotTracked::remote: alloc::string::String
+impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::error::Error) -> Self
+impl core::error::Error for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::pull::PullError
+impl core::marker::Send for grit_lib::porcelain::pull::PullError
+impl core::marker::Sync for grit_lib::porcelain::pull::PullError
+impl core::marker::Unpin for grit_lib::porcelain::pull::PullError
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullError
+pub enum grit_lib::porcelain::pull::PullOutcome
+pub grit_lib::porcelain::pull::PullOutcome::Adopted
+pub grit_lib::porcelain::pull::PullOutcome::Adopted::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::porcelain::pull::PullOutcome::Adopted::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::pull::PullOutcome::Integrated(grit_lib::porcelain::merge::IntegrateBranchOutcome)
+impl core::clone::Clone for grit_lib::porcelain::pull::PullOutcome
+pub fn grit_lib::porcelain::pull::PullOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::pull::PullOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::pull::PullOutcome
+pub fn grit_lib::porcelain::pull::PullOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::pull::PullOutcome
+pub fn grit_lib::porcelain::pull::PullOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::pull::PullOutcome
+impl core::marker::Freeze for grit_lib::porcelain::pull::PullOutcome
+impl core::marker::Send for grit_lib::porcelain::pull::PullOutcome
+impl core::marker::Sync for grit_lib::porcelain::pull::PullOutcome
+impl core::marker::Unpin for grit_lib::porcelain::pull::PullOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullOutcome
+pub enum grit_lib::porcelain::pull::PullSource
+pub grit_lib::porcelain::pull::PullSource::Local
+pub grit_lib::porcelain::pull::PullSource::Remote(alloc::string::String)
+impl core::clone::Clone for grit_lib::porcelain::pull::PullSource
+pub fn grit_lib::porcelain::pull::PullSource::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::pull::PullSource
+impl core::cmp::PartialEq for grit_lib::porcelain::pull::PullSource
+pub fn grit_lib::porcelain::pull::PullSource::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::pull::PullSource
+pub fn grit_lib::porcelain::pull::PullSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::pull::PullSource
+impl core::marker::Freeze for grit_lib::porcelain::pull::PullSource
+impl core::marker::Send for grit_lib::porcelain::pull::PullSource
+impl core::marker::Sync for grit_lib::porcelain::pull::PullSource
+impl core::marker::Unpin for grit_lib::porcelain::pull::PullSource
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullSource
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullSource
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullSource
+pub struct grit_lib::porcelain::pull::PullPlan
+pub grit_lib::porcelain::pull::PullPlan::branch: alloc::string::String
+pub grit_lib::porcelain::pull::PullPlan::branch_ref: alloc::string::String
+pub grit_lib::porcelain::pull::PullPlan::head: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::pull::PullPlan::source: grit_lib::porcelain::pull::PullSource
+pub grit_lib::porcelain::pull::PullPlan::upstream_ref: alloc::string::String
+impl grit_lib::porcelain::pull::PullPlan
+pub fn grit_lib::porcelain::pull::PullPlan::upstream_label(&self) -> alloc::string::String
+impl core::clone::Clone for grit_lib::porcelain::pull::PullPlan
+pub fn grit_lib::porcelain::pull::PullPlan::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::pull::PullPlan
+impl core::cmp::PartialEq for grit_lib::porcelain::pull::PullPlan
+pub fn grit_lib::porcelain::pull::PullPlan::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::pull::PullPlan
+pub fn grit_lib::porcelain::pull::PullPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::pull::PullPlan
+impl core::marker::Freeze for grit_lib::porcelain::pull::PullPlan
+impl core::marker::Send for grit_lib::porcelain::pull::PullPlan
+impl core::marker::Sync for grit_lib::porcelain::pull::PullPlan
+impl core::marker::Unpin for grit_lib::porcelain::pull::PullPlan
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullPlan
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullPlan
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullPlan
+pub fn grit_lib::porcelain::pull::integrate_upstream(&grit_lib::repo::Repository, &grit_lib::porcelain::pull::PullPlan) -> core::result::Result<grit_lib::porcelain::pull::PullOutcome, grit_lib::porcelain::pull::PullError>
+pub fn grit_lib::porcelain::pull::plan_pull(&grit_lib::repo::Repository) -> core::result::Result<grit_lib::porcelain::pull::PullPlan, grit_lib::porcelain::pull::PullError>
 pub mod grit_lib::porcelain::quote_path
 pub fn grit_lib::porcelain::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_c_style(&str, bool) -> alloc::string::String
@@ -11939,6 +12029,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::midx::CompactError
 pub fn grit_lib::objects::midx::CompactError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::CloneError

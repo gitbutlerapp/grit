@@ -6,8 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::change_id::{
-    change_id, resolved_change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator,
-    ChangeIdPolicy,
+    change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator, ChangeIdPolicy,
 };
 use crate::commit::signing::extra_headers_without_commit_signatures;
 use crate::commit_encoding::identity_raw_for_serialized_commit;
@@ -1209,16 +1208,7 @@ fn logical_change_id_for_commit(
     repo: &Repository,
     oid: ObjectId,
 ) -> Result<Option<ChangeId>, HistoryError> {
-    let obj = repo.odb().read(&oid).map_err(library_err)?;
-    let data = parse_commit(&obj.data).map_err(library_err)?;
-    if let Some(id) = change_id(&data) {
-        return Ok(Some(id));
-    }
-    let config = repo.config().map_err(library_err)?;
-    if ChangeIdPolicy::from_config(config.as_ref()).enabled() {
-        return Ok(Some(resolved_change_id(&oid, &data).id));
-    }
-    Ok(None)
+    crate::change_id::logical_change_id_for_commit(repo, oid).map_err(library_err)
 }
 
 fn plan_ref_updates(
