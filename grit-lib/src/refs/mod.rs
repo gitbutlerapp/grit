@@ -27,6 +27,7 @@
 //! ```
 
 pub mod handle;
+pub mod listing;
 pub mod store;
 
 mod domain_reexports;
