@@ -26,8 +26,8 @@ type LsRefsAdvertised = (
 );
 use crate::progress::ProgressSink;
 use crate::transfer::{
-    classify_update, open_odb, prune_tracking_refs, ref_excluded, FetchOptions, FetchOutcome,
-    RefUpdate, UpdateMode,
+    classify_update, open_odb, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
+    validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
 };
 use crate::transport::Connection;
 
@@ -173,13 +173,27 @@ fn append_shallow_request_v0(
     local_shallow: &[ObjectId],
     opts: &FetchOptions,
 ) -> Result<()> {
+    let sends_shallow = !local_shallow.is_empty()
+        || opts.wire_deepen().is_some()
+        || opts
+            .deepen_since
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+        || opts.deepen_not.iter().any(|s| !s.trim().is_empty());
+    if sends_shallow && !server_caps.contains("shallow") {
+        return Err(Error::FetchShallowUnsupported);
+    }
     for oid in local_shallow {
         pkt_line::write_line_to_vec(req, &format!("shallow {}", oid.to_hex()))?;
     }
-    if opts.unshallow {
-        pkt_line::write_line_to_vec(req, &format!("deepen {}", crate::shallow::INFINITE_DEPTH))?;
-    } else if let Some(depth) = opts.depth.filter(|d| *d > 0) {
+    if let Some((depth, relative)) = opts.wire_deepen() {
+        if relative && !server_caps.contains("deepen-relative") {
+            return Err(Error::FetchDeepenRelativeUnsupported);
+        }
         pkt_line::write_line_to_vec(req, &format!("deepen {depth}"))?;
+        if relative {
+            pkt_line::write_line_to_vec(req, "deepen-relative")?;
+        }
     }
     if let Some(since) = opts
         .deepen_since
@@ -250,6 +264,7 @@ fn negotiate_pack(
     // string we read from the advertisement drives `deepen-since`/`deepen-not`.
     let advertised: Vec<(String, ObjectId)> = conn.advertised_refs().to_vec();
     let server_caps: String = conn.capabilities().join(" ");
+    validate_fetch_depth_server(opts, Some(&server_caps), None)?;
 
     let mut req: Vec<u8> = Vec::new();
     let w0 = format!("want {}{}", first_want.to_hex(), caps);
@@ -874,6 +889,8 @@ pub(crate) struct V2DeepenArgs {
     pub(crate) local_shallow: Vec<ObjectId>,
     /// `deepen <n>` (absolute depth, or `INFINITE_DEPTH` for `--unshallow`).
     pub(crate) depth: Option<u32>,
+    /// When true, send v0/v1/v2 `deepen-relative` after `deepen`.
+    pub(crate) deepen_relative: bool,
     /// `deepen-since <unix-ts>`.
     pub(crate) deepen_since: Option<String>,
     /// `deepen-not <ref>` exclusions.
@@ -886,14 +903,14 @@ impl V2DeepenArgs {
     /// Build the v2 deepen args from the fetch options and the local shallow file,
     /// translating `--unshallow` into the `INFINITE_DEPTH` deepen Git uses.
     pub(crate) fn from_opts(opts: &FetchOptions, local_shallow: &[ObjectId]) -> Self {
-        let depth = if opts.unshallow {
-            Some(crate::shallow::INFINITE_DEPTH)
-        } else {
-            opts.depth.filter(|d| *d > 0)
-        };
+        let (depth, deepen_relative) = opts
+            .wire_deepen()
+            .map(|(d, r)| (Some(d), r))
+            .unwrap_or((None, false));
         Self {
             local_shallow: local_shallow.to_vec(),
             depth,
+            deepen_relative,
             deepen_since: opts
                 .deepen_since
                 .as_deref()
@@ -913,6 +930,7 @@ impl V2DeepenArgs {
     /// handling and the "skip offering haves" decision).
     pub(crate) fn is_shallow_request(&self) -> bool {
         self.depth.is_some()
+            || self.deepen_relative
             || self.deepen_since.is_some()
             || !self.deepen_not.is_empty()
             || !self.local_shallow.is_empty()
@@ -966,6 +984,9 @@ pub(crate) fn write_v2_fetch_request(
     }
     if let Some(depth) = deepen.depth {
         pkt_line::write_line(&mut req, &format!("deepen {depth}"))?;
+    }
+    if deepen.deepen_relative {
+        pkt_line::write_line(&mut req, "deepen-relative")?;
     }
     if let Some(since) = &deepen.deepen_since {
         pkt_line::write_line(&mut req, &format!("deepen-since {since}"))?;
@@ -1192,8 +1213,9 @@ pub fn fetch_remote(
         conn.protocol_version(),
         opts.refspecs.len(),
         opts.tags,
-        opts.depth
+        opts.fetch_depth
     );
+    validate_fetch_depth_local(local_git_dir, opts)?;
     let local_odb = open_odb(local_git_dir);
 
     // 1. Remote refs + default branch.
@@ -1308,7 +1330,7 @@ pub fn fetch_remote(
         let peel_set = following_peel_commit_set_for_shallow(
             &local_odb,
             &fetch_commit_oids,
-            opts.depth,
+            opts.absolute_depth_for_tags(),
             &local_shallow_set,
         );
         following_tag_wants.extend(following_tag_wants_peel_among_fetched_commits(
@@ -1372,6 +1394,7 @@ pub fn fetch_remote(
             "fetch_remote: negotiating + fetching pack…"
         );
         let (pack_path, su) = if let Some(caps) = v2_caps.as_ref() {
+            validate_fetch_depth_server(opts, None, Some(caps))?;
             let deepen = V2DeepenArgs::from_opts(opts, &local_shallow);
             negotiate_pack_v2(
                 local_git_dir,

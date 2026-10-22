@@ -7,7 +7,8 @@ use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::remote::fetch_request::resolve_fetch_invocation;
 use grit_lib::remote::transfer::{
-    resolve_fetch_prune, resolve_fetch_tags, FetchOptions, RefUpdate, TagMode, UpdateMode,
+    resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions, RefUpdate, TagMode,
+    UpdateMode,
 };
 use grit_lib::remote::{DefaultHttpClientFactory, RemoteError, DEFAULT_REMOTE};
 use schemars::JsonSchema;
@@ -29,6 +30,17 @@ pub struct FetchOutcome {
     pub dry_run: bool,
     /// True when any ref update was rejected (exit 1 when set).
     pub rejected: bool,
+    /// Shallow boundary changes when a depth/deepen/unshallow fetch ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub shallow: Option<FetchShallowDelta>,
+}
+
+/// Shallow boundaries added or removed by this fetch (`--json` only).
+#[derive(Serialize, JsonSchema)]
+pub struct FetchShallowDelta {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
 }
 
 /// Per-ref fetch status in JSON.
@@ -141,6 +153,7 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         TerminalProgress::new(mode)
     };
     let mut progress = progress;
+    let fetch_depth = args.fetch_depth();
     let result = match fetch_once(
         &repo,
         &config,
@@ -148,6 +161,7 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         tags,
         prune_enabled,
         args.dry_run,
+        fetch_depth,
         &factory,
         &mut progress,
     ) {
@@ -164,6 +178,7 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
                     tags,
                     prune_enabled,
                     args.dry_run,
+                    fetch_depth,
                     &factory,
                     &mut progress,
                 )?
@@ -174,6 +189,7 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
     };
 
     let (updates, updated, rejected) = map_updates(&result.updates, args.dry_run);
+    let shallow = shallow_json(&result, fetch_depth.is_some());
 
     Ok(FetchOutcome {
         remote: remote_name,
@@ -181,6 +197,20 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         updated,
         dry_run: args.dry_run,
         rejected,
+        shallow,
+    })
+}
+
+fn shallow_json(
+    result: &grit_lib::remote::transfer::FetchOutcome,
+    depth_request: bool,
+) -> Option<FetchShallowDelta> {
+    if !depth_request && result.new_shallow.is_empty() && result.new_unshallow.is_empty() {
+        return None;
+    }
+    Some(FetchShallowDelta {
+        added: result.new_shallow.iter().map(|o| o.to_hex()).collect(),
+        removed: result.new_unshallow.iter().map(|o| o.to_hex()).collect(),
     })
 }
 
@@ -257,6 +287,7 @@ fn fetch_once(
     tags: TagMode,
     prune: bool,
     dry_run: bool,
+    fetch_depth: Option<FetchDepth>,
     factory: &DefaultHttpClientFactory,
     progress: &mut TerminalProgress,
 ) -> Result<grit_lib::remote::transfer::FetchOutcome> {
@@ -271,6 +302,7 @@ fn fetch_once(
                 environment: crate::context::environment(),
                 prune,
                 dry_run,
+                fetch_depth,
                 ..Default::default()
             },
             progress,

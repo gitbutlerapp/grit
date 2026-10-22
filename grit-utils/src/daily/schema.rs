@@ -276,6 +276,7 @@ mod tests {
             ("pick/one@synth-10k", "pick"),
             ("stash/push-pop@synth-10k", "stash"),
             ("fetch/incremental@git-git", "fetch"),
+            ("fetch/deepen@git-git", "fetch"),
             ("pull/fast-forward@git-git", "pull"),
             ("push/incremental@git-git", "push"),
             ("clone/local@synth-10k", "clone"),

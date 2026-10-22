@@ -669,6 +669,20 @@ pub enum Error {
     #[error("the receiving end does not support push options")]
     PushOptionsUnsupported,
 
+    /// `git fetch --unshallow` on a repository that is not shallow.
+    #[error("repository is not shallow")]
+    FetchUnshallowNotShallow,
+
+    /// A deepen/shallow fetch was requested but the remote did not advertise the
+    /// `shallow` capability.
+    #[error("the remote does not support shallow fetches")]
+    FetchShallowUnsupported,
+
+    /// A `--deepen` fetch was requested but the remote did not advertise
+    /// `deepen-relative`.
+    #[error("the remote does not support deepen-relative")]
+    FetchDeepenRelativeUnsupported,
+
     /// A bundle fetch or verify found prerequisite commits missing from history.
     #[error("repository lacks these prerequisite commits")]
     BundleMissingPrerequisites,

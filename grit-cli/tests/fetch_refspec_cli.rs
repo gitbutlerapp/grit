@@ -475,3 +475,22 @@ fn fetch_rejected_non_fast_forward_exit_one_json() -> TestResult {
     assert_ne!(forceme, remote_main);
     Ok(())
 }
+
+#[test]
+fn fetch_depth_flags_are_mutually_exclusive() -> TestResult {
+    let tmp = tempfile::tempdir()?;
+    let (_origin, client) = seed_remote(tmp.path())?;
+    for args in [
+        &["fetch", "--depth", "1", "--deepen", "3"][..],
+        &["fetch", "--depth", "1", "--unshallow"][..],
+        &["fetch", "--deepen", "3", "--unshallow"][..],
+    ] {
+        let out = grit(&client, args);
+        assert!(
+            !out.status.success(),
+            "expected clap conflict for {args:?}, stderr={}",
+            stderr(&out)
+        );
+    }
+    Ok(())
+}

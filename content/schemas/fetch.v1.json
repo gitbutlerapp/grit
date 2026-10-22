@@ -41,6 +41,28 @@
       ],
       "type": "object"
     },
+    "FetchShallowDelta": {
+      "description": "Shallow boundaries added or removed by a depth/deepen/unshallow fetch.",
+      "properties": {
+        "added": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "removed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "added",
+        "removed"
+      ],
+      "type": "object"
+    },
     "FetchUpdateStatus": {
       "description": "Per-ref fetch status in JSON.",
       "enum": [
@@ -66,6 +88,9 @@
     },
     "remote": {
       "type": "string"
+    },
+    "shallow": {
+      "$ref": "#/definitions/FetchShallowDelta"
     },
     "updated": {
       "format": "uint",

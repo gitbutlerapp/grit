@@ -420,6 +420,32 @@ pub fn verify_fetch_dry_run(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()
     Ok(())
 }
 
+pub fn verify_fetch_deepen(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    configure_client_remote(&ctx.git, cwd, remote)?;
+    let branch = remote.meta.default_branch.as_str();
+    run_git(
+        &ctx.git,
+        cwd,
+        &["fetch", "--depth", "1", "-q", "origin", branch],
+    )?;
+    run_grit(&ctx.grit, cwd, &["fetch", "--depth", "1", "origin", branch])?;
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_git(
+        &ctx.git,
+        cwd,
+        &["fetch", "--deepen", "50", "-q", "origin", branch],
+    )?;
+    prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
+    run_grit(
+        &ctx.grit,
+        cwd,
+        &["fetch", "--deepen", "50", "origin", branch],
+    )?;
+    verify_client_fetch_tip(&ctx.git, &remote.bare, cwd, branch)?;
+    Ok(())
+}
+
 pub fn verify_fetch_noop(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;

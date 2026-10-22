@@ -6,10 +6,10 @@ use super::super::remote_fixture::{
     clone_bench_script, clone_bench_script_grit, setup_git_git_file_remote,
     setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
     setup_many_refs_file_remote, setup_synth10k_file_remote, setup_synth10k_grit_http_remote,
-    verify_clone_http, verify_clone_local, verify_fetch_dry_run, verify_fetch_incremental,
-    verify_fetch_incremental_http, verify_fetch_noop, verify_fetch_one_branch,
-    verify_ls_remote_all, verify_pull_fast_forward, verify_push_incremental,
-    verify_push_incremental_http,
+    verify_clone_http, verify_clone_local, verify_fetch_deepen, verify_fetch_dry_run,
+    verify_fetch_incremental, verify_fetch_incremental_http, verify_fetch_noop,
+    verify_fetch_one_branch, verify_ls_remote_all, verify_pull_fast_forward,
+    verify_push_incremental, verify_push_incremental_http,
 };
 use super::super::runner::BenchArgv;
 
@@ -55,6 +55,29 @@ fn correctness_fetch_one_branch(ctx: &DailyHeadlineContext) -> anyhow::Result<()
 
 fn correctness_fetch_dry_run(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
     verify_fetch_dry_run(ctx, &ctx.repo)
+}
+
+fn correctness_fetch_deepen(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
+    verify_fetch_deepen(ctx, &ctx.repo)
+}
+
+fn prepare_fetch_deepen_client(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let branch = default_remote_branch(ctx);
+    DailyPrepare::Shell(sh_script(format!(
+        "set -e\ncd {}\ngit fetch --depth 1 -q origin {}\n{} fetch --depth 1 origin {}\n",
+        ctx.repo.display(),
+        branch,
+        ctx.grit.display(),
+        branch,
+    )))
+}
+
+fn fetch_deepen_git(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.git, &["fetch", "--deepen", "50", "-q", "origin"])
+}
+
+fn fetch_deepen_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.grit, &["fetch", "--deepen", "50", "origin"])
 }
 
 fn correctness_ls_remote(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
@@ -289,6 +312,15 @@ fn matrix_plans() -> Vec<DailyHeadlinePlan> {
             build_git: fetch_dry_run_git,
             build_grit: fetch_dry_run_grit,
             correctness: Some(correctness_fetch_dry_run),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("fetch/deepen@git-git"),
+            pending: false,
+            setup: setup_git_git_file_remote,
+            prepare: prepare_fetch_deepen_client,
+            build_git: fetch_deepen_git,
+            build_grit: fetch_deepen_grit,
+            correctness: Some(correctness_fetch_deepen),
         },
     ]
 }

@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit fetch [<remote>] [<refspec>…] [--tags] [--no-tags] [--prune] [--no-prune] [--dry-run] [-q]
+grit fetch [<remote>] [<refspec>…] [--depth N] [--deepen N] [--unshallow] [--tags] [--no-tags] [--prune] [--no-prune] [--dry-run] [-q]
 ```
 
 ## Description
@@ -27,6 +27,8 @@ Tag policy follows Git: default is follow-tags (reachable annotated tags), `--ta
 
 `--dry-run` negotiates and reports updates without writing refs, objects, or `FETCH_HEAD`.
 
+`--depth`, `--deepen`, and `--unshallow` match Git’s shallow fetch controls (mutually exclusive). `--depth` truncates history on the first shallow fetch; `--deepen` adds commits relative to an existing shallow clone; `--unshallow` fetches the rest and removes `.git/shallow`. `--unshallow` on a complete repository is a typed error.
+
 `-q` / `--quiet` suppresses progress and human output (JSON and markdown are unchanged).
 
 ## Options
@@ -40,6 +42,9 @@ Tag policy follows Git: default is follow-tags (reachable annotated tags), `--ta
 | `--prune` | Remove stale remote-tracking refs. |
 | `--no-prune` | Do not prune, even when config enables it. |
 | `--dry-run` | Report updates without writing. |
+| `--depth N` | Shallow fetch: keep at most N commits from each tip. |
+| `--deepen N` | Deepen a shallow clone by N commits (relative). |
+| `--unshallow` | Fetch full history and drop shallow boundaries. |
 | `-q`, `--quiet` | Suppress progress and human stdout/stderr. |
 
 ## Examples
@@ -78,6 +83,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `rejected` | boolean | True when any update was rejected (exit 1). |
 | `updates` | array | Per-ref results. Each object has `ref`, `remote_ref`, `status` (`new`, `fast_forward`, `forced`, `pruned`, `rejected`, or `up_to_date`), `old_oid` and `new_oid` (full hex or `null`), and `reason` when `status` is `rejected`. |
 | `updated` | number | Count of refs that actually changed. |
+| `shallow` | object | When present: `added` and `removed` lists of full hex oids for new/removed `.git/shallow` boundaries. |
 
 Example:
 

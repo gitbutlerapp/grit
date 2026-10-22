@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::fetch::NoProgress;
-use grit_lib::remote::transfer::FetchOptions;
+use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
 
@@ -205,7 +205,7 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
     // 1. Shallow depth=1 fetch.
     let mut shallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        depth: Some(1),
+        fetch_depth: FetchDepth::depth(1),
         ..Default::default()
     };
     let outcome = match http_fetch(
@@ -292,7 +292,7 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
     // 2. Deepen to full with `--unshallow`.
     let mut unshallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
-        unshallow: true,
+        fetch_depth: Some(FetchDepth::Unshallow),
         ..Default::default()
     };
     let outcome = http_fetch(

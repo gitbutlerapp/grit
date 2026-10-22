@@ -262,7 +262,7 @@ pub fn clone(
         environment: opts.environment.clone(),
         thread_policy: opts.thread_policy,
         remote_progress: progress.remote_sideband_progress(),
-        depth: opts.depth,
+        fetch_depth: opts.depth.and_then(crate::transfer::FetchDepth::depth),
         ..Default::default()
     };
     if let Ok(v) = crate::protocol::try_effective_client_protocol_version_from_config(&config) {

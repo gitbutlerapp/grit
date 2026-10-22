@@ -29,9 +29,32 @@ pub struct FetchArgs {
     /// Suppress progress and human output.
     #[arg(short = 'q', long = "quiet")]
     pub quiet: bool,
+    /// Fetch only the recent history of each branch (same as `git fetch --depth`).
+    #[arg(long = "depth", value_name = "N", conflicts_with_all = ["deepen", "unshallow"])]
+    pub depth: Option<u32>,
+    /// Deepen an existing shallow clone by this many commits (`git fetch --deepen`).
+    #[arg(long = "deepen", value_name = "N", conflicts_with_all = ["depth", "unshallow"])]
+    pub deepen: Option<u32>,
+    /// Convert a shallow repository to a complete one (`git fetch --unshallow`).
+    #[arg(long = "unshallow", conflicts_with_all = ["depth", "deepen"])]
+    pub unshallow: bool,
 }
 
 impl FetchArgs {
+    /// Resolved shallow fetch control from the mutually exclusive depth flags.
+    #[must_use]
+    pub fn fetch_depth(&self) -> Option<grit_lib::remote::transfer::FetchDepth> {
+        if self.unshallow {
+            Some(grit_lib::remote::transfer::FetchDepth::Unshallow)
+        } else if let Some(n) = self.deepen {
+            grit_lib::remote::transfer::FetchDepth::deepen(n)
+        } else if let Some(n) = self.depth {
+            grit_lib::remote::transfer::FetchDepth::depth(n)
+        } else {
+            None
+        }
+    }
+
     /// CLI override for tag mode: `Some(true)` → all tags, `Some(false)` → none.
     #[must_use]
     pub fn tag_mode_override(&self) -> Option<bool> {

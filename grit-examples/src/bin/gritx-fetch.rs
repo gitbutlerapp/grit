@@ -70,7 +70,9 @@ fn run() -> Result<()> {
             TagMode::Following
         },
         prune: cli.prune,
-        depth: cli.depth,
+        fetch_depth: cli
+            .depth
+            .and_then(grit_lib::remote::transfer::FetchDepth::depth),
         ..Default::default()
     };
 
