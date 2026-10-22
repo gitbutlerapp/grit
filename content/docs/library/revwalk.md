@@ -26,6 +26,11 @@ Common helpers that do not need a full repository walk:
 | `reverse` | Reverse the selected list after sorting. |
 | `commit_filter` | Optional [`CommitFilter`](rustdoc:grit_lib::revwalk::filter::CommitFilter) (`--author`, `--committer`, `--grep`, mailmap). |
 | `pickaxe` | Optional [`Pickaxe`](rustdoc:grit_lib::diff::pickaxe::Pickaxe) (`-S` / `-G` tree-diff filters). |
+| `retain_commit_data` | Keep the commits the walk parses in [`RevListResult::commit_data`](rustdoc:grit_lib::revwalk::rev_list::RevListResult), so code that prints the listed commits does not read them again. |
+
+With the default order, `max_count` and no negative specs, the walk stops as soon as it has enough commits, however large the limit, and lists them in exactly `git rev-list` order (newest committer date first, ties in discovery order).
+
+To print the listed commits, set `retain_commit_data` and hand `commit_data` to [`load_commits_with_decorations_reusing`](rustdoc:grit_lib::porcelain::log::load_commits_with_decorations_reusing). It moves out the commits the walk parsed and reads only the rest, such as commits whose parents came from a commit-graph.
 
 For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). That matches `git rev-list main..feature`.
 
