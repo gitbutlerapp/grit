@@ -102,10 +102,15 @@ pub fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
 ///
 /// Returns [`Error::Io`] if a present file cannot be removed.
 pub(crate) fn clear_squash_commit_state(git_dir: &std::path::Path) -> Result<()> {
-    for name in ["SQUASH_MSG", "MERGE_MSG"] {
-        let path = git_dir.join(name);
-        if path.is_file() {
-            fs::remove_file(&path).map_err(Error::Io)?;
+    let squash = git_dir.join("SQUASH_MSG");
+    if !squash.is_file() {
+        return Ok(());
+    }
+    fs::remove_file(&squash).map_err(Error::Io)?;
+    if !git_dir.join("MERGE_HEAD").is_file() {
+        let merge_msg = git_dir.join("MERGE_MSG");
+        if merge_msg.is_file() {
+            fs::remove_file(&merge_msg).map_err(Error::Io)?;
         }
     }
     Ok(())

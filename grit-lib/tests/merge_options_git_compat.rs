@@ -415,5 +415,16 @@ fn squash_conflict_resolves_with_git_commit_no_edit() {
 
     git(tmp.path(), &["commit", "--no-edit"]);
     assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
+    let head: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .expect("head");
+    let obj = repo.odb().read(&head).expect("read head");
+    let commit = parse_commit(&obj.data).expect("parse head");
+    assert_eq!(
+        commit.parents.len(),
+        1,
+        "squash finish must be a single-parent commit, not a merge commit"
+    );
     git(tmp.path(), &["fsck", "--strict"]);
 }
