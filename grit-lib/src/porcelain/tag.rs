@@ -12,10 +12,10 @@
 //!   ([`list_tags`], [`TagInfo`], [`tag_ref_metadata`]) and deletion ([`delete_tag`]).
 //! - The `--contains` / `--no-contains` / `--points-at` filter predicates
 //!   ([`tag_contains`], [`tag_points_at`]).
-//! - The `--sort` comparators: numeric `version:refname` ordering
-//!   ([`compare_version`] / [`version_segments`]) and the `creatordate` /
-//!   `taggerdate` epoch extraction ([`creator_date`] / [`parse_epoch_from_ident`]).
-//! - The `-l` glob matcher ([`glob_matches`]) and the `-n<N>` annotation
+//! - Ref list sort/filter helpers live in [`crate::refs::listing`] (`compare_version_names`,
+//!   [`crate::refs::listing::pattern_matches_short_name`], [`creator_date`],
+//!   [`crate::refs::listing::epoch_from_identity`]).
+//! - The `-n<N>` annotation
 //!   extraction ([`get_tag_annotation`]).
 //! - The `-m`/`-F` message cleanup ([`strip_comments`]).
 
@@ -23,12 +23,43 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::check_ref_format::validate_tag_short_name;
 use crate::error::{Error, Result};
+use crate::hash::hash_object;
 use crate::objects::{parse_commit, parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
 use crate::refs;
+use crate::refs::listing::{
+    compare_version_names, creator_date as listing_creator_date, epoch_from_identity,
+    pattern_matches_short_name,
+};
 use crate::repo::Repository;
 use crate::signing::{should_sign_tag, sign_serialized_tag, GpgConfig};
 
 const TAGS_PREFIX: &str = "refs/tags/";
+
+/// Tag create/delete validation failures.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TagError {
+    /// `refs/tags/<name>` already exists and `force` was not set.
+    #[error("tag '{name}' already exists")]
+    AlreadyExists {
+        /// Short tag name.
+        name: String,
+    },
+    /// The tag short name failed ref-format checks.
+    #[error("invalid tag name: {detail}")]
+    InvalidName {
+        /// Human-readable detail (from [`RefNameError`](crate::refs::check_ref_format::RefNameError)).
+        detail: String,
+    },
+    /// `refs/tags/<name>` does not exist.
+    #[error("no tag named '{name}'")]
+    NotFound {
+        /// Short tag name.
+        name: String,
+    },
+    /// `-m` / `-F` input was empty after comment stripping and whitespace cleanup.
+    #[error("tag message cannot be empty")]
+    EmptyMessage,
+}
 
 /// Whether a `refs/tags/*` ref is lightweight or an annotated tag object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +85,10 @@ pub struct CreateTagRequest {
     pub sign: Option<bool>,
     /// Override `user.signingkey` for this tag (same resolution as commit signing).
     pub signing_key: Option<String>,
+    /// Replace an existing tag ref when set.
+    pub force: bool,
+    /// Compute the outcome without updating refs (or writing new tag objects).
+    pub dry_run: bool,
 }
 
 /// Result of [`create_tag`].
@@ -69,19 +104,42 @@ pub struct CreateTagOutcome {
     pub peeled: Option<ObjectId>,
     /// Whether the tag object was signed (always false for lightweight tags).
     pub signed: bool,
+    /// When `force` replaced an existing tag, the previous ref target.
+    pub replaced: Option<ObjectId>,
+    /// Whether this outcome was preview-only (no ref or object writes).
+    pub dry_run: bool,
 }
 
 /// Create a lightweight or annotated tag ref.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when the name is invalid, the tag exists, or a message
-/// was given without a tagger line.
+/// Returns [`TagError`] when the name is invalid, the tag exists without `force`,
+/// or the message is empty after cleanup. Propagates object-store and signing errors.
 pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTagOutcome> {
-    validate_tag_short_name(&req.name).map_err(|e| Error::Message(e.to_string()))?;
+    validate_tag_short_name(&req.name).map_err(|e| {
+        Error::Tag(TagError::InvalidName {
+            detail: e.to_string(),
+        })
+    })?;
     let tag_ref = format!("refs/tags/{}", req.name);
-    if refs::resolve_ref(repo.git_dir(), &tag_ref).is_ok() {
-        return Err(Error::Message(format!("tag '{}' already exists", req.name)));
+    let replaced = match refs::resolve_ref(repo.git_dir(), &tag_ref) {
+        Ok(existing) => {
+            if req.force {
+                Some(existing)
+            } else {
+                return Err(Error::Tag(TagError::AlreadyExists {
+                    name: req.name.clone(),
+                }));
+            }
+        }
+        Err(_) => None,
+    };
+
+    if let Some(ref raw) = req.message {
+        if strip_comments(raw).trim().is_empty() {
+            return Err(Error::Tag(TagError::EmptyMessage));
+        }
     }
 
     let target_kind = repo.odb().read_info(&req.target)?.kind;
@@ -118,13 +176,19 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
         } else {
             unsigned
         };
-        let tag_oid = repo.odb().write(ObjectKind::Tag, &bytes)?;
+        let tag_oid = if req.dry_run {
+            hash_object(repo.odb().hash_algo(), ObjectKind::Tag, &bytes)?
+        } else {
+            repo.odb().write(ObjectKind::Tag, &bytes)?
+        };
         (tag_oid, TagKind::Annotated)
     } else {
         (req.target, TagKind::Lightweight)
     };
 
-    refs::write_ref(repo.git_dir(), &tag_ref, &ref_oid)?;
+    if !req.dry_run {
+        refs::write_ref(repo.git_dir(), &tag_ref, &ref_oid)?;
+    }
 
     Ok(CreateTagOutcome {
         name: req.name.clone(),
@@ -132,6 +196,8 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
         kind,
         peeled,
         signed,
+        replaced,
+        dry_run: req.dry_run,
     })
 }
 
@@ -203,18 +269,19 @@ pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::TagNotFound`] when the tag does not exist, and propagates ref
+/// Returns [`TagError::NotFound`] when the tag does not exist, and propagates ref
 /// store failures.
-pub fn delete_tag(repo: &Repository, name: &str) -> Result<ObjectId> {
+pub fn delete_tag(repo: &Repository, name: &str, dry_run: bool) -> Result<ObjectId> {
     let tag_ref = format!("{TAGS_PREFIX}{name}");
-    let existing =
-        repo.references()
-            .read_existing(&tag_ref)?
-            .ok_or_else(|| Error::TagNotFound {
-                tag: name.to_owned(),
-            })?;
+    let existing = repo.references().read_existing(&tag_ref)?.ok_or_else(|| {
+        Error::Tag(TagError::NotFound {
+            name: name.to_owned(),
+        })
+    })?;
     let oid = existing.oid;
-    repo.references().delete_verified(&tag_ref, &existing)?;
+    if !dry_run {
+        repo.references().delete_verified(&tag_ref, &existing)?;
+    }
     Ok(oid)
 }
 
@@ -321,29 +388,7 @@ pub fn tag_points_at(repo: &Repository, tag_oid: &ObjectId, target: &ObjectId) -
 /// Returns 0 if the date cannot be determined.
 #[must_use]
 pub fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
-    let obj = match repo.odb().read(oid) {
-        Ok(o) => o,
-        Err(_) => return 0,
-    };
-    match obj.kind {
-        ObjectKind::Tag => {
-            // Parse tagger line for epoch
-            if let Ok(tag) = parse_tag(&obj.data) {
-                if let Some(ref tagger) = tag.tagger {
-                    return parse_epoch_from_ident(tagger);
-                }
-            }
-            0
-        }
-        ObjectKind::Commit => {
-            if let Ok(commit) = parse_commit(&obj.data) {
-                parse_epoch_from_ident(&commit.committer)
-            } else {
-                0
-            }
-        }
-        _ => 0,
-    }
+    listing_creator_date(repo.odb(), oid).unwrap_or(0)
 }
 
 /// Extract the epoch timestamp from a Git identity string.
@@ -351,40 +396,21 @@ pub fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
 /// Format: `Name <email> <epoch> <offset>`
 #[must_use]
 pub fn parse_epoch_from_ident(ident: &str) -> i64 {
-    // The epoch is the second-to-last token
-    let parts: Vec<&str> = ident.rsplitn(3, ' ').collect();
-    if parts.len() >= 2 {
-        parts[1].parse().unwrap_or(0)
-    } else {
-        0
-    }
+    epoch_from_identity(ident)
 }
 
-/// Compare two tag names as version strings (for `version:refname`).
-///
-/// Splits each name on `.` and `-` boundaries, comparing numeric segments
-/// numerically and non-numeric segments lexicographically.  This matches
-/// the behaviour of `git tag --sort=version:refname` (strverscmp-like).
+/// Compare two ref names using Git `version:refname` ordering (no configured suffix list).
 #[must_use]
 pub fn compare_version(a: &str, b: &str) -> std::cmp::Ordering {
-    let seg_a = version_segments(a);
-    let seg_b = version_segments(b);
-    for (sa, sb) in seg_a.iter().zip(seg_b.iter()) {
-        let ord = match (sa.parse::<u64>(), sb.parse::<u64>()) {
-            (Ok(na), Ok(nb)) => na.cmp(&nb),
-            _ => sa.cmp(sb),
-        };
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
-        }
-    }
-    seg_a.len().cmp(&seg_b.len())
+    compare_version_names(a, b, &[])
 }
 
 /// Split a version string into segments at `.` and `-` boundaries.
+///
+/// Deprecated: prefer [`compare_version_names`] from [`crate::refs::listing`].
 #[must_use]
+#[deprecated(note = "use grit_lib::refs::listing::compare_version_names instead")]
 pub fn version_segments(s: &str) -> Vec<&str> {
-    // Split on `.` and `-` keeping non-empty pieces
     s.split(['.', '-']).filter(|seg| !seg.is_empty()).collect()
 }
 
@@ -427,38 +453,10 @@ pub fn strip_comments(s: &str) -> String {
     result.join("\n") + "\n"
 }
 
-/// Simple glob pattern matching for tag names.
-///
-/// Supports `*` (matches any sequence) and `?` (matches any single character).
+/// Whether `name` matches `pattern` (Git tag/branch list glob on the short name).
 #[must_use]
 pub fn glob_matches(pattern: &str, name: &str) -> bool {
-    glob_match_bytes(pattern.as_bytes(), name.as_bytes())
-}
-
-/// Recursive glob matcher.
-fn glob_match_bytes(pat: &[u8], text: &[u8]) -> bool {
-    match (pat.first(), text.first()) {
-        (None, None) => true,
-        (Some(&b'*'), _) => {
-            // Skip consecutive stars
-            let pat_rest = pat
-                .iter()
-                .position(|&b| b != b'*')
-                .map_or(&pat[pat.len()..], |i| &pat[i..]);
-            if pat_rest.is_empty() {
-                return true;
-            }
-            for i in 0..=text.len() {
-                if glob_match_bytes(pat_rest, &text[i..]) {
-                    return true;
-                }
-            }
-            false
-        }
-        (Some(&b'?'), Some(_)) => glob_match_bytes(&pat[1..], &text[1..]),
-        (Some(p), Some(t)) if p == t => glob_match_bytes(&pat[1..], &text[1..]),
-        _ => false,
-    }
+    pattern_matches_short_name(name, pattern, false)
 }
 
 #[cfg(test)]
@@ -483,6 +481,7 @@ mod tests {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         };
         let oid = create_commit(&repo, &req, &mut NullProgress)
             .expect("commit")
@@ -500,6 +499,8 @@ mod tests {
                 tagger: Some("T <t@example.com> 1700000000 +0000".into()),
                 sign: None,
                 signing_key: None,
+                force: false,
+                dry_run: false,
             },
         )
         .expect("create tag")
@@ -542,7 +543,7 @@ mod tests {
         let (_tmp, repo, commit) = repo_with_commit();
         let annotated = tag(&repo, "v1", commit, Some("release"));
 
-        assert_eq!(delete_tag(&repo, "v1").unwrap(), annotated);
+        assert_eq!(delete_tag(&repo, "v1", false).unwrap(), annotated);
         assert!(list_tags(&repo).unwrap().is_empty());
         assert!(repo.odb().exists(&annotated));
     }
@@ -550,11 +551,75 @@ mod tests {
     #[test]
     fn delete_missing_tag_is_typed() {
         let (_tmp, repo, _) = repo_with_commit();
-        let err = delete_tag(&repo, "nope").unwrap_err();
+        let err = delete_tag(&repo, "nope", false).unwrap_err();
         assert!(
-            matches!(&err, Error::TagNotFound { tag } if tag == "nope"),
+            matches!(&err, Error::Tag(TagError::NotFound { name }) if name == "nope"),
             "{err:?}"
         );
         assert_eq!(err.to_string(), "no tag named 'nope'");
+    }
+
+    #[test]
+    fn create_tag_already_exists_is_typed() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        tag(&repo, "v1", commit, None);
+        let err = create_tag(
+            &repo,
+            &CreateTagRequest {
+                name: "v1".into(),
+                target: commit,
+                message: None,
+                tagger: None,
+                sign: None,
+                signing_key: None,
+                force: false,
+                dry_run: false,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Tag(TagError::AlreadyExists { name }) if name == "v1"
+        ));
+    }
+
+    #[test]
+    fn create_tag_invalid_name_is_typed() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        let err = create_tag(
+            &repo,
+            &CreateTagRequest {
+                name: "bad..tag".into(),
+                target: commit,
+                message: None,
+                tagger: None,
+                sign: None,
+                signing_key: None,
+                force: false,
+                dry_run: false,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Tag(TagError::InvalidName { .. })));
+    }
+
+    #[test]
+    fn create_tag_empty_message_is_typed() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        let err = create_tag(
+            &repo,
+            &CreateTagRequest {
+                name: "v1".into(),
+                target: commit,
+                message: Some("# only comment\n".into()),
+                tagger: Some("T <t@example.com> 1700000000 +0000".into()),
+                sign: None,
+                signing_key: None,
+                force: false,
+                dry_run: false,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Tag(TagError::EmptyMessage)));
     }
 }

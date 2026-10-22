@@ -10,12 +10,10 @@ use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch::{NoProgress, Progress};
 use crate::objects::ObjectId;
-use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::transfer::{
-    apply_tag_mode, classify_update, match_positive, prune_tracking_refs, ref_excluded,
-    refspecs_force, FetchOptions, FetchOutcome, MatchedRef, RefUpdate, TagMode, TransferStats,
-    UpdateMode,
+    apply_tag_mode, classify_update, prune_tracking_refs, FetchOptions, FetchOutcome, RefUpdate,
+    TagMode, TransferStats, UpdateMode,
 };
 
 const V2_SIGNATURE: &[u8] = b"# v2 git bundle\n";
@@ -154,9 +152,9 @@ pub fn fetch_from_bundle_with_progress(
     let default_branch =
         default_branch_from_bundle_head(&header.refs, init_default_branch.as_deref());
 
-    let mut opts = opts.clone();
-    if opts.remote_name.is_none() && opts.fetch_source.is_none() {
-        opts.fetch_source = Some(bundle_path.to_string_lossy().into_owned());
+    let mut effective = opts.clone();
+    if effective.remote_name.is_none() && effective.fetch_source.is_none() {
+        effective.fetch_source = Some(bundle_path.to_string_lossy().into_owned());
     }
 
     complete_bundle_fetch(
@@ -164,7 +162,7 @@ pub fn fetch_from_bundle_with_progress(
         repo.odb(),
         &remote_refs,
         default_branch,
-        &opts,
+        &effective,
         &HashSet::new(),
         pack_oids,
         transfer,
@@ -228,51 +226,26 @@ fn complete_bundle_fetch(
     pack_oids: HashSet<ObjectId>,
     transfer: TransferStats,
 ) -> Result<FetchOutcome> {
-    let mut positive: Vec<RefspecItem> = Vec::new();
-    let mut negatives: Vec<RefspecItem> = Vec::new();
-    for spec in &opts.refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid refspec '{spec}': {e}")))?;
-        if item.negative {
-            negatives.push(item);
-        } else {
-            positive.push(item);
-        }
-    }
-    for spec in &opts.negative_refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
-        negatives.push(item);
-    }
+    let remote_head_oid = crate::transfer::remote_head_oid_from_advertised(remote_refs);
+    let filtered_remote_refs: Vec<(String, ObjectId)> = remote_refs
+        .iter()
+        .filter(|(name, _)| {
+            name != "HEAD"
+                && !name.ends_with("^{}")
+                && crate::refs::is_valid_fetch_advertised_ref(name)
+        })
+        .cloned()
+        .collect();
 
-    let mut matched: Vec<MatchedRef> = Vec::new();
-    let mut matched_oids: HashSet<ObjectId> = HashSet::new();
-    let mut seen_remote_ref: HashSet<String> = HashSet::new();
-
-    for (name, oid) in remote_refs {
-        if name == "HEAD" || name.ends_with("^{}") {
-            continue;
-        }
-        if !crate::refs::is_valid_fetch_advertised_ref(name) {
-            continue;
-        }
-        if ref_excluded(name, &negatives) {
-            continue;
-        }
-        if let Some(local_ref) = match_positive(name, &positive) {
-            if seen_remote_ref.insert(name.clone()) {
-                matched_oids.insert(*oid);
-                matched.push(MatchedRef {
-                    remote_ref: name.clone(),
-                    local_ref,
-                    oid: *oid,
-                    force: refspecs_force(name, &positive),
-                    is_tag: name.starts_with("refs/tags/"),
-                    advertised_peel: None,
-                });
-            }
-        }
-    }
+    let crate::transfer::FetchMatchSet {
+        mut matched,
+        positive,
+        negatives,
+        explicit_refspec_fetch,
+    } = crate::transfer::build_fetch_matched_set(opts, &filtered_remote_refs, remote_head_oid)?;
+    let mut matched_oids: HashSet<ObjectId> = matched.iter().map(|m| m.oid).collect();
+    let mut seen_remote_ref: HashSet<String> =
+        matched.iter().map(|m| m.remote_ref.clone()).collect();
 
     let local_shallow = crate::shallow::load_shallow_boundaries(local_git_dir);
     let mut tag_shallow = local_shallow.clone();
@@ -346,6 +319,15 @@ fn complete_bundle_fetch(
             mode,
             UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
         );
+        crate::transfer::enforce_fetch_ref_update(
+            local_ref,
+            old,
+            m.oid,
+            mode,
+            opts,
+            explicit_refspec_fetch,
+            local_repo.as_ref(),
+        )?;
         if write && !opts.dry_run {
             if !crate::refs::is_valid_storable_ref_name(local_ref) {
                 updates.push(RefUpdate {
@@ -389,6 +371,7 @@ fn complete_bundle_fetch(
     crate::transfer::finish_anonymous_url_fetch(
         local_git_dir,
         opts,
+        explicit_refspec_fetch,
         default_branch.as_deref(),
         remote_refs,
         &matched,

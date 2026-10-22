@@ -4,6 +4,7 @@ use std::ops::ControlFlow;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
+use crate::refs::listing::{query_refs, RefListing, RefQuery, RefQueryError, RefQueryOptions};
 use crate::refs::store::{Expected, RawRef, RefName, RefUpdate, RefUpdateFlags};
 use crate::refs::{
     commit_ref_update_on_store, ensure_refname_safe_for_storage, list_refs_for_repository,
@@ -137,6 +138,20 @@ impl<'repo> References<'repo> {
     #[inline]
     pub fn list(&self, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
         list_refs_for_repository(self.repo, prefix)
+    }
+
+    /// List refs matching `query` (patterns, sort, limit) through this repository's ref store.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RefQueryError`] when the ref store cannot be read, when creator-date sort
+    /// is requested without object data, or when an object read fails.
+    pub fn query(
+        &self,
+        query: &RefQuery,
+        options: &RefQueryOptions,
+    ) -> std::result::Result<Vec<RefListing>, RefQueryError> {
+        query_refs(self.repo, query, options)
     }
 
     /// Point `name` at `oid`, creating parent directories as needed.

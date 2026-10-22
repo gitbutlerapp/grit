@@ -74,11 +74,12 @@ pub fn merge_bases_first_vs_rest(
     if others.len() == 1 {
         let other = others[0];
         let mut cache = CommitGraphCache::new(repo);
-        if let Some(base) = try_direct_ancestor_merge_base(&mut cache, other, first)? {
-            return Ok(vec![base]);
-        }
-        if let Some(base) = try_direct_ancestor_merge_base(&mut cache, first, other)? {
-            return Ok(vec![base]);
+        match direct_ancestor_relation(&mut cache, first, other)? {
+            FirstParentRelation::Same | FirstParentRelation::FirstIsAncestor => {
+                return Ok(vec![first]);
+            }
+            FirstParentRelation::SecondIsAncestor => return Ok(vec![other]),
+            FirstParentRelation::Unrelated => {}
         }
         let mut selected = walk_intersecting_histories(&mut cache, first, others, false)?;
         if selected.is_empty() {
@@ -880,15 +881,18 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     }
     let mut cache = CommitGraphCache::new(repo);
 
-    if tips.len() == 1 && hide.len() == 1 {
-        let tip = tips[0];
-        let hide_tip = hide[0];
-        if tip != hide_tip
-            && try_direct_first_parent_chain_merge_base(&mut cache, tip, hide_tip)?.is_some()
-        {
+    let single_relation = if tips.len() == 1 && hide.len() == 1 {
+        let relation = first_parent_chain_relation(&mut cache, tips[0], hide[0]);
+        if matches!(
+            relation,
+            FirstParentRelation::Same | FirstParentRelation::FirstIsAncestor
+        ) {
             return Ok(0);
         }
-    }
+        Some(relation)
+    } else {
+        None
+    };
 
     if filter.min_parents.is_none()
         && filter.max_parents.is_none()
@@ -905,6 +909,16 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         }
     }
 
+    // Walking a merge-free chain down to `hide` costs one commit per counted commit, so it
+    // runs before the bitmap probe, which pays for opening and checking the bitmap file.
+    if single_relation == Some(FirstParentRelation::SecondIsAncestor) {
+        if let Some(n) =
+            try_count_on_first_parent_chain_excluding_hide(&mut cache, tips[0], hide[0], filter)?
+        {
+            return Ok(n);
+        }
+    }
+
     if tips.len() == 1
         && hide.len() == 1
         && filter.min_parents.is_none()
@@ -914,14 +928,6 @@ pub fn count_commits_reachable_excluding_ancestors_of(
         && !filter.first_parent_only
     {
         if let Some(n) = try_count_diff_via_stored_commit_bitmaps(repo, tips[0], hide[0])? {
-            return Ok(n);
-        }
-    }
-
-    if tips.len() == 1 && hide.len() == 1 {
-        if let Some(n) =
-            try_count_on_first_parent_chain_excluding_hide(&mut cache, tips[0], hide[0], filter)?
-        {
             return Ok(n);
         }
     }
@@ -1029,22 +1035,17 @@ pub fn first_parent_commits_with_cutoffs(
     Ok(out)
 }
 
+/// Count commits on `tip`'s first-parent chain above `hide`.
+///
+/// The caller must already know that `hide` lies on `tip`'s first-parent chain
+/// ([`FirstParentRelation::SecondIsAncestor`]). Returns `None` when a merge is met and the
+/// full graph must be walked instead.
 fn try_count_on_first_parent_chain_excluding_hide(
     cache: &mut CommitGraphCache<'_>,
     tip: ObjectId,
     hide: ObjectId,
     filter: ReachableCountFilter,
 ) -> Result<Option<usize>> {
-    if tip == hide {
-        return Ok(Some(0));
-    }
-    if try_direct_first_parent_chain_merge_base(cache, tip, hide)?.is_some() {
-        return Ok(Some(0));
-    }
-    if try_direct_first_parent_chain_merge_base(cache, hide, tip)?.is_none() {
-        return Ok(None);
-    }
-
     let mut count = 0usize;
     let mut cur = tip;
     while cur != hide {
@@ -1073,14 +1074,10 @@ fn commit_is_excluded_from_count(
 ) -> Result<bool> {
     if hide.len() == 1 {
         let hide_tip = hide[0];
-        if oid == hide_tip {
-            return Ok(true);
-        }
-        if try_direct_first_parent_chain_merge_base(cache, hide_tip, oid)?.is_some() {
-            return Ok(false);
-        }
-        if try_direct_first_parent_chain_merge_base(cache, oid, hide_tip)?.is_some() {
-            return Ok(true);
+        match first_parent_chain_relation(cache, oid, hide_tip) {
+            FirstParentRelation::Same | FirstParentRelation::FirstIsAncestor => return Ok(true),
+            FirstParentRelation::SecondIsAncestor => return Ok(false),
+            FirstParentRelation::Unrelated => {}
         }
         if cache.is_ancestor(oid, hide_tip)? {
             return Ok(true);
@@ -1350,54 +1347,132 @@ fn first_parent_oid(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<O
         .ok_or_else(|| Error::ObjectNotFound(format!("{oid} has no parent")))
 }
 
-/// When `ancestor` is a direct ancestor of `descendant` on first-parent chains, return it
-/// using commit-graph generations to bound the walk.
-fn try_direct_ancestor_merge_base(
+/// Classify `first` and `second` along first-parent chains, using commit-graph generations
+/// to bound the walk when both commits are ranked and [`first_parent_chain_relation`]
+/// otherwise.
+fn direct_ancestor_relation(
     cache: &mut CommitGraphCache<'_>,
-    ancestor: ObjectId,
-    descendant: ObjectId,
-) -> Result<Option<ObjectId>> {
-    if ancestor == descendant {
-        return Ok(Some(ancestor));
+    first: ObjectId,
+    second: ObjectId,
+) -> Result<FirstParentRelation> {
+    if first == second {
+        return Ok(FirstParentRelation::Same);
     }
-    let desc_gen = commit_rank_for_walk(cache, descendant);
-    let anc_gen = commit_rank_for_walk(cache, ancestor);
-    if desc_gen != UNRANKED_COMMIT && anc_gen != UNRANKED_COMMIT {
-        if desc_gen <= anc_gen {
-            // Ranked commits: cannot be a strict first-parent ancestor; avoid scanning to root.
-            return Ok(None);
-        }
-        let mut cur = descendant;
-        let mut gen = desc_gen;
-        while gen > anc_gen {
-            cur = first_parent_oid(cache, cur)?;
-            gen = commit_rank_for_walk(cache, cur);
-            if gen == UNRANKED_COMMIT {
-                return Ok(None);
-            }
-        }
-        return Ok((cur == ancestor).then_some(ancestor));
+    let first_gen = commit_rank_for_walk(cache, first);
+    let second_gen = commit_rank_for_walk(cache, second);
+    if first_gen == UNRANKED_COMMIT || second_gen == UNRANKED_COMMIT {
+        return Ok(first_parent_chain_relation(cache, first, second));
     }
-    try_direct_first_parent_chain_merge_base(cache, ancestor, descendant)
+    if first_gen == second_gen {
+        return Ok(FirstParentRelation::Unrelated);
+    }
+    let (ancestor, ancestor_gen, mut cur, mut gen, found) = if first_gen < second_gen {
+        (
+            first,
+            first_gen,
+            second,
+            second_gen,
+            FirstParentRelation::FirstIsAncestor,
+        )
+    } else {
+        (
+            second,
+            second_gen,
+            first,
+            first_gen,
+            FirstParentRelation::SecondIsAncestor,
+        )
+    };
+    while gen > ancestor_gen {
+        cur = first_parent_oid(cache, cur)?;
+        gen = commit_rank_for_walk(cache, cur);
+        if gen == UNRANKED_COMMIT {
+            return Ok(FirstParentRelation::Unrelated);
+        }
+    }
+    Ok(if cur == ancestor {
+        found
+    } else {
+        FirstParentRelation::Unrelated
+    })
 }
 
-/// When commit-graph generations are unavailable, test whether `ancestor` lies on
-/// `descendant`'s first-parent chain (common for linear history without a graph file).
-fn try_direct_first_parent_chain_merge_base(
+/// How two commits relate along their first-parent chains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirstParentRelation {
+    /// Both inputs are the same commit.
+    Same,
+    /// The first commit lies on the second commit's first-parent chain.
+    FirstIsAncestor,
+    /// The second commit lies on the first commit's first-parent chain.
+    SecondIsAncestor,
+    /// Neither commit lies on the other's first-parent chain (they may still be
+    /// related through second parents).
+    Unrelated,
+}
+
+/// Classify `first` and `second` by walking both first-parent chains together.
+///
+/// Stops as soon as one chain reaches the other tip, or the chains merge at a commit that
+/// is neither tip: once merged they share every later commit, so the tip that is not yet
+/// on the other chain can never appear on it. That argument holds for any interleaving of
+/// the two walks, so committer dates only pick which chain to advance (newer first) and
+/// never affect the answer. With sane dates the cost is about the distance to the answer
+/// instead of a walk to the root of the losing direction. A root commit or a
+/// missing or unreadable parent ends that chain; the caller's full walk reports real errors.
+fn first_parent_chain_relation(
     cache: &mut CommitGraphCache<'_>,
-    ancestor: ObjectId,
-    descendant: ObjectId,
-) -> Result<Option<ObjectId>> {
-    let mut cur = descendant;
-    loop {
-        if cur == ancestor {
-            return Ok(Some(ancestor));
-        }
-        cur = match first_parent_oid(cache, cur) {
-            Ok(parent) => parent,
-            Err(_) => return Ok(None),
-        };
+    first: ObjectId,
+    second: ObjectId,
+) -> FirstParentRelation {
+    if first == second {
+        return FirstParentRelation::Same;
     }
+    let mut seen_first = oid_hash_set();
+    seen_first.insert(first);
+    let mut seen_second = oid_hash_set();
+    seen_second.insert(second);
+    let mut cur_first = Some(first);
+    let mut cur_second = Some(second);
+    while cur_first.is_some() || cur_second.is_some() {
+        // Advance the newer chain first so a descendant reaches its ancestor without also
+        // walking the ancestor's chain; equal or unreadable dates step both.
+        let first_time = cur_first.and_then(|oid| cache.commit_time(oid).ok());
+        let second_time = cur_second.and_then(|oid| cache.commit_time(oid).ok());
+        let (step_first, step_second) = match (cur_first, cur_second) {
+            (Some(_), Some(_)) => match (first_time, second_time) {
+                (Some(a), Some(b)) if a > b => (true, false),
+                (Some(a), Some(b)) if a < b => (false, true),
+                _ => (true, true),
+            },
+            (first, second) => (first.is_some(), second.is_some()),
+        };
+        if let Some(cur) = cur_first.filter(|_| step_first) {
+            cur_first = first_parent_oid(cache, cur).ok();
+            if let Some(next) = cur_first {
+                if next == second {
+                    return FirstParentRelation::SecondIsAncestor;
+                }
+                if seen_second.contains(&next) {
+                    return FirstParentRelation::Unrelated;
+                }
+                seen_first.insert(next);
+            }
+        }
+        if let Some(cur) = cur_second.filter(|_| step_second) {
+            cur_second = first_parent_oid(cache, cur).ok();
+            if let Some(next) = cur_second {
+                if next == first {
+                    return FirstParentRelation::FirstIsAncestor;
+                }
+                if seen_first.contains(&next) {
+                    return FirstParentRelation::Unrelated;
+                }
+                seen_second.insert(next);
+            }
+        }
+    }
+    FirstParentRelation::Unrelated
 }
 
 fn commit_rank_for_walk(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> u64 {
@@ -1946,6 +2021,182 @@ mod tests {
         assert!(
             parent_reads >= 1400,
             "sanity: should walk from tip toward merge base (parent lookups {parent_reads})"
+        );
+        Ok(())
+    }
+
+    fn clear_commit_linkage(repo: &Repository) {
+        let mut link = repo
+            .caches()
+            .commit_linkage()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        link.parents.clear();
+        link.times.clear();
+    }
+
+    /// Linear chain of `len` commits; `time(i)` dates commit `i` (0 is the root).
+    fn write_chain(
+        repo: &Repository,
+        len: usize,
+        time: impl Fn(usize) -> i64,
+    ) -> Result<Vec<ObjectId>> {
+        let mut chain = vec![write_commit_same_time(&repo.odb(), &[], "c0", time(0))?];
+        for i in 1..len {
+            let parent = chain[i - 1];
+            chain.push(write_commit_same_time(
+                &repo.odb(),
+                &[parent],
+                &format!("c{i}"),
+                time(i),
+            )?);
+        }
+        Ok(chain)
+    }
+
+    /// Classify a pair with a cold cache and return the result with the parent lookups spent.
+    fn relation_with_lookups(
+        repo: &Repository,
+        first: ObjectId,
+        second: ObjectId,
+    ) -> (FirstParentRelation, usize) {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+        clear_commit_linkage(repo);
+        reset_commit_parent_lookups();
+        let relation = first_parent_chain_relation(&mut CommitGraphCache::new(repo), first, second);
+        (relation, commit_parent_lookups())
+    }
+
+    #[test]
+    fn first_parent_chain_relation_stops_near_the_answer() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let chain = write_chain(&repo, 3000, |i| 100 + i as i64)?;
+        let tip = chain[2999];
+        let old = chain[2499];
+
+        let (relation, lookups) = relation_with_lookups(&repo, tip, old);
+        assert_eq!(relation, FirstParentRelation::SecondIsAncestor);
+        assert!(
+            lookups <= 510,
+            "descendant first: must not walk the ancestor's 2500-commit chain ({lookups})"
+        );
+
+        let (relation, lookups) = relation_with_lookups(&repo, old, tip);
+        assert_eq!(relation, FirstParentRelation::FirstIsAncestor);
+        assert!(
+            lookups <= 510,
+            "ancestor first: must not walk the ancestor's 2500-commit chain ({lookups})"
+        );
+
+        assert_eq!(
+            relation_with_lookups(&repo, tip, tip).0,
+            FirstParentRelation::Same
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_parent_chain_relation_equal_and_skewed_dates_stay_correct() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+
+        let flat = write_chain(&repo, 2000, |_| 100)?;
+        let (relation, lookups) = relation_with_lookups(&repo, flat[1999], flat[1499]);
+        assert_eq!(relation, FirstParentRelation::SecondIsAncestor);
+        assert!(
+            lookups <= 1010,
+            "equal dates step both chains in lockstep ({lookups})"
+        );
+        let (relation, _) = relation_with_lookups(&repo, flat[1499], flat[1999]);
+        assert_eq!(relation, FirstParentRelation::FirstIsAncestor);
+
+        // Every descendant is dated before its parent: the date order is wrong at each step,
+        // which may cost extra walking but must not change the answer.
+        let skewed = write_chain(&repo, 300, |i| 10_000 - i as i64)?;
+        assert_eq!(
+            relation_with_lookups(&repo, skewed[299], skewed[100]).0,
+            FirstParentRelation::SecondIsAncestor
+        );
+        assert_eq!(
+            relation_with_lookups(&repo, skewed[100], skewed[299]).0,
+            FirstParentRelation::FirstIsAncestor
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_parent_chain_relation_forked_branches_stop_where_chains_meet() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let trunk = write_chain(&repo, 2000, |i| 100 + i as i64)?;
+        let fork = trunk[1999];
+        let mut tip_a = fork;
+        let mut tip_b = fork;
+        for i in 0..20 {
+            tip_a = write_commit_same_time(&repo.odb(), &[tip_a], &format!("a{i}"), 5_000 + i)?;
+            tip_b = write_commit_same_time(&repo.odb(), &[tip_b], &format!("b{i}"), 6_000 + i)?;
+        }
+        let (relation, lookups) = relation_with_lookups(&repo, tip_a, tip_b);
+        assert_eq!(relation, FirstParentRelation::Unrelated);
+        assert!(
+            lookups <= 60,
+            "forked tips must stop at the fork, not scan the 2000-commit trunk ({lookups})"
+        );
+
+        // A second-parent ancestor is not on the first-parent chain.
+        let merge = write_commit_same_time(&repo.odb(), &[tip_a, tip_b], "merge", 7_000)?;
+        assert_eq!(
+            relation_with_lookups(&repo, merge, tip_b).0,
+            FirstParentRelation::Unrelated
+        );
+        assert_eq!(
+            relation_with_lookups(&repo, merge, tip_a).0,
+            FirstParentRelation::SecondIsAncestor
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn count_excluding_ancestors_on_deep_chain_is_bounded_by_distance() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let chain = write_chain(&repo, 3000, |i| 100 + i as i64)?;
+        let tip = chain[2999];
+        let old = chain[2499];
+
+        clear_commit_linkage(&repo);
+        reset_commit_parent_lookups();
+        let filter = ReachableCountFilter::default();
+        assert_eq!(
+            count_commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old], filter)?,
+            500
+        );
+        assert_eq!(
+            count_commits_reachable_excluding_ancestors_of(&repo, &[old], &[tip], filter)?,
+            0
+        );
+        assert_eq!(merge_bases_first_vs_rest(&repo, old, &[tip])?, vec![old]);
+        assert_eq!(merge_bases_first_vs_rest(&repo, tip, &[old])?, vec![old]);
+        let lookups = commit_parent_lookups();
+        assert!(
+            lookups <= 520,
+            "left/right counts on a deep chain must not walk to the root ({lookups})"
+        );
+
+        let since = ReachableCountFilter {
+            since: Some(100 + 2900),
+            ..ReachableCountFilter::default()
+        };
+        assert_eq!(
+            count_commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old], since)?,
+            100
         );
         Ok(())
     }

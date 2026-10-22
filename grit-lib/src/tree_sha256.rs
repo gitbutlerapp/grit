@@ -9,6 +9,19 @@
 //! # }
 //! ```
 
+/// Tag header name for the tree-sha256 digest (reference tool: [`HEADER`](https://github.com/schacon/tree-sha256)).
+pub const TREE_SHA256_HEADER: &str = "tree-sha256";
+
+/// Tag header naming a submodule path excluded from the digest.
+pub const TREE_SHA256_EXCLUDED_HEADER: &str = "tree-sha256-excluded";
+
+mod tag_verify;
+
+pub use tag_verify::{
+    parse_tree_sha256_tag_headers, verify_tag, SignatureVerdict, TagVerification, TagVerifyOptions,
+    TreeSha256TagHeaders, TreeSha256Verdict,
+};
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -144,7 +157,7 @@ pub fn tree_sha256(
     oid: ObjectId,
     options: &TreeSha256Options,
 ) -> Result<TreeSha256Report> {
-    tree_sha256_with_chain(repo, oid, options, &[])
+    tree_sha256_with_chain(repo, oid, options, &[], "")
 }
 
 fn tree_sha256_with_chain(
@@ -152,6 +165,7 @@ fn tree_sha256_with_chain(
     oid: ObjectId,
     options: &TreeSha256Options,
     parent_chain: &[ObjectId],
+    path_prefix_from_root: &str,
 ) -> Result<TreeSha256Report> {
     let tree_oid = peel_to_tree(repo, oid)?;
     let root_commit = peel_to_commit(repo, oid)?;
@@ -165,6 +179,7 @@ fn tree_sha256_with_chain(
         repo,
         options,
         commit_chain,
+        path_prefix_from_root: path_prefix_from_root.to_owned(),
         records: Vec::new(),
         missing: Vec::new(),
         files: 0,
@@ -233,6 +248,8 @@ struct ComputeCtx<'a> {
     repo: &'a Repository,
     options: &'a TreeSha256Options,
     commit_chain: Vec<ObjectId>,
+    /// Path from the top-level repository to this walk's root (empty at the superproject).
+    path_prefix_from_root: String,
     records: Vec<Vec<u8>>,
     missing: Vec<MissingSubmodule>,
     files: usize,
@@ -276,27 +293,27 @@ impl ComputeCtx<'_> {
     }
 
     fn handle_gitlink(&mut self, path: &[u8], gitlink: ObjectId) -> Result<()> {
-        let path_str = path_bytes_to_string(path);
+        let global_path = self.global_path_from_root(path);
         if self.is_excluded(path) {
             self.push_excluded_record(path, gitlink);
-            self.excluded.push((path_str.clone(), gitlink));
+            self.excluded.push((global_path.clone(), gitlink));
             return Ok(());
         }
         if gitlink_in_commit_chain(&self.commit_chain, gitlink) {
             self.push_cycle_record(path, gitlink);
-            self.cycles.push(path_str.clone());
+            self.cycles.push(global_path.clone());
             return Ok(());
         }
         let Some(sub_repo) = self.open_submodule_repo(path)? else {
             self.missing.push(MissingSubmodule {
-                path: path_str,
+                path: global_path,
                 reason: MissingSubmoduleReason::NotCheckedOut,
             });
             return Ok(());
         };
         if sub_repo.odb().read(&gitlink).is_err() {
             self.missing.push(MissingSubmodule {
-                path: path_str,
+                path: global_path,
                 reason: MissingSubmoduleReason::MissingCommit,
             });
             return Ok(());
@@ -306,25 +323,26 @@ impl ComputeCtx<'_> {
             exclude_globs: self.options.exclude_globs.clone(),
             exclude_exact: self.options.exclude_exact.clone(),
         };
-        match tree_sha256_with_chain(&sub_repo, gitlink, &sub_opts, &self.commit_chain) {
+        match tree_sha256_with_chain(
+            &sub_repo,
+            gitlink,
+            &sub_opts,
+            &self.commit_chain,
+            &global_path,
+        ) {
             Ok(sub_report) => {
                 self.commit_chain.pop();
                 self.push_submodule_record(path, &sub_report.digest);
                 self.files += sub_report.files;
                 self.submodules += 1 + sub_report.submodules;
-                for (sub_path, oid) in sub_report.excluded {
-                    self.excluded
-                        .push((qualify_submodule_path(&path_str, &sub_path), oid));
-                }
-                for sub_path in sub_report.cycles {
-                    self.cycles
-                        .push(qualify_submodule_path(&path_str, &sub_path));
-                }
+                // Submodule reports already record excluded/cycle paths from the top repo.
+                self.excluded.extend(sub_report.excluded);
+                self.cycles.extend(sub_report.cycles);
             }
             Err(Error::TreeSha256MissingSubmodules(mut miss)) => {
                 self.commit_chain.pop();
                 for m in &mut miss {
-                    m.path = qualify_submodule_path(&path_str, &m.path);
+                    m.path = qualify_submodule_path(&global_path, &m.path);
                 }
                 self.missing.append(&mut miss);
             }
@@ -336,19 +354,28 @@ impl ComputeCtx<'_> {
         Ok(())
     }
 
+    fn global_path_from_root(&self, local_path: &[u8]) -> String {
+        let local = path_bytes_to_string(local_path);
+        if self.path_prefix_from_root.is_empty() {
+            return local;
+        }
+        qualify_submodule_path(&self.path_prefix_from_root, &local)
+    }
+
     fn is_excluded(&self, path: &[u8]) -> bool {
+        let global = self.global_path_from_root(path);
         if self
             .options
             .exclude_exact
             .iter()
-            .any(|p| path == p.as_bytes())
+            .any(|p| p.as_bytes() == path || p == &global)
         {
             return true;
         }
         self.options
             .exclude_globs
             .iter()
-            .any(|g| path_matches_glob_bytes(path, g.as_bytes()))
+            .any(|g| path_matches_glob_bytes(path, g.as_bytes()) || path_matches_glob(&global, g))
     }
 
     fn open_submodule_repo(&self, rel_path: &[u8]) -> Result<Option<Repository>> {
@@ -550,12 +577,6 @@ fn submodule_name_for_path(cfg: &ConfigSet, path: &str) -> Option<String> {
 pub(crate) fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> bool {
     chain.contains(&gitlink)
 }
-
-/// Tag header name for the tree-sha256 digest (reference tool: [`HEADER`](https://github.com/schacon/tree-sha256)).
-pub const TREE_SHA256_HEADER: &str = "tree-sha256";
-
-/// Tag header naming a submodule path excluded from the digest.
-pub const TREE_SHA256_EXCLUDED_HEADER: &str = "tree-sha256-excluded";
 
 /// Digest and excluded submodule paths recorded on an annotated tag.
 #[derive(Debug, Clone, PartialEq, Eq)]

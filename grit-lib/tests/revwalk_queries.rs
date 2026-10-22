@@ -650,6 +650,94 @@ fn left_right_counts_match_git_rev_list_left_right_count() {
 }
 
 #[test]
+fn left_right_counts_first_parent_shapes_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let commit = |label: &str, parents: &[ObjectId], time: i64| {
+        let date = format!("@{time} +0000");
+        support::commit_labeled_with_dates(wt, label, parents, &date, &date)
+    };
+
+    // Trunk with increasing dates, a side branch forked from it, and a merge of the side
+    // branch back into the trunk.
+    let mut trunk = vec![commit("t0", &[], 1_000)];
+    for i in 1..40 {
+        let parent = trunk[i - 1];
+        trunk.push(commit(&format!("t{i}"), &[parent], 1_000 + i as i64 * 10));
+    }
+    let mut side = trunk[12];
+    for i in 0..5 {
+        side = commit(&format!("s{i}"), &[side], 1_125 + i as i64);
+    }
+    let merge = commit("merge", &[trunk[39], side], 2_000);
+    let after_merge = commit("after-merge", &[merge], 2_010);
+
+    // Descendants dated before their ancestors (clock skew) and a run of equal dates.
+    let mut skewed = trunk[20];
+    for i in 0..6 {
+        skewed = commit(&format!("skew{i}"), &[skewed], 500 - i as i64);
+    }
+    let mut flat = trunk[25];
+    for i in 0..6 {
+        flat = commit(&format!("flat{i}"), &[flat], 1_250);
+    }
+
+    let refs = [
+        ("refs/heads/main", after_merge),
+        ("refs/heads/trunk", trunk[39]),
+        ("refs/heads/old", trunk[5]),
+        ("refs/heads/side", side),
+        ("refs/heads/skewed", skewed),
+        ("refs/heads/flat", flat),
+    ];
+    for (name, oid) in refs {
+        git(wt, &["update-ref", name, &oid.to_hex()]);
+    }
+
+    let repo = open_grit(wt);
+    let walk = repo.rev_walk();
+    for token in [
+        "old...trunk",
+        "trunk...old",
+        "trunk...trunk",
+        "trunk~30...trunk~2",
+        "side...trunk",
+        "trunk...side",
+        "old...side",
+        "main...old",
+        "old...main",
+        "main...side",
+        "side...main",
+        "skewed...trunk",
+        "trunk~19...skewed",
+        "skewed...trunk~19",
+        "skewed~6...skewed",
+        "flat...flat~6",
+        "flat~6...flat",
+        "flat...skewed",
+        "skewed...side",
+    ] {
+        let git_counts = git_rev_list_left_right_count(wt, &[token]);
+        let grit_counts = walk
+            .left_right_counts(&[token], &RevWalkListOptions::default())
+            .unwrap_or_else(|e| panic!("{token}: {e}"));
+        assert_eq!(grit_counts, git_counts, "{token}");
+
+        let git_fp = git_rev_list_left_right_count(wt, &[token, "--first-parent"]);
+        let grit_fp = walk
+            .left_right_counts(
+                &[token],
+                &RevWalkListOptions {
+                    first_parent: true,
+                    ..RevWalkListOptions::default()
+                },
+            )
+            .unwrap_or_else(|e| panic!("{token} --first-parent: {e}"));
+        assert_eq!(grit_fp, git_fp, "{token} --first-parent");
+    }
+}
+
+#[test]
 fn upstream_range_at_u_matches_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

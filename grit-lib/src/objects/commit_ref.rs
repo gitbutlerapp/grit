@@ -102,16 +102,7 @@ impl<'a> CommitRef<'a> {
     /// Decoded commit message (uses [`Self::encoding_raw`] when set).
     #[must_use]
     pub fn message(&self) -> Cow<'_, str> {
-        if self.encoding.is_some() {
-            return Cow::Owned(commit_encoding::decode_bytes(
-                self.encoding_label(),
-                self.message,
-            ));
-        }
-        match std::str::from_utf8(self.message) {
-            Ok(s) => Cow::Borrowed(s),
-            Err(_) => Cow::Owned(commit_encoding::decode_bytes(None, self.message)),
-        }
+        decode_message(self.encoding.is_some(), self.encoding_label(), self.message)
     }
 
     /// Committer unix seconds for `--until` / `--since` filtering (unknown → `0`).
@@ -216,7 +207,24 @@ fn parse_oid_fast(value: &[u8]) -> Result<ObjectId> {
     parse_oid_field(value)
 }
 
-fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
+/// Header fields found by [`scan_commit`]; required ones may be absent in lenient mode.
+struct CommitScan<'a> {
+    headers_block: &'a [u8],
+    message: &'a [u8],
+    has_blank_line: bool,
+    tree: Option<ObjectId>,
+    parents: SmallVec<[ObjectId; 2]>,
+    author_raw: Option<Cow<'a, [u8]>>,
+    committer_raw: Option<Cow<'a, [u8]>>,
+    encoding: Option<&'a [u8]>,
+}
+
+/// One pass over the commit headers.
+///
+/// Strict mode rejects malformed header lines, unparsable ids, orphan continuations and a
+/// non-UTF-8 `encoding`. Lenient mode skips those lines instead, the way Git's display code
+/// reads whatever headers a commit does have.
+fn scan_commit(data: &[u8], lenient: bool) -> Result<CommitScan<'_>> {
     #[derive(Clone, Copy)]
     enum Continuation {
         Author,
@@ -235,6 +243,7 @@ fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
 
     let mut headers_end = 0usize;
     let mut message: &[u8] = &[];
+    let mut has_blank_line = false;
 
     while pos < data.len() {
         let line_start = pos;
@@ -248,19 +257,19 @@ fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
         if line.is_empty() {
             headers_end = line_start;
             message = data.get(after_nl..).unwrap_or_default();
+            has_blank_line = true;
             break;
         }
 
         if line.first() == Some(&b' ') {
             let rest = line.get(1..).unwrap_or_default();
-            match cont {
-                Continuation::Author => {
-                    merge_identity_continuation(&mut author_raw, rest)?;
-                }
-                Continuation::Committer => {
-                    merge_identity_continuation(&mut committer_raw, rest)?;
-                }
-                Continuation::MultilineExtra | Continuation::Ignore => {}
+            let merged = match cont {
+                Continuation::Author => merge_identity_continuation(&mut author_raw, rest),
+                Continuation::Committer => merge_identity_continuation(&mut committer_raw, rest),
+                Continuation::MultilineExtra | Continuation::Ignore => Ok(()),
+            };
+            if !lenient {
+                merged?;
             }
             pos = after_nl;
             continue;
@@ -268,11 +277,19 @@ fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
 
         match classify_header_line(line) {
             HeaderKind::Tree => {
-                tree = Some(parse_oid_fast(header_value(line, 5))?);
+                match parse_oid_fast(header_value(line, 5)) {
+                    Ok(oid) => tree = Some(oid),
+                    Err(err) if !lenient => return Err(err),
+                    Err(_) => {}
+                }
                 cont = Continuation::Ignore;
             }
             HeaderKind::Parent => {
-                parents.push(parse_oid_fast(header_value(line, 7))?);
+                match parse_oid_fast(header_value(line, 7)) {
+                    Ok(oid) => parents.push(oid),
+                    Err(err) if !lenient => return Err(err),
+                    Err(_) => {}
+                }
                 cont = Continuation::Ignore;
             }
             HeaderKind::Author => {
@@ -285,45 +302,97 @@ fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
             }
             HeaderKind::Encoding => {
                 let rest = header_value(line, 9);
-                if std::str::from_utf8(rest).is_err() {
+                if std::str::from_utf8(rest).is_ok() {
+                    encoding = Some(rest);
+                } else if !lenient {
                     return Err(Error::CorruptObject("encoding is not UTF-8".to_owned()));
                 }
-                encoding = Some(rest);
                 cont = Continuation::Ignore;
             }
             HeaderKind::Extra => {
                 cont = Continuation::MultilineExtra;
             }
             HeaderKind::Malformed => {
-                return Err(Error::CorruptObject(
-                    "malformed commit header line".to_owned(),
-                ));
+                if !lenient {
+                    return Err(Error::CorruptObject(
+                        "malformed commit header line".to_owned(),
+                    ));
+                }
+                cont = Continuation::Ignore;
             }
         }
         pos = after_nl;
     }
 
-    if headers_end == 0 && pos >= data.len() {
+    if !has_blank_line {
+        headers_end = data.len();
+    }
+    Ok(CommitScan {
+        headers_block: &data[..headers_end],
+        message,
+        has_blank_line,
+        tree,
+        parents,
+        author_raw,
+        committer_raw,
+        encoding,
+    })
+}
+
+fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
+    let scan = scan_commit(data, false)?;
+    if !scan.has_blank_line {
         return Err(Error::CorruptObject(
             "commit missing blank line before message".to_owned(),
         ));
     }
-
-    let headers_block = &data[..headers_end];
-    let author_bytes = author_raw
+    let author_bytes = scan
+        .author_raw
         .ok_or_else(|| Error::CorruptObject("commit missing author header".to_owned()))?;
-    let committer_bytes = committer_raw
+    let committer_bytes = scan
+        .committer_raw
         .ok_or_else(|| Error::CorruptObject("commit missing committer header".to_owned()))?;
 
     Ok(CommitRef {
-        headers_block,
-        message,
-        tree: tree.ok_or_else(|| Error::CorruptObject("commit missing tree header".to_owned()))?,
-        parents,
+        headers_block: scan.headers_block,
+        message: scan.message,
+        tree: scan
+            .tree
+            .ok_or_else(|| Error::CorruptObject("commit missing tree header".to_owned()))?,
+        parents: scan.parents,
         author_raw: author_bytes,
         committer_raw: committer_bytes,
-        encoding,
+        encoding: scan.encoding,
     })
+}
+
+/// Author identity and message of a commit, read leniently.
+///
+/// Unlike [`CommitRef::parse`], a missing `author`/`committer` header, a malformed or
+/// unparsable header line, or a missing blank line does not fail: the author is `None` when
+/// absent and the message is empty without a blank line. Decoding (including `encoding`)
+/// matches [`CommitRef::author`] and [`CommitRef::message`], so well-formed commits yield the
+/// same strings as [`super::parse_commit`].
+pub(crate) fn commit_author_and_message_lenient(data: &[u8]) -> (Option<String>, String) {
+    let Ok(scan) = scan_commit(data, true) else {
+        return (None, String::new());
+    };
+    let label = scan.encoding.and_then(|b| std::str::from_utf8(b).ok());
+    let author = scan
+        .author_raw
+        .map(|raw| commit_encoding::decode_bytes(label, &raw));
+    let message = decode_message(scan.encoding.is_some(), label, scan.message).into_owned();
+    (author, message)
+}
+
+fn decode_message<'a>(has_encoding: bool, label: Option<&str>, body: &'a [u8]) -> Cow<'a, str> {
+    if has_encoding {
+        return Cow::Owned(commit_encoding::decode_bytes(label, body));
+    }
+    match std::str::from_utf8(body) {
+        Ok(s) => Cow::Borrowed(s),
+        Err(_) => Cow::Owned(commit_encoding::decode_bytes(None, body)),
+    }
 }
 
 fn collect_extra_header_bytes(headers_block: &[u8]) -> Cow<'_, [u8]> {
@@ -441,6 +510,75 @@ fn merge_identity_continuation(slot: &mut Option<Cow<'_, [u8]>>, rest: &[u8]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lenient_author_and_message_match_strict_parse_on_valid_commits() {
+        let latin1: &[u8] = b"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\
+            author J\xf6rg <j@example.com> 1 +0100\n\
+            committer C <c@example.com> 2 +0000\n\
+            encoding ISO-8859-1\n\
+            \n\
+            Gr\xfc\xdfe\n";
+        let continued: &[u8] = b"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\
+            author A\n Continued <a@example.com> 1 +0000\n\
+            committer C <c@example.com> 2 +0000\n\
+            gpgsig -----BEGIN-----\n sig\n -----END-----\n\
+            \n\
+            subject\n\nbody\n";
+        for data in [latin1, continued] {
+            let strict = CommitRef::parse(data).expect("valid commit");
+            let (author, message) = commit_author_and_message_lenient(data);
+            assert_eq!(author.as_deref(), Some(strict.author().as_str()));
+            assert_eq!(message, strict.message());
+        }
+    }
+
+    #[test]
+    fn lenient_author_and_message_tolerate_missing_and_malformed_headers() {
+        let tree = "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n";
+        let no_committer = format!("{tree}author A <a@x> 1700000000 +0000\n\nmessage\n");
+        assert!(CommitRef::parse(no_committer.as_bytes()).is_err());
+        assert_eq!(
+            commit_author_and_message_lenient(no_committer.as_bytes()),
+            (
+                Some("A <a@x> 1700000000 +0000".to_owned()),
+                "message\n".to_owned()
+            )
+        );
+
+        let no_author = format!("{tree}committer C <c@x> 2 +0000\n\n\nsubject\n");
+        assert!(CommitRef::parse(no_author.as_bytes()).is_err());
+        assert_eq!(
+            commit_author_and_message_lenient(no_author.as_bytes()),
+            (None, "\nsubject\n".to_owned())
+        );
+
+        let malformed =
+            format!("{tree}parent not-an-oid\n\n bad continuation\nauthor A <a@x> 1 +0000\n\nm\n");
+        assert_eq!(
+            commit_author_and_message_lenient(malformed.as_bytes()).1,
+            " bad continuation\nauthor A <a@x> 1 +0000\n\nm\n",
+            "the first blank line still ends the headers"
+        );
+
+        let mut odd_lines = tree.as_bytes().to_vec();
+        odd_lines.extend_from_slice(b"encoding \xff\n orphan\nauthor A <a@x> 1 +0000\n\nm\n");
+        assert!(CommitRef::parse(&odd_lines).is_err());
+        let (author, message) = commit_author_and_message_lenient(&odd_lines);
+        assert_eq!(author.as_deref(), Some("A <a@x> 1 +0000"));
+        assert_eq!(message, "m\n");
+
+        let no_blank = format!("{tree}author A <a@x> 1 +0000\ncommitter C <c@x> 2 +0000\n");
+        assert!(CommitRef::parse(no_blank.as_bytes()).is_err());
+        assert_eq!(
+            commit_author_and_message_lenient(no_blank.as_bytes()),
+            (Some("A <a@x> 1 +0000".to_owned()), String::new())
+        );
+        assert_eq!(
+            commit_author_and_message_lenient(b""),
+            (None, String::new())
+        );
+    }
 
     #[test]
     fn commit_ref_roundtrip_vectors() {

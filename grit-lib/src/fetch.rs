@@ -16,17 +16,18 @@ use crate::fetch_negotiator::SkippingNegotiator;
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::protocol_v2;
-use crate::refspec::{parse_fetch_refspec, RefspecItem};
+use crate::refspec::RefspecItem;
 
 type LsRefsAdvertised = (
     Vec<(String, ObjectId)>,
     Option<String>,
     std::collections::HashMap<String, ObjectId>,
+    Option<ObjectId>,
 );
 use crate::progress::ProgressSink;
 use crate::transfer::{
-    classify_update, match_positive, open_odb, prune_tracking_refs, ref_excluded, refspecs_force,
-    FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
+    classify_update, open_odb, prune_tracking_refs, ref_excluded, FetchOptions, FetchOutcome,
+    RefUpdate, UpdateMode,
 };
 use crate::transport::Connection;
 
@@ -433,17 +434,20 @@ pub(crate) fn v2_object_format(server_caps: &[String], local_odb: &crate::odb::O
     local_odb.hash_algo().name().to_owned()
 }
 
-/// Derive `ref-prefix` lines for `command=ls-refs` from the fetch refspecs, port
-/// of the CLI's `v2_ref_prefixes_from_refspecs`. A `refs/...` source maps to its
-/// literal directory prefix (up to the first `*`); a bare name maps under
-/// `refs/heads/`. `HEAD` is requested as a literal prefix.
-fn v2_ref_prefixes_from_refspecs(refspecs: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let push_unique = |out: &mut Vec<String>, value: &str| {
-        if !out.iter().any(|v| v == value) {
-            out.push(value.to_owned());
-        }
-    };
+fn push_unique_prefix(out: &mut Vec<String>, value: &str) {
+    if !out.iter().any(|v| v == value) {
+        out.push(value.to_owned());
+    }
+}
+
+/// Ref namespace prefixes to enumerate when advertising refs for fetch (local dir,
+/// v2 `ls-refs`, and opportunistic remote-tracking updates).
+///
+/// Always includes `refs/heads/` and `refs/tags/`. Explicit refspec sources also
+/// add literal prefixes (e.g. `refs/heads/main`, `refs/pull/123/head`) so DWIM can
+/// resolve `pull/123/head` under `refs/`.
+pub(crate) fn fetch_ref_list_prefixes(refspecs: &[String]) -> Vec<String> {
+    let mut out = vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()];
     for spec in refspecs {
         if spec.starts_with('^') {
             continue;
@@ -454,7 +458,7 @@ fn v2_ref_prefixes_from_refspecs(refspecs: &[String]) -> Vec<String> {
             continue;
         }
         if src == "HEAD" {
-            push_unique(&mut out, "HEAD");
+            push_unique_prefix(&mut out, "HEAD");
             continue;
         }
         if let Some(star) = src.find('*') {
@@ -463,16 +467,18 @@ fn v2_ref_prefixes_from_refspecs(refspecs: &[String]) -> Vec<String> {
                 continue;
             }
             if prefix.starts_with("refs/") {
-                push_unique(&mut out, prefix);
+                push_unique_prefix(&mut out, prefix);
             } else {
-                push_unique(&mut out, &format!("refs/heads/{prefix}"));
+                push_unique_prefix(&mut out, &format!("refs/heads/{prefix}"));
             }
             continue;
         }
         if src.starts_with("refs/") {
-            push_unique(&mut out, src);
+            push_unique_prefix(&mut out, src);
         } else {
-            push_unique(&mut out, &format!("refs/heads/{src}"));
+            push_unique_prefix(&mut out, &format!("refs/heads/{src}"));
+            // Git DWIM: bare names may live directly under `refs/` (pull refs, etc.).
+            push_unique_prefix(&mut out, &format!("refs/{src}"));
         }
     }
     out
@@ -590,12 +596,8 @@ pub(crate) fn build_v2_ls_refs_request(
     // drives `FetchOutcome::default_branch` (the wire equivalent of the v0/v1
     // `symref=HEAD:` capability). `HEAD` is dropped from the fetchable ref set.
     pkt_line::write_line(&mut req, "ref-prefix HEAD")?;
-    let mut prefixes = v2_ref_prefixes_from_refspecs(refspecs);
-    if prefixes.is_empty() {
-        prefixes.push("refs/heads/".to_owned());
-        prefixes.push("refs/tags/".to_owned());
-    } else if tags != crate::transfer::TagMode::None && !prefixes.iter().any(|p| p == "refs/tags/")
-    {
+    let mut prefixes = fetch_ref_list_prefixes(refspecs);
+    if tags != crate::transfer::TagMode::None && !prefixes.iter().any(|p| p == "refs/tags/") {
         // Tag-following / `--tags` wants the tag namespace advertised so we can
         // add tags from the ls-refs result, even if the refspecs only name heads.
         prefixes.push("refs/tags/".to_owned());
@@ -616,6 +618,7 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
     // Response: `<oid> <refname>[ symref-target:…][ peeled:…]` lines, flush-terminated.
     let mut advertised: Vec<(String, ObjectId)> = Vec::new();
     let mut head_symref: Option<String> = None;
+    let mut head_oid: Option<ObjectId> = None;
     let mut advertised_peel: std::collections::HashMap<String, ObjectId> =
         std::collections::HashMap::new();
     let mut reader = reader;
@@ -639,6 +642,7 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
                     continue;
                 }
                 if name == "HEAD" {
+                    head_oid = Some(oid);
                     if let Some(t) =
                         symref_target.filter(|t| crate::refs::is_valid_advertised_symref_target(t))
                     {
@@ -656,7 +660,7 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
             }
         }
     }
-    Ok((advertised, head_symref, advertised_peel))
+    Ok((advertised, head_symref, advertised_peel, head_oid))
 }
 
 /// Build the ordered `have` candidate list for a v2 fetch from the local ref
@@ -1198,18 +1202,23 @@ pub fn fetch_remote(
     // capability block); we obtain them now with an `ls-refs` command, derived
     // from the fetch refspecs. For v0/v1 they come from the connect-time
     // advertisement directly.
-    let (remote_refs, default_branch, v2_caps, advertised_peel) = if conn.protocol_version() >= 2 {
+    let (remote_refs, default_branch, v2_caps, advertised_peel, remote_head_oid) = if conn
+        .protocol_version()
+        >= 2
+    {
         let caps: Vec<String> = conn.capabilities().to_vec();
-        let (refs, head_symref, peel) =
+        let (refs, head_symref, peel, head_oid) =
             v2_ls_refs(conn, &caps, &local_odb, opts.tags, &opts.refspecs)?;
         let default_branch =
             head_symref.map(|t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_owned());
-        (refs, default_branch, Some(caps), peel)
+        (refs, default_branch, Some(caps), peel, head_oid)
     } else {
         let default_branch = conn
             .head_symref()
             .map(|t| t.strip_prefix("refs/heads/").unwrap_or(t).to_owned());
         let advertised_peel = conn.advertised_tag_peel().cloned().unwrap_or_default();
+        let remote_head_oid =
+            crate::transfer::remote_head_oid_from_advertised(conn.advertised_refs());
         let remote_refs: Vec<(String, ObjectId)> = conn
             .advertised_refs()
             .iter()
@@ -1218,7 +1227,13 @@ pub fn fetch_remote(
             })
             .cloned()
             .collect();
-        (remote_refs, default_branch, None, advertised_peel)
+        (
+            remote_refs,
+            default_branch,
+            None,
+            advertised_peel,
+            remote_head_oid,
+        )
     };
     net_trace!(
         opts.network_trace,
@@ -1238,46 +1253,15 @@ pub fn fetch_remote(
         return Err(Error::RemoteReadFailed);
     }
 
-    // 2. Parse refspecs.
-    let mut positive: Vec<RefspecItem> = Vec::new();
-    let mut negatives: Vec<RefspecItem> = Vec::new();
-    for spec in &opts.refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid refspec '{spec}': {e}")))?;
-        if item.negative {
-            negatives.push(item);
-        } else {
-            positive.push(item);
-        }
-    }
-    for spec in &opts.negative_refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
-        negatives.push(item);
-    }
-
-    // 3. Match refs to refspecs (mirror transfer::fetch_local).
-    let mut matched: Vec<crate::transfer::MatchedRef> = Vec::new();
-    let mut matched_oids: HashSet<ObjectId> = HashSet::new();
-    let mut seen_remote_ref: HashSet<String> = HashSet::new();
-    for (name, oid) in &remote_refs {
-        if ref_excluded(name, &negatives) {
-            continue;
-        }
-        if let Some(local_ref) = match_positive(name, &positive) {
-            if seen_remote_ref.insert(name.clone()) {
-                matched_oids.insert(*oid);
-                matched.push(crate::transfer::MatchedRef {
-                    remote_ref: name.clone(),
-                    local_ref,
-                    oid: *oid,
-                    force: refspecs_force(name, &positive),
-                    is_tag: name.starts_with("refs/tags/"),
-                    advertised_peel: advertised_peel.get(name).copied(),
-                });
-            }
-        }
-    }
+    let crate::transfer::FetchMatchSet {
+        mut matched,
+        positive,
+        negatives,
+        explicit_refspec_fetch,
+    } = crate::transfer::build_fetch_matched_set(opts, &remote_refs, remote_head_oid)?;
+    let mut matched_oids: HashSet<ObjectId> = matched.iter().map(|m| m.oid).collect();
+    let mut seen_remote_ref: HashSet<String> =
+        matched.iter().map(|m| m.remote_ref.clone()).collect();
 
     // TagMode: add tags. Tag-following needs the closure of fetched objects,
     // which we cannot compute remotely; the wire `include-tag` capability makes
@@ -1572,6 +1556,15 @@ pub fn fetch_remote(
             mode,
             UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
         );
+        crate::transfer::enforce_fetch_ref_update(
+            local_ref,
+            old,
+            m.oid,
+            mode,
+            opts,
+            explicit_refspec_fetch,
+            local_repo.as_ref(),
+        )?;
         if write && !opts.dry_run {
             if !crate::refs::is_valid_storable_ref_name(local_ref) {
                 updates.push(RefUpdate {
@@ -1649,6 +1642,7 @@ pub fn fetch_remote(
     crate::transfer::finish_anonymous_url_fetch(
         local_git_dir,
         opts,
+        explicit_refspec_fetch,
         default_branch.as_deref(),
         &remote_refs,
         &matched,
@@ -1792,6 +1786,7 @@ pub(crate) fn add_wire_tags(
             force: false,
             is_tag: true,
             advertised_peel: advertised_peel.get(name).copied(),
+            fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         });
     }
     following_only
@@ -2144,6 +2139,14 @@ mod fetch_advertised_ref_tests {
     use std::io::Cursor;
 
     #[test]
+    fn fetch_ref_list_prefixes_includes_refs_dwim_for_pull() {
+        let specs = vec!["pull/123/head:pr-123".to_owned()];
+        let prefixes = fetch_ref_list_prefixes(&specs);
+        assert!(prefixes.iter().any(|p| p == "refs/pull/123/head"));
+        assert!(prefixes.iter().any(|p| p == "refs/heads/"));
+    }
+
+    #[test]
     fn build_v2_ls_refs_request_includes_unborn_when_advertised() {
         use crate::odb::Odb;
         use crate::transfer::TagMode;
@@ -2165,7 +2168,7 @@ mod fetch_advertised_ref_tests {
             .unwrap();
         crate::pkt_line::write_flush(&mut body).unwrap();
 
-        let (_, head, _) = parse_v2_ls_refs_response(&mut Cursor::new(body)).unwrap();
+        let (_, head, _, _) = parse_v2_ls_refs_response(&mut Cursor::new(body)).unwrap();
         assert_eq!(head.as_deref(), Some("refs/heads/trunk"));
     }
 
@@ -2177,7 +2180,7 @@ mod fetch_advertised_ref_tests {
         crate::pkt_line::write_line(&mut body, &line).unwrap();
         crate::pkt_line::write_flush(&mut body).unwrap();
 
-        let (refs, _, _) = parse_v2_ls_refs_response(&mut Cursor::new(body)).unwrap();
+        let (refs, _, _, _) = parse_v2_ls_refs_response(&mut Cursor::new(body)).unwrap();
         assert!(refs.is_empty());
     }
 
@@ -2220,6 +2223,7 @@ mod fetch_advertised_ref_tests {
             force: false,
             is_tag: false,
             advertised_peel: None,
+            fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         });
 
         let following_only = add_wire_tags(
@@ -2267,6 +2271,7 @@ mod fetch_advertised_ref_tests {
             force: false,
             is_tag: true,
             advertised_peel: Some(commit),
+            fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         }];
         let wants = following_tag_wants_with_local_peel(&matched, &following_only, &odb);
         assert!(wants.contains(&tag_obj));
@@ -2287,6 +2292,7 @@ mod fetch_advertised_ref_tests {
             force: false,
             is_tag: true,
             advertised_peel: Some(tip),
+            fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         }];
         let wants = following_tag_wants_peel_among_fetched_commits(
             &matched,

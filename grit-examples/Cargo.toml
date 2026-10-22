@@ -92,6 +92,14 @@ name = "guide_maintenance"
 path = "src/bin/guide_maintenance.rs"
 
 [[bin]]
+name = "guide_tree_sha256"
+path = "src/bin/guide_tree_sha256.rs"
+
+[[bin]]
+name = "guide_tree_sha256_verify"
+path = "src/bin/guide_tree_sha256_verify.rs"
+
+[[bin]]
 name = "history_reword"
 path = "src/bin/history_reword.rs"
 

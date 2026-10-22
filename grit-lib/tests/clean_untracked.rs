@@ -28,6 +28,7 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        dry_run: false,
     }
 }
 

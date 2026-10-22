@@ -27,7 +27,9 @@
 //! ```
 
 pub mod handle;
+pub mod listing;
 pub mod store;
+pub mod version_sort;
 
 mod domain_reexports;
 pub use domain_reexports::*;

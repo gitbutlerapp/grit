@@ -846,10 +846,12 @@ use crate::diff::{detect_renames, diff_trees, DiffEntry, DiffStatus};
 use crate::diff_rename_parallel::{diff_rename_parallel_options, parallel_map_indices};
 use crate::error::{Error as LibError, Result};
 use crate::objects::{
-    find_tree_entry_by_name_in_data, parse_commit, parse_commit_tree_and_parents, parse_tree,
+    commit_author_and_message_lenient, find_tree_entry_by_name_in_data,
+    parse_commit_tree_and_parents_lenient, parse_commit_tree_and_parents_prefix, parse_tree,
     Object, ObjectId, ObjectKind,
 };
 use crate::odb::Odb;
+use crate::pack::SingleLocalPackReader;
 use crate::parallel::{ParallelOptions, ThreadPolicy};
 use crate::repo::Repository;
 use crate::wildmatch::wildmatch;
@@ -1378,10 +1380,9 @@ struct BlameSession<'a> {
     pair_maps: HashMap<PairMapCacheKey, PairMapCacheValue>,
     /// When set, lines were handed off from a merge parent ≥2; walk only first-parent links.
     deferred_branch: bool,
-    tree_object_data: HashMap<ObjectId, Arc<Vec<u8>>>,
     identity_line_maps: HashMap<usize, Arc<Vec<Option<usize>>>>,
+    pack: SessionPackReader,
     merge_line_stamps: Vec<LineUseStamp>,
-    commit_meta: HashMap<ObjectId, Arc<BlameCommitMeta>>,
 }
 
 impl<'a> BlameSession<'a> {
@@ -1407,10 +1408,9 @@ impl<'a> BlameSession<'a> {
             commit_path_blob: HashMap::new(),
             pair_maps: HashMap::new(),
             deferred_branch: false,
-            tree_object_data: HashMap::new(),
             identity_line_maps: HashMap::new(),
+            pack: SessionPackReader::default(),
             merge_line_stamps: Vec::new(),
-            commit_meta: HashMap::new(),
         }
     }
 
@@ -1423,17 +1423,17 @@ impl<'a> BlameSession<'a> {
         map
     }
 
-    fn tree_object_data(&mut self, tree_oid: ObjectId) -> Result<Arc<Vec<u8>>> {
-        if let Some(data) = self.tree_object_data.get(&tree_oid) {
-            return Ok(Arc::clone(data));
-        }
-        let obj = read_object_for_blame(self.odb, &tree_oid, None)?;
+    /// Look up one entry of `tree_oid` without retaining the tree data.
+    fn tree_entry(&mut self, tree_oid: ObjectId, name: &[u8]) -> Result<Option<(ObjectId, u32)>> {
+        // Whole-object reads (unlike `read_into`) feed the delta-base cache; consecutive
+        // root trees are long delta chains against each other, so the cache is what keeps
+        // a first-parent walk from re-inflating every chain from its base.
+        let obj = self.pack.read(self.odb, &tree_oid)?;
         if obj.kind != ObjectKind::Tree {
             return Err(LibError::Message("expected tree".to_string()));
         }
-        let data = Arc::new(obj.data);
-        self.tree_object_data.insert(tree_oid, Arc::clone(&data));
-        Ok(data)
+        let oid_len = self.odb.hash_algo().len();
+        Ok(find_tree_entry_by_name_in_data(&obj.data, oid_len, name)?.map(|e| (e.oid, e.mode)))
     }
 
     fn merge_aware_blame(&self, first_parent_only: bool) -> bool {
@@ -1476,7 +1476,7 @@ impl<'a> BlameSession<'a> {
         odb: &Odb,
         commit: ObjectId,
         path: &str,
-        commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+        commit_cache: &mut BlameCommitCache,
     ) -> Result<Option<(ObjectId, u32)>> {
         let cache_key = (commit, path.to_owned());
         if let Some(resolved) = self.commit_path_blob.get(&cache_key) {
@@ -1526,31 +1526,17 @@ impl<'a> BlameSession<'a> {
         if let Some(entry) = self.path_entries.get(&key) {
             return Ok(*entry);
         }
-        let oid_len = self.odb.hash_algo().len();
-        let parts: Vec<&[u8]> = path.split('/').map(str::as_bytes).collect();
-        let mut current = tree_oid;
-        let mut resolved = None;
-        for (i, part) in parts.iter().enumerate() {
-            let data = self.tree_object_data(current)?;
-            let Some(e) = find_tree_entry_by_name_in_data(data.as_slice(), oid_len, part)? else {
-                resolved = None;
-                break;
-            };
-            if i == parts.len() - 1 {
-                if e.mode == 0o040000 {
-                    resolved = None;
-                } else {
-                    resolved = Some((e.oid, e.mode));
-                }
-                break;
-            }
-            if e.mode == 0o040000 {
-                current = e.oid;
-            } else {
-                resolved = None;
-                break;
-            }
-        }
+        // Memoizing each `(subtree, remaining path)` level means a walk only inflates
+        // the trees that changed between commits: unchanged subtrees hit the cache.
+        let (head, rest) = match path.split_once('/') {
+            Some((head, rest)) => (head, Some(rest)),
+            None => (path, None),
+        };
+        let resolved = match (self.tree_entry(tree_oid, head.as_bytes())?, rest) {
+            (Some((oid, 0o040000)), Some(rest)) => self.resolve_path_in_tree(oid, rest)?,
+            (Some((oid, mode)), None) if mode != 0o040000 => Some((oid, mode)),
+            _ => None,
+        };
         self.path_entries.insert(key, resolved);
         Ok(resolved)
     }
@@ -1664,29 +1650,73 @@ const BLAME_RENAME_SIMILARITY: u32 = 50;
 struct BlameCommitMeta {
     tree: ObjectId,
     parents: Vec<ObjectId>,
-    /// Populated when the commit object was read during the walk.
-    display: Option<BlameCommitInfo>,
 }
 
-impl BlameCommitMeta {
-    fn from_commit_object(data: &[u8], tree: ObjectId, parents: Vec<ObjectId>) -> Self {
-        let display = parse_commit(data).ok().map(|commit| BlameCommitInfo {
-            author: commit.author.trim().to_string(),
-            author_time: author_epoch_from_identity(&commit.author),
-            summary: commit
-                .message
-                .lines()
-                .find(|line| !line.trim().is_empty())
-                .unwrap_or("")
-                .trim()
-                .to_string(),
-        });
-        Self {
-            tree,
-            parents,
-            display,
+/// Pack reader held for one blame walk, opened on first use.
+///
+/// [`Odb::read`] re-opens a pack reader per call; a walk over tens of thousands of commits
+/// and trees keeps one instead. Any miss or error falls back to the [`Odb`], so this is
+/// purely a fast path.
+#[derive(Default)]
+struct SessionPackReader {
+    reader: Option<SingleLocalPackReader>,
+    opened: bool,
+}
+
+impl SessionPackReader {
+    fn get(&mut self, odb: &Odb) -> Option<&mut SingleLocalPackReader> {
+        if !self.opened {
+            self.opened = true;
+            self.reader = odb.open_session_pack_reader().ok().flatten();
         }
+        self.reader.as_mut()
     }
+
+    /// Read an object, preferring the session pack (which feeds the delta-base cache).
+    fn read(&mut self, odb: &Odb, oid: &ObjectId) -> Result<Object> {
+        if let Some(Ok(obj)) = self.get(odb).map(|r| r.read_object(oid)) {
+            return Ok(obj);
+        }
+        read_object_for_blame(odb, oid, None)
+    }
+
+    /// Tree and parents of `oid`, inflating only the commit header when it is packed whole.
+    ///
+    /// Both the header-prefix and the whole-object paths use Git's canonical tree/parent
+    /// parse, which ignores the rest of the headers; a prefix is only trusted when it holds
+    /// the complete parent list, so the result never depends on how the object is stored.
+    fn commit_tree_and_parents(
+        &mut self,
+        odb: &Odb,
+        oid: &ObjectId,
+    ) -> Result<(ObjectId, Vec<ObjectId>)> {
+        let hex_len = odb.hash_algo().hex_len();
+        if let Some(reader) = self.get(odb) {
+            if let Ok(Some(prefix)) = reader.read_commit_author_prefix_unordered(oid) {
+                if let Some(parsed) = parse_commit_tree_and_parents_prefix(prefix, hex_len) {
+                    return Ok(parsed);
+                }
+            }
+            reader.clear_commit_header_prefix();
+        }
+        let mut data = Vec::new();
+        if odb.read_into(oid, &mut data)? != ObjectKind::Commit {
+            return Err(LibError::CorruptObject(format!(
+                "{} is not a commit",
+                oid.to_hex()
+            )));
+        }
+        parse_commit_tree_and_parents_lenient(&data, hex_len).ok_or_else(|| {
+            LibError::CorruptObject(format!("commit {} has no valid tree header", oid.to_hex()))
+        })
+    }
+}
+
+/// Commit metadata memoized across one blame walk.
+#[derive(Default)]
+struct BlameCommitCache {
+    metas: HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    pack: SessionPackReader,
 }
 
 /// Walk history and attribute each line in a blob at `start_oid` to a commit.
@@ -1737,7 +1767,7 @@ fn fast_forward_same_blob(
     blob_oid: ObjectId,
     path: &str,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    commit_cache: &mut BlameCommitCache,
 ) -> Result<ObjectId> {
     session.set_bloom_path(path);
     loop {
@@ -1811,7 +1841,7 @@ fn compute_blame_with_session(
     line_range: Option<RangeInclusive<usize>>,
     session: &mut BlameSession<'_>,
 ) -> Result<Vec<BlameLine>> {
-    let mut commit_cache: HashMap<ObjectId, Arc<BlameCommitMeta>> = HashMap::new();
+    let mut commit_cache = BlameCommitCache::default();
     let start_commit = get_blame_commit(
         odb,
         start_oid,
@@ -2760,9 +2790,6 @@ fn compute_blame_with_session(
     }
 
     result.sort_by_key(|b| b.final_lineno);
-    for (oid, meta) in commit_cache {
-        session.commit_meta.entry(oid).or_insert(meta);
-    }
     Ok(result)
 }
 
@@ -2924,35 +2951,34 @@ fn collect_tree_file_entries(
 fn get_blame_commit(
     odb: &Odb,
     oid: ObjectId,
-    cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    cache: &mut BlameCommitCache,
     graph: Option<&CommitGraphChain>,
 ) -> Result<Arc<BlameCommitMeta>> {
-    if let Some(c) = cache.get(&oid) {
+    if let Some(c) = cache.metas.get(&oid) {
         return Ok(Arc::clone(c));
     }
     let meta = if let Some(chain) = graph {
         if let Some((tree, parents)) = chain.graph_commit_meta(&oid) {
-            Arc::new(BlameCommitMeta {
-                tree,
-                parents,
-                display: None,
-            })
+            Arc::new(BlameCommitMeta { tree, parents })
         } else {
-            load_blame_commit_from_object(odb, oid)?
+            load_blame_commit_from_object(odb, oid, &mut cache.pack)?
         }
     } else {
-        load_blame_commit_from_object(odb, oid)?
+        load_blame_commit_from_object(odb, oid, &mut cache.pack)?
     };
-    cache.insert(oid, Arc::clone(&meta));
+    cache.metas.insert(oid, Arc::clone(&meta));
     Ok(meta)
 }
 
-fn load_blame_commit_from_object(odb: &Odb, oid: ObjectId) -> Result<Arc<BlameCommitMeta>> {
-    let obj = read_object_for_blame(odb, &oid, None)?;
-    let (tree, parents) = parse_commit_tree_and_parents(&obj.data)?;
-    Ok(Arc::new(BlameCommitMeta::from_commit_object(
-        &obj.data, tree, parents,
-    )))
+/// Read only the tree and parent headers; author and summary are loaded later, and
+/// only for the commits that end up owning lines.
+fn load_blame_commit_from_object(
+    odb: &Odb,
+    oid: ObjectId,
+    pack: &mut SessionPackReader,
+) -> Result<Arc<BlameCommitMeta>> {
+    let (tree, parents) = pack.commit_tree_and_parents(odb, &oid)?;
+    Ok(Arc::new(BlameCommitMeta { tree, parents }))
 }
 
 /// Skip first-parent history while Bloom filters or an identical blob show `path` unchanged.
@@ -2965,7 +2991,7 @@ fn advance_across_unchanged_first_parents(
     mut blob_mode: u32,
     path: &str,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    commit_cache: &mut BlameCommitCache,
 ) -> Result<(ObjectId, u32)> {
     session.set_bloom_path(path);
     let chain = session.commit_graph.clone();
@@ -3036,7 +3062,7 @@ fn bloom_may_skip_to_first_parent(
     parent_oid: ObjectId,
     path: &str,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    commit_cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    commit_cache: &mut BlameCommitCache,
     parent_is_first_in_graph: bool,
 ) -> Result<bool> {
     if grafts.contains_key(&current_oid) {
@@ -3078,7 +3104,7 @@ fn commit_object_parents(
     session: &BlameSession<'_>,
     odb: &Odb,
     oid: ObjectId,
-    cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    cache: &mut BlameCommitCache,
 ) -> Result<Vec<ObjectId>> {
     if let Some(chain) = session.commit_graph.as_ref() {
         if let Some((parents, _commit_time)) = chain.graph_commit(&oid) {
@@ -3097,7 +3123,7 @@ fn commit_parents_for_blame(
     odb: &Odb,
     oid: ObjectId,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    cache: &mut HashMap<ObjectId, Arc<BlameCommitMeta>>,
+    cache: &mut BlameCommitCache,
     session: &BlameSession<'_>,
 ) -> Result<Vec<ObjectId>> {
     if let Some(p) = grafts.get(&oid) {
@@ -3142,9 +3168,10 @@ pub struct BlameAttributedLine {
 /// Metadata for a commit referenced by [`BlameResult::lines`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlameCommitInfo {
-    /// Author identity line (`Name <email> <epoch> <tz>`).
+    /// Author identity line (`Name <email> <epoch> <tz>`); empty when the commit has no
+    /// `author` header.
     pub author: String,
-    /// Author timestamp (Unix seconds).
+    /// Author timestamp (Unix seconds); `0` when the author line has none.
     pub author_time: i64,
     /// First line of the commit message.
     pub summary: String,
@@ -3216,13 +3243,9 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
 
             let mut commits = HashMap::new();
             for line in &lines {
-                commits.entry(line.commit).or_insert_with(|| {
-                    session
-                        .commit_meta
-                        .get(&line.commit)
-                        .and_then(|meta| meta.display.clone())
-                        .unwrap_or_else(|| load_blame_commit_info(repo.odb(), line.commit))
-                });
+                commits
+                    .entry(line.commit)
+                    .or_insert_with(|| load_blame_commit_info(repo.odb(), line.commit));
             }
             Ok((lines, commits))
         },
@@ -3258,23 +3281,19 @@ fn normalize_blame_path(repo: &Repository, path: &str) -> String {
     }
 }
 
+/// Author and summary for a blamed commit, read leniently so a commit missing `author` or
+/// `committer` (or with other malformed headers) still reports what it does have, the same
+/// whether the object is loose or packed.
 fn load_blame_commit_info(odb: &Odb, oid: ObjectId) -> BlameCommitInfo {
-    let fallback = BlameCommitInfo {
-        author: String::new(),
-        author_time: 0,
-        summary: String::new(),
+    let (author, message) = match read_object_for_blame(odb, &oid, None) {
+        Ok(obj) if obj.kind == ObjectKind::Commit => commit_author_and_message_lenient(&obj.data),
+        _ => (None, String::new()),
     };
-    let Ok(obj) = read_object_for_blame(odb, &oid, None) else {
-        return fallback;
-    };
-    let Ok(commit) = parse_commit(&obj.data) else {
-        return fallback;
-    };
+    let author = author.unwrap_or_default();
     BlameCommitInfo {
-        author: commit.author.trim().to_string(),
-        author_time: author_epoch_from_identity(&commit.author),
-        summary: commit
-            .message
+        author_time: author_epoch_from_identity(&author),
+        author: author.trim().to_string(),
+        summary: message
             .lines()
             .find(|line| !line.trim().is_empty())
             .unwrap_or("")

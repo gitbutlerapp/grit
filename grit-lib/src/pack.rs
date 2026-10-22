@@ -3708,7 +3708,9 @@ pub struct SingleLocalPackReader {
     pack_id: u32,
     cursor: usize,
     info_cache: HashMap<u64, ObjectInfo>,
-    delta_scratch: ZlibInflateScratch,
+    /// Created on first header/size probe; full object reads never touch it, so opening
+    /// a reader per [`crate::odb::Odb::read`] must not pay for an inflater.
+    delta_scratch: Option<ZlibInflateScratch>,
     commit_header_buf: Vec<u8>,
 }
 
@@ -3776,8 +3778,8 @@ impl SingleLocalPackReader {
             pack_id,
             cursor: 0,
             info_cache: HashMap::new(),
-            delta_scratch: ZlibInflateScratch::default(),
-            commit_header_buf: Vec::with_capacity(COMMIT_HEADER_READ_PREFIX),
+            delta_scratch: None,
+            commit_header_buf: Vec::new(),
         }))
     }
 
@@ -3814,8 +3816,8 @@ impl SingleLocalPackReader {
             pack_id,
             cursor: 0,
             info_cache: HashMap::new(),
-            delta_scratch: ZlibInflateScratch::default(),
-            commit_header_buf: Vec::with_capacity(COMMIT_HEADER_READ_PREFIX),
+            delta_scratch: None,
+            commit_header_buf: Vec::new(),
         }))
     }
 
@@ -3878,11 +3880,13 @@ impl SingleLocalPackReader {
             return Ok(None);
         }
         self.commit_header_buf.clear();
-        self.delta_scratch.decompress_prefix_into(
-            &pack_bytes[pos..],
-            COMMIT_HEADER_READ_PREFIX,
-            &mut self.commit_header_buf,
-        )?;
+        self.delta_scratch
+            .get_or_insert_with(ZlibInflateScratch::default)
+            .decompress_prefix_into(
+                &pack_bytes[pos..],
+                COMMIT_HEADER_READ_PREFIX,
+                &mut self.commit_header_buf,
+            )?;
         if self.commit_header_buf.is_empty() {
             return Ok(None);
         }
@@ -3947,6 +3951,7 @@ impl SingleLocalPackReader {
                     if result_size.is_none() {
                         result_size = Some(
                             self.delta_scratch
+                                .get_or_insert_with(ZlibInflateScratch::default)
                                 .read_pack_delta_result_size(pack_bytes, &mut pos)?,
                         );
                     }
@@ -3965,6 +3970,7 @@ impl SingleLocalPackReader {
                     if result_size.is_none() {
                         result_size = Some(
                             self.delta_scratch
+                                .get_or_insert_with(ZlibInflateScratch::default)
                                 .read_pack_delta_result_size(pack_bytes, &mut pos)?,
                         );
                     }

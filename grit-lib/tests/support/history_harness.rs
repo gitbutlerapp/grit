@@ -59,6 +59,13 @@ fn git_command_advances_harness_clock(args: &[&str]) -> bool {
                         | "help"
                         | "merge-base"
                         | "symbolic-ref"
+                        | "config"
+                        | "init"
+                        | "add"
+                        | "branch"
+                        | "clone"
+                        | "update-ref"
+                        | "mktree"
                 );
             }
         }
@@ -266,6 +273,11 @@ pub fn assert_fixup_tip_structure_matches(grit_dir: &Path, git_dir: &Path) {
     );
 }
 
+/// Disable grit change ids so rewritten commits can match system `git history fixup` byte-for-byte.
+pub fn disable_grit_change_ids_for_git_oracle(dir: &Path) {
+    git(dir, &["config", "grit.changeIds", "false"]);
+}
+
 /// Assert grit and git fixup results match; full commit OID only when `git history fixup` exists.
 pub fn assert_fixup_tip_matches_git_oracle(grit_dir: &Path, git_dir: &Path) {
     assert_fixup_tip_structure_matches(grit_dir, git_dir);
@@ -280,7 +292,31 @@ pub fn assert_fixup_tip_matches_git_oracle(grit_dir: &Path, git_dir: &Path) {
 
 #[cfg(test)]
 mod git_history_probe_tests {
-    use super::git_history_stderr_indicates_unavailable;
+    use super::{
+        build_commit_dag, git, git_history_stderr_indicates_unavailable,
+        reset_harness_commit_clock, HistoryRepo,
+    };
+    use grit_lib::objects::ObjectId;
+
+    fn committer_epoch(worktree: &std::path::Path, oid: ObjectId) -> u64 {
+        git(worktree, &["log", "-1", "--format=%ct", &oid.to_hex()])
+            .trim()
+            .parse()
+            .expect("committer epoch")
+    }
+
+    #[test]
+    fn build_commit_dag_assigns_increasing_committer_times() {
+        reset_harness_commit_clock();
+        let repo = HistoryRepo::init();
+        let wt = repo.worktree();
+        let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[]);
+        let a = committer_epoch(wt, oids["a"]);
+        let b = committer_epoch(wt, oids["b"]);
+        let c = committer_epoch(wt, oids["c"]);
+        assert!(a < b, "commit a ({a}) must be older than b ({b})");
+        assert!(b < c, "commit b ({b}) must be older than c ({c})");
+    }
 
     #[test]
     fn stderr_missing_history_command() {

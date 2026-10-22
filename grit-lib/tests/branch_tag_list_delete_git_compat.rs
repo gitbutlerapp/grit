@@ -12,7 +12,9 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{create_branch, delete_branch, list_branches};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::tag::{create_tag, delete_tag, list_tags, CreateTagRequest, TagKind};
+use grit_lib::porcelain::tag::{
+    create_tag, delete_tag, list_tags, CreateTagRequest, TagError, TagKind,
+};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
@@ -242,8 +244,8 @@ fn delete_packed_tags_is_seen_by_git() {
     let repo = open(&dir);
     let annotated = oid(&dir, "refs/tags/v2");
 
-    assert_eq!(delete_tag(&repo, "v2").unwrap(), annotated);
-    assert_eq!(delete_tag(&repo, "v1").unwrap(), oid(&dir, "main~1"));
+    assert_eq!(delete_tag(&repo, "v2", false).unwrap(), annotated);
+    assert_eq!(delete_tag(&repo, "v1", false).unwrap(), oid(&dir, "main~1"));
     assert!(!ref_exists(&dir, "refs/tags/v2"));
     assert!(!ref_exists(&dir, "refs/tags/v1"));
     assert_eq!(
@@ -257,9 +259,9 @@ fn delete_packed_tags_is_seen_by_git() {
             .collect::<Vec<_>>(),
         ["tree-tag"]
     );
-    let err = delete_tag(&repo, "v2").unwrap_err();
+    let err = delete_tag(&repo, "v2", false).unwrap_err();
     assert!(
-        matches!(&err, Error::TagNotFound { tag } if tag == "v2"),
+        matches!(&err, Error::Tag(TagError::NotFound { name }) if name == "v2"),
         "{err:?}"
     );
     git(&dir, &["fsck", "--no-progress"]);
@@ -288,6 +290,7 @@ fn list_and_delete_on_reftable_backend() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -303,6 +306,8 @@ fn list_and_delete_on_reftable_backend() {
             tagger: None,
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .unwrap();
@@ -317,7 +322,7 @@ fn list_and_delete_on_reftable_backend() {
     assert_eq!(list_tags(&repo).unwrap().len(), 1);
 
     assert_eq!(delete_branch(&repo, "topic", false).unwrap().oid, tip);
-    assert_eq!(delete_tag(&repo, "v1").unwrap(), tip);
+    assert_eq!(delete_tag(&repo, "v1", false).unwrap(), tip);
     let names: Vec<String> = list_branches(&repo)
         .unwrap()
         .branches
@@ -407,7 +412,7 @@ fn list_and_delete_use_injected_memory_ref_store() {
     assert_eq!(store.read_raw("refs/heads/topic").unwrap(), None);
     assert!(!store.reflog_exists("refs/heads/topic").unwrap());
 
-    assert_eq!(delete_tag(&repo, "injected").unwrap(), tip);
+    assert_eq!(delete_tag(&repo, "injected", false).unwrap(), tip);
     assert_eq!(store.read_raw("refs/tags/injected").unwrap(), None);
     assert!(list_tags(&repo).unwrap().is_empty());
 

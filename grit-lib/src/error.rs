@@ -747,6 +747,24 @@ pub enum Error {
     #[error("could not read from remote repository")]
     RemoteReadFailed,
 
+    /// Explicit fetch refspec resolution failed (missing or ambiguous source).
+    #[error("{0}")]
+    FetchRefspec(#[from] crate::fetch_request::FetchRefspecError),
+
+    /// Fetch refused to overwrite a local branch with a non-fast-forward update.
+    #[error("non-fast-forward update for {local_ref}")]
+    FetchNonFastForward {
+        /// Local ref that would have been overwritten.
+        local_ref: String,
+    },
+
+    /// Fetch refused to update the branch checked out in this or a linked worktree.
+    #[error("cannot fetch into checked-out branch '{branch}'")]
+    FetchIntoCheckedOutBranch {
+        /// Short branch name under `refs/heads/`.
+        branch: String,
+    },
+
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.
@@ -815,6 +833,10 @@ pub enum Error {
         /// Short tag name (e.g. `v1.0`).
         tag: String,
     },
+
+    /// Tag create/delete validation failure ([`crate::porcelain::tag::TagError`]).
+    #[error(transparent)]
+    Tag(#[from] crate::porcelain::tag::TagError),
 
     /// A linked worktree path is already registered under `.git/worktrees/`.
     #[error(
@@ -989,6 +1011,23 @@ pub enum Error {
     /// One or more submodules required for [`crate::tree_sha256::tree_sha256`] are missing.
     #[error("tree-sha256: missing submodules")]
     TreeSha256MissingSubmodules(Vec<crate::tree_sha256::MissingSubmodule>),
+
+    /// [`crate::tree_sha256::verify_tag`] was given an object that is not an annotated tag.
+    #[error("verify-tag: object {oid} is a {found:?}, not an annotated tag")]
+    TagVerifyNotTag {
+        /// Object id passed to verification.
+        oid: crate::objects::ObjectId,
+        /// Kind stored in the ODB.
+        found: crate::objects::ObjectKind,
+    },
+
+    /// Annotated tag header block has no `object` line.
+    #[error("verify-tag: tag has no object header")]
+    TagVerifyMissingObjectHeader,
+
+    /// Annotated tag carries more than one `tree-sha256` header line.
+    #[error("verify-tag: tag has more than one tree-sha256 header")]
+    TagVerifyDuplicateTreeSha256Header,
 
     /// Annotated tag tree-sha256 header parsing failed.
     #[error(transparent)]

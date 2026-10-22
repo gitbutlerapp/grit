@@ -144,6 +144,9 @@ pub struct FetchOptions {
     /// Source label written into [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) for
     /// anonymous URL/path fetches ([`crate::remote::Remote::from_url`] sets this automatically).
     pub fetch_source: Option<String>,
+    /// Configured `remote.<name>.fetch` refspecs (for opportunistic tracking when [`Self::refspecs`]
+    /// overrides them). [`crate::remote::Remote::fetch`] fills this for named remotes.
+    pub configured_refspecs: Vec<String>,
     /// Clone-only reflog entries for `refs/remotes/{remote}/HEAD` (not remote branches).
     pub clone_reflog: Option<CloneReflog>,
     /// Diagnostic sink for [`crate::diagnostics::Trace::Network`] events.
@@ -180,6 +183,7 @@ impl Default for FetchOptions {
             initial_remote_fetch: false,
             remote_name: None,
             fetch_source: None,
+            configured_refspecs: Vec::new(),
             clone_reflog: None,
             diagnostics: None,
             network_trace: false,
@@ -217,6 +221,7 @@ impl Clone for FetchOptions {
             initial_remote_fetch: self.initial_remote_fetch,
             remote_name: self.remote_name.clone(),
             fetch_source: self.fetch_source.clone(),
+            configured_refspecs: self.configured_refspecs.clone(),
             clone_reflog: self.clone_reflog.clone(),
             diagnostics: self.diagnostics.clone(),
             network_trace: self.network_trace,
@@ -1209,6 +1214,114 @@ pub fn fetch_local(
     fetch_local_with_progress(local_git_dir, remote_git_dir, opts, &mut NoProgress)
 }
 
+/// Result of matching remote refs to fetch refspecs.
+pub(crate) struct FetchMatchSet {
+    pub(crate) matched: Vec<MatchedRef>,
+    pub(crate) positive: Vec<RefspecItem>,
+    pub(crate) negatives: Vec<RefspecItem>,
+    pub(crate) explicit_refspec_fetch: bool,
+}
+
+/// Match remote refs to fetch refspecs (shared by local, wire, and bundle fetch).
+pub(crate) fn build_fetch_matched_set(
+    opts: &FetchOptions,
+    remote_refs: &[(String, ObjectId)],
+    remote_head_oid: Option<ObjectId>,
+) -> Result<FetchMatchSet> {
+    use crate::fetch_request::{FetchRefspecInput, FetchRefspecPlan, FetchRemoteAdvertisement};
+
+    let remote = FetchRemoteAdvertisement {
+        refs: remote_refs,
+        head_oid: remote_head_oid,
+    };
+    let plan = FetchRefspecPlan::resolve(
+        &FetchRefspecInput {
+            user_refspecs: opts.refspecs.clone(),
+            configured_refspecs: opts.configured_refspecs.clone(),
+            remote_name: opts.remote_name.clone(),
+        },
+        remote,
+    )?;
+    let explicit_refspec_fetch = plan.is_explicit();
+
+    let mut negatives = match &plan {
+        FetchRefspecPlan::Pattern { negatives, .. } | FetchRefspecPlan::Mixed { negatives, .. } => {
+            negatives.clone()
+        }
+    };
+    for spec in &opts.negative_refspecs {
+        let item = parse_fetch_refspec(spec)
+            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
+        negatives.push(item);
+    }
+
+    let positive = match &plan {
+        FetchRefspecPlan::Pattern { positive, .. } => positive.clone(),
+        FetchRefspecPlan::Mixed {
+            pattern_positive, ..
+        } => {
+            let mut positive = pattern_positive.clone();
+            for spec in &opts.refspecs {
+                if let Ok(item) = parse_fetch_refspec(spec) {
+                    if !item.negative && !item.pattern && !item.matching {
+                        positive.push(item);
+                    }
+                }
+            }
+            positive
+        }
+    };
+
+    let matched = crate::fetch_request::matched_refs_from_plan(&plan, remote)?;
+    Ok(FetchMatchSet {
+        matched,
+        positive,
+        negatives,
+        explicit_refspec_fetch,
+    })
+}
+
+/// Enforce Git fetch ref-update rules for explicit refspec fetches.
+pub(crate) fn enforce_fetch_ref_update(
+    local_ref: &str,
+    old: Option<ObjectId>,
+    new: ObjectId,
+    mode: UpdateMode,
+    opts: &FetchOptions,
+    explicit_refspec_fetch: bool,
+    local_repo: Option<&crate::repo::Repository>,
+) -> Result<()> {
+    if opts.dry_run {
+        return Ok(());
+    }
+    let would_write = matches!(
+        mode,
+        UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
+    );
+    if let Some(short) = local_ref.strip_prefix("refs/heads/") {
+        if old.is_some()
+            && old != Some(new)
+            && (would_write || mode == UpdateMode::NonFastForwardRejected)
+        {
+            if let Some(repo) = local_repo {
+                if crate::worktree::find_worktree_with_branch_checked_out(repo, short, None)?
+                    .is_some()
+                {
+                    return Err(Error::FetchIntoCheckedOutBranch {
+                        branch: short.to_owned(),
+                    });
+                }
+            }
+        }
+    }
+    if mode == UpdateMode::NonFastForwardRejected && explicit_refspec_fetch {
+        return Err(Error::FetchNonFastForward {
+            local_ref: local_ref.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 /// Like [`fetch_local`], reporting object copy progress through `progress`.
 pub fn fetch_local_with_progress(
     local_git_dir: &Path,
@@ -1230,21 +1343,20 @@ pub fn fetch_local_with_progress(
     let remote_odb = open_odb(remote_git_dir);
 
     // 1. Enumerate remote refs (with HEAD symref for the default branch).
-    let remote_entries = crate::remote::list_refs_from_git_dir(
+    let remote_entries = crate::remote::list_refs_from_git_dir_for_fetch(
         remote_git_dir,
         Some(&remote_odb),
-        &crate::remote::ListRefsOptions {
-            symrefs: true,
-            ..Default::default()
-        },
+        &opts.refspecs,
     )
     .map_err(crate::error::Error::from)?;
 
     let mut default_branch = None;
+    let mut remote_head_oid = None;
     // remote ref name -> oid (excluding HEAD and peeled `^{}` entries).
     let mut remote_refs: Vec<(String, ObjectId)> = Vec::new();
     for entry in &remote_entries {
         if entry.name == "HEAD" {
+            remote_head_oid = Some(entry.oid);
             default_branch = entry
                 .symref_target
                 .as_ref()
@@ -1260,53 +1372,15 @@ pub fn fetch_local_with_progress(
         remote_refs.push((entry.name.clone(), entry.oid));
     }
 
-    // 2. Parse refspecs.
-    let mut positive: Vec<RefspecItem> = Vec::new();
-    let mut negatives: Vec<RefspecItem> = Vec::new();
-    for spec in &opts.refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid refspec '{spec}': {e}")))?;
-        if item.negative {
-            negatives.push(item);
-        } else {
-            positive.push(item);
-        }
-    }
-    for spec in &opts.negative_refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
-        negatives.push(item);
-    }
-
-    // Compute the matched (remote_ref, local_ref, wanted_oid, force) set.
-    // `local_ref == None` means "fetch but do not store" (empty dst).
-    let mut matched: Vec<MatchedRef> = Vec::new();
-    let mut matched_oids: HashSet<ObjectId> = HashSet::new();
-    let mut seen_remote_ref: HashSet<String> = HashSet::new();
-
-    for (name, oid) in &remote_refs {
-        if name.starts_with("refs/tags/") {
-            // Tags are governed by TagMode below, not the head refspecs, unless
-            // a refspec explicitly names them. Still allow an explicit refspec
-            // match here; TagMode adds the rest.
-        }
-        if ref_excluded(name, &negatives) {
-            continue;
-        }
-        if let Some(local_ref) = match_positive(name, &positive) {
-            if seen_remote_ref.insert(name.clone()) {
-                matched_oids.insert(*oid);
-                matched.push(MatchedRef {
-                    remote_ref: name.clone(),
-                    local_ref,
-                    oid: *oid,
-                    force: refspecs_force(name, &positive),
-                    is_tag: name.starts_with("refs/tags/"),
-                    advertised_peel: None,
-                });
-            }
-        }
-    }
+    let FetchMatchSet {
+        mut matched,
+        positive,
+        negatives,
+        explicit_refspec_fetch,
+    } = build_fetch_matched_set(opts, &remote_refs, remote_head_oid)?;
+    let mut matched_oids: HashSet<ObjectId> = matched.iter().map(|m| m.oid).collect();
+    let mut seen_remote_ref: HashSet<String> =
+        matched.iter().map(|m| m.remote_ref.clone()).collect();
 
     // TagMode: add tags. We need the closure of objects already being fetched to
     // decide "Following".
@@ -1552,6 +1626,15 @@ pub fn fetch_local_with_progress(
             mode,
             UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
         );
+        enforce_fetch_ref_update(
+            local_ref,
+            old,
+            m.oid,
+            mode,
+            opts,
+            explicit_refspec_fetch,
+            local_repo.as_ref(),
+        )?;
         if write && !opts.dry_run {
             if !crate::refs::is_valid_storable_ref_name(local_ref) {
                 updates.push(RefUpdate {
@@ -1635,6 +1718,7 @@ pub fn fetch_local_with_progress(
     finish_anonymous_url_fetch(
         local_git_dir,
         opts,
+        explicit_refspec_fetch,
         default_branch.as_deref(),
         &remote_refs,
         &matched,
@@ -2155,6 +2239,8 @@ pub(crate) struct MatchedRef {
     pub(crate) is_tag: bool,
     /// Peeled target from ls-refs `peeled:` (annotated tags), when known.
     pub(crate) advertised_peel: Option<ObjectId>,
+    /// How this ref appears in [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion).
+    pub(crate) fetch_head: crate::fetch_request::FetchHeadPolicy,
 }
 
 /// Open an [`Odb`] for a git directory, attaching the git dir so `hash_algo`
@@ -2176,11 +2262,16 @@ fn config_for_git_dir(git_dir: &Path) -> Option<crate::config::ConfigSet> {
 pub(crate) fn finish_anonymous_url_fetch(
     git_dir: &Path,
     opts: &FetchOptions,
+    explicit_refspec_fetch: bool,
     default_branch: Option<&str>,
     remote_refs: &[(String, ObjectId)],
     matched: &[MatchedRef],
 ) -> Result<()> {
-    if opts.dry_run || opts.remote_name.is_some() {
+    if opts.dry_run {
+        return Ok(());
+    }
+    let write_fetch_head = opts.remote_name.is_none() || explicit_refspec_fetch;
+    if !write_fetch_head {
         return Ok(());
     }
     let Some(source) = opts.fetch_source.as_deref() else {
@@ -2238,19 +2329,28 @@ fn fetch_head_lines_for_ad_hoc_fetch(
 
     matched
         .iter()
-        .filter(|m| !m.is_tag && m.remote_ref.starts_with("refs/heads/"))
-        .map(|m| {
-            let short = m
-                .remote_ref
-                .strip_prefix("refs/heads/")
-                .unwrap_or(m.remote_ref.as_str());
-            FetchHeadLine {
-                oid: m.oid,
-                for_merge: true,
-                description: format!("branch '{short}' of {source}"),
-            }
+        .filter(|m| m.fetch_head == crate::fetch_request::FetchHeadPolicy::ForMerge)
+        .map(|m| FetchHeadLine {
+            oid: m.oid,
+            for_merge: true,
+            description: crate::fetch_request::fetch_head_description(
+                &m.remote_ref,
+                m.is_tag,
+                source,
+            ),
         })
         .collect()
+}
+
+/// Tip oid of `HEAD` from a ref advertisement (before `HEAD` is stripped).
+#[must_use]
+pub(crate) fn remote_head_oid_from_advertised(
+    advertised: &[(String, ObjectId)],
+) -> Option<ObjectId> {
+    advertised
+        .iter()
+        .find(|(name, _)| name == "HEAD")
+        .map(|(_, oid)| *oid)
 }
 
 /// Match a ref name against the positive refspecs, returning the destination
@@ -2298,7 +2398,7 @@ pub(crate) fn ref_excluded(refname: &str, negatives: &[RefspecItem]) -> bool {
 /// Supports a single `*` wildcard (Git's fetch refspec form). When `dst` is
 /// `None` the destination equals the matched source (rare for tracking fetches);
 /// when `dst` is `Some("")` the empty string is returned (fetch-without-store).
-fn apply_refspec(src: &str, dst: Option<&str>, refname: &str) -> Option<String> {
+pub(crate) fn apply_refspec(src: &str, dst: Option<&str>, refname: &str) -> Option<String> {
     match src.find('*') {
         Some(star) => {
             let prefix = &src[..star];
@@ -2424,6 +2524,7 @@ pub(crate) fn apply_tag_mode(
                 force: false,
                 is_tag: true,
                 advertised_peel: peeled,
+                fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
             });
         }
     }
@@ -2653,7 +2754,7 @@ mod tests {
         let local = tempfile::tempdir().expect("local");
         init_repository(local.path(), false, "main", None, RefStorageFormat::Files).expect("init");
 
-        let opts = FetchOptions {
+        let mut opts = FetchOptions {
             refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
             initial_remote_fetch: true,
             tags: TagMode::None,

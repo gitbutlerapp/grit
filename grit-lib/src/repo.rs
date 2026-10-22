@@ -899,6 +899,22 @@ impl Repository {
         crate::tree_sha256::tree_sha256(self, oid, options)
     }
 
+    /// Verify an annotated tag's signature and optional `tree-sha256` header.
+    ///
+    /// Reads the tag object by `oid` (not via a ref). Signature checking and digest
+    /// recomputation run on separate threads when both are needed.
+    ///
+    /// # Errors
+    ///
+    /// See [`crate::tree_sha256::verify_tag`].
+    pub fn verify_tag(
+        &self,
+        oid: crate::objects::ObjectId,
+        options: &crate::tree_sha256::TagVerifyOptions,
+    ) -> crate::error::Result<crate::tree_sha256::TagVerification> {
+        crate::tree_sha256::verify_tag(self, oid, options)
+    }
+
     /// Patch-ID for a single commit (merge commits and empty diffs return `None`).
     ///
     /// # Errors

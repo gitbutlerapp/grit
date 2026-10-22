@@ -196,7 +196,7 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
         }
     };
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         depth: Some(1),
         ..Default::default()
@@ -368,7 +368,7 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
             return;
         }
     };
-    let shallow_opts = FetchOptions {
+    let mut shallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         depth: Some(1),
         ..Default::default()
@@ -397,7 +397,7 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
             return;
         }
     };
-    let unshallow_opts = FetchOptions {
+    let mut unshallow_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         unshallow: true,
         ..Default::default()

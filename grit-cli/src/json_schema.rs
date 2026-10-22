@@ -46,9 +46,22 @@ pub fn schema_id(command: &str) -> String {
     format!("https://grit-scm.com/schemas/{command}/v1.json")
 }
 
+/// Stable `$id` URL for a command's v2 schema document.
+pub fn schema_id_v2(command: &str) -> String {
+    format!("https://grit-scm.com/schemas/{command}/v2.json")
+}
+
+/// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
+const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull"];
+
 /// File name for a command schema under [`schemas_dir`].
 pub fn schema_file_name(command: &str) -> String {
     format!("{command}.v1.json")
+}
+
+/// File name for a v2 schema document.
+pub fn schema_file_name_v2(command: &str) -> String {
+    format!("{command}.v2.json")
 }
 
 fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
@@ -297,9 +310,13 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
     Some(key.to_owned())
 }
 
-/// Load the committed schema document for `command`.
+/// Load the committed schema document for `command` (v1, or v2 when listed in [`SCHEMA_V2_COMMANDS`]).
 pub fn load_committed_schema(command: &str) -> serde_json::Value {
-    let path = schemas_dir().join(schema_file_name(command));
+    let path = if SCHEMA_V2_COMMANDS.contains(&command) {
+        schemas_dir().join(schema_file_name_v2(command))
+    } else {
+        schemas_dir().join(schema_file_name(command))
+    };
     let text =
         fs::read_to_string(&path).unwrap_or_else(|e| panic!("read schema {}: {e}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse schema {}: {e}", path.display()))
@@ -311,6 +328,19 @@ pub fn write_all_schemas(dir: &Path) {
         panic!("create schemas dir: {e}");
     }
     for entry in schema_registry() {
+        if SCHEMA_V2_COMMANDS.contains(&entry.command) {
+            let schema = (entry.schema)();
+            let json = root_schema_to_document_v2(entry.command, schema);
+            let path = dir.join(schema_file_name_v2(entry.command));
+            let text = match serde_json::to_string_pretty(&json) {
+                Ok(t) => t,
+                Err(e) => panic!("serialize schema: {e}"),
+            };
+            if let Err(e) = fs::write(&path, format!("{text}\n")) {
+                panic!("write schema {}: {e}", path.display());
+            }
+            continue;
+        }
         let schema = (entry.schema)();
         let json = root_schema_to_document(entry.command, schema);
         let path = dir.join(schema_file_name(entry.command));
@@ -322,6 +352,14 @@ pub fn write_all_schemas(dir: &Path) {
             panic!("write schema {}: {e}", path.display());
         }
     }
+}
+
+fn root_schema_to_document_v2(command: &str, root: RootSchema) -> serde_json::Value {
+    let mut value = root_schema_to_document(command, root);
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("$id".into(), schema_id_v2(command).into());
+    }
+    value
 }
 
 fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value {
@@ -705,6 +743,20 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         write_all_schemas(tmp.path());
         for entry in schema_registry() {
+            if SCHEMA_V2_COMMANDS.contains(&entry.command) {
+                let committed = dir.join(schema_file_name_v2(entry.command));
+                let generated = tmp.path().join(schema_file_name_v2(entry.command));
+                let committed_text = fs::read_to_string(&committed)
+                    .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
+                let generated_text = fs::read_to_string(&generated)
+                    .unwrap_or_else(|e| panic!("read {}: {e}", generated.display()));
+                assert_eq!(
+                    committed_text, generated_text,
+                    "v2 schema drift for `{}`; run GRIT_UPDATE_SCHEMAS=1 cargo test json_schemas_are_current -p grit-cli",
+                    entry.command
+                );
+                continue;
+            }
             let committed = dir.join(schema_file_name(entry.command));
             let generated = tmp.path().join(schema_file_name(entry.command));
             let committed_text = fs::read_to_string(&committed)

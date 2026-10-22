@@ -413,7 +413,7 @@ fn sha256_fetch_over_git_daemon_v2() {
         conn.capabilities()
     );
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::All,
         ..Default::default()

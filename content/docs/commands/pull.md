@@ -8,29 +8,22 @@ order: 3
 ## Synopsis
 
 ```text
-grit pull [--ff-only] [--no-rebase]
+grit pull
 ```
 
 ## Description
 
-Runs [`grit fetch`](../fetch/), then integrates the remote's copy of the current branch into it: a fast-forward when you have no new commits of your own, and a merge commit when both sides diverged (unless `--ff-only` or `pull.ff=only` refuses). On a branch with no commits yet, it adopts the upstream as the first commit.
+Runs [`grit fetch`](../fetch/), then merges the remote's copy of the current branch into it, as [`grit merge`](../merge/) would: a fast-forward when you have no new commits of your own, and a merge commit when both sides do. On a branch with no commits yet, it simply takes the remote's.
 
-The remote is the one in `branch.<name>.remote`, or `origin`. The upstream branch comes from [`branch_tracking`](../../library/) (`branch.<name>.merge`), defaulting to the branch with the same name as yours.
+The remote is the one in `branch.<name>.remote`, or `origin`. The remote branch is the one in `branch.<name>.merge`, or the branch with the same name as yours.
 
-Like [`grit merge`](../merge/), `grit pull` won't run with a detached HEAD. Conflicts leave merge-in-progress state with conflict markers in the worktree.
+Like `grit merge`, `grit pull` uses the same scoped local-change rules as [`grit switch`](../switch/), won't run with a detached HEAD, and stops without changing anything if there are conflicts.
 
 The fetch step uses the same terminal progress as [`grit fetch`](../fetch/) and [`grit clone`](../clone/): live stderr progress on a TTY in human mode, silent when stderr is piped or when you pass `--json` or `--markdown`.
 
-Integration mode follows Git's `pull.ff` and `pull.rebase` config unless overridden on the command line. Rebase pulls (`pull.rebase`) are not supported yet; use `--no-rebase` to merge when `pull.rebase` is set.
-
 ## Options
 
-| Flag | Description |
-| ---- | ----------- |
-| `--ff-only` | Refuse when a merge commit would be required. Exit **1** when diverged; the branch, index, and worktree are unchanged. JSON includes `ahead` and `behind` counts. |
-| `--no-rebase` | Merge instead of rebasing, overriding `pull.rebase`. |
-
-See also [global options](../global-options/).
+`grit pull` takes no options beyond the [global ones](../global-options/).
 
 ## Examples
 
@@ -42,29 +35,28 @@ Fast-forwarded origin/main → b52cca6
 $ grit pull
 Merged origin/main into the current branch (acd1d4b)
 
-$ grit pull --ff-only
-Not possible to fast-forward origin/main; local is 1 ahead, 2 behind.
+$ grit pull
+Already up to date.
 ```
 
 ## JSON output
 
-Schema: [v1](/schemas/pull/v1.json)
+Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
-Pass `--json` for stable, scripting-friendly output.
-
-Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, or `set_upstream`); **1** when `--ff-only` refuses diverged history (`refused_not_ff`, branch/index/worktree unchanged) or when the merge stops with conflicts (`conflicts`).
+The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `merged`, `refused_not_ff`, `conflicts`, or `set_upstream`. |
-| `branch` | string | Remote branch integrated, or local branch name for `set_upstream`. |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, or `set_upstream`. |
+| `branch` | string | Remote branch that was integrated. |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
-| `change_id` | string or null | Stored `change-id` on `oid` when present. |
-| `upstream` | string or null | For `set_upstream`, the remote-tracking branch adopted. |
+| `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit, fast-forward tip, or adopted upstream). |
+| `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
 | `ahead` | integer or null | Local-only commits when `result` is `refused_not_ff`. |
 | `behind` | integer or null | Upstream-only commits when `result` is `refused_not_ff`. |
-| `conflicts` | array | Conflicted paths when `result` is `conflicts`; omitted otherwise. |
-| `conflict_details` | array or null | Per-path conflict metadata when `result` is `conflicts`. |
+| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text (same shape as [`grit merge`](../merge/#json-output)). |
+| `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts`. |
+| `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort`. |
 
 Example:
 
@@ -80,7 +72,7 @@ Example:
 
 Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-Schema: [v1](/schemas/pull/v1.json)
+Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 

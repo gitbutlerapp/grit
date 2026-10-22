@@ -100,6 +100,7 @@ fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -347,6 +348,13 @@ fn porcelain_stash_tag_status_and_worktree() {
 
     let gpg = grit_lib::commit::signing::GpgConfig::from_config(&ConfigSet::new()).expect("gpg");
     let _ = verify_tag(&gpg, b"not a signed tag");
+    let _ = repo.verify_tag(
+        tag_oid,
+        &grit_lib::tree_sha256::TagVerifyOptions {
+            check_signature: false,
+            gpg: gpg.with_command_runner(repo.command_runner()),
+        },
+    );
 
     let identity = "User <u@example.com> 1700000000 +0000".to_owned();
     let _ = repo.stash().push(&StashPushOptions {

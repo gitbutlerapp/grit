@@ -22,6 +22,7 @@ mod extra_headers;
 pub mod handle;
 mod oid_hashtable;
 
+pub(crate) use commit_ref::commit_author_and_message_lenient;
 pub use commit_ref::CommitRef;
 pub use core::*;
 pub use extra_headers::{

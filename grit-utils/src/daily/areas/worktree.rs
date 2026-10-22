@@ -2,8 +2,8 @@
 
 use super::super::helpers::{
     add_all_bench, add_dry_run_bench, add_modified_bench, add_update_bench, clean_untracked_bench,
-    commit_paths_bench, commit_small_bench, commit_staged_bench, ctx, headline_spec,
-    init_empty_bench, mv_file_bench, prepare_stash_reset, prepare_switch_reset,
+    commit_dry_run_bench, commit_paths_bench, commit_small_bench, commit_staged_bench, ctx,
+    headline_spec, init_empty_bench, mv_file_bench, prepare_stash_reset, prepare_switch_reset,
     prepare_worktree_add, prepare_worktree_clean_untracked, prepare_worktree_commit,
     prepare_worktree_commit_staged, prepare_worktree_init_empty, prepare_worktree_mv_file,
     prepare_worktree_restore_paths, prepare_worktree_rm_dir, prepare_worktree_status_clean,
@@ -189,6 +189,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         prepare: prepare_worktree_commit,
         build_git: |c| commit_paths_bench(c).1,
         build_grit: |c| commit_paths_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("commit/dry-run@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_worktree_commit,
+        build_git: |c| commit_dry_run_bench(c).1,
+        build_grit: |c| commit_dry_run_bench(c).0,
         correctness: None,
     });
 

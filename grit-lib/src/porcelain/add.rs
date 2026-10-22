@@ -14,7 +14,6 @@ use crate::diff::{
     read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::git_path::pathspec_traverses_symlink_dir;
 use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
 use crate::ignore::IgnoreMatcher;
 use crate::index::{
@@ -74,7 +73,8 @@ pub struct StageOptions {
     /// Override bulk/parallel staging thresholds (integration tests only).
     #[doc(hidden)]
     pub staging_thresholds: Option<IndexStagingThresholds>,
-    /// When true, classify paths that would be staged without writing blobs, the index, or UNTR.
+    /// When true, hash worktree blobs without writing loose objects (commit `--dry-run`); also
+    /// classifies paths without persisting the index or UNTR when used from `grit add --dry-run`.
     pub dry_run: bool,
     /// Record intent-to-add entries (empty blob, extended flag) instead of hashing file content.
     pub intent_to_add: bool,
@@ -168,6 +168,22 @@ pub fn stage_for_commit(
     stage_with_tracked_scan(repo, &opts, progress)
 }
 
+/// Like [`stage_for_commit`], but updates only an in-memory index (no `.git/index` write).
+///
+/// When `dry_run` is true, blob objects are hashed but not written to the object database.
+///
+/// # Errors
+///
+/// Same as [`stage_for_commit`].
+pub fn stage_for_commit_in_memory(
+    repo: &Repository,
+    progress: &mut dyn ProgressSink,
+    dry_run: bool,
+) -> Result<StageOutcome> {
+    let mut index = repo.load_index()?;
+    stage_for_commit_on_index(repo, &mut index, progress, dry_run)
+}
+
 /// Like [`stage_for_commit`], but updates a caller-owned index and does not write it to disk.
 ///
 /// Used by [`crate::porcelain::commit::commit_worktree`] to avoid reloading the index.
@@ -175,9 +191,11 @@ pub(crate) fn stage_for_commit_on_index(
     repo: &Repository,
     index: &mut Index,
     progress: &mut dyn ProgressSink,
+    dry_run: bool,
 ) -> Result<StageOutcome> {
     let opts = StageOptions {
         mode: StageMode::All,
+        dry_run,
         ..StageOptions::default()
     };
     stage_inner_on_index(repo, &opts, progress, true, index, false)
@@ -269,6 +287,7 @@ fn stage_inner_on_index(
 ) -> Result<StageOutcome> {
     let dry_run = opts.dry_run;
     let persist_index = write_index && !dry_run;
+    let dry_run_list_only = dry_run && write_index;
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
@@ -296,7 +315,7 @@ fn stage_inner_on_index(
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
 
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
-    let use_tracked_scan = tracked_scan && !index.entries.is_empty();
+    let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !opts.dry_run;
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
         (Vec::new(), std::collections::BTreeMap::new())
@@ -319,26 +338,17 @@ fn stage_inner_on_index(
             config: Some(std::sync::Arc::clone(&rules_config)),
             worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
             thread_policy: Some(repo.thread_policy()),
+            hash_blobs_without_write: opts.dry_run,
             ..DiffIndexToWorktreeOptions::default()
         };
-        if dry_run {
-            let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
-                repo.odb(),
-                index,
-                work_tree,
-                diff_opts,
-            )?;
-            (unstaged, std::collections::BTreeMap::new())
-        } else {
-            let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
-                repo.odb(),
-                repo.git_dir(),
-                index,
-                work_tree,
-                diff_opts,
-            )?;
-            (unstaged, staging_stats)
-        }
+        let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
+            repo.odb(),
+            repo.git_dir(),
+            index,
+            work_tree,
+            diff_opts,
+        )?;
+        (unstaged, staging_stats)
     };
 
     let rules = lock_rules(&rules_arc)?;
@@ -457,7 +467,7 @@ fn stage_inner_on_index(
                 continue;
             }
             if plan.remove {
-                if dry_run {
+                if dry_run && write_index {
                     if index.get(path.as_bytes(), 0).is_some() {
                         outcome.removed.push(path);
                     }
@@ -466,27 +476,29 @@ fn stage_inner_on_index(
                 }
                 continue;
             }
-            if !dry_run {
-                icase_map.remove_alias_of(index, path.as_bytes());
-                apply_tracked_stage_plan(
-                    repo,
-                    work_tree,
-                    &path,
-                    &plan,
-                    staging_stats.get(&path),
-                    index,
-                    has_unmerged,
-                    opts.executable_hint,
-                    &matches,
-                )?;
+            if dry_run && write_index {
+                outcome.modified.push(path);
+                continue;
             }
+            icase_map.remove_alias_of(index, path.as_bytes());
+            apply_tracked_stage_plan(
+                repo,
+                work_tree,
+                &path,
+                &plan,
+                staging_stats.get(&path),
+                index,
+                has_unmerged,
+                opts.executable_hint,
+                &matches,
+            )?;
             outcome.modified.push(path);
         }
     }
 
     if ignorecase {
         outcome.modified.extend(stage_ignorecase_spelling_updates(
-            repo, work_tree, &icase_map, &matches, index, dry_run,
+            work_tree, &icase_map, &matches, index, dry_run,
         )?);
     }
 
@@ -505,6 +517,7 @@ fn stage_inner_on_index(
             parallelism,
             opts.executable_hint,
             dry_run,
+            dry_run_list_only,
             &mut outcome,
         )?;
     }
@@ -545,10 +558,6 @@ fn stage_inner_on_index(
     Ok(outcome)
 }
 
-/// Stage worktree content for explicit pathspecs that match unmerged index entries.
-///
-/// Index-vs-worktree diffs skip paths with no stage-0 entry, so modify/delete conflicts
-/// need an explicit pass when the user runs `grit add <path>`.
 fn validate_index_staging_path(repo: &Repository, path: &[u8], mode: u32) -> Result<()> {
     let opts = ProtectOptions::from_config(&*repo.config()?);
     crate::path_validate::validate_path(
@@ -562,6 +571,10 @@ fn validate_index_staging_path(repo: &Repository, path: &[u8], mode: u32) -> Res
     })
 }
 
+/// Stage worktree content for explicit pathspecs that match unmerged index entries.
+///
+/// Index-vs-worktree diffs skip paths with no stage-0 entry, so modify/delete conflicts
+/// need an explicit pass when the user runs `grit add <path>`.
 fn stage_unmerged_paths_matching_pathspecs(
     repo: &Repository,
     work_tree: &Path,
@@ -616,7 +629,6 @@ fn stage_unmerged_paths_matching_pathspecs(
         .map_err(|e| Error::Message(format!("could not store {rel}: {e}")))?;
         let mut entry = entry_from_metadata(&meta, raw_path, oid, mode);
         entry.mode = mode;
-        validate_index_staging_path(repo, raw_path, mode)?;
         index.stage_file(entry);
         mark_fsmonitor_staged(index, rel);
         modified.push(rel.to_owned());
@@ -722,7 +734,7 @@ fn mode_from_diff_octal(mode: &str) -> Result<u32> {
 
 #[allow(clippy::too_many_arguments)]
 fn apply_tracked_stage_plan(
-    repo: &Repository,
+    _repo: &Repository,
     work_tree: &Path,
     rel_path: &str,
     plan: &TrackedStagePlan,
@@ -748,7 +760,7 @@ fn apply_tracked_stage_plan(
         } else {
             plan.oid
         };
-        return stage_gitlink_at(repo, rel_path, &meta, oid, index);
+        return stage_gitlink_at(rel_path, &meta, oid, index);
     }
 
     let oid = plan.oid;
@@ -765,7 +777,6 @@ fn apply_tracked_stage_plan(
         entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode)
     };
     entry.mode = mode;
-    validate_index_staging_path(repo, rel_path.as_bytes(), mode)?;
     if has_unmerged {
         index.stage_file(entry);
     } else {
@@ -777,7 +788,6 @@ fn apply_tracked_stage_plan(
 
 /// Refresh index path spellings when the work tree uses a different ASCII case (ignorecase FS).
 fn stage_ignorecase_spelling_updates(
-    repo: &Repository,
     work_tree: &Path,
     icase_map: &Stage0IcasePathMap,
     matches: &impl Fn(&str) -> bool,
@@ -826,7 +836,6 @@ fn stage_ignorecase_spelling_updates(
         icase_map.remove_alias_of(index, actual_rel.as_bytes());
         let mut refreshed = entry;
         refreshed.path = actual_rel.as_bytes().to_vec();
-        validate_index_staging_path(repo, refreshed.path.as_slice(), refreshed.mode)?;
         index.stage_file(refreshed);
         mark_fsmonitor_staged(index, &actual_rel);
         updated.push(actual_rel);
@@ -902,6 +911,7 @@ fn stage_untracked_paths_parallel(
     parallelism: Parallelism,
     executable_hint: StageExecutableHint,
     dry_run: bool,
+    dry_run_list_only: bool,
     outcome: &mut StageOutcome,
 ) -> Result<()> {
     let precompose_unicode = rules
@@ -920,19 +930,10 @@ fn stage_untracked_paths_parallel(
         if !matches(path) {
             continue;
         }
-        if indexed_any_stage.contains(crate::repo_relpath::storage_bytes(path).as_ref()) {
+        if indexed_any_stage.contains(path.as_bytes()) {
             continue;
         }
-        let resolved = if precompose_unicode {
-            resolve_worktree_path_for_staging(work_tree, path, true)
-        } else {
-            let rel_bytes = crate::repo_relpath::storage_bytes(path);
-            let abs = crate::index::worktree_path_from_index_rel(work_tree, &rel_bytes);
-            crate::unicode_normalization::WorktreePathForStaging {
-                abs,
-                index_relpath: path.to_owned(),
-            }
-        };
+        let resolved = resolve_worktree_path_for_staging(work_tree, path, precompose_unicode);
         if fs::symlink_metadata(&resolved.abs)
             .ok()
             .is_some_and(|meta| crate::read_dir_kind::metadata_is_git_ignored_special(&meta))
@@ -988,7 +989,7 @@ fn stage_untracked_paths_parallel(
         index.cache_tree.is_none() && index.untracked_cache.is_none();
     let mut batch_entries: Vec<IndexEntry> = Vec::with_capacity(prepared.len());
     for prep in prepared {
-        let abs = crate::repo_relpath::worktree_abs(work_tree, &prep.index_relpath);
+        let abs = work_tree.join(&prep.index_relpath);
         if prep.meta.is_dir()
             && !prep.meta.file_type().is_symlink()
             && read_submodule_head_oid(&abs).is_some()
@@ -996,15 +997,15 @@ fn stage_untracked_paths_parallel(
             deferred.push(prep.index_relpath);
             continue;
         }
-        if dry_run {
+        if dry_run_list_only {
             outcome.added.push(prep.index_relpath);
             continue;
         }
         icase_map.remove_alias_of(index, prep.index_relpath.as_bytes());
         let mode =
             mode_with_executable_hint(prep.mode, &prep.index_relpath, executable_hint, matches);
-        let index_path = crate::repo_relpath::storage_bytes(&prep.index_relpath).into_owned();
-        let mut entry = entry_from_metadata(&prep.meta, &index_path, prep.oid, mode);
+        let mut entry =
+            entry_from_metadata(&prep.meta, prep.index_relpath.as_bytes(), prep.oid, mode);
         entry.mode = mode;
         if !skip_per_path_cache_invalidate {
             index.invalidate_untracked_cache_for_path(&prep.index_relpath);
@@ -1016,19 +1017,19 @@ fn stage_untracked_paths_parallel(
     let staged_batch_count = batch_entries.len();
     for entry in batch_entries {
         validate_index_staging_path(repo, &entry.path, entry.mode)?;
-        if !dry_run {
+        if !dry_run_list_only {
             if let Ok(rel) = std::str::from_utf8(&entry.path) {
                 mark_fsmonitor_staged(index, rel);
             }
             index.add_or_replace(entry);
         }
     }
-    if staged_batch_count > 0 && !dry_run && index.fsmonitor_last_update.is_some() {
+    if staged_batch_count > 0 && !dry_run_list_only && index.fsmonitor_last_update.is_some() {
         index.fsmonitor_validity_changed();
     }
 
     for path in deferred {
-        if dry_run {
+        if dry_run_list_only {
             outcome.added.push(path);
             continue;
         }
@@ -1040,6 +1041,7 @@ fn stage_untracked_paths_parallel(
             rules,
             index,
             executable_hint,
+            dry_run,
             matches,
         )?;
         outcome.added.push(path);
@@ -1048,6 +1050,7 @@ fn stage_untracked_paths_parallel(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn stage_untracked_path(
     repo: &Repository,
     work_tree: &Path,
@@ -1055,6 +1058,7 @@ fn stage_untracked_path(
     rules: &WorktreeRules,
     index: &mut Index,
     executable_hint: StageExecutableHint,
+    dry_run: bool,
     matches: &impl Fn(&str) -> bool,
 ) -> Result<()> {
     let rel_path = rel_path.trim_end_matches('/');
@@ -1063,16 +1067,9 @@ fn stage_untracked_path(
         .get_bool("core.precomposeunicode")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let rel_bytes = crate::repo_relpath::storage_bytes(rel_path);
-    let (abs, index_relpath) = if precompose_unicode {
-        let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
-        (resolved.abs, resolved.index_relpath)
-    } else {
-        (
-            crate::index::worktree_path_from_index_rel(work_tree, &rel_bytes),
-            rel_path.to_owned(),
-        )
-    };
+    let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
+    let abs = resolved.abs;
+    let index_relpath = resolved.index_relpath;
     let meta = fs::symlink_metadata(&abs).map_err(|e| {
         Error::Io(std::io::Error::new(
             e.kind(),
@@ -1090,7 +1087,7 @@ fn stage_untracked_path(
                 "could not resolve submodule HEAD for '{index_relpath}'"
             ))
         })?;
-        return stage_gitlink_at(repo, &index_relpath, &meta, head_oid, index);
+        return stage_gitlink_at(&index_relpath, &meta, head_oid, index);
     }
 
     let file_attrs = rules.file_attrs(&index_relpath, false);
@@ -1100,21 +1097,34 @@ fn stage_untracked_path(
         executable_hint,
         matches,
     );
-    let oid = materialize_worktree_blob(
-        repo.odb(),
-        &abs,
-        &meta,
-        rules.conversion(),
-        &file_attrs,
-        &index_relpath,
-        None,
-        Some(rules.filter_process()),
-    )
-    .map_err(|e| Error::Message(format!("could not store {index_relpath}: {e}")))?;
+    let oid = if dry_run {
+        crate::diff::hash_worktree_file(
+            repo.odb(),
+            &abs,
+            &meta,
+            rules.conversion(),
+            &file_attrs,
+            &index_relpath,
+            None,
+            Some(rules.filter_process()),
+        )
+        .map_err(|e| Error::Message(format!("could not hash {index_relpath}: {e}")))?
+    } else {
+        materialize_worktree_blob(
+            repo.odb(),
+            &abs,
+            &meta,
+            rules.conversion(),
+            &file_attrs,
+            &index_relpath,
+            None,
+            Some(rules.filter_process()),
+        )
+        .map_err(|e| Error::Message(format!("could not store {index_relpath}: {e}")))?
+    };
 
     let mut entry = entry_from_metadata(&meta, index_relpath.as_bytes(), oid, mode);
     entry.mode = mode;
-    validate_index_staging_path(repo, index_relpath.as_bytes(), mode)?;
     index.stage_file(entry);
     mark_fsmonitor_staged(index, &index_relpath);
     Ok(())
@@ -1153,21 +1163,6 @@ fn validate_pathspecs(
         let head = head_paths.as_deref().unwrap_or_default();
         if sorted_paths_match_pathspec(resolved, head, ctx) {
             continue;
-        }
-        let ignorecase = rules
-            .config()
-            .get_bool("core.ignorecase")
-            .and_then(|r| r.ok())
-            .unwrap_or(false);
-        if pathspec_traverses_symlink_dir(
-            work_tree,
-            resolved,
-            repo.pathspec_precompose_enabled(),
-            ignorecase,
-        ) {
-            return Err(Error::PathspecBeyondSymlink {
-                spec: label.to_owned(),
-            });
         }
         if !pathspec_matches_known_in_repository(repo, resolved)? {
             return Err(Error::Message(format!(
@@ -1436,13 +1431,11 @@ fn sorted_stageable_paths<'a>(
 }
 
 fn stage_gitlink_at(
-    repo: &Repository,
     rel_path: &str,
     meta: &fs::Metadata,
     head_oid: ObjectId,
     index: &mut Index,
 ) -> Result<()> {
-    validate_index_staging_path(repo, rel_path.as_bytes(), MODE_GITLINK)?;
     let mut entry = entry_from_metadata(meta, rel_path.as_bytes(), head_oid, MODE_GITLINK);
     entry.size = 0;
     index.stage_file(entry);
@@ -1685,57 +1678,6 @@ mod tests {
                 "{missing}: {err:?}"
             );
         }
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn stage_errors_on_pathspec_beyond_symlink_dir() {
-        use std::os::unix::fs::symlink;
-
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        let repo = init_repo(root);
-        fs::create_dir_all(root.join("real")).unwrap();
-        fs::write(root.join("real/f"), b"base\n").unwrap();
-        symlink("real", root.join("dl")).expect("symlink");
-        let mut index = Index::new();
-        stage_file_in_index(&repo, &mut index, "real/f", b"base\n");
-        write_index(&repo, &mut index);
-        fs::write(root.join("real/f"), b"base\nmod\n").unwrap();
-
-        let err = stage(
-            &repo,
-            &StageOptions {
-                pathspecs: vec!["dl/f".to_owned()],
-                pathspec_sources: vec!["dl/f".to_owned()],
-                ..StageOptions::default()
-            },
-            &mut NullProgress,
-        )
-        .unwrap_err();
-        match err {
-            Error::PathspecBeyondSymlink { spec } => assert_eq!(spec, "dl/f"),
-            other => panic!("expected PathspecBeyondSymlink, got {other:?}"),
-        }
-
-        let err = stage(
-            &repo,
-            &StageOptions {
-                pathspecs: vec!["dl/".to_owned()],
-                pathspec_sources: vec!["dl/".to_owned()],
-                ..StageOptions::default()
-            },
-            &mut NullProgress,
-        )
-        .unwrap_err();
-        match err {
-            Error::PathspecBeyondSymlink { spec } => assert_eq!(spec, "dl/"),
-            other => panic!("expected PathspecBeyondSymlink for dl/, got {other:?}"),
-        }
-
-        let index = repo.load_index().unwrap();
-        let entry = index.get(b"real/f", 0).expect("tracked file");
-        assert_eq!(entry.size, 5, "modified file must stay unstaged");
     }
 
     #[test]

@@ -83,7 +83,7 @@ error: untracked file 'notes.txt' would be overwritten — move or remove it fir
 
 ## JSON output
 
-Schema: [v1](/schemas/merge/v1.json)
+Schema: [v2](/schemas/merge/v2.json) · [v1](/schemas/merge/v1.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
@@ -94,8 +94,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `oid` | string or null | Commit the current branch points at after the merge, when applicable. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
-| `conflicts` | array or null | Sorted paths with unresolved conflicts when `result` is `conflicts`. |
-| `conflict_details` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text. |
+| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text. |
+| `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts` (for example `grit diff`, `grit add .`). |
+| `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort` (not part of the ordered sequence). |
 
 Example:
 
@@ -112,19 +113,20 @@ When the merge stops on conflicts (exit code 1), stdout is still a single JSON o
 {
   "result": "conflicts",
   "branch": "topic",
-  "conflicts": ["src/lib.rs"],
-  "conflict_details": [
+  "conflicts": [
     {
       "path": "src/lib.rs",
       "kind": "content"
     }
-  ]
+  ],
+  "next_steps": ["grit diff", "grit add ."],
+  "alternatives": ["grit merge --abort"]
 }
 ```
 
 ## Markdown output
 
-Schema: [v1](/schemas/merge/v1.json)
+Schema: [v2](/schemas/merge/v2.json) · [v1](/schemas/merge/v1.json)
 Pass [`--markdown`](../global-options/) for a `Merge` heading and a result summary. Fast-forward:
 
 ```text

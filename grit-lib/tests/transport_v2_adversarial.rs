@@ -399,7 +399,7 @@ fn v2_clone_from_scratch_no_haves_and_not_v0() {
     assert_eq!(conn.protocol_version(), 2, "expected v2 negotiation");
     assert!(conn.advertised_refs().is_empty(), "v2 advertises no refs");
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::None,
         ..Default::default()
@@ -486,7 +486,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
             }
         };
         assert_eq!(conn.protocol_version(), 2);
-        let opts = FetchOptions {
+        let mut opts = FetchOptions {
             refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
             tags: TagMode::None,
             ..Default::default()
@@ -536,7 +536,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
     let mut conn = TeeConn::new(raw_conn);
     let captured = conn.captured();
     assert_eq!(conn.protocol_version(), 2);
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         tags: TagMode::None,
         ..Default::default()
@@ -620,7 +620,7 @@ fn v2_unborn_remote_is_empty_and_does_not_hang() {
     };
     assert_eq!(conn.protocol_version(), 2);
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::All,
         ..Default::default()
@@ -716,7 +716,7 @@ fn v2_tag_modes_all_and_following() {
             }
         };
         assert_eq!(conn.protocol_version(), 2);
-        let opts = FetchOptions {
+        let mut opts = FetchOptions {
             // Only fetch main; tags come via TagMode.
             refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
             tags: TagMode::All,
@@ -749,7 +749,7 @@ fn v2_tag_modes_all_and_following() {
             .connect(&srv.url, Service::UploadPack, &opts_v2)
             .expect("connect follow");
         assert_eq!(conn.protocol_version(), 2);
-        let opts = FetchOptions {
+        let mut opts = FetchOptions {
             refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
             tags: TagMode::Following,
             ..Default::default()
@@ -811,7 +811,7 @@ fn v2_ref_prefix_filtering_excludes_tags() {
     assert_eq!(conn.protocol_version(), 2);
 
     // Heads only, NO tag following -> ls-refs must only ask for HEAD + refs/heads/.
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::None,
         ..Default::default()
@@ -943,7 +943,7 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
         conn.capabilities()
     );
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::All,
         ..Default::default()

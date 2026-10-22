@@ -203,7 +203,7 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
         main_oid.to_hex()
     );
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::All,
         ..Default::default()
@@ -339,7 +339,7 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
         }
     };
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::Following,
         ..Default::default()
@@ -422,7 +422,7 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
         }
     };
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         tags: TagMode::Following,
         ..Default::default()
@@ -510,7 +510,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             return;
         }
     };
-    let fetch_opts = FetchOptions {
+    let mut fetch_opts = FetchOptions {
         refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
         tags: TagMode::None,
         ..Default::default()
@@ -528,6 +528,8 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             tagger: Some("T <t@example.com> 946684800 +0000".to_owned()),
             sign: None,
             signing_key: None,
+            force: false,
+            dry_run: false,
         },
     )
     .expect("annotated tag");

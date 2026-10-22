@@ -263,7 +263,7 @@ fn fetch_v0_sideband_band3_fatal_is_typed_error_not_hang() {
         .with_caps(&["side-band-64k", "multi_ack_detailed", "ofs-delta"])
         .with_version(0);
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::None,
         ..Default::default()
@@ -305,7 +305,7 @@ fn fetch_v0_err_after_done_is_typed_remote_error() {
         .with_caps(&["side-band-64k", "multi_ack_detailed", "ofs-delta"])
         .with_version(0);
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::None,
         ..Default::default()
@@ -844,7 +844,7 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
         }
     };
 
-    let opts = FetchOptions {
+    let mut opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::All,
         depth: Some(1),

@@ -311,6 +311,9 @@ impl Remote {
         progress: &mut dyn Progress,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> RemoteResult<FetchOutcome> {
+        if opts.configured_refspecs.is_empty() {
+            opts.configured_refspecs = self.fetch_refspecs.clone();
+        }
         if opts.refspecs.is_empty() {
             opts.refspecs = self.fetch_refspecs.clone();
         }
@@ -1006,12 +1009,35 @@ fn list_refs_from_bundle(path: &Path, opts: &ListRefsOptions) -> RemoteResult<Ve
     Ok(out)
 }
 
+/// List refs from a on-disk git directory using explicit scan prefixes (fetch).
+pub(crate) fn list_refs_from_git_dir_for_fetch(
+    git_dir: &Path,
+    odb: Option<&Odb>,
+    refspecs: &[String],
+) -> RemoteResult<Vec<RemoteRef>> {
+    let prefixes = crate::fetch::fetch_ref_list_prefixes(refspecs);
+    let opts = ListRefsOptions {
+        symrefs: true,
+        ..Default::default()
+    };
+    list_refs_from_git_dir_with_scan_prefixes(git_dir, odb, &opts, &prefixes)
+}
+
 ///
 /// Returns [`RemoteError::Library`] on I/O or ref resolution failures.
 pub fn list_refs_from_git_dir(
     git_dir: &Path,
     odb: Option<&Odb>,
     opts: &ListRefsOptions,
+) -> RemoteResult<Vec<RemoteRef>> {
+    list_refs_from_git_dir_with_scan_prefixes(git_dir, odb, opts, &list_ref_prefixes(opts))
+}
+
+fn list_refs_from_git_dir_with_scan_prefixes(
+    git_dir: &Path,
+    odb: Option<&Odb>,
+    opts: &ListRefsOptions,
+    scan_prefixes: &[String],
 ) -> RemoteResult<Vec<RemoteRef>> {
     let mut lazy_odb: Option<Odb> = None;
 
@@ -1043,8 +1069,8 @@ pub fn list_refs_from_git_dir(
         }
     }
 
-    for prefix in list_ref_prefixes(opts) {
-        let listed = crate::refs::list_refs(git_dir, &prefix).map_err(RemoteError::Library)?;
+    for prefix in scan_prefixes {
+        let listed = crate::refs::list_refs(git_dir, prefix).map_err(RemoteError::Library)?;
         for (name, oid) in listed {
             if let Some(branch_tail) = name.strip_prefix("refs/heads/") {
                 if branch_tail.starts_with("refs/") {

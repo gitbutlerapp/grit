@@ -2040,7 +2040,9 @@ fn merge_conflict_json_is_structured() -> TestResult {
     assert_eq!(out.status, Some(1), "{}", out.dump());
     let v: Value = serde_json::from_str(&out.stdout)?;
     assert_eq!(v["result"], "conflicts");
-    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    assert_eq!(v["conflicts"][0]["path"], "f");
+    assert_eq!(v["conflicts"][0]["kind"], "content");
+    assert!(v["next_steps"].as_array().is_some());
     assert!(
         repo.join(".git/MERGE_HEAD").exists(),
         "merge should leave MERGE_HEAD"
@@ -2278,14 +2280,39 @@ fn schema_top_level_keys_are_stable() -> TestResult {
         keys(&committed),
         [
             "amended",
+            "author",
             "branch",
             "change_id",
             "changes",
+            "dry_run",
+            "files",
+            "hooks_run",
             "oid",
+            "parents",
             "scope",
             "subject"
         ]
     );
+    write_file(&seed.join("dry.txt"), "dry\n");
+    let dry_preview = gs_json(&seed, &["commit", "--dry-run", "-m", "dry"]);
+    assert_eq!(
+        keys(&dry_preview),
+        [
+            "amended",
+            "author",
+            "branch",
+            "change_id",
+            "changes",
+            "dry_run",
+            "files",
+            "hooks_run",
+            "parents",
+            "scope",
+            "subject"
+        ]
+    );
+    assert!(dry_preview.get("oid").is_none());
+    assert_eq!(dry_preview["dry_run"], Value::Bool(true));
 
     let status = gs_json(&seed, &["status"]);
     assert_eq!(

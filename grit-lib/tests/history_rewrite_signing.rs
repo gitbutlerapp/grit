@@ -121,6 +121,7 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )

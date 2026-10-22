@@ -624,8 +624,114 @@ fn nested_submodule_excluded_paths_are_qualified() {
     let repo = Repository::discover(Some(&root), &RepositoryOptions::empty()).unwrap();
     let head: ObjectId = git(&root, &["rev-parse", "HEAD"]).trim().parse().unwrap();
     let mut opts = TreeSha256Options::default();
-    opts.exclude_exact = vec!["nest".into()];
+    opts.exclude_exact = vec!["inner/nest".into()];
     let report = tree_sha256(&repo, head, &opts).unwrap();
     assert_eq!(report.excluded.len(), 1);
     assert_eq!(report.excluded[0].0, "inner/nest");
+}
+
+#[test]
+fn deep_nested_submodule_excluded_paths_are_qualified() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = tmp.path().join("leaf-src");
+    fs::create_dir(&leaf).unwrap();
+    git(&leaf, &["init", "-q", "-b", "main"]);
+    fs::write(leaf.join("x.txt"), b"x\n").unwrap();
+    git(&leaf, &["add", "x.txt"]);
+    git(&leaf, &["commit", "-m", "leaf"]);
+    let leaf_head = git(&leaf, &["rev-parse", "HEAD"]).trim().to_string();
+
+    let mid = tmp.path().join("mid-src");
+    fs::create_dir(&mid).unwrap();
+    git(&mid, &["init", "-q", "-b", "main"]);
+    fs::write(
+        mid.join(".gitmodules"),
+        format!(
+            "[submodule \"leaf\"]\n\tpath = leaf\n\turl = file://{}\n",
+            leaf.display()
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .current_dir(&mid)
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{leaf_head},leaf"),
+        ])
+        .status()
+        .unwrap();
+    git(&mid, &["add", ".gitmodules"]);
+    git(&mid, &["commit", "-m", "mid"]);
+    let mid_head = git(&mid, &["rev-parse", "HEAD"]).trim().to_string();
+
+    let inner = tmp.path().join("inner-src");
+    fs::create_dir(&inner).unwrap();
+    git(&inner, &["init", "-q", "-b", "main"]);
+    fs::write(
+        inner.join(".gitmodules"),
+        format!(
+            "[submodule \"mid\"]\n\tpath = mid\n\turl = file://{}\n",
+            mid.display()
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .current_dir(&inner)
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{mid_head},mid"),
+        ])
+        .status()
+        .unwrap();
+    git(&inner, &["add", ".gitmodules"]);
+    git(&inner, &["commit", "-m", "inner"]);
+    let inner_head = git(&inner, &["rev-parse", "HEAD"]).trim().to_string();
+
+    let root = tmp.path().join("root");
+    fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    fs::write(
+        root.join(".gitmodules"),
+        format!(
+            "[submodule \"inner\"]\n\tpath = inner\n\turl = file://{}\n",
+            inner.display()
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .current_dir(&root)
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{inner_head},inner"),
+        ])
+        .status()
+        .unwrap();
+    git(&root, &["add", ".gitmodules"]);
+    git(&root, &["commit", "-m", "root"]);
+    install_submodule_checkout(&root, "inner", &inner, &inner_head);
+    git(
+        &root.join("inner"),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "mid",
+        ],
+    );
+
+    let repo = Repository::discover(Some(&root), &RepositoryOptions::empty()).unwrap();
+    let head: ObjectId = git(&root, &["rev-parse", "HEAD"]).trim().parse().unwrap();
+    let mut opts = TreeSha256Options::default();
+    opts.exclude_exact = vec!["inner/mid/leaf".into()];
+    let report = tree_sha256(&repo, head, &opts).unwrap();
+    assert_eq!(report.excluded.len(), 1);
+    assert_eq!(report.excluded[0].0, "inner/mid/leaf");
 }

@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 1,
-    "stdout": "{\"result\":\"conflicts\",\"branch\":\"side\",\"conflicts\":[\"f.txt\"],\"conflict_details\":[{\"path\":\"f.txt\",\"kind\":\"content\"}]}\n",
+    "stdout": "{\"result\":\"conflicts\",\"branch\":\"side\",\"conflicts\":[{\"path\":\"f.txt\",\"kind\":\"content\"}],\"next_steps\":[\"grit diff\",\"grit add .\"],\"alternatives\":[\"grit merge --abort\"]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 1,
-    "stdout": "## Merge\n\n- Merge **`side`** stopped with conflicts\n\n- **content** — `f.txt`\n\n→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`\n",
+    "stdout": "## Merge\n\n- Merge **`side`** stopped with conflicts\n\n- **content** — `f.txt`\n\n→ `grit diff`, then `grit add .`\n→ or `grit merge --abort`\n",
     "stderr": ""
   }
 }

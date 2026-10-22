@@ -227,28 +227,8 @@ pub fn reduce_octopus_merge_heads(
     Ok((out_oids, out_names))
 }
 
-/// How a merge conflict should be presented to the user.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MergeConflictKind {
-    /// Both sides edited the same tracked file (textual or binary).
-    Content,
-    /// Both sides added the same path with different content.
-    AddAdd,
-    /// One side deleted the path and the other modified it.
-    ModifyDelete {
-        /// When true, the deletion is on the current branch (HEAD); the incoming branch modified the file.
-        deleted_in_current: bool,
-    },
-}
-
-/// One conflicted path reported from [`integrate_branch`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MergeConflictDetail {
-    /// Repository-relative path.
-    pub path: String,
-    /// Conflict shape derived from unmerged index stages.
-    pub kind: MergeConflictKind,
-}
+pub use crate::operation::{conflicts_from_tree_merge, tree_merge_has_conflicts};
+pub use crate::operation::{Conflict as MergeConflictDetail, ConflictKind as MergeConflictKind};
 
 /// Options for [`integrate_branch`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,9 +363,9 @@ pub fn integrate_branch_with_options(
         presentation,
     )?;
 
-    if has_tree_merge_conflicts(&merged) {
-        let paths = tree_merge_conflict_paths(&merged);
-        let details = classify_merge_conflicts(&merged.index, &paths);
+    if tree_merge_has_conflicts(&merged) {
+        let details = conflicts_from_tree_merge(&merged);
+        let paths: Vec<String> = details.iter().map(|c| c.path.clone()).collect();
         let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
         ensure_merge_tree_transition_allowed(repo, Some(&into_tree), &materialized)?;
         apply_conflict_merge_worktree(repo, &into_tree, &merged)?;
@@ -512,56 +492,6 @@ fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
         )));
     }
     Ok(parse_commit(&obj.data)?.tree)
-}
-
-fn has_tree_merge_conflicts(merged: &TreeMergeOutput) -> bool {
-    !merged.conflict_content.is_empty() || merged.index.entries().iter().any(|e| e.stage() != 0)
-}
-
-fn classify_merge_conflicts(index: &Index, paths: &[String]) -> Vec<MergeConflictDetail> {
-    paths
-        .iter()
-        .map(|path| {
-            let path_bytes = path.as_bytes();
-            let stage1 = index.get(path_bytes, 1).is_some();
-            let stage2 = index.get(path_bytes, 2).is_some();
-            let stage3 = index.get(path_bytes, 3).is_some();
-            let kind = match (stage1, stage2, stage3) {
-                (false, true, true) => MergeConflictKind::AddAdd,
-                (true, true, true) => MergeConflictKind::Content,
-                (true, false, true) => MergeConflictKind::ModifyDelete {
-                    deleted_in_current: true,
-                },
-                (true, true, false) => MergeConflictKind::ModifyDelete {
-                    deleted_in_current: false,
-                },
-                _ => MergeConflictKind::Content,
-            };
-            MergeConflictDetail {
-                path: path.clone(),
-                kind,
-            }
-        })
-        .collect()
-}
-
-fn tree_merge_conflict_paths(merged: &TreeMergeOutput) -> Vec<String> {
-    let mut paths: Vec<String> = merged
-        .conflict_content
-        .keys()
-        .map(|k| String::from_utf8_lossy(k).into_owned())
-        .collect();
-    paths.extend(
-        merged
-            .index
-            .entries()
-            .iter()
-            .filter(|e| e.stage() != 0)
-            .map(|e| String::from_utf8_lossy(&e.path).into_owned()),
-    );
-    paths.sort();
-    paths.dedup();
-    paths
 }
 
 fn conflict_path_set(merged: &TreeMergeOutput) -> BTreeSet<Vec<u8>> {
@@ -835,11 +765,12 @@ mod integrate_tests {
             result_tree: crate::diff::zero_oid(),
             touched_paths: HashSet::new(),
         };
-        assert_eq!(
-            tree_merge_conflict_paths(&merged),
-            vec!["a.txt".to_owned(), "b.txt".to_owned()]
-        );
-        assert!(has_tree_merge_conflicts(&merged));
+        let paths: Vec<String> = conflicts_from_tree_merge(&merged)
+            .into_iter()
+            .map(|c| c.path)
+            .collect();
+        assert_eq!(paths, vec!["a.txt".to_owned(), "b.txt".to_owned()]);
+        assert!(tree_merge_has_conflicts(&merged));
     }
 
     #[test]

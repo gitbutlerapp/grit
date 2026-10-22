@@ -72,7 +72,7 @@ fn parse_git_blame_porcelain(output: &str) -> Vec<PorcelainLine> {
         let Some(sha) = parts.next() else {
             continue;
         };
-        if sha.len() != 40 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !matches!(sha.len(), 40 | 64) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
             continue;
         }
         let Ok(commit) = sha.parse::<ObjectId>() else {
@@ -919,4 +919,338 @@ fn blame_annotated_tag_start_matches_git_porcelain() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     assert_blame_matches(&repo, root, file, Some("v1.1"), None);
     assert_blame_matches(&repo, root, file, Some("v1"), None);
+}
+
+fn commit_identity_and_summary(dir: &Path, commit: &ObjectId) -> (String, String) {
+    let raw = git_output(dir, &["cat-file", "commit", &commit.to_hex()]);
+    let (headers, message) = raw.split_once("\n\n").unwrap_or((raw.as_str(), ""));
+    let author = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("author "))
+        .expect("author header")
+        .trim()
+        .to_owned();
+    let summary = message
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    (author, summary)
+}
+
+/// Every attributed commit carries the same author line and summary that `git` stores.
+fn assert_commit_metadata_matches(repo: &Repository, dir: &Path, file: &str) {
+    let result = blame_file(repo, file, &BlameOptions::default()).expect("blame_file");
+    assert!(!result.lines.is_empty());
+    for line in &result.lines {
+        let info = result
+            .commits
+            .get(&line.commit)
+            .expect("metadata for every blamed commit");
+        let (author, summary) = commit_identity_and_summary(dir, &line.commit);
+        assert_eq!(info.author, author, "author of {}", line.commit);
+        assert_eq!(info.summary, summary, "summary of {}", line.commit);
+    }
+}
+
+/// History where the blamed file sits two directories deep, siblings at every level churn,
+/// a side branch edits the file, and an octopus merge has more parents than fit in a
+/// fixed-size commit header read.
+fn build_packed_walk_fixture(object_format: &str) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(
+        root,
+        &[
+            "init",
+            "-q",
+            "-b",
+            "main",
+            &format!("--object-format={object_format}"),
+        ],
+    );
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "dir/sub/notes.txt";
+    std::fs::create_dir_all(root.join("dir/sub")).unwrap();
+    std::fs::write(root.join(file), "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    std::fs::write(root.join("top.txt"), "0\n").unwrap();
+    git_run(root, &["add", "-A"]);
+    git_run(root, &["commit", "-q", "-m", "init"]);
+
+    for i in 0..12 {
+        std::fs::write(root.join("top.txt"), format!("{i}\n")).unwrap();
+        std::fs::write(root.join("dir/sibling.txt"), format!("{i}\n")).unwrap();
+        std::fs::write(root.join("dir/sub/peer.txt"), format!("{i}\n")).unwrap();
+        git_run(root, &["add", "-A"]);
+        let message = format!("churn {i}\n\n{}", "long body line\n".repeat(64));
+        git_run(root, &["commit", "-q", "-m", &message]);
+    }
+
+    std::fs::write(root.join(file), "one\nTWO\nthree\nfour\nfive\n").unwrap();
+    git_run(root, &["commit", "-q", "-am", "edit two on main"]);
+
+    git_run(root, &["checkout", "-q", "-b", "side", "HEAD~3"]);
+    std::fs::write(root.join(file), "one\ntwo\nthree\nFOUR\nfive\n").unwrap();
+    git_run(root, &["commit", "-q", "-am", "edit four on side"]);
+    git_run(root, &["checkout", "-q", "main"]);
+    git_run(root, &["merge", "-q", "--no-edit", "side"]);
+
+    let mut branches = Vec::new();
+    for i in 0..11 {
+        let name = format!("octo{i}");
+        git_run(root, &["checkout", "-q", "-b", &name, "main"]);
+        std::fs::write(root.join(format!("octo{i}.txt")), format!("{i}\n")).unwrap();
+        git_run(root, &["add", "-A"]);
+        git_run(root, &["commit", "-q", "-m", &format!("octo {i}")]);
+        branches.push(name);
+    }
+    git_run(root, &["checkout", "-q", "main"]);
+    let mut merge_args = vec!["merge", "-q", "--no-ff", "--no-edit"];
+    merge_args.extend(branches.iter().map(String::as_str));
+    git_run(root, &merge_args);
+
+    for i in 0..6 {
+        std::fs::write(root.join("dir/sibling.txt"), format!("after {i}\n")).unwrap();
+        git_run(
+            root,
+            &["commit", "-q", "-am", &format!("after octopus {i}")],
+        );
+    }
+    std::fs::write(root.join(file), "zero\none\nTWO\nthree\nFOUR\nfive\n").unwrap();
+    git_run(root, &["commit", "-q", "-am", "prepend zero"]);
+    tmp
+}
+
+fn assert_packed_walk_matches_git(object_format: &str) {
+    let tmp = build_packed_walk_fixture(object_format);
+    let root = tmp.path();
+    let file = "dir/sub/notes.txt";
+    let parents = git_output(root, &["rev-list", "--parents", "-n", "1", "HEAD~7"]);
+    assert_eq!(
+        parents.split_whitespace().count(),
+        13,
+        "fixture needs a 12-parent octopus merge"
+    );
+
+    let loose_repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let loose = grit_blame(&loose_repo, file, None, None);
+    assert_blame_matches(&loose_repo, root, file, None, None);
+    drop(loose_repo);
+
+    git_run(root, &["repack", "-adq", "--depth=50", "--window=50"]);
+    git_run(root, &["prune-packed"]);
+    let packs = std::fs::read_dir(root.join(".git/objects/pack"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .count();
+    assert_eq!(packs, 1, "single pack after repack");
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    assert_blame_matches(&repo, root, file, None, None);
+    assert_eq!(grit_blame(&repo, file, None, None), loose);
+    assert_blame_matches(&repo, root, file, Some("HEAD~1"), None);
+    assert_blame_matches(&repo, root, file, Some("HEAD"), Some((2, 4)));
+    assert_blame_matches(&repo, root, "dir/sub/peer.txt", None, None);
+    assert_blame_matches(&repo, root, "top.txt", None, None);
+    assert_commit_metadata_matches(&repo, root, file);
+}
+
+#[test]
+fn blame_packed_deep_path_through_octopus_matches_git() {
+    assert_packed_walk_matches_git("sha1");
+}
+
+#[test]
+fn blame_packed_sha256_history_matches_git() {
+    assert_packed_walk_matches_git("sha256");
+}
+
+#[test]
+fn blame_reports_git_commit_metadata_for_loose_history() {
+    let (tmp, repo, _mid) = build_blame_fixture();
+    assert_commit_metadata_matches(&repo, tmp.path(), "story.txt");
+}
+
+/// Per-commit `(author, author-mail, author-time, summary)` from `git blame --porcelain`.
+fn git_porcelain_metadata(
+    dir: &Path,
+    file: &str,
+) -> std::collections::HashMap<ObjectId, (String, String, i64, String)> {
+    let out = git_output(dir, &["blame", "--porcelain", "--", file]);
+    let mut map = std::collections::HashMap::new();
+    let mut current: Option<ObjectId> = None;
+    let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+    for line in out.lines() {
+        if line.starts_with('\t') {
+            if let Some(oid) = current.take() {
+                if !fields.is_empty() {
+                    map.insert(
+                        oid,
+                        (
+                            fields.get("author").cloned().unwrap_or_default(),
+                            fields.get("author-mail").cloned().unwrap_or_default(),
+                            fields
+                                .get("author-time")
+                                .and_then(|t| t.parse().ok())
+                                .unwrap_or(-1),
+                            fields.get("summary").cloned().unwrap_or_default(),
+                        ),
+                    );
+                }
+            }
+            fields.clear();
+            continue;
+        }
+        let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+        if key.len() == 40 && key.chars().all(|c| c.is_ascii_hexdigit()) {
+            current = key.parse().ok();
+            continue;
+        }
+        fields.insert(
+            match key {
+                "author" => "author",
+                "author-mail" => "author-mail",
+                "author-time" => "author-time",
+                "summary" => "summary",
+                _ => continue,
+            },
+            value.to_owned(),
+        );
+    }
+    map
+}
+
+/// Grit's metadata rendered the way `git blame --porcelain` reports it.
+fn grit_metadata_as_porcelain(
+    info: &grit_lib::blame::BlameCommitInfo,
+) -> (String, String, i64, String) {
+    let author = info.author.as_str();
+    let (name, mail) = match (author.find('<'), author.find('>')) {
+        (Some(lt), Some(gt)) if lt < gt => {
+            (author[..lt].trim().to_owned(), author[lt..=gt].to_owned())
+        }
+        _ => ("(unknown)".to_owned(), "(unknown)".to_owned()),
+    };
+    (name, mail, info.author_time, info.summary.clone())
+}
+
+fn git_hash_commit_literally(dir: &Path, body: &str) -> String {
+    use std::io::Write as _;
+    let mut cmd = Command::new("git");
+    cmd.current_dir(dir)
+        .args([
+            "hash-object",
+            "-t",
+            "commit",
+            "-w",
+            "--literally",
+            "--stdin",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    git_env(&mut cmd);
+    let mut child = cmd.spawn().expect("spawn git hash-object");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(body.as_bytes())
+        .expect("write commit body");
+    let out = child.wait_with_output().expect("git hash-object");
+    assert!(out.status.success(), "git hash-object --literally failed");
+    String::from_utf8(out.stdout)
+        .expect("utf-8")
+        .trim()
+        .to_owned()
+}
+
+/// `f.txt` gains one line in a commit without `committer` and one in a commit without
+/// `author`; `g.txt` is untouched since the root, so its walk passes through both.
+fn build_malformed_commit_fixture() -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+    std::fs::write(root.join("f.txt"), "hello\n").unwrap();
+    std::fs::write(root.join("g.txt"), "steady\n").unwrap();
+    git_run(root, &["add", "-A"]);
+    git_run(root, &["commit", "-q", "-m", "base"]);
+    let base = git_output(root, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    std::fs::write(root.join("f.txt"), "hello\nworld\n").unwrap();
+    git_run(root, &["add", "f.txt"]);
+    let tree1 = git_output(root, &["write-tree"]).trim().to_owned();
+    let no_committer = git_hash_commit_literally(
+        root,
+        &format!("tree {tree1}\nparent {base}\nauthor A <a@x> 1700000000 +0000\n\nmessage\n"),
+    );
+
+    std::fs::write(root.join("f.txt"), "hello\nworld\nagain\n").unwrap();
+    git_run(root, &["add", "f.txt"]);
+    let tree2 = git_output(root, &["write-tree"]).trim().to_owned();
+    let no_author = git_hash_commit_literally(
+        root,
+        &format!(
+            "tree {tree2}\nparent {no_committer}\ncommitter C <c@x> 1700000100 +0000\n\n\nno author subject\nbody\n"
+        ),
+    );
+    git_run(root, &["update-ref", "refs/heads/main", &no_author]);
+    git_run(root, &["reset", "-q", "--hard"]);
+    std::fs::write(root.join("h.txt"), "later\n").unwrap();
+    git_run(root, &["add", "h.txt"]);
+    git_run(root, &["commit", "-q", "-m", "well-formed tip"]);
+    tmp
+}
+
+#[test]
+fn blame_through_commits_missing_author_or_committer_matches_git_loose_and_packed() {
+    let tmp = build_malformed_commit_fixture();
+    let root = tmp.path();
+    let blame_all = |repo: &Repository| {
+        ["f.txt", "g.txt"]
+            .map(|file| blame_file(repo, file, &BlameOptions::default()).expect("blame_file"))
+    };
+    let check = |repo: &Repository| {
+        for file in ["f.txt", "g.txt"] {
+            assert_blame_matches(repo, root, file, None, None);
+            let git_meta = git_porcelain_metadata(root, file);
+            let result = blame_file(repo, file, &BlameOptions::default()).expect("blame_file");
+            for line in &result.lines {
+                let info = result.commits.get(&line.commit).expect("metadata");
+                assert_eq!(
+                    Some(&grit_metadata_as_porcelain(info)),
+                    git_meta.get(&line.commit),
+                    "metadata for {} in {file}",
+                    line.commit
+                );
+            }
+        }
+    };
+
+    let loose_repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    check(&loose_repo);
+    let loose = blame_all(&loose_repo);
+    let f = &loose[0];
+    let summaries: Vec<&str> = f
+        .lines
+        .iter()
+        .map(|l| f.commits[&l.commit].summary.as_str())
+        .collect();
+    assert_eq!(summaries, ["base", "message", "no author subject"]);
+    drop(loose_repo);
+
+    git_run(root, &["repack", "-adq"]);
+    git_run(root, &["prune-packed"]);
+    let packed_repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    check(&packed_repo);
+    assert_eq!(
+        blame_all(&packed_repo),
+        loose,
+        "blame must not depend on whether objects are loose or packed"
+    );
 }

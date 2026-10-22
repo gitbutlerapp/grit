@@ -22,6 +22,7 @@ mod json_filter;
 mod json_schema;
 mod log_display;
 mod markdown;
+mod operation_output;
 mod output;
 mod pathspec_args;
 mod progress;
@@ -731,6 +732,9 @@ enum Command {
         /// Record a commit even when the tree matches the parent (same as `git commit --allow-empty`).
         #[arg(long = "allow-empty")]
         allow_empty: bool,
+        /// Compute the commit without writing objects, updating refs, or running hooks.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
         #[command(flatten)]
         paths: crate::pathspec_args::TrailingPathspecArgs,
     },
@@ -886,15 +890,37 @@ enum Command {
     Tag {
         /// Name of the tag to create. Omit to list tags.
         name: Option<String>,
+        /// Revision to tag (default `HEAD`).
+        #[arg(value_name = "TARGET", conflicts_with = "object")]
+        target: Option<String>,
         /// Delete the named tag instead of creating it.
         #[arg(short = 'd', long = "delete")]
         delete: bool,
         /// Annotated tag message (`-m` creates an annotated tag).
-        #[arg(short = 'm', long = "message")]
+        #[arg(short = 'm', long = "message", conflicts_with = "message_file")]
         message: Option<String>,
+        /// Read the annotated tag message from a file (`-` reads stdin).
+        #[arg(
+            short = 'F',
+            long = "file",
+            value_name = "PATH|-",
+            conflicts_with = "message"
+        )]
+        message_file: Option<String>,
         /// Object to tag (revision). Defaults to `HEAD`.
-        #[arg(long = "object", value_name = "REV")]
+        #[arg(
+            long = "object",
+            value_name = "REV",
+            hide = true,
+            conflicts_with = "target"
+        )]
         object: Option<String>,
+        /// Replace an existing tag with the same name.
+        #[arg(short = 'f', long = "force", conflicts_with = "delete")]
+        force: bool,
+        /// Preview create or delete without changing refs.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
         /// Sign the tag object (implies annotated). Honors `tag.gpgSign` when omitted.
         #[arg(short = 's', long = "sign", conflicts_with = "no_sign")]
         sign: bool,
@@ -1422,10 +1448,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             staged,
             amend,
             allow_empty,
+            dry_run,
             paths,
         } => emit(
             &commands::commit::run(
                 message.or(message_flag),
+                dry_run,
                 amend,
                 allow_empty,
                 all,
@@ -1487,9 +1515,13 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         }
         Command::Tag {
             name,
+            target,
             delete,
             message,
+            message_file,
             object,
+            force,
+            dry_run,
             sign,
             no_sign,
             signing_key,
@@ -1502,15 +1534,19 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 None
             };
             emit(
-                &commands::tag::run(
+                &commands::tag::run(commands::tag::TagRunOptions {
                     name,
+                    target,
+                    object,
                     delete,
                     message,
-                    object,
-                    sign_override,
+                    message_file,
+                    force,
+                    dry_run,
+                    sign: sign_override,
                     signing_key,
-                    ctx.now,
-                )?,
+                    now: ctx.now,
+                })?,
                 opts,
                 ctx,
             )
