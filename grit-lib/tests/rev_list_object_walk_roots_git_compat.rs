@@ -177,3 +177,53 @@ fn object_walk_sparse_pathspec_limits_objects_match_git() {
     grit_paths.extend(result.objects.iter().map(|(o, _)| *o));
     assert_eq!(grit_paths, git_set, "path-limited object set");
 }
+
+#[test]
+fn object_walk_over_merges_and_nested_dir_edits_matches_git() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "a/b/c/deep.txt", "deep\n", "deep");
+    commit_file(wt, "a/b/side.txt", "side\n", "side");
+    commit_file(wt, "a/top.txt", "top\n", "top");
+    git(wt, &["checkout", "-q", "-b", "topic"]);
+    commit_file(wt, "a/b/c/deep.txt", "deep on topic\n", "topic deep");
+    commit_file(wt, "a/b/new.txt", "new\n", "topic new");
+    git(wt, &["checkout", "-q", "-"]);
+    commit_file(wt, "a/top.txt", "top on main\n", "main top");
+    // Back to an earlier blob, so the object exists in a grandparent but not the parent.
+    commit_file(wt, "a/b/side.txt", "side v2\n", "side v2");
+    commit_file(wt, "a/b/side.txt", "side\n", "side back");
+    git(wt, &["merge", "-q", "--no-edit", "topic"]);
+    // `a/b/c` turns from a directory into a file of the same name.
+    git(wt, &["rm", "-q", "-r", "a/b/c"]);
+    commit_file(wt, "a/b/c", "now a file\n", "dir to file");
+
+    for (positive, negative) in [
+        (vec!["HEAD"], vec![]),
+        (vec!["HEAD"], vec!["HEAD~3"]),
+        (vec!["HEAD"], vec!["topic"]),
+        (vec!["topic", "HEAD~1"], vec!["HEAD~5"]),
+    ] {
+        let mut git_args: Vec<String> = positive.iter().map(|s| s.to_string()).collect();
+        git_args.extend(negative.iter().map(|s| format!("^{s}")));
+        let git_args: Vec<&str> = git_args.iter().map(String::as_str).collect();
+        let git_set = git_rev_list_object_set(wt, &git_args);
+        let grit_set = grit_rev_list_object_set(
+            wt,
+            &positive.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            &negative.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            None,
+        );
+        if negative.is_empty() {
+            assert_eq!(grit_set, git_set, "objects for {git_args:?}");
+        } else {
+            // Excluded ranges may still list extra objects already reachable from the
+            // negative side; a pack or bundle built from the walk must never miss one.
+            let missing: Vec<_> = git_set.difference(&grit_set).collect();
+            assert!(
+                missing.is_empty(),
+                "objects for {git_args:?} miss {missing:?}"
+            );
+        }
+    }
+}

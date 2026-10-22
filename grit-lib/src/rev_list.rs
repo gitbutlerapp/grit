@@ -8058,32 +8058,6 @@ fn tree_oid_at_path(
     Ok(Some(current))
 }
 
-fn entry_oid_at_path(
-    repo: &Repository,
-    tree_state: &mut TreeWalkState,
-    root_tree: ObjectId,
-    path_prefix: &str,
-    name: &str,
-) -> Result<Option<ObjectId>> {
-    let dir_tree = if path_prefix.is_empty() {
-        root_tree
-    } else {
-        let Some(tree) = tree_oid_at_path(repo, tree_state, root_tree, path_prefix)? else {
-            return Ok(None);
-        };
-        tree
-    };
-    let blob = tree_state.tree_blob(repo, dir_tree)?;
-    let oid_len = tree_state.oid_len(repo);
-    for entry in TreeRefIter::with_oid_len(blob.as_slice(), oid_len) {
-        let entry = entry?;
-        if String::from_utf8_lossy(entry.name) == name {
-            return Ok(Some(entry.oid));
-        }
-    }
-    Ok(None)
-}
-
 fn subtree_unchanged_in_all_parents(
     repo: &Repository,
     tree_state: &mut TreeWalkState,
@@ -8105,26 +8079,51 @@ fn subtree_unchanged_in_all_parents(
     Ok(true)
 }
 
-fn entry_unchanged_in_all_parents(
-    repo: &Repository,
-    tree_state: &mut TreeWalkState,
-    parent_roots: &[ObjectId],
-    path_prefix: &str,
-    name: &str,
-    oid: ObjectId,
-) -> Result<bool> {
-    if parent_roots.is_empty() {
-        return Ok(false);
-    }
-    for &root in parent_roots {
-        let Some(parent_oid) = entry_oid_at_path(repo, tree_state, root, path_prefix, name)? else {
-            return Ok(false);
-        };
-        if parent_oid != oid {
-            return Ok(false);
+/// The directory at one path in every parent commit's tree, indexed by entry name.
+///
+/// Lets the object walk ask, for every entry of a tree, whether all parents hold the same
+/// object under that name, with one path resolution and one parse per parent rather than
+/// one per entry. Names compare as lossy UTF-8; the first entry with a name wins.
+struct ParentDirEntries {
+    /// One map per parent; `None` when the directory is absent in that parent.
+    dirs: Vec<Option<HashMap<String, ObjectId>>>,
+}
+
+impl ParentDirEntries {
+    fn load(
+        repo: &Repository,
+        tree_state: &mut TreeWalkState,
+        parent_roots: &[ObjectId],
+        path_prefix: &str,
+    ) -> Result<Self> {
+        let mut dirs = Vec::with_capacity(parent_roots.len());
+        for &root in parent_roots {
+            let Some(dir_tree) = tree_oid_at_path(repo, tree_state, root, path_prefix)? else {
+                dirs.push(None);
+                continue;
+            };
+            let blob = tree_state.tree_blob(repo, dir_tree)?;
+            let oid_len = tree_state.oid_len(repo);
+            let mut entries = HashMap::new();
+            for entry in TreeRefIter::with_oid_len(blob.as_slice(), oid_len) {
+                let entry = entry?;
+                entries
+                    .entry(String::from_utf8_lossy(entry.name).into_owned())
+                    .or_insert(entry.oid);
+            }
+            dirs.push(Some(entries));
         }
+        Ok(Self { dirs })
     }
-    Ok(true)
+
+    /// Whether every parent's directory holds `oid` under `name` (false with no parents).
+    fn unchanged_in_all(&self, name: &str, oid: ObjectId) -> bool {
+        !self.dirs.is_empty()
+            && self
+                .dirs
+                .iter()
+                .all(|dir| dir.as_ref().and_then(|d| d.get(name)) == Some(&oid))
+    }
 }
 
 /// Maps each tree OID to the minimum traversal depth it was entered at (Git `list-objects` /
@@ -8861,6 +8860,7 @@ fn collect_tree_objects_filtered(
 
     let needs_child_read_info =
         object_walk_needs_child_read_info(filter, sparse_lines, missing_action);
+    let mut parent_dirs: Option<ParentDirEntries> = None;
     for entry in TreeRefIter::with_oid_len(tree_blob.as_slice(), oid_len) {
         let entry = entry?;
         if entry.mode == 0o160000 {
@@ -8889,9 +8889,13 @@ fn collect_tree_objects_filtered(
                 }
             }
             if let Some(parents) = parent_commit_trees {
-                if entry_unchanged_in_all_parents(
-                    repo, tree_state, parents, prefix, &name, entry.oid,
-                )? {
+                if parent_dirs.is_none() {
+                    parent_dirs = Some(ParentDirEntries::load(repo, tree_state, parents, prefix)?);
+                }
+                if parent_dirs
+                    .as_ref()
+                    .is_some_and(|dirs| dirs.unchanged_in_all(&name, entry.oid))
+                {
                     continue;
                 }
             } else if let Some(pu) = parent_union {
@@ -8927,9 +8931,13 @@ fn collect_tree_objects_filtered(
             )?;
         } else {
             if let Some(parents) = parent_commit_trees {
-                if entry_unchanged_in_all_parents(
-                    repo, tree_state, parents, prefix, &name, entry.oid,
-                )? {
+                if parent_dirs.is_none() {
+                    parent_dirs = Some(ParentDirEntries::load(repo, tree_state, parents, prefix)?);
+                }
+                if parent_dirs
+                    .as_ref()
+                    .is_some_and(|dirs| dirs.unchanged_in_all(&name, entry.oid))
+                {
                     continue;
                 }
             } else if let Some(pu) = parent_union {
