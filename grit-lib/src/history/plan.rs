@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::change_id::{
-    change_id, resolved_change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator,
-    ChangeIdPolicy,
+    change_id, ensure_change_id_header, resolved_change_id, set_change_id, ChangeId, ChangeIdError,
+    ChangeIdGenerator, ChangeIdPolicy,
 };
 use crate::commit::signing::extra_headers_without_commit_signatures;
 use crate::commit_encoding::identity_raw_for_serialized_commit;
@@ -1179,7 +1179,7 @@ fn preserve_logical_change_id(
         return Ok(());
     }
     let id = change_id(template).unwrap_or_else(|| ChangeId::derived_from_commit_id(&template_oid));
-    set_change_id(data, &id);
+    ensure_change_id_header(data, &id);
     Ok(())
 }
 

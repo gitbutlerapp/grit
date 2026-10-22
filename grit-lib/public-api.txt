@@ -761,6 +761,7 @@ pub fn grit_lib::change_id::ChangeIdGenerator::random_bytes(&self) -> core::resu
 impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator
 pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
 pub fn grit_lib::change_id::change_id(&grit_lib::objects::CommitData) -> core::option::Option<grit_lib::change_id::ChangeId>
+pub fn grit_lib::change_id::ensure_change_id_header(&mut grit_lib::objects::CommitData, &grit_lib::change_id::ChangeId)
 pub fn grit_lib::change_id::find_commits_by_change_id_prefix(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::change_id::ChangeIdMatch>>
 pub fn grit_lib::change_id::is_change_id_spec_token(&str) -> bool
 pub fn grit_lib::change_id::resolve_commit_by_change_id_prefix(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -9819,6 +9820,7 @@ pub fn grit_lib::objects::ChangeIdGenerator::random_bytes(&self) -> core::result
 impl grit_lib::change_id::ChangeIdGenerator for grit_lib::change_id::OsChangeIdGenerator
 pub fn grit_lib::change_id::OsChangeIdGenerator::random_bytes(&self) -> core::result::Result<[u8; 16], grit_lib::change_id::ChangeIdError>
 pub fn grit_lib::objects::change_id(&grit_lib::objects::CommitData) -> core::option::Option<grit_lib::change_id::ChangeId>
+pub fn grit_lib::objects::ensure_change_id_header(&mut grit_lib::objects::CommitData, &grit_lib::change_id::ChangeId)
 pub fn grit_lib::objects::empty_object_id_hash_set() -> &'static std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::empty_oid_byte_filter_map() -> &'static grit_lib::objects::OidHashMap<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::empty_oid_set() -> &'static grit_lib::objects::OidHashSet

@@ -306,6 +306,18 @@ pub fn set_change_id(data: &mut CommitData, id: &ChangeId) {
         });
 }
 
+/// Set or replace the `change-id` header while leaving `gitbutler-change-id` and other extras intact.
+///
+/// History rewrites use this so legacy headers and unknown extra fields from the template commit
+/// survive alongside the canonical `change-id` line.
+pub fn ensure_change_id_header(data: &mut CommitData, id: &ChangeId) {
+    let line = format!("change-id {}\n", id.as_str());
+    data.extra_headers =
+        insert_header_before_signature(&data.extra_headers, line.as_bytes(), |key| {
+            key == CHANGE_ID_KEY
+        });
+}
+
 /// Stored header when present, otherwise [`ChangeId::derived_from_commit_id`].
 #[must_use]
 pub fn resolved_change_id(oid: &ObjectId, data: &CommitData) -> ResolvedChangeId {
@@ -1033,6 +1045,31 @@ mod tests {
         let raw = String::from_utf8_lossy(&data.extra_headers);
         assert!(raw.contains("change-id jj-style-id"));
         assert!(raw.contains("gitbutler-change-id legacy-should-stay"));
+        assert!(raw.contains("x-custom custom-value"));
+    }
+
+    #[test]
+    fn ensure_change_id_header_preserves_legacy_and_other_extras() {
+        let mut data = CommitData {
+            tree: ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap(),
+            parents: vec![],
+            author: String::new(),
+            committer: String::new(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: String::new(),
+            raw_message: None,
+            extra_headers: b"change-id jj-style-id\n\
+gitbutler-change-id legacy-stays\n\
+x-custom custom-value\n"
+                .to_vec(),
+        };
+        let id = ChangeId::from_opaque("jj-style-id".to_owned());
+        ensure_change_id_header(&mut data, &id);
+        let raw = String::from_utf8_lossy(&data.extra_headers);
+        assert!(raw.contains("change-id jj-style-id"));
+        assert!(raw.contains("gitbutler-change-id legacy-stays"));
         assert!(raw.contains("x-custom custom-value"));
     }
 
