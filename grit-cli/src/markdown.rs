@@ -514,7 +514,7 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         MergeResult::Stopped => {
             outln!(
                 w,
-                "- Merge from **`{}`** applied; finish with `grit commit` or `grit merge --continue`",
+                "- Merge from **`{}`** applied; finish with `grit commit` or `grit merge --abort`",
                 outcome.branch
             );
         }

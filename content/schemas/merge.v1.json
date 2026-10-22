@@ -32,6 +32,9 @@
         "merged",
         "conflicts",
         "aborted",
+        "squashed",
+        "stopped",
+        "refused_not_ff",
         "set_upstream"
       ],
       "type": "string"
@@ -62,6 +65,16 @@
     },
     "conflicts": {
       "description": "Conflicted paths when `result` is `conflicts`.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "next_steps": {
+      "description": "Suggested follow-up commands for `squashed` and `stopped`.",
       "items": {
         "type": "string"
       },

@@ -96,6 +96,21 @@ pub fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
     }
 }
 
+/// Remove squash merge sentinel files after a successful commit (Git removes `SQUASH_MSG` on commit).
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] if a present file cannot be removed.
+pub fn clear_squash_commit_state(git_dir: &std::path::Path) -> Result<()> {
+    for name in ["SQUASH_MSG", "MERGE_MSG"] {
+        let path = git_dir.join(name);
+        if path.is_file() {
+            fs::remove_file(&path).map_err(Error::Io)?;
+        }
+    }
+    Ok(())
+}
+
 /// Default message for the next commit when `SQUASH_MSG` or merge `MERGE_MSG` is present.
 ///
 /// # Errors
@@ -553,6 +568,8 @@ fn create_commit_with_index(
 
     if concluding_merge {
         let _ = finish_merge_state(repo)?;
+    } else if repo.git_dir().join("SQUASH_MSG").is_file() {
+        clear_squash_commit_state(repo.git_dir())?;
     }
 
     if let Some(persist) = persist_index {

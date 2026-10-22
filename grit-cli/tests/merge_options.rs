@@ -111,6 +111,22 @@ fn merge_squash_json() -> TestResult {
 }
 
 #[test]
+fn merge_squash_commit_clears_squash_msg() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    setup_linear(dir.path())?;
+    let out = grit_cmd(dir.path(), &["merge", "--squash", "topic"]);
+    assert!(out.ok, "squash failed: {}", out.stdout);
+    assert!(dir.path().join(".git/SQUASH_MSG").exists());
+    let commit = grit_cmd(dir.path(), &["commit", "-m", "squashed"]);
+    assert!(commit.ok, "commit failed: {}", commit.stdout);
+    assert!(
+        !dir.path().join(".git/SQUASH_MSG").exists(),
+        "SQUASH_MSG must be removed after commit"
+    );
+    Ok(())
+}
+
+#[test]
 fn merge_no_commit_json() -> TestResult {
     let dir = tempfile::tempdir()?;
     setup_linear(dir.path())?;

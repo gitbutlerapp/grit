@@ -156,11 +156,7 @@ impl MergeOutcome {
             upstream: None,
             conflicts: None,
             conflict_details: None,
-            next_steps: Some(vec![
-                "grit commit".into(),
-                "grit merge --continue".into(),
-                "grit merge --abort".into(),
-            ]),
+            next_steps: Some(vec!["grit commit".into(), "grit merge --abort".into()]),
         }
     }
 
@@ -281,7 +277,7 @@ impl HumanRender for MergeOutcome {
             MergeResult::Stopped => {
                 outln!(
                     w,
-                    "Merge from {} applied — run `grit commit` or `grit merge --continue` to finish",
+                    "Merge from {} applied — run `grit commit` to finish, or `grit merge --abort` to cancel",
                     self.branch
                 );
             }

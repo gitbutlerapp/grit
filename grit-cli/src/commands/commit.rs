@@ -93,17 +93,14 @@ pub fn run(
         None => pending_commit_message(&repo)
             .context("could not read pending commit message")?
             .filter(|m| !m.trim().is_empty()),
-        _ => None,
+        Some(_) => None,
     };
-    let message = match message {
-        Some(m) => Some(m),
-        None => {
-            if matches!(scope, CommitScope::AutoStage) {
-                stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
-            }
-            bail!("provide a commit message, e.g. grit commit \"what changed\"");
+    if message.is_none() && !amend {
+        if matches!(scope, CommitScope::AutoStage) {
+            stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
         }
-    };
+        bail!("provide a commit message, e.g. grit commit \"what changed\"");
+    }
     let message_text = message.as_deref().unwrap_or("");
 
     let config = repo.config().context("could not load config")?;

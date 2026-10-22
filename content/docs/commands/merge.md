@@ -64,7 +64,7 @@ $ grit merge --squash topic
 Squash merge applied from topic — run `grit commit` to record the squashed commit
 
 $ grit merge --no-commit topic
-Merge from topic applied — run `grit commit` or `grit merge --continue` to finish
+Merge from topic applied — run `grit commit` to finish, or `grit merge --abort` to cancel
 ```
 
 When both branches change the same lines:

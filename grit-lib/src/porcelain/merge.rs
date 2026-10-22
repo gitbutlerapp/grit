@@ -34,6 +34,7 @@ use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::diff::diff_trees;
 use crate::error::{Error, Result};
+use crate::ident::parse_signature_times;
 use crate::ident_resolve::{
     resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
 };
@@ -461,13 +462,12 @@ pub fn integrate_branch_with(
         let materialized = materialized_merge_result_tree(repo.odb(), &merged)?;
         ensure_merge_tree_transition_allowed(repo, Some(&into_tree), &materialized)?;
         apply_conflict_merge_worktree(repo, &into_tree, &merged)?;
-        if !matches!(options.commit, MergeCommitMode::Squash) {
-            record_merge_in_progress(
-                repo.git_dir(),
-                into_oid,
-                other_oid,
-                merge_message_text(label, options.message.as_deref()),
-            )?;
+        let merge_msg = merge_message_text(label, options.message.as_deref());
+        if matches!(options.commit, MergeCommitMode::Squash) {
+            write_squash_msg_file(repo, into_oid, other_oid)?;
+            write_squash_conflict_merge_msg(repo.git_dir(), &paths, options.message.as_deref())?;
+        } else {
+            record_merge_in_progress(repo.git_dir(), into_oid, other_oid, merge_msg)?;
         }
         return Ok(IntegrateBranchOutcome::Conflicts { paths, details });
     }
@@ -489,9 +489,10 @@ pub fn integrate_branch_with(
                 other_oid,
                 merge_message_text(label, options.message.as_deref()),
             )?;
-            if matches!(options.fast_forward, FastForwardPolicy::Never) {
-                write_merge_mode_no_ff(repo.git_dir())?;
-            }
+            write_merge_mode_for_no_commit(
+                repo.git_dir(),
+                matches!(options.fast_forward, FastForwardPolicy::Never),
+            )?;
             Ok(IntegrateBranchOutcome::Stopped)
         }
         MergeCommitMode::Commit => {
@@ -562,8 +563,33 @@ fn merge_message_text(label: &str, override_message: Option<&str>) -> String {
     format!("Merge {label}\n")
 }
 
-fn write_merge_mode_no_ff(git_dir: &Path) -> Result<()> {
-    fs::write(git_dir.join("MERGE_MODE"), "no-ff\n").map_err(Error::Io)
+/// Write `MERGE_MODE` for `--no-commit`, matching Git's bytes (empty file or `no-ff` without newline).
+fn write_merge_mode_for_no_commit(git_dir: &Path, no_ff: bool) -> Result<()> {
+    let bytes = if no_ff { b"no-ff".as_slice() } else { b"" };
+    fs::write(git_dir.join("MERGE_MODE"), bytes).map_err(Error::Io)
+}
+
+fn write_squash_conflict_merge_msg(
+    git_dir: &Path,
+    paths: &[String],
+    override_message: Option<&str>,
+) -> Result<()> {
+    let mut body = String::new();
+    if let Some(msg) = override_message.filter(|m| !m.trim().is_empty()) {
+        body.push_str(msg.trim());
+        if !body.ends_with('\n') {
+            body.push('\n');
+        }
+    } else {
+        body.push('\n');
+    }
+    body.push_str("# Conflicts:\n");
+    for path in paths {
+        body.push_str("#\t");
+        body.push_str(path);
+        body.push('\n');
+    }
+    fs::write(git_dir.join("MERGE_MSG"), body).map_err(Error::Io)
 }
 
 fn write_squash_msg_file(repo: &Repository, into_oid: ObjectId, other_oid: ObjectId) -> Result<()> {
@@ -611,27 +637,15 @@ fn squash_author_line(author: &str) -> String {
 }
 
 fn squash_date_line(author: &str) -> String {
-    let parts: Vec<&str> = author.rsplitn(3, ' ').collect();
-    if parts.len() < 2 {
+    let Some(parsed) = parse_signature_times(author) else {
         return String::new();
-    }
-    let ts_str = parts[1];
-    let offset_str = parts[0];
-    let Ok(ts) = ts_str.parse::<i64>() else {
-        return format!("{ts_str} {offset_str}");
     };
-    let tz_bytes = offset_str.as_bytes();
-    let tz_secs: i64 = if tz_bytes.len() >= 5 {
-        let sign = if tz_bytes[0] == b'-' { -1 } else { 1 };
-        let h: i64 = offset_str[1..3].parse().unwrap_or(0);
-        let m: i64 = offset_str[3..5].parse().unwrap_or(0);
-        sign * (h * 3600 + m * 60)
-    } else {
-        0
+    let offset_str = &author[parsed.tz_hhmm_range.clone()];
+    let Ok(dt) =
+        time::OffsetDateTime::from_unix_timestamp(parsed.unix_seconds + parsed.tz_offset_secs)
+    else {
+        return String::new();
     };
-    let adjusted = ts + tz_secs;
-    let dt = time::OffsetDateTime::from_unix_timestamp(adjusted)
-        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
     let weekday = match dt.weekday() {
         time::Weekday::Monday => "Mon",
         time::Weekday::Tuesday => "Tue",
