@@ -20,6 +20,7 @@
 //! in-progress operation [`state`](crate::state::WtStatusState), the loaded and
 //! sparse-expanded index, and the stash count.
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, DirEntry, ReadDir};
@@ -740,25 +741,20 @@ fn collect_untracked_parallel_top_level(
     matcher_template: &IgnoreMatcher,
     pathspecs: &[String],
 ) -> Result<(Vec<String>, Vec<String>)> {
-    let entries: Vec<DirEntry> = fs::read_dir(work_tree)
-        .map_err(crate::error::Error::Io)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let entries = named_entries_sorted(fs::read_dir(work_tree).map_err(crate::error::Error::Io)?);
 
     let mut root_files = Vec::new();
     let mut root_dirs = Vec::new();
-    for entry in entries {
-        if entry.file_name() == ".git" {
+    for named in entries {
+        if named.0 == b".git" {
             continue;
         }
-        if crate::read_dir_kind::entry_is_dir(&entry).unwrap_or(false) {
-            root_dirs.push(entry);
-        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
-            root_files.push(entry);
+        if crate::read_dir_kind::entry_is_dir(&named.1).unwrap_or(false) {
+            root_dirs.push(named);
+        } else if !crate::read_dir_kind::entry_is_git_ignored_special(&named.1).unwrap_or(true) {
+            root_files.push(named);
         }
     }
-    root_files.sort_by_key(|e| e.file_name());
-    root_dirs.sort_by_key(|e| e.file_name());
 
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();
@@ -771,7 +767,7 @@ fn collect_untracked_parallel_top_level(
     let threads = parallelism.threads();
 
     if !root_files.is_empty() {
-        let scan_root_file = |entry: &DirEntry,
+        let scan_root_file = |(name, entry): &(Vec<u8>, DirEntry),
                               local_untracked: &mut Vec<String>,
                               local_ignored: &mut Vec<String>| {
             let mut matcher = matcher_template.clone();
@@ -789,6 +785,7 @@ fn collect_untracked_parallel_top_level(
                 tracked_paths,
                 "",
                 entry,
+                name,
                 pathspecs,
                 None,
                 local_untracked,
@@ -813,7 +810,7 @@ fn collect_untracked_parallel_top_level(
             }
         } else {
             let mut matcher = matcher_template.clone();
-            for entry in root_files {
+            for (name, entry) in &root_files {
                 let _ = visit_untracked_dir_entry(
                     repo,
                     index,
@@ -827,7 +824,8 @@ fn collect_untracked_parallel_top_level(
                     precompose_unicode,
                     tracked_paths,
                     "",
-                    &entry,
+                    entry,
+                    name,
                     pathspecs,
                     None,
                     &mut untracked,
@@ -843,7 +841,7 @@ fn collect_untracked_parallel_top_level(
 
     let dir_count = root_dirs.len();
     let est_bytes = dir_count.saturating_mul(4096);
-    let per_dir = try_par_hash_with(&root_dirs, threads, est_bytes, |entry| {
+    let per_dir = try_par_hash_with(&root_dirs, threads, est_bytes, |(name, entry)| {
         let mut matcher = matcher_template.clone();
         let mut local_untracked = Vec::new();
         let mut local_ignored = Vec::new();
@@ -861,6 +859,7 @@ fn collect_untracked_parallel_top_level(
             tracked_paths,
             "",
             entry,
+            name,
             pathspecs,
             None,
             &mut local_untracked,
@@ -894,35 +893,28 @@ fn visit_untracked_dir_entry(
     tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     rel: &str,
     entry: &DirEntry,
+    name: &[u8],
     pathspecs: &[String],
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
 ) -> Result<UntrackedWalkStep> {
-    let name_bytes = dir_entry_name_bytes(entry);
-    if name_bytes == b".git"[..] {
+    if name == b".git" {
         return Ok(UntrackedWalkStep::Continue);
     }
-    let name_bytes: Vec<u8> = if precompose_unicode {
-        if let Ok(raw_name) = std::str::from_utf8(&name_bytes) {
-            precompose_utf8_segment(raw_name).into_owned().into_bytes()
-        } else {
-            name_bytes
-        }
-    } else {
-        name_bytes
+    let name_bytes: Cow<'_, [u8]> = match std::str::from_utf8(name) {
+        Ok(raw_name) if precompose_unicode => match precompose_utf8_segment(raw_name) {
+            Cow::Borrowed(_) => Cow::Borrowed(name),
+            Cow::Owned(s) => Cow::Owned(s.into_bytes()),
+        },
+        _ => Cow::Borrowed(name),
     };
-    let path = entry.path();
     let parent = crate::repo_relpath::storage_bytes(rel);
     let child_bytes = crate::repo_relpath::join_rel(&parent, &name_bytes);
-    let child_rel = crate::repo_relpath::storage_string(&child_bytes);
-    let child_rel_match = crate::repo_relpath::as_utf8_for_matching(&child_rel);
     let is_dir = crate::read_dir_kind::entry_is_dir(entry).unwrap_or(false);
 
-    if is_dir && gitlinks.contains(&child_rel) {
-        return Ok(UntrackedWalkStep::Continue);
-    }
-
+    // Most entries in a typical work tree are tracked; settle those before building the
+    // stored path string or the absolute path.
     if tracked_paths.contains_bytes(&child_bytes) {
         let index_is_tree = index
             .get(&child_bytes, 0)
@@ -932,10 +924,17 @@ fn visit_untracked_dir_entry(
         }
     }
 
+    let child_rel = crate::repo_relpath::storage_string(&child_bytes);
+    if is_dir && gitlinks.contains(&child_rel) {
+        return Ok(UntrackedWalkStep::Continue);
+    }
+    let child_rel_match = crate::repo_relpath::as_utf8_for_matching(&child_rel);
+
     if is_dir {
         if !pathspec_may_match_directory(&child_rel, pathspecs) {
             return Ok(UntrackedWalkStep::Continue);
         }
+        let path = entry.path();
         visit_untracked_directory(
             repo,
             index,
@@ -1012,6 +1011,7 @@ fn visit_untracked_read_dir_lazy(
         };
         #[cfg(test)]
         untracked_walk_probe::record_entry();
+        let name = dir_entry_name_bytes(&entry);
         if matches!(
             visit_untracked_dir_entry(
                 repo,
@@ -1027,6 +1027,7 @@ fn visit_untracked_read_dir_lazy(
                 tracked_paths,
                 rel,
                 &entry,
+                &name,
                 pathspecs,
                 rules,
                 untracked_out,
@@ -1098,10 +1099,7 @@ fn visit_untracked_node(
         );
     }
 
-    let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    sorted.sort_by_key(|e| e.file_name());
-
-    for entry in &sorted {
+    for (name, entry) in &named_entries_sorted(entries) {
         if matches!(
             visit_untracked_dir_entry(
                 repo,
@@ -1117,6 +1115,7 @@ fn visit_untracked_node(
                 tracked_paths,
                 rel,
                 entry,
+                name,
                 pathspecs,
                 rules,
                 untracked_out,
@@ -1651,8 +1650,8 @@ fn index_relpath_to_string(path: &[u8]) -> String {
 
 #[cfg(unix)]
 fn dir_entry_name_bytes(entry: &std::fs::DirEntry) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-    entry.file_name().as_os_str().as_bytes().to_vec()
+    use std::os::unix::ffi::OsStringExt;
+    entry.file_name().into_vec()
 }
 
 #[cfg(not(unix))]
@@ -1662,6 +1661,19 @@ fn dir_entry_name_bytes(entry: &std::fs::DirEntry) -> Vec<u8> {
         .to_string_lossy()
         .into_owned()
         .into_bytes()
+}
+
+/// Collect readable entries of `entries` with their raw file names, ordered by name bytes.
+///
+/// Extracting each name once keeps sorting allocation-free; `DirEntry::file_name` allocates
+/// on every call.
+fn named_entries_sorted(entries: ReadDir) -> Vec<(Vec<u8>, DirEntry)> {
+    let mut named: Vec<(Vec<u8>, DirEntry)> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| (dir_entry_name_bytes(&e), e))
+        .collect();
+    named.sort_by(|a, b| a.0.cmp(&b.0));
+    named
 }
 
 fn conflict_paths_from_index_raw(index: &Index) -> Vec<Vec<u8>> {

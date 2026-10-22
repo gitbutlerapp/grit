@@ -1,6 +1,6 @@
 //! Case-insensitive path identity when `core.ignorecase` is enabled.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::index::Index;
@@ -12,52 +12,42 @@ fn push_bucket(map: &mut HashMap<u32, FoldBucket>, path: Vec<u8>) {
     map.entry(memihash(&path)).or_default().push(path);
 }
 
-fn bucket_has_path(bucket: &[Vec<u8>], path: &[u8]) -> bool {
+fn bucket_has_path<P: AsRef<[u8]>>(bucket: &[P], path: &[u8]) -> bool {
     bucket
         .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(path))
+        .any(|candidate| candidate.as_ref().eq_ignore_ascii_case(path))
 }
 
 /// Stage-0 tracked paths for O(1) average lookups during untracked scans.
+///
+/// Borrows path bytes from the [`Index`] it was built from, so building the table does not
+/// copy every indexed path.
 #[derive(Debug)]
-pub struct Stage0TrackedPaths {
-    exact: HashSet<Vec<u8>>,
-    folded: Option<HashMap<u32, FoldBucket>>,
+pub struct Stage0TrackedPaths<'a> {
+    exact: hashbrown::HashSet<&'a [u8]>,
+    folded: Option<HashMap<u32, Vec<&'a [u8]>>>,
 }
 
-impl Stage0TrackedPaths {
+impl<'a> Stage0TrackedPaths<'a> {
     /// Build a lookup table for untracked scanning: every indexed path counts as
     /// tracked, including unmerged conflict stages (1–3).
     #[must_use]
-    pub fn from_index_for_untracked_scan(index: &Index, ignorecase: bool) -> Self {
-        Self::from_index_with_stage_filter(index, ignorecase, |_| true)
-    }
-
-    fn from_index_with_stage_filter(
-        index: &Index,
-        ignorecase: bool,
-        stage_ok: impl Fn(u8) -> bool,
-    ) -> Self {
+    pub fn from_index_for_untracked_scan(index: &'a Index, ignorecase: bool) -> Self {
         if ignorecase {
-            let mut folded = HashMap::new();
+            let mut folded: HashMap<u32, Vec<&'a [u8]>> = HashMap::new();
             for e in &index.entries {
-                if stage_ok(e.stage()) {
-                    push_bucket(&mut folded, e.path.clone());
-                }
+                folded
+                    .entry(memihash(&e.path))
+                    .or_default()
+                    .push(e.path.as_slice());
             }
             Self {
-                exact: HashSet::new(),
+                exact: hashbrown::HashSet::new(),
                 folded: Some(folded),
             }
         } else {
-            let mut exact = HashSet::with_capacity(index.entries.len());
-            for e in &index.entries {
-                if stage_ok(e.stage()) {
-                    exact.insert(e.path.clone());
-                }
-            }
             Self {
-                exact,
+                exact: index.entries.iter().map(|e| e.path.as_slice()).collect(),
                 folded: None,
             }
         }
