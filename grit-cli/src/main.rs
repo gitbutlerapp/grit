@@ -291,6 +291,9 @@ enum HistoryAction {
         /// Replay onto this commit instead of `UPSTREAM`.
         #[arg(long = "onto", value_name = "REV")]
         onto: Option<String>,
+        /// Run a shell command after each replayed commit is checked out (may be repeated).
+        #[arg(long = "exec", value_name = "CMD", conflicts_with = "dry_run")]
+        exec: Vec<String>,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -1039,6 +1042,9 @@ enum Command {
         /// Replay onto this commit instead of `UPSTREAM`.
         #[arg(long = "onto", value_name = "REV")]
         onto: Option<String>,
+        /// Run a shell command after each replayed commit is checked out (may be repeated).
+        #[arg(long = "exec", value_name = "CMD", conflicts_with = "dry_run")]
+        exec: Vec<String>,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -2091,9 +2097,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             HistoryAction::Rebase {
                 upstream,
                 onto,
+                exec,
                 shared,
-            } => emit(
-                &commands::history::run_rebase(upstream, onto, &shared)?,
+            } => commands::history::emit_rebase_outcome(
+                commands::history::run_rebase(upstream, onto, &exec, &shared),
                 opts,
                 ctx,
             ),
@@ -2233,9 +2240,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Rebase {
             upstream,
             onto,
+            exec,
             shared,
-        } => emit(
-            &commands::history::run_rebase(upstream, onto, &shared)?,
+        } => commands::history::emit_rebase_outcome(
+            commands::history::run_rebase(upstream, onto, &exec, &shared),
             opts,
             ctx,
         ),

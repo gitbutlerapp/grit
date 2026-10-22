@@ -166,6 +166,12 @@ Pass `--json` on `grit history drop`, `grit history move`, `grit history reword`
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
 | `dry_run` | boolean | `true` when `--dry-run` was set. |
 
+For `rebase` with `--exec`, the object also includes:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `exec` | array | `{commit,command,exit_code}` per successful `--exec` invocation (full hex `commit`). |
+
 For `absorb`, the object also includes:
 
 | Field | Type | Meaning |

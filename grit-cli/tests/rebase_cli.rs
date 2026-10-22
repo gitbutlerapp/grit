@@ -336,3 +336,82 @@ fn rebase_updates_stacked_branches() -> TestResult {
     git_fsck_strict(dir)?;
     Ok(())
 }
+
+#[test]
+fn rebase_exec_true_moves_refs() -> TestResult {
+    let scratch = Scratch::new("exec-true")?;
+    let dir = scratch.path();
+    let (upstream, onto, tip) = init_rebase_fixture(dir)?;
+    gs(dir, ["config", "grit.changeIds", "false"])?;
+    let out = gs(
+        dir,
+        [
+            "rebase", "--onto", &onto, &upstream, "--exec", "true", "--json",
+        ],
+    )?;
+    assert!(out.success(), "{}\n{}", out.stdout, out.stderr);
+    let json = parse_json(&out.stdout)?;
+    assert_eq!(json["operation"], "rebase");
+    let exec = json["exec"].as_array().ok_or("exec array")?;
+    assert!(!exec.is_empty());
+    assert_ne!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    git_fsck_strict(dir)?;
+    Ok(())
+}
+
+#[test]
+fn rebase_exec_failure_exit_code_and_refs_unchanged() -> TestResult {
+    let scratch = Scratch::new("exec-fail")?;
+    let dir = scratch.path();
+    let (upstream, onto, tip) = init_rebase_fixture(dir)?;
+    gs(dir, ["config", "grit.changeIds", "false"])?;
+    let out = gs(
+        dir,
+        [
+            "rebase", "--onto", &onto, &upstream, "--exec", "exit 7", "--json",
+        ],
+    )?;
+    assert_eq!(out.status, Some(7), "stderr:\n{}", out.stderr);
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    git_fsck_strict(dir)?;
+    Ok(())
+}
+
+#[test]
+fn rebase_exec_sees_each_commit_tree() -> TestResult {
+    let scratch = Scratch::new("exec-log")?;
+    let dir = scratch.path();
+    let (upstream, onto, _tip) = init_rebase_fixture(dir)?;
+    gs(dir, ["config", "grit.changeIds", "false"])?;
+    let log = dir.join("head.log");
+    if log.exists() {
+        fs::remove_file(&log)?;
+    }
+    let out = gs(
+        dir,
+        [
+            "rebase",
+            "--onto",
+            &onto,
+            &upstream,
+            "--exec",
+            "git rev-parse HEAD >> head.log",
+            "--json",
+        ],
+    )?;
+    assert!(out.success(), "{}\n{}", out.stdout, out.stderr);
+    let json = parse_json(&out.stdout)?;
+    let rewritten = json["rewritten"].as_array().ok_or("rewritten")?;
+    let new_ids: Vec<String> = rewritten
+        .iter()
+        .filter_map(|row| row["new"].as_str().map(str::to_owned))
+        .collect();
+    let logged = fs::read_to_string(&log)?;
+    let lines: Vec<&str> = logged.lines().collect();
+    assert_eq!(lines.len(), new_ids.len());
+    for (line, expected) in lines.iter().zip(new_ids.iter()) {
+        assert_eq!(*line, expected);
+    }
+    git_fsck_strict(dir)?;
+    Ok(())
+}

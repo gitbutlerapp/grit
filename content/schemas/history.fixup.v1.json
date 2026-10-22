@@ -2,6 +2,30 @@
   "$id": "https://grit-scm.com/schemas/history.fixup/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "ExecResultJson": {
+      "description": "One `rebase --exec` command result in `--json` output.",
+      "properties": {
+        "command": {
+          "description": "Shell command string.",
+          "type": "string"
+        },
+        "commit": {
+          "description": "Commit OID (full hex) checked out when the command ran.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "Subprocess exit code.",
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command",
+        "commit",
+        "exit_code"
+      ],
+      "type": "object"
+    },
     "HeadPair": {
       "description": "`HEAD` commit before and after rewrite.",
       "properties": {
@@ -88,6 +112,13 @@
     "dry_run": {
       "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
       "type": "boolean"
+    },
+    "exec": {
+      "description": "`--exec` subprocess results when `--exec` was used (success only).",
+      "items": {
+        "$ref": "#/definitions/ExecResultJson"
+      },
+      "type": "array"
     },
     "head": {
       "anyOf": [

@@ -1333,6 +1333,19 @@ pub fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
     )
 }
 
+/// Refuse when the index or worktree differs from `HEAD` before `rebase --exec`.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when staged or unstaged changes are present.
+pub fn ensure_worktree_clean_for_rebase_exec(repo: &Repository) -> Result<()> {
+    ensure_worktree_clean_with_message(
+        repo,
+        "you have uncommitted changes — commit them before rebasing with --exec",
+        false,
+    )
+}
+
 /// Inputs for a branch switch or fast-forward checkout after cleanliness checks.
 pub struct TreeSwitchPlan {
     /// Untracked paths under the work tree (normal untracked mode).

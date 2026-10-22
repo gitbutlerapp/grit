@@ -11,7 +11,7 @@ order: 5
 grit rebase [<upstream>]
 grit rebase [--onto <rev>] [<upstream>]
 grit history rebase [<upstream>]
-grit rebase|history rebase … [--dry-run] [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer]
+grit rebase|history rebase … [--dry-run] [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer] [--exec <cmd>]…
 ```
 
 ## Description
@@ -36,6 +36,7 @@ Shared rewrite flags match [`grit history`](history.md): `--dry-run`, `--update-
 | `--update-refs` | `branches` (default) or `head`. |
 | `--empty` | `drop` (default), `keep`, or `abort` when a replay would become empty. |
 | `--keep-committer` | Preserve committer ident and timestamp on replayed commits. |
+| `--exec` | After each replayed commit is checked out, run `CMD` via `sh -c` in the worktree (repeatable; runs in order at every commit). Requires a clean index and worktree. Incompatible with `--dry-run`. Command output goes to stderr. On failure grit restores `HEAD`, the index, and the worktree without moving refs; exit code is the command's exit code. |
 
 ## Examples
 
@@ -59,6 +60,7 @@ Pass `--json` on `grit rebase` or `grit history rebase`:
 | `refs` | array | `{ref,old,new}` for each ref that would move or moved. `name` duplicates `ref` and is deprecated. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes; `null` when unchanged. |
 | `dry_run` | boolean | Whether refs were left unchanged. |
+| `exec` | array | When `--exec` was used and the rebase succeeded: `{commit, command, exit_code}` per invocation (full hex `commit`). |
 
 Example:
 
@@ -86,6 +88,8 @@ Example:
 ```
 
 On conflict, stdout is a structured error (`kind: "conflict"`, `commit`, `conflicts`) and exit code is **1**.
+
+When `--exec` fails, exit code is the failing command's code (not necessarily **1**). When the worktree is dirty, exit **1** with a plain error message.
 
 ## Markdown output
 

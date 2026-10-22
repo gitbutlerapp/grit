@@ -110,7 +110,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Fetch and merge the remote copy of this branch | `grit pull` |
 | Pull only when a fast-forward is possible | `grit pull --ff-only` (exit **0** on success, **1** with `refused_not_ff` when diverged; branch unchanged) |
 | Fetch and replay local commits on top of upstream | `grit pull --rebase` (or `pull.rebase` in config; rebase conflicts abort atomically, exit **1**) |
-| Replay local commits onto another base | `grit rebase [<upstream>]` (default `@{upstream}`; `--onto`; conflicts abort atomically, exit **1**) |
+| Replay local commits onto another base | `grit rebase [<upstream>]` (default `@{upstream}`; `--onto`; `--exec` runs `sh -c` after each replayed commit; conflicts abort atomically, exit **1**; exec failure uses the command's exit code) |
 | Publish this branch to `origin` under the same name | `grit push` |
 | Push to a different remote branch name | `grit push origin HEAD:refs/heads/<name>` |
 | Publish rewritten history safely | `grit fetch`, then `grit push --force-with-lease` (or `--force-with-lease=<rev>` for one ref); stale lease → exit **1**, `"rejected": true` |

@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
+use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
@@ -11,10 +12,11 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
-    move_commit, plan_rebase, reword, squash, staged_fixup_paths, verify_rewrite_plan,
-    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment,
-    HunkRange, Placement, RebaseOntoOptions, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
-    RewritePlan, SquashMessage, SquashOptions, UnassignedHunk,
+    move_commit, plan_rebase, reword, squash, staged_fixup_paths, verify_rebase_with_exec,
+    verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy, ExecSpec, FixupOptions,
+    HistoryError, HunkAssignment, HunkRange, Placement, RebaseOntoOptions, RebasePlan,
+    RebaseRequest, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
+    UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
@@ -97,6 +99,20 @@ pub struct HistoryRewriteOutcome {
     pub head: Option<HeadPair>,
     /// Whether refs were left unchanged (`true` for `--dry-run`).
     pub dry_run: bool,
+    /// `--exec` subprocess results when `--exec` was used (success only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exec: Vec<ExecResultJson>,
+}
+
+/// One `rebase --exec` command result in `--json` output.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ExecResultJson {
+    /// Commit OID (full hex) checked out when the command ran.
+    pub commit: String,
+    /// Shell command string.
+    pub command: String,
+    /// Subprocess exit code.
+    pub exit_code: i32,
 }
 
 impl HistoryRewriteOutcome {
@@ -108,6 +124,7 @@ impl HistoryRewriteOutcome {
             refs: Vec::new(),
             head: None,
             dry_run,
+            exec: Vec::new(),
         }
     }
 
@@ -139,7 +156,13 @@ impl HistoryRewriteOutcome {
                 new: new.to_hex(),
             }),
             dry_run,
+            exec: Vec::new(),
         }
+    }
+
+    fn with_exec(mut self, exec: Vec<ExecResultJson>) -> Self {
+        self.exec = exec;
+        self
     }
 }
 
@@ -580,10 +603,42 @@ impl MarkdownRender for HistoryAbsorbOutcome {
     }
 }
 
+/// Non-zero exit from `rebase --exec` (refs were not updated).
+#[derive(Debug)]
+pub struct RebaseExecExit {
+    /// Subprocess exit code to return to the shell.
+    pub code: i32,
+}
+
+impl std::fmt::Display for RebaseExecExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "rebase --exec command failed (exit {})", self.code)
+    }
+}
+
+impl std::error::Error for RebaseExecExit {}
+
+/// Render a rebase outcome, exiting with the subprocess code when `--exec` fails.
+pub fn emit_rebase_outcome(
+    result: Result<HistoryRewriteOutcome>,
+    opts: &crate::output::OutputOptions,
+    ctx: &RenderContext,
+) -> Result<()> {
+    if let Err(err) = &result {
+        if let Some(ex) = err.downcast_ref::<RebaseExecExit>() {
+            crate::output::emit_error(err, opts);
+            std::process::exit(ex.code);
+        }
+    }
+    let outcome = result?;
+    crate::output::emit(&outcome, opts, ctx)
+}
+
 /// Replay local commits onto a new base (`grit rebase` / `grit history rebase`).
 pub fn run_rebase(
     upstream: Option<String>,
     onto: Option<String>,
+    exec: &[String],
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
     let on_err = history_error("rebase");
@@ -610,14 +665,43 @@ pub fn run_rebase(
             Some(commit),
         )),
         RebasePlan::Plan(plan) => {
+            if !exec.is_empty() && shared.dry_run {
+                bail!("--exec cannot be used with --dry-run");
+            }
             verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
+            let mut exec_json = Vec::new();
+            if !exec.is_empty() && !shared.dry_run {
+                let spec = ExecSpec {
+                    commands: exec.to_vec(),
+                };
+                let runner = system_command_runner();
+                match verify_rebase_with_exec(&rewrite.repo, &plan, &spec, runner.as_ref()) {
+                    Ok(report) => {
+                        for row in &report.runs {
+                            let _ = io::stderr().write_all(&row.stderr);
+                            exec_json.push(ExecResultJson {
+                                commit: row.commit.to_hex(),
+                                command: row.command.clone(),
+                                exit_code: row.exit_code,
+                            });
+                        }
+                    }
+                    Err(HistoryError::ExecFailed {
+                        exit_code, stderr, ..
+                    }) => {
+                        let _ = io::stderr().write_all(&stderr);
+                        return Err(RebaseExecExit { code: exit_code }.into());
+                    }
+                    Err(other) => return Err(on_err(other)),
+                }
+            }
             if !shared.dry_run {
                 let effective_onto = onto_oid.unwrap_or(upstream_oid);
                 let message = format!("rebase: onto {}", short(&effective_onto.to_hex()));
                 apply_rewrite(&rewrite.repo, &plan, &rewrite.apply_options(message)?)
                     .map_err(on_err)?;
             }
-            Ok(HistoryRewriteOutcome::new("rebase", &plan, shared.dry_run))
+            Ok(HistoryRewriteOutcome::new("rebase", &plan, shared.dry_run).with_exec(exec_json))
         }
     }
 }
@@ -769,6 +853,15 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
                 "local changes would be overwritten:\n  {}",
                 paths.join("\n  ")
             )
+        }
+        HistoryError::UncommittedChanges => anyhow::anyhow!(
+            "you have uncommitted changes — commit them before rebasing with --exec"
+        ),
+        HistoryError::ExecFailed {
+            commit, exit_code, ..
+        } => {
+            let short = &commit.to_hex()[..7];
+            anyhow::anyhow!("rebase --exec command failed at commit {short} (exit {exit_code})")
         }
         HistoryError::RefCasMismatch { name } => anyhow::anyhow!(
             "ref {name} changed since the rewrite plan was built — retry the command"
