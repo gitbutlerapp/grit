@@ -50,6 +50,7 @@ use grit_utils::scenarios::{
 };
 use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
+use grit_utils::tag_tree_sha256_suite::run_tag_tree_sha256_suite;
 use grit_utils::worktree_fixture::{
     prepare_add as prepare_worktree_add, prepare_clean_untracked as prepare_worktree_clean,
     prepare_commit as prepare_worktree_commit,
@@ -167,6 +168,11 @@ enum Cmd {
     },
     /// `grit fsck` vs `git fsck` on a deep-history worktree (medium fixture)
     Fsck {
+        #[arg(long)]
+        smoke: bool,
+    },
+    /// Signed tag tree-sha256 overhead on a git.git worktree (`--sign --tree-sha256` vs `--sign`).
+    TagTreeSha256 {
         #[arg(long)]
         smoke: bool,
     },
@@ -1630,6 +1636,11 @@ fn main() -> Result<()> {
             eprintln!("Running fsck benchmarks...");
             let cfg = run_config(&cli, true);
             run_fsck_suite(&hyperfine, &git, &grit, &cfg, *smoke, timestamp)?
+        }
+        Cmd::TagTreeSha256 { smoke } => {
+            eprintln!("Running tag tree-sha256 benchmarks...");
+            let cfg = run_config(&cli, true);
+            run_tag_tree_sha256_suite(&hyperfine, &git, &grit, &cfg, *smoke, timestamp)?
         }
         Cmd::Hash { smoke } => {
             eprintln!("Running hash benchmarks...");
