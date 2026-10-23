@@ -161,14 +161,20 @@ pub fn verify_rebase_with_exec(
                 stderr: stderr.clone(),
             });
             if exit_code != 0 {
-                let completed_runs = runs;
-                let failed = completed_runs.last().expect("just pushed");
+                let (completed_runs, stdout, stderr) = match runs.split_last() {
+                    Some((failed, prior)) => (
+                        prior.to_vec(),
+                        failed.stdout.clone(),
+                        failed.stderr.clone(),
+                    ),
+                    None => (Vec::new(), stdout, stderr),
+                };
                 let exec_err = HistoryError::ExecFailed {
                     commit,
                     exit_code,
-                    stdout: failed.stdout.clone(),
-                    stderr: failed.stderr.clone(),
-                    completed_runs: completed_runs[..completed_runs.len() - 1].to_vec(),
+                    stdout,
+                    stderr,
+                    completed_runs,
                 };
                 return Err(fail_exec_session(&mut session, exec_err));
             }
