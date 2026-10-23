@@ -677,6 +677,87 @@ fn fixup_hunks_leaves_other_unstaged() {
 }
 
 #[test]
+fn fixup_hunks_preserves_preexisting_staged_on_same_path() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let (base, edited) = two_hunk_edited_file();
+    commit_file(wt, "f.txt", &base, "init");
+    commit_file(wt, "other.t", "x\n", "second");
+    let target = git_rev_parse(wt, "HEAD~1").expect("target");
+    fs::write(wt.join("f.txt"), &edited).expect("write");
+    let grit = open_grit(wt);
+    let ids = unstaged_hunk_ids(&grit);
+    assert!(ids.len() >= 2);
+    grit_lib::porcelain::hunk_select::stage_hunks(
+        &grit,
+        DiffSide::Unstaged,
+        &HunkSelection {
+            ids: vec![ids[0].clone()],
+            ranges: Vec::new(),
+        },
+        &[],
+        false,
+    )
+    .expect("stage first hunk");
+    let staged_before = Command::new("git")
+        .current_dir(wt)
+        .args(["diff", "--cached", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("diff cached");
+    assert!(
+        staged_before.status.success() && !staged_before.stdout.is_empty(),
+        "line-5 hunk should be staged before fixup"
+    );
+    let selection = HunkSelection {
+        ids: vec![ids[1].clone()],
+        ranges: Vec::new(),
+    };
+    plan_and_apply_hunks(
+        &grit,
+        wt,
+        target,
+        &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
+    );
+    let staged_after = Command::new("git")
+        .current_dir(wt)
+        .args(["diff", "--cached", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("diff cached after");
+    assert!(
+        staged_after.status.success(),
+        "cached diff failed: {}",
+        String::from_utf8_lossy(&staged_after.stderr)
+    );
+    let staged_text = String::from_utf8_lossy(&staged_after.stdout);
+    assert!(
+        staged_text.contains("LINE5"),
+        "pre-existing staged line-5 edit must remain staged: {staged_text}"
+    );
+    assert!(
+        !staged_text.contains("LINE18"),
+        "consumed line-18 hunk must not remain staged: {staged_text}"
+    );
+    let status = Command::new("git")
+        .current_dir(wt)
+        .args(["status", "--short"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("status");
+    assert!(status.status.success());
+    let status_text = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_text.contains("f.txt") && status_text.contains('M'),
+        "expected staged f.txt, got: {status_text}"
+    );
+    git(wt, &["fsck", "--strict"]);
+}
+
+#[test]
 fn fixup_hunks_stale_id_no_rewrite() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
