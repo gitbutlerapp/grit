@@ -7,8 +7,10 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::commit::{
-    commit_with_scope, default_commit_scope, CommitRequest, CommitScope, HookPolicy,
+    commit_with_patch, commit_with_scope, default_commit_scope, CommitPatchError, CommitPatchInput,
+    CommitRequest, CommitScope, HookPolicy,
 };
+use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
 use grit_lib::progress::NullProgress;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
@@ -28,6 +30,7 @@ pub enum CommitScopeJson {
     AutoStage,
     Staged,
     Paths,
+    Patch,
 }
 
 /// Author recorded on the new commit (`--json` / `--markdown`).
@@ -115,6 +118,148 @@ impl MarkdownRender for CommitOutcome {
     }
 }
 
+/// Exit code for `--hunks` failures (unknown, stale, or wrong-side ids).
+pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
+    if err.downcast_ref::<HunkSelectError>().is_some()
+        || err
+            .downcast_ref::<CommitPatchError>()
+            .is_some_and(|e| matches!(e, CommitPatchError::Select(_)))
+    {
+        2
+    } else {
+        1
+    }
+}
+
+fn map_patch_error(err: CommitPatchError) -> anyhow::Error {
+    anyhow::Error::new(err)
+}
+
+fn map_hunk_parse(err: grit_lib::porcelain::hunk_select::HunkSelectError) -> anyhow::Error {
+    anyhow::Error::new(err)
+}
+
+/// Run `grit commit --hunks`.
+#[allow(clippy::too_many_arguments)]
+pub fn run_hunks(
+    message: Option<String>,
+    message_file: Option<String>,
+    author_override: Option<String>,
+    author_date: Option<String>,
+    trailers: Vec<String>,
+    signoff: bool,
+    reset_author: bool,
+    reuse_message: Option<String>,
+    gpg_sign: bool,
+    no_gpg_sign: bool,
+    no_verify: bool,
+    dry_run: bool,
+    allow_empty: bool,
+    paths: &TrailingPathspecArgs,
+    hunks: &[String],
+) -> Result<CommitOutcome> {
+    let repo = context::discover()?;
+    let resolved = paths.resolve(&repo)?;
+    let (pathspecs, _) = resolved.into_pathspec_lists();
+    let selection = parse_hunk_id_list(hunks).map_err(map_hunk_parse)?;
+    if selection.ids.is_empty() {
+        bail!("--hunks requires at least one hunk id");
+    }
+    let message_for_outcome = message.clone();
+    let req = build_commit_request(
+        &repo,
+        message,
+        message_file,
+        author_override,
+        author_date,
+        trailers,
+        signoff,
+        reset_author,
+        reuse_message,
+        gpg_sign,
+        no_gpg_sign,
+        no_verify,
+        dry_run,
+        false,
+        allow_empty,
+    )?;
+    let outcome = commit_with_patch(
+        &repo,
+        &req,
+        CommitPatchInput::Hunks(selection),
+        &pathspecs,
+        &mut NullProgress,
+    )
+    .map_err(map_patch_error)?;
+    finish_commit_outcome(
+        &repo,
+        req,
+        outcome,
+        CommitScopeJson::Patch,
+        dry_run,
+        message_for_outcome,
+    )
+}
+
+/// Run `grit commit --patch-file`.
+#[allow(clippy::too_many_arguments)]
+pub fn run_patch_file(
+    message: Option<String>,
+    message_file: Option<String>,
+    author_override: Option<String>,
+    author_date: Option<String>,
+    trailers: Vec<String>,
+    signoff: bool,
+    reset_author: bool,
+    reuse_message: Option<String>,
+    gpg_sign: bool,
+    no_gpg_sign: bool,
+    no_verify: bool,
+    dry_run: bool,
+    allow_empty: bool,
+    patch_file: &str,
+) -> Result<CommitOutcome> {
+    let repo = context::discover()?;
+    let patches = crate::patch_selection::parse_patch_file(patch_file)?;
+    if patches.is_empty() {
+        bail!("patch file contains no applicable hunks");
+    }
+    let message_for_outcome = message.clone();
+    let req = build_commit_request(
+        &repo,
+        message,
+        message_file,
+        author_override,
+        author_date,
+        trailers,
+        signoff,
+        reset_author,
+        reuse_message,
+        gpg_sign,
+        no_gpg_sign,
+        no_verify,
+        dry_run,
+        false,
+        allow_empty,
+    )?;
+    let outcome = commit_with_patch(
+        &repo,
+        &req,
+        CommitPatchInput::Patches(patches),
+        &[],
+        &mut NullProgress,
+    )
+    .map_err(map_patch_error)?;
+    finish_commit_outcome(
+        &repo,
+        req,
+        outcome,
+        CommitScopeJson::Patch,
+        dry_run,
+        message_for_outcome,
+    )
+}
+
 /// Run `grit commit` with the given message, flags, and optional path scope.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -145,10 +290,57 @@ pub fn run(
 
     let scope = resolve_commit_scope(&repo, all, staged, &paths)?;
     let scope_json = scope_json(&scope);
+    let message_for_outcome = message.clone();
+    let req = build_commit_request(
+        &repo,
+        message,
+        message_file,
+        author_override,
+        author_date,
+        trailers,
+        signoff,
+        reset_author,
+        reuse_message,
+        gpg_sign,
+        no_gpg_sign,
+        no_verify,
+        dry_run,
+        amend,
+        allow_empty,
+    )?;
+    let outcome =
+        commit_with_scope(&repo, &req, scope, &mut NullProgress).map_err(map_commit_error)?;
+    finish_commit_outcome(
+        &repo,
+        req,
+        outcome,
+        scope_json,
+        dry_run,
+        message_for_outcome,
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+fn build_commit_request(
+    repo: &grit_lib::repo::Repository,
+    message: Option<String>,
+    message_file: Option<String>,
+    author_override: Option<String>,
+    author_date: Option<String>,
+    trailers: Vec<String>,
+    signoff: bool,
+    reset_author: bool,
+    reuse_message: Option<String>,
+    gpg_sign: bool,
+    no_gpg_sign: bool,
+    no_verify: bool,
+    dry_run: bool,
+    amend: bool,
+    allow_empty: bool,
+) -> Result<CommitRequest> {
     let reuse_message_from = if let Some(rev) = reuse_message.as_deref() {
         Some(
-            resolve_revision_as_commit(&repo, rev)
+            resolve_revision_as_commit(repo, rev)
                 .with_context(|| format!("could not resolve reuse-message commit '{rev}'"))?,
         )
     } else {
@@ -196,29 +388,34 @@ pub fn run(
         HookPolicy::Run
     };
 
-    let outcome = commit_with_scope(
-        &repo,
-        &CommitRequest {
-            message: message_text.to_owned(),
-            author,
-            committer,
-            allow_empty,
-            sign_override,
-            amend,
-            hooks,
-            author_date: parsed_author_date,
-            trailers: parsed_trailers,
-            signoff,
-            reset_author,
-            reuse_message_from,
-            dry_run,
-            ..Default::default()
-        },
-        scope,
-        &mut NullProgress,
-    )
-    .map_err(map_commit_error)?;
+    Ok(CommitRequest {
+        message: message_text.to_owned(),
+        author,
+        committer,
+        allow_empty,
+        sign_override,
+        amend,
+        hooks,
+        author_date: parsed_author_date,
+        trailers: parsed_trailers,
+        signoff,
+        reset_author,
+        reuse_message_from,
+        dry_run,
+        ..Default::default()
+    })
+}
 
+fn finish_commit_outcome(
+    repo: &grit_lib::repo::Repository,
+    req: CommitRequest,
+    outcome: grit_lib::porcelain::commit::CommitOutcome,
+    scope_json: CommitScopeJson,
+    dry_run: bool,
+    message: Option<String>,
+) -> Result<CommitOutcome> {
+    let amend = req.amend;
+    let message_text = req.message.clone();
     let subject = if dry_run && amend && message.as_ref().is_none_or(|m| m.trim().is_empty()) {
         let head = resolve_head(repo.git_dir()).context("resolve HEAD")?;
         if let HeadState::Branch { oid: Some(tip), .. } | HeadState::Detached { oid: tip } = head {
@@ -361,6 +558,7 @@ fn scope_json(scope: &CommitScope) -> CommitScopeJson {
         CommitScope::AutoStage => CommitScopeJson::AutoStage,
         CommitScope::Staged => CommitScopeJson::Staged,
         CommitScope::Paths(_) => CommitScopeJson::Paths,
+        CommitScope::Patch { .. } => CommitScopeJson::Patch,
     }
 }
 

@@ -44,7 +44,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 
 `grit diff --json` on **`--staged`** or **`--unstaged`** patch output includes stable **`hunks[].id`** (12 lowercase hex chars) and **`hunks[].index`** (0-based within the file). Ids hash side, path, and line bodies (not line numbers), so they stay valid when earlier hunks are staged. Use **`grit add --hunks <id,...>`** (optional `-- paths`) to stage selected hunks; **`--lines`** on `add`, `restore`, and `commit` follow in later releases. Commit-range diffs omit `id` for now.
 
-**Select hunks workflow:** `grit diff --unstaged --json -- path | jq '.files[].hunks[] | .id'` → pick ids → `grit add --hunks id1,id2 -- path`. Use `--dry-run` to preview. Exit code **2** for unknown, stale, or wrong-side ids.
+**Select hunks workflow:** `grit diff --unstaged --json -- path | jq '.files[].hunks[] | .id'` → pick ids → `grit add --hunks id1,id2 -- path` or **`grit commit --hunks id1,id2 -m msg -- path`** to stage and commit in one step. Use `--dry-run` to preview. Exit code **2** for unknown, stale, or wrong-side ids.
 
 Revisions can be full or short ids, branch or tag names, or expressions like `HEAD~2`.
 
@@ -57,6 +57,8 @@ $ grit commit -m "Explain what changed and why"
 ```
 
 `grit commit` **auto-stages** the whole worktree by default (`commit.autoStage=true`). Use **`grit commit --staged`** to commit only the index (set `commit.autoStage=false` to make that the default). Use **`grit commit -m msg -- <paths>`** (or `--pathspec-from-file`) for a partial commit that leaves other staged changes alone — like `git commit --only`. `-a` / `--all` forces auto-stage; `--staged` and paths cannot be combined with each other or with `-a`.
+
+**Partial hunks:** `grit diff --unstaged --json` → pick `hunks[].id` → **`grit commit --hunks id1,id2 -m msg`** (optional `-- paths`). Same exit code **2** as `grit add --hunks` for unknown or stale ids. **`grit commit --patch-file file`** applies a cached patch then commits. Neither mode auto-stages the rest of the tree.
 
 ### Staging (`grit add`)
 

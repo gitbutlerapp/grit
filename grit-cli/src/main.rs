@@ -25,6 +25,7 @@ mod log_display;
 mod markdown;
 mod operation_output;
 mod output;
+mod patch_selection;
 mod pathspec_args;
 mod progress;
 mod ref_name_messages;
@@ -879,6 +880,29 @@ enum Command {
         /// Compute the commit without writing objects, updating refs, or running hooks.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Apply a unified diff to the index, then commit only that staged content (`git apply --cached` + commit).
+        #[arg(
+            long = "patch-file",
+            value_name = "FILE|-",
+            conflicts_with_all = ["hunks", "lines", "all", "staged", "paths", "pathspec_from_file"]
+        )]
+        patch_file: Option<String>,
+        /// Commit only the listed hunk ids from `grit diff --json` (comma-separated, repeatable).
+        #[arg(
+            long = "hunks",
+            value_name = "ID,...",
+            action = clap::ArgAction::Append,
+            conflicts_with_all = ["patch_file", "lines", "all", "staged"]
+        )]
+        hunks: Vec<String>,
+        /// Commit only line ranges from the unstaged diff (same format as `grit add --lines`; not yet available).
+        #[arg(
+            long = "lines",
+            value_name = "PATH:START,END",
+            action = clap::ArgAction::Append,
+            conflicts_with_all = ["patch_file", "hunks", "all", "staged", "paths", "pathspec_from_file"]
+        )]
+        lines: Vec<String>,
         #[command(flatten)]
         paths: crate::pathspec_args::TrailingPathspecArgs,
     },
@@ -1953,30 +1977,95 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             amend,
             allow_empty,
             dry_run,
+            patch_file,
+            hunks,
+            lines,
             paths,
-        } => emit(
-            &commands::commit::run(
-                message.or(message_flag),
-                message_file,
-                author_override,
-                author_date,
-                trailers,
-                signoff,
-                reset_author,
-                reuse_message,
-                gpg_sign,
-                no_gpg_sign,
-                no_verify,
-                dry_run,
-                amend,
-                allow_empty,
-                all,
-                staged,
-                paths,
-            )?,
-            opts,
-            ctx,
-        ),
+        } => {
+            if !lines.is_empty() {
+                bail!("--lines is not available on commit yet");
+            }
+            patch_selection::ensure_single_patch_mode(
+                patch_file.is_some(),
+                !hunks.is_empty(),
+                !lines.is_empty(),
+            )?;
+            if let Some(file) = patch_file {
+                emit(
+                    &commands::commit::run_patch_file(
+                        message.or(message_flag),
+                        message_file,
+                        author_override,
+                        author_date,
+                        trailers,
+                        signoff,
+                        reset_author,
+                        reuse_message,
+                        gpg_sign,
+                        no_gpg_sign,
+                        no_verify,
+                        dry_run,
+                        allow_empty,
+                        &file,
+                    )?,
+                    opts,
+                    ctx,
+                )
+            } else if !hunks.is_empty() {
+                match commands::commit::run_hunks(
+                    message.or(message_flag),
+                    message_file,
+                    author_override,
+                    author_date,
+                    trailers,
+                    signoff,
+                    reset_author,
+                    reuse_message,
+                    gpg_sign,
+                    no_gpg_sign,
+                    no_verify,
+                    dry_run,
+                    allow_empty,
+                    &paths,
+                    &hunks,
+                ) {
+                    Ok(outcome) => emit(&outcome, opts, ctx),
+                    Err(err) => {
+                        let code = commands::commit::hunks_exit_code(&err);
+                        if opts.mode == OutputMode::Json {
+                            output::emit_error(&err, opts);
+                        } else {
+                            eprintln!("error: {err:#}");
+                        }
+                        std::process::exit(code);
+                    }
+                }
+            } else {
+                emit(
+                    &commands::commit::run(
+                        message.or(message_flag),
+                        message_file,
+                        author_override,
+                        author_date,
+                        trailers,
+                        signoff,
+                        reset_author,
+                        reuse_message,
+                        gpg_sign,
+                        no_gpg_sign,
+                        no_verify,
+                        dry_run,
+                        amend,
+                        allow_empty,
+                        all,
+                        staged,
+                        paths,
+                    )?,
+                    opts,
+                    ctx,
+                )
+            }
+        }
         Command::Branch {
             name,
             start,

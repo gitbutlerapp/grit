@@ -4,6 +4,7 @@
 //! object, persists the index with a valid cache-tree, then updates the branch and `HEAD`
 //! reflogs through [`crate::refs::update_branch_for_commit`].
 
+use crate::apply::{apply_patch_to_index, FilePatch, IndexApplyOptions};
 use crate::change_id::{change_id, set_change_id, ChangeId, ChangeIdPolicy};
 use crate::commit::assemble_identity;
 use crate::commit::trailers::interpret::{
@@ -17,6 +18,7 @@ use crate::diff::{
     diff_tree_path_change_count, diff_trees_with_renames, flatten_tree_entries,
     materialize_worktree_blob, zero_oid, DiffEntry, DiffStatus,
 };
+use crate::error::ApplyError;
 use crate::error::{Error, Result};
 use crate::hooks::{run_commit_hook, CommitHookEnv, HookError, HookName, HookResult};
 use crate::ident::parse_signature_times;
@@ -25,6 +27,7 @@ use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::pathspec::{pathspec_is_exclude, ResolvedPathspecs};
 use crate::porcelain::add::{stage_on_index, StageMode, StageOptions};
+use crate::porcelain::hunk_select::{resolve_selection, HunkSelectError, HunkSelection};
 use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
 use crate::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository;
 use crate::progress::ProgressSink;
@@ -47,6 +50,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 
 /// Whether commit hooks run before the object is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -138,7 +142,7 @@ pub struct CommitPlan {
 }
 
 /// Which paths are included when recording a commit ([`commit_with_scope`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum CommitScope {
     /// Stage every worktree change, then commit (default `grit commit` behavior).
     AutoStage,
@@ -146,6 +150,66 @@ pub enum CommitScope {
     Staged,
     /// Commit only matching paths from the worktree (`git commit --only --` paths).
     Paths(ResolvedPathspecs),
+    /// Commit only hunks from a unified diff or stable hunk ids (`grit commit --hunks` / `--patch-file`).
+    Patch {
+        /// Hunk ids or pre-parsed file patches (exactly one is populated).
+        input: CommitPatchInput,
+        /// Optional pathspecs narrowing hunk resolution (same as `grit add --hunks`).
+        pathspecs: Vec<String>,
+    },
+}
+
+impl PartialEq for CommitScope {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::AutoStage, Self::AutoStage) | (Self::Staged, Self::Staged) => true,
+            (Self::Paths(a), Self::Paths(b)) => a == b,
+            (
+                Self::Patch {
+                    input: a,
+                    pathspecs: ap,
+                },
+                Self::Patch {
+                    input: b,
+                    pathspecs: bp,
+                },
+            ) => ap == bp && patch_input_same_kind(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for CommitScope {}
+
+fn patch_input_same_kind(a: &CommitPatchInput, b: &CommitPatchInput) -> bool {
+    matches!(
+        (a, b),
+        (CommitPatchInput::Hunks(_), CommitPatchInput::Hunks(_))
+            | (CommitPatchInput::Patches(_), CommitPatchInput::Patches(_))
+    )
+}
+
+/// Hunk ids or parsed patches for [`CommitScope::Patch`].
+#[derive(Debug, Clone)]
+pub enum CommitPatchInput {
+    /// Stable ids from `grit diff --json`.
+    Hunks(HunkSelection),
+    /// Unified diff hunks (`git apply --cached` preimage = index).
+    Patches(Vec<FilePatch>),
+}
+
+/// Failure while resolving or applying a patch-scoped commit.
+#[derive(Debug, Error)]
+pub enum CommitPatchError {
+    /// Hunk id resolution failed (unknown, stale, wrong side, binary).
+    #[error(transparent)]
+    Select(#[from] HunkSelectError),
+    /// Index apply failed after resolution.
+    #[error(transparent)]
+    Apply(#[from] ApplyError),
+    /// Commit, index, or repository error.
+    #[error(transparent)]
+    Commit(#[from] Error),
 }
 
 /// Default [`CommitScope`] from `commit.autoStage` (default true → [`CommitScope::AutoStage`]).
@@ -188,7 +252,79 @@ pub fn commit_with_scope(
         CommitScope::AutoStage => commit_worktree(repo, req, progress),
         CommitScope::Staged => create_commit(repo, req, progress),
         CommitScope::Paths(paths) => commit_paths_scope(repo, req, &paths, progress),
+        CommitScope::Patch { input, pathspecs } => {
+            commit_with_patch(repo, req, input, &pathspecs, progress)
+                .map_err(|e| Error::Message(e.to_string()))
+        }
     }
+}
+
+/// Record a commit after applying `input` to the current index (partial stage + commit).
+///
+/// Applies the selection in memory, commits the resulting tree, then writes the updated index.
+/// Does not auto-stage the worktree (same effective scope as [`CommitScope::Staged`]).
+///
+/// # Errors
+///
+/// [`CommitPatchError::Select`] for hunk id failures; [`CommitPatchError::Apply`] for patch apply;
+/// same commit errors as [`create_commit`].
+pub fn commit_with_patch(
+    repo: &Repository,
+    req: &CommitRequest,
+    input: CommitPatchInput,
+    pathspecs: &[String],
+    progress: &mut dyn ProgressSink,
+) -> std::result::Result<CommitOutcome, CommitPatchError> {
+    commit_patch_scope(repo, req, input, pathspecs, progress)
+}
+
+fn commit_patch_scope(
+    repo: &Repository,
+    req: &CommitRequest,
+    input: CommitPatchInput,
+    pathspecs: &[String],
+    progress: &mut dyn ProgressSink,
+) -> std::result::Result<CommitOutcome, CommitPatchError> {
+    if !read_merge_heads(repo.git_dir())?.is_empty() {
+        return Err(Error::PartialCommitDuringMerge.into());
+    }
+
+    let patches = match input {
+        CommitPatchInput::Hunks(selection) => {
+            if selection.ids.is_empty() {
+                return Err(Error::NothingToCommit.into());
+            }
+            resolve_selection(
+                repo,
+                crate::diff::hunk_id::DiffSide::Unstaged,
+                &selection,
+                pathspecs,
+            )?
+        }
+        CommitPatchInput::Patches(patches) => {
+            if patches.is_empty() {
+                return Err(Error::NothingToCommit.into());
+            }
+            patches
+        }
+    };
+
+    let mut index = repo.load_index().map_err(CommitPatchError::Commit)?;
+    if index.has_unmerged_entries() {
+        return Err(Error::IndexUnmerged.into());
+    }
+
+    apply_patch_to_index(
+        repo,
+        &mut index,
+        &patches,
+        &IndexApplyOptions { dry_run: false },
+    )?;
+
+    let mut req = req.clone();
+    req.assume_worktree_synced = true;
+    create_commit_with_index(repo, &mut index, &req, progress, None)
+        .map_err(CommitPatchError::Commit)
 }
 
 /// Preview a commit for `scope` without mutating the repository (objects, index on disk, refs, hooks).
@@ -1331,6 +1467,8 @@ mod tests {
     use crate::write_tree::{cache_tree_fully_valid, verify_cache_tree};
     use std::fs;
     use std::path::Path;
+    use std::process::Command;
+    use std::str::FromStr;
     use tempfile::TempDir;
 
     fn init_repo(root: &Path) -> Repository {
@@ -2214,5 +2352,297 @@ mod tests {
             commit_with_scope(&repo, &req, CommitScope::Staged, &mut NullProgress).unwrap();
         assert_eq!(outcome.author.email, "o@example.com");
         assert_eq!(outcome.author.name, "Override");
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn two_hunk_file() -> (String, String) {
+        let mut base = String::new();
+        for i in 0..24 {
+            base.push_str(&format!("line{i}\n"));
+        }
+        let mut edited = base.clone();
+        edited = edited.replacen("line5\n", "LINE5\n", 1);
+        edited = edited.replacen("line18\n", "LINE18\n", 1);
+        (base, edited)
+    }
+
+    fn tree_blob(repo: &Repository, tree_oid: &ObjectId, path: &str) -> Vec<u8> {
+        for (p, _mode, oid) in flatten_tree_entries(repo.odb(), tree_oid).unwrap() {
+            if p == path {
+                return repo.odb().read(&oid).unwrap().data;
+            }
+        }
+        panic!("missing {path} in tree");
+    }
+
+    #[test]
+    fn commit_hunks_only_selected_in_tree() {
+        use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
+        use crate::porcelain::hunk_select::HunkSelection;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let (base, edited) = two_hunk_file();
+        fs::write(root.join("f.txt"), base).unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("init"), &mut NullProgress).unwrap();
+        fs::write(root.join("f.txt"), edited).unwrap();
+
+        let (files, peers) =
+            unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
+        let ids = hunk_ids_with_duplicate_peers(
+            DiffSide::Unstaged,
+            "f.txt",
+            &files[0].hunks,
+            peers.get("f.txt").map(|v| v.as_slice()).unwrap_or(&[]),
+        );
+        commit_with_patch(
+            &repo,
+            &commit_req("one hunk"),
+            CommitPatchInput::Hunks(HunkSelection {
+                ids: vec![ids[0].clone()],
+            }),
+            &[],
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        let tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
+        let tree = parse_commit(&repo.odb().read(&tip).unwrap().data)
+            .unwrap()
+            .tree;
+        let blob = tree_blob(&repo, &tree, "f.txt");
+        let text = String::from_utf8_lossy(&blob);
+        assert!(text.contains("LINE5"), "first hunk in commit tree");
+        assert!(
+            !text.contains("LINE18"),
+            "second hunk must not be in commit tree: {text}"
+        );
+    }
+
+    #[test]
+    fn commit_hunks_leaves_other_unstaged() {
+        use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
+        use crate::porcelain::hunk_select::HunkSelection;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let (base, edited) = two_hunk_file();
+        fs::write(root.join("f.txt"), base).unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("init"), &mut NullProgress).unwrap();
+        fs::write(root.join("f.txt"), edited).unwrap();
+
+        let (files, peers) =
+            unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
+        let ids = hunk_ids_with_duplicate_peers(
+            DiffSide::Unstaged,
+            "f.txt",
+            &files[0].hunks,
+            peers.get("f.txt").map(|v| v.as_slice()).unwrap_or(&[]),
+        );
+        commit_with_patch(
+            &repo,
+            &commit_req("partial"),
+            CommitPatchInput::Hunks(HunkSelection {
+                ids: vec![ids[0].clone()],
+            }),
+            &[],
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        let diff = run_grit_status_unstaged(root);
+        assert!(
+            diff.contains("line18") || diff.contains("LINE18"),
+            "remaining hunk still unstaged: {diff}"
+        );
+        git(root, &["fsck", "--strict"]);
+    }
+
+    fn run_grit_status_unstaged(root: &std::path::Path) -> String {
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["diff"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn format_patch_for_git(patch: &FilePatch) -> String {
+        use crate::apply::HunkLine;
+        let mut out = String::new();
+        let path = patch.effective_path().unwrap_or("f");
+        out.push_str(&format!("diff --git a/{path} b/{path}\n"));
+        if patch.is_new {
+            out.push_str("new file mode 100644\n");
+        }
+        let old = if patch.is_new {
+            "/dev/null".to_string()
+        } else {
+            format!("a/{}", patch.old_path.as_deref().unwrap_or(path))
+        };
+        let new = if patch.is_deleted {
+            "/dev/null".to_string()
+        } else {
+            format!("b/{}", patch.new_path.as_deref().unwrap_or(path))
+        };
+        out.push_str(&format!("--- {old}\n"));
+        out.push_str(&format!("+++ {new}\n"));
+        for h in &patch.hunks {
+            out.push_str(&format!(
+                "@@ -{},{} +{},{} @@\n",
+                h.old_start, h.old_count, h.new_start, h.new_count
+            ));
+            for line in &h.lines {
+                match line {
+                    HunkLine::Context(s) => {
+                        out.push(' ');
+                        out.push_str(s);
+                        if !s.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                    HunkLine::Add(s) => {
+                        out.push('+');
+                        out.push_str(s);
+                        if !s.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                    HunkLine::Remove(s) => {
+                        out.push('-');
+                        out.push_str(s);
+                        if !s.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                    HunkLine::NoNewline => out.push_str("\\ No newline at end of file\n"),
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn commit_patch_file_matches_git_apply_cached_then_commit() {
+        use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
+        use crate::porcelain::hunk_select::{resolve_selection, HunkSelection};
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let (base, edited) = two_hunk_file();
+        fs::write(root.join("f.txt"), base.clone()).unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("init"), &mut NullProgress).unwrap();
+        fs::write(root.join("f.txt"), edited.clone()).unwrap();
+
+        let (files, peers) =
+            unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
+        let ids = hunk_ids_with_duplicate_peers(
+            DiffSide::Unstaged,
+            "f.txt",
+            &files[0].hunks,
+            peers.get("f.txt").map(|v| v.as_slice()).unwrap_or(&[]),
+        );
+        let patch = resolve_selection(
+            &repo,
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: vec![ids[0].clone()],
+            },
+            &[],
+        )
+        .unwrap();
+        let patch_text = patch.iter().map(format_patch_for_git).collect::<String>();
+
+        commit_with_patch(
+            &repo,
+            &commit_req("grit partial"),
+            CommitPatchInput::Patches(patch),
+            &[],
+            &mut NullProgress,
+        )
+        .unwrap();
+        let grit_tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
+        let grit_tree = parse_commit(&repo.odb().read(&grit_tip).unwrap().data)
+            .unwrap()
+            .tree;
+
+        let git_dir = tempfile::tempdir().unwrap();
+        git(git_dir.path(), &["init", "-q", "-b", "main"]);
+        fs::write(git_dir.path().join("f.txt"), base).unwrap();
+        git(git_dir.path(), &["add", "f.txt"]);
+        git(git_dir.path(), &["commit", "-qm", "init"]);
+        fs::write(git_dir.path().join("f.txt"), edited).unwrap();
+        fs::write(git_dir.path().join("partial.patch"), &patch_text).unwrap();
+        git(git_dir.path(), &["apply", "--cached", "partial.patch"]);
+        git(git_dir.path(), &["commit", "-qm", "git partial"]);
+        let git_tip = Command::new("git")
+            .current_dir(git_dir.path())
+            .args(["rev-parse", "HEAD^{tree}"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        let git_tree_hex = String::from_utf8_lossy(&git_tip.stdout);
+        let git_tree = ObjectId::from_hex(git_tree_hex.trim()).unwrap();
+        assert_eq!(grit_tree, git_tree);
+        git(root, &["fsck", "--strict"]);
+    }
+
+    #[test]
+    fn commit_hunks_stale_id_no_commit() {
+        use crate::diff::hunk_id::HunkId;
+        use crate::porcelain::hunk_select::HunkSelection;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("f.txt"), b"one\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("init"), &mut NullProgress).unwrap();
+        let before_tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
+        let before_index_oid = repo.load_index().unwrap().entries[0].oid;
+
+        fs::write(root.join("f.txt"), b"two\n").unwrap();
+        let err = commit_with_patch(
+            &repo,
+            &commit_req("nope"),
+            CommitPatchInput::Hunks(HunkSelection {
+                ids: vec![HunkId::from_str("000000000001").unwrap()],
+            }),
+            &[],
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CommitPatchError::Select(_)));
+        assert_eq!(
+            resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
+            before_tip
+        );
+        assert_eq!(repo.load_index().unwrap().entries[0].oid, before_index_oid);
     }
 }

@@ -42,7 +42,7 @@ pub enum HunkSelectError {
         id: HunkId,
         /// Path when the caller narrowed the diff (or a single candidate file).
         path: Option<String>,
-        /// Current ids on [`StaleId::path`] when cheap to compute.
+        /// Current ids on the stale path when cheap to compute.
         current_ids: Vec<HunkId>,
     },
     /// Id belongs to the other index/worktree side (for example staged vs unstaged).

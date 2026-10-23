@@ -18,6 +18,8 @@ grit commit --no-verify -m <message>
 grit commit --dry-run -m <message>
 grit commit --allow-empty -m <message>
 grit commit --amend [-m <message>]
+grit commit --hunks <id,...> -m <message> [-- <path>…]
+grit commit --patch-file <file|-> -m <message>
 ```
 
 ## Description
@@ -27,6 +29,8 @@ By default, `grit commit` **auto-stages** every change in the working tree (modi
 Use **`--staged`** to commit the index as-is without auto-staging (Git’s `git commit` without `-a`). Use **`-a` / `--all`** to force auto-staging even when `commit.autoStage=false`.
 
 Use **trailing paths** (`grit commit -m msg -- a b`) or **`--pathspec-from-file`** to commit only those paths from the worktree while leaving other staged changes in the index (Git’s `git commit --only --` paths). Partial path commits are refused while a merge is in progress.
+
+Use **`--hunks`** with stable ids from [`grit diff --json`](../diff/) to stage and commit only selected unstaged hunks in one step (like `git apply --cached` on those hunks, then commit). Optional **`-- paths`** narrow the diff scan the same way as [`grit add --hunks`](../add/). Use **`--patch-file`** to apply a unified diff to the index and commit the result (`-` reads stdin). These modes do not auto-stage the rest of the worktree (same effective scope as **`--staged`**). They cannot be combined with `-a` / `--all`, **`--staged`**, or path-only commits. **`--lines`** follows the same rules as `grit add --lines` when that flag is available.
 
 The message can be given as an argument, with `-m`, or with `-F` / `--message-file` (`-` reads stdin). Messages may start with `-` when quoted on the shell (for example `grit commit -m "-fix typo"`) or passed via `--message=-fix typo`. Message text is normalized with Git-style stripspace before hooks run (leading/trailing blank lines collapse; a trailing newline is added). A message with several lines is recorded as is after normalization; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stops with an error and does not change the index or working tree. You cannot combine `-m`, a positional message, and `--message-file`.
 
@@ -73,6 +77,9 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 | `--dry-run` | Preview the commit; no objects, refs, hooks, or on-disk index changes. |
 | `-a`, `--all` | Stage every change first, then commit. Conflicts with `--staged` and path arguments. |
 | `--staged` | Commit only what is already in the index (no auto-stage). Conflicts with `-a` and path arguments. |
+| `--hunks` | Commit only listed hunk ids from `grit diff --json` (comma-separated, repeatable). Optional `-- paths`. Conflicts with `--patch-file`, `--lines`, `-a`, `--staged`, and path arguments. |
+| `--patch-file` | Apply a unified diff to the index, then commit (`-` for stdin). Conflicts with `--hunks`, `--lines`, `-a`, `--staged`, and path arguments. |
+| `--lines` | Commit only line ranges from the unstaged diff (same format as `grit add --lines` when available). Conflicts with `--hunks`, `--patch-file`, `-a`, `--staged`, and path arguments. |
 | `--pathspec-from-file`, `--pathspec-file-nul` | Same as on [`grit add`](../add/): read pathspecs from a file; combine with trailing `PATH` arguments. |
 | `--amend` | Replace the tip commit on the current branch. |
 | `--allow-empty` | Record a commit even when staged content matches the parent tree (empty tree change). |
@@ -156,7 +163,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `changes` | number | Path changes vs the parent commit tree |
 | `amended` | boolean | `true` when `--amend` was used |
 | `dry_run` | boolean | `true` when `--dry-run` was used |
-| `scope` | string | `auto_stage`, `staged`, or `paths` — how the index was prepared |
+| `scope` | string | `auto_stage`, `staged`, `paths`, or `patch` — how the index was prepared |
 | `dry_run` | boolean | `true` when `--dry-run` was passed |
 | `files` | array | Path-level changes (`path`, `status`, optional `old_path` for renames) |
 | `change_id` | string or null | Stored `change-id` header on the new commit, or null when absent or dry-run (see [Change ids](../library/change-ids/)) |

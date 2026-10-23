@@ -49,7 +49,8 @@
       "enum": [
         "auto_stage",
         "staged",
-        "paths"
+        "paths",
+        "patch"
       ],
       "type": "string"
     }
