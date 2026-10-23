@@ -6,11 +6,12 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::campaign_prep::{
-    ensure_campaign_hot_path, load_campaign_hot_path_meta, reset_campaign_worktree_clean,
-    restore_campaign_worktree_to_main, switch_wide_meta, sync_grit_index_to_git,
-    GIT_DOT_GIT_SWITCH_DETACH_TAG,
+    ensure_campaign_conflicts, ensure_campaign_hot_path, load_campaign_hot_path_meta,
+    reset_campaign_worktree_clean, restore_campaign_worktree_to_main, switch_wide_meta,
+    sync_grit_index_to_git, GIT_DOT_GIT_SWITCH_DETACH_TAG,
 };
 use crate::campaign_worktree::{blame_target_path, list_tracked_files};
+use crate::conflicts_suite::campaign_conflicts_scenarios;
 use crate::fixture::prepare_commit_iteration;
 use crate::hot_path_fixture::HotPathMeta;
 use crate::network_fixture::{ensure_campaign_bare_network_meta, file_url};
@@ -534,6 +535,7 @@ pub fn run_fixture_cli_matrix(
     )?);
 
     append_hot_path_scenarios(hyperfine, git, grit, cfg, fixture, &meta, smoke, &mut out)?;
+    append_conflicts_scenarios(hyperfine, git, grit, cfg, fixture, &mut out)?;
     append_stash_scenario(hyperfine, git, grit, cfg, fixture, &mut out)?;
     append_fsck_gc_repack(hyperfine, git, grit, cfg, fixture, smoke, &mut out)?;
     if include_file_transport {
@@ -696,6 +698,29 @@ fn append_hot_path_scenarios(
                 grit_via_shell: true,
                 git_via_shell: true,
             },
+            &fixture.worktree,
+        )?);
+    }
+    Ok(())
+}
+
+fn append_conflicts_scenarios(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    fixture: &CampaignFixture,
+    out: &mut Vec<ScenarioResult>,
+) -> Result<()> {
+    let conflicts = ensure_campaign_conflicts(git, &fixture.worktree)?;
+    for scenario in campaign_conflicts_scenarios(grit, git, &conflicts, &fixture.label, fixture.id)
+    {
+        out.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &scenario,
             &fixture.worktree,
         )?);
     }
@@ -1196,6 +1221,60 @@ impl Drop for CampaignCwdGuard {
 #[cfg(test)]
 mod tests {
     use super::LOG_BENCH_GRIT_PAGE_COUNT;
+
+    use crate::conflicts_fixture::ConflictsMeta;
+    use crate::conflicts_suite::campaign_conflicts_scenarios;
+    use crate::hot_path_fixture::HotPathMeta;
+    use std::path::Path;
+
+    const CAMPAIGN_CONFLICT_SUFFIXES: [&str; 5] = [
+        "merge-no-ff",
+        "merge-conflict-continue",
+        "pick-range-20",
+        "revert-single",
+        "revert-mainline",
+    ];
+
+    fn sample_conflicts_meta() -> ConflictsMeta {
+        ConflictsMeta {
+            base: HotPathMeta {
+                branch_a: "main".into(),
+                branch_b: "topic".into(),
+                main_branch: "main".into(),
+                topic_branch: "topic".into(),
+                base_commit: "base".into(),
+                main_tip: "main-tip".into(),
+                pick_commit: "pick".into(),
+                pick_series_commits: (0..20).map(|i| format!("series-{i}")).collect(),
+                wide: false,
+                wide_branch_b: None,
+            },
+            merge_commit: "merge".into(),
+            conflict_path_count: 10,
+        }
+    }
+
+    #[test]
+    fn campaign_conflicts_matrix_ids() {
+        let meta = sample_conflicts_meta();
+        for fixture in ["git-dot-git", "chromium-synth"] {
+            let scenarios = campaign_conflicts_scenarios(
+                Path::new("grit"),
+                Path::new("git"),
+                &meta,
+                "label",
+                fixture,
+            );
+            assert_eq!(scenarios.len(), CAMPAIGN_CONFLICT_SUFFIXES.len());
+            for suffix in CAMPAIGN_CONFLICT_SUFFIXES {
+                let id = format!("{fixture}/{suffix}");
+                assert!(
+                    scenarios.iter().any(|s| s.id == id),
+                    "missing campaign conflict row {id}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn production_log_limit_pages_match_git_thousand() {

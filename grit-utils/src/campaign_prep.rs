@@ -7,7 +7,14 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use crate::campaign_worktree::{dirty_tracked_worktree, list_tracked_files};
-use crate::hot_path_fixture::{meta_path, HotPathMeta};
+use crate::conflicts_fixture::{
+    conflict_overlap_for_size, conflicts_meta_path, load_conflicts_meta,
+    persist_conflicts_meta_campaign, ConflictsMeta, BENCH_CONFLICTS_TOPIC,
+};
+use crate::hot_path_fixture::{
+    assert_pick_merge_sibling_topology, commit_main_diverge, meta_path, touch_paths_for_size,
+    HotPathMeta,
+};
 use crate::real_repo_fixture::git_env;
 
 /// Load hot-path metadata prepared for campaign scenarios.
@@ -319,6 +326,165 @@ fn ensure_campaign_wide_branch_b(
     Ok(WIDE_BRANCH_B.into())
 }
 
+fn campaign_conflicts_meta_valid(git: &Path, repo: &Path, meta: &ConflictsMeta) -> Result<bool> {
+    if meta.base.pick_series_commits.len() != 20 {
+        return Ok(false);
+    }
+    if meta.merge_commit.is_empty() || meta.conflict_path_count == 0 {
+        return Ok(false);
+    }
+    if meta.base.topic_branch != BENCH_CONFLICTS_TOPIC {
+        return Ok(false);
+    }
+    for rev in [
+        meta.base.main_tip.as_str(),
+        meta.base.pick_commit.as_str(),
+        meta.merge_commit.as_str(),
+    ] {
+        if rev_parse(git, repo, rev).is_err() {
+            return Ok(false);
+        }
+    }
+    for rev in &meta.base.pick_series_commits {
+        if rev_parse(git, repo, rev).is_err() {
+            return Ok(false);
+        }
+    }
+    Ok(assert_pick_merge_sibling_topology(git, repo, &meta.base).is_ok())
+}
+
+/// Leave the worktree on `main_branch` at `main_tip` for conflict prepare hooks.
+pub fn restore_campaign_conflicts_worktree(
+    git: &Path,
+    repo: &Path,
+    meta: &ConflictsMeta,
+) -> Result<()> {
+    run_git_auth(git, repo, &["checkout", "-f", &meta.base.main_branch])?;
+    run_git_auth(git, repo, &["reset", "--hard", &meta.base.main_tip])?;
+    Ok(())
+}
+
+fn touch_files_for_bench(repo: &Path, rel_paths: &[PathBuf], suffix: &str) -> Result<()> {
+    for rel in rel_paths {
+        let path = repo.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, format!("{suffix}\n"))?;
+    }
+    Ok(())
+}
+
+/// Branch topology and metadata for campaign merge/pick/revert conflict matrix rows.
+pub fn ensure_campaign_conflicts(git: &Path, repo: &Path) -> Result<ConflictsMeta> {
+    if conflicts_meta_path(repo).is_file() {
+        let meta = load_conflicts_meta(repo)?;
+        if campaign_conflicts_meta_valid(git, repo, &meta)? {
+            restore_campaign_conflicts_worktree(git, repo, &meta)?;
+            return Ok(meta);
+        }
+        fs::remove_file(conflicts_meta_path(repo)).context("remove stale conflicts meta")?;
+    }
+
+    let main_branch = current_branch(git, repo)?;
+    run_git_auth(git, repo, &["checkout", "-f", &main_branch])?;
+    run_git_auth(git, repo, &["reset", "--hard", "HEAD"])?;
+    let base_commit = rev_parse(git, repo, "HEAD")?;
+
+    let files = list_tracked_files(git, repo)?;
+    anyhow::ensure!(!files.is_empty(), "conflicts prep needs tracked files");
+    let file_count = files.len();
+    let touch = touch_paths_for_size(file_count).min(file_count);
+    let overlap = conflict_overlap_for_size(file_count).min(touch).max(1);
+    let targets: Vec<PathBuf> = files.iter().take(touch).cloned().collect();
+
+    run_git_auth(
+        git,
+        repo,
+        &["checkout", "-B", BENCH_CONFLICTS_TOPIC, &base_commit],
+    )?;
+    let mut series = Vec::with_capacity(20);
+    const SERIES_LEN: usize = 20;
+    for i in 0..SERIES_LEN {
+        let rel = &files[i % files.len()];
+        touch_files_for_bench(
+            repo,
+            std::slice::from_ref(rel),
+            &format!("conflicts-series-{i}"),
+        )?;
+        run_git_auth(git, repo, &["add", "-A"])?;
+        run_git_auth(
+            git,
+            repo,
+            &["commit", "-qm", &format!("conflicts series {i}")],
+        )?;
+        series.push(rev_parse(git, repo, "HEAD")?);
+    }
+    let pick_commit = series.last().cloned().unwrap_or_default();
+
+    run_git_auth(git, repo, &["checkout", "-f", &main_branch])?;
+    run_git_auth(git, repo, &["reset", "--hard", &base_commit])?;
+    let conflict_targets: Vec<PathBuf> = targets.iter().take(overlap).cloned().collect();
+    touch_files_for_bench(repo, &conflict_targets, "main-conflict")?;
+    run_git_auth(git, repo, &["add", "-A"])?;
+    run_git_auth(git, repo, &["commit", "-qm", "main conflict overlap"])?;
+    let main_tip = commit_main_diverge(git, repo, &files)?;
+
+    let mut merge_cmd = Command::new(git);
+    merge_cmd
+        .args([
+            "merge",
+            "--no-ff",
+            "-q",
+            "--no-edit",
+            BENCH_CONFLICTS_TOPIC,
+        ])
+        .current_dir(repo)
+        .env("GIT_AUTHOR_NAME", "Bench")
+        .env("GIT_AUTHOR_EMAIL", "b@example.com")
+        .env("GIT_COMMITTER_NAME", "Bench")
+        .env("GIT_COMMITTER_EMAIL", "b@example.com");
+    git_env(&mut merge_cmd);
+    let merge_out = merge_cmd.output().context("git merge for merge_commit")?;
+    if !merge_out.status.success() {
+        run_git_auth(git, repo, &["checkout", "--theirs", "."])?;
+        run_git_auth(git, repo, &["add", "-A"])?;
+        run_git_auth(
+            git,
+            repo,
+            &["commit", "--no-edit", "-qm", "bench conflicts merge"],
+        )?;
+    }
+    let merge_commit = rev_parse(git, repo, "HEAD")?;
+    anyhow::ensure!(
+        merge_commit != main_tip,
+        "expected merge commit after --no-ff merge"
+    );
+    run_git_auth(git, repo, &["reset", "--hard", &main_tip])?;
+
+    let base = HotPathMeta {
+        branch_a: main_branch.clone(),
+        branch_b: BENCH_CONFLICTS_TOPIC.into(),
+        main_branch,
+        topic_branch: BENCH_CONFLICTS_TOPIC.into(),
+        base_commit,
+        main_tip,
+        pick_commit,
+        pick_series_commits: series,
+        wide: false,
+        wide_branch_b: None,
+    };
+    assert_pick_merge_sibling_topology(git, repo, &base)?;
+    let meta = ConflictsMeta {
+        base,
+        merge_commit,
+        conflict_path_count: overlap,
+    };
+    persist_conflicts_meta_campaign(repo, &meta)?;
+    restore_campaign_conflicts_worktree(git, repo, &meta)?;
+    Ok(meta)
+}
+
 /// Metadata for the campaign `switch-wide` row (~10% path delta on `wide_branch_b`).
 pub fn switch_wide_meta(base: &HotPathMeta) -> Result<HotPathMeta> {
     let branch_b = base
@@ -423,6 +589,22 @@ mod tests {
             .lines()
             .filter(|l| !l.is_empty())
             .count())
+    }
+
+    #[test]
+    fn campaign_conflicts_meta_has_series_and_merge() -> Result<()> {
+        let git = resolve_binary("git", None)?;
+        let tmp = TempDir::new()?;
+        let dir = tmp.path().join("repo");
+        init_repo_with_files(&git, &dir, 120)?;
+        let meta = ensure_campaign_conflicts(&git, &dir)?;
+        assert_eq!(meta.base.pick_series_commits.len(), 20);
+        assert!(!meta.merge_commit.is_empty());
+        assert!(meta.conflict_path_count > 0);
+        assert_eq!(meta.base.topic_branch, BENCH_CONFLICTS_TOPIC);
+        let head = rev_parse(&git, &dir, "HEAD")?;
+        assert_eq!(head, meta.base.main_tip);
+        Ok(())
     }
 
     #[test]

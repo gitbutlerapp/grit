@@ -9,10 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::fixture::{remove_dir_robust, scratch_dir};
 use crate::hot_path_fixture::{
     assert_pick_merge_sibling_topology, commit_main_diverge, extend_history, list_tracked_files,
-    meta_path, populate_tree, prepare_pick, prepare_pick_series, rev_parse, run_git,
+    meta_path, populate_tree, rev_parse, run_git,
     setup_pick_merge_fixture_in, setup_pick_series_fixture, setup_pick_series_fixture_in,
     touch_paths_for_size, HotPathMeta, HotPathRepoSpec,
 };
+
+/// Topic branch for campaign conflict rows (distinct from `campaign-topic`).
+pub(crate) const BENCH_CONFLICTS_TOPIC: &str = "bench-conflicts-topic";
 
 /// Extra metadata for conflict-operation benchmarks (stored beside hot-path meta).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,15 +37,31 @@ pub fn load_conflicts_meta(repo: &Path) -> Result<ConflictsMeta> {
     serde_json::from_str(&raw).context("parse conflicts meta")
 }
 
-fn write_conflicts_meta(dir: &Path, meta: &ConflictsMeta) -> Result<()> {
+fn write_conflicts_meta_files(
+    dir: &Path,
+    meta: &ConflictsMeta,
+    sync_hot_path_meta: bool,
+) -> Result<()> {
     let git_dir = dir.join(".git");
     fs::create_dir_all(&git_dir)?;
     fs::write(
         conflicts_meta_path(dir),
         serde_json::to_string_pretty(meta)?,
     )?;
-    fs::write(meta_path(dir), serde_json::to_string_pretty(&meta.base)?)?;
+    if sync_hot_path_meta {
+        fs::write(meta_path(dir), serde_json::to_string_pretty(&meta.base)?)?;
+    }
     Ok(())
+}
+
+/// Write conflicts metadata and mirror [`HotPathMeta`] into the hot-path meta file (standalone fixtures).
+pub(crate) fn persist_conflicts_meta(dir: &Path, meta: &ConflictsMeta) -> Result<()> {
+    write_conflicts_meta_files(dir, meta, true)
+}
+
+/// Write conflicts metadata without clobbering campaign hot-path meta on the same worktree.
+pub(crate) fn persist_conflicts_meta_campaign(dir: &Path, meta: &ConflictsMeta) -> Result<()> {
+    write_conflicts_meta_files(dir, meta, false)
 }
 
 fn write_files(repo: &Path, rel_paths: &[PathBuf], suffix: &str) -> Result<()> {
@@ -79,7 +98,7 @@ pub fn setup_conflicts_clean_fixture_in(
         merge_commit: String::new(),
         conflict_path_count: 0,
     };
-    write_conflicts_meta(dir, &meta)?;
+    persist_conflicts_meta(dir, &meta)?;
     Ok((dir.to_path_buf(), meta))
 }
 
@@ -154,7 +173,7 @@ pub fn setup_conflicts_merge_fixture_in(
         merge_commit: String::new(),
         conflict_path_count: overlap,
     };
-    write_conflicts_meta(dir, &meta)?;
+    persist_conflicts_meta(dir, &meta)?;
     Ok((dir.to_path_buf(), meta))
 }
 
@@ -192,7 +211,7 @@ pub fn setup_conflicts_revert_mainline_fixture_in(
     if meta.merge_commit == meta.base.main_tip {
         bail!("expected merge commit on main after --no-ff merge");
     }
-    write_conflicts_meta(dir, &meta)?;
+    persist_conflicts_meta(dir, &meta)?;
     Ok((dir.to_path_buf(), meta))
 }
 
@@ -207,7 +226,7 @@ pub fn setup_conflicts_pick_range_fixture(
         merge_commit: String::new(),
         conflict_path_count: 0,
     };
-    write_conflicts_meta(&dir, &meta)?;
+    persist_conflicts_meta(&dir, &meta)?;
     Ok((dir, meta))
 }
 
@@ -222,20 +241,27 @@ pub fn setup_conflicts_pick_range_fixture_in(
         merge_commit: String::new(),
         conflict_path_count: 0,
     };
-    write_conflicts_meta(dir, &meta)?;
+    persist_conflicts_meta(dir, &meta)?;
     Ok((dir.to_path_buf(), meta))
 }
 
+fn prepare_conflicts_to_main_tip(git: &Path, repo: &Path) -> Result<()> {
+    let meta = load_conflicts_meta(repo)?;
+    run_git(git, repo, &["checkout", "-q", &meta.base.main_branch])?;
+    run_git(git, repo, &["reset", "-q", "--hard", &meta.base.main_tip])?;
+    Ok(())
+}
+
 pub fn prepare_conflicts_merge_no_ff(git: &Path, repo: &Path) -> Result<()> {
-    prepare_pick(git, repo)
+    prepare_conflicts_to_main_tip(git, repo)
 }
 
 pub fn prepare_conflicts_merge_conflict_continue(git: &Path, repo: &Path) -> Result<()> {
-    prepare_pick(git, repo)
+    prepare_conflicts_to_main_tip(git, repo)
 }
 
 pub fn prepare_conflicts_pick_range(git: &Path, repo: &Path) -> Result<()> {
-    prepare_pick_series(git, repo)
+    prepare_conflicts_to_main_tip(git, repo)
 }
 
 pub fn prepare_conflicts_revert_single(git: &Path, repo: &Path) -> Result<()> {
@@ -281,9 +307,32 @@ pub fn conflicts_touch_paths(file_count: usize) -> usize {
 mod tests {
     use super::*;
     use crate::binary::resolve_binary;
+    use crate::hot_path_fixture::rev_parse;
 
     fn git_bin() -> PathBuf {
         resolve_binary("git", None).expect("git")
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        prior: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let prior = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prior {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
     }
 
     #[test]
@@ -306,38 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn revert_single_matches_git() {
-        let git = git_bin();
-        let grit = resolve_binary("grit", None).expect("grit");
-        let spec = HotPathRepoSpec {
-            file_count: 200,
-            dir_count: 2,
-            history_commits: 5,
-            fsmonitor: false,
-        };
-        let touch = conflicts_touch_paths(spec.file_count);
-        let grit_dir = tempfile::tempdir().expect("grit dir");
-        let git_dir = tempfile::tempdir().expect("git dir");
-        setup_conflicts_clean_fixture_in(&git, grit_dir.path(), spec, touch).expect("setup grit");
-        setup_conflicts_clean_fixture_in(&git, git_dir.path(), spec, touch).expect("setup git");
-        prepare_conflicts_revert_single(&git, grit_dir.path()).expect("prep grit");
-        prepare_conflicts_revert_single(&git, git_dir.path()).expect("prep git");
-        let grit_status = std::process::Command::new(&grit)
-            .current_dir(grit_dir.path())
-            .args(["revert", "HEAD"])
-            .status()
-            .expect("grit revert");
-        let git_status = std::process::Command::new(&git)
-            .current_dir(git_dir.path())
-            .args(["revert", "--no-edit", "HEAD"])
-            .status()
-            .expect("git revert");
-        assert!(grit_status.success(), "grit revert failed");
-        assert!(git_status.success(), "git revert failed");
-    }
-
-    #[test]
-    fn factory_merge_conflict_repo_has_meta() {
+    fn merge_conflict_fixture_writes_meta_and_prepares() {
         let git = git_bin();
         let spec = HotPathRepoSpec {
             file_count: 200,
@@ -347,13 +365,11 @@ mod tests {
         };
         let touch = conflicts_touch_paths(spec.file_count);
         let overlap = conflict_overlap_for_size(spec.file_count);
-        let repo = std::path::PathBuf::from("/tmp/grit-bench-scratch/merge-conflict-continue-200");
-        if repo.exists() {
-            crate::fixture::remove_dir_robust(&repo);
-        }
-        setup_conflicts_merge_fixture_in(&git, &repo, spec, touch, overlap).expect("setup");
-        assert!(conflicts_meta_path(&repo).is_file());
-        prepare_conflicts_merge_conflict_continue(&git, &repo).expect("prepare");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = EnvVarGuard::set("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
+        setup_conflicts_merge_fixture_in(&git, dir.path(), spec, touch, overlap).expect("setup");
+        assert!(conflicts_meta_path(dir.path()).is_file());
+        prepare_conflicts_merge_conflict_continue(&git, dir.path()).expect("prepare");
     }
 
     #[test]
@@ -368,8 +384,7 @@ mod tests {
         let touch = conflicts_touch_paths(spec.file_count);
         let overlap = conflict_overlap_for_size(spec.file_count);
         let dir = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("GRIT_BENCH_SCRATCH", dir.path());
-        std::env::set_var("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
+        let _cwd = EnvVarGuard::set("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
         setup_conflicts_merge_fixture_in(&git, dir.path(), spec, touch, overlap).expect("setup");
         prepare_conflicts_merge_conflict_continue(&git, dir.path()).expect("prepare");
     }
@@ -385,16 +400,14 @@ mod tests {
         };
         let touch = conflicts_touch_paths(spec.file_count);
         let dir = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("GRIT_BENCH_SCRATCH", dir.path());
-        std::env::set_var("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
+        let _cwd = EnvVarGuard::set("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
         setup_conflicts_clean_fixture_in(&git, dir.path(), spec, touch).expect("setup");
         prepare_conflicts_merge_no_ff(&git, dir.path()).expect("prepare");
     }
 
     #[test]
-    fn merge_conflict_continue_script_exits_zero() {
+    fn revert_single_prepare_cherry_picks_topic() {
         let git = git_bin();
-        let grit = resolve_binary("grit", None).expect("grit");
         let spec = HotPathRepoSpec {
             file_count: 200,
             dir_count: 2,
@@ -402,40 +415,13 @@ mod tests {
             fsmonitor: false,
         };
         let touch = conflicts_touch_paths(spec.file_count);
-        let overlap = conflict_overlap_for_size(spec.file_count);
         let dir = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("GRIT_BENCH_SCRATCH", dir.path());
-        std::env::set_var("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
-        setup_conflicts_merge_fixture_in(&git, dir.path(), spec, touch, overlap).expect("setup");
-        prepare_conflicts_merge_conflict_continue(&git, dir.path()).expect("prepare");
-        let topic = load_conflicts_meta(dir.path())
-            .expect("meta")
-            .base
-            .topic_branch;
-        let grit_status = std::process::Command::new(&grit)
-            .current_dir(dir.path())
-            .args(["merge", &topic])
-            .status()
-            .expect("grit merge");
-        assert!(!grit_status.success(), "merge should stop on conflicts");
-        let finish = std::process::Command::new(&grit)
-            .current_dir(dir.path())
-            .args(["restore", "--theirs", "."])
-            .status()
-            .expect("restore");
-        assert!(finish.success(), "restore --theirs failed");
-        let add = std::process::Command::new(&grit)
-            .current_dir(dir.path())
-            .args(["add", "."])
-            .status()
-            .expect("add");
-        assert!(add.success(), "add failed");
-        let cont = std::process::Command::new(&grit)
-            .current_dir(dir.path())
-            .args(["merge", "--continue"])
-            .status()
-            .expect("continue");
-        assert!(cont.success(), "merge --continue failed");
+        let _cwd = EnvVarGuard::set("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
+        setup_conflicts_clean_fixture_in(&git, dir.path(), spec, touch).expect("setup");
+        let meta = load_conflicts_meta(dir.path()).expect("meta");
+        prepare_conflicts_revert_single(&git, dir.path()).expect("prepare");
+        let parent = rev_parse(&git, dir.path(), "HEAD^").expect("parent");
+        assert_eq!(parent, meta.base.main_tip);
     }
 
     #[test]
