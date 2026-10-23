@@ -361,7 +361,6 @@ pub fn run(
     let use_rev_walk = display.graph
         || display.group_by.is_some()
         || !rev.paths.is_empty()
-        || rev.max_count().is_some()
         || walk_opts
             .commit_filter
             .as_ref()

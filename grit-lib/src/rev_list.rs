@@ -6742,7 +6742,10 @@ fn try_bounded_limit_list(
     if can_stream_default_order(exclude, options) {
         return streaming_default_order_list(repo, include, options).map(Some);
     }
-    if !within_bounded_limit_list_cap(options) {
+    if !within_bounded_limit_list_cap(options)
+        && options.since_cutoff.is_none()
+        && options.until_cutoff.is_none()
+    {
         return Ok(None);
     }
 

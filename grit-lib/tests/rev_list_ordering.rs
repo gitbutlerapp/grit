@@ -746,6 +746,34 @@ fn t4217_log_limit_since_until_match_git() {
     );
 }
 
+#[test]
+fn t4217_since_with_large_max_count_match_git() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let old = commit_labeled_with_dates(wt, "old", &[], "@1000000000 +0000", "@1000000000 +0000");
+    let mid =
+        commit_labeled_with_dates(wt, "mid", &[old], "@1500000000 +0000", "@1500000000 +0000");
+    let new_tip =
+        commit_labeled_with_dates(wt, "new", &[mid], "@2000000000 +0000", "@2000000000 +0000");
+    git(wt, &["update-ref", "refs/heads/main", &new_tip.to_hex()]);
+    let grit = open_grit_repo(wt);
+
+    let opts = RevListOptions {
+        since_cutoff: Some(1_400_000_000),
+        max_count: Some(100_000),
+        ..RevListOptions::default()
+    };
+    assert_rev_list_commits_match_git(
+        wt,
+        &grit,
+        &["--since=1400000000", "-n", "100000", "main"],
+        &[String::from("main")],
+        &[],
+        opts,
+        "t4217 since with large -n",
+    );
+}
+
 /// Linear 2001 → 2002 → 2003 commits: `--boundary` must retain parents dropped only by date cutoffs.
 #[test]
 fn t4217_boundary_since_until_match_git() {
