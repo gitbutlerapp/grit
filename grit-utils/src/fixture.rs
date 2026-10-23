@@ -600,19 +600,17 @@ pub fn create_blame_deep_history_repo(git: &Path, commit_count: usize) -> Result
 }
 
 fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
-    let out = Command::new(git)
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "Bench")
-        .env("GIT_AUTHOR_EMAIL", "b@example.com")
-        .env("GIT_COMMITTER_NAME", "Bench")
-        .env("GIT_COMMITTER_EMAIL", "b@example.com")
-        .output()?;
+    let mut cmd = Command::new(git);
+    cmd.args(args).current_dir(dir);
+    crate::real_repo_fixture::git_env(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("git {}", args.join(" ")))?;
     if !out.status.success() {
         bail!(
             "git {} failed: {}",
             args.join(" "),
-            String::from_utf8_lossy(&out.stderr)
+            String::from_utf8_lossy(&out.stderr).trim()
         );
     }
     Ok(())
