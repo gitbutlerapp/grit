@@ -116,7 +116,7 @@ Full factory captures run **`grit-bench daily`** twice back-to-back (release bui
 
 Time-ratio drift compares stored **grit/git** time ratios when git median wall time is **above 20 ms** on **both** captures (raw median movement between runs does not skip rows). Memory drift compares **grit/git peak-RSS** ratios on every non-pending row. Tolerance is a strict **`delta > tolerance`** check (not rounded to whole percent). The committed transcript lives in **`grit-utils/baselines/daily/consecutive-compare.txt`** (exit **0** at ±10% tolerance after a passing consecutive pair).
 
-Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** after building release binaries and setting **`GRIT_BENCH_BASELINE_GRIT`**. The capture script prepares only fixtures the daily matrix uses (not full **`synth-l`**), sets **`GRIT_BENCH_DAILY_LOW_MEMORY=1`** (smoke-sized **big-blobs** / **deep-tree** / **many-refs** fixtures while keeping `@big-blobs` scenario ids), runs **`daily --only <id>`** once per executable scenario (`daily list-ids`), and merges partial JSON reports so peak RSS stays within factory VM limits.
+Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** after building release binaries and setting **`GRIT_BENCH_BASELINE_GRIT`**. The script **unsets** **`GRIT_BENCH_DAILY_LOW_MEMORY`** so matrix **`@repo`** ids always use full-size fixture cache tiers (smoke-sized shapes need distinct scenario ids). It runs **`daily --only <id>`** once per executable scenario (`daily list-ids`), records **`capture.fixture_policy`**, per-area and total wall seconds, and logical core count, then merges partial JSON reports so peak RSS stays within factory VM limits.
 
 | Baseline file | Role |
 | --- | --- |
@@ -126,4 +126,4 @@ Regenerate the pair with **`grit-utils/scripts/capture-daily-baseline.sh`** afte
 
 Reports may include optional **`capture.fixture_policy`** and **`capture.area_wall_seconds`** (per functional area) when generated via **`capture-daily-baseline.sh`**. Regenerate **`latest.json`**, **`second.json`**, and **`consecutive-compare.txt`** after comparator or fixture-policy changes; the pair must pass **`daily compare --tolerance 0.10`** before committing.
 
-Default daily **`RunPolicy`** was tightened for baseline stability: **2** warmups per tool, **5** minimum timed runs, **5 s** minimum aggregated timed window, **180 s** scenario budget.
+Default daily **`RunPolicy`** for full captures: **2** warmups per tool, **5** minimum timed runs, **5 s** minimum aggregated timed window, **180 s** scenario budget. Noisy rows (**`synth-100k`**, **`deep-tree`**, **`stash/push-pop`**, remote headlines) use longer windows and more timed samples via **`policy_for_scenario`** in **`grit-utils/src/daily/run.rs`** so consecutive baselines pass **`daily compare --tolerance 0.10`** without dropping scenarios.
